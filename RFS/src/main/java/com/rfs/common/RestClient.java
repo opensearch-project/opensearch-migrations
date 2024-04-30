@@ -1,21 +1,18 @@
 package com.rfs.common;
 
-import java.io.BufferedReader;
-import java.io.InputStreamReader;
-import java.io.OutputStream;
-import java.net.HttpURLConnection;
-import java.net.URL;
-import java.nio.charset.StandardCharsets;
 import java.util.Base64;
-import java.util.stream.Collectors;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import reactor.core.publisher.Mono;
+import reactor.netty.http.client.HttpClient;
+import reactor.netty.ByteBufMono;
+
 public class RestClient {
     private static final Logger logger = LogManager.getLogger(RestClient.class);
 
-    public class Response {
+    public static class Response {
         public final int code;
         public final String body;
         public final String message;
@@ -27,109 +24,94 @@ public class RestClient {
         }
     }
 
+    public static class BulkResponse extends Response {
+        public BulkResponse(int responseCode, String responseBody, String responseMessage) {
+            super(responseCode, responseBody, responseMessage);
+        }
+
+        public boolean hasBadStatusCode() {
+            return !(code == 200 || code == 201);
+        }
+
+        public boolean hasFailedOperations() {
+            return body.contains("\"errors\":true");
+        }
+
+        public String getFailureMessage() {
+            String failureMessage;
+            if (hasBadStatusCode()) {
+                failureMessage = "Bulk request failed.  Status code: " + code + ", Response body: " + body;
+            } else {
+                failureMessage = "Bulk request succeeded, but some operations failed.  Response body: " + body;
+            }
+
+            return failureMessage;
+        }
+    }
+
     public final ConnectionDetails connectionDetails;
+    private final HttpClient client;
 
     public RestClient(ConnectionDetails connectionDetails) {
         this.connectionDetails = connectionDetails;
+
+        this.client = HttpClient.create()
+            .baseUrl(connectionDetails.url)
+            .headers(h -> {
+                h.add("Content-Type", "application/json");
+                if (connectionDetails.authType == ConnectionDetails.AuthType.BASIC) {
+                    String credentials = connectionDetails.username + ":" + connectionDetails.password;
+                    String encodedCredentials = Base64.getEncoder().encodeToString(credentials.getBytes());
+                    h.add("Authorization", "Basic " + encodedCredentials);
+                }
+            });
     }
 
-    public Response get(String path, boolean quietLogging) throws Exception {
-        String urlString = connectionDetails.url + "/" + path;
-        
-        URL url = new URL(urlString);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-
-        // Set the request method
-        conn.setRequestMethod("GET");
-        
-        // Set the necessary headers
-        setAuthHeader(conn);
-
-        // Enable input and output streams
-        conn.setDoOutput(true);
-
-        // Report the results
-        int responseCode = conn.getResponseCode();
-
-        String responseBody;
-        if (responseCode >= HttpURLConnection.HTTP_BAD_REQUEST) {
-            // Read error stream if present
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getErrorStream(), StandardCharsets.UTF_8))) {
-                responseBody = br.lines().collect(Collectors.joining(System.lineSeparator()));
-            }
-        } else {
-            // Read input stream for successful requests
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                responseBody = br.lines().collect(Collectors.joining(System.lineSeparator()));
-            }
-        }
-
-        if (quietLogging || (responseCode == HttpURLConnection.HTTP_CREATED || responseCode == HttpURLConnection.HTTP_OK)) {
-            logger.debug("Response Code: " + responseCode + ", Response Message: " + conn.getResponseMessage() + ", Response Body: " + responseBody);
-        } else {
-            logger.error("Response Code: " + responseCode + ", Response Message: " + conn.getResponseMessage() + ", Response Body: " + responseBody);
-        }
-
-        conn.disconnect();
-
-        return new Response(responseCode, responseBody, conn.getResponseMessage());
-    }
-    
-    public Response put(String path, String body, boolean quietLogging) throws Exception {
-        String urlString = connectionDetails.url + "/" + path;
-        
-        URL url = new URL(urlString);
-        HttpURLConnection conn = (HttpURLConnection) url.openConnection();
-
-        // Set the request method
-        conn.setRequestMethod("PUT");
-
-        // Set the necessary headers
-        conn.setRequestProperty("Content-Type", "application/json");
-        setAuthHeader(conn);
-
-        // Enable input and output streams
-        conn.setDoOutput(true);
-
-        // Write the request body
-        try(OutputStream os = conn.getOutputStream()) {
-            byte[] input = body.getBytes("utf-8");
-            os.write(input, 0, input.length);           
-        }        
-
-        // Report the results
-        int responseCode = conn.getResponseCode();
-
-        String responseBody;
-        if (responseCode >= HttpURLConnection.HTTP_BAD_REQUEST) {
-            // Read error stream if present
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getErrorStream(), StandardCharsets.UTF_8))) {
-                responseBody = br.lines().collect(Collectors.joining(System.lineSeparator()));
-            }
-        } else {
-            // Read input stream for successful requests
-            try (BufferedReader br = new BufferedReader(new InputStreamReader(conn.getInputStream(), StandardCharsets.UTF_8))) {
-                responseBody = br.lines().collect(Collectors.joining(System.lineSeparator()));
-            }
-        }
-
-        if (quietLogging || (responseCode == HttpURLConnection.HTTP_CREATED || responseCode == HttpURLConnection.HTTP_OK)) {
-            logger.debug("Response Code: " + responseCode + ", Response Message: " + conn.getResponseMessage() + ", Response Body: " + responseBody);
-        } else {
-            logger.error("Response Code: " + responseCode + ", Response Message: " + conn.getResponseMessage() + ", Response Body: " + responseBody);
-        }
-
-        conn.disconnect();
-        
-        return new Response(responseCode, responseBody, conn.getResponseMessage());
+    public Mono<Response> getAsync(String path, boolean quietLogging) {
+        return client.get()
+            .uri("/" + path)
+            .responseSingle((response, bytes) -> bytes.asString()
+                .map(body -> new Response(response.status().code(), body, response.status().reasonPhrase()))
+                .doOnNext(resp -> logResponse(resp, quietLogging)));
     }
 
-    private void setAuthHeader(HttpURLConnection conn) {
-        if (connectionDetails.authType == ConnectionDetails.AuthType.BASIC) {
-            String auth = connectionDetails.username + ":" + connectionDetails.password;
-            byte[] encodedAuth = Base64.getEncoder().encode(auth.getBytes(StandardCharsets.UTF_8));
-            String authHeaderValue = "Basic " + new String(encodedAuth);
-            conn.setRequestProperty("Authorization", authHeaderValue);
+    public Response get(String path, boolean quietLogging) {
+        return getAsync(path, quietLogging).block();
+    }
+
+    public Mono<BulkResponse> postBulkAsync(String path, String body) {
+        return client.post()
+            .uri("/" + path)
+            .send(ByteBufMono.fromString(Mono.just(body)))
+            .responseSingle((response, bytes) -> bytes.asString()
+                .map(b -> new BulkResponse(response.status().code(), b, response.status().reasonPhrase()))
+                .flatMap(responseDetails -> {
+                    if (responseDetails.hasBadStatusCode() || responseDetails.hasFailedOperations()) {
+                        logger.error(responseDetails.getFailureMessage());
+                        return Mono.error(new RuntimeException(responseDetails.getFailureMessage()));
+                    }
+                    return Mono.just(responseDetails);
+                }));
+    }
+
+    public Mono<Response> putAsync(String path, String body, boolean quietLogging) {
+        return client.put()
+            .uri("/" + path)
+            .send(ByteBufMono.fromString(Mono.just(body)))
+            .responseSingle((response, bytes) -> bytes.asString()
+                .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase()))
+                .doOnNext(resp -> logResponse(resp, quietLogging)));
+    }
+
+    public Response put(String path, String body, boolean quietLogging) {
+        return putAsync(path, body, quietLogging).block();
+    }
+
+    private void logResponse(Response response, boolean quietLogging) {
+        if (quietLogging || (response.code == 200 || response.code == 201)) {
+            logger.debug("Response Code: " + response.code + ", Response Message: " + response.message + ", Response Body: " + response.body);
+        } else {
+            logger.error("Response Code: " + response.code + ", Response Message: " + response.message + ", Response Body: " + response.body);
         }
     }
 }

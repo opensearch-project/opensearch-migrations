@@ -61,7 +61,7 @@ public abstract class SnapshotCreator {
         String bodyString = body.toString();
         RestClient.Response response = client.put(targetName, bodyString, false);
         if (response.code == HttpURLConnection.HTTP_OK || response.code == HttpURLConnection.HTTP_CREATED) {
-            logger.info("Snapshot " + getSnapshotName() + " creation successful");
+            logger.info("Snapshot " + getSnapshotName() + " creation initiated");
         } else {
             logger.error("Snapshot " + getSnapshotName() + " creation failed");
             throw new SnapshotCreationFailed(getSnapshotName());
