@@ -39,13 +39,33 @@ public class CodedOutputStreamSizeUtil {
         int tsTagAndContentSize = CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsContentSize) + tsContentSize;
 
         // Capture required bytes
-        int dataSize = CodedOutputStream.computeByteBufferSize(dataFieldNumber, buffer);
+        int dataSize = computeByteBufferRemainingSize(dataFieldNumber, buffer);
         int captureTagAndContentSize = CodedOutputStream.computeInt32Size(observationFieldNumber, dataSize) + dataSize;
 
         // Observation and closing index required bytes
         return bytesNeededForObservationAndClosingIndex(tsTagAndContentSize + captureTagAndContentSize,
                 Integer.MAX_VALUE);
     }
+
+    /**
+     * This function determines the number of bytes needed to write the remaining bytes in a byteBuffer and its tag.
+     * Use this over CodeOutputStream.computeByteBufferSize(int fieldNumber, ByteBuffer buffer) due to the latter
+     * relying on the ByteBuffer capacity instead of limit in size calculation.
+     */
+    public static int computeByteBufferRemainingSize(int fieldNumber, ByteBuffer buffer) {
+        return CodedOutputStream.computeTagSize(fieldNumber) + computeByteBufferRemainingSizeNoTag(buffer);
+    }
+
+    /**
+     * This function determines the number of bytes needed to write the remaining bytes in a byteBuffer. Use this over
+     * CodeOutputStream.computeByteBufferSizeNoTag(ByteBuffer buffer) due to the latter relying on the
+     * ByteBuffer capacity instead of limit in size calculation.
+     */
+    public static int computeByteBufferRemainingSizeNoTag(ByteBuffer buffer) {
+        int bufferSize = buffer.remaining();
+        return CodedOutputStream.computeUInt32SizeNoTag(bufferSize) + bufferSize;
+    }
+
 
     /**
      * This function determines the number of bytes needed to store a TrafficObservation and a closing index for a

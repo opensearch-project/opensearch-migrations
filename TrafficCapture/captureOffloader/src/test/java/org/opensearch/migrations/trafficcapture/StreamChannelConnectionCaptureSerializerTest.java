@@ -204,17 +204,54 @@ class StreamChannelConnectionCaptureSerializerTest {
         var serializer = createSerializerWithTestHandler(outputBuffersCreated, getEstimatedTrafficStreamByteSize(1, 200));
 
         ByteBuffer byteBuffer = ByteBuffer.allocateDirect(100);
-        byteBuffer.limit(50);
-        byteBuffer.putInt(1);
+        byteBuffer.put(FAKE_READ_PACKET_DATA.getBytes(StandardCharsets.UTF_8));
+        byteBuffer.flip();
 
         serializer.addDataMessage(TrafficObservation.WRITE_FIELD_NUMBER, WriteObservation.DATA_FIELD_NUMBER, REFERENCE_TIMESTAMP, byteBuffer);
         var future = serializer.flushCommitAndResetStream(true);
         future.get();
 
+        Assertions.assertEquals(0, byteBuffer.position());
+
         var outputBuffersList = new ArrayList<>(outputBuffersCreated);
         TrafficStream reconstitutedTrafficStream = TrafficStream.parseFrom(outputBuffersList.get(0));
-        Assertions.assertEquals(1, reconstitutedTrafficStream.getSubStream(0).getWrite().getData().size());
+        Assertions.assertEquals(FAKE_READ_PACKET_DATA, reconstitutedTrafficStream.getSubStream(0).getWrite().getData().toStringUtf8());
     }
+
+    @Test
+    public void testWriteIsHandledForBufferAllocatedLargerThanWrittenWithChunking()
+        throws IOException, ExecutionException, InterruptedException {
+        var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
+        var serializer = createSerializerWithTestHandler(outputBuffersCreated, getEstimatedTrafficStreamByteSize(1, 4));
+
+        ByteBuffer byteBuffer = ByteBuffer.allocate(100);
+        byteBuffer.put(FAKE_READ_PACKET_DATA.getBytes(StandardCharsets.UTF_8));
+        byteBuffer.flip();
+
+        Assertions.assertEquals(0, byteBuffer.position());
+        Assertions.assertEquals(100, byteBuffer.capacity());
+        Assertions.assertEquals(16, byteBuffer.limit());
+
+        serializer.addDataMessage(TrafficObservation.WRITE_FIELD_NUMBER, WriteObservation.DATA_FIELD_NUMBER, REFERENCE_TIMESTAMP, byteBuffer);
+        var future = serializer.flushCommitAndResetStream(true);
+        future.get();
+
+       Assertions.assertEquals(0, byteBuffer.position());
+
+        List<TrafficObservation> observations = new ArrayList<>();
+        for (ByteBuffer buffer : outputBuffersCreated) {
+            var trafficStream = TrafficStream.parseFrom(buffer);
+            observations.add(trafficStream.getSubStream(0));
+        }
+
+        StringBuilder reconstructedData = new StringBuilder();
+        for (TrafficObservation observation : observations) {
+            var stringChunk = observation.getWriteSegment().getData().toStringUtf8();
+            reconstructedData.append(stringChunk);
+        }
+        Assertions.assertEquals(FAKE_READ_PACKET_DATA, reconstructedData.toString());
+    }
+
 
     @Test
     public void testWithLimitlessCodedOutputStreamHolder()
