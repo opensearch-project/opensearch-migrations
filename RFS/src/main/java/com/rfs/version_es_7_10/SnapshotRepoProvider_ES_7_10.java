@@ -21,6 +21,7 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
                 .collect(Collectors.toList());
     }
 
+    @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
         List<SnapshotRepo.Index> matchedIndices = new ArrayList<>();
         SnapshotRepoData_ES_7_10.Snapshot targetSnapshot = repoData.snapshots.stream()
@@ -40,6 +41,7 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
         return matchedIndices;
     }
 
+    @Override
     public List<SnapshotRepo.Snapshot> getSnapshots() {
         List<SnapshotRepo.Snapshot> convertedList = new ArrayList<>(repoData.snapshots);
         return convertedList;
@@ -54,6 +56,7 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
         return null;
     }
 
+    @Override
     public String getIndexId(String indexName) {
         return repoData.indices.get(indexName).id;
     }

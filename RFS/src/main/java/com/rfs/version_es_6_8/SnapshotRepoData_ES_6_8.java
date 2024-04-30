@@ -37,10 +37,12 @@ public class SnapshotRepoData_ES_6_8 {
         public String uuid;
         public int state;
 
+        @Override
         public String getName() {
             return name;
         }
 
+        @Override
         public String getId() {
             return uuid;
         }
@@ -64,14 +66,17 @@ public class SnapshotRepoData_ES_6_8 {
         public String id;
         public List<String> snapshots;
 
+        @Override
         public String getName() {
             return name;
         }
 
+        @Override
         public String getId() {
             return id;
         }
 
+        @Override
         public List<String> getSnapshots() {
             return snapshots;
         }

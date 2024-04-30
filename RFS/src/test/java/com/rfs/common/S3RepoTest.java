@@ -3,6 +3,7 @@ package com.rfs.common;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -17,9 +18,10 @@ import org.mockito.Mockito;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import software.amazon.awssdk.core.sync.ResponseTransformer;
-import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.core.async.AsyncResponseTransformer;
+import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
+import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
@@ -29,17 +31,17 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 public class S3RepoTest {
     @Mock
-    private S3Client mockS3Client;
+    private S3AsyncClient mockS3Client;
     private TestableS3Repo testRepo;
     private Path testDir = Paths.get("/fake/path");
     private String testRegion = "us-fake-1";
-    private String testUri = "s3://bucket-name/directory";
+    private S3Uri testRepoUri = new S3Uri("s3://bucket-name/directory");
     private String testRepoFileName = "index-2";
-    private String testRepoFileUri = testUri + "/" + testRepoFileName;
+    private S3Uri testRepoFileUri = new S3Uri(testRepoUri.uri + "/" + testRepoFileName);
     
 
     class TestableS3Repo extends S3Repo {
-        public TestableS3Repo(Path s3LocalDir, String s3RepoUri, String s3Region, S3Client s3Client) {
+        public TestableS3Repo(Path s3LocalDir, S3Uri s3RepoUri, String s3Region, S3AsyncClient s3Client) {
             super(s3LocalDir, s3RepoUri, s3Region, s3Client);
         }
 
@@ -49,14 +51,23 @@ public class S3RepoTest {
         }
 
         @Override
-        protected String findRepoFileUri() {
+        protected boolean doesFileExistLocally(Path path) {
+            return false;
+        }
+
+        @Override
+        protected S3Uri findRepoFileUri() {
             return testRepoFileUri;
         }
     }
 
     @BeforeEach
     void setUp() {
-        testRepo = Mockito.spy(new TestableS3Repo(testDir, testUri, testRegion, mockS3Client));
+        GetObjectResponse mockResponse = GetObjectResponse.builder().build();
+        CompletableFuture<GetObjectResponse> noopFuture = CompletableFuture.completedFuture(mockResponse);
+        lenient().when(mockS3Client.getObject(any(GetObjectRequest.class), any(AsyncResponseTransformer.class))).thenReturn(noopFuture);
+
+        testRepo = Mockito.spy(new TestableS3Repo(testDir, testRepoUri, testRegion, mockS3Client));
     }
 
     @Test
@@ -72,8 +83,8 @@ public class S3RepoTest {
     void GetSnapshotRepoDataFilePath_AsExpected() throws IOException {
         // Set up the test
         Path expectedPath = testDir.resolve(testRepoFileName);
-        String expectedBucketName = testRepo.getS3BucketName();
-        String expectedKey = testRepo.getS3ObjectsPrefix() + "/" + testRepoFileName;
+        String expectedBucketName = testRepoUri.bucketName;
+        String expectedKey = testRepoUri.key + "/" + testRepoFileName;
 
         // Run the test
         Path filePath = testRepo.getSnapshotRepoDataFilePath();
@@ -88,7 +99,7 @@ public class S3RepoTest {
             .key(expectedKey)
             .build();
 
-        verify(mockS3Client).getObject(eq(expectedRequest), any(ResponseTransformer.class));
+        verify(mockS3Client).getObject(eq(expectedRequest), any(AsyncResponseTransformer.class));
     }
 
 
@@ -96,10 +107,10 @@ public class S3RepoTest {
     void GetGlobalMetadataFilePath_AsExpected() throws IOException {
         // Set up the test
         String snapshotId = "snapshot1";
-        String snapshotFileName = "meta-" + snapshotId + ".dat";
-        Path expectedPath = testDir.resolve(snapshotFileName);
-        String expectedBucketName = testRepo.getS3BucketName();
-        String expectedKey = testRepo.getS3ObjectsPrefix() + "/" + snapshotFileName;
+        String metadataFileName = "meta-" + snapshotId + ".dat";
+        Path expectedPath = testDir.resolve(metadataFileName);
+        String expectedBucketName = testRepoUri.bucketName;
+        String expectedKey = testRepoUri.key + "/" + metadataFileName;
 
         // Run the test
         Path filePath = testRepo.getGlobalMetadataFilePath(snapshotId);
@@ -114,7 +125,7 @@ public class S3RepoTest {
             .key(expectedKey)
             .build();
 
-        verify(mockS3Client).getObject(eq(expectedRequest), any(ResponseTransformer.class));
+        verify(mockS3Client).getObject(eq(expectedRequest), any(AsyncResponseTransformer.class));
     }
 
     @Test
@@ -123,8 +134,9 @@ public class S3RepoTest {
         String snapshotId = "snapshot1";
         String snapshotFileName = "snap-" + snapshotId + ".dat";
         Path expectedPath = testDir.resolve(snapshotFileName);
-        String expectedBucketName = testRepo.getS3BucketName();
-        String expectedKey = testRepo.getS3ObjectsPrefix() + "/" + snapshotFileName;
+
+        String expectedBucketName = testRepoUri.bucketName;
+        String expectedKey = testRepoUri.key + "/" + snapshotFileName;
 
         // Run the test
         Path filePath = testRepo.getSnapshotMetadataFilePath(snapshotId);
@@ -139,7 +151,7 @@ public class S3RepoTest {
             .key(expectedKey)
             .build();
 
-        verify(mockS3Client).getObject(eq(expectedRequest), any(ResponseTransformer.class));
+        verify(mockS3Client).getObject(eq(expectedRequest), any(AsyncResponseTransformer.class));
     }
 
     @Test
@@ -149,8 +161,9 @@ public class S3RepoTest {
         String indexFileId = "234bcd";
         String indexFileName = "indices/" + indexId + "/meta-" + indexFileId + ".dat";
         Path expectedPath = testDir.resolve(indexFileName);
-        String expectedBucketName = testRepo.getS3BucketName();
-        String expectedKey = testRepo.getS3ObjectsPrefix() + "/" + indexFileName;
+
+        String expectedBucketName = testRepoUri.bucketName;
+        String expectedKey = testRepoUri.key + "/" + indexFileName;
 
         // Run the test
         Path filePath = testRepo.getIndexMetadataFilePath(indexId, indexFileId);
@@ -165,7 +178,7 @@ public class S3RepoTest {
             .key(expectedKey)
             .build();
 
-        verify(mockS3Client).getObject(eq(expectedRequest), any(ResponseTransformer.class));
+        verify(mockS3Client).getObject(eq(expectedRequest), any(AsyncResponseTransformer.class));
     }
 
     @Test
@@ -191,8 +204,9 @@ public class S3RepoTest {
         int shardId = 7;
         String shardFileName = "indices/" + indexId + "/" + shardId + "/snap-" + snapshotId + ".dat";
         Path expectedPath = testDir.resolve(shardFileName);
-        String expectedBucketName = testRepo.getS3BucketName();
-        String expectedKey = testRepo.getS3ObjectsPrefix() + "/" + shardFileName;
+
+        String expectedBucketName = testRepoUri.bucketName;
+        String expectedKey = testRepoUri.key + "/" + shardFileName;
 
         // Run the test
         Path filePath = testRepo.getShardMetadataFilePath(snapshotId, indexId, shardId);
@@ -207,7 +221,7 @@ public class S3RepoTest {
             .key(expectedKey)
             .build();
 
-        verify(mockS3Client).getObject(eq(expectedRequest), any(ResponseTransformer.class));
+        verify(mockS3Client).getObject(eq(expectedRequest), any(AsyncResponseTransformer.class));
     }
 
     @Test
@@ -216,10 +230,11 @@ public class S3RepoTest {
         String blobName = "bobloblaw";
         String indexId = "123abc";
         int shardId = 7;
-        String shardFileName = "indices/" + indexId + "/" + shardId + "/" + blobName;
-        Path expectedPath = testDir.resolve(shardFileName);
-        String expectedBucketName = testRepo.getS3BucketName();
-        String expectedKey = testRepo.getS3ObjectsPrefix() + "/" + shardFileName;
+        String blobFileName = "indices/" + indexId + "/" + shardId + "/" + blobName;
+        Path expectedPath = testDir.resolve(blobFileName);
+
+        String expectedBucketName = testRepoUri.bucketName;
+        String expectedKey = testRepoUri.key + "/" + blobFileName;
 
         // Run the test
         Path filePath = testRepo.getBlobFilePath(indexId, shardId, blobName);
@@ -234,37 +249,6 @@ public class S3RepoTest {
             .key(expectedKey)
             .build();
 
-        verify(mockS3Client).getObject(eq(expectedRequest), any(ResponseTransformer.class));
-    }
-
-    static Stream<Arguments> provideUrisForBucketNames() {
-        return Stream.of(
-            Arguments.of("s3://bucket-name", "bucket-name"),
-            Arguments.of("s3://bucket-name/", "bucket-name"),
-            Arguments.of("s3://bucket-name/with/suffix", "bucket-name")
-        );
-    }
-
-    @ParameterizedTest
-    @MethodSource("provideUrisForBucketNames")
-    void getS3BucketName_AsExpected(String uri, String expectedBucketName) {
-        TestableS3Repo repo = new TestableS3Repo(testDir, uri, testRegion, mock(S3Client.class));
-        assertEquals(expectedBucketName, repo.getS3BucketName());
-    }
-
-    static Stream<Arguments> provideUrisForPrefixes() {
-        return Stream.of(
-            Arguments.of("s3://bucket-name", ""),
-            Arguments.of("s3://bucket-name/", ""),
-            Arguments.of("s3://bucket-name/with/suffix", "with/suffix"),
-            Arguments.of("s3://bucket-name/with/suffix/", "with/suffix")
-        );
-    }
-
-    @ParameterizedTest
-    @MethodSource("provideUrisForPrefixes")
-    void getS3ObjectsPrefix_AsExpected(String uri, String expectedPrefix) {
-        TestableS3Repo repo = new TestableS3Repo(testDir, uri, testRegion, mock(S3Client.class));
-        assertEquals(expectedPrefix, repo.getS3ObjectsPrefix());
+        verify(mockS3Client).getObject(eq(expectedRequest), any(AsyncResponseTransformer.class));
     }
 }
