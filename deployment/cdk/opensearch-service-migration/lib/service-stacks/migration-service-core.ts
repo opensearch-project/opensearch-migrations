@@ -161,6 +161,9 @@ export class MigrationServiceCore extends Stack {
                     "sleep infinity"
                 ],
                 essential: true,
+                // Every time this healthcheck is called, it verifies container uptime is within given
+                // bounds of startupPeriodSeconds and maxUptimeSeconds otherwise reporting unhealthy which
+                // signals ECS to start up a replacement task and kill this one once the replacement is healthy
                 healthCheck: {
                     command: [
                         "CMD-SHELL",
@@ -173,6 +176,8 @@ export class MigrationServiceCore extends Stack {
                     startPeriod: Duration.seconds(startupPeriodSeconds * 2)
                 }
             });
+            // Dependency on maxUptimeContainer to wait until serviceContainer is started
+            // Cannot depend on Healthy given serviceContainer does not have a healthcheck configured.
             maxUptimeContainer.addContainerDependencies({
                 container: serviceContainer,
                 condition: ContainerDependencyCondition.START,
