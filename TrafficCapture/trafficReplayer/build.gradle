@@ -11,30 +11,16 @@
 
 plugins {
     id 'org.opensearch.migrations.java-application-conventions'
-//    id "com.github.spotbugs" version "4.7.3"
-//    id 'checkstyle'
     id 'io.freefair.lombok'
     id 'java-test-fixtures'
 }
-
-//spotbugs {
-//    includeFilter = new File(rootDir, 'config/spotbugs/spotbugs-include.xml')
-//}
-
-//checkstyle {
-//    toolVersion = '10.12.3'
-//    configFile = new File(rootDir, 'config/checkstyle/checkstyle.xml')
-//    System.setProperty('checkstyle.cache.file', String.format('%s/%s',
-//            buildDir, 'checkstyle.cachefile'))
-//}
 
 repositories {
     mavenCentral()
 }
 
 dependencies {
-    //spotbugs 'com.github.spotbugs:spotbugs:4.7.3'
-    def resilience4jVersion = "1.7.0";
+    // api project(":trafficCaptureDependencies")
 
     implementation project(':captureProtobufs')
     implementation project(':coreUtilities')
@@ -43,24 +29,24 @@ dependencies {
     runtimeOnly project(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     runtimeOnly project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
-    implementation group: 'com.beust', name: 'jcommander', version: '1.82'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
-    implementation group: 'com.google.guava', name: 'guava', version: '32.0.1-jre'
-    implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.22.2'
-    implementation group: 'io.github.resilience4j', name: 'resilience4j-ratelimiter', version:"${resilience4jVersion}"
-    implementation group: 'io.github.resilience4j', name: 'resilience4j-retry', version:"${resilience4jVersion}"
-    implementation group: 'io.netty', name: 'netty-all', version: versions.netty
-    implementation group: 'org.apache.kafka', name: 'kafka-clients', version: '3.6.0'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
-    implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
-    implementation group: 'software.amazon.awssdk', name: 'arns', version: '2.20.102'
-    implementation group: 'software.amazon.awssdk', name: 'auth', version: '2.20.102'
-    implementation group: 'software.amazon.awssdk', name: 'sdk-core', version: '2.20.102'
-    implementation group: 'software.amazon.awssdk', name: 'secretsmanager', version: '2.25.19'
-    implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: versions.msk_iam
-    implementation 'org.apache.commons:commons-compress:1.26.0'
+    implementation group: 'com.beust', name: 'jcommander'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    implementation group: 'com.google.guava', name: 'guava'
+    implementation group: 'com.google.protobuf', name: 'protobuf-java'
+    implementation group: 'io.github.resilience4j', name: 'resilience4j-ratelimiter'
+    implementation group: 'io.github.resilience4j', name: 'resilience4j-retry'
+    implementation group: 'io.netty', name: 'netty-all'
+    implementation group: 'org.apache.kafka', name: 'kafka-clients'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    implementation group: 'org.slf4j', name: 'slf4j-api'
+    implementation group: 'software.amazon.awssdk', name: 'arns'
+    implementation group: 'software.amazon.awssdk', name: 'auth'
+    implementation group: 'software.amazon.awssdk', name: 'sdk-core'
+    implementation group: 'software.amazon.awssdk', name: 'secretsmanager'
+    implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth'
+    implementation 'org.apache.commons:commons-compress'
 
     testFixturesImplementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     testFixturesImplementation project(':captureOffloader')
@@ -70,7 +56,7 @@ dependencies {
     testFixturesImplementation testFixtures(project(path: ':coreUtilities'))
     testFixturesImplementation testFixtures(project(path: ':testUtilities'))
 
-    testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
+    testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api'
     testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
     testFixturesImplementation group: 'io.netty', name: 'netty-all', version: versions.netty
     testFixturesImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api', version:'5.9.3'

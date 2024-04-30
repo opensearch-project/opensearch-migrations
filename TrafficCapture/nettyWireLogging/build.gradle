@@ -8,25 +8,26 @@ plugins {
 }
 
 dependencies {
-    implementation group: 'io.netty', name: 'netty-bom', version: versions.netty
+    api project(":trafficCaptureDependencies")
+    implementation group: 'io.netty', name: 'netty-bom'
 
     implementation project(':captureOffloader')
     implementation project(':coreUtilities')
-    api            group: 'io.netty', name: 'netty-buffer', version: versions.netty
-    api            group: 'io.netty', name: 'netty-codec-http', version: versions.netty
-    api            group: 'io.netty', name: 'netty-handler', version: versions.netty
+    api            group: 'io.netty', name: 'netty-buffer'
+    api            group: 'io.netty', name: 'netty-codec-http'
+    api            group: 'io.netty', name: 'netty-handler'
 
-    implementation group: 'org.slf4j', name: 'slf4j-api', version: versions.slf4j
+    implementation group: 'org.slf4j', name: 'slf4j-api'
 
     testImplementation project(':captureProtobufs')
-    testImplementation group: 'com.google.guava', name: 'guava', version: versions.guava
-    testImplementation group: 'com.google.protobuf', name: 'protobuf-java', version: versions.protobuf
+    testImplementation group: 'com.google.guava', name: 'guava'
+    testImplementation group: 'com.google.protobuf', name: 'protobuf-java'
     testImplementation group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
-    testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: versions.apacheHttp
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: versions.log4j
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: versions.log4j
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: versions.log4j
-    testImplementation group: 'org.slf4j', name: 'slf4j-api', version: versions.slf4j
+    testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    testImplementation group: 'org.slf4j', name: 'slf4j-api'
 
     testImplementation testFixtures(project(path: ':testUtilities'))
     testImplementation testFixtures(project(path: ':coreUtilities'))

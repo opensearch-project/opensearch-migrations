@@ -1,0 +1,87 @@
+plugins {
+  id "java-library"
+}
+
+ext {
+    versions = [
+        netty: '4.1.108.Final',
+        slf4j: '2.0.7',
+        guava: '32.0.1-jre',
+        log4j: '2.20.0',
+        protobuf: '3.22.2',
+        apacheHttp: '5.2.1',
+
+        mockito: '4.6.1',
+        msk_iam: '2.0.3'
+    ]
+}
+
+dependencies {
+
+  constraints {
+    api group: 'io.netty', name: 'netty-bom', version: versions.netty
+    api group: 'io.netty', name: 'netty-buffer', version: versions.netty
+    api group: 'io.netty', name: 'netty-codec-http', version: versions.netty
+    api group: 'io.netty', name: 'netty-handler', version: versions.netty
+    api group: 'io.netty', name: 'netty-all', version: versions.netty
+
+
+    api group: 'org.slf4j', name: 'slf4j-api', version: versions.slf4j
+
+    api group: 'com.google.guava', name: 'guava', version: versions.guava
+
+    api group: 'com.google.protobuf', name: 'protobuf-java', version: versions.protobuf
+
+    api group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
+
+    api group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: versions.apacheHttp
+
+    api group: 'software.amazon.msk', name:'aws-msk-iam-auth', version: versions.msk_iam
+
+    api group: 'org.apache.logging.log4j', name: 'log4j-api', version: versions.log4j
+    api group: 'org.apache.logging.log4j', name: 'log4j-core', version: versions.log4j
+    api group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: versions.log4j
+
+    api group: 'org.projectlombok', name:'lombok', version:'1.18.26'
+    api group: 'org.apache.kafka', name:'kafka-clients', version:'3.6.0'
+
+    api "com.google.protobuf:protoc:3.22.2"
+
+    api group: 'org.apache.jmeter', name: 'ApacheJMeter_core', version: '5.6.3'
+    api group: 'org.apache.jmeter', name: 'ApacheJMeter_http', version: '5.6.3'
+    api group: 'org.apache.jmeter', name: 'ApacheJMeter_config', version: '5.6.3'
+    api group: 'com.beust', name: 'jcommander', version: '1.82'
+
+    api 'org.projectlombok:lombok:1.18.28'
+
+    api group: 'io.github.resilience4j', name: 'resilience4j-ratelimiter', version:"1.7.0"
+    api group: 'io.github.resilience4j', name: 'resilience4j-retry', version:"1.7.0"
+
+    api 'com.fasterxml.jackson.core:jackson-databind:2.16.2'
+    api 'com.fasterxml.jackson.dataformat:jackson-dataformat-smile:2.16.2'
+
+    api group: 'org.junit.jupiter', name:'junit-jupiter-api', version:'5.9.3'
+    api group: 'org.junit.jupiter', name:'junit-jupiter-params', version:'5.9.3'
+    api group: 'org.junit.jupiter', name:'junit-jupiter-engine', version:'5.x.x'
+
+    api group: 'io.burt', name: 'jmespath-core', version: '0.6.0'
+
+    api 'org.apache.commons:commons-compress:1.26.0'
+
+    api group: 'software.amazon.awssdk', name: 'arns', version: '2.20.102'
+    api group: 'software.amazon.awssdk', name: 'auth', version: '2.20.102'
+    api group: 'software.amazon.awssdk', name: 'sdk-core', version: '2.20.102'
+    api group: 'software.amazon.awssdk', name: 'secretsmanager', version: '2.25.19'
+
+    // Mitigate downstream CVEs
+    implementation('net.minidev:json-smart:2.4.9')
+    implementation('xalan:xalan:2.7.3')
+    implementation('com.fasterxml.jackson.core:jackson-databind:2.14.3')
+    implementation('com.thoughtworks.xstream:xstream:1.4.20')
+    implementation('commons-net:commons-net:3.9.0')
+    implementation('org.jsoup:jsoup:1.15.3')
+    implementation('org.apache.tika:tika-core:1.28.4')
+    implementation('com.jayway.jsonpath:json-path:2.9.0')
+
+  }
+}

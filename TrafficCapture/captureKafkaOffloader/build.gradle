@@ -9,23 +9,24 @@ repositories {
 }
 
 dependencies {
+    api project(":trafficCaptureDependencies")
     implementation project(':captureOffloader')
     implementation project(':coreUtilities')
-    implementation group: 'com.google.protobuf', name:'protobuf-java', version: versions.protobuf
-    api            group:'io.netty', name:'netty-buffer', version: versions.netty
-    implementation group: 'org.projectlombok', name:'lombok', version:'1.18.26'
-    implementation group: 'org.apache.kafka', name:'kafka-clients', version:'3.6.0'
-    implementation group: 'org.slf4j', name:'slf4j-api', version: versions.slf4j
-    implementation group: 'software.amazon.msk', name:'aws-msk-iam-auth', version: versions.msk_iam
+    implementation group: 'com.google.protobuf', name:'protobuf-java'
+    api            group:'io.netty', name:'netty-buffer'
+    implementation group: 'org.projectlombok', name:'lombok'
+    implementation group: 'org.apache.kafka', name:'kafka-clients'
+    implementation group: 'org.slf4j', name:'slf4j-api'
+    implementation group: 'software.amazon.msk', name:'aws-msk-iam-auth'
 
     testImplementation project(':captureProtobufs')
     testImplementation testFixtures(project(path: ':coreUtilities'))
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: versions.log4j
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: versions.log4j
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: versions.log4j
-    testImplementation group: 'org.mockito', name: 'mockito-core', version: versions.mockito
-    testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter', version: versions.mockito
-    testImplementation group: 'org.slf4j', name: 'slf4j-api', version: versions.slf4j
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    testImplementation group: 'org.mockito', name: 'mockito-core'
+    testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter'
+    testImplementation group: 'org.slf4j', name: 'slf4j-api'
 }
 
 configurations.all {
