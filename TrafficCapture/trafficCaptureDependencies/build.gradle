@@ -38,6 +38,7 @@ dependencies {
 
     api group: 'software.amazon.msk', name:'aws-msk-iam-auth', version: versions.msk_iam
 
+    api group: 'org.apache.logging.log4j', name: 'log4j-bom', version: versions.log4j
     api group: 'org.apache.logging.log4j', name: 'log4j-api', version: versions.log4j
     api group: 'org.apache.logging.log4j', name: 'log4j-core', version: versions.log4j
     api group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: versions.log4j
