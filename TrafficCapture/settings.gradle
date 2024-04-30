@@ -37,8 +37,7 @@ include('captureKafkaOffloader',
         'trafficReplayer',
         'testUtilities',
         'dockerSolution',
-        'trafficCaptureProxyServerTest',
-        'trafficCaptureDependencies'
+        'trafficCaptureProxyServerTest'
 )
 
 addSubProjects('', new File(rootProject.projectDir,'replayerPlugins'))

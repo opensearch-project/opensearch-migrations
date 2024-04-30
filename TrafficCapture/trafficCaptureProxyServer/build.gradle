@@ -29,23 +29,23 @@ dependencies {
     implementation project(':coreUtilities')
 
     implementation group: 'io.netty', name: 'netty-all'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
-    implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    implementation group: 'org.slf4j', name: 'slf4j-api'
 
-    implementation group: 'com.beust', name: 'jcommander', version: '1.82'
+    implementation group: 'com.beust', name: 'jcommander'
     implementation 'com.google.protobuf:protobuf-java:3.22.2'
 
     testImplementation project(':captureProtobufs')
     testImplementation testFixtures(project(path: ':testUtilities'))
     testImplementation testFixtures(project(path: ':captureOffloader'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
-    testImplementation group: 'eu.rekawek.toxiproxy', name: 'toxiproxy-java', version: '2.1.7'
-    testImplementation group: 'org.testcontainers', name: 'junit-jupiter', version: '1.19.7'
-    testImplementation group: 'org.testcontainers', name: 'kafka', version: '1.19.7'
-    testImplementation group: 'org.testcontainers', name: 'testcontainers', version: '1.19.7'
-    testImplementation group: 'org.testcontainers', name: 'toxiproxy', version: '1.19.7'
+    testImplementation group: 'eu.rekawek.toxiproxy', name: 'toxiproxy-java'
+    testImplementation group: 'org.testcontainers', name: 'junit-jupiter'
+    testImplementation group: 'org.testcontainers', name: 'kafka'
+    testImplementation group: 'org.testcontainers', name: 'testcontainers'
+    testImplementation group: 'org.testcontainers', name: 'toxiproxy'
     constraints {
         testImplementation('org.apache.commons:commons-compress:1.26.0') {
             because 'mend security issue'

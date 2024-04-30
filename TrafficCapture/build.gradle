@@ -11,20 +11,6 @@ allprojects {
 }
 
 subprojects {
-    ext {
-        versions = [
-            netty: '4.0.1.Final',
-            slf4j: '2.0.7',
-            guava: '32.0.1-jre',
-            log4j: '2.20.0',
-            protobuf: '3.22.2',
-            apacheHttp: '5.2.1',
-
-            mockito: '4.6.1',
-            msk_iam: '2.0.3'
-        ]
-    }
-
     apply plugin: 'java'
     apply plugin: 'maven-publish'
     task javadocJar(type: Jar, dependsOn: javadoc) {

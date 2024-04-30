@@ -20,7 +20,7 @@ repositories {
 }
 
 dependencies {
-    // api project(":trafficCaptureDependencies")
+    implementation project(":trafficCaptureDependencies")
 
     implementation project(':captureProtobufs')
     implementation project(':coreUtilities')
@@ -57,9 +57,9 @@ dependencies {
     testFixturesImplementation testFixtures(project(path: ':testUtilities'))
 
     testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api'
-    testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
-    testFixturesImplementation group: 'io.netty', name: 'netty-all', version: versions.netty
-    testFixturesImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api', version:'5.9.3'
+    testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    testFixturesImplementation group: 'io.netty', name: 'netty-all'
+    testFixturesImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
 
     testImplementation testFixtures(project(path: ':testUtilities'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
@@ -67,44 +67,15 @@ dependencies {
     testImplementation project(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     testImplementation project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
-    testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
-    testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api', version:'5.x.x'
-    testImplementation group: 'org.testcontainers', name: 'junit-jupiter', version: '1.19.7'
-    testImplementation group: 'org.testcontainers', name: 'kafka', version: '1.19.7'
-    testImplementation group: 'org.testcontainers', name: 'testcontainers', version: '1.19.7'
+    testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
+    testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
+    testImplementation group: 'org.testcontainers', name: 'junit-jupiter'
+    testImplementation group: 'org.testcontainers', name: 'kafka'
+    testImplementation group: 'org.testcontainers', name: 'testcontainers'
 
-    testImplementation group: 'org.mockito', name:'mockito-core', version: versions.mockito
-    testImplementation group: 'org.mockito', name:'mockito-junit-jupiter', version: versions.mockito
-    testRuntimeOnly group:'org.junit.jupiter', name:'junit-jupiter-engine', version:'5.x.x'
-
-    constraints {
-        testImplementation('org.apache.commons:commons-compress:1.26.0') {
-            because 'mend security issue'
-        }
-        implementation('io.netty:netty-codec-http:4.1.108.Final') {
-            because 'mend security issue'
-        }
-    }
-}
-
-configurations.all {
-    resolutionStrategy.eachDependency { DependencyResolveDetails details ->
-        if (details.requested.group == 'org.apache.commons' && details.requested.name == 'commons-text') {
-            def targetVersion = '1.10.0'
-            if (CommonUtils.wasRequestedVersionReleasedBeforeTargetVersion(details.requested.version, targetVersion)) {
-                details.useVersion targetVersion
-            }
-        }
-        if (details.requested.group == 'org.apache.bcel' && details.requested.name == 'bcel') {
-            def targetVersion = '6.7.0'
-            if (CommonUtils.wasRequestedVersionReleasedBeforeTargetVersion(details.requested.version, targetVersion)) {
-                details.useVersion targetVersion
-            }
-        }
-        if (details.requested.group == 'io.netty') {
-            details.useVersion versions.netty
-        }
-    }
+    testImplementation group: 'org.mockito', name:'mockito-core'
+    testImplementation group: 'org.mockito', name:'mockito-junit-jupiter'
+    testRuntimeOnly group:'org.junit.jupiter', name:'junit-jupiter-engine'
 }
 
 application {

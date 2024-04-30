@@ -41,42 +41,38 @@ repositories {
 }
 
 dependencies {
-    api platform("io.opentelemetry:opentelemetry-bom:1.34.1")
+    api project(":trafficCaptureDependencies")
+
+    api platform("io.opentelemetry:opentelemetry-bom")
 
     implementation project(':captureProtobufs')
 
-    implementation "com.google.protobuf:protobuf-java:3.22.2"
-    implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
+    implementation "com.google.protobuf:protobuf-java"
+    implementation group: 'org.slf4j', name: 'slf4j-api'
 
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
 
     // Log4j
-    implementation(platform("org.apache.logging.log4j:log4j-bom:2.21.1"))
+    implementation(platform("org.apache.logging.log4j:log4j-bom"))
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
 
     // OpenTelemetry core
     api group: 'io.opentelemetry', name: 'opentelemetry-api'
     api group: 'io.opentelemetry', name: 'opentelemetry-sdk'
     implementation group: 'io.opentelemetry', name: 'opentelemetry-exporter-otlp'
-    implementation group: 'io.opentelemetry.semconv', name: 'opentelemetry-semconv', version: '1.23.1-alpha'
+    implementation group: 'io.opentelemetry.semconv', name: 'opentelemetry-semconv'
 
     testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-api'
     testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-sdk'
     testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
-    testFixturesImplementation platform("io.opentelemetry:opentelemetry-bom:1.34.1")
+    testFixturesImplementation platform("io.opentelemetry:opentelemetry-bom")
     testFixturesImplementation group: 'io.opentelemetry', name: 'opentelemetry-api'
     testFixturesImplementation group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
-    testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
-}
-
-configurations.all {
-    resolutionStrategy {
-        force 'com.squareup.okio:okio-jvm:3.4.0'
-    }
+    testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api'
 }
 
 tasks.named('test') {

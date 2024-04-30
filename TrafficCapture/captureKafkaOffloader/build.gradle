@@ -28,11 +28,3 @@ dependencies {
     testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter'
     testImplementation group: 'org.slf4j', name: 'slf4j-api'
 }
-
-configurations.all {
-    resolutionStrategy.eachDependency { DependencyResolveDetails details ->
-        if (details.requested.group == 'io.netty') {
-            details.useVersion versions.netty
-        }
-    }
-}
