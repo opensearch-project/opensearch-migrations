@@ -342,8 +342,8 @@ def create_pipeline_from_stage(osi_client, pipeline_name: str, pipeline_config_p
         exit(0)
 
     if print_command_only:
-        print(f"./osiMigration.py create-pipeline --source-endpoint={source_endpoint} --target-endpoint={target_endpoint} "
-              f"--aws-region={region} --subnet-ids={','.join(map(str,subnet_ids))} "
+        print(f"./osiMigration.py create-pipeline --source-endpoint={source_endpoint} "
+              f"--target-endpoint={target_endpoint} --aws-region={region} --subnet-ids={','.join(map(str,subnet_ids))} "
               f"--security-group-ids={','.join(map(str,security_groups))} --source-auth-type='SIGV4' "
               f"--target-auth-type='SIGV4' --source-pipeline-role-arn={pipeline_role_arn} "
               f"--target-pipeline-role-arn={pipeline_role_arn} --tag=migration_deployment {solution_version}")
