@@ -95,77 +95,92 @@ def parse_args():
     parser_stop_command.add_argument('--name', type=str, help='The name of the OSI pipeline',
                                      default=DEFAULT_PIPELINE_NAME)
 
-    parser_create_pipeline_command = subparsers.add_parser('create-pipeline',
-                                                           help='Operation to create an OSI pipeline')
-    parser_create_pipeline_command.add_argument('--source-endpoint',
-                                                type=str,
-                                                help='The source cluster endpoint to use for the OSI pipeline',
-                                                required=True)
-    parser_create_pipeline_command.add_argument('--target-endpoint',
-                                                type=str,
-                                                help='The target cluster endpoint to use for the OSI pipeline',
-                                                required=True)
-    parser_create_pipeline_command.add_argument('--name',
-                                                type=str,
-                                                help='The name of the OSI pipeline',
-                                                default=DEFAULT_PIPELINE_NAME)
-    parser_create_pipeline_command.add_argument('--aws-region',
-                                                type=str,
-                                                help='The name of the AWS region for the OSI pipeline to fetch Secrets and IAM roles, e.g. us-east-1',
-                                                required=True)
-    parser_create_pipeline_command.add_argument('--subnet-ids',
-                                                type=str,
-                                                action=CommaSeparatedListAction,
-                                                help='A comma delimited list of subnet-ids for the OSI pipeline to use, e.g. subnet-1234,subnet-5678',
-                                                required=True)
-    parser_create_pipeline_command.add_argument('--security-group-ids',
-                                                type=str,
-                                                action=CommaSeparatedListAction,
-                                                help='A comma delimited list of security group ids for the OSI pipeline to use, e.g. sg-1234abc,sg-4567def. These should allow the OSI pipeline to make requests to both the source and target clusters',
-                                                required=True)
-    parser_create_pipeline_command.add_argument('--source-auth-type',
-                                                type=str,
-                                                help='The auth type to use when making requests from the OSI pipeline to the source cluster',
-                                                choices=['BASIC_AUTH', 'SIGV4'],
-                                                required=True)
-    parser_create_pipeline_command.add_argument('--target-auth-type',
-                                                type=str,
-                                                help='The auth type to use when making requests from the OSI pipeline to the target cluster',
-                                                choices=['SIGV4'],
-                                                required=True)
-    parser_create_pipeline_command.add_argument('--source-auth-secret',
-                                                type=str,
-                                                help='The AWS Secrets Manager Secret containing the \'username\' and \'password\' keys for the OSI pipeline to use when communicating with the source cluster')
-    parser_create_pipeline_command.add_argument('--source-pipeline-role-arn',
-                                                type=str,
-                                                help='The ARN of the IAM role that the OSI pipeline should assume when communicating with the source cluster')
-    parser_create_pipeline_command.add_argument('--target-pipeline-role-arn',
-                                                type=str,
-                                                help='The ARN of the IAM role that the OSI pipeline should assume when communicating with the target cluster')
-    parser_create_pipeline_command.add_argument('--log-group-name',
-                                                type=str,
-                                                help='The name of an existing Cloudwatch Log Group for OSI to publish logs to. This is required to enable logging')
-    parser_create_pipeline_command.add_argument('--tag',
-                                                nargs=2,
-                                                action=KeyValueAction,
-                                                metavar=('Key', 'Value'),
-                                                help='Tag to apply to the created OSI pipeline, e.g. migration_deployment 1.0.3. Argument can be used multiple times')
-    parser_create_pipeline_command.add_argument("--print-config-only",
-                                                action="store_true",
-                                                help="Flag to only output the pipeline config template that is generated")
-    parser_create_pipeline_from_solution_command = subparsers.add_parser('create-pipeline-from-solution',
-                                                                         help='Operation to detect source and target fields from full Migration deployment and create an OSI pipeline. Note: Only configured for managed OpenSearch Service to managed OpenSearch Service migrations currently')
-    parser_create_pipeline_from_solution_command.add_argument('--source-endpoint',
-                                                              type=str,
-                                                              help='The source cluster endpoint to use for the OSI pipeline',
-                                                              required=True)
-    parser_create_pipeline_from_solution_command.add_argument('--name',
-                                                              type=str,
-                                                              help='The name of the OSI pipeline',
-                                                              default=DEFAULT_PIPELINE_NAME)
-    parser_create_pipeline_from_solution_command.add_argument("--print-config-only",
-                                                action="store_true",
-                                                help="Flag to only output the pipeline config template that is generated")
+    create_command = subparsers.add_parser('create-pipeline',
+                                           help='Operation to create an OSI pipeline')
+    create_command.add_argument('--source-endpoint',
+                                type=str,
+                                help='The source cluster endpoint to use for the OSI pipeline',
+                                required=True)
+    create_command.add_argument('--target-endpoint',
+                                type=str,
+                                help='The target cluster endpoint to use for the OSI pipeline',
+                                required=True)
+    create_command.add_argument('--name',
+                                type=str,
+                                help='The name of the OSI pipeline',
+                                default=DEFAULT_PIPELINE_NAME)
+    create_command.add_argument('--aws-region',
+                                type=str,
+                                help='The name of the AWS region for the OSI pipeline to fetch Secrets and IAM roles, '
+                                     'e.g. us-east-1',
+                                required=True)
+    create_command.add_argument('--subnet-ids',
+                                type=str,
+                                action=CommaSeparatedListAction,
+                                help='A comma delimited list of subnet-ids for the OSI pipeline to use, '
+                                     'e.g. subnet-1234,subnet-5678',
+                                required=True)
+    create_command.add_argument('--security-group-ids',
+                                type=str,
+                                action=CommaSeparatedListAction,
+                                help='A comma delimited list of security group ids for the OSI pipeline to use, '
+                                     'e.g. sg-1234abc,sg-4567def. These should allow the OSI pipeline to make requests '
+                                     'to both the source and target clusters',
+                                required=True)
+    create_command.add_argument('--source-auth-type',
+                                type=str,
+                                help='The auth type to use when making requests from the OSI pipeline to the source '
+                                     'cluster',
+                                choices=['BASIC_AUTH', 'SIGV4'],
+                                required=True)
+    create_command.add_argument('--target-auth-type',
+                                type=str,
+                                help='The auth type to use when making requests from the OSI pipeline to the '
+                                     'target cluster',
+                                choices=['SIGV4'],
+                                required=True)
+    create_command.add_argument('--source-auth-secret',
+                                type=str,
+                                help='The AWS Secrets Manager Secret containing the \'username\' and \'password\' keys '
+                                     'for the OSI pipeline to use when communicating with the source cluster')
+    create_command.add_argument('--source-pipeline-role-arn',
+                                type=str,
+                                help='The ARN of the IAM role that the OSI pipeline should assume when communicating '
+                                     'with the source cluster')
+    create_command.add_argument('--target-pipeline-role-arn',
+                                type=str,
+                                help='The ARN of the IAM role that the OSI pipeline should assume when communicating'
+                                     ' with the target cluster')
+    create_command.add_argument('--log-group-name',
+                                type=str,
+                                help='The name of an existing Cloudwatch Log Group for OSI to publish logs to. '
+                                     'This is required to enable logging')
+    create_command.add_argument('--tag',
+                                nargs=2,
+                                action=KeyValueAction,
+                                metavar=('Key', 'Value'),
+                                help='Tag to apply to the created OSI pipeline, e.g. migration_deployment 1.0.3. '
+                                     'Argument can be used multiple times')
+    create_command.add_argument("--print-config-only",
+                                action="store_true",
+                                help="Flag to only output the pipeline config template that is generated")
+    create_command_solution_help = ('Operation to detect source and target fields from full Migration deployment and '
+                                    'create an OSI pipeline. Note: Only configured for managed OpenSearch Service to '
+                                    'managed OpenSearch Service migrations currently')
+    create_command_solution = subparsers.add_parser('create-pipeline-from-solution',
+                                                    help=create_command_solution_help)
+    create_command_solution.add_argument('--source-endpoint',
+                                         type=str,
+                                         help='The source cluster endpoint to use for the OSI pipeline',
+                                         required=True)
+    create_command_solution.add_argument('--name',
+                                         type=str,
+                                         help='The name of the OSI pipeline',
+                                         default=DEFAULT_PIPELINE_NAME)
+    create_command_solution.add_argument("--print-config-only",
+                                         action="store_true",
+                                         help="Flag to only output the pipeline config template "
+                                              "that is generated")
     return parser.parse_args()
 
 
@@ -195,7 +210,6 @@ def get_private_subnets(vpc_id):
 def construct_pipeline_config(pipeline_config_file_path: str, source_endpoint: str, target_endpoint: str,
                               source_auth_type: str, target_auth_type: str, source_auth_secret=None,
                               source_pipeline_role_arn=None, target_pipeline_role_arn=None, aws_region=None):
-
     # Validation of auth options provided
     if aws_region is None and (source_auth_type == 'SIGV4' or target_auth_type == 'SIGV4'):
         raise InvalidAuthParameters('AWS region must be provided for a source or target auth type of SIGV4')
@@ -278,16 +292,17 @@ def osi_create_pipeline(osi_client, pipeline_name: str, pipeline_config: str, su
         },
         # Documentation lists this as a requirement but does not seem to be the case from testing:
         # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/osis/client/create_pipeline.html
-        #BufferOptions={
+        # BufferOptions={
         #    'PersistentBufferEnabled': False
-        #},
+        # },
         Tags=tags
     )
 
 
 def create_pipeline(osi_client, pipeline_name: str, pipeline_config: str, subnet_ids: List[str],
                     security_group_ids: List[str], cw_log_group_name: str, tags: List[Dict[str, str]]):
-    osi_create_pipeline(osi_client, pipeline_name, pipeline_config, subnet_ids, security_group_ids, cw_log_group_name, tags)
+    osi_create_pipeline(osi_client, pipeline_name, pipeline_config, subnet_ids, security_group_ids, cw_log_group_name,
+                        tags)
 
 
 def create_pipeline_from_stage(osi_client, pipeline_name: str, pipeline_config_path: str, source_endpoint: str,
