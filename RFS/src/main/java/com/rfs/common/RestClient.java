@@ -24,31 +24,6 @@ public class RestClient {
         }
     }
 
-    public static class BulkResponse extends Response {
-        public BulkResponse(int responseCode, String responseBody, String responseMessage) {
-            super(responseCode, responseBody, responseMessage);
-        }
-
-        public boolean hasBadStatusCode() {
-            return !(code == 200 || code == 201);
-        }
-
-        public boolean hasFailedOperations() {
-            return body.contains("\"errors\":true");
-        }
-
-        public String getFailureMessage() {
-            String failureMessage;
-            if (hasBadStatusCode()) {
-                failureMessage = "Bulk request failed.  Status code: " + code + ", Response body: " + body;
-            } else {
-                failureMessage = "Bulk request succeeded, but some operations failed.  Response body: " + body;
-            }
-
-            return failureMessage;
-        }
-    }
-
     public final ConnectionDetails connectionDetails;
     private final HttpClient client;
 
@@ -79,19 +54,12 @@ public class RestClient {
         return getAsync(path, quietLogging).block();
     }
 
-    public Mono<BulkResponse> postBulkAsync(String path, String body) {
+    public Mono<Response> postAsync(String path, String body) {
         return client.post()
             .uri("/" + path)
             .send(ByteBufMono.fromString(Mono.just(body)))
             .responseSingle((response, bytes) -> bytes.asString()
-                .map(b -> new BulkResponse(response.status().code(), b, response.status().reasonPhrase()))
-                .flatMap(responseDetails -> {
-                    if (responseDetails.hasBadStatusCode() || responseDetails.hasFailedOperations()) {
-                        logger.error(responseDetails.getFailureMessage());
-                        return Mono.error(new RuntimeException(responseDetails.getFailureMessage()));
-                    }
-                    return Mono.just(responseDetails);
-                }));
+                .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())));
     }
 
     public Mono<Response> putAsync(String path, String body, boolean quietLogging) {

@@ -16,16 +16,14 @@ public class DocumentReindexer {
     private static final int MAX_BATCH_SIZE = 1000; // Arbitrarily chosen
 
     public static Mono<Void> reindex(String indexName, Flux<Document> documentStream, ConnectionDetails targetConnection) throws Exception {   
-        RestClient client = new RestClient(targetConnection);
-
-        String targetPath = indexName + "/_bulk";
+        OpenSearchClient client = new OpenSearchClient(targetConnection);
 
         return documentStream
             .map(DocumentReindexer::convertDocumentToBulkSection)  // Convert each Document to part of a bulk operation
             .buffer(MAX_BATCH_SIZE) // Collect until you hit the batch size
             .doOnNext(bulk -> logger.info(bulk.size() + " documents in current bulk request"))
             .map(DocumentReindexer::convertToBulkRequestBody)  // Assemble the bulk request body from the parts
-            .flatMap(bulkJson -> client.postBulkAsync(targetPath, bulkJson) // Send the request
+            .flatMap(bulkJson -> client.sendBulkRequest(indexName, bulkJson) // Send the request
                 .doOnSuccess(unused -> logger.debug("Batch succeeded"))
                 .doOnError(error -> logger.error("Batch failed", error))
                 .onErrorResume(e -> Mono.empty()) // Prevent the error from stopping the entire stream
@@ -53,7 +51,7 @@ public class DocumentReindexer {
 
     public static void refreshAllDocuments(ConnectionDetails targetConnection) throws Exception {
         // Send the request
-        RestClient client = new RestClient(targetConnection);
-        client.get("_refresh", false);
+        OpenSearchClient client = new OpenSearchClient(targetConnection);
+        client.refresh();
     }
 }
