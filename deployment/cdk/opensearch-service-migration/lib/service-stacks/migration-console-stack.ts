@@ -73,28 +73,26 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             parameterName: `/migration/${stage}/${deployId}/osiPipelineRoleArn`,
             stringValue: osiPipelineRole.roleArn
         });
+        return osiPipelineRole.roleArn
     }
 
-    createOpenSearchIngestionManagementPolicy(): PolicyStatement {
+    createOpenSearchIngestionManagementPolicy(pipelineRoleArn: string): PolicyStatement[] {
         const allMigrationPipelineArn = `arn:aws:osis:${this.region}:${this.account}:pipeline/*`
         const osiManagementPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: [allMigrationPipelineArn],
-            conditions: {
-                'Null': {
-                    'aws:TagKeys': 'false'
-                },
-                'ForAllValues:StringEquals': {
-                    'aws:TagKeys': [
-                        'migration_deployment'
-                    ]
-                }
-            },
             actions: [
                 "osis:*"
             ]
         })
-        return osiManagementPolicy
+        const passPipelineRolePolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [pipelineRoleArn],
+            actions: [
+                "iam:PassRole"
+            ]
+        })
+        return [osiManagementPolicy, passPipelineRolePolicy]
     }
 
     constructor(scope: Construct, id: string, props: MigrationConsoleProps) {
@@ -204,8 +202,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         }
 
         if (props.migrationConsoleEnableOSI) {
-            servicePolicies.push(this.createOpenSearchIngestionManagementPolicy())
-            this.configureOpenSearchIngestionPipelineRole(props.stage, props.defaultDeployId)
+            const pipelineRoleArn = this.configureOpenSearchIngestionPipelineRole(props.stage, props.defaultDeployId)
+            servicePolicies.push(...this.createOpenSearchIngestionManagementPolicy(pipelineRoleArn))
             const osiLogGroup = new LogGroup(this, 'OSILogGroup',  {
                 retention: RetentionDays.ONE_MONTH,
                 removalPolicy: RemovalPolicy.DESTROY,
