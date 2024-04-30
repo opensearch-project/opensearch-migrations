@@ -17,9 +17,8 @@ TARGET_ENDPOINT_PLACEHOLDER = "<TARGET_CLUSTER_ENDPOINT_PLACEHOLDER>"
 SOURCE_AUTH_OPTIONS_PLACEHOLDER = "<SOURCE_AUTH_OPTIONS_PLACEHOLDER>"
 TARGET_AUTH_OPTIONS_PLACEHOLDER = "<TARGET_AUTH_OPTIONS_PLACEHOLDER>"
 AWS_REGION_PLACEHOLDER = "<AWS_REGION_PLACEHOLDER>"
-SOURCE_STS_ROLE_ARN_PLACEHOLDER = "<SOURCE_STS_ROLE_ARN_PLACEHOLDER>"
+STS_ROLE_ARN_PLACEHOLDER = "<STS_ROLE_ARN_PLACEHOLDER>"
 SOURCE_SECRET_ID_PLACEHOLDER = "<SOURCE_SECRET_ID_PLACEHOLDER>"
-TARGET_STS_ROLE_ARN_PLACEHOLDER = "<TARGET_STS_ROLE_ARN_PLACEHOLDER>"
 SECRET_CONFIG_TEMPLATE = """
 pipeline_configurations:
   aws:
@@ -27,7 +26,7 @@ pipeline_configurations:
       source-secret-config:
         secret_id: <SOURCE_SECRET_ID_PLACEHOLDER>
         region: <AWS_REGION_PLACEHOLDER>
-        sts_role_arn: <SOURCE_STS_ROLE_ARN_PLACEHOLDER>
+        sts_role_arn: <STS_ROLE_ARN_PLACEHOLDER>
 """
 SOURCE_BASIC_AUTH_CONFIG_TEMPLATE = """
       username: "${{aws_secrets:source-secret-config:username}}"
@@ -36,7 +35,7 @@ SOURCE_BASIC_AUTH_CONFIG_TEMPLATE = """
 SIGV4_AUTH_CONFIG_TEMPLATE = """
       aws:
         region: <AWS_REGION_PLACEHOLDER>
-        sts_role_arn: <TARGET_STS_ROLE_ARN_PLACEHOLDER>
+        sts_role_arn: <STS_ROLE_ARN_PLACEHOLDER>
 """
 
 
@@ -181,6 +180,10 @@ def parse_args():
                                          action="store_true",
                                          help="Flag to only output the pipeline config template "
                                               "that is generated")
+    create_command_solution.add_argument("--print-command-only",
+                                         action="store_true",
+                                         help="Flag to only output the equivalent create-pipeline command that is "
+                                              "generated")
     return parser.parse_args()
 
 
@@ -229,7 +232,7 @@ def construct_pipeline_config(pipeline_config_file_path: str, source_endpoint: s
     # Fill in OSI pipeline template file from provided options
     if source_auth_type == 'BASIC_AUTH':
         secret_config = SECRET_CONFIG_TEMPLATE.replace(SOURCE_SECRET_ID_PLACEHOLDER, source_auth_secret)
-        secret_config = secret_config.replace(SOURCE_STS_ROLE_ARN_PLACEHOLDER, source_pipeline_role_arn)
+        secret_config = secret_config.replace(STS_ROLE_ARN_PLACEHOLDER, source_pipeline_role_arn)
         secret_config = secret_config.replace(AWS_REGION_PLACEHOLDER, aws_region)
         pipeline_config = pipeline_config.replace(AWS_SECRET_CONFIG_PLACEHOLDER, secret_config)
         pipeline_config = pipeline_config.replace(SOURCE_AUTH_OPTIONS_PLACEHOLDER, SOURCE_BASIC_AUTH_CONFIG_TEMPLATE)
@@ -238,12 +241,12 @@ def construct_pipeline_config(pipeline_config_file_path: str, source_endpoint: s
 
     if source_auth_type == 'SIGV4':
         aws_source_config = SIGV4_AUTH_CONFIG_TEMPLATE.replace(AWS_REGION_PLACEHOLDER, aws_region)
-        aws_source_config = aws_source_config.replace(SOURCE_STS_ROLE_ARN_PLACEHOLDER, source_pipeline_role_arn)
+        aws_source_config = aws_source_config.replace(STS_ROLE_ARN_PLACEHOLDER, source_pipeline_role_arn)
         pipeline_config = pipeline_config.replace(SOURCE_AUTH_OPTIONS_PLACEHOLDER, aws_source_config)
 
     if target_auth_type == 'SIGV4':
         aws_target_config = SIGV4_AUTH_CONFIG_TEMPLATE.replace(AWS_REGION_PLACEHOLDER, aws_region)
-        aws_target_config = aws_target_config.replace(TARGET_STS_ROLE_ARN_PLACEHOLDER, target_pipeline_role_arn)
+        aws_target_config = aws_target_config.replace(STS_ROLE_ARN_PLACEHOLDER, target_pipeline_role_arn)
         pipeline_config = pipeline_config.replace(TARGET_AUTH_OPTIONS_PLACEHOLDER, aws_target_config)
 
     pipeline_config = pipeline_config.replace(SOURCE_ENDPOINT_PLACEHOLDER, source_endpoint)
@@ -306,7 +309,7 @@ def create_pipeline(osi_client, pipeline_name: str, pipeline_config: str, subnet
 
 
 def create_pipeline_from_stage(osi_client, pipeline_name: str, pipeline_config_path: str, source_endpoint: str,
-                               target_endpoint: str, print_config_only: bool):
+                               target_endpoint: str, print_config_only: bool, print_command_only: bool):
     region = os.environ.get("AWS_REGION")
     solution_version = os.environ.get("MIGRATION_SOLUTION_VERSION")
     stage = os.environ.get("MIGRATION_STAGE")
@@ -338,6 +341,14 @@ def create_pipeline_from_stage(osi_client, pipeline_name: str, pipeline_config_p
         print(pipeline_config)
         exit(0)
 
+    if print_command_only:
+        print(f"./osiMigration.py create-pipeline --source-endpoint={source_endpoint} --target-endpoint={target_endpoint} "
+              f"--aws-region={region} --subnet-ids={','.join(map(str,subnet_ids))} "
+              f"--security-group-ids={','.join(map(str,security_groups))} --source-auth-type='SIGV4' "
+              f"--target-auth-type='SIGV4' --source-pipeline-role-arn={pipeline_role_arn} "
+              f"--target-pipeline-role-arn={pipeline_role_arn} --tag=migration_deployment {solution_version}")
+        exit(0)
+
     osi_create_pipeline(osi_client, pipeline_name, pipeline_config, subnet_ids, security_groups,
                         param_dict[osi_log_group_key], tags)
 
@@ -367,4 +378,5 @@ if __name__ == "__main__":
     elif args.subcommand == "create-pipeline-from-solution":
         validate_environment()
         create_pipeline_from_stage(client, args.name, DEFAULT_PIPELINE_CONFIG_PATH, args.source_endpoint,
-                                   os.environ.get("MIGRATION_DOMAIN_ENDPOINT"), args.print_config_only)
+                                   os.environ.get("MIGRATION_DOMAIN_ENDPOINT"), args.print_config_only,
+                                   args.print_command_only)

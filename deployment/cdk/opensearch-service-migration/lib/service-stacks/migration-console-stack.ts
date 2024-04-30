@@ -137,7 +137,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         const ecsClusterArn = `arn:aws:ecs:${this.region}:${this.account}:service/migration-${props.stage}-ecs-cluster`
         const allReplayerServiceArn = `${ecsClusterArn}/migration-${props.stage}-traffic-replayer*`
         const reindexFromSnapshotServiceArn = `${ecsClusterArn}/migration-${props.stage}-reindex-from-snapshot`
-        const updateReplayerServicePolicy = new PolicyStatement({
+        const ecsUpdateServicePolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: [allReplayerServiceArn, reindexFromSnapshotServiceArn],
             actions: [
@@ -155,6 +155,17 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
+        // Allow Console to determine proper subnets to use for any resource creation
+        const describeVPCPolicy = new PolicyStatement( {
+            effect: Effect.ALLOW,
+            resources: ["*"],
+            actions: [
+                "ec2:DescribeSubnets",
+                "ec2:DescribeRouteTables"
+            ]
+        })
+
+        // Allow Console to retrieve SSM Parameters
         const getSSMParamsPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/migration/${props.stage}/${props.defaultDeployId}/*`],
@@ -171,7 +182,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         }
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.region, this.account)
-        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, updateReplayerServicePolicy, artifactS3PublishPolicy, getSSMParamsPolicy]
+        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
