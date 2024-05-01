@@ -9,7 +9,6 @@ plugins {
 
 dependencies {
     api project(":trafficCaptureDependencies")
-    implementation group: 'io.netty', name: 'netty-bom'
 
     implementation project(':captureOffloader')
     implementation project(':coreUtilities')

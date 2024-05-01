@@ -30,8 +30,6 @@ repositories {
 dependencies {
     api project(":trafficCaptureDependencies")
 
-    api platform("io.opentelemetry:opentelemetry-bom")
-
     implementation project(':captureProtobufs')
 
     implementation "com.google.protobuf:protobuf-java"
@@ -42,7 +40,6 @@ dependencies {
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
 
     // Log4j
-    implementation(platform("org.apache.logging.log4j:log4j-bom"))
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
@@ -56,7 +53,6 @@ dependencies {
     testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-api'
     testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-sdk'
     testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
-    testFixturesImplementation platform("io.opentelemetry:opentelemetry-bom")
     testFixturesImplementation group: 'io.opentelemetry', name: 'opentelemetry-api'
     testFixturesImplementation group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
     testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api'
