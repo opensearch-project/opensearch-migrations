@@ -107,9 +107,8 @@ public class ParsedHttpMessagesAsDicts {
         try (var encodedBufHolder = RefSafeHolder.create(Base64.encode(content, false, Base64Dialect.STANDARD))) {
             var encodedBuf = encodedBufHolder.get();
             assert encodedBuf != null : "Base64.encode should not return null";
-            String base64body = encodedBuf.toString(StandardCharsets.UTF_8);
-            map.put("body", base64body);
             headers.entries().forEach(kvp -> map.put(kvp.getKey(), kvp.getValue()));
+            map.put("body", encodedBuf.toString(StandardCharsets.UTF_8));
             return map;
         }
     }
