@@ -50,11 +50,13 @@ class InvalidAuthParameters(Exception):
 # Custom action to parse argument into a list of dictionaries with two named fields
 class KeyValueAction(argparse.Action):
     def __call__(self, parser, namespace, values, option_string=None):
-        tag_list = getattr(namespace, self.dest, [])
-        if tag_list is None:
-            tag_list = []
-        tag_list.append({'Key': values[0], 'Value': values[1]})
-        setattr(namespace, self.dest, tag_list)
+        tags = getattr(namespace, self.dest, [])
+        if tags is None:
+            tags = []
+        for value in values:
+            key, value = value.split('=')
+            tags.append({'Key': key, 'Value': value})
+        setattr(namespace, self.dest, tags)
 
 
 # Custom action to parse a potentially comma-separated string into a list
@@ -155,10 +157,10 @@ def parse_args():
                                 help='The name of an existing Cloudwatch Log Group for OSI to publish logs to. '
                                      'This is required to enable logging')
     create_command.add_argument('--tag',
-                                nargs=2,
+                                nargs='+',
                                 action=KeyValueAction,
-                                metavar=('Key', 'Value'),
-                                help='Tag to apply to the created OSI pipeline, e.g. migration_deployment 1.0.3. '
+                                metavar='Key=Value',
+                                help='Tag to apply to the created OSI pipeline, e.g. migration_deployment=1.0.3. '
                                      'Argument can be used multiple times')
     create_command.add_argument("--print-config-only",
                                 action="store_true",
@@ -304,8 +306,9 @@ def osi_create_pipeline(osi_client, pipeline_name: str, pipeline_config: str, su
 
 def create_pipeline(osi_client, pipeline_name: str, pipeline_config: str, subnet_ids: List[str],
                     security_group_ids: List[str], cw_log_group_name: str, tags: List[Dict[str, str]]):
+    tags_clean = [] if tags is None else tags
     osi_create_pipeline(osi_client, pipeline_name, pipeline_config, subnet_ids, security_group_ids, cw_log_group_name,
-                        tags)
+                        tags_clean)
 
 
 def create_pipeline_from_stage(osi_client, pipeline_name: str, pipeline_config_path: str, source_endpoint: str,
@@ -346,7 +349,7 @@ def create_pipeline_from_stage(osi_client, pipeline_name: str, pipeline_config_p
               f"--target-endpoint={target_endpoint} --aws-region={region} --subnet-ids={','.join(map(str,subnet_ids))} "
               f"--security-group-ids={','.join(map(str,security_groups))} --source-auth-type='SIGV4' "
               f"--target-auth-type='SIGV4' --source-pipeline-role-arn={pipeline_role_arn} "
-              f"--target-pipeline-role-arn={pipeline_role_arn} --tag=migration_deployment {solution_version}")
+              f"--target-pipeline-role-arn={pipeline_role_arn} --tag=migration_deployment={solution_version}")
         exit(0)
 
     osi_create_pipeline(osi_client, pipeline_name, pipeline_config, subnet_ids, security_groups,

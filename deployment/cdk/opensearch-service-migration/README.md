@@ -196,6 +196,31 @@ With the [required setup](#importing-target-clusters) on the target cluster havi
 The pipeline configuration file can be viewed (and updated) via AWS Secrets Manager.
 Please note that it will be base64 encoded.
 
+## Kicking off OpenSearch Ingestion Service
+
+**Note**: Using OpenSearch Ingestion Service is currently an experimental feature that must be enabled with the `migrationConsoleEnableOSI` option. Currently only Managed OpenSearch service as a source to Managed OpenSearch service as a target migrations are supported
+
+After enabling and deploying the CDK, log into the Migration Console
+```shell
+# ./accessContainer.sh migration-console STAGE REGION
+./accessContainer.sh migration-console dev us-east-1
+```
+Make any modifications to the `osiPipelineTemplate.yaml` on the Migration Console, if needed. Note: Placeholder values exist in the file to automatically populate source/target endpoints and corresponding auth options by the python tool that uses this yaml file.
+
+The OpenSearch Ingestion pipeline can then be created by giving an existing source cluster endpoint and running the below command
+```shell
+./osiMigration.py create-pipeline-from-solution --source-endpoint=<SOURCE_ENDPOINT>
+```
+
+When OpenSearch Ingestion pipelines are created they begin running immediately and can be stopped with the following command
+```shell
+./osiMigration.py stop-pipeline
+```
+Or restarted with the following command
+```shell
+./osiMigration.py start-pipeline
+```
+
 ## Kicking off Reindex from Snapshot (RFS)
 
 When the RFS service gets deployed, it does not start running immediately. Instead, the user controls when they want to kick off a historical data migration.
