@@ -2,6 +2,7 @@
 
 from pathlib import Path
 from typing import List, Dict
+from urllib.parse import urlparse
 import argparse
 import logging
 import coloredlogs
@@ -11,31 +12,15 @@ import os
 logger = logging.getLogger(__name__)
 DEFAULT_PIPELINE_NAME = "migration-assistant-pipeline"
 DEFAULT_PIPELINE_CONFIG_PATH = "./osiPipelineTemplate.yaml"
+
 AWS_SECRET_CONFIG_PLACEHOLDER = "<AWS_SECRET_CONFIG_PLACEHOLDER>"
 SOURCE_ENDPOINT_PLACEHOLDER = "<SOURCE_CLUSTER_ENDPOINT_PLACEHOLDER>"
 TARGET_ENDPOINT_PLACEHOLDER = "<TARGET_CLUSTER_ENDPOINT_PLACEHOLDER>"
 SOURCE_AUTH_OPTIONS_PLACEHOLDER = "<SOURCE_AUTH_OPTIONS_PLACEHOLDER>"
 TARGET_AUTH_OPTIONS_PLACEHOLDER = "<TARGET_AUTH_OPTIONS_PLACEHOLDER>"
-AWS_REGION_PLACEHOLDER = "<AWS_REGION_PLACEHOLDER>"
-STS_ROLE_ARN_PLACEHOLDER = "<STS_ROLE_ARN_PLACEHOLDER>"
-SOURCE_SECRET_ID_PLACEHOLDER = "<SOURCE_SECRET_ID_PLACEHOLDER>"
-SECRET_CONFIG_TEMPLATE = """
-pipeline_configurations:
-  aws:
-    secrets:
-      source-secret-config:
-        secret_id: <SOURCE_SECRET_ID_PLACEHOLDER>
-        region: <AWS_REGION_PLACEHOLDER>
-        sts_role_arn: <STS_ROLE_ARN_PLACEHOLDER>
-"""
 SOURCE_BASIC_AUTH_CONFIG_TEMPLATE = """
       username: "${{aws_secrets:source-secret-config:username}}"
       password: "${{aws_secrets:source-secret-config:password}}"
-"""
-SIGV4_AUTH_CONFIG_TEMPLATE = """
-      aws:
-        region: <AWS_REGION_PLACEHOLDER>
-        sts_role_arn: <STS_ROLE_ARN_PLACEHOLDER>
 """
 
 
@@ -83,6 +68,21 @@ def validate_environment():
     for i in env_vars:
         if os.environ.get(i) is None:
             raise MissingEnvironmentVariable(f"Required environment variable '{i}' not found")
+
+
+# Allowing ability to remove port, as port is currently not supported by OpenSearch Ingestion
+def sanitize_endpoint(endpoint: str, remove_port: bool):
+    url = urlparse(endpoint)
+    scheme = url.scheme
+    hostname = url.hostname
+    port = url.port
+    if scheme is None or hostname is None:
+        raise RuntimeError(f"Provided endpoint does not have proper endpoint formatting: {endpoint}")
+
+    if port is not None and not remove_port:
+        return f"{scheme}://{hostname}:{port}"
+
+    return f"{scheme}://{hostname}"
 
 
 def parse_args():
@@ -212,6 +212,26 @@ def get_private_subnets(vpc_id):
     return private_subnets
 
 
+def generate_source_secret_config(source_auth_secret, source_pipeline_role_arn, aws_region):
+    return f"""
+pipeline_configurations:
+  aws:
+    secrets:
+      source-secret-config:
+        secret_id: {source_auth_secret}
+        region: {aws_region}
+        sts_role_arn: {source_pipeline_role_arn}
+"""
+
+
+def generate_sigv4_auth_config(pipeline_role_arn, aws_region):
+    return f"""
+      aws:
+        region: {aws_region}
+        sts_role_arn: {pipeline_role_arn}
+"""
+
+
 def construct_pipeline_config(pipeline_config_file_path: str, source_endpoint: str, target_endpoint: str,
                               source_auth_type: str, target_auth_type: str, source_auth_secret=None,
                               source_pipeline_role_arn=None, target_pipeline_role_arn=None, aws_region=None):
@@ -233,22 +253,18 @@ def construct_pipeline_config(pipeline_config_file_path: str, source_endpoint: s
 
     # Fill in OSI pipeline template file from provided options
     if source_auth_type == 'BASIC_AUTH':
-        secret_config = SECRET_CONFIG_TEMPLATE.replace(SOURCE_SECRET_ID_PLACEHOLDER, source_auth_secret)
-        secret_config = secret_config.replace(STS_ROLE_ARN_PLACEHOLDER, source_pipeline_role_arn)
-        secret_config = secret_config.replace(AWS_REGION_PLACEHOLDER, aws_region)
+        secret_config = generate_source_secret_config(source_auth_secret, source_pipeline_role_arn, aws_region)
         pipeline_config = pipeline_config.replace(AWS_SECRET_CONFIG_PLACEHOLDER, secret_config)
         pipeline_config = pipeline_config.replace(SOURCE_AUTH_OPTIONS_PLACEHOLDER, SOURCE_BASIC_AUTH_CONFIG_TEMPLATE)
     else:
         pipeline_config = pipeline_config.replace(AWS_SECRET_CONFIG_PLACEHOLDER, "")
 
     if source_auth_type == 'SIGV4':
-        aws_source_config = SIGV4_AUTH_CONFIG_TEMPLATE.replace(AWS_REGION_PLACEHOLDER, aws_region)
-        aws_source_config = aws_source_config.replace(STS_ROLE_ARN_PLACEHOLDER, source_pipeline_role_arn)
+        aws_source_config = generate_sigv4_auth_config(source_pipeline_role_arn, aws_region)
         pipeline_config = pipeline_config.replace(SOURCE_AUTH_OPTIONS_PLACEHOLDER, aws_source_config)
 
     if target_auth_type == 'SIGV4':
-        aws_target_config = SIGV4_AUTH_CONFIG_TEMPLATE.replace(AWS_REGION_PLACEHOLDER, aws_region)
-        aws_target_config = aws_target_config.replace(STS_ROLE_ARN_PLACEHOLDER, target_pipeline_role_arn)
+        aws_target_config = generate_sigv4_auth_config(target_pipeline_role_arn, aws_region)
         pipeline_config = pipeline_config.replace(TARGET_AUTH_OPTIONS_PLACEHOLDER, aws_target_config)
 
     pipeline_config = pipeline_config.replace(SOURCE_ENDPOINT_PLACEHOLDER, source_endpoint)
@@ -368,8 +384,10 @@ if __name__ == "__main__":
     elif args.subcommand == "stop-pipeline":
         stop_pipeline(client, args.name)
     elif args.subcommand == "create-pipeline":
-        pipeline_config_string = construct_pipeline_config(DEFAULT_PIPELINE_CONFIG_PATH, args.source_endpoint,
-                                                           args.target_endpoint, args.source_auth_type,
+        source_endpoint = sanitize_endpoint(args.source_endpoint, False)
+        target_endpoint = sanitize_endpoint(args.target_endpoint, True)
+        pipeline_config_string = construct_pipeline_config(DEFAULT_PIPELINE_CONFIG_PATH, source_endpoint,
+                                                           target_endpoint, args.source_auth_type,
                                                            args.target_auth_type,
                                                            args.source_auth_secret, args.source_pipeline_role_arn,
                                                            args.target_pipeline_role_arn, args.aws_region)
@@ -380,6 +398,7 @@ if __name__ == "__main__":
                         args.log_group_name, args.tag)
     elif args.subcommand == "create-pipeline-from-solution":
         validate_environment()
-        create_pipeline_from_stage(client, args.name, DEFAULT_PIPELINE_CONFIG_PATH, args.source_endpoint,
-                                   os.environ.get("MIGRATION_DOMAIN_ENDPOINT"), args.print_config_only,
-                                   args.print_command_only)
+        source_endpoint = sanitize_endpoint(args.source_endpoint, False)
+        target_endpoint = sanitize_endpoint(os.environ.get("MIGRATION_DOMAIN_ENDPOINT"), True)
+        create_pipeline_from_stage(client, args.name, DEFAULT_PIPELINE_CONFIG_PATH, source_endpoint,
+                                   target_endpoint, args.print_config_only, args.print_command_only)
