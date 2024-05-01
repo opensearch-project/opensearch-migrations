@@ -1,6 +1,6 @@
 package org.opensearch.migrations.replay.datahandlers;
 
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
 
 /**
  * This class consumes arrays of bytes or ByteBufs, potentially asynchronously,
@@ -11,5 +11,5 @@ import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFutur
  */
 public interface IPacketFinalizingConsumer<R> extends IPacketConsumer {
 
-    DiagnosticTrackableCompletableFuture<String,R> finalizeRequest();
+    TrackedFuture<String,R> finalizeRequest();
 }
