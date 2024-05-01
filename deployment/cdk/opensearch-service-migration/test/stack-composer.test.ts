@@ -201,7 +201,8 @@ test('Test that app registry association is created when migrationsAppRegistryAR
     })
     const stacks = new StackComposer(app, {
         migrationsAppRegistryARN: "arn:aws:servicecatalog:us-west-2:12345678912:/applications/12345abcdef",
-        env: {account: "test-account", region: "us-east-1"}
+        env: {account: "test-account", region: "us-east-1"},
+        migrationsSolutionVersion: "1.0.1"
     })
 
     const domainStack = stacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
