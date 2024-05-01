@@ -15,6 +15,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
         this.awarenessAttributeDimensionality = awarenessAttributeDimensionality;
     }
 
+    @Override
     public ObjectNode transformGlobalMetadata(ObjectNode root) {
         ObjectNode newRoot = mapper.createObjectNode();
 
@@ -49,6 +50,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
         return newRoot;
     }
 
+    @Override
     public ObjectNode transformIndexMetadata(ObjectNode root){
         ObjectNode newRoot = root.deepCopy();
 

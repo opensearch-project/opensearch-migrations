@@ -5,7 +5,7 @@ import io.github.resilience4j.ratelimiter.RateLimiter;
 import io.github.resilience4j.ratelimiter.RateLimiterConfig;
 import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryConfig;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
 
 import java.time.Duration;
 import java.util.function.Supplier;
@@ -22,8 +22,8 @@ import java.util.function.Supplier;
  */
 public class AdaptiveRateLimiter<D,T> {
 
-    public DiagnosticTrackableCompletableFuture<D,T>
-    get(Supplier<DiagnosticTrackableCompletableFuture<D,T>> producer) {
+    public TrackedFuture<D,T>
+    get(Supplier<TrackedFuture<D,T>> producer) {
         var intervalFunction = IntervalFunction.ofExponentialBackoff(Duration.ofMillis(1),2,Duration.ofSeconds(1));
         RetryConfig retryConfig = RetryConfig.custom()
                 .maxAttempts(Integer.MAX_VALUE)

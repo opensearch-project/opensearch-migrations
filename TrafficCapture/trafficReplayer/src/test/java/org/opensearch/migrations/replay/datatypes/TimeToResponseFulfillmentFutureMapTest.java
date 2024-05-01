@@ -10,21 +10,27 @@ import java.time.Instant;
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
 class TimeToResponseFulfillmentFutureMapTest {
     @Test
-    public void testAddsAndPopsAreOrdered() {
+    public void testAddsAndPopsAreOrdered() throws Exception {
         var timeMap = new TimeToResponseFulfillmentFutureMap();
         StringBuilder log = new StringBuilder();
-        timeMap.appendTask(Instant.EPOCH, new ChannelTask(ChannelTaskType.TRANSMIT, ()->log.append('A')));
-        timeMap.appendTask(Instant.EPOCH, new ChannelTask(ChannelTaskType.TRANSMIT, ()->log.append('B')));
-        timeMap.appendTask(Instant.EPOCH.plus(Duration.ofMillis(1)), new ChannelTask(ChannelTaskType.TRANSMIT, ()->log.append('C')));
-        timeMap.appendTask(Instant.EPOCH.plus(Duration.ofMillis(1)), new ChannelTask(ChannelTaskType.TRANSMIT, ()->log.append('D')));
+        timeMap.appendTaskTrigger(Instant.EPOCH, ChannelTaskType.TRANSMIT)
+                .scheduleFuture.thenAccept(v->log.append('A'), ()->"");
+        timeMap.appendTaskTrigger(Instant.EPOCH, ChannelTaskType.TRANSMIT)
+                .scheduleFuture.thenAccept(v->log.append('B'), ()->"");
+        timeMap.appendTaskTrigger(Instant.EPOCH.plus(Duration.ofMillis(1)), ChannelTaskType.TRANSMIT)
+                .scheduleFuture.thenAccept(v->log.append('C'), ()->"");
+        var lastWorkFuture =
+                timeMap.appendTaskTrigger(Instant.EPOCH.plus(Duration.ofMillis(1)), ChannelTaskType.TRANSMIT)
+                        .scheduleFuture.thenAccept(v->log.append('D'), ()->"");
         while (true) {
             var t = timeMap.peekFirstItem();
             if (t == null) {
                 break;
             }
-            t.getValue().runnable.run();
+            t.scheduleFuture.future.complete(null);
             timeMap.removeFirstItem();
         }
+        lastWorkFuture.get();
         Assertions.assertEquals("ABCD", log.toString());
     }
 }

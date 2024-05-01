@@ -12,6 +12,7 @@ import {
     createOpenSearchServerlessIAMAccessPolicy
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
+import { Duration } from "aws-cdk-lib";
 
 
 export interface TrafficReplayerProps extends StackPropsExt {
@@ -23,7 +24,8 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly customKafkaGroupId?: string,
     readonly userAgentSuffix?: string,
     readonly extraArgs?: string,
-    readonly otelCollectorEnabled?: boolean
+    readonly otelCollectorEnabled?: boolean,
+    readonly maxUptime?: Duration
 }
 
 export class TrafficReplayerStack extends MigrationServiceCore {
@@ -109,5 +111,4 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             ...props
         });
     }
-
 }
