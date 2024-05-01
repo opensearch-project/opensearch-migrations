@@ -22,6 +22,9 @@ public class OpenSearchClient {
         }
 
         public boolean hasFailedOperations() {
+            // The OpenSearch Bulk API response body is JSON and contains a top-level "errors" field that indicates
+            // whether any of the individual operations in the bulk request failed.  Rather than marshalling the entire
+            // response as JSON, just check for the string value.
             return body.contains("\"errors\":true");
         }
 
@@ -83,7 +86,7 @@ public class OpenSearchClient {
             client.put(objectPath, settings.toString(), false);
             return true;
         } else if (response.code == HttpURLConnection.HTTP_OK) {
-            logger.warn(objectPath + " already exists. Skipping creation.");
+            logger.info(objectPath + " already exists. Skipping creation.");
         } else {
             logger.warn("Could not confirm that " + objectPath + " does not already exist. Skipping creation.");
         }
