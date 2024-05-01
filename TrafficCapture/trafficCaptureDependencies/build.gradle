@@ -81,8 +81,8 @@ dependencies {
 
     api group: 'com.lmax', name: 'disruptor', version: '4.0.0'
 
-    api group: 'org.bouncycastle', name: 'bcprov-jdk18on', version: '1.74'
-    api group: 'org.bouncycastle', name: 'bcpkix-jdk18on', version: '1.74'
+    api group: 'org.bouncycastle', name: 'bcprov-jdk18on', version: '1.78'
+    api group: 'org.bouncycastle', name: 'bcpkix-jdk18on', version: '1.78'
 
     api group: 'org.testcontainers', name: 'junit-jupiter', version: '1.19.7'
     api group: 'org.testcontainers', name: 'kafka', version: '1.19.7'
