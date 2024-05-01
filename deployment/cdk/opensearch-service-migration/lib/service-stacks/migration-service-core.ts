@@ -13,10 +13,11 @@ import {
     Ulimit,
     OperatingSystemFamily,
     Volume,
-    AwsLogDriverMode
+    AwsLogDriverMode,
+    ContainerDependencyCondition
 } from "aws-cdk-lib/aws-ecs";
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
-import {RemovalPolicy, Stack} from "aws-cdk-lib";
+import {Duration, RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {CfnService as DiscoveryCfnService, PrivateDnsNamespace} from "aws-cdk-lib/aws-servicediscovery";
@@ -46,7 +47,8 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly taskCpuUnits?: number,
     readonly taskMemoryLimitMiB?: number,
     readonly taskInstanceCount?: number,
-    readonly ulimits?: Ulimit[]
+    readonly ulimits?: Ulimit[],
+    readonly maxUptime?: Duration
 }
 
 export class MigrationServiceCore extends Stack {
@@ -145,6 +147,50 @@ export class MigrationServiceCore extends Stack {
         if (props.mountPoints) {
             serviceContainer.addMountPoints(...props.mountPoints)
         }
+
+        if (props.maxUptime) {
+            let maxUptimeSeconds = Math.max(props.maxUptime.toSeconds(), Duration.minutes(5).toSeconds());
+
+            // This sets the minimum time that a task should be running before considering it healthy.
+            // This is needed because we don't have health checks configured for our service containers.
+            // We can reduce it lower than 30 seconds, and possibly remove it, but then we increase the delay
+            // between the current task being shutdown and the new task being ready to take work. This means
+            // health checks for this container will fail initially and startPeriod will stop ECS from treating
+            // failing health checks as unhealthy during this period.
+            let startupPeriodSeconds = 30;
+            // Add a separate container to monitor and fail healthcheck after a given maxUptime
+            const maxUptimeContainer = serviceTaskDef.addContainer("MaxUptimeContainer", {
+                image: ContainerImage.fromRegistry("public.ecr.aws/amazonlinux/amazonlinux:2023-minimal"), 
+                memoryLimitMiB: 64, 
+                entryPoint: [
+                    "/bin/sh",
+                    "-c",
+                    "sleep infinity"
+                ],
+                essential: true,
+                // Every time this healthcheck is called, it verifies container uptime is within given
+                // bounds of startupPeriodSeconds and maxUptimeSeconds otherwise reporting unhealthy which
+                // signals ECS to start up a replacement task and kill this one once the replacement is healthy
+                healthCheck: {
+                    command: [
+                        "CMD-SHELL",
+                        "UPTIME=$(awk '{print int($1)}' /proc/uptime); " +
+                        `test $UPTIME -gt ${startupPeriodSeconds} && ` +
+                        `test $UPTIME -lt ${maxUptimeSeconds}`
+                    ],
+                    timeout: Duration.seconds(2),
+                    retries: 1,
+                    startPeriod: Duration.seconds(startupPeriodSeconds * 2)
+                }
+            });
+            // Dependency on maxUptimeContainer to wait until serviceContainer is started
+            // Cannot depend on Healthy given serviceContainer does not have a healthcheck configured.
+            maxUptimeContainer.addContainerDependencies({
+                container: serviceContainer,
+                condition: ContainerDependencyCondition.START,
+            });
+        }
+
 
         let cloudMapOptions: CloudMapOptions|undefined = undefined
         if (props.serviceDiscoveryEnabled) {
