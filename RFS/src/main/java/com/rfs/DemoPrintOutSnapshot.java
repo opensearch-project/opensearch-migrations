@@ -27,7 +27,7 @@ import com.rfs.common.SnapshotMetadata;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.ClusterVersion;
-import com.rfs.common.FilesSystemRepo;
+import com.rfs.common.FileSystemRepo;
 import com.rfs.version_es_7_10.*;
 
 public class DemoPrintOutSnapshot {
@@ -62,7 +62,7 @@ public class DemoPrintOutSnapshot {
             throw new IllegalArgumentException("Unsupported source version: " + sourceVersion);
         }
 
-        SourceRepo repo = new FilesSystemRepo(Path.of(snapshotDirPath));
+        SourceRepo repo = new FileSystemRepo(Path.of(snapshotDirPath));
 
         try {
             // ==========================================================================================================
