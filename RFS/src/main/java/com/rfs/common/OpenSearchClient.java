@@ -25,33 +25,33 @@ public class OpenSearchClient {
     }
 
     /*
-     * Create a legacy template if it does not already exist; return true if created, false otherwise.
+     * Idempotently create a legacy template if it does not already exist; return true if created, false otherwise.
      */
-    public boolean createLegacyTemplateIdempotent(String templateName, ObjectNode settings){
+    public boolean createLegacyTemplate(String templateName, ObjectNode settings){
         String targetPath = "_template/" + templateName;
         return createObjectIdempotent(targetPath, settings);
     }
 
     /*
-     * Create a component template if it does not already exist; return true if created, false otherwise.
+     * Idempotently create a component template if it does not already exist; return true if created, false otherwise.
      */
-    public boolean createComponentTemplateIdempotent(String templateName, ObjectNode settings){
+    public boolean createComponentTemplate(String templateName, ObjectNode settings){
         String targetPath = "_component_template/" + templateName;
         return createObjectIdempotent(targetPath, settings);
     }
 
     /*
-     * Create an index template if it does not already exist; return true if created, false otherwise.
+     * Idempotently create an index template if it does not already exist; return true if created, false otherwise.
      */
-    public boolean createIndexTemplateIdempotent(String templateName, ObjectNode settings){
+    public boolean createIndexTemplate(String templateName, ObjectNode settings){
         String targetPath = "_index_template/" + templateName;
         return createObjectIdempotent(targetPath, settings);
     }
 
     /*
-     * Create an index if it does not already exist; return true if created, false otherwise.
+     * Idempotently create an index if it does not already exist; return true if created, false otherwise.
      */
-    public boolean createIndexIdempotent(String indexName, ObjectNode settings){
+    public boolean createIndex(String indexName, ObjectNode settings){
         String targetPath = indexName;
         return createObjectIdempotent(targetPath, settings);
     }
@@ -126,7 +126,7 @@ public class OpenSearchClient {
     }
 
     /*
-     * Create a document if it does not already exist; return true if created, false otherwise.
+     * Idempotently create a document if it does not already exist; return true if created, false otherwise.
      */
     public boolean createDocument(String indexName, String documentId, ObjectNode body) {
         String targetPath = indexName + "/_doc/" + documentId + "?op_type=create";

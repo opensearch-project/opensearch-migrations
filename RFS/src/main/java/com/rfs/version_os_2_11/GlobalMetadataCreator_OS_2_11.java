@@ -39,7 +39,7 @@ public class GlobalMetadataCreator_OS_2_11 {
 
                 logger.info("Setting Legacy Template: " + templateName);
                 ObjectNode settings = (ObjectNode) globalMetadata.getTemplates().get(templateName);
-                client.createLegacyTemplateIdempotent(templateName, settings);
+                client.createLegacyTemplate(templateName, settings);
             }
         } else {
             // Get the template names
@@ -50,7 +50,7 @@ public class GlobalMetadataCreator_OS_2_11 {
             for (String templateName : templateKeys) {
                 logger.info("Setting Legacy Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
-                client.createLegacyTemplateIdempotent(templateName, settings);
+                client.createLegacyTemplate(templateName, settings);
             }
         }
     }
@@ -73,7 +73,7 @@ public class GlobalMetadataCreator_OS_2_11 {
 
                 logger.info("Setting Component Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
-                client.createComponentTemplateIdempotent(templateName, settings);
+                client.createComponentTemplate(templateName, settings);
             }
         } else {
             // Get the template names
@@ -84,7 +84,7 @@ public class GlobalMetadataCreator_OS_2_11 {
             for (String templateName : templateKeys) {
                 logger.info("Setting Component Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
-                client.createComponentTemplateIdempotent(templateName, settings);
+                client.createComponentTemplate(templateName, settings);
             }
         }
     }
@@ -107,7 +107,7 @@ public class GlobalMetadataCreator_OS_2_11 {
 
                 logger.info("Setting Index Template: " + templateName);
                 ObjectNode settings = (ObjectNode) globalMetadata.getIndexTemplates().get(templateName);
-                client.createIndexTemplateIdempotent(templateName, settings);
+                client.createIndexTemplate(templateName, settings);
             }
         } else {
             // Get the template names
@@ -118,7 +118,7 @@ public class GlobalMetadataCreator_OS_2_11 {
             for (String templateName : templateKeys) {
                 logger.info("Setting Index Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
-                client.createIndexTemplateIdempotent(templateName, settings);
+                client.createIndexTemplate(templateName, settings);
             }
         }
     }

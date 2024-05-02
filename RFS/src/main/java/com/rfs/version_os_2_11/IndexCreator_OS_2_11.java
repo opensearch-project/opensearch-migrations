@@ -28,6 +28,6 @@ public class IndexCreator_OS_2_11 {
         body.set("settings", settings);
 
         // Idempotently create the index
-        client.createIndexIdempotent(indexName, body);
+        client.createIndex(indexName, body);
     }
 }

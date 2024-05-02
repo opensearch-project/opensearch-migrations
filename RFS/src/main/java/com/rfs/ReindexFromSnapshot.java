@@ -162,11 +162,11 @@ public class ReindexFromSnapshot {
 
         SourceRepo repo;
         if (snapshotDirPath != null) {
-            repo = new FilesystemRepo(snapshotDirPath);
+            repo = new FileSystemRepo(snapshotDirPath);
         } else if (s3RepoUri != null && s3Region != null && s3LocalDirPath != null) {
             repo = S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
         } else if (snapshotLocalRepoDirPath != null) {
-            repo = new FilesystemRepo(snapshotLocalRepoDirPath);
+            repo = new FileSystemRepo(snapshotLocalRepoDirPath);
         } else {
             throw new IllegalArgumentException("Could not construct a source repo from the available, user-supplied arguments");
         }

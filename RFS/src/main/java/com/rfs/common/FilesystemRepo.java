@@ -1,6 +1,5 @@
 package com.rfs.common;
 
-
 import java.io.IOException;
 import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
@@ -8,7 +7,7 @@ import java.nio.file.Path;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class FilesystemRepo implements SourceRepo {
+public class FileSystemRepo implements SourceRepo {
     private final Path repoRootDir;
 
     private Path findRepoFile() throws IOException {
@@ -34,7 +33,7 @@ public class FilesystemRepo implements SourceRepo {
         return highestVersionedFile;
     }
 
-    public FilesystemRepo(Path repoRootDir) {
+    public FileSystemRepo(Path repoRootDir) {
         this.repoRootDir = repoRootDir;
     }
 
