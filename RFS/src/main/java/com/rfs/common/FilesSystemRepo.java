@@ -7,7 +7,7 @@ import java.nio.file.Path;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class FileSystemRepo implements SourceRepo {
+public class FilesSystemRepo implements SourceRepo {
     private final Path repoRootDir;
 
     private Path findRepoFile() throws IOException {
@@ -33,7 +33,7 @@ public class FileSystemRepo implements SourceRepo {
         return highestVersionedFile;
     }
 
-    public FileSystemRepo(Path repoRootDir) {
+    public FilesSystemRepo(Path repoRootDir) {
         this.repoRootDir = repoRootDir;
     }
 

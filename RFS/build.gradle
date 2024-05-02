@@ -66,6 +66,11 @@ application {
     mainClassName = 'com.rfs.ReindexFromSnapshot'
 }
 
+task runRfsWorker (type: JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.rfs.RunRfsWorker'
+}
+
 // Cleanup additional docker build directory
 clean.doFirst {
     delete project.file("./docker/build")
