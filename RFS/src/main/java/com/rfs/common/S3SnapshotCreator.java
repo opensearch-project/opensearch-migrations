@@ -10,15 +10,15 @@ public class S3SnapshotCreator extends SnapshotCreator {
     private static final Logger logger = LogManager.getLogger(S3SnapshotCreator.class);
     private static final ObjectMapper mapper = new ObjectMapper();
 
-    private final ConnectionDetails connectionDetails;
+    private final OpenSearchClient client;
     private final String snapshotName;
     private final String s3Uri;
     private final String s3Region;
 
-    public S3SnapshotCreator(String snapshotName, ConnectionDetails connectionDetails, String s3Uri, String s3Region) {
-        super(snapshotName, connectionDetails);
+    public S3SnapshotCreator(String snapshotName, OpenSearchClient client, String s3Uri, String s3Region) {
+        super(snapshotName, client);
         this.snapshotName = snapshotName;
-        this.connectionDetails = connectionDetails;
+        this.client = client;
         this.s3Uri = s3Uri;
         this.s3Region = s3Region;
     }

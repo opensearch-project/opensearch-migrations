@@ -10,7 +10,10 @@ import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
+
+import lombok.Lombok;
 import reactor.core.publisher.Flux;
+
 
 public class LuceneDocumentsReader {
     private static final Logger logger = LogManager.getLogger(LuceneDocumentsReader.class);
@@ -36,6 +39,7 @@ public class LuceneDocumentsReader {
                     reader.close();
                 } catch (IOException e) {
                     logger.error("Failed to close IndexReader", e);
+                    Lombok.sneakyThrow(e);
                 }
             }
         );
@@ -61,7 +65,7 @@ public class LuceneDocumentsReader {
             }
             if (source_bytes == null || source_bytes.bytes.length == 0) {
                 logger.warn("Document " + id + " is deleted or doesn't have the _source field enabled");
-                return null;  // Skip deleted documents or those without the _source field
+                return null;  // Skip these too
             }
 
             logger.debug("Document " + id + " read successfully");
