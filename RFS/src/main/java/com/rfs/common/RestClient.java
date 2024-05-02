@@ -42,16 +42,15 @@ public class RestClient {
             });
     }
 
-    public Mono<Response> getAsync(String path, boolean quietLogging) {
+    public Mono<Response> getAsync(String path) {
         return client.get()
             .uri("/" + path)
             .responseSingle((response, bytes) -> bytes.asString()
-                .map(body -> new Response(response.status().code(), body, response.status().reasonPhrase()))
-                .doOnNext(resp -> logResponse(resp, quietLogging)));
+                .map(body -> new Response(response.status().code(), body, response.status().reasonPhrase())));
     }
 
-    public Response get(String path, boolean quietLogging) {
-        return getAsync(path, quietLogging).block();
+    public Response get(String path) {
+        return getAsync(path).block();
     }
 
     public Mono<Response> postAsync(String path, String body) {
@@ -62,24 +61,15 @@ public class RestClient {
                 .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())));
     }
 
-    public Mono<Response> putAsync(String path, String body, boolean quietLogging) {
+    public Mono<Response> putAsync(String path, String body) {
         return client.put()
             .uri("/" + path)
             .send(ByteBufMono.fromString(Mono.just(body)))
             .responseSingle((response, bytes) -> bytes.asString()
-                .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase()))
-                .doOnNext(resp -> logResponse(resp, quietLogging)));
+                .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())));
     }
 
-    public Response put(String path, String body, boolean quietLogging) {
-        return putAsync(path, body, quietLogging).block();
-    }
-
-    private void logResponse(Response response, boolean quietLogging) {
-        if (quietLogging || (response.code == 200 || response.code == 201)) {
-            logger.debug("Response Code: " + response.code + ", Response Message: " + response.message + ", Response Body: " + response.body);
-        } else {
-            logger.error("Response Code: " + response.code + ", Response Message: " + response.message + ", Response Body: " + response.body);
-        }
+    public Response put(String path, String body) {
+        return putAsync(path, body).block();
     }
 }

@@ -39,7 +39,7 @@ public class LuceneDocumentsReader {
                     reader.close();
                 } catch (IOException e) {
                     logger.error("Failed to close IndexReader", e);
-                    Lombok.sneakyThrow(e);
+                    throw Lombok.sneakyThrow(e);
                 }
             }
         );

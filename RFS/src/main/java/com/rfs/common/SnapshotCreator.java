@@ -3,7 +3,6 @@ package com.rfs.common;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import lombok.Getter;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -14,8 +13,7 @@ public abstract class SnapshotCreator {
     private static final ObjectMapper mapper = new ObjectMapper();
 
     private final OpenSearchClient client;
-    @Getter
-    private final String snapshotName;
+    public final String snapshotName;
 
     public SnapshotCreator(String snapshotName, OpenSearchClient client) {
         this.snapshotName = snapshotName;
@@ -28,7 +26,7 @@ public abstract class SnapshotCreator {
         return "migration_assistant_repo";
     }
 
-    public void registerRepo() throws Exception {
+    public void registerRepo() {
         ObjectNode settings = getRequestBodyForRegisterRepo();
 
         // Register the repo; it's fine if it already exists
@@ -41,60 +39,72 @@ public abstract class SnapshotCreator {
         }
     }
 
-    public void createSnapshot() throws Exception {
+    public void createSnapshot() {
         // Assemble the settings
         ObjectNode body = mapper.createObjectNode();
         body.put("indices", "_all");
         body.put("ignore_unavailable", true);
         body.put("include_global_state", true);
 
-        // Register the repo; idempotent operation
-        RestClient.Response response = client.createSnapshot(getRepoName(), getSnapshotName(), body);
+        // Create the snapshot; idempotent operation
+        RestClient.Response response = client.createSnapshot(getRepoName(), snapshotName, body);
         if (response.code == HttpURLConnection.HTTP_OK || response.code == HttpURLConnection.HTTP_CREATED) {
-            logger.info("Snapshot " + getSnapshotName() + " creation initiated");
+            logger.info("Snapshot " + snapshotName + " creation initiated");
         } else {
-            logger.error("Snapshot " + getSnapshotName() + " creation failed");
-            throw new SnapshotCreationFailed(getSnapshotName());
+            logger.error("Snapshot " + snapshotName + " creation failed");
+            throw new SnapshotCreationFailed(snapshotName);
         }
     }
 
-    public boolean isSnapshotFinished() throws Exception {
-        // Check if the snapshot has finished
-        RestClient.Response response = client.getSnapshotStatus(getRepoName(), getSnapshotName());
+    public boolean isSnapshotFinished() {
+        RestClient.Response response = client.getSnapshotStatus(getRepoName(), snapshotName);
         if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
-            logger.error("Snapshot " + getSnapshotName() + " does not exist");
-            throw new SnapshotDoesNotExist(getSnapshotName());
+            logger.error("Snapshot " + snapshotName + " does not exist");
+            throw new SnapshotDoesNotExist(snapshotName);
         }
-        JsonNode responseJson = mapper.readTree(response.body);
+
+        JsonNode responseJson;
+        try {
+            responseJson = mapper.readTree(response.body);
+        } catch (Exception e) {
+            logger.error("Failed to parse snapshot status response", e);
+            throw new SnapshotStatusUnparsable(snapshotName);
+        }
         JsonNode firstSnapshot = responseJson.path("snapshots").get(0);
         JsonNode stateNode = firstSnapshot.path("state");
-        String state = stateNode.asText();
+        String state = stateNode.asText();        
 
         if (state.equals("SUCCESS")) {
             return true;
         } else if (state.equals("IN_PROGRESS")) {
             return false;
         } else {
-            logger.error("Snapshot " + getSnapshotName() + " has failed with state " + state);
-            throw new SnapshotCreationFailed(getSnapshotName());
+            logger.error("Snapshot " + snapshotName + " has failed with state " + state);
+            throw new SnapshotCreationFailed(snapshotName);
         }
     }
 
-    public class RepoRegistrationFailed extends Exception {
+    public class RepoRegistrationFailed extends RuntimeException {
         public RepoRegistrationFailed(String repoName) {
             super("Failed to register repo " + repoName);
         }
     }
 
-    public class SnapshotCreationFailed extends Exception {
+    public class SnapshotCreationFailed extends RuntimeException {
         public SnapshotCreationFailed(String snapshotName) {
             super("Failed to create snapshot " + snapshotName);
         }
     }
 
-    public class SnapshotDoesNotExist extends Exception {
+    public class SnapshotDoesNotExist extends RuntimeException {
         public SnapshotDoesNotExist(String snapshotName) {
             super("Snapshot " + snapshotName + " does not exist");
+        }
+    }
+
+    public class SnapshotStatusUnparsable extends RuntimeException {
+        public SnapshotStatusUnparsable(String snapshotName) {
+            super("Status of Snapshot " + snapshotName + " is not parsable");
         }
     }
 }
