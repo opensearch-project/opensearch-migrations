@@ -2,9 +2,11 @@ FROM ubuntu:jammy
 
 ENV DEBIAN_FRONTEND noninteractive
 
+COPY lib /root/lib
+
 RUN apt-get update && \
     apt-get install -y --no-install-recommends python3.9 python3-pip python3-dev openjdk-11-jre-headless wget gcc libc-dev git curl vim jq unzip less && \
-    pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl tqdm awscli
+    pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl tqdm awscli -r /root/lib/osiMigrationLib/requirements.txt
 RUN mkdir /root/kafka-tools
 RUN mkdir /root/kafka-tools/aws
 
@@ -25,6 +27,8 @@ COPY simpleDocumentGenerator.py /root/
 COPY catIndices.sh /root/
 COPY showFetchMigrationCommand.sh /root/
 COPY setupIntegTests.sh /root/
+COPY osiMigration.py /root/
+COPY osiPipelineTemplate.yaml /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
 COPY kafkaExport.sh /root/kafka-tools
@@ -34,6 +38,7 @@ RUN chmod ug+x /root/humanReadableLogs.py
 RUN chmod ug+x /root/simpleDocumentGenerator.py
 RUN chmod ug+x /root/catIndices.sh
 RUN chmod ug+x /root/showFetchMigrationCommand.sh
+RUN chmod ug+x /root/osiMigration.py
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
 CMD tail -f /dev/null

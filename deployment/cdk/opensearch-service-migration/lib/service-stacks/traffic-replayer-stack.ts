@@ -53,7 +53,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             readOnly: false,
             sourceVolume: volumeName
         }
-        const replayerOutputEFSArn = `arn:aws:elasticfilesystem:${props.env?.region}:${props.env?.account}:file-system/${volumeId}`
+        const replayerOutputEFSArn = `arn:aws:elasticfilesystem:${this.region}:${this.account}:file-system/${volumeId}`
         const replayerOutputMountPolicy = new PolicyStatement( {
             effect: Effect.ALLOW,
             resources: [replayerOutputEFSArn],

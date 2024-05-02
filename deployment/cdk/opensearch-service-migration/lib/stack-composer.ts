@@ -27,6 +27,7 @@ export interface StackPropsExt extends StackProps {
 }
 
 export interface StackComposerProps extends StackProps {
+    readonly migrationsSolutionVersion: string
     readonly migrationsAppRegistryARN?: string,
     readonly customReplayerUserAgent?: string
 }
@@ -168,6 +169,7 @@ export class StackComposer {
         const captureProxyESServiceEnabled = this.getContextForType('captureProxyESServiceEnabled', 'boolean', defaultValues, contextJSON)
         const captureProxyESExtraArgs = this.getContextForType('captureProxyESExtraArgs', 'string', defaultValues, contextJSON)
         const migrationConsoleServiceEnabled = this.getContextForType('migrationConsoleServiceEnabled', 'boolean', defaultValues, contextJSON)
+        const migrationConsoleEnableOSI = this.getContextForType('migrationConsoleEnableOSI', 'boolean', defaultValues, contextJSON)
         const trafficReplayerServiceEnabled = this.getContextForType('trafficReplayerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const trafficReplayerEnableClusterFGACAuth = this.getContextForType('trafficReplayerEnableClusterFGACAuth', 'boolean', defaultValues, contextJSON)
         const trafficReplayerMaxUptime = this.getContextForType('trafficReplayerMaxUptime', 'string', defaultValues, contextJSON);
@@ -242,7 +244,7 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 addOnMigrationDeployId: addOnMigrationDeployId,
                 otelCollectorEnabled: otelCollectorEnabled,
-                ...props,
+                env: props.env
             })
             this.stacks.push(networkStack)
         }
@@ -288,7 +290,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 addOnMigrationDeployId: addOnMigrationDeployId,
-                ...props,
+                env: props.env
             });
             this.addDependentStacks(openSearchStack, [networkStack])
             this.stacks.push(openSearchStack)
@@ -314,7 +316,7 @@ export class StackComposer {
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
-                ...props,
+                env: props.env
             })
             this.addDependentStacks(migrationStack, [networkStack])
             this.stacks.push(migrationStack)
@@ -327,7 +329,7 @@ export class StackComposer {
                     description: "This stack contains custom resources to add additional functionality to the MSK L1 construct",
                     stage: stage,
                     defaultDeployId: defaultDeployId,
-                    ...props,
+                    env: props.env
                 })
                 this.addDependentStacks(mskUtilityStack, [migrationStack])
                 this.stacks.push(mskUtilityStack)
@@ -343,7 +345,7 @@ export class StackComposer {
                 vpc:networkStack.vpc,
                 stage: stage,
                 defaultDeployId: defaultDeployId,
-                ...props,
+                env: props.env
             })
             this.addDependentStacks(otelCollectorStack, [networkStack, migrationStack])
             this.stacks.push(otelCollectorStack)
@@ -360,7 +362,7 @@ export class StackComposer {
                 fargateCpuArch: fargateCpuArch,
                 addOnMigrationDeployId: addOnMigrationDeployId,
                 enableDemoAdmin: true,
-                ...props,
+                env: props.env
             })
             this.addDependentStacks(osContainerStack, [migrationStack])
             this.stacks.push(osContainerStack)
@@ -375,7 +377,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                ...props,
+                env: props.env
             })
             this.addDependentStacks(kafkaBrokerStack, [migrationStack])
             this.stacks.push(kafkaBrokerStack)
@@ -392,7 +394,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                ...props,
+                env: props.env
             })
             this.addDependentStacks(fetchMigrationStack, [migrationStack, openSearchStack, osContainerStack])
             this.stacks.push(fetchMigrationStack)
@@ -409,7 +411,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                ...props,
+                env: props.env
             })
             this.addDependentStacks(reindexFromSnapshotStack, [migrationStack, openSearchStack, osContainerStack])
             this.stacks.push(reindexFromSnapshotStack)
@@ -427,7 +429,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                ...props,
+                env: props.env
             })
             this.addDependentStacks(captureProxyESStack, [migrationStack, mskUtilityStack, kafkaBrokerStack, otelCollectorStack])
             this.stacks.push(captureProxyESStack)
@@ -450,7 +452,7 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 maxUptime: trafficReplayerMaxUptime ? Duration.parse(trafficReplayerMaxUptime) : undefined,
-                ...props,
+                env: props.env
             })
             this.addDependentStacks(trafficReplayerStack, [networkStack, migrationStack, mskUtilityStack,
                 kafkaBrokerStack, otelCollectorStack, openSearchStack, osContainerStack])
@@ -466,7 +468,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                ...props,
+                env: props.env
             })
             this.addDependentStacks(elasticsearchStack, [migrationStack])
             this.stacks.push(elasticsearchStack)
@@ -485,7 +487,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                ...props,
+                env: props.env
             })
             this.addDependentStacks(captureProxyStack, [elasticsearchStack, otelCollectorStack, migrationStack,
                 kafkaBrokerStack, mskUtilityStack])
@@ -495,16 +497,18 @@ export class StackComposer {
         let migrationConsoleStack
         if (migrationConsoleServiceEnabled && networkStack && migrationStack) {
             migrationConsoleStack = new MigrationConsoleStack(scope, "migration-console", {
+                migrationsSolutionVersion: props.migrationsSolutionVersion,
                 vpc: networkStack.vpc,
                 streamingSourceType: streamingSourceType,
                 fetchMigrationEnabled: fetchMigrationEnabled,
                 otelCollectorEnabled: otelCollectorEnabled,
+                migrationConsoleEnableOSI: migrationConsoleEnableOSI,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                ...props,
+                env: props.env
             })
             // To enable the Migration Console to make requests to other service endpoints with Service Connect,
             // it must be deployed after any Service Connect services
