@@ -72,7 +72,7 @@ clean.doFirst {
 }
 
 // Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
-tasks.register('copyDependencies', Copy) {
+tasks.register('copyDependencies', Sync) {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
     from configurations.runtimeClasspath
