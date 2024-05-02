@@ -7,7 +7,6 @@ import com.rfs.cms.CmsClient;
 import com.rfs.cms.CmsEntry.Snapshot;
 import com.rfs.cms.CmsEntry.SnapshotStatus;
 import com.rfs.common.SnapshotCreator;
-import com.rfs.common.SnapshotCreator.SnapshotCreationFailed;
 
 public class RfsWorker {
     private static final Logger logger = LogManager.getLogger(RfsWorker.class);
@@ -26,7 +25,7 @@ public class RfsWorker {
 
         while (true) {
             logger.info("Checking if work remains in the Snapshot Phase...");
-            Snapshot snapshotEntry = cmsClient.getSnapshotEntry(snapshotCreator.snapshotName);
+            Snapshot snapshotEntry = cmsClient.getSnapshotEntry(snapshotCreator.getSnapshotName());
             
             if (snapshotEntry == null || snapshotEntry.status != SnapshotStatus.COMPLETED) {
                 WorkerState nextState = new SnapshotState.EnterPhase(globalState, cmsClient, snapshotCreator, snapshotEntry);

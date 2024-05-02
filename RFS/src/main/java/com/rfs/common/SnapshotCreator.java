@@ -13,7 +13,7 @@ public abstract class SnapshotCreator {
     private static final ObjectMapper mapper = new ObjectMapper();
 
     private final OpenSearchClient client;
-    public final String snapshotName;
+    private final String snapshotName;
 
     public SnapshotCreator(String snapshotName, OpenSearchClient client) {
         this.snapshotName = snapshotName;
@@ -24,6 +24,10 @@ public abstract class SnapshotCreator {
 
     public String getRepoName() {
         return "migration_assistant_repo";
+    }
+
+    public String getSnapshotName() {
+        return snapshotName;
     }
 
     public void registerRepo() {
@@ -84,25 +88,25 @@ public abstract class SnapshotCreator {
         }
     }
 
-    public class RepoRegistrationFailed extends RuntimeException {
+    public static class RepoRegistrationFailed extends RuntimeException {
         public RepoRegistrationFailed(String repoName) {
             super("Failed to register repo " + repoName);
         }
     }
 
-    public class SnapshotCreationFailed extends RuntimeException {
+    public static class SnapshotCreationFailed extends RuntimeException {
         public SnapshotCreationFailed(String snapshotName) {
             super("Failed to create snapshot " + snapshotName);
         }
     }
 
-    public class SnapshotDoesNotExist extends RuntimeException {
+    public static class SnapshotDoesNotExist extends RuntimeException {
         public SnapshotDoesNotExist(String snapshotName) {
             super("Snapshot " + snapshotName + " does not exist");
         }
     }
 
-    public class SnapshotStatusUnparsable extends RuntimeException {
+    public static class SnapshotStatusUnparsable extends RuntimeException {
         public SnapshotStatusUnparsable(String snapshotName) {
             super("Status of Snapshot " + snapshotName + " is not parsable");
         }

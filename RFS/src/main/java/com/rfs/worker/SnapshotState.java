@@ -70,7 +70,7 @@ public class SnapshotState {
         @Override
         public void run() {
             logger.info("Snapshot CMS Entry not found, attempting to create it...");
-            cmsClient.createSnapshotEntry(snapshotCreator.snapshotName);
+            cmsClient.createSnapshotEntry(snapshotCreator.getSnapshotName());
             logger.info("Snapshot CMS Entry created");
         }
 
@@ -92,7 +92,7 @@ public class SnapshotState {
             snapshotCreator.createSnapshot();
 
             logger.info("Snapshot in progress...");
-            cmsClient.updateSnapshotEntry(snapshotCreator.snapshotName, SnapshotStatus.IN_PROGRESS);
+            cmsClient.updateSnapshotEntry(snapshotCreator.getSnapshotName(), SnapshotStatus.IN_PROGRESS);
         }
 
         @Override
@@ -108,16 +108,20 @@ public class SnapshotState {
             super(globalState, cmsClient, snapshotCreator);
         }
 
+        protected void waitABit() throws InterruptedException {
+            logger.info("Snapshot not finished yet; sleeping for 5 seconds...");
+            Thread.sleep(5000);
+        }
+
         @Override
         public void run() {
             try{
                 while (!snapshotCreator.isSnapshotFinished()) {
-                    logger.info("Snapshot not finished yet; sleeping for 5 seconds...");
-                    Thread.sleep(5000);
+                    waitABit();
                 }
             } catch (InterruptedException e) {
                 logger.error("Interrupted while waiting for Snapshot to complete", e);
-                this.e = snapshotCreator.new SnapshotCreationFailed(snapshotCreator.snapshotName);
+                this.e = new SnapshotCreationFailed(snapshotCreator.getSnapshotName());
             } catch (SnapshotCreationFailed e) {
                 this.e = e;
             } 
@@ -140,7 +144,7 @@ public class SnapshotState {
 
         @Override
         public void run() {
-            cmsClient.updateSnapshotEntry(snapshotCreator.snapshotName, SnapshotStatus.COMPLETED);
+            cmsClient.updateSnapshotEntry(snapshotCreator.getSnapshotName(), SnapshotStatus.COMPLETED);
             globalState.updatePhase(GlobalData.Phase.SNAPSHOT_COMPLETED);
             logger.info("Snapshot completed, exiting Snapshot Phase...");
         }
@@ -162,7 +166,7 @@ public class SnapshotState {
         @Override
         public void run() {
             logger.error("Snapshot creation failed");
-            cmsClient.updateSnapshotEntry(snapshotCreator.snapshotName, SnapshotStatus.FAILED);
+            cmsClient.updateSnapshotEntry(snapshotCreator.getSnapshotName(), SnapshotStatus.FAILED);
             globalState.updatePhase(GlobalData.Phase.SNAPSHOT_FAILED);
             throw e;
         }
