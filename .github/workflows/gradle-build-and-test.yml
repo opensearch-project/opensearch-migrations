@@ -30,7 +30,7 @@ jobs:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
       - name: Run Tests with Coverage
-        run: ./gradlew test jacocoTestReport --scan --stacktrace
+        run: ./gradlew test jacocoTestReport --scan --info --stacktrace
         working-directory: TrafficCapture
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
