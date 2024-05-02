@@ -14,7 +14,7 @@ import unittest
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
-from moto import mock_iam
+from moto import mock_aws
 
 import endpoint_utils
 from endpoint_info import EndpointInfo
@@ -284,7 +284,7 @@ class TestEndpointUtils(unittest.TestCase):
         # Should return region successfully
         self.assertEqual("test-region", endpoint_utils.get_aws_region(test_config))
 
-    @mock_iam
+    @mock_aws
     def test_get_aws_sigv4_auth(self):
         result = endpoint_utils.get_aws_sigv4_auth("test")
         self.assertEqual(result.service, "es")

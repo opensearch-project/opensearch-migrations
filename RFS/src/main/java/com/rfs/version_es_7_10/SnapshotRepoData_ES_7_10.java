@@ -44,10 +44,12 @@ public class SnapshotRepoData_ES_7_10 {
         public Map<String, String> indexMetadataLookup;
         public String version;
 
+        @Override
         public String getName() {
             return name;
         }
 
+        @Override
         public String getId() {
             return uuid;
         }
@@ -75,14 +77,17 @@ public class SnapshotRepoData_ES_7_10 {
         public List<String> snapshots;
         public List<String> shardGenerations;
 
+        @Override
         public String getName() {
             return name;
         }
 
+        @Override
         public String getId() {
             return id;
         }
 
+        @Override
         public List<String> getSnapshots() {
             return snapshots;
         }

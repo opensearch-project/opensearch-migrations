@@ -121,12 +121,6 @@ public class WireCaptureContexts extends IWireCaptureContexts {
             super(rootWireLoggingContext, enclosingScope, sourceRequestIndex);
         }
 
-        @Override
-        public IWireCaptureContexts.IWaitingForResponseContext createWaitingForResponseContext() {
-            return new WaitingForResponseContext(getRootInstrumentationScope(), getImmediateEnclosingScope(),
-                    sourceRequestIndex);
-        }
-
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             public final LongCounter blockingRequestCounter;
             public final LongCounter requestsNotOffloadedCounter;
