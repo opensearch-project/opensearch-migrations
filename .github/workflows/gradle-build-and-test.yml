@@ -38,7 +38,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: traffic-capture-test-reports-${{ github.event.repository.updated_at}}
+          name: traffic-capture-test-reports
           path: |
             ./TrafficCapture/*/build/reports/
   
