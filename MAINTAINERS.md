@@ -13,7 +13,7 @@ This document contains a list of maintainers in this repo. See [opensearch-proje
 | Omar Khasawneh     | [okhasawn](https://github.com/okhasawn)                 | Amazon      |
 | Brian Presley      | [sumobrian](https://github.com/sumobrian)               | Amazon      |
 | Andre Kurait       | [andrekurait](https://github.com/andrekurait)           | Amazon      |
-| Peter Neid         | [peternied](https://github.com/peternied)               | Amazon      |
+| Peter Nied         | [peternied](https://github.com/peternied)               | Amazon      |
 
 
 ## Emeritus
