@@ -128,7 +128,7 @@ allprojects {
             systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
         }
         systemProperty 'log4j2.contextSelector', 'org.apache.logging.log4j.core.selector.BasicContextSelector'
-        jvmArgs '-ea', "--add-opens", "java.base/jdk.internal.misc=ALL-UNNAMED", "-Dio.netty.tryReflectionSetAccessible=true"
+        jvmArgs '-ea'
     }
 
     test {
