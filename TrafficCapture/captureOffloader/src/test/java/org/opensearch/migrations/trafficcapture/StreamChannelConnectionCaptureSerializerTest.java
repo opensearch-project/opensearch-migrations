@@ -1,7 +1,5 @@
 package org.opensearch.migrations.trafficcapture;
 
-import static org.junit.jupiter.api.Assertions.assertThrows;
-
 import com.google.protobuf.ByteString;
 import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Timestamp;
@@ -467,9 +465,77 @@ class StreamChannelConnectionCaptureSerializerTest {
         final String tooLargeNodeId = 'a' + realNodeId;
 
         var outputBuffersCreated = new ConcurrentLinkedQueue<ByteBuffer>();
-        assertThrows(AssertionError.class,
+        Assertions.assertThrows(AssertionError.class,
             () -> new StreamChannelConnectionCaptureSerializer<>("a" + tooLargeNodeId, realKafkaConnectionId,
                 new StreamManager(getEstimatedTrafficStreamByteSize(0, 0), outputBuffersCreated)));
+    }
+
+    @ParameterizedTest
+    @CsvSource(value = {
+        // Test with totalAvailableSpace >= requestedWriteableSpace
+        "2,2",
+        "3,2",
+        "4,2",
+
+        // Test around length where length bytes increases with totalAvailableSpace < requestedWriteableSpace
+        "1,10",
+        "2,10",
+        "3,10",
+
+        "127,10000000",
+        "128,10000000", // 2^7
+        "129,10000000",
+        "130,10000000",
+        "131,10000000",
+        "132,10000000",
+
+        "16381,10000000",
+        "16382,10000000",
+        "16383,10000000",
+        "16384,10000000", // 2^14
+        "16385,10000000",
+        "16386,10000000",
+        "16387,10000000",
+        "16388,10000000",
+        "16389,10000000",
+
+        "2097150,10000000",
+        "2097151,10000000",
+        "2097152,10000000", // 2^21
+        "2097153,10000000",
+        "2097154,10000000",
+        "2097155,10000000",
+        "2097156,10000000",
+        "2097157,10000000",
+        "2097158,10000000",
+
+        "268435455,100000000",
+        "268435456,100000000", // 2^28
+        "268435457,100000000",
+        "268435458,100000000",
+        "268435459,100000000",
+        "268435460,100000000",
+        "268435461,100000000",
+        "268435462,100000000"
+    })
+    public void testCalculateMaxWritableSpace(int totalAvailableSpace, int requestedWriteableSpace) {
+        var calculatedMaxWritableSpace = StreamChannelConnectionCaptureSerializer.calculateMaxWritableSpace(totalAvailableSpace,
+            requestedWriteableSpace);
+
+        Assertions.assertTrue(calculatedMaxWritableSpace <= requestedWriteableSpace, "cannot write more bytes than requested");
+
+        var spaceLeftAfterWrite = totalAvailableSpace
+                                  - CodedOutputStream.computeInt32SizeNoTag(calculatedMaxWritableSpace)
+                                  - calculatedMaxWritableSpace;
+        Assertions.assertTrue(spaceLeftAfterWrite >= 0, "expected non-negative space left");
+
+        if (calculatedMaxWritableSpace < requestedWriteableSpace) {
+            // If we are not writing all requestedWriteableSpace verify there is not space for one more byte
+            var expectedSpaceLeftAfterWriteIfOneMoreByteWrote = totalAvailableSpace
+                                                                - CodedOutputStream.computeInt32SizeNoTag(calculatedMaxWritableSpace + 1)
+                                                                - (calculatedMaxWritableSpace + 1);
+            Assertions.assertTrue(expectedSpaceLeftAfterWriteIfOneMoreByteWrote < 0, "expected no space to write one more byte");
+        }
     }
 
     @Test
