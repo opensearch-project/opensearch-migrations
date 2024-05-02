@@ -24,17 +24,24 @@ jobs:
           gradle-home-cache-cleanup: true
 
       - name: Run Gradle Build
-        run: ./gradlew build -x test --scan --info --stacktrace
+        run: ./gradlew build -x test --scan --stacktrace
         working-directory: TrafficCapture
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
       - name: Run Tests with Coverage
-        run: ./gradlew test jacocoTestReport --scan --info --stacktrace
+        run: ./gradlew test jacocoTestReport --scan --stacktrace
         working-directory: TrafficCapture
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: traffic-capture-test-reports-${{ github.event.repository.updated_at}}
+          path: |
+            ./TrafficCapture/*/build/reports/
+  
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
         with:
