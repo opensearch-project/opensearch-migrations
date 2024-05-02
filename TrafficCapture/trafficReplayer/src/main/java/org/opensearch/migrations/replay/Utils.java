@@ -21,7 +21,7 @@ import java.util.zip.GZIPOutputStream;
 @Slf4j
 public class Utils {
     public static final int MAX_BYTES_SHOWN_FOR_TO_STRING = 128;
-    public static final int MAX_PAYLOAD_SIZE_TO_PRINT = 1024 * 1024; // 1MB
+    public static final int MAX_PAYLOAD_BYTES_TO_PRINT = 100 * 1024 * 1024; // 100MiB based on https://docs.aws.amazon.com/opensearch-service/latest/developerguide/limits.html#network-limits
 
     public static Instant setIfLater(AtomicReference<Instant> referenceValue, Instant pointInTime) {
         return referenceValue.updateAndGet(existingInstant -> existingInstant.isBefore(pointInTime) ?
