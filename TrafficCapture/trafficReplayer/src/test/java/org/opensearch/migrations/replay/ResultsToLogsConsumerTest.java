@@ -17,13 +17,14 @@ import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.impl.Log4jContextFactory;
+import org.apache.logging.log4j.core.selector.ClassLoaderContextSelector;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
-import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
@@ -32,6 +33,10 @@ import org.slf4j.LoggerFactory;
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 4)
 class ResultsToLogsConsumerTest extends InstrumentationTest {
+    static {
+        // Synchronize logging to for assertions
+        LogManager.setFactory(new Log4jContextFactory(new ClassLoaderContextSelector()));
+    }
     private static final String NODE_ID = "n";
     private static final ObjectMapper mapper = new ObjectMapper();
     public static final String TEST_EXCEPTION_MESSAGE = "TEST_EXCEPTION";
@@ -153,11 +158,11 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                         "        \"Request-URI\": \"/test\",\r\n" +
                         "        \"Method\": \"GET\",\r\n" +
                         "        \"HTTP-Version\": \"HTTP/1.1\",\r\n" +
-                        "        \"body\": \"\",\r\n" +
                         "        \"Host\": \"foo.example\",\r\n" +
                         "        \"auTHorization\": \"Basic YWRtaW46YWRtaW4=\",\r\n" +
                         "        \"Content-Type\": \"application/json\",\r\n" +
-                        "        \"content-length\": \"0\"\r\n" +
+                        "        \"content-length\": \"0\",\r\n" +
+                        "        \"body\": \"\"\r\n" +
                         "    },\r\n" +
                         "    \"sourceResponse\": {\r\n" +
                         "        \"HTTP-Version\": {\r\n" +
@@ -166,22 +171,22 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                         "        \"Status-Code\": 200,\r\n" +
                         "        \"Reason-Phrase\": \"OK\",\r\n" +
                         "        \"response_time_ms\": 0,\r\n" +
-                        "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\",\r\n" +
                         "        \"Content-transfer-encoding\": \"chunked\",\r\n" +
                         "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\r\n" +
                         "        \"Content-type\": \"text/plain\",\r\n" +
                         "        \"Funtime\": \"checkIt!\",\r\n" +
-                        "        \"content-length\": \"30\"\r\n" +
+                        "        \"content-length\": \"30\",\r\n" +
+                        "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\"\r\n" +
                         "    },\r\n" +
                         "    \"targetRequest\": {\r\n" +
                         "        \"Request-URI\": \"/test\",\r\n" +
                         "        \"Method\": \"GET\",\r\n" +
                         "        \"HTTP-Version\": \"HTTP/1.1\",\r\n" +
-                        "        \"body\": \"\",\r\n" +
                         "        \"Host\": \"foo.example\",\r\n" +
                         "        \"auTHorization\": \"Basic YWRtaW46YWRtaW4=\",\r\n" +
                         "        \"Content-Type\": \"application/json\",\r\n" +
-                        "        \"content-length\": \"0\"\r\n" +
+                        "        \"content-length\": \"0\",\r\n" +
+                        "        \"body\": \"\"\r\n" +
                         "    },\r\n" +
                         "    \"targetResponse\": {\r\n" +
                         "        \"HTTP-Version\": {\r\n" +
@@ -190,12 +195,12 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                         "        \"Status-Code\": 200,\r\n" +
                         "        \"Reason-Phrase\": \"OK\",\r\n" +
                         "        \"response_time_ms\": 267,\r\n" +
-                        "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\",\r\n" +
                         "        \"Content-transfer-encoding\": \"chunked\",\r\n" +
                         "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\r\n" +
                         "        \"Content-type\": \"text/plain\",\r\n" +
                         "        \"Funtime\": \"checkIt!\",\r\n" +
-                        "        \"content-length\": \"30\"\r\n" +
+                        "        \"content-length\": \"30\",\r\n" +
+                        "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\"\r\n" +
                         "    },\r\n" +
                         "    \"connectionId\": \"testConnection.1\"\r\n" +
                         "}";
@@ -211,10 +216,10 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 "        \"Request-URI\": \"/test\",\r\n" +
                 "        \"Method\": \"POST\",\r\n" +
                 "        \"HTTP-Version\": \"HTTP/1.1\",\r\n" +
-                "        \"body\": \"ew0KICAic2V0dGluZ3MiOiB7DQogICAgImluZGV4Ijogew0KICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LA0KICAgICAgIm51bWJlcl9vZl9yZXBsaWNhcyI6IDMNCiAgICB9LA0KICAgICJhbmFseXNpcyI6IHsNCiAgICAgICJhbmFseXplciI6IHsNCiAgICAgICAgIm5hbWVBbmFseXplciI6IHsNCiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLA0KICAgICAgICAgICJ0b2tlbml6ZXIiOiAia2V5d29yZCIsDQogICAgICAgICAgImZpbHRlciI6ICJ1cHBlcmNhc2UiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0sDQogICJtYXBwaW5ncyI6IHsNCiAgICAiZW1wbG95ZWUiOiB7DQogICAgICAicHJvcGVydGllcyI6IHsNCiAgICAgICAgImFnZSI6IHsNCiAgICAgICAgICAidHlwZSI6ICJsb25nIg0KICAgICAgICB9LA0KICAgICAgICAibGV2ZWwiOiB7DQogICAgICAgICAgInR5cGUiOiAibG9uZyINCiAgICAgICAgfSwNCiAgICAgICAgInRpdGxlIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiDQogICAgICAgIH0sDQogICAgICAgICJuYW1lIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiLA0KICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0NCn0NCg==\",\r\n" +
                 "        \"Host\": \"foo.example\",\r\n" +
                 "        \"Content-Type\": \"application/json\",\r\n" +
-                "        \"Content-Length\": \"652\"\r\n" +
+                "        \"Content-Length\": \"652\",\r\n" +
+                "        \"body\": \"ew0KICAic2V0dGluZ3MiOiB7DQogICAgImluZGV4Ijogew0KICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LA0KICAgICAgIm51bWJlcl9vZl9yZXBsaWNhcyI6IDMNCiAgICB9LA0KICAgICJhbmFseXNpcyI6IHsNCiAgICAgICJhbmFseXplciI6IHsNCiAgICAgICAgIm5hbWVBbmFseXplciI6IHsNCiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLA0KICAgICAgICAgICJ0b2tlbml6ZXIiOiAia2V5d29yZCIsDQogICAgICAgICAgImZpbHRlciI6ICJ1cHBlcmNhc2UiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0sDQogICJtYXBwaW5ncyI6IHsNCiAgICAiZW1wbG95ZWUiOiB7DQogICAgICAicHJvcGVydGllcyI6IHsNCiAgICAgICAgImFnZSI6IHsNCiAgICAgICAgICAidHlwZSI6ICJsb25nIg0KICAgICAgICB9LA0KICAgICAgICAibGV2ZWwiOiB7DQogICAgICAgICAgInR5cGUiOiAibG9uZyINCiAgICAgICAgfSwNCiAgICAgICAgInRpdGxlIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiDQogICAgICAgIH0sDQogICAgICAgICJuYW1lIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiLA0KICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0NCn0NCg==\"\r\n" +
                 "    },\r\n" +
                 "    \"sourceResponse\": {\r\n" +
                 "        \"HTTP-Version\": {\r\n" +
@@ -223,21 +228,21 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 "        \"Status-Code\": 200,\r\n" +
                 "        \"Reason-Phrase\": \"OK\",\r\n" +
                 "        \"response_time_ms\": 0,\r\n" +
-                "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\",\r\n" +
                 "        \"Content-transfer-encoding\": \"chunked\",\r\n" +
                 "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\r\n" +
                 "        \"Content-type\": \"text/plain\",\r\n" +
                 "        \"Funtime\": \"checkIt!\",\r\n" +
-                "        \"content-length\": \"30\"\r\n" +
+                "        \"content-length\": \"30\",\r\n" +
+                "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\"\r\n" +
                 "    },\r\n" +
                 "    \"targetRequest\": {\r\n" +
                 "        \"Request-URI\": \"/test\",\r\n" +
                 "        \"Method\": \"POST\",\r\n" +
                 "        \"HTTP-Version\": \"HTTP/1.1\",\r\n" +
-                "        \"body\": \"ew0KICAic2V0dGluZ3MiOiB7DQogICAgImluZGV4Ijogew0KICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LA0KICAgICAgIm51bWJlcl9vZl9yZXBsaWNhcyI6IDMNCiAgICB9LA0KICAgICJhbmFseXNpcyI6IHsNCiAgICAgICJhbmFseXplciI6IHsNCiAgICAgICAgIm5hbWVBbmFseXplciI6IHsNCiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLA0KICAgICAgICAgICJ0b2tlbml6ZXIiOiAia2V5d29yZCIsDQogICAgICAgICAgImZpbHRlciI6ICJ1cHBlcmNhc2UiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0sDQogICJtYXBwaW5ncyI6IHsNCiAgICAiZW1wbG95ZWUiOiB7DQogICAgICAicHJvcGVydGllcyI6IHsNCiAgICAgICAgImFnZSI6IHsNCiAgICAgICAgICAidHlwZSI6ICJsb25nIg0KICAgICAgICB9LA0KICAgICAgICAibGV2ZWwiOiB7DQogICAgICAgICAgInR5cGUiOiAibG9uZyINCiAgICAgICAgfSwNCiAgICAgICAgInRpdGxlIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiDQogICAgICAgIH0sDQogICAgICAgICJuYW1lIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiLA0KICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0NCn0NCg==\",\r\n" +
                 "        \"Host\": \"foo.example\",\r\n" +
                 "        \"Content-Type\": \"application/json\",\r\n" +
-                "        \"Content-Length\": \"652\"\r\n" +
+                "        \"Content-Length\": \"652\",\r\n" +
+                "        \"body\": \"ew0KICAic2V0dGluZ3MiOiB7DQogICAgImluZGV4Ijogew0KICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LA0KICAgICAgIm51bWJlcl9vZl9yZXBsaWNhcyI6IDMNCiAgICB9LA0KICAgICJhbmFseXNpcyI6IHsNCiAgICAgICJhbmFseXplciI6IHsNCiAgICAgICAgIm5hbWVBbmFseXplciI6IHsNCiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLA0KICAgICAgICAgICJ0b2tlbml6ZXIiOiAia2V5d29yZCIsDQogICAgICAgICAgImZpbHRlciI6ICJ1cHBlcmNhc2UiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0sDQogICJtYXBwaW5ncyI6IHsNCiAgICAiZW1wbG95ZWUiOiB7DQogICAgICAicHJvcGVydGllcyI6IHsNCiAgICAgICAgImFnZSI6IHsNCiAgICAgICAgICAidHlwZSI6ICJsb25nIg0KICAgICAgICB9LA0KICAgICAgICAibGV2ZWwiOiB7DQogICAgICAgICAgInR5cGUiOiAibG9uZyINCiAgICAgICAgfSwNCiAgICAgICAgInRpdGxlIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiDQogICAgICAgIH0sDQogICAgICAgICJuYW1lIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiLA0KICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0NCn0NCg==\"\r\n" +
                 "    },\r\n" +
                 "    \"targetResponse\": {\r\n" +
                 "        \"HTTP-Version\": {\r\n" +
@@ -246,12 +251,12 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 "        \"Status-Code\": 200,\r\n" +
                 "        \"Reason-Phrase\": \"OK\",\r\n" +
                 "        \"response_time_ms\": 267,\r\n" +
-                "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\",\r\n" +
                 "        \"Content-transfer-encoding\": \"chunked\",\r\n" +
                 "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\r\n" +
                 "        \"Content-type\": \"text/plain\",\r\n" +
                 "        \"Funtime\": \"checkIt!\",\r\n" +
-                "        \"content-length\": \"30\"\r\n" +
+                "        \"content-length\": \"30\",\r\n" +
+                "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\"\r\n" +
                 "    },\r\n" +
                 "    \"connectionId\": \"testConnection.1\"\r\n" +
                 "}";
