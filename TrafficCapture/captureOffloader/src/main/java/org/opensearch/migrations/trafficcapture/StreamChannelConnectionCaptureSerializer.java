@@ -206,6 +206,14 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         return Math.min(maxWriteBytesSpace, requestedWriteableSpace);
     }
 
+    // Similar to calculateMaxWritableSpace but perform pessimistic calculation with fewer operations. In some cases returns
+    // up to 1 byte fewer than what could be written out of the available space.
+    public static int pessimisticallyCalculateMaxWritableSpace(int totalAvailableSpace, int requestedWriteableSpace) {
+        final int pessimisticLengthFieldSpace = CodedOutputStream.computeUInt32SizeNoTag(totalAvailableSpace);
+        int maxWriteBytesSpace = totalAvailableSpace - pessimisticLengthFieldSpace;
+        return Math.min(maxWriteBytesSpace, requestedWriteableSpace);
+    }
+
     private void readByteBufIntoCurrentStream(int fieldNum, ByteBuf buf) throws IOException {
         var codedOutputStream = getOrCreateCodedOutputStream();
         if (buf.readableBytes() > 0) {
@@ -346,7 +354,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             while(readBuffer.readableBytes() > 0) {
                 // addSubstreamMessage will write until COS limit and flush prior if needed
                 spaceLeft = currentOutputStreamWriteableSpaceLeft();
-                var bytesToRead = calculateMaxWritableSpace(spaceLeft - trafficStreamOverhead, readBuffer.readableBytes());
+                var bytesToRead = pessimisticallyCalculateMaxWritableSpace(spaceLeft - trafficStreamOverhead, readBuffer.readableBytes());
                 if (bytesToRead <= 0) {
                     throw new IllegalStateException("Stream space is not allowing forward progress on byteBuf reading");
                 }

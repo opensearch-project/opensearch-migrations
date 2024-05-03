@@ -538,6 +538,15 @@ class StreamChannelConnectionCaptureSerializerTest {
                                                                 - (calculatedMaxWritableSpace + 1);
             Assertions.assertTrue(expectedSpaceLeftAfterWriteIfOneMoreByteWrote < 0, "expected no space to write one more byte");
         }
+
+        // Test that when PessimisticallyCalculateMaxWritableSpace != calculatedMaxWritableSpace, then
+        // it is positive and equal to calculateMaxWritableSpace - 1
+        var pessimisticWriteableSpace = StreamChannelConnectionCaptureSerializer.pessimisticallyCalculateMaxWritableSpace(totalAvailableSpace,
+            requestedWriteableSpace);
+        if (pessimisticWriteableSpace != calculatedMaxWritableSpace) {
+            Assertions.assertTrue(pessimisticWriteableSpace > 0);
+            Assertions.assertEquals(calculatedMaxWritableSpace - 1, pessimisticWriteableSpace);
+        }
     }
 
     @Test
