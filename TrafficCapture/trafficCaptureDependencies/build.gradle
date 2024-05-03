@@ -21,7 +21,7 @@ dependencies {
 
     api group: 'software.amazon.msk', name:'aws-msk-iam-auth', version: '2.0.3'
 
-    def log4j = '2.20.0'
+    def log4j = '2.23.1'
     api group: 'org.apache.logging.log4j', name: 'log4j-api', version: log4j
     api group: 'org.apache.logging.log4j', name: 'log4j-core', version: log4j
     api group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: log4j
