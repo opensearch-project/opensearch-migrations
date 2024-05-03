@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay.datatypes;
 
 import io.netty.buffer.ByteBuf;
 
+import io.netty.util.ReferenceCounted;
 import java.util.ArrayList;
 import java.util.StringJoiner;
 import java.util.stream.Stream;
@@ -36,7 +37,7 @@ public class TransformedPackets implements AutoCloseable {
 
     @Override
     public void close() {
-        data.stream().forEach(bb->bb.release());
+        data.forEach(ReferenceCounted::release);
         // Once we're closed, I'd rather see an NPE rather than refCnt errors from netty, which
         // could cause us to look in many places before finding out that it was just localize
         // to how callers were handling this object

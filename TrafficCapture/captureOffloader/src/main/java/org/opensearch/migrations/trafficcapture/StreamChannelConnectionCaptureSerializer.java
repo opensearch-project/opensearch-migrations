@@ -1,12 +1,15 @@
 package org.opensearch.migrations.trafficcapture;
 
+import com.google.protobuf.ByteOutput;
 import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.Timestamp;
+import com.google.protobuf.WireFormat;
 import io.netty.buffer.ByteBuf;
 
-import java.util.function.IntSupplier;
-import java.util.function.Supplier;
+import java.io.UncheckedIOException;
+import java.nio.channels.GatheringByteChannel;
+import java.util.stream.IntStream;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
@@ -133,9 +136,29 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         }
     }
 
-    public CompletableFuture<T> flushIfNeeded(IntSupplier requiredSize) throws IOException {
-        var spaceLeft = getOrCreateCodedOutputStreamHolder().getOutputStreamSpaceLeft();
-        if (spaceLeft != -1 && spaceLeft < requiredSize.getAsInt()) {
+    public int currentOutputStreamWriteableSpaceLeft() throws IOException {
+        // Writeable bytes is the space left minus the space needed to complete the next flush
+        var maxFieldTagNumberToBeWrittenUponStreamFlush = Math.max(TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER, TrafficStream.NUMBER_FIELD_NUMBER);
+        var spaceNeededForRecordCreationDuringNextFlush = CodedOutputStream.computeInt32Size(maxFieldTagNumberToBeWrittenUponStreamFlush, numFlushesSoFar + 1);
+        var outputStreamSpaceLeft = getOrCreateCodedOutputStreamHolder().getOutputStreamSpaceLeft();
+        return outputStreamSpaceLeft == -1 ? -1 : outputStreamSpaceLeft - spaceNeededForRecordCreationDuringNextFlush;
+    }
+
+    /**
+     * Checks if the current output stream has enough space for the required size and flushes if not.
+     * This method evaluates the writable space left in the current stream. If the space is insufficient
+     * for the required size, it triggers a flush operation by calling {@link #flushCommitAndResetStream(boolean)}
+     * with 'false' to indicate this is not a final operation. If there is adequate space,
+     * it returns a completed future with null.
+     *
+     * @param requiredSize The size required to write to the current stream.
+     * @return CompletableFuture<T> A future that completes immediately with null if there is enough space,
+     *         or completes with the future returned by flushCommitAndResetStream if a flush is needed.
+     * @throws IOException if there are I/O errors when checking the stream's space or flushing.
+     */
+    public CompletableFuture<T> flushIfNeeded(int requiredSize) throws IOException {
+        var spaceLeft = currentOutputStreamWriteableSpaceLeft();
+        if (spaceLeft != -1 && spaceLeft < requiredSize) {
             return flushCommitAndResetStream(false);
         }
         return CompletableFuture.completedFuture(null);
@@ -163,7 +186,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         final var captureTagNoLengthSize = CodedOutputStream.computeTagSize(captureTagFieldNumber);
         final var observationContentSize = tsTagSize + tsContentSize + captureTagNoLengthSize + captureTagLengthAndContentSize;
         // Ensure space is available before starting an observation
-        flushIfNeeded(() -> CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(observationContentSize, numFlushesSoFar + 1));
+        flushIfNeeded(CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(observationContentSize, numFlushesSoFar + 1));
         // e.g. 2 {
         writeTrafficStreamTag(TrafficStream.SUBSTREAM_FIELD_NUMBER);
         // Write observation content length
@@ -182,11 +205,44 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         }
     }
 
-    private void writeByteBufferToCurrentStream(int fieldNum, ByteBuffer byteBuffer) throws IOException {
-        if (byteBuffer.remaining() > 0) {
-            getOrCreateCodedOutputStream().writeByteBuffer(fieldNum, byteBuffer);
+    /**
+     * Computes the maximum number of writable bytes for a length-delimited field within a given total available space.
+     * This method takes into account the space required for encoding the length of the field itself, which might reduce
+     * the writable space due to the encoding overhead.
+     *
+     * @param totalAvailableSpace The total available space in bytes that can be used for both the length field and the data.
+     * @param requestedFieldSize The desired number of writable bytes the caller wishes to use for the data, excluding the length field.
+     * @return The maximum number of bytes that can be written as data, which may be less than the requestedWritableSpace due to space
+     *         taken by the length field and totalAvailableSpace. If a length delimited field is written of the returned size, and the returned
+     *         length is less than requestedFieldSize, then there will be at most one byte of available space remaining. In some cases
+     *         this byte is due to overestimation of lengthFieldSpace in which an optimal calculation would have returned one length
+     *         greater, and in other cases it is due to the length returned being at the border of an increase in the lengthFieldSpace
+     *         and thus an additional space on the return value would require two additional space to write.
+     */
+    public static int computeMaxLengthDelimitedFieldSizeForSpace(int totalAvailableSpace, int requestedFieldSize) {
+        // A pessimistic calculation space required for the length field due to not accounting for the space of the length field itself.
+        // This may yield a length space one byte greater than optimal, potentially leaving at most one length delimited byte
+        // which the availableSpace has space for.
+        final int pessimisticLengthFieldSpace = CodedOutputStream.computeUInt32SizeNoTag(totalAvailableSpace);
+        int maxWriteBytesSpace = totalAvailableSpace - pessimisticLengthFieldSpace;
+        return Math.min(maxWriteBytesSpace, requestedFieldSize);
+    }
+    private void readByteBufIntoCurrentStream(int fieldNum, ByteBuf buf) throws IOException {
+        var codedOutputStream = getOrCreateCodedOutputStream();
+        final int bufReadableLength = buf.readableBytes();
+        if (bufReadableLength > 0) {
+            // Here we are optimizing to reduce the number of internal copies and merges performed on the netty
+            // ByteBuf to write to the CodedOutputStream especially in cases of Composite and Direct ByteBufs. We
+            // can do this by delegating the individual ByteBuffer writes to netty which will retain the underlying
+            // structure. We also need to be careful with the exact CodedOutputStream operations performed to ensure
+            // we write until hitting ByteBuf/ByteBuffer writerIndex/limit and not their capacity since some
+            // CodedOutputStream operations write until capacity, e.g. CodedOutputStream::writeByteBuffer
+            codedOutputStream.writeTag(fieldNum, WireFormat.WIRETYPE_LENGTH_DELIMITED);
+            codedOutputStream.writeUInt32NoTag(bufReadableLength);
+            buf.readBytes(new ByteOutputGatheringByteChannel(codedOutputStream), bufReadableLength);
+            assert buf.readableBytes() == 0 : "Expected buf bytes read but instead left " + buf.readableBytes() + " unread.";
         } else {
-            getOrCreateCodedOutputStream().writeUInt32NoTag(0);
+            codedOutputStream.writeUInt32NoTag(0);
         }
     }
 
@@ -198,6 +254,17 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             getOrCreateCodedOutputStream().writeUInt32NoTag(0);
         }
     }
+
+    /**
+     * Writes a record to the stream, flushes it, and begins its closure. This method synchronously sets up
+     * the closing process of the underlying stream and prepares the CodedOutputStreamHolder to return a new stream on next retrieval.
+     * Each invocation writes a record to signal the current state: the final chunk if 'isFinal' is true,
+     * otherwise a continuation. Returns a CompletableFuture that resolves upon the stream's closure.
+     *
+     * @param isFinal Indicates if this should be the final operation on the stream.
+     * @return CompletableFuture<T> A future that completes when the stream is closed. Returns null if already closed or no stream exists and 'isFinal' is false.
+     * @throws IOException if there are I/O errors during the operation.
+     */
 
     @Override
     public CompletableFuture<T> flushCommitAndResetStream(boolean isFinal) throws IOException {
@@ -276,8 +343,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         writeByteStringToCurrentStream(dataFieldNumber, str);
     }
 
-    private void addDataMessage(int captureFieldNumber, int dataFieldNumber, Instant timestamp, ByteBuf buffer) throws IOException {
-        var byteBuffer = buffer.nioBuffer();
+    private void addDataMessage(int captureFieldNumber, int dataFieldNumber, Instant timestamp, ByteBuf buf) throws IOException {
         int segmentFieldNumber;
         int segmentDataFieldNumber;
         if (captureFieldNumber == TrafficObservation.READ_FIELD_NUMBER) {
@@ -293,54 +359,53 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         // the potentially required bytes for simplicity. This could leave ~5 bytes of unused space in the CodedOutputStream
         // when considering the case of a message that does not need segments or for the case of a smaller segment created
         // from a much larger message
-        int messageAndOverheadBytesLeft = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(timestamp,
-            segmentFieldNumber, segmentDataFieldNumber, byteBuffer);
-        int trafficStreamOverhead = messageAndOverheadBytesLeft - byteBuffer.capacity();
+        final int messageAndOverheadBytesLeft = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(timestamp,
+            segmentFieldNumber, segmentDataFieldNumber, buf);
+        final int dataSize = CodedOutputStreamSizeUtil.computeByteBufRemainingSizeNoTag(buf);
+        final int trafficStreamOverhead = messageAndOverheadBytesLeft - dataSize;
 
-        // Ensure that space for at least one data byte and overhead exists, otherwise a flush is necessary.
-        flushIfNeeded(() -> (trafficStreamOverhead + 1));
+        // Writing one data byte requires two bytes to account for length byte
+        final int maxBytesNeededForOneSegmentWithOneDataByteWithLengthByte = trafficStreamOverhead + 2;
 
+        flushIfNeeded(maxBytesNeededForOneSegmentWithOneDataByteWithLengthByte);
+        var spaceLeft = currentOutputStreamWriteableSpaceLeft();
+
+        var bufToRead = buf.duplicate();
         // If our message is empty or can fit in the current CodedOutputStream no chunking is needed, and we can continue
-        var spaceLeft = getOrCreateCodedOutputStreamHolder().getOutputStreamSpaceLeft();
-        if (byteBuffer.limit() == 0 || spaceLeft == -1 || messageAndOverheadBytesLeft <= spaceLeft) {
+        if (bufToRead.readableBytes() == 0 || spaceLeft == -1 || messageAndOverheadBytesLeft <= spaceLeft) {
             int minExpectedSpaceAfterObservation = spaceLeft - messageAndOverheadBytesLeft;
-            addSubstreamMessage(captureFieldNumber, dataFieldNumber, timestamp, byteBuffer);
+            addSubstreamMessage(captureFieldNumber, dataFieldNumber, timestamp, bufToRead);
             observationSizeSanityCheck(minExpectedSpaceAfterObservation, captureFieldNumber);
-            return;
-        }
-
-        while(byteBuffer.position() < byteBuffer.limit()) {
-            // COS checked for unbounded limit above
-            int availableCOSSpace = getOrCreateCodedOutputStreamHolder().getOutputStreamSpaceLeft();
-            int chunkBytes = messageAndOverheadBytesLeft > availableCOSSpace ? availableCOSSpace - trafficStreamOverhead : byteBuffer.limit() - byteBuffer.position();
-            ByteBuffer bb = byteBuffer.slice();
-            bb.limit(chunkBytes);
-            bb = bb.slice();
-            byteBuffer.position(byteBuffer.position() + chunkBytes);
-            addSubstreamMessage(segmentFieldNumber, segmentDataFieldNumber, timestamp, bb);
-            int minExpectedSpaceAfterObservation = availableCOSSpace - chunkBytes - trafficStreamOverhead;
-            observationSizeSanityCheck(minExpectedSpaceAfterObservation, segmentFieldNumber);
-            // 1 to N-1 chunked messages
-            if (byteBuffer.position() < byteBuffer.limit()) {
-                flushCommitAndResetStream(false);
-                messageAndOverheadBytesLeft = messageAndOverheadBytesLeft - chunkBytes;
+        } else {
+            while(bufToRead.readableBytes() > 0) {
+                spaceLeft = currentOutputStreamWriteableSpaceLeft();
+                var bytesToRead = computeMaxLengthDelimitedFieldSizeForSpace(spaceLeft - trafficStreamOverhead, bufToRead.readableBytes());
+                if (bytesToRead <= 0) {
+                    throw new IllegalStateException("Stream space is not allowing forward progress on byteBuf reading");
+                }
+                var bufSliceToRead = bufToRead.readSlice(bytesToRead);
+                addSubstreamMessage(segmentFieldNumber, segmentDataFieldNumber, timestamp, bufSliceToRead);
+                if (bufToRead.readableBytes() > 0) {
+                    flushIfNeeded(maxBytesNeededForOneSegmentWithOneDataByteWithLengthByte);
+                }
             }
+            writeEndOfSegmentMessage(timestamp);
         }
-        writeEndOfSegmentMessage(timestamp);
-
     }
 
     private void addSubstreamMessage(int captureFieldNumber, int dataFieldNumber, int dataCountFieldNumber, int dataCount,
-        Instant timestamp, java.nio.ByteBuffer byteBuffer) throws IOException {
-        int dataSize = 0;
+        Instant timestamp, ByteBuf byteBuf) throws IOException {
+        int dataBytesSize = 0;
+        int dataTagSize = 0;
+        int dataSize = dataBytesSize + dataTagSize;
         int segmentCountSize = 0;
         int captureClosureLength = 1;
         CodedOutputStream codedOutputStream = getOrCreateCodedOutputStream();
         if (dataCountFieldNumber > 0) {
             segmentCountSize = CodedOutputStream.computeInt32Size(dataCountFieldNumber, dataCount);
         }
-        if (byteBuffer.remaining() > 0) {
-            dataSize = CodedOutputStream.computeByteBufferSize(dataFieldNumber, byteBuffer);
+        if (byteBuf.readableBytes() > 0) {
+            dataSize = CodedOutputStreamSizeUtil.computeByteBufRemainingSize(dataFieldNumber, byteBuf);
             captureClosureLength = CodedOutputStream.computeInt32SizeNoTag(dataSize + segmentCountSize);
         }
         beginSubstreamObservation(timestamp, captureFieldNumber, captureClosureLength + dataSize + segmentCountSize);
@@ -355,7 +420,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             codedOutputStream.writeInt32(dataCountFieldNumber, dataCount);
         }
         // Write data field
-        writeByteBufferToCurrentStream(dataFieldNumber, byteBuffer);
+        readByteBufIntoCurrentStream(dataFieldNumber, byteBuf);
         if (captureFieldNumber == TrafficObservation.READ_FIELD_NUMBER ||
                 captureFieldNumber == TrafficObservation.READSEGMENT_FIELD_NUMBER) {
             this.readObservationsAreWaitingForEom = true;
@@ -363,8 +428,8 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     }
 
     private void addSubstreamMessage(int captureFieldNumber, int dataFieldNumber, Instant timestamp,
-        java.nio.ByteBuffer byteBuffer) throws IOException {
-        addSubstreamMessage(captureFieldNumber, dataFieldNumber, 0, 0, timestamp, byteBuffer);
+        ByteBuf byteBuf) throws IOException {
+        addSubstreamMessage(captureFieldNumber, dataFieldNumber, 0, 0, timestamp, byteBuf);
     }
 
     @Override
@@ -467,11 +532,53 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     }
 
     private void observationSizeSanityCheck(int minExpectedSpaceAfterObservation, int fieldNumber) throws IOException {
-        int actualRemainingSpace = getOrCreateCodedOutputStreamHolder().getOutputStreamSpaceLeft();
+        int actualRemainingSpace = currentOutputStreamWriteableSpaceLeft();
         if (actualRemainingSpace != -1 && (actualRemainingSpace < minExpectedSpaceAfterObservation || minExpectedSpaceAfterObservation < 0)) {
             log.warn("Writing a substream (capture type: {}) for Traffic Stream: {} left {} bytes in the CodedOutputStream but we calculated " +
                     "at least {} bytes remaining, this should be investigated", fieldNumber, connectionIdString + "." + (numFlushesSoFar + 1),
                 actualRemainingSpace, minExpectedSpaceAfterObservation);
+        }
+    }
+
+    private static class ByteOutputGatheringByteChannel implements GatheringByteChannel {
+        final ByteOutput byteOutput;
+
+        public ByteOutputGatheringByteChannel(ByteOutput byteOutput) {
+            this.byteOutput = byteOutput;
+        }
+
+        @Override
+        public int write(ByteBuffer src) throws IOException {
+            var bytesToWrite = src.remaining();
+            byteOutput.write(src);
+            return bytesToWrite - src.remaining();
+        }
+
+        @Override
+        public long write(ByteBuffer[] srcs, int offset, int length) throws UncheckedIOException {
+            return IntStream.range(offset, offset + length)
+                .mapToLong(i -> {
+                    try {
+                        return write(srcs[i]);
+                    } catch (IOException e) {
+                        throw new UncheckedIOException(e);
+                    }
+                })
+                .sum();
+        }
+
+        @Override
+        public long write(ByteBuffer[] srcs) throws IOException {
+            return write(srcs, 0, srcs.length);
+        }
+
+        @Override
+        public boolean isOpen() {
+            return true;
+        }
+
+        @Override
+        public void close() {
         }
     }
 }

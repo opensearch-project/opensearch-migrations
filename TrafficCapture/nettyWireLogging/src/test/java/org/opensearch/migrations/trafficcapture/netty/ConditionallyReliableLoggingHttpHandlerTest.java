@@ -30,6 +30,7 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Slf4j
+@WrapWithNettyLeakDetection
 public class ConditionallyReliableLoggingHttpHandlerTest {
 
     private static void writeMessageAndVerify(byte[] fullTrafficBytes, Consumer<EmbeddedChannel> channelWriter,
@@ -46,10 +47,11 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
             channelWriter.accept(channel);
 
             // we wrote the correct data to the downstream handler/channel
-            var outputData = new SequenceInputStream(Collections.enumeration(channel.inboundMessages().stream()
-                    .map(m -> new ByteBufInputStream((ByteBuf) m, true))
-                    .collect(Collectors.toList())))
-                    .readAllBytes();
+            var outputDataStream = new SequenceInputStream(Collections.enumeration(channel.inboundMessages().stream()
+                    .map(m -> new ByteBufInputStream((ByteBuf) m, false))
+                    .collect(Collectors.toList())));
+            var outputData = outputDataStream.readAllBytes();
+            outputDataStream.close();
             Assertions.assertArrayEquals(fullTrafficBytes, outputData);
 
             Assertions.assertNotNull(streamManager.byteBufferAtomicReference.get(),
@@ -70,6 +72,9 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                 Assertions.assertTrue(!rootContext.instrumentationBundle.getFinishedSpans().isEmpty());
                 Assertions.assertTrue(!rootContext.instrumentationBundle.getFinishedMetrics().isEmpty());
             }
+
+            channel.finishAndReleaseAll();
+            channel.close();
         }
     }
 
@@ -125,6 +130,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     new ConditionallyReliableLoggingHttpHandler(rootInstrumenter, "n", "c",
                             ctx -> offloader, headerCapturePredicate, x -> true));
             getWriter(false, true, SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8)).accept(channel);
+            channel.finishAndReleaseAll();
             channel.close();
             var requestBytes = SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8);
 
@@ -160,7 +166,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
 
             // we wrote the correct data to the downstream handler/channel
             var consumedData = new SequenceInputStream(Collections.enumeration(channel.inboundMessages().stream()
-                    .map(m -> new ByteBufInputStream((ByteBuf) m))
+                    .map(m -> new ByteBufInputStream((ByteBuf) m, false))
                     .collect(Collectors.toList())))
                     .readAllBytes();
             log.info("captureddata = " + new String(consumedData, StandardCharsets.UTF_8));
@@ -198,6 +204,8 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                         new String(reconstitutedTrafficStreamWrites, StandardCharsets.UTF_8));
                 Assertions.assertArrayEquals(bytesForResponsePreserved, reconstitutedTrafficStreamWrites);
             }
+
+            channel.finishAndReleaseAll();
         }
     }
 
@@ -220,7 +228,6 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    @WrapWithNettyLeakDetection(repetitions = 16)
     public void testThatAPostInTinyPacketsBlocksFutureActivity_withLeakDetection(boolean usePool) throws Exception {
         testThatAPostInTinyPacketsBlocksFutureActivity(usePool, false);
         //MyResourceLeakDetector.dumpHeap("nettyWireLogging_"+COUNT+"_"+ Instant.now() +".hprof", true);

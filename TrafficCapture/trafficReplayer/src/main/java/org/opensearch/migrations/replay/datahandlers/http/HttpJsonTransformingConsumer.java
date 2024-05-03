@@ -90,17 +90,13 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
 
     @Override
     public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
-        chunks.add(nextRequestPacket.duplicate().readerIndex(0).retain());
+        chunks.add(nextRequestPacket.retainedDuplicate());
         chunkSizes.get(chunkSizes.size() - 1).add(nextRequestPacket.readableBytes());
-        if (log.isTraceEnabled()) {
-            byte[] copy = new byte[nextRequestPacket.readableBytes()];
-            nextRequestPacket.duplicate().readBytes(copy);
-            log.trace("HttpJsonTransformingConsumer[" + this + "]: writing into embedded channel: "
-                    + new String(copy, StandardCharsets.UTF_8));
-        }
+        log.atTrace().log(() -> "HttpJsonTransformingConsumer[" + this + "]: writing into embedded channel: "
+                   + nextRequestPacket.toString(StandardCharsets.UTF_8));
         return TextTrackedFuture.completedFuture(null, ()->"initialValue")
-                .map(cf->cf.thenAccept(x -> channel.writeInbound(nextRequestPacket)),
-                        ()->"HttpJsonTransformingConsumer sending bytes to its EmbeddedChannel");
+            .map(cf->cf.thenAccept(x -> channel.writeInbound(nextRequestPacket)),
+                ()->"HttpJsonTransformingConsumer sending bytes to its EmbeddedChannel");
     }
 
     public TrackedFuture<String, TransformedOutputAndResult<R>> finalizeRequest() {
