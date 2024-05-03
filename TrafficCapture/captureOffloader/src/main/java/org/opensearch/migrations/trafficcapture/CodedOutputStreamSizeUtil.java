@@ -50,16 +50,16 @@ public class CodedOutputStreamSizeUtil {
     /**
      * This function determines the number of bytes needed to write the readable bytes in a byteBuf and its tag.
      */
-    public static int computeByteBufRemainingSize(int fieldNumber, ByteBuf buffer) {
-        return CodedOutputStream.computeTagSize(fieldNumber) + computeByteBufRemainingSizeNoTag(buffer);
+    public static int computeByteBufRemainingSize(int fieldNumber, ByteBuf buf) {
+        return CodedOutputStream.computeTagSize(fieldNumber) + computeByteBufRemainingSizeNoTag(buf);
     }
 
     /**
      * This function determines the number of bytes needed to write the readable bytes in a byteBuf.
      */
-    public static int computeByteBufRemainingSizeNoTag(ByteBuf buffer) {
-        int bufferSize = buffer.readableBytes();
-        return CodedOutputStream.computeUInt32SizeNoTag(bufferSize) + bufferSize;
+    public static int computeByteBufRemainingSizeNoTag(ByteBuf buf) {
+        int bufSize = buf.readableBytes();
+        return CodedOutputStream.computeUInt32SizeNoTag(bufSize) + bufSize;
     }
 
 

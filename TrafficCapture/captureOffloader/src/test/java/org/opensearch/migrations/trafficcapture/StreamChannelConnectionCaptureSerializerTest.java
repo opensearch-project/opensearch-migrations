@@ -520,33 +520,58 @@ class StreamChannelConnectionCaptureSerializerTest {
         "268435461,100000000",
         "268435462,100000000"
     })
-    public void testCalculateMaxWritableSpace(int totalAvailableSpace, int requestedWriteableSpace) {
-        var calculatedMaxWritableSpace = StreamChannelConnectionCaptureSerializer.calculateMaxWritableSpace(totalAvailableSpace,
+    public void test_computeMaxLengthDelimitedFieldSizeForSpace(int totalAvailableSpace, int requestedWriteableSpace) {
+        var optimalMaxWriteableSpace = optimalComputeMaxLengthDelimitedFieldSizeForSpace(totalAvailableSpace,
             requestedWriteableSpace);
 
-        Assertions.assertTrue(calculatedMaxWritableSpace <= requestedWriteableSpace, "cannot write more bytes than requested");
+        Assertions.assertTrue(optimalMaxWriteableSpace <= requestedWriteableSpace, "cannot write more bytes than requested");
 
         var spaceLeftAfterWrite = totalAvailableSpace
-                                  - CodedOutputStream.computeInt32SizeNoTag(calculatedMaxWritableSpace)
-                                  - calculatedMaxWritableSpace;
+                                  - CodedOutputStream.computeInt32SizeNoTag(optimalMaxWriteableSpace)
+                                  - optimalMaxWriteableSpace;
         Assertions.assertTrue(spaceLeftAfterWrite >= 0, "expected non-negative space left");
+        if (optimalMaxWriteableSpace < requestedWriteableSpace) {
+            Assertions.assertTrue(spaceLeftAfterWrite <= 1, "expected space left to be no more than 1 if"
+                                                            + "not enough space for requestedWriteableSpace");
+        }
 
-        if (calculatedMaxWritableSpace < requestedWriteableSpace) {
+        if (optimalMaxWriteableSpace < requestedWriteableSpace) {
             // If we are not writing all requestedWriteableSpace verify there is not space for one more byte
             var expectedSpaceLeftAfterWriteIfOneMoreByteWrote = totalAvailableSpace
-                                                                - CodedOutputStream.computeInt32SizeNoTag(calculatedMaxWritableSpace + 1)
-                                                                - (calculatedMaxWritableSpace + 1);
+                                                                - CodedOutputStream.computeInt32SizeNoTag(optimalMaxWriteableSpace)
+                                                                - CodedOutputStream.computeInt32SizeNoTag(optimalMaxWriteableSpace + 1)
+                                                                - (optimalMaxWriteableSpace + 1);
             Assertions.assertTrue(expectedSpaceLeftAfterWriteIfOneMoreByteWrote < 0, "expected no space to write one more byte");
         }
 
-        // Test that when PessimisticallyCalculateMaxWritableSpace != calculatedMaxWritableSpace, then
+        // Test that when maxWriteableSpace != optimalMaxWriteableSpace, then
         // it is positive and equal to calculateMaxWritableSpace - 1
-        var pessimisticWriteableSpace = StreamChannelConnectionCaptureSerializer.pessimisticallyCalculateMaxWritableSpace(totalAvailableSpace,
+        var maxWriteableSpace = StreamChannelConnectionCaptureSerializer.computeMaxLengthDelimitedFieldSizeForSpace(totalAvailableSpace,
             requestedWriteableSpace);
-        if (pessimisticWriteableSpace != calculatedMaxWritableSpace) {
-            Assertions.assertTrue(pessimisticWriteableSpace > 0);
-            Assertions.assertEquals(calculatedMaxWritableSpace - 1, pessimisticWriteableSpace);
+        if (maxWriteableSpace != optimalMaxWriteableSpace) {
+            Assertions.assertTrue(maxWriteableSpace > 0);
+            Assertions.assertEquals(optimalMaxWriteableSpace - 1, maxWriteableSpace);
+            var spaceLeftIfWritten = totalAvailableSpace - CodedOutputStream.computeInt32SizeNoTag(maxWriteableSpace) - maxWriteableSpace;
+            if (maxWriteableSpace < requestedWriteableSpace) {
+                Assertions.assertTrue(spaceLeftIfWritten <= 1, "expected pessimistic space left to be no more than 1 if"
+                                                                + "not enough space for requestedWriteableSpace");
+            }
         }
+    }
+
+    // Optimally calculates maxWriteableSpace taking into account lengthSpace. In some cases, this may
+    // yield a maxWriteableSpace with one leftover byte, however, this is still the correct max as attempting to write
+    // the additional byte would yield an additional length byte and overflow
+    public static int optimalComputeMaxLengthDelimitedFieldSizeForSpace(int totalAvailableSpace, int requestedWriteableSpace) {
+        // Overestimate the lengthFieldSpace first to then correct in instances where writing one more byte does not result
+        // in as large a lengthFieldSpace. In instances where we must have a leftoverByte, it will be in the lengthFieldSpace
+        final int maxLengthFieldSpace = CodedOutputStream.computeUInt32SizeNoTag(totalAvailableSpace);
+        final int initialEstimatedMaxWriteSpace = totalAvailableSpace - maxLengthFieldSpace;
+        final int lengthFieldSpaceForInitialEstimatedAndOneMoreByte = CodedOutputStream.computeUInt32SizeNoTag(initialEstimatedMaxWriteSpace + 1);
+
+        int maxWriteBytesSpace = totalAvailableSpace - lengthFieldSpaceForInitialEstimatedAndOneMoreByte;
+
+        return Math.min(maxWriteBytesSpace, requestedWriteableSpace);
     }
 
     @Test
@@ -590,18 +615,23 @@ class StreamChannelConnectionCaptureSerializerTest {
                     "Unknown outputStreamHolder sent back to StreamManager: " + outputStreamHolder);
             }
             var osh = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
-            log.atTrace().log(() -> "Getting ready to flush for " + osh);
-            log.atTrace().log(() -> "Bytes written so far... " + StandardCharsets.UTF_8.decode(osh.getByteBuffer().duplicate()));
+            log.atTrace().setMessage("Getting ready to flush for {}").addArgument(osh).log();
+            log.atTrace().setMessage("Bytes written so far... {}")
+                .addArgument(() -> StandardCharsets.UTF_8.decode(osh.getByteBuffer().duplicate())).log();
 
             return CompletableFuture.runAsync(() -> {
                 try {
                     osh.getOutputStream().flush();
-                    log.atTrace().log(() -> "Just flushed for " + osh.getOutputStream());
+                    log.atTrace().setMessage("Just flushed for {}")
+                        .addArgument(osh.getOutputStream())
+                        .log();
                     var bb = osh.getByteBuffer();
                     bb.position(0);
                     var bytesWritten = osh.getOutputStream().getTotalBytesWritten();
                     bb.limit(bytesWritten);
-                    log.atTrace().log(() -> "Adding " + StandardCharsets.UTF_8.decode(bb.duplicate()));
+                    log.atTrace().setMessage("Adding {}")
+                        .addArgument(() -> StandardCharsets.UTF_8.decode(bb.duplicate()))
+                        .log();
                     outputBuffers.add(bb);
                 } catch (IOException e) {
                     throw Lombok.sneakyThrow(e);
