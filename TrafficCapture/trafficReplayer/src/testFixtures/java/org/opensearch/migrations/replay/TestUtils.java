@@ -115,13 +115,10 @@ public class TestUtils {
         fullRequest.release();
     }
 
-    private static String getStringFromContent(FullHttpRequest fullRequest) throws IOException {
-        try (var baos = new ByteArrayOutputStream()) {
-            var bb = fullRequest.content();
-            bb.duplicate().readBytes(baos, bb.readableBytes());
-            return baos.toString(StandardCharsets.UTF_8);
-        }
+    private static String getStringFromContent(FullHttpRequest fullRequest) {
+        return fullRequest.content().toString(StandardCharsets.UTF_8);
     }
+
     static void runPipelineAndValidate(TestContext rootContext,
                                        IAuthTransformerFactory authTransformer,
                                        String extraHeaders,
