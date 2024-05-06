@@ -5,6 +5,7 @@ import pytest
 import requests
 import secrets
 import string
+from operations import generate_large_doc
 import subprocess
 import time
 import unittest
@@ -110,7 +111,7 @@ class E2ETests(unittest.TestCase):
                 return True
         return False
 
-    def assert_source_target_doc_match(self, index_name, doc_id):
+    def assert_source_target_doc_match(self, index_name, doc_id, doc_body : dict = None):
         source_response = get_document(self.source_endpoint, index_name, doc_id, self.source_auth,
                                        self.source_verify_ssl)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
@@ -127,6 +128,8 @@ class E2ETests(unittest.TestCase):
         target_document = target_response.json()
         target_content = target_document['_source']
         self.assertEqual(source_content, target_content)
+        if doc_body is not None:
+            self.assertEqual(source_content, doc_body)
 
     def set_common_values(self):
         self.index_prefix_ignore_list = ["test_", ".", "searchguard", "sg7", "security-auditlog"]
@@ -327,7 +330,7 @@ class E2ETests(unittest.TestCase):
         for doc_id_int in range(number_of_docs):
             doc_id = str(doc_id_int)
             proxy_response = create_document(self.proxy_endpoint, index_name, doc_id, self.source_auth,
-                                             self.source_verify_ssl, proxy_single_connection_session)
+                                             self.source_verify_ssl, session=proxy_single_connection_session)
             self.assertEqual(proxy_response.status_code, HTTPStatus.CREATED)
 
             if doc_id_int + 1 < number_of_docs:
@@ -339,3 +342,33 @@ class E2ETests(unittest.TestCase):
                 self.assert_source_target_doc_match(index_name, doc_id)
         finally:
             proxy_single_connection_session.close()
+
+    def test_0008_largeRequest(self):
+        index_name = f"test_0008_{self.unique_id}"
+        doc_id = "1"
+
+        # Create large document, 99MiB which is less than the default max of
+        # 100MiB in ES/OS settings (http.max_content_length)
+        large_doc = generate_large_doc(size_mib=99)
+
+        # Measure the time taken by the create_document call
+        # Send large request to proxy and verify response
+        start_time = time.time()
+        proxy_response = create_document(self.proxy_endpoint, index_name, doc_id, self.source_auth,
+                                         self.source_verify_ssl, doc_body=large_doc)
+        end_time = time.time()
+        duration = end_time - start_time
+
+        # Set wait time to response time or 1 second
+        wait_time_seconds = min(round(duration, 3), 1)
+
+        self.assertEqual(proxy_response.status_code, HTTPStatus.CREATED)
+        f" replay large doc creation")
+
+        # Wait for the measured duration
+        logger.debug(f"Waiting {wait_time_seconds} seconds for"
+
+        time.sleep(wait_time_seconds)
+
+        # Verify document created on source and target
+        self.assert_source_target_doc_match(index_name, doc_id, doc_body=large_doc)
