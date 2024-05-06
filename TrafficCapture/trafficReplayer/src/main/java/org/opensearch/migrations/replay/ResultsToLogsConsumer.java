@@ -39,7 +39,7 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
     // if it's configured to output at all
     private static Logger makeTransactionSummaryLogger() {
         var logger = LoggerFactory.getLogger(TRANSACTION_SUMMARY_LOGGER);
-        logger.atInfo().setMessage(()->getTransactionSummaryStringPreamble()).log();
+        logger.atInfo().setMessage("{}").addArgument(()->getTransactionSummaryStringPreamble()).log();
         return logger;
     }
 
@@ -107,14 +107,23 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
      */
     public void accept(SourceTargetCaptureTuple tuple, ParsedHttpMessagesAsDicts parsedMessages) {
         final var index = tupleCounter.getAndIncrement();
-        progressLogger.atInfo().setMessage(()->toTransactionSummaryString(index, tuple, parsedMessages)).log();
-        tupleLogger.atInfo().setMessage(() -> {
+        progressLogger.atInfo().setMessage("{}").addArgument(()->toTransactionSummaryString(index, tuple, parsedMessages)).log();
+        if (tupleLogger.isInfoEnabled()) {
             try {
-                return PLAIN_MAPPER.writeValueAsString(toJSONObject(tuple, parsedMessages));
+                var tupleString = PLAIN_MAPPER.writeValueAsString(toJSONObject(tuple, parsedMessages));
+                tupleLogger.atInfo().setMessage("{}").addArgument(() -> tupleString).log();
             } catch (Exception e) {
+                log.atError()
+                    .setMessage("Exception converting tuple to string")
+                    .setCause(e)
+                    .log();
+                tupleLogger.atInfo()
+                    .setMessage("{}")
+                    .addArgument("{ \"error\":\"" + e.getMessage() + "\" }")
+                    .log();
                 throw Lombok.sneakyThrow(e);
             }
-        }).log();
+        }
     }
 
     public static String getTransactionSummaryStringPreamble() {
