@@ -123,9 +123,9 @@ public class DemoPrintOutSnapshot {
 
             GlobalMetadata.Data globalMetadata;
             if (sourceVersion == ClusterVersion.ES_6_8) {
-                globalMetadata = new GlobalMetadataFactory_ES_6_8().fromRepo(repo, repoDataProvider, snapshotName);
+                globalMetadata = new GlobalMetadataFactory_ES_6_8(repoDataProvider).fromRepo(snapshotName);
             } else {
-                globalMetadata = new GlobalMetadataFactory_ES_7_10().fromRepo(repo, repoDataProvider, snapshotName);
+                globalMetadata = new GlobalMetadataFactory_ES_7_10(repoDataProvider).fromRepo(snapshotName);
             }
 
             if (sourceVersion == ClusterVersion.ES_6_8) { 

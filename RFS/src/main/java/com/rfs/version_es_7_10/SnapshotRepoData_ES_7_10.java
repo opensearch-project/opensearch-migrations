@@ -13,17 +13,21 @@ import com.rfs.common.SourceRepo;
 import com.rfs.common.SnapshotRepo;
 
 public class SnapshotRepoData_ES_7_10 {
-    public static SnapshotRepoData_ES_7_10 fromRepoFile(Path filePath) throws IOException {
+    public static SnapshotRepoData_ES_7_10 fromRepoFile(Path filePath) {
         ObjectMapper mapper = new ObjectMapper();
-        SnapshotRepoData_ES_7_10 data = mapper.readValue(new File(filePath.toString()), SnapshotRepoData_ES_7_10.class);
-        data.filePath = filePath;
-        return data;
+        try {
+            SnapshotRepoData_ES_7_10 data = mapper.readValue(new File(filePath.toString()), SnapshotRepoData_ES_7_10.class);
+            data.filePath = filePath;
+            return data;
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
-    public static SnapshotRepoData_ES_7_10 fromRepo(SourceRepo repo) throws IOException {
+    public static SnapshotRepoData_ES_7_10 fromRepo(SourceRepo repo) {
         Path file = repo.getSnapshotRepoDataFilePath();
         if (file == null) {
-            throw new IOException("No index file found in " + repo.getRepoRootDir());
+            throw new RuntimeException("No index file found in " + repo.getRepoRootDir());
         }
         return fromRepoFile(file);
     }

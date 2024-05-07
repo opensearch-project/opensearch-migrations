@@ -1,11 +1,7 @@
 package com.rfs.cms;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class CmsEntry {
-    private static final ObjectMapper objectMapper = new ObjectMapper();
-
     public static enum SnapshotStatus {
         NOT_STARTED,
         IN_PROGRESS,
@@ -14,20 +10,6 @@ public class CmsEntry {
     }
 
     public static class Snapshot {
-        public static Snapshot fromJsonString(String json) {
-            try {
-                ObjectNode node = objectMapper.readValue(json, ObjectNode.class);
-                ObjectNode sourceNode = (ObjectNode) node.get("_source");
-
-                return new Snapshot(
-                    sourceNode.get("name").asText(),
-                    SnapshotStatus.valueOf(sourceNode.get("status").asText())
-                );
-            } catch (Exception e) {
-                throw new RuntimeException(e);
-            }
-        }
-
         public final String name;
         public final SnapshotStatus status;
 
@@ -35,12 +17,26 @@ public class CmsEntry {
             this.name = name;
             this.status = status;
         }
+    }
 
-        public ObjectNode toJson() {
-            ObjectNode node = objectMapper.createObjectNode();
-            node.put("name", name);
-            node.put("status", status.toString());
-            return node;
+    public static enum MetadataStatus {
+        IN_PROGRESS,
+        COMPLETED,
+        FAILED,
+    }
+
+    public static class Metadata {
+        public static final int METADATA_LEASE_MS = 1 * 60 * 1000; // 1 minute, arbitrarily chosen
+        public static final int MAX_ATTEMPTS = 3; // arbitrarily chosen
+
+        public final MetadataStatus status;
+        public final String leaseExpiry;
+        public final Integer numAttempts;
+
+        public Metadata(MetadataStatus status, String leaseExpiry, int numAttempts) {
+            this.status = status;
+            this.leaseExpiry = leaseExpiry;
+            this.numAttempts = numAttempts;
         }
-    }    
+    }
 }

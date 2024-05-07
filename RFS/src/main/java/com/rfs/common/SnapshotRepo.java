@@ -19,6 +19,9 @@ public class SnapshotRepo {
     
         // Get the ID of an index from its name
         public String getIndexId(String indexName);
+
+        // Get the underlying repo
+        public SourceRepo getRepo();
         
     }
 

@@ -43,50 +43,54 @@ public class FileSystemRepo implements SourceRepo {
     }
 
     @Override
-    public Path getSnapshotRepoDataFilePath() throws IOException {
-        return findRepoFile();
+    public Path getSnapshotRepoDataFilePath() {
+        try {
+            return findRepoFile();
+        } catch (IOException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     @Override
-    public Path getGlobalMetadataFilePath(String snapshotId) throws IOException {
+    public Path getGlobalMetadataFilePath(String snapshotId) {
         String filePath = getRepoRootDir().toString() + "/meta-" + snapshotId + ".dat";
         return Path.of(filePath);
     }
 
     @Override
-    public Path getSnapshotMetadataFilePath(String snapshotId) throws IOException {
+    public Path getSnapshotMetadataFilePath(String snapshotId) {
         String filePath = getRepoRootDir().toString() + "/snap-" + snapshotId + ".dat";
         return Path.of(filePath);
     }
 
     @Override
-    public Path getIndexMetadataFilePath(String indexId, String indexFileId) throws IOException {
+    public Path getIndexMetadataFilePath(String indexId, String indexFileId) {
         String filePath = getRepoRootDir().toString() + "/indices/" + indexId + "/meta-" + indexFileId + ".dat";
         return Path.of(filePath);
     }
 
     @Override
-    public Path getShardDirPath(String indexId, int shardId) throws IOException {
+    public Path getShardDirPath(String indexId, int shardId) {
         String shardDirPath = getRepoRootDir().toString() + "/indices/" + indexId + "/" + shardId;
         return Path.of(shardDirPath);
     }
 
     @Override
-    public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) throws IOException {
+    public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) {
         Path shardDirPath = getShardDirPath(indexId, shardId);
         Path filePath = shardDirPath.resolve("snap-" + snapshotId + ".dat");
         return filePath;
     }
 
     @Override
-    public Path getBlobFilePath(String indexId, int shardId, String blobName) throws IOException {
+    public Path getBlobFilePath(String indexId, int shardId, String blobName) {
         Path shardDirPath = getShardDirPath(indexId, shardId);
         Path filePath = shardDirPath.resolve(blobName);
         return filePath;
     }
 
     @Override
-    public void prepBlobFiles(ShardMetadata.Data shardMetadata) throws IOException {
+    public void prepBlobFiles(ShardMetadata.Data shardMetadata) {
         // No work necessary for local filesystem
     }
 }

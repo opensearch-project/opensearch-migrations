@@ -62,10 +62,12 @@ public class OpenSearchClient {
             if (resp.code == HttpURLConnection.HTTP_NOT_FOUND || resp.code == HttpURLConnection.HTTP_OK) {
                 return Mono.just(resp);
             } else {
-                String errorMessage = "Could not create object: " + objectPath + ". Response Code: " + resp.code + ", Response Body: " + resp.body;
+                String errorMessage = ("Could not create object: " + objectPath + ". Response Code: " + resp.code
+                    + ", Response Message: " + resp.message + ", Response Body: " + resp.body);
                 return Mono.error(new OperationFailed(errorMessage, resp));
             }
         })
+        .doOnError(e -> logger.error(e.getMessage()))
         .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
         .block();
 
@@ -87,10 +89,12 @@ public class OpenSearchClient {
                 if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_CREATED) {
                     return Mono.just(resp);
                 } else {
-                    String errorMessage = "Could not register snapshot repo: " + targetPath + ". Response Code: " + resp.code + ", Response Body: " + resp.body;
+                    String errorMessage = ("Could not register snapshot repo: " + targetPath + ". Response Code: " + resp.code
+                        + ", Response Message: " + resp.message + ", Response Body: " + resp.body);
                     return Mono.error(new OperationFailed(errorMessage, resp));
                 }
             })
+            .doOnError(e -> logger.error(e.getMessage()))
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
     }
@@ -102,10 +106,12 @@ public class OpenSearchClient {
                 if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_CREATED) {
                     return Mono.just(resp);
                 } else {
-                    String errorMessage = "Could not create snapshot: " + targetPath + ". Response Code: " + resp.code + ", Response Body: " + resp.body;
+                    String errorMessage = ("Could not create snapshot: " + targetPath + ". Response Code: " + resp.code
+                        + ", Response Message: " + resp.message + ", Response Body: " + resp.body);
                     return Mono.error(new OperationFailed(errorMessage, resp));
                 }
             })
+            .doOnError(e -> logger.error(e.getMessage()))
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
     }
@@ -121,6 +127,7 @@ public class OpenSearchClient {
                     return Mono.error(new OperationFailed(errorMessage, resp));
                 }
             })
+            .doOnError(e -> logger.error(e.getMessage()))
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
     }
@@ -135,10 +142,12 @@ public class OpenSearchClient {
                 if (resp.code == HttpURLConnection.HTTP_CREATED || resp.code == HttpURLConnection.HTTP_CONFLICT) {
                     return Mono.just(resp);
                 } else {
-                    String errorMessage = "Could not create document: " + indexName + "/" + documentId + ". Response Code: " + resp.code;
+                    String errorMessage = ("Could not create document: " + indexName + "/" + documentId + ". Response Code: " + resp.code
+                        + ", Response Message: " + resp.message + ", Response Body: " + resp.body);
                     return Mono.error(new OperationFailed(errorMessage, resp));
                 }
             })
+            .doOnError(e -> logger.error(e.getMessage()))
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
         if (response.code == HttpURLConnection.HTTP_CREATED) {
@@ -156,10 +165,12 @@ public class OpenSearchClient {
                 if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_NOT_FOUND) {
                     return Mono.just(resp);
                 } else {
-                    String errorMessage = "Could not retrieve document: " + indexName + "/" + documentId + ". Response Code: " + resp.code;
+                    String errorMessage = ("Could not retrieve document: " + indexName + "/" + documentId + ". Response Code: " + resp.code
+                        + ", Response Message: " + resp.message + ", Response Body: " + resp.body);
                     return Mono.error(new OperationFailed(errorMessage, resp));
                 }
             })
+            .doOnError(e -> logger.error(e.getMessage()))
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
     }
@@ -190,10 +201,13 @@ public class OpenSearchClient {
                 if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_CONFLICT) {
                     return Mono.just(resp);
                 } else {
-                    String errorMessage = "Could not update document: " + indexName + "/" + documentId + ". Response Code: " + resp.code;
+
+                    String errorMessage = ("Could not update document: " + indexName + "/" + documentId + ". Response Code: " + resp.code
+                        + ", Response Message: " + resp.message + ", Response Body: " + resp.body);
                     return Mono.error(new OperationFailed(errorMessage, resp));
                 }
             })
+            .doOnError(e -> logger.error(e.getMessage()))
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
         if (response.code == HttpURLConnection.HTTP_OK) {

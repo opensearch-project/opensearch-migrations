@@ -12,16 +12,28 @@ import com.rfs.common.OpenSearchClient;
 public class GlobalMetadataCreator_OS_2_11 {
     private static final Logger logger = LogManager.getLogger(GlobalMetadataCreator_OS_2_11.class);
 
-    public static void create(ObjectNode root, OpenSearchClient client, List<String> componentTemplateWhitelist, List<String> indexTemplateWhitelist) throws Exception {
+    private final OpenSearchClient client;
+    private final List<String> legacyTemplateWhitelist;
+    private final List<String> componentTemplateWhitelist;
+    private final List<String> indexTemplateWhitelist;
+
+    public GlobalMetadataCreator_OS_2_11(OpenSearchClient client, List<String> legacyTemplateWhitelist, List<String> componentTemplateWhitelist, List<String> indexTemplateWhitelist) {
+        this.client = client;
+        this.legacyTemplateWhitelist = legacyTemplateWhitelist;
+        this.componentTemplateWhitelist = componentTemplateWhitelist;
+        this.indexTemplateWhitelist = indexTemplateWhitelist;
+    }
+
+    public void create(ObjectNode root) throws Exception {
         logger.info("Setting Global Metadata");
 
         GlobalMetadataData_OS_2_11 globalMetadata = new GlobalMetadataData_OS_2_11(root);
-        createTemplates(globalMetadata, client, indexTemplateWhitelist);
+        createLegacyTemplates(globalMetadata, client, legacyTemplateWhitelist);
         createComponentTemplates(globalMetadata, client, componentTemplateWhitelist);
         createIndexTemplates(globalMetadata, client, indexTemplateWhitelist);
     }
 
-    public static void createTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> indexTemplateWhitelist) throws Exception {
+    protected void createLegacyTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> templateWhitelist) throws Exception {
         logger.info("Setting Legacy Templates");
         ObjectNode templates = globalMetadata.getTemplates();
 
@@ -30,8 +42,8 @@ public class GlobalMetadataCreator_OS_2_11 {
             return;
         }
 
-        if (indexTemplateWhitelist != null) {
-            for (String templateName : indexTemplateWhitelist) {
+        if (templateWhitelist != null) {
+            for (String templateName : templateWhitelist) {
                 if (!templates.has(templateName) || templates.get(templateName) == null) {
                     logger.warn("Legacy Template not found: " + templateName);
                     continue;
@@ -55,7 +67,7 @@ public class GlobalMetadataCreator_OS_2_11 {
         }
     }
 
-    public static void createComponentTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> indexTemplateWhitelist) throws Exception {
+    protected void createComponentTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> indexTemplateWhitelist) throws Exception {
         logger.info("Setting Component Templates");
         ObjectNode templates = globalMetadata.getComponentTemplates();
 
@@ -89,7 +101,7 @@ public class GlobalMetadataCreator_OS_2_11 {
         }
     }
 
-    public static void createIndexTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> indexTemplateWhitelist) throws Exception {
+    protected void createIndexTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> indexTemplateWhitelist) throws Exception {
         logger.info("Setting Index Templates");
         ObjectNode templates = globalMetadata.getIndexTemplates();
 
