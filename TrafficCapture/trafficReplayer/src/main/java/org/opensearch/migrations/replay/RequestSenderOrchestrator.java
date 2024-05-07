@@ -139,7 +139,7 @@ public class RequestSenderOrchestrator {
         final var replaySession = clientConnectionPool.getCachedSession(ctx, sessionNumber);
         return NettyFutureBinders.bindNettySubmitToTrackableFuture(replaySession.eventLoop)
                 .getDeferredFutureThroughHandle((v,t) -> {
-                    log.atTrace().setMessage(() -> "adding work item at slot " +
+                    log.atTrace().setMessage("{}").addArgument(() -> "adding work item at slot " +
                             channelInteractionNumber + " for " + replaySession.getChannelKeyContext() + " with " +
                             replaySession.scheduleSequencer).log();
                     return replaySession.scheduleSequencer.addFutureForWork(channelInteractionNumber,
@@ -210,7 +210,7 @@ public class RequestSenderOrchestrator {
             var itemStartTimeOfPopped = schedule.removeFirstItem();
             assert atTime.equals(itemStartTimeOfPopped):
                     "Expected to have popped the item to match the start time for the responseFuture that finished";
-            log.atDebug().setMessage(()->channelInteraction.toString() + " responseFuture completed - checking "
+            log.atDebug().setMessage("{}").addArgument(()->channelInteraction.toString() + " responseFuture completed - checking "
                     + schedule + " for the next item to schedule").log();
             Optional.ofNullable(schedule.peekFirstItem()).ifPresent(kvp ->
                     bindNettyScheduleToCompletableFuture(eventLoop, kvp.startTime, kvp.scheduleFuture));

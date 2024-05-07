@@ -271,7 +271,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     public TrackedFuture<String,Void> consumeBytes(ByteBuf packetData) {
         activeChannelFuture = activeChannelFuture.getDeferredFutureThroughHandle((v, channelException) -> {
             if (channelException == null) {
-                log.atTrace().setMessage(()->"outboundChannelFuture is ready. Writing packets (hash=" +
+                log.atTrace().setMessage("{}").addArgument(()->"outboundChannelFuture is ready. Writing packets (hash=" +
                         System.identityHashCode(packetData) + "): " + httpContext() + ": " +
                         packetData.toString(StandardCharsets.UTF_8)).log();
                 return writePacketAndUpdateFuture(packetData).whenComplete((v2,t2)->{

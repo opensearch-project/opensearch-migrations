@@ -275,9 +275,9 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             log.atLevel(records.isEmpty()? Level.TRACE:Level.INFO)
                     .setMessage(()->"Kafka consumer poll has fetched "+records.count() + " records.  " +
                             "Records in flight=" + kafkaRecordsLeftToCommitEventually.get()).log();
-            log.atTrace().setMessage(()->"All positions: {"+kafkaConsumer.assignment().stream()
+            log.atTrace().setMessage("{}").addArgument(()->"All positions: {"+kafkaConsumer.assignment().stream()
                     .map(tp->tp+": "+kafkaConsumer.position(tp)).collect(Collectors.joining(",")) + "}").log();
-            log.atTrace().setMessage(()->"All previously COMMITTED positions: {"+kafkaConsumer.assignment().stream()
+            log.atTrace().setMessage("{}").addArgument(()->"All previously COMMITTED positions: {"+kafkaConsumer.assignment().stream()
                     .map(tp->tp+": "+kafkaConsumer.committed(tp)).collect(Collectors.joining(",")) + "}").log();
             return records;
         } catch (RuntimeException e) {
