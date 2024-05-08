@@ -75,19 +75,20 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         ConnectionClosedListenerHandler(IReplayContexts.IChannelKeyContext channelKeyContext) {
             socketContext = channelKeyContext.createSocketContext();
         }
+
         @Override
-        public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
+        public void channelInactive(ChannelHandlerContext ctx) throws Exception {
             socketContext.close();
-            super.channelUnregistered(ctx);
+            super.channelInactive(ctx);
         }
 
         @Override
-        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
-            socketContext.close();
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
+            socketContext.addTraceException(cause, true);
             log.atDebug().setMessage("Exception caught in ConnectionClosedListenerHandler." +
-            "Closing channel due to exception").setCause(cause).log();
+                                     "Closing channel due to exception").setCause(cause).log();
             ctx.close();
-            ctx.fireExceptionCaught(cause);
+            super.exceptionCaught(ctx, cause);
         }
     }
 
