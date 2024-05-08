@@ -1,0 +1,8 @@
+botocore>=1.31.70
+jsondiff>=2.0.0
+jsonpath-ng>=1.6.0
+prometheus-client>=0.17.1
+pyyaml>=6.0.1
+requests>=2.31.0
+requests-aws4auth>=1.2.3
+responses>=0.23.3
