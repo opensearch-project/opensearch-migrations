@@ -195,8 +195,8 @@ public class TrafficReplayerRunner {
         try (var os = new NullOutputStream();
              var trafficSource = captureSourceSupplier.get();
              var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {
-            trafficReplayer.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(70), blockingTrafficSource,
-                    timeShifter, tupleReceiver);
+            trafficReplayer.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(70), Duration.ofSeconds(30),
+                blockingTrafficSource, timeShifter, tupleReceiver);
         }
     }
 

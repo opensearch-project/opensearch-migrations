@@ -7,11 +7,8 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 
 import javax.net.ssl.SSLException;
 import java.net.URI;
-import java.time.Duration;
 
 public class RootReplayerConstructorExtensions extends TrafficReplayerTopLevel {
-
-    public static final Duration RESPONSE_TIMEOUT = Duration.ofSeconds(30);
 
     public RootReplayerConstructorExtensions(IRootReplayerContext topContext,
                                              URI uri,
@@ -43,27 +40,16 @@ public class RootReplayerConstructorExtensions extends TrafficReplayerTopLevel {
     }
 
     public static ClientConnectionPool makeClientConnectionPool(URI serverUri) throws SSLException {
-        return makeClientConnectionPool(serverUri, null, RESPONSE_TIMEOUT);
-    }
-
-    public static ClientConnectionPool makeClientConnectionPool(URI serverUri, String poolPrefix) throws SSLException {
-        return makeClientConnectionPool(serverUri, poolPrefix, RESPONSE_TIMEOUT);
+        return makeClientConnectionPool(serverUri, null);
     }
 
     public static ClientConnectionPool makeClientConnectionPool(URI serverUri,
-                                                                String poolPrefix,
-                                                                Duration timeout) throws SSLException {
-        return makeClientConnectionPool(serverUri, true, 0, poolPrefix, timeout);
+                                                                String poolPrefix) throws SSLException {
+        return makeClientConnectionPool(serverUri, true, 0, poolPrefix);
     }
 
     public static ClientConnectionPool makeClientConnectionPool(URI serverUri,
                                                                 int numSendingThreads) throws SSLException {
-        return makeClientConnectionPool(serverUri, numSendingThreads, RESPONSE_TIMEOUT);
-    }
-
-    public static ClientConnectionPool makeClientConnectionPool(URI serverUri,
-                                                                int numSendingThreads,
-                                                                Duration timeout) throws SSLException {
-        return makeClientConnectionPool(serverUri, true, numSendingThreads, null, timeout);
+        return makeClientConnectionPool(serverUri, true, numSendingThreads, null);
     }
 }

@@ -103,11 +103,10 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
                     new StaticAuthTransformerFactory("TEST"),
                     new TransformationLoader().getTransformerFactoryLoader("localhost"),
                     RootReplayerConstructorExtensions.makeClientConnectionPool(httpServer.localhostEndpoint(), true,
-                            0, "targetConnectionPool for SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest",
-                            Duration.ofSeconds(30)))) {
+                            0, "targetConnectionPool for SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest"))) {
             new Thread(()->responseTracker.onCountDownFinished(Duration.ofSeconds(10),
                         ()->replayer.shutdown(null).join()));
-            replayer.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofMillis(1),
+            replayer.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofMillis(1), Duration.ofSeconds(30),
                     trafficSource, new TimeShifter(TIME_SPEEDUP_FACTOR), t->{});
         }
 

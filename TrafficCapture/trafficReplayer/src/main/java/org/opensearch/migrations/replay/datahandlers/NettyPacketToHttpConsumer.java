@@ -5,6 +5,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.ChannelInitializer;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.ChannelPipeline;
@@ -53,6 +54,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     public static final String BACKSIDE_HTTP_WATCHER_HANDLER_NAME = "BACKSIDE_HTTP_WATCHER_HANDLER";
     public static final String CONNECTION_CLOSE_HANDLER_NAME = "CONNECTION_CLOSE_HANDLER";
     public static final String SSL_HANDLER_NAME = "ssl";
+    public static final String READ_TIMEOUT_HANDLER_NAME = "readTimeoutHandler";
     public static final String WRITE_COUNT_WATCHER_HANDLER_NAME = "writeCountWatcher";
     public static final String READ_COUNT_WATCHER_HANDLER_NAME = "readCountWatcher";
 
@@ -66,12 +68,11 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     private Channel channel;
     AggregatedRawResponse.Builder responseBuilder;
     IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> currentRequestContextUnion;
+    Duration readTimeoutDuration;
 
-    private static class ConnectionClosedListenerHandler extends ReadTimeoutHandler {
+    private static class ConnectionClosedListenerHandler extends ChannelInboundHandlerAdapter {
         private final IReplayContexts.ISocketContext socketContext;
-        ConnectionClosedListenerHandler(IReplayContexts.IChannelKeyContext channelKeyContext,
-                                        Duration timeout) {
-            super(timeout.toMillis(), TimeUnit.MILLISECONDS);
+        ConnectionClosedListenerHandler(IReplayContexts.IChannelKeyContext channelKeyContext) {
             socketContext = channelKeyContext.createSocketContext();
         }
         @Override
@@ -79,16 +80,27 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             socketContext.close();
             super.channelUnregistered(ctx);
         }
+
+        @Override
+        public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) {
+            socketContext.close();
+            log.atDebug().setMessage("Exception caught in ConnectionClosedListenerHandler." +
+            "Closing channel due to exception").setCause(cause).log();
+            ctx.close();
+            ctx.fireExceptionCaught(cause);
+        }
     }
 
     public NettyPacketToHttpConsumer(ConnectionReplaySession replaySession,
-                                     IReplayContexts.IReplayerHttpTransactionContext ctx) {
+                                     IReplayContexts.IReplayerHttpTransactionContext ctx,
+                                     Duration readTimeoutDuration) {
         this.replaySession = replaySession;
         var parentContext = ctx.createTargetRequestContext();
         this.setCurrentMessageContext(parentContext.createHttpSendingContext());
         responseBuilder = AggregatedRawResponse.builder(Instant.now());
         log.atDebug().setMessage(() -> "C'tor: incoming session=" + replaySession).log();
         this.activeChannelFuture = activateLiveChannel();
+        this.readTimeoutDuration = readTimeoutDuration;
     }
 
     private TrackedFuture<String, Void> activateLiveChannel() {
@@ -141,8 +153,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     createClientConnection(EventLoopGroup eventLoopGroup,
                            SslContext sslContext,
                            URI serverUri,
-                           IReplayContexts.IChannelKeyContext channelKeyContext,
-                           Duration timeout) {
+                           IReplayContexts.IChannelKeyContext channelKeyContext) {
         String host = serverUri.getHost();
         int port = serverUri.getPort();
         log.atTrace().setMessage(()->"Active - setting up backend connection to " + host + ":" + port).log();
@@ -153,7 +164,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                     @Override
                     protected void initChannel(@NonNull Channel ch) throws Exception {
                         ch.pipeline().addFirst(CONNECTION_CLOSE_HANDLER_NAME,
-                                new ConnectionClosedListenerHandler(channelKeyContext, timeout));
+                                new ConnectionClosedListenerHandler(channelKeyContext));
                     }
                 })
                 .channel(NioSocketChannel.class)
@@ -223,6 +234,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             }
             getParentContext().onBytesReceived(size);
         }));
+        pipeline.addLast(READ_TIMEOUT_HANDLER_NAME,
+            new ReadTimeoutHandler(this.readTimeoutDuration.toMillis(), TimeUnit.MILLISECONDS));
         addLoggingHandlerLast(pipeline, "B");
         pipeline.addLast(new BacksideSnifferHandler(responseBuilder));
         addLoggingHandlerLast(pipeline, "C");

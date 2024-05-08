@@ -150,8 +150,8 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 var eventLoop = new NioEventLoopGroup(1, new DefaultThreadFactory("test")).next();
                 var replaySession = new ConnectionReplaySession(eventLoop, channelContext,
                         () -> NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext,
-                                testServer.localhostEndpoint(), channelContext, REGULAR_RESPONSE_TIMEOUT));
-                var nphc = new NettyPacketToHttpConsumer(replaySession, httpContext);
+                                testServer.localhostEndpoint(), channelContext));
+                var nphc = new NettyPacketToHttpConsumer(replaySession, httpContext, REGULAR_RESPONSE_TIMEOUT);
                 nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
                 var aggregatedResponse = nphc.finalizeRequest().get();
                 var responseBytePackets = aggregatedResponse.getCopyOfPackets();
@@ -203,12 +203,11 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             var timeShifter = new TimeShifter();
             timeShifter.setFirstTimestamp(Instant.now());
             clientConnectionPool = new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
-                    "targetPool for testThatConnectionsAreKeptAliveAndShared", 1,
-                    readTimeout);
+                    "targetPool for testThatConnectionsAreKeptAliveAndShared", 1);
 
             var reqCtx = rootContext.getTestConnectionRequestContext(1);
             var nphc = new NettyPacketToHttpConsumer(clientConnectionPool
-                    .buildConnectionReplaySession(reqCtx.getChannelKeyContext()), reqCtx);
+                    .buildConnectionReplaySession(reqCtx.getChannelKeyContext()), reqCtx, REGULAR_RESPONSE_TIMEOUT);
             // purposefully send ONLY the beginning of a request
             nphc.consumeBytes("GET ".getBytes(StandardCharsets.UTF_8));
             if (resultWaitTimeout.minus(readTimeout).isNegative()) {
@@ -260,9 +259,10 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             var timeShifter = new TimeShifter();
             timeShifter.setFirstTimestamp(Instant.now());
             var clientConnectionPool =  new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
-                    "targetPool for testThatConnectionsAreKeptAliveAndShared", 1, REGULAR_RESPONSE_TIMEOUT);
+                    "targetPool for testThatConnectionsAreKeptAliveAndShared", 1);
             var sendingFactory = new ReplayEngine(
-                    new RequestSenderOrchestrator(clientConnectionPool, NettyPacketToHttpConsumer::new),
+                    new RequestSenderOrchestrator(clientConnectionPool,
+                        (replaySession, ctx1) -> new NettyPacketToHttpConsumer(replaySession, ctx1, REGULAR_RESPONSE_TIMEOUT)),
                     new TestFlowController(), timeShifter);
             for (int j = 0; j < 2; ++j) {
                 for (int i = 0; i < 2; ++i) {

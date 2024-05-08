@@ -309,8 +309,7 @@ public class TrafficReplayer {
             var tr = new TrafficReplayerTopLevel(topContext, uri, authTransformer,
                     new TransformationLoader().getTransformerFactoryLoader(uri.getHost(), params.userAgent, transformerConfig),
                     TrafficReplayerTopLevel.makeClientConnectionPool(
-                            uri, params.allowInsecureConnections, params.numClientThreads,
-                            Duration.ofSeconds(params.targetServerResponseTimeoutSeconds)),
+                            uri, params.allowInsecureConnections, params.numClientThreads),
                     new TrafficStreamLimiter(params.maxConcurrentRequests), orderedRequestTracker);
             activeContextMonitor = new ActiveContextMonitor(
                     globalContextTracker, perContextTracker, orderedRequestTracker, 64,
@@ -326,7 +325,9 @@ public class TrafficReplayer {
             setupShutdownHookForReplayer(tr);
             var tupleWriter = new TupleParserChainConsumer(new ResultsToLogsConsumer());
             var timeShifter = new TimeShifter(params.speedupFactor);
-            tr.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(params.observedPacketConnectionTimeout),
+            tr.setupRunAndWaitForReplayWithShutdownChecks(
+                Duration.ofSeconds(params.observedPacketConnectionTimeout),
+                Duration.ofSeconds(params.targetServerResponseTimeoutSeconds),
                     blockingTrafficSource, timeShifter, tupleWriter);
             log.info("Done processing TrafficStreams");
         } finally {

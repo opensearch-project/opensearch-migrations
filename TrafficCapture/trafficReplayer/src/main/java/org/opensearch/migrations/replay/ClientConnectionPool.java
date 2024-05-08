@@ -22,7 +22,6 @@ import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import org.opensearch.migrations.replay.util.TrackedFuture;
 
 import java.net.URI;
-import java.time.Duration;
 import java.util.concurrent.CompletableFuture;
 
 @Slf4j
@@ -32,7 +31,6 @@ public class ClientConnectionPool {
     private final SslContext sslContext;
     public final NioEventLoopGroup eventLoopGroup;
     private final LoadingCache<Key, ConnectionReplaySession> connectionId2ChannelCache;
-    private final Duration timeout;
 
     @EqualsAndHashCode
     @AllArgsConstructor
@@ -48,11 +46,9 @@ public class ClientConnectionPool {
     public ClientConnectionPool(@NonNull URI serverUri,
                                 SslContext sslContext,
                                 @NonNull String targetConnectionPoolName,
-                                int numThreads,
-                                @NonNull Duration timeout) {
+                                int numThreads) {
         this.serverUri = serverUri;
         this.sslContext = sslContext;
-        this.timeout = timeout;
         this.eventLoopGroup =
                 new NioEventLoopGroup(numThreads, new DefaultThreadFactory(targetConnectionPoolName));
 
@@ -80,7 +76,7 @@ public class ClientConnectionPool {
         return new AdaptiveRateLimiter<String, ChannelFuture>()
                 .get(() ->
                         NettyPacketToHttpConsumer.createClientConnection(eventLoop,
-                                        sslContext, serverUri, connectionContext, timeout)
+                                        sslContext, serverUri, connectionContext)
                                 .whenComplete((v,t)-> {
                                     if (t == null) {
                                         log.atDebug().setMessage(() -> "New network connection result for " +
