@@ -1,5 +1,0 @@
-# Transitive dependency from moto, explicit version needed to mitigate CVE-2023-46136
-werkzeug>=3.0.1
-coverage>=7.3.2
-pur>=7.3.1
-moto>=4.2.7
