@@ -70,11 +70,6 @@ def _initialize_logging():
 
 
 def validate_environment():
-    # Local testing values
-    os.environ['AWS_REGION'] = 'us-west-2'
-    os.environ['MIGRATION_SOLUTION_VERSION'] = '1.0.5'
-    os.environ['MIGRATION_STAGE'] = 'aws-integ'
-    os.environ['MIGRATION_DOMAIN_ENDPOINT'] = 'http://test:123'
     env_vars = ['AWS_REGION', 'MIGRATION_SOLUTION_VERSION', 'MIGRATION_STAGE', 'MIGRATION_DOMAIN_ENDPOINT']
     for i in env_vars:
         if os.environ.get(i) is None:
@@ -339,14 +334,15 @@ def osi_create_pipeline(osi_client, pipeline_name: str, pipeline_config: str, su
     cw_log_options = {
         'IsLoggingEnabled': False
     }
-    # Seeing issues from CW log group naming that need further investigation
-    # if cw_log_group_name is not None:
-    #     cw_log_options = {
-    #         'IsLoggingEnabled': True,
-    #         'CloudWatchLogDestination': {
-    #             'LogGroup': cw_log_group_name
-    #         }
-    #     }
+    # Currently limited that CW log groups must already be created and follow naming pattern
+    # /aws/vendedlogs/<name>
+    if cw_log_group_name is not None:
+        cw_log_options = {
+            'IsLoggingEnabled': True,
+            'CloudWatchLogDestination': {
+                'LogGroup': cw_log_group_name
+            }
+        }
 
     osi_client.create_pipeline(
         PipelineName=pipeline_name,
@@ -392,6 +388,7 @@ def create_pipeline_from_stage(osi_client, pipeline_name: str, pipeline_config_p
     param_dict = {}
     for param in parameters:
         param_dict[param['Name']] = param['Value']
+    log_group_name = param_dict[osi_log_group_key]
     vpc_id = param_dict[vpc_id_key]
     security_groups = [param_dict[target_sg_id_key], param_dict[source_sg_id_key]]
     subnet_ids = get_private_subnets(vpc_id)
@@ -409,15 +406,18 @@ def create_pipeline_from_stage(osi_client, pipeline_name: str, pipeline_config_p
         exit(0)
 
     if print_command_only:
-        print(f"./osiMigration.py create-pipeline --source-endpoint={source_endpoint} "
-              f"--target-endpoint={target_endpoint} --aws-region={region} --subnet-ids={','.join(map(str,subnet_ids))} "
-              f"--security-group-ids={','.join(map(str,security_groups))} --source-auth-type='SIGV4' "
-              f"--target-auth-type='SIGV4' --pipeline-role-arn={pipeline_role_arn} "
-              f"--tag=migration_deployment={solution_version}")
+        command_str = (f"./osiMigration.py create-pipeline --source-endpoint={source_endpoint} "
+                       f"--target-endpoint={target_endpoint} --aws-region={region} "
+                       f"--subnet-ids={','.join(map(str,subnet_ids))} "
+                       f"--security-group-ids={','.join(map(str,security_groups))} "
+                       f"--source-auth-type='SIGV4' --target-auth-type='SIGV4' --pipeline-role-arn={pipeline_role_arn} "
+                       f"--tag=migration_deployment={solution_version} --log-group-name={log_group_name}")
+        print(command_str)
         exit(0)
 
-    osi_create_pipeline(osi_client, pipeline_name, pipeline_config, subnet_ids, security_groups,
-                        param_dict[osi_log_group_key], tags)
+    osi_create_pipeline(osi_client=osi_client, pipeline_name=pipeline_name, pipeline_config=pipeline_config,
+                        subnet_ids=subnet_ids, security_group_ids=security_groups,
+                        cw_log_group_name=log_group_name, tags=tags)
 
 
 if __name__ == "__main__":
