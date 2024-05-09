@@ -47,7 +47,7 @@ public class FileSystemRepo implements SourceRepo {
         try {
             return findRepoFile();
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            throw new CantFindRepoIndexFile(e);
         }
     }
 
@@ -92,5 +92,11 @@ public class FileSystemRepo implements SourceRepo {
     @Override
     public void prepBlobFiles(ShardMetadata.Data shardMetadata) {
         // No work necessary for local filesystem
+    }
+
+    public static class CantFindRepoIndexFile extends RfsException {
+        public CantFindRepoIndexFile(Throwable cause) {
+            super("Can't find the repo index file in the repo directory", cause);
+        }
     }
 }

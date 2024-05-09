@@ -14,7 +14,7 @@ public class GlobalMetadataFactory_ES_7_10 implements com.rfs.common.GlobalMetad
     }
 
     @Override
-    public GlobalMetadata.Data fromJsonNode(JsonNode root) throws Exception {
+    public GlobalMetadata.Data fromJsonNode(JsonNode root) {
         ObjectNode metadataRoot = (ObjectNode) root.get("meta-data");
         return new GlobalMetadataData_ES_7_10(metadataRoot);
     }

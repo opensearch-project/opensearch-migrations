@@ -11,6 +11,7 @@ import java.util.Map;
 
 import com.rfs.common.SourceRepo;
 import com.rfs.common.SnapshotRepo;
+import com.rfs.common.SnapshotRepo.CantParseRepoFile;
 
 public class SnapshotRepoData_ES_7_10 {
     public static SnapshotRepoData_ES_7_10 fromRepoFile(Path filePath) {
@@ -20,14 +21,14 @@ public class SnapshotRepoData_ES_7_10 {
             data.filePath = filePath;
             return data;
         } catch (IOException e) {
-            throw new RuntimeException(e);
+            throw new CantParseRepoFile("Can't read or parse the Repo Metadata file: " + filePath.toString(), e);
         }
     }
 
     public static SnapshotRepoData_ES_7_10 fromRepo(SourceRepo repo) {
         Path file = repo.getSnapshotRepoDataFilePath();
         if (file == null) {
-            throw new RuntimeException("No index file found in " + repo.getRepoRootDir());
+            throw new CantParseRepoFile("No index file found in " + repo.getRepoRootDir());
         }
         return fromRepoFile(file);
     }

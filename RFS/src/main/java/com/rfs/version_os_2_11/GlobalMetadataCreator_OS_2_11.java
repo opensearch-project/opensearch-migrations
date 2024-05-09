@@ -24,7 +24,7 @@ public class GlobalMetadataCreator_OS_2_11 {
         this.indexTemplateWhitelist = indexTemplateWhitelist;
     }
 
-    public void create(ObjectNode root) throws Exception {
+    public void create(ObjectNode root) {
         logger.info("Setting Global Metadata");
 
         GlobalMetadataData_OS_2_11 globalMetadata = new GlobalMetadataData_OS_2_11(root);
@@ -33,7 +33,7 @@ public class GlobalMetadataCreator_OS_2_11 {
         createIndexTemplates(globalMetadata, client, indexTemplateWhitelist);
     }
 
-    protected void createLegacyTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> templateWhitelist) throws Exception {
+    protected void createLegacyTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> templateWhitelist) {
         logger.info("Setting Legacy Templates");
         ObjectNode templates = globalMetadata.getTemplates();
 
@@ -67,7 +67,7 @@ public class GlobalMetadataCreator_OS_2_11 {
         }
     }
 
-    protected void createComponentTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> indexTemplateWhitelist) throws Exception {
+    protected void createComponentTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> indexTemplateWhitelist) {
         logger.info("Setting Component Templates");
         ObjectNode templates = globalMetadata.getComponentTemplates();
 
@@ -101,7 +101,7 @@ public class GlobalMetadataCreator_OS_2_11 {
         }
     }
 
-    protected void createIndexTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> indexTemplateWhitelist) throws Exception {
+    protected void createIndexTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> indexTemplateWhitelist) {
         logger.info("Setting Index Templates");
         ObjectNode templates = globalMetadata.getIndexTemplates();
 

@@ -267,7 +267,7 @@ public class OpenSearchClient {
         }
     }
 
-    public static class OperationFailed extends RuntimeException {
+    public static class OperationFailed extends RfsException {
         public final RestClient.Response response;
 
         public OperationFailed(String message, RestClient.Response response) {

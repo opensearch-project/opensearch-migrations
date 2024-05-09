@@ -38,7 +38,7 @@ public class S3Repo implements SourceRepo {
         try {
             return Integer.parseInt(key.substring(key.lastIndexOf('-') + 1));
         } catch (NumberFormatException e) {
-            throw new RuntimeException("Failed to extract version from S3 object key: " + key, e);
+            throw new CantExtractIndexFileVersion(key, e);
         }
     }
 
@@ -64,7 +64,7 @@ public class S3Repo implements SourceRepo {
         try {
             Files.createDirectories(localPath);
         } catch (IOException e) {
-            throw new RuntimeException("Failed to create local directory: " + localPath, e);
+            throw new CantCreateS3LocalDir(localPath, e);
         }
     }
 
@@ -203,5 +203,17 @@ public class S3Repo implements SourceRepo {
 
         // Print out any failed downloads
         completedDirectoryDownload.failedTransfers().forEach(logger::error);
+    }
+
+    public static class CantCreateS3LocalDir extends RfsException {
+        public CantCreateS3LocalDir(Path localPath, Throwable cause) {
+            super("Failed to create the S3 local download directory: " + localPath, cause);
+        }
+    }
+
+    public static class CantExtractIndexFileVersion extends RfsException {
+        public CantExtractIndexFileVersion(String key, Throwable cause) {
+            super("Failed to extract the Index File version from S3 object key: " + key, cause);
+        }
     }
 }

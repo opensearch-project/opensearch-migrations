@@ -10,6 +10,7 @@ import com.rfs.cms.CmsClient;
 import com.rfs.cms.CmsEntry;
 import com.rfs.cms.OpenSearchCmsClient;
 import com.rfs.common.GlobalMetadata;
+import com.rfs.common.RfsException;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
 
@@ -188,7 +189,6 @@ public class MetadataStep {
 
     public static class MigrateTemplates extends Base {
         private boolean updatedEntry = false;
-        private MetadataMigrationFailed e = null;
 
         public MigrateTemplates(SharedMembers members) {
             super(members);
@@ -196,30 +196,24 @@ public class MetadataStep {
 
         @Override
         public void run() {
-            try {
-                logger.info("Setting the worker's current work item to be the Metadata Migration...");
-                members.globalState.updateWorkItem(new OpenSearchWorkItem(OpenSearchCmsClient.CMS_INDEX_NAME, OpenSearchCmsClient.CMS_METADATA_DOC_ID));
-                logger.info("Work item set");
+            logger.info("Setting the worker's current work item to be the Metadata Migration...");
+            members.globalState.updateWorkItem(new OpenSearchWorkItem(OpenSearchCmsClient.CMS_INDEX_NAME, OpenSearchCmsClient.CMS_METADATA_DOC_ID));
+            logger.info("Work item set");
 
-                logger.info("Migrating the Templates...");
-                GlobalMetadata.Data globalMetadata = members.metadataFactory.fromRepo(members.snapshotName);
-                ObjectNode root = globalMetadata.toObjectNode();
-                ObjectNode transformedRoot = members.transformer.transformGlobalMetadata(root);
-                members.metadataCreator.create(transformedRoot);
-                logger.info("Templates migration complete");
+            logger.info("Migrating the Templates...");
+            GlobalMetadata.Data globalMetadata = members.metadataFactory.fromRepo(members.snapshotName);
+            ObjectNode root = globalMetadata.toObjectNode();
+            ObjectNode transformedRoot = members.transformer.transformGlobalMetadata(root);
+            members.metadataCreator.create(transformedRoot);
+            logger.info("Templates migration complete");
 
-                logger.info("Updating the Metadata Migration entry to indicate completion...");
-                updatedEntry = members.cmsClient.setMetadataMigrationStatus(CmsEntry.MetadataStatus.COMPLETED);
-                logger.info("Metadata Migration entry updated");
+            logger.info("Updating the Metadata Migration entry to indicate completion...");
+            updatedEntry = members.cmsClient.setMetadataMigrationStatus(CmsEntry.MetadataStatus.COMPLETED);
+            logger.info("Metadata Migration entry updated");
 
-                logger.info("Clearing the worker's current work item...");
-                members.globalState.updateWorkItem(null);
-                logger.info("Work item cleared");
-
-            } catch (Exception e) {
-                logger.error("Failed to migrate the Templates");
-                this.e = new MetadataMigrationFailed(e.getMessage());
-            }
+            logger.info("Clearing the worker's current work item...");
+            members.globalState.updateWorkItem(null);
+            logger.info("Work item cleared");
         }
 
         @Override
@@ -234,11 +228,7 @@ public class MetadataStep {
                 logger.warn("Completed migrating the templates but failed to update the Metadata Migration entry; retrying...");
                 return new GetEntry(members);
             }
-            if (updatedEntry && e == null) {
-                return new ExitPhaseSuccess(members);
-            } else {
-                return new ExitPhaseFailed(members, e);
-            }
+            return new ExitPhaseSuccess(members);
         }
     }
 
@@ -316,7 +306,7 @@ public class MetadataStep {
         }
     }
 
-    public static class MetadataMigrationFailed extends RuntimeException {
+    public static class MetadataMigrationFailed extends RfsException {
         public MetadataMigrationFailed(String message) {
             super("The Metadata Migration has failed.  Reason: " + message);
         }

@@ -10,19 +10,19 @@ public class GlobalMetadataData_ES_7_10 implements com.rfs.common.GlobalMetadata
     }
 
     @Override
-    public ObjectNode toObjectNode() throws Exception {
+    public ObjectNode toObjectNode() {
         return root;
     }
 
-    public ObjectNode getTemplates() throws Exception {
+    public ObjectNode getTemplates() {
         return (ObjectNode) root.get("templates");
     }
 
-    public ObjectNode getIndexTemplates() throws Exception {
+    public ObjectNode getIndexTemplates() {
         return (ObjectNode) root.get("index_template").get("index_template");
     }
 
-    public ObjectNode getComponentTemplates() throws Exception {
+    public ObjectNode getComponentTemplates() {
         return (ObjectNode) root.get("component_template").get("component_template");
     }
 }

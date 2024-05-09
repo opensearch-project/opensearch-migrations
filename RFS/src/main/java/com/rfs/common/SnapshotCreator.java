@@ -88,25 +88,25 @@ public abstract class SnapshotCreator {
         }
     }
 
-    public static class RepoRegistrationFailed extends RuntimeException {
+    public static class RepoRegistrationFailed extends RfsException {
         public RepoRegistrationFailed(String repoName) {
             super("Failed to register repo " + repoName);
         }
     }
 
-    public static class SnapshotCreationFailed extends RuntimeException {
+    public static class SnapshotCreationFailed extends RfsException {
         public SnapshotCreationFailed(String snapshotName) {
             super("Failed to create snapshot " + snapshotName);
         }
     }
 
-    public static class SnapshotDoesNotExist extends RuntimeException {
+    public static class SnapshotDoesNotExist extends RfsException {
         public SnapshotDoesNotExist(String snapshotName) {
             super("Snapshot " + snapshotName + " does not exist");
         }
     }
 
-    public static class SnapshotStatusUnparsable extends RuntimeException {
+    public static class SnapshotStatusUnparsable extends RfsException {
         public SnapshotStatusUnparsable(String snapshotName) {
             super("Status of Snapshot " + snapshotName + " is not parsable");
         }

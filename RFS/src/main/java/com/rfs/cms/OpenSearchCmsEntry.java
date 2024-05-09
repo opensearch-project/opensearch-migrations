@@ -4,6 +4,7 @@ import java.util.Date;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.rfs.common.RfsException;
 
 public class OpenSearchCmsEntry {
     private static final ObjectMapper objectMapper = new ObjectMapper();
@@ -29,7 +30,7 @@ public class OpenSearchCmsEntry {
                     CmsEntry.SnapshotStatus.valueOf(sourceNode.get(FIELD_STATUS).asText())
                 );
             } catch (Exception e) {
-                throw new RuntimeException(e);
+                throw new CantParseCmsEntryFromJson(Snapshot.class, json, e);
             }
         }
 
@@ -73,7 +74,7 @@ public class OpenSearchCmsEntry {
                     sourceNode.get(FIELD_NUM_ATTEMPTS).asInt()
                 );
             } catch (Exception e) {
-                throw new RuntimeException(e);
+                throw new CantParseCmsEntryFromJson(Metadata.class, json, e);
             }
         }
 
@@ -87,6 +88,12 @@ public class OpenSearchCmsEntry {
             node.put(FIELD_LEASE_EXPIRY, leaseExpiry);
             node.put(FIELD_NUM_ATTEMPTS, numAttempts);
             return node;
+        }
+    }
+
+    public static class CantParseCmsEntryFromJson extends RfsException {
+        public CantParseCmsEntryFromJson(Class<?> entryClass, String json, Exception e) {
+            super("Failed to parse CMS entry of type " + entryClass.getName() + " from JSON: " + json, e);
         }
     }
 }
