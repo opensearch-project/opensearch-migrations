@@ -36,7 +36,7 @@ dependencies {
     implementation group: 'com.lmax', name: 'disruptor'
 
     implementation group: 'com.beust', name: 'jcommander'
-    implementation 'com.google.protobuf:protobuf-java:3.22.2'
+    implementation group: "com.google.protobuf", name: "protobuf-java"
 
     testImplementation project(':captureProtobufs')
     testImplementation testFixtures(project(path: ':testUtilities'))
