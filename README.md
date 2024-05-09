@@ -17,11 +17,18 @@ OpenSearch upgrade, migration, and comparison tooling facilitates OpenSearch mig
 
 ## Supported cluster versions and platforms
 
-There are numerous combinations of source clusters, target clusters, and platforms. While the tools provided in this repository might work with various combinations, they might not support breaking changes between different source and target versions. Below is a growing support table that will be updated over time.
+There are numerous combinations of source clusters, target clusters, and platforms. While the tools provided in this repository might work with various combinations, they might not support breaking changes between different source and target versions. Below is a list of supported source and target versions and platforms.
 
-|Supported Sources|Supported Targets|Source Platform|Target Platform|
-|:---------------:|:---------------:|:-------------:|:-------------:|
-|ElasticSearch 7-7.10.2|OpenSearch 1.x and 2.x|AWS Self-Managed|AWS OpenSearch and OpenSearch Serverless|
+### Supported Source and Target Versions
+* Elasticsearch 6.x (Coming soon...)
+* Elasticsearch 7.0 - 7.17.x
+* OpenSearch 1.x
+* OpenSearch 2.x
+
+### Supported Source and Target Platforms
+* Self-managed (hosted by cloud provider)
+* Self-managed (on-premises)
+* Managed cloud offerings (e.g., Amazon OpenSearch, Amazon OpenSearch Serverless)
 
 ## Build and deploy
 
