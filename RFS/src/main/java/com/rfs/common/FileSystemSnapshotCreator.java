@@ -2,11 +2,8 @@ package com.rfs.common;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 public class FileSystemSnapshotCreator extends SnapshotCreator {
-    private static final Logger logger = LogManager.getLogger(FileSystemSnapshotCreator.class);
     private static final ObjectMapper mapper = new ObjectMapper();
 
     private final OpenSearchClient client;

@@ -2,16 +2,11 @@ package com.rfs.common;
 
 import java.util.Base64;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.ByteBufMono;
 
 public class RestClient {
-    private static final Logger logger = LogManager.getLogger(RestClient.class);
-
     public static class Response {
         public final int code;
         public final String body;

@@ -42,5 +42,5 @@ public interface CmsClient {
      * Updates all fields of the Metadata Migration entry in the CMS.  Returns true if the update was successful, and
      * false if something else updated it before we could
      */
-    public boolean updateMetadataEntry(CmsEntry.MetadataStatus status, Integer numAttempts, String leaseExpiry);
+    public boolean updateMetadataEntry(CmsEntry.MetadataStatus status, String leaseExpiry, Integer numAttempts);
 }

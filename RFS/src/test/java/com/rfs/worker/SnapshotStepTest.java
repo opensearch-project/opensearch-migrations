@@ -27,7 +27,7 @@ import static org.mockito.Mockito.*;
 
 
 @ExtendWith(MockitoExtension.class)
-public class SnapshotStateTest {
+public class SnapshotStepTest {
 
     @Test
     void EnterPhase_run_AsExpected() {

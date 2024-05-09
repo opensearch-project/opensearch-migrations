@@ -66,7 +66,7 @@ public class OpenSearchCmsClient implements CmsClient {
     }
 
     @Override
-    public boolean updateMetadataEntry(CmsEntry.MetadataStatus status, Integer numAttempts, String leaseExpiry) {
+    public boolean updateMetadataEntry(CmsEntry.MetadataStatus status, String leaseExpiry, Integer numAttempts) {
         OpenSearchCmsEntry.Metadata metadata = new OpenSearchCmsEntry.Metadata(status, leaseExpiry, numAttempts);
         return client.updateDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID, metadata.toJson());
     }

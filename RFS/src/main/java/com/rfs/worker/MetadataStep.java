@@ -98,13 +98,15 @@ public class MetadataStep {
                         long leaseExpiryMillis = Long.parseLong(metadataEntry.leaseExpiry);
                         Instant leaseExpiryInstant = Instant.ofEpochMilli(leaseExpiryMillis);
                         boolean leaseExpired = leaseExpiryInstant.isBefore(Instant.now());
+
+                        // Don't try to acquire the lease if we're already at the max number of attempts
+                        if (metadataEntry.numAttempts >= CmsEntry.Metadata.MAX_ATTEMPTS && leaseExpired) {
+                            return new ExitPhaseFailed(members, new MaxAttemptsExceeded());
+                        }
+
                         if (leaseExpired) {
                             return new AcquireLease(members, metadataEntry);
                         } 
-
-                        if (metadataEntry.numAttempts > CmsEntry.Metadata.MAX_ATTEMPTS) {
-                            return new ExitPhaseFailed(members, new MaxAttemptsExceeded());
-                        }
                         
                         logger.info("Metadata Migration entry found, but there's already a valid work lease on it");
                         return new RandomWait(members);
@@ -152,6 +154,10 @@ public class MetadataStep {
             this.existingEntry = existingEntry;
         }
 
+        protected Instant getNow() {
+            return Instant.now();
+        }
+
         @Override
         public void run() {
             logger.info("Current Metadata Migration work lease appears to have expired; attempting to acquire it...");
@@ -159,8 +165,8 @@ public class MetadataStep {
             // TODO: Should be using the server-side clock here
             this.acquiredLease = members.cmsClient.updateMetadataEntry(
                 CmsEntry.MetadataStatus.IN_PROGRESS,
-                existingEntry.numAttempts + 1,
-                String.valueOf(Instant.now().plusMillis(CmsEntry.Metadata.METADATA_LEASE_MS).toEpochMilli())
+                String.valueOf(getNow().plusMillis(CmsEntry.Metadata.METADATA_LEASE_MS).toEpochMilli()),
+                existingEntry.numAttempts + 1
             );
 
             if (acquiredLease) {
