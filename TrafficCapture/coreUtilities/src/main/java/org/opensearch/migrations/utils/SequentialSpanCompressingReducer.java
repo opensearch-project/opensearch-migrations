@@ -3,11 +3,16 @@ package org.opensearch.migrations.utils;
 import lombok.AllArgsConstructor;
 
 /**
- * This class can be used to reduce a stream of Integers into a string (calling getFinalAccumulation()) To use
- * ```
- * Stream&lt;Integer&gt;...reduce(new SequentialSpanCompressingReducer(-1), SequentialSpanCompressingReducer::addNext,
- *          (c, d) -> { throw new IllegalStateException("parallel streams aren't allowed"); })
- * ```
+ * This class can be used to reduce a stream of Integers into a string (calling getFinalAccumulation()).
+ *
+ * Example usage:
+ * <pre>{@code
+ * Stream<Integer> stream = ...
+ * String result = stream.reduce(new SequentialSpanCompressingReducer(-1),
+ *                                SequentialSpanCompressingReducer::addNext,
+ *                                (c, d) -> { throw new IllegalStateException("parallel streams aren't allowed"); })
+ *                      .getFinalAccumulation();
+ * }</pre>
  */
 @AllArgsConstructor
 public class SequentialSpanCompressingReducer {
