@@ -92,8 +92,8 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
         chunks.add(nextRequestPacket.retainedDuplicate());
         chunkSizes.get(chunkSizes.size() - 1).add(nextRequestPacket.readableBytes());
-        log.atTrace().log(() -> "HttpJsonTransformingConsumer[" + this + "]: writing into embedded channel: "
-                   + nextRequestPacket.toString(StandardCharsets.UTF_8));
+        log.atTrace().setMessage("{}").addArgument(() -> "HttpJsonTransformingConsumer[" + this + "]: writing into embedded channel: "
+                   + nextRequestPacket.toString(StandardCharsets.UTF_8)).log();
         return TextTrackedFuture.completedFuture(null, ()->"initialValue")
             .map(cf->cf.thenAccept(x -> channel.writeInbound(nextRequestPacket)),
                 ()->"HttpJsonTransformingConsumer sending bytes to its EmbeddedChannel");

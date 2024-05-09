@@ -240,7 +240,7 @@ public abstract class TrafficReplayerCore {
             log.trace("done sending and finalizing data to the packet handler");
 
             try (var requestResponseTuple = getSourceTargetCaptureTuple(tupleHandlingContext, rrPair, summary, t)) {
-                log.atDebug().setMessage(()->"Source/Target Request/Response tuple: " + requestResponseTuple).log();
+                log.atDebug().setMessage("{}").addArgument(()->"Source/Target Request/Response tuple: " + requestResponseTuple).log();
                 tupleWriter.accept(requestResponseTuple);
             }
 
@@ -379,7 +379,7 @@ public abstract class TrafficReplayerCore {
                                 .map(ts -> TrafficStreamUtils.summarizeTrafficStream(ts.getStream()))
                                 .collect(Collectors.joining(";")))
                         .filter(s -> !s.isEmpty())
-                        .ifPresent(s -> log.atInfo().log("TrafficStream Summary: {" + s + "}"));
+                        .ifPresent(s -> log.atInfo().setMessage("{}").addArgument("TrafficStream Summary: {" + s + "}").log());
             }
             trafficStreams.forEach(trafficToHttpTransactionAccumulator::accept);
         }

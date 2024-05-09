@@ -51,7 +51,7 @@ public class ActiveContextMonitor implements Runnable {
                                 Function<TrackedFuture<String, Void>, String> formatWorkItem,
                                 Logger logger) {
         this(globalContextTracker, perActivityContextTracker, orderedRequestTracker, totalItemsToOutputLimit,
-                formatWorkItem, (level, supplier)->logger.atLevel(level).setMessage(supplier).log(),
+                formatWorkItem, (level, supplier)->logger.atLevel(level).setMessage("{}").addArgument(supplier).log(),
                 logger::isEnabledForLevel);
     }
 
