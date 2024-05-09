@@ -2,10 +2,10 @@ package org.opensearch.migrations.trafficcapture;
 
 import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Timestamp;
+import io.netty.buffer.ByteBuf;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
-import java.nio.ByteBuffer;
 import java.time.Instant;
 
 /**
@@ -28,24 +28,40 @@ public class CodedOutputStreamSizeUtil {
 
     /**
      * This function calculates the maximum bytes that would be needed to store a [Read/Write]SegmentObservation, if constructed
-     * from the given ByteBuffer and associated segment field numbers and values passed in. This estimate is essentially
-     * the max size needed in the CodedOutputStream to store the provided ByteBuffer data and its associated TrafficStream
+     * from the given ByteBuf and associated segment field numbers and values passed in. This estimate is essentially
+     * the max size needed in the CodedOutputStream to store the provided ByteBuf data and its associated TrafficStream
      * overhead. The actual required bytes could be marginally smaller.
      */
     public static int maxBytesNeededForASegmentedObservation(Instant timestamp, int observationFieldNumber,
-                                                             int dataFieldNumber, ByteBuffer buffer) {
+                                                             int dataFieldNumber, ByteBuf buf) {
         // Timestamp required bytes
         int tsContentSize = getSizeOfTimestamp(timestamp);
         int tsTagAndContentSize = CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsContentSize) + tsContentSize;
 
         // Capture required bytes
-        int dataSize = CodedOutputStream.computeByteBufferSize(dataFieldNumber, buffer);
+        int dataSize = computeByteBufRemainingSize(dataFieldNumber, buf);
         int captureTagAndContentSize = CodedOutputStream.computeInt32Size(observationFieldNumber, dataSize) + dataSize;
 
         // Observation and closing index required bytes
         return bytesNeededForObservationAndClosingIndex(tsTagAndContentSize + captureTagAndContentSize,
                 Integer.MAX_VALUE);
     }
+
+    /**
+     * This function determines the number of bytes needed to write the readable bytes in a byteBuf and its tag.
+     */
+    public static int computeByteBufRemainingSize(int fieldNumber, ByteBuf buf) {
+        return CodedOutputStream.computeTagSize(fieldNumber) + computeByteBufRemainingSizeNoTag(buf);
+    }
+
+    /**
+     * This function determines the number of bytes needed to write the readable bytes in a byteBuf.
+     */
+    public static int computeByteBufRemainingSizeNoTag(ByteBuf buf) {
+        int bufSize = buf.readableBytes();
+        return CodedOutputStream.computeUInt32SizeNoTag(bufSize) + bufSize;
+    }
+
 
     /**
      * This function determines the number of bytes needed to store a TrafficObservation and a closing index for a

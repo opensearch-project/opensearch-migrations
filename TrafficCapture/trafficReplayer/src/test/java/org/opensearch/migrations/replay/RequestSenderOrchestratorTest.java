@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay;
 
+import static org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest.REGULAR_RESPONSE_TIMEOUT;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.FullHttpResponse;
@@ -90,8 +92,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
         final int NUM_PACKETS = 3;
 
         var clientConnectionPool = TrafficReplayerTopLevel.makeClientConnectionPool(new URI("http://localhost"),
-                false, 1, "testFutureGraphBuildout targetConnectionPool",
-                Duration.ofSeconds(30));
+                false, 1, "testFutureGraphBuildout targetConnectionPool");
         var connectionToConsumerMap = new HashMap<Long, BlockingPacketConsumer>();
         var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool, (s,c) ->
                 connectionToConsumerMap.get(c.getSourceRequestIndex()));
@@ -168,10 +169,10 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                 r -> TestHttpServerContext.makeResponse(r, Duration.ofMillis(100)))) {
             var testServerUri = httpServer.localhostEndpoint();
             var clientConnectionPool = TrafficReplayerTopLevel.makeClientConnectionPool(testServerUri, false,
-                    1, "targetConnectionPool for testThatSchedulingWorks",
-                    Duration.ofSeconds(30));
+                    1, "targetConnectionPool for testThatSchedulingWorks");
             var senderOrchestrator =
-                    new RequestSenderOrchestrator(clientConnectionPool, NettyPacketToHttpConsumer::new);
+                    new RequestSenderOrchestrator(clientConnectionPool,
+                        (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, REGULAR_RESPONSE_TIMEOUT));
             var baseTime = Instant.now();
             Instant lastEndTime = baseTime;
             var scheduledItems = new ArrayList<TrackedFuture<String, AggregatedRawResponse>>();
@@ -210,7 +211,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                     var body = response.content();
                     Assertions.assertEquals(TestHttpServerContext.SERVER_RESPONSE_BODY_PREFIX +
                                     TestHttpServerContext.getUriForIthRequest(i / NUM_REPEATS),
-                        body.duplicate().toString(StandardCharsets.UTF_8));
+                        body.toString(StandardCharsets.UTF_8));
                 }
             }
             closeFuture.get();

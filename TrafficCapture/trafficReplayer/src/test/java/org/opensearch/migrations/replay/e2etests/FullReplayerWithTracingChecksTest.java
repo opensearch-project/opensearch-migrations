@@ -97,7 +97,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                     RootReplayerConstructorExtensions.makeClientConnectionPool(serverUri, 10), 10 * 1024
             );
                  var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {
-                tr.setupRunAndWaitForReplayToFinish(Duration.ofSeconds(70), blockingTrafficSource,
+                tr.setupRunAndWaitForReplayToFinish(Duration.ofSeconds(70), Duration.ofSeconds(30), blockingTrafficSource,
                         new TimeShifter(10 * 1000),
                         t -> {
                             var wasNew = tuplesReceived.add(t.getRequestKey().toString());

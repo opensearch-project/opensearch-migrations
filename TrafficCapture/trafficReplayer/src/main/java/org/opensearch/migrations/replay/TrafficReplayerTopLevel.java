@@ -97,20 +97,19 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     }
 
     public static ClientConnectionPool makeClientConnectionPool(URI serverUri, boolean allowInsecureConnections,
-                                                                int numSendingThreads, Duration timeout)
+                                                                int numSendingThreads)
             throws SSLException {
-        return makeClientConnectionPool(serverUri, allowInsecureConnections, numSendingThreads, null, timeout);
+        return makeClientConnectionPool(serverUri, allowInsecureConnections, numSendingThreads, null);
     }
 
     public static ClientConnectionPool makeClientConnectionPool(URI serverUri,
                                                                 boolean allowInsecureConnections,
                                                                 int numSendingThreads,
-                                                                String connectionPoolName,
-                                                                Duration timeout) throws SSLException {
+                                                                String connectionPoolName) throws SSLException {
         return new ClientConnectionPool(serverUri, loadSslContext(serverUri, allowInsecureConnections),
                 connectionPoolName != null ? connectionPoolName :
                         getTargetConnectionPoolName(targetConnectionPoolUniqueCounter.getAndIncrement()),
-                numSendingThreads, timeout);
+                numSendingThreads);
     }
 
     public static String getTargetConnectionPoolName(int i) {
@@ -130,12 +129,15 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     }
 
     public void setupRunAndWaitForReplayToFinish(Duration observedPacketConnectionTimeout,
+                                                 Duration targetServerResponseTimeout,
                                                  BlockingTrafficSource trafficSource,
                                                  TimeShifter timeShifter,
                                                  Consumer<SourceTargetCaptureTuple> resultTupleConsumer)
             throws InterruptedException, ExecutionException {
 
-        var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool, NettyPacketToHttpConsumer::new);
+        var senderOrchestrator = new RequestSenderOrchestrator(clientConnectionPool,
+            (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx,
+                targetServerResponseTimeout));
         var replayEngine = new ReplayEngine(senderOrchestrator, trafficSource, timeShifter);
 
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
@@ -204,13 +206,14 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     }
 
     public void setupRunAndWaitForReplayWithShutdownChecks(Duration observedPacketConnectionTimeout,
+                                                           Duration targetServerResponseTimeout,
                                                            BlockingTrafficSource trafficSource,
                                                            TimeShifter timeShifter,
                                                            Consumer<SourceTargetCaptureTuple> resultTupleConsumer)
             throws TrafficReplayer.TerminationException, ExecutionException, InterruptedException {
         try {
-            setupRunAndWaitForReplayToFinish(observedPacketConnectionTimeout, trafficSource,
-                    timeShifter, resultTupleConsumer);
+            setupRunAndWaitForReplayToFinish(observedPacketConnectionTimeout, targetServerResponseTimeout,
+                trafficSource, timeShifter, resultTupleConsumer);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new TrafficReplayer.TerminationException(shutdownReasonRef.get(), e);

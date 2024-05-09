@@ -11,6 +11,10 @@ def calculateDockerHash = { projectName ->
     CommonUtils.calculateDockerHash(projectName, project)
 }
 
+clean.doFirst {
+    delete project.file("./src/main/docker/migrationConsole/build")
+}
+
 dependencies {
     implementation project(':trafficCaptureProxyServer')
     implementation project(':trafficReplayer')
