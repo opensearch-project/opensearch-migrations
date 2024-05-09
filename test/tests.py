@@ -316,11 +316,9 @@ class E2ETests(unittest.TestCase):
         # requests on the same connection on the proxy that has a minute gap
         seconds_between_requests = 60  # 1 minute
 
-        # Set a consistent session to be used for this test
-        session = Session()
+        proxy_single_connection_session = Session()
         adapter = HTTPAdapter(pool_connections=1, pool_maxsize=1, max_retries=1)
-        session.mount('http://', adapter)
-        session.mount('https://', adapter)
+        proxy_single_connection_session.mount(self.proxy_endpoint, adapter)
 
         index_name = f"test_0007_{self.unique_id}"
 
@@ -329,7 +327,7 @@ class E2ETests(unittest.TestCase):
         for doc_id_int in range(number_of_docs):
             doc_id = str(doc_id_int)
             proxy_response = create_document(self.proxy_endpoint, index_name, doc_id, self.source_auth,
-                                             self.source_verify_ssl, session)
+                                             self.source_verify_ssl, proxy_single_connection_session)
             self.assertEqual(proxy_response.status_code, HTTPStatus.CREATED)
 
             if doc_id_int + 1 < number_of_docs:
@@ -340,4 +338,4 @@ class E2ETests(unittest.TestCase):
                 doc_id = str(doc_id_int)
                 self.assert_source_target_doc_match(index_name, doc_id)
         finally:
-            session.close()
+            proxy_single_connection_session.close()
