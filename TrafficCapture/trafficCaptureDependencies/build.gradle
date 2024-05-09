@@ -78,7 +78,7 @@ dependencies {
 
     def bouncycastle = '1.78'
     implementation group: 'org.bouncycastle', name: 'bcprov-jdk18on', version: bouncycastle
-    implementation group: 'org.bouncycastle', name: 'bcpkix-jdk18on', version: '1.78'
+    implementation group: 'org.bouncycastle', name: 'bcpkix-jdk18on', version: bouncycastle
 
     def testcontainers = '1.19.7'
     implementation group: 'org.testcontainers', name: 'junit-jupiter', version: testcontainers
@@ -93,7 +93,7 @@ dependencies {
     implementation group: 'eu.rekawek.toxiproxy', name: 'toxiproxy-java', version: '2.1.7'
 
     // ************************************************************
-    // The following constraints are for mitigating downstream CVEs
+    // The following constraints are for mitigating transitive CVEs
     // ************************************************************
     implementation group: 'net.minidev', name: 'json-smart', version: '2.4.9'
     implementation group: 'xalan', name: 'xalan', version: '2.7.3'
