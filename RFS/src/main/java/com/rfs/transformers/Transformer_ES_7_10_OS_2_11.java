@@ -59,6 +59,21 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
         // Transform the component templates
         if (root.get("component_template") != null) {
             ObjectNode componentTemplatesRoot = (ObjectNode) root.get("component_template").deepCopy();
+            ObjectNode componentTemplateValuesRoot = (ObjectNode) componentTemplatesRoot.get("component_template");
+            componentTemplateValuesRoot.fieldNames().forEachRemaining(templateName -> {
+                ObjectNode template = (ObjectNode) componentTemplateValuesRoot.get(templateName);
+                ObjectNode templateSubRoot = (ObjectNode) template.get("template");
+
+                if (templateSubRoot == null) {
+                    return;
+                }
+
+                logger.info("Transforming template: " + templateName);
+                logger.debug("Original template: " + template.toString());
+                // No transformation needed for component templates
+                logger.debug("Transformed template: " + template.toString());
+                componentTemplateValuesRoot.set(templateName, template);
+            });
             newRoot.set("component_template", componentTemplatesRoot);
         }
 

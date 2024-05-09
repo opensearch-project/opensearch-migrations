@@ -234,35 +234,29 @@ public class MetadataStep {
 
     public static class RandomWait extends Base {
         private final static int WAIT_TIME_MS = 5 * 1000; // arbitrarily chosen
-        private MetadataMigrationFailed e = null;
 
         public RandomWait(SharedMembers members) {
             super(members);
         }
 
-        protected void waitABit() throws InterruptedException {
-            Thread.sleep(WAIT_TIME_MS);
+        protected void waitABit() {
+            try {
+                Thread.sleep(WAIT_TIME_MS);
+            } catch (InterruptedException e) {
+                logger.error("Interrupted while performing a wait", e);
+                throw new MetadataMigrationFailed("Interrupted");
+            }
         }
 
         @Override
         public void run() {
             logger.info("Backing off for " + WAIT_TIME_MS  + " milliseconds before checking the Metadata Migration entry again...");
-
-            try {
-                waitABit();
-            } catch (InterruptedException e) {
-                logger.error("Interrupted while performing a wait", e);
-                this.e = new MetadataMigrationFailed("Interrupted");
-            }
+            waitABit();            
         }
 
         @Override
         public WorkerStep nextStep() {
-            if (e == null) {
-                return new GetEntry(members);
-            } else {                
-                return new ExitPhaseFailed(members, e);
-            }
+            return new GetEntry(members);
         }
     }
 
@@ -297,12 +291,11 @@ public class MetadataStep {
             logger.error("Metadata Migration failed");
             members.cmsClient.setMetadataMigrationStatus(CmsEntry.MetadataStatus.FAILED);
             members.globalState.updatePhase(GlobalState.Phase.METADATA_FAILED);
-            throw e;
         }
 
         @Override
         public WorkerStep nextStep() {
-            return null;
+            throw e;
         }
     }
 

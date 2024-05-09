@@ -17,14 +17,20 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.cms.CmsClient;
 import com.rfs.cms.CmsEntry;
+import com.rfs.cms.OpenSearchCmsClient;
 import com.rfs.common.GlobalMetadata;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
+import com.rfs.worker.MetadataStep.MaxAttemptsExceeded;
 import com.rfs.worker.MetadataStep.SharedMembers;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 
 
@@ -227,5 +233,121 @@ public class MetadataStepTest {
         );
         assertEquals(nextStepClass, nextStep.getClass());
     }
-    
+
+    static Stream<Arguments> provideMigrateTemplatesArgs() {
+        return Stream.of(
+            // We were able to acquire the lease
+            Arguments.of(true, MetadataStep.ExitPhaseSuccess.class),
+
+            // We were unable to acquire the lease
+            Arguments.of(false, MetadataStep.GetEntry.class)
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource("provideMigrateTemplatesArgs")
+    void MigrateTemplates_AsExpected(boolean updatedEntry, Class<?> nextStepClass) {
+        // Set up the test
+        GlobalMetadata.Data testGlobalMetadata = Mockito.mock(GlobalMetadata.Data.class);
+        ObjectNode testNode = Mockito.mock(ObjectNode.class);
+        ObjectNode testTransformedNode = Mockito.mock(ObjectNode.class);
+        Mockito.when(testMembers.metadataFactory.fromRepo(testMembers.snapshotName)).thenReturn(testGlobalMetadata);
+        Mockito.when(testGlobalMetadata.toObjectNode()).thenReturn(testNode);
+        Mockito.when(testMembers.transformer.transformGlobalMetadata(testNode)).thenReturn(testTransformedNode);
+        Mockito.when(testMembers.cmsClient.setMetadataMigrationStatus(CmsEntry.MetadataStatus.COMPLETED)).thenReturn(updatedEntry);
+
+        // Run the test
+        MetadataStep.MigrateTemplates testStep = new MetadataStep.MigrateTemplates(testMembers);
+        testStep.run();
+        WorkerStep nextStep = testStep.nextStep();
+
+        // Check the results
+        Mockito.verify(testMembers.globalState, times(1)).updateWorkItem(
+            argThat(argument -> {
+                if (!(argument instanceof OpenSearchWorkItem)) {
+                    return false;
+                }
+                OpenSearchWorkItem workItem = (OpenSearchWorkItem) argument;
+                return workItem.indexName.equals(OpenSearchCmsClient.CMS_INDEX_NAME) &&
+                    workItem.documentId.equals(OpenSearchCmsClient.CMS_METADATA_DOC_ID);
+            })
+        );
+        Mockito.verify(testMembers.metadataFactory, times(1)).fromRepo(
+            testMembers.snapshotName
+        );
+        Mockito.verify(testMembers.transformer, times(1)).transformGlobalMetadata(
+            testNode
+        );
+        Mockito.verify(testMembers.metadataCreator, times(1)).create(
+            testTransformedNode
+        );
+        Mockito.verify(testMembers.cmsClient, times(1)).setMetadataMigrationStatus(
+            CmsEntry.MetadataStatus.COMPLETED
+        );
+        Mockito.verify(testMembers.globalState, times(1)).updateWorkItem(
+            null
+        );
+
+        assertEquals(nextStepClass, nextStep.getClass());
+    }
+
+    public static class TestRandomWait extends MetadataStep.RandomWait {
+        public TestRandomWait(SharedMembers members) {
+            super(members);
+        }
+
+        @Override
+        protected void waitABit() {
+            // do nothing
+        }
+    }
+
+    @Test
+    void RandomWait_AsExpected() {
+        // Run the test
+        MetadataStep.RandomWait testStep = new TestRandomWait(testMembers);
+        testStep.run();
+        WorkerStep nextStep = testStep.nextStep();
+
+        // Check the results
+        assertEquals(MetadataStep.GetEntry.class, nextStep.getClass());
+    }
+
+    @Test
+    void ExitPhaseSuccess_AsExpected() {
+        // Run the test
+        MetadataStep.ExitPhaseSuccess testStep = new MetadataStep.ExitPhaseSuccess(testMembers);
+        testStep.run();
+        WorkerStep nextStep = testStep.nextStep();
+
+        // Check the results
+        Mockito.verify(testMembers.cmsClient, times(1)).setMetadataMigrationStatus(
+            CmsEntry.MetadataStatus.COMPLETED
+        );
+        Mockito.verify(testMembers.globalState, times(1)).updatePhase(
+            GlobalState.Phase.METADATA_COMPLETED
+        );
+        assertEquals(null, nextStep);
+    }
+
+    @Test
+    void ExitPhaseFailed_AsExpected() {
+        // Set up the test
+        MaxAttemptsExceeded e = new MaxAttemptsExceeded();
+
+        // Run the test
+        MetadataStep.ExitPhaseFailed testStep = new MetadataStep.ExitPhaseFailed(testMembers, e);
+        testStep.run();
+        assertThrows(MaxAttemptsExceeded.class, () -> {
+            testStep.nextStep();
+        });
+
+        // Check the results
+        Mockito.verify(testMembers.cmsClient, times(1)).setMetadataMigrationStatus(
+            CmsEntry.MetadataStatus.FAILED
+        );
+        Mockito.verify(testMembers.globalState, times(1)).updatePhase(
+            GlobalState.Phase.METADATA_FAILED
+        );
+    }
 }

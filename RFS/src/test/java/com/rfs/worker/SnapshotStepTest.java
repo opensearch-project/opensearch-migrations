@@ -213,8 +213,9 @@ public class SnapshotStepTest {
 
         // Run the test
         SnapshotStep.ExitPhaseSnapshotFailed exitPhase = new ExitPhaseSnapshotFailed(globalState, cmsClient, snapshotCreator, e);
+        exitPhase.run();
         assertThrows(SnapshotCreationFailed.class, () -> {
-            exitPhase.run();
+            exitPhase.nextStep();
         });
 
         // Check the results

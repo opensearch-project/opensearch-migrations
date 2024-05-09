@@ -34,15 +34,18 @@ public class GlobalMetadataCreator_OS_2_11 {
     }
 
     protected void createLegacyTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> templateWhitelist) {
-        logger.info("Setting Legacy Templates");
+        logger.info("Setting Legacy Templates...");
         ObjectNode templates = globalMetadata.getTemplates();
 
         if (templates == null){
-            logger.info("No Legacy Templates");
+            logger.info("No Legacy Templates in Snapshot");
             return;
         }
 
-        if (templateWhitelist != null) {
+        if (templateWhitelist != null && templateWhitelist.size() == 0) {
+            logger.info("No Legacy Templates in specified whitelist");
+            return;
+        } else if (templateWhitelist != null) {
             for (String templateName : templateWhitelist) {
                 if (!templates.has(templateName) || templates.get(templateName) == null) {
                     logger.warn("Legacy Template not found: " + templateName);
@@ -67,17 +70,20 @@ public class GlobalMetadataCreator_OS_2_11 {
         }
     }
 
-    protected void createComponentTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> indexTemplateWhitelist) {
-        logger.info("Setting Component Templates");
+    protected void createComponentTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> templateWhitelist) {
+        logger.info("Setting Component Templates...");
         ObjectNode templates = globalMetadata.getComponentTemplates();
 
         if (templates == null){
-            logger.info("No Component Templates");
+            logger.info("No Component Templates in Snapshot");
             return;
         }
 
-        if (indexTemplateWhitelist != null) {            
-            for (String templateName : indexTemplateWhitelist) {
+        if (templateWhitelist != null && templateWhitelist.size() == 0) {
+            logger.info("No Component Templates in specified whitelist");
+            return;
+        } else if (templateWhitelist != null) {            
+            for (String templateName : templateWhitelist) {
                 if (!templates.has(templateName) || templates.get(templateName) == null) {
                     logger.warn("Component Template not found: " + templateName);
                     continue;
@@ -101,17 +107,20 @@ public class GlobalMetadataCreator_OS_2_11 {
         }
     }
 
-    protected void createIndexTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> indexTemplateWhitelist) {
-        logger.info("Setting Index Templates");
+    protected void createIndexTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> templateWhitelist) {
+        logger.info("Setting Index Templates...");
         ObjectNode templates = globalMetadata.getIndexTemplates();
 
         if (templates == null){
-            logger.info("No Index Templates");
+            logger.info("No Index Templates in Snapshot");
             return;
         }
 
-        if (indexTemplateWhitelist != null) {
-            for (String templateName : indexTemplateWhitelist) {
+        if (templateWhitelist != null && templateWhitelist.size() == 0) {
+            logger.info("No Index Templates in specified whitelist");
+            return;
+        } else if (templateWhitelist != null) {
+            for (String templateName : templateWhitelist) {
                 if (!templates.has(templateName) || templates.get(templateName) == null) {
                     logger.warn("Index Template not found: " + templateName);
                     continue;

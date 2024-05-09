@@ -132,7 +132,7 @@ public class SnapshotStep {
                 }
             } catch (InterruptedException e) {
                 logger.error("Interrupted while waiting for Snapshot to complete", e);
-                this.e = new SnapshotCreationFailed(snapshotCreator.getSnapshotName());
+                throw new SnapshotCreationFailed(snapshotCreator.getSnapshotName());
             } catch (SnapshotCreationFailed e) {
                 this.e = e;
             } 
@@ -185,12 +185,11 @@ public class SnapshotStep {
             logger.error("Snapshot creation failed");
             cmsClient.updateSnapshotEntry(snapshotCreator.getSnapshotName(), SnapshotStatus.FAILED);
             globalState.updatePhase(GlobalState.Phase.SNAPSHOT_FAILED);
-            throw e;
         }
 
         @Override
         public WorkerStep nextStep() {
-            return null;
+            throw e;
         }
     }
 }
