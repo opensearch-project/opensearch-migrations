@@ -10,7 +10,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
@@ -49,10 +49,9 @@ public class AddCompressionEncodingTest extends InstrumentationTest {
                 "host: localhost\n" +
                 "content-length: " + (numParts * payloadPartSize) + "\n";
 
-        DiagnosticTrackableCompletableFuture<String, Void> tail =
-                compressingTransformer.consumeBytes(sourceHeaders.getBytes(StandardCharsets.UTF_8))
-                        .thenCompose(v -> compressingTransformer.consumeBytes("\n".getBytes(StandardCharsets.UTF_8)),
-                                () -> "AddCompressionEncodingTest.compressingTransformer");
+        var tail = compressingTransformer.consumeBytes(sourceHeaders.getBytes(StandardCharsets.UTF_8))
+                .thenCompose(v -> compressingTransformer.consumeBytes("\n".getBytes(StandardCharsets.UTF_8)),
+                        () -> "AddCompressionEncodingTest.compressingTransformer");
         final byte[] payloadPart = new byte[payloadPartSize];
         Arrays.fill(payloadPart, BYTE_FILL_VALUE);
         for (var i = new AtomicInteger(numParts); i.get() > 0; i.decrementAndGet()) {
@@ -67,7 +66,7 @@ public class AddCompressionEncodingTest extends InstrumentationTest {
 
         EmbeddedChannel channel = new EmbeddedChannel(
             new HttpServerCodec(),
-            new HttpObjectAggregator(Utils.MAX_PAYLOAD_SIZE_TO_PRINT)  // Set max content length if needed
+            new HttpObjectAggregator(Utils.MAX_PAYLOAD_BYTES_TO_PRINT)  // Set max content length if needed
         );
 
         channel.writeInbound(Unpooled.wrappedBuffer(testPacketCapture.getBytesCaptured()));

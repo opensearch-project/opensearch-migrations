@@ -149,10 +149,8 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 var channelContext = httpContext.getChannelKeyContext();
                 var eventLoop = new NioEventLoopGroup(1, new DefaultThreadFactory("test")).next();
                 var replaySession = new ConnectionReplaySession(eventLoop, channelContext,
-                        () -> ClientConnectionPool.getCompletedChannelFutureAsCompletableFuture(
-                                httpContext.getChannelKeyContext(),
-                                NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext,
-                                        testServer.localhostEndpoint(), channelContext, REGULAR_RESPONSE_TIMEOUT)));
+                        () -> NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext,
+                                testServer.localhostEndpoint(), channelContext, REGULAR_RESPONSE_TIMEOUT));
                 var nphc = new NettyPacketToHttpConsumer(replaySession, httpContext);
                 nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
                 var aggregatedResponse = nphc.finalizeRequest().get();
@@ -263,8 +261,9 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             timeShifter.setFirstTimestamp(Instant.now());
             var clientConnectionPool =  new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
                     "targetPool for testThatConnectionsAreKeptAliveAndShared", 1, REGULAR_RESPONSE_TIMEOUT);
-            var sendingFactory = new ReplayEngine(new RequestSenderOrchestrator(clientConnectionPool),
-                new TestFlowController(), timeShifter);
+            var sendingFactory = new ReplayEngine(
+                    new RequestSenderOrchestrator(clientConnectionPool, NettyPacketToHttpConsumer::new),
+                    new TestFlowController(), timeShifter);
             for (int j = 0; j < 2; ++j) {
                 for (int i = 0; i < 2; ++i) {
                     var ctx = rootContext.getTestConnectionRequestContext("TEST_" + i, j);

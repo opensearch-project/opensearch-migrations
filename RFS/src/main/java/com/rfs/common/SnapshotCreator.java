@@ -13,13 +13,13 @@ public abstract class SnapshotCreator {
     private static final Logger logger = LogManager.getLogger(SnapshotCreator.class);
     private static final ObjectMapper mapper = new ObjectMapper();
 
-    private final ConnectionDetails connectionDetails;
+    private final OpenSearchClient client;
     @Getter
     private final String snapshotName;
 
-    public SnapshotCreator(String snapshotName, ConnectionDetails connectionDetails) {
+    public SnapshotCreator(String snapshotName, OpenSearchClient client) {
         this.snapshotName = snapshotName;
-        this.connectionDetails = connectionDetails;
+        this.client = client;
     }
 
     abstract ObjectNode getRequestBodyForRegisterRepo();
@@ -29,15 +29,10 @@ public abstract class SnapshotCreator {
     }
 
     public void registerRepo() throws Exception {
-        // Assemble the REST path
-        String targetName = "_snapshot/" + getRepoName();
-
-        ObjectNode body = getRequestBodyForRegisterRepo();
+        ObjectNode settings = getRequestBodyForRegisterRepo();
 
         // Register the repo; it's fine if it already exists
-        RestClient client = new RestClient(connectionDetails);
-        String bodyString = body.toString();
-        RestClient.Response response = client.put(targetName, bodyString, false);
+        RestClient.Response response = client.registerSnapshotRepo(getRepoName(), settings);
         if (response.code == HttpURLConnection.HTTP_OK || response.code == HttpURLConnection.HTTP_CREATED) {
             logger.info("Snapshot repo registration successful");
         } else {
@@ -47,21 +42,16 @@ public abstract class SnapshotCreator {
     }
 
     public void createSnapshot() throws Exception {
-        // Assemble the REST path
-        String targetName = "_snapshot/" + getRepoName() + "/" + getSnapshotName();
-
-        // Assemble the request body
+        // Assemble the settings
         ObjectNode body = mapper.createObjectNode();
         body.put("indices", "_all");
         body.put("ignore_unavailable", true);
         body.put("include_global_state", true);
 
         // Register the repo; idempotent operation
-        RestClient client = new RestClient(connectionDetails);
-        String bodyString = body.toString();
-        RestClient.Response response = client.put(targetName, bodyString, false);
+        RestClient.Response response = client.createSnapshot(getRepoName(), getSnapshotName(), body);
         if (response.code == HttpURLConnection.HTTP_OK || response.code == HttpURLConnection.HTTP_CREATED) {
-            logger.info("Snapshot " + getSnapshotName() + " creation successful");
+            logger.info("Snapshot " + getSnapshotName() + " creation initiated");
         } else {
             logger.error("Snapshot " + getSnapshotName() + " creation failed");
             throw new SnapshotCreationFailed(getSnapshotName());
@@ -69,12 +59,8 @@ public abstract class SnapshotCreator {
     }
 
     public boolean isSnapshotFinished() throws Exception {
-        // Assemble the REST path
-        String targetName = "_snapshot/" + getRepoName() + "/" + getSnapshotName();
-
         // Check if the snapshot has finished
-        RestClient client = new RestClient(connectionDetails);
-        RestClient.Response response = client.get(targetName, false);
+        RestClient.Response response = client.getSnapshotStatus(getRepoName(), getSnapshotName());
         if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
             logger.error("Snapshot " + getSnapshotName() + " does not exist");
             throw new SnapshotDoesNotExist(getSnapshotName());

@@ -9,14 +9,14 @@ public class FileSystemSnapshotCreator extends SnapshotCreator {
     private static final Logger logger = LogManager.getLogger(FileSystemSnapshotCreator.class);
     private static final ObjectMapper mapper = new ObjectMapper();
 
-    private final ConnectionDetails connectionDetails;
+    private final OpenSearchClient client;
     private final String snapshotName;
     private final String snapshotRepoDirectoryPath;
 
-    public FileSystemSnapshotCreator(String snapshotName, ConnectionDetails connectionDetails, String snapshotRepoDirectoryPath) {
-        super(snapshotName, connectionDetails);
+    public FileSystemSnapshotCreator(String snapshotName, OpenSearchClient client, String snapshotRepoDirectoryPath) {
+        super(snapshotName, client);
         this.snapshotName = snapshotName;
-        this.connectionDetails = connectionDetails;
+        this.client = client;
         this.snapshotRepoDirectoryPath = snapshotRepoDirectoryPath;
     }
 

@@ -203,7 +203,11 @@ read -r -d '' cdk_context << EOM
 }
 EOM
 
-git clone https://github.com/lewijacn/opensearch-cluster-cdk.git || echo "Repo already exists, skipping.."
+if [ ! -d "opensearch-cluster-cdk" ]; then
+  git clone https://github.com/lewijacn/opensearch-cluster-cdk.git
+else
+  echo "Repo already exists, skipping clone."
+fi
 cd opensearch-cluster-cdk && git checkout migration-es
 git pull
 npm install
@@ -214,6 +218,10 @@ fi
 if [ "$SKIP_SOURCE_DEPLOY" = false ] ; then
   # Deploy source cluster on EC2 instances
   cdk deploy "*" --require-approval never --c suffix="Migration-Source" --c distVersion="7.10.2" --c distributionUrl="https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz" --c captureProxyEnabled=true --c securityDisabled=true --c minDistribution=false --c cpuArch="x64" --c isInternal=true --c singleNodeCluster=true --c networkAvailabilityZones=2 --c dataNodeCount=1 --c managerNodeCount=0 --c serverAccessType="ipv4" --c restrictServerAccessTo="0.0.0.0/0"
+  if [ $? -ne 0 ]; then
+    echo "Error: deploy source cluster failed, exiting."
+    exit 1
+  fi
 fi
 
 source_endpoint=$(aws cloudformation describe-stacks --stack-name opensearch-infra-stack-Migration-Source --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
@@ -232,10 +240,22 @@ if [ "$SKIP_MIGRATION_DEPLOY" = false ] ; then
 
   cd ../../deployment/cdk/opensearch-service-migration || exit
   ./buildDockerImages.sh
+  if [ $? -ne 0 ]; then
+    echo "Error: building docker images failed, exiting."
+    exit 1
+  fi
   npm install
   cdk deploy "*" --c aws-existing-source=$cdk_context --c contextId=aws-existing-source --require-approval never --concurrency 3
+  if [ $? -ne 0 ]; then
+    echo "Error: deploying migration stacks failed, exiting."
+    exit 1
+  fi
 fi
 
 if [ "$SKIP_CAPTURE_PROXY" = false ] ; then
   prepare_source_nodes_for_capture "$STAGE"
+  if [ $? -ne 0 ]; then
+    echo "Error: enabling capture proxy on source cluster, exiting."
+    exit 1
+  fi
 fi

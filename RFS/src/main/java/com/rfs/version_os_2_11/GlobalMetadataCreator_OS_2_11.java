@@ -1,6 +1,5 @@
 package com.rfs.version_os_2_11;
 
-import java.net.HttpURLConnection;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -8,22 +7,21 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.rfs.common.ConnectionDetails;
-import com.rfs.common.RestClient;
+import com.rfs.common.OpenSearchClient;
 
 public class GlobalMetadataCreator_OS_2_11 {
     private static final Logger logger = LogManager.getLogger(GlobalMetadataCreator_OS_2_11.class);
 
-    public static void create(ObjectNode root, ConnectionDetails connectionDetails, List<String> componentTemplateWhitelist, List<String> indexTemplateWhitelist) throws Exception {
+    public static void create(ObjectNode root, OpenSearchClient client, List<String> componentTemplateWhitelist, List<String> indexTemplateWhitelist) throws Exception {
         logger.info("Setting Global Metadata");
 
         GlobalMetadataData_OS_2_11 globalMetadata = new GlobalMetadataData_OS_2_11(root);
-        createTemplates(globalMetadata, connectionDetails, indexTemplateWhitelist);
-        createComponentTemplates(globalMetadata, connectionDetails, componentTemplateWhitelist);
-        createIndexTemplates(globalMetadata, connectionDetails, indexTemplateWhitelist);
+        createTemplates(globalMetadata, client, indexTemplateWhitelist);
+        createComponentTemplates(globalMetadata, client, componentTemplateWhitelist);
+        createIndexTemplates(globalMetadata, client, indexTemplateWhitelist);
     }
 
-    public static void createTemplates(GlobalMetadataData_OS_2_11 globalMetadata, ConnectionDetails connectionDetails, List<String> indexTemplateWhitelist) throws Exception {
+    public static void createTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> indexTemplateWhitelist) throws Exception {
         logger.info("Setting Legacy Templates");
         ObjectNode templates = globalMetadata.getTemplates();
 
@@ -41,8 +39,7 @@ public class GlobalMetadataCreator_OS_2_11 {
 
                 logger.info("Setting Legacy Template: " + templateName);
                 ObjectNode settings = (ObjectNode) globalMetadata.getTemplates().get(templateName);
-                String path = "_template/" + templateName;
-                createEntity(templateName, settings, connectionDetails, path);
+                client.createLegacyTemplateIdempotent(templateName, settings);
             }
         } else {
             // Get the template names
@@ -53,13 +50,12 @@ public class GlobalMetadataCreator_OS_2_11 {
             for (String templateName : templateKeys) {
                 logger.info("Setting Legacy Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
-                String path = "_template/" + templateName;
-                createEntity(templateName, settings, connectionDetails, path);
+                client.createLegacyTemplateIdempotent(templateName, settings);
             }
         }
     }
 
-    public static void createComponentTemplates(GlobalMetadataData_OS_2_11 globalMetadata, ConnectionDetails connectionDetails, List<String> indexTemplateWhitelist) throws Exception {
+    public static void createComponentTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> indexTemplateWhitelist) throws Exception {
         logger.info("Setting Component Templates");
         ObjectNode templates = globalMetadata.getComponentTemplates();
 
@@ -77,8 +73,7 @@ public class GlobalMetadataCreator_OS_2_11 {
 
                 logger.info("Setting Component Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
-                String path = "_component_template/" + templateName;
-                createEntity(templateName, settings, connectionDetails, path);
+                client.createComponentTemplateIdempotent(templateName, settings);
             }
         } else {
             // Get the template names
@@ -89,13 +84,12 @@ public class GlobalMetadataCreator_OS_2_11 {
             for (String templateName : templateKeys) {
                 logger.info("Setting Component Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
-                String path = "_component_template/" + templateName;
-                createEntity(templateName, settings, connectionDetails, path);
+                client.createComponentTemplateIdempotent(templateName, settings);
             }
         }
     }
 
-    public static void createIndexTemplates(GlobalMetadataData_OS_2_11 globalMetadata, ConnectionDetails connectionDetails, List<String> indexTemplateWhitelist) throws Exception {
+    public static void createIndexTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> indexTemplateWhitelist) throws Exception {
         logger.info("Setting Index Templates");
         ObjectNode templates = globalMetadata.getIndexTemplates();
 
@@ -113,8 +107,7 @@ public class GlobalMetadataCreator_OS_2_11 {
 
                 logger.info("Setting Index Template: " + templateName);
                 ObjectNode settings = (ObjectNode) globalMetadata.getIndexTemplates().get(templateName);
-                String path = "_index_template/" + templateName;
-                createEntity(templateName, settings, connectionDetails, path);
+                client.createIndexTemplateIdempotent(templateName, settings);
             }
         } else {
             // Get the template names
@@ -125,26 +118,8 @@ public class GlobalMetadataCreator_OS_2_11 {
             for (String templateName : templateKeys) {
                 logger.info("Setting Index Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
-                String path = "_index_template/" + templateName;
-                createEntity(templateName, settings, connectionDetails, path);
+                client.createIndexTemplateIdempotent(templateName, settings);
             }
-        }
-    }
-
-    private static void createEntity(String entityName, ObjectNode settings, ConnectionDetails connectionDetails, String path) throws Exception {
-        // Assemble the request details
-        String body = settings.toString();
-
-        // Confirm the index doesn't already exist, then create it
-        RestClient client = new RestClient(connectionDetails);
-        RestClient.Response response = client.get(path, true);
-        if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
-            String bodyString = body.toString();
-            client.put(path, bodyString, false);
-        } else if (response.code == HttpURLConnection.HTTP_OK) {
-            logger.warn(entityName + " already exists. Skipping creation.");
-        } else {
-            logger.warn("Could not confirm that " + entityName + " does not already exist. Skipping creation.");
         }
     }
 }

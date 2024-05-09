@@ -164,7 +164,7 @@ public class ReindexFromSnapshot {
         if (snapshotDirPath != null) {
             repo = new FilesystemRepo(snapshotDirPath);
         } else if (s3RepoUri != null && s3Region != null && s3LocalDirPath != null) {
-            repo = S3Repo.create(s3LocalDirPath, s3RepoUri, s3Region);
+            repo = S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
         } else if (snapshotLocalRepoDirPath != null) {
             repo = new FilesystemRepo(snapshotLocalRepoDirPath);
         } else {
@@ -182,9 +182,10 @@ public class ReindexFromSnapshot {
                 // ==========================================================================================================            
                 logger.info("==================================================================");
                 logger.info("Attempting to create the snapshot...");
+                OpenSearchClient sourceClient = new OpenSearchClient(sourceConnection);
                 SnapshotCreator snapshotCreator = repo instanceof S3Repo
-                    ? new S3SnapshotCreator(snapshotName, sourceConnection, s3RepoUri, s3Region)
-                    : new FileSystemSnapshotCreator(snapshotName, sourceConnection, snapshotLocalRepoDirPath.toString());
+                    ? new S3SnapshotCreator(snapshotName, sourceClient, s3RepoUri, s3Region)
+                    : new FileSystemSnapshotCreator(snapshotName, sourceClient, snapshotLocalRepoDirPath.toString());
                 snapshotCreator.registerRepo();
                 snapshotCreator.createSnapshot();
                 while (!snapshotCreator.isSnapshotFinished()) {
@@ -266,14 +267,15 @@ public class ReindexFromSnapshot {
                 logger.info("==================================================================");
                 logger.info("Attempting to recreate the Global Metadata...");
 
+                OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
                 if (sourceVersion == ClusterVersion.ES_6_8) {
                     ObjectNode root = globalMetadata.toObjectNode();
                     ObjectNode transformedRoot = transformer.transformGlobalMetadata(root);                    
-                    GlobalMetadataCreator_OS_2_11.create(transformedRoot, targetConnection, Collections.emptyList(), templateWhitelist);
+                    GlobalMetadataCreator_OS_2_11.create(transformedRoot, targetClient, Collections.emptyList(), templateWhitelist);
                 } else if (sourceVersion == ClusterVersion.ES_7_10) {
                     ObjectNode root = globalMetadata.toObjectNode();
                     ObjectNode transformedRoot = transformer.transformGlobalMetadata(root);                    
-                    GlobalMetadataCreator_OS_2_11.create(transformedRoot, targetConnection, componentTemplateWhitelist, templateWhitelist);
+                    GlobalMetadataCreator_OS_2_11.create(transformedRoot, targetClient, componentTemplateWhitelist, templateWhitelist);
                 }
             }
 
@@ -301,6 +303,7 @@ public class ReindexFromSnapshot {
                 // ==========================================================================================================
                 logger.info("==================================================================");
                 logger.info("Attempting to recreate the indices...");
+                OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
                 for (IndexMetadata.Data indexMetadata : indexMetadatas) {
                     String reindexName = indexMetadata.getName() + indexSuffix;
                     logger.info("Recreating index " + indexMetadata.getName() + " as " + reindexName + " on target...");
@@ -308,7 +311,7 @@ public class ReindexFromSnapshot {
                     ObjectNode root = indexMetadata.toObjectNode();
                     ObjectNode transformedRoot = transformer.transformIndexMetadata(root);
                     IndexMetadataData_OS_2_11 indexMetadataOS211 = new IndexMetadataData_OS_2_11(transformedRoot, indexMetadata.getId(), reindexName);
-                    IndexCreator_OS_2_11.create(reindexName, indexMetadataOS211, targetConnection);
+                    IndexCreator_OS_2_11.create(reindexName, indexMetadataOS211, targetClient);
                 }
             }
 
@@ -358,12 +361,17 @@ public class ReindexFromSnapshot {
 
                         Flux<Document> documents = new LuceneDocumentsReader().readDocuments(luceneDirPath, indexMetadata.getName(), shardId);
                         String targetIndex = indexMetadata.getName() + indexSuffix;
-                        DocumentReindexer.reindex(targetIndex, documents, targetConnection);
 
-                        logger.info("Shard reindexing completed");
+                        final int finalShardId = shardId; // Define in local context for the lambda
+                        DocumentReindexer.reindex(targetIndex, documents, targetConnection)
+                            .doOnError(error -> logger.error("Error during reindexing: " + error))
+                            .doOnSuccess(done -> logger.info("Reindexing completed for index " + targetIndex + ", shard " + finalShardId))
+                            // Wait for the shard reindexing to complete before proceeding; fine in this demo script, but
+                            // shouldn't be done quite this way in the real RFS Worker.
+                            .block();
                     }
                 }
-                logger.info("Refreshing newly added documents");
+                logger.info("Refreshing target cluster to reflect newly added documents");
                 DocumentReindexer.refreshAllDocuments(targetConnection);
                 logger.info("Refresh complete");
             }

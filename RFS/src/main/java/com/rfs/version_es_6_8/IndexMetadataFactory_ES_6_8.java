@@ -8,15 +8,18 @@ import com.rfs.common.SnapshotRepo;
 
 public class IndexMetadataFactory_ES_6_8 implements com.rfs.common.IndexMetadata.Factory {
     
+    @Override
     public IndexMetadata.Data fromJsonNode(JsonNode root, String indexId, String indexName) throws Exception {
         ObjectNode objectNodeRoot = (ObjectNode) root.get(indexName);
         return new IndexMetadataData_ES_6_8(objectNodeRoot, indexId, indexName);
     }
 
+    @Override
     public SmileFactory getSmileFactory() {
         return ElasticsearchConstants_ES_6_8.SMILE_FACTORY;
     }
 
+    @Override
     public String getIndexFileId(SnapshotRepo.Provider repoDataProvider, String snapshotName, String indexName) {
         return repoDataProvider.getSnapshotId(snapshotName);
     }

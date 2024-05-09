@@ -58,12 +58,16 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
         } else if (msg instanceof HttpContent) {
             if (compressorStream != null) {
                 var contentBuf = ((HttpContent) msg).content();
-                contentBuf.readBytes(compressorStream, contentBuf.readableBytes());
-                if (msg instanceof LastHttpContent) {
-                    closeStream();
-                    ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
+                try {
+                  contentBuf.readBytes(compressorStream, contentBuf.readableBytes());
+                  if (msg instanceof LastHttpContent) {
+                      closeStream();
+                      ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
+                  }
+                  return; // fireChannelRead will be fired on the compressed contents via the compressorStream.
+                } finally {
+                  contentBuf.release();
                 }
-                return; // fireChannelRead will be fired on the compressed contents via the compressorStream.
            } else {
                 assert (bufferedOutputStream == null && passDownstreamOutputStream == null) :
                 "Expected contents with data to be passed through the compression stream before it was closed OR " +

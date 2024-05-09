@@ -17,7 +17,7 @@ public class OrderedWorkerTracker<T> implements TrafficReplayerTopLevel.IStreama
     static class TimeKeyAndFuture<U> {
         @Getter
         final long nanoTimeKey;
-        final DiagnosticTrackableCompletableFuture<String,U> future;
+        final TrackedFuture<String,U> future;
     }
     ConcurrentHashMap<UniqueReplayerRequestKey, TimeKeyAndFuture<T>> primaryMap = new ConcurrentHashMap<>();
     ConcurrentSkipListSet<TimeKeyAndFuture<T>> orderedSet =
@@ -26,7 +26,7 @@ public class OrderedWorkerTracker<T> implements TrafficReplayerTopLevel.IStreama
 
     @Override
     public void put(UniqueReplayerRequestKey uniqueReplayerRequestKey,
-                    DiagnosticTrackableCompletableFuture<String, T> completableFuture) {
+                    TrackedFuture<String, T> completableFuture) {
         var timedValue = new TimeKeyAndFuture<>(System.nanoTime(), completableFuture);
         primaryMap.put(uniqueReplayerRequestKey, timedValue);
         orderedSet.add(timedValue);
@@ -49,7 +49,7 @@ public class OrderedWorkerTracker<T> implements TrafficReplayerTopLevel.IStreama
         return primaryMap.size();
     }
 
-    public Stream<Map.Entry<UniqueReplayerRequestKey, DiagnosticTrackableCompletableFuture<String,T>>>
+    public Stream<Map.Entry<UniqueReplayerRequestKey, TrackedFuture<String,T>>>
     getRemainingItems() {
         return primaryMap.entrySet().stream().map(kvp->Map.entry(kvp.getKey(), kvp.getValue().future));
     }

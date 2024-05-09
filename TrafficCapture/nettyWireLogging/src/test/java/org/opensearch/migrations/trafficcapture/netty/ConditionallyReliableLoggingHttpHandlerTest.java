@@ -1,12 +1,9 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
-import com.google.protobuf.CodedOutputStream;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufInputStream;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
-import lombok.Getter;
-import lombok.NonNull;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Disabled;
@@ -15,92 +12,26 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.testutils.TestUtilities;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-import org.opensearch.migrations.tracing.IContextTracker;
-import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
-import org.opensearch.migrations.trafficcapture.CodedOutputStreamAndByteBufferWrapper;
-import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
-import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSerializer;
-import org.opensearch.migrations.trafficcapture.netty.tracing.RootWireLoggingContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
 import java.io.SequenceInputStream;
-import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Slf4j
+@WrapWithNettyLeakDetection
 public class ConditionallyReliableLoggingHttpHandlerTest {
-
-    private static class TestRootContext extends RootWireLoggingContext implements AutoCloseable {
-        @Getter
-        InMemoryInstrumentationBundle instrumentationBundle;
-
-        public TestRootContext() {
-            this(false, false);
-        }
-        public TestRootContext(boolean trackMetrics, boolean trackTraces) {
-            this(trackMetrics, trackTraces, DO_NOTHING_TRACKER);
-        }
-        public TestRootContext(boolean trackMetrics, boolean trackTraces, @NonNull IContextTracker contextTracker) {
-            this(new InMemoryInstrumentationBundle(trackMetrics, trackTraces), contextTracker);
-        }
-
-        public TestRootContext(InMemoryInstrumentationBundle inMemoryInstrumentationBundle,
-                               IContextTracker contextTracker) {
-            super(inMemoryInstrumentationBundle.openTelemetrySdk, contextTracker);
-            this.instrumentationBundle = inMemoryInstrumentationBundle;
-        }
-
-        @Override
-        public void close() {
-            instrumentationBundle.close();
-        }
-    }
-
-    static class TestStreamManager extends OrderedStreamLifecyleManager implements AutoCloseable {
-        AtomicReference<ByteBuffer> byteBufferAtomicReference = new AtomicReference<>();
-        AtomicInteger flushCount = new AtomicInteger();
-
-        @Override
-        public void close() {}
-
-        @Override
-        public CodedOutputStreamAndByteBufferWrapper createStream() {
-            return new CodedOutputStreamAndByteBufferWrapper(1024*1024);
-        }
-
-        @SneakyThrows
-        @Override
-        public CompletableFuture<Object>
-        kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder, int index) {
-            if (!(outputStreamHolder instanceof CodedOutputStreamAndByteBufferWrapper)) {
-                throw new IllegalStateException("Unknown outputStreamHolder sent back to StreamManager: " +
-                        outputStreamHolder);
-            }
-            var osh = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
-            CodedOutputStream cos = osh.getOutputStream();
-
-            cos.flush();
-            byteBufferAtomicReference.set(osh.getByteBuffer().flip().asReadOnlyBuffer());
-            log.trace("byteBufferAtomicReference.get="+byteBufferAtomicReference.get());
-
-            return CompletableFuture.completedFuture(flushCount.incrementAndGet());
-        }
-    }
 
     private static void writeMessageAndVerify(byte[] fullTrafficBytes, Consumer<EmbeddedChannel> channelWriter,
                                               boolean checkInstrumentation)
@@ -116,38 +47,35 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
             channelWriter.accept(channel);
 
             // we wrote the correct data to the downstream handler/channel
-            var outputData = new SequenceInputStream(Collections.enumeration(channel.inboundMessages().stream()
-                    .map(m -> new ByteArrayInputStream(consumeIntoArray((ByteBuf) m)))
-                    .collect(Collectors.toList())))
-                    .readAllBytes();
+            var outputDataStream = new SequenceInputStream(Collections.enumeration(channel.inboundMessages().stream()
+                    .map(m -> new ByteBufInputStream((ByteBuf) m, false))
+                    .collect(Collectors.toList())));
+            var outputData = outputDataStream.readAllBytes();
+            outputDataStream.close();
             Assertions.assertArrayEquals(fullTrafficBytes, outputData);
 
-            Assertions.assertNotNull(streamManager.byteBufferAtomicReference,
+            Assertions.assertNotNull(streamManager.byteBufferAtomicReference.get(),
                     "This would be null if the handler didn't block until the output was written");
             // we wrote the correct data to the offloaded stream
             var trafficStream = TrafficStream.parseFrom(streamManager.byteBufferAtomicReference.get());
             Assertions.assertTrue(trafficStream.getSubStreamCount() > 0 &&
                     trafficStream.getSubStream(0).hasRead());
-            var combinedTrafficPacketsSteam =
+            var combinedTrafficPacketsStream =
                     new SequenceInputStream(Collections.enumeration(trafficStream.getSubStreamList().stream()
                             .filter(TrafficObservation::hasRead)
                             .map(to -> new ByteArrayInputStream(to.getRead().getData().toByteArray()))
                             .collect(Collectors.toList())));
-            Assertions.assertArrayEquals(fullTrafficBytes, combinedTrafficPacketsSteam.readAllBytes());
+            Assertions.assertArrayEquals(fullTrafficBytes, combinedTrafficPacketsStream.readAllBytes());
             Assertions.assertEquals(1, streamManager.flushCount.get());
 
             if (checkInstrumentation) {
                 Assertions.assertTrue(!rootContext.instrumentationBundle.getFinishedSpans().isEmpty());
                 Assertions.assertTrue(!rootContext.instrumentationBundle.getFinishedMetrics().isEmpty());
             }
-        }
-    }
 
-    private static byte[] consumeIntoArray(ByteBuf m) {
-        var bArr = new byte[m.readableBytes()];
-        m.readBytes(bArr);
-        m.release();
-        return bArr;
+            channel.finishAndReleaseAll();
+            channel.close();
+        }
     }
 
     @ParameterizedTest
@@ -202,13 +130,14 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                     new ConditionallyReliableLoggingHttpHandler(rootInstrumenter, "n", "c",
                             ctx -> offloader, headerCapturePredicate, x -> true));
             getWriter(false, true, SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8)).accept(channel);
+            channel.finishAndReleaseAll();
             channel.close();
             var requestBytes = SimpleRequests.HEALTH_CHECK.getBytes(StandardCharsets.UTF_8);
 
             Assertions.assertEquals(0, streamMgr.flushCount.get());
             // we wrote the correct data to the downstream handler/channel
             var outputData = new SequenceInputStream(Collections.enumeration(channel.inboundMessages().stream()
-                    .map(m -> new ByteArrayInputStream(consumeIntoArray((ByteBuf) m)))
+                    .map(m -> new ByteBufInputStream((ByteBuf) m, true))
                     .collect(Collectors.toList())))
                     .readAllBytes();
             log.info("outputdata = " + new String(outputData, StandardCharsets.UTF_8));
@@ -237,7 +166,7 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
 
             // we wrote the correct data to the downstream handler/channel
             var consumedData = new SequenceInputStream(Collections.enumeration(channel.inboundMessages().stream()
-                    .map(m -> new ByteArrayInputStream(consumeIntoArray((ByteBuf) m)))
+                    .map(m -> new ByteBufInputStream((ByteBuf) m, false))
                     .collect(Collectors.toList())))
                     .readAllBytes();
             log.info("captureddata = " + new String(consumedData, StandardCharsets.UTF_8));
@@ -275,6 +204,8 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
                         new String(reconstitutedTrafficStreamWrites, StandardCharsets.UTF_8));
                 Assertions.assertArrayEquals(bytesForResponsePreserved, reconstitutedTrafficStreamWrites);
             }
+
+            channel.finishAndReleaseAll();
         }
     }
 
@@ -297,7 +228,6 @@ public class ConditionallyReliableLoggingHttpHandlerTest {
 
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
-    @WrapWithNettyLeakDetection(repetitions = 16)
     public void testThatAPostInTinyPacketsBlocksFutureActivity_withLeakDetection(boolean usePool) throws Exception {
         testThatAPostInTinyPacketsBlocksFutureActivity(usePool, false);
         //MyResourceLeakDetector.dumpHeap("nettyWireLogging_"+COUNT+"_"+ Instant.now() +".hprof", true);

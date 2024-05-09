@@ -39,7 +39,7 @@ public class ActiveContextMonitor implements Runnable {
     private final ActiveContextTrackerByActivityType perActivityContextTracker;
     private final OrderedWorkerTracker<Void> orderedRequestTracker;
     private final int totalItemsToOutputLimit;
-    private final Function<DiagnosticTrackableCompletableFuture<String,Void>,String> formatWorkItem;
+    private final Function<TrackedFuture<String,Void>,String> formatWorkItem;
 
     private final Predicate<Level> logLevelIsEnabled;
     private final AtomicReference<TreeMap<Duration,Level>> ageToLevelEdgeMapRef;
@@ -48,7 +48,7 @@ public class ActiveContextMonitor implements Runnable {
                                 ActiveContextTrackerByActivityType perActivityContextTracker,
                                 OrderedWorkerTracker<Void> orderedRequestTracker,
                                 int totalItemsToOutputLimit,
-                                Function<DiagnosticTrackableCompletableFuture<String, Void>, String> formatWorkItem,
+                                Function<TrackedFuture<String, Void>, String> formatWorkItem,
                                 Logger logger) {
         this(globalContextTracker, perActivityContextTracker, orderedRequestTracker, totalItemsToOutputLimit,
                 formatWorkItem, (level, supplier)->logger.atLevel(level).setMessage(supplier).log(),
@@ -59,7 +59,7 @@ public class ActiveContextMonitor implements Runnable {
                                 ActiveContextTrackerByActivityType perActivityContextTracker,
                                 OrderedWorkerTracker<Void> orderedRequestTracker,
                                 int totalItemsToOutputLimit,
-                                Function<DiagnosticTrackableCompletableFuture<String, Void>, String> formatWorkItem,
+                                Function<TrackedFuture<String, Void>, String> formatWorkItem,
                                 BiConsumer<Level, Supplier<String>> logger,
                                 Predicate<Level> logLevelIsEnabled) {
         this(globalContextTracker, perActivityContextTracker, orderedRequestTracker, totalItemsToOutputLimit,
@@ -75,7 +75,7 @@ public class ActiveContextMonitor implements Runnable {
                                 ActiveContextTrackerByActivityType perActivityContextTracker,
                                 OrderedWorkerTracker<Void> orderedRequestTracker,
                                 int totalItemsToOutputLimit,
-                                Function<DiagnosticTrackableCompletableFuture<String, Void>, String> formatWorkItem,
+                                Function<TrackedFuture<String, Void>, String> formatWorkItem,
                                 BiConsumer<Level, Supplier<String>> logger,
                                 Predicate<Level> logLevelIsEnabled,
                                 Map<Level,Duration> levelShowsAgeOlderThanMap) {

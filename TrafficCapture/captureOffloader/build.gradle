@@ -28,6 +28,7 @@ dependencies {
     implementation group: 'org.projectlombok', name: 'lombok', version: '1.18.26'
     implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
 
+    testImplementation testFixtures(project(path: ':testUtilities'))
     testImplementation project(':coreUtilities')
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'

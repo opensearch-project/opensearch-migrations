@@ -146,7 +146,7 @@ public class HttpByteBufFormatter {
         EmbeddedChannel channel = new EmbeddedChannel(
                 msgType == HttpMessageType.REQUEST ? new HttpServerCodec() : new HttpClientCodec(),
                 new HttpContentDecompressor(),
-                new HttpObjectAggregator(Utils.MAX_PAYLOAD_SIZE_TO_PRINT)  // Set max content length if needed
+                new HttpObjectAggregator(Utils.MAX_PAYLOAD_BYTES_TO_PRINT)  // Set max content length if needed
         );
         try {
             byteBufStream.forEachOrdered(b -> channel.writeInbound(b.retainedDuplicate()));

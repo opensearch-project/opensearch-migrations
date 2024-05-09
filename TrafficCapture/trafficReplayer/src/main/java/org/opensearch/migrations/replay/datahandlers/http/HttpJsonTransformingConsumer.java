@@ -9,8 +9,8 @@ import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.slf4j.event.Level;
@@ -89,21 +89,17 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     }
 
     @Override
-    public DiagnosticTrackableCompletableFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
-        chunks.add(nextRequestPacket.duplicate().readerIndex(0).retain());
+    public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
+        chunks.add(nextRequestPacket.retainedDuplicate());
         chunkSizes.get(chunkSizes.size() - 1).add(nextRequestPacket.readableBytes());
-        if (log.isTraceEnabled()) {
-            byte[] copy = new byte[nextRequestPacket.readableBytes()];
-            nextRequestPacket.duplicate().readBytes(copy);
-            log.trace("HttpJsonTransformingConsumer[" + this + "]: writing into embedded channel: "
-                    + new String(copy, StandardCharsets.UTF_8));
-        }
-        return StringTrackableCompletableFuture.completedFuture(null, ()->"initialValue")
-                .map(cf->cf.thenAccept(x -> channel.writeInbound(nextRequestPacket)),
-                        ()->"HttpJsonTransformingConsumer sending bytes to its EmbeddedChannel");
+        log.atTrace().log(() -> "HttpJsonTransformingConsumer[" + this + "]: writing into embedded channel: "
+                   + nextRequestPacket.toString(StandardCharsets.UTF_8));
+        return TextTrackedFuture.completedFuture(null, ()->"initialValue")
+            .map(cf->cf.thenAccept(x -> channel.writeInbound(nextRequestPacket)),
+                ()->"HttpJsonTransformingConsumer sending bytes to its EmbeddedChannel");
     }
 
-    public DiagnosticTrackableCompletableFuture<String, TransformedOutputAndResult<R>> finalizeRequest() {
+    public TrackedFuture<String, TransformedOutputAndResult<R>> finalizeRequest() {
         var offloadingHandler = getOffloadingHandler();
         try {
             channel.checkException();
@@ -145,7 +141,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                             } else {
                                 transformationContext.close();
                                 transformationContext.onTransformSuccess();
-                                return StringTrackableCompletableFuture.completedFuture(v, ()->"transformedHttpMessageValue");
+                                return TextTrackedFuture.completedFuture(v, ()->"transformedHttpMessageValue");
                             }
                         }, ()->"HttpJsonTransformingConsumer.finalizeRequest() is waiting to handle");
     }
@@ -157,25 +153,26 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         return t;
     }
 
-    private DiagnosticTrackableCompletableFuture<String, TransformedOutputAndResult<R>>
+    private TrackedFuture<String, TransformedOutputAndResult<R>>
     redriveWithoutTransformation(IPacketFinalizingConsumer<R> packetConsumer, Throwable reason) {
-        DiagnosticTrackableCompletableFuture<String,Void> consumptionChainedFuture =
+        var consumptionChainedFuture =
                 chunks.stream().collect(
-                        Utils.foldLeft(DiagnosticTrackableCompletableFuture.Factory.
-                                        completedFuture(null, ()->"Initial value"),
-                                (dcf, bb) -> dcf.thenCompose(v -> packetConsumer.consumeBytes(bb),
+                        Utils.foldLeft(TrackedFuture.Factory.completedFuture((Void) null, ()->"Initial value"),
+                                (tf, bb) -> tf.thenCompose(v -> packetConsumer.consumeBytes(bb),
                                         ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation collect()")));
-        DiagnosticTrackableCompletableFuture<String,R> finalizedFuture =
+        var finalizedFuture =
                 consumptionChainedFuture.thenCompose(v -> packetConsumer.finalizeRequest(),
                         ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation.compose()");
-        return finalizedFuture.map(f->f.thenApply(r -> reason == null ?
-                new TransformedOutputAndResult<>(r, HttpRequestTransformationStatus.SKIPPED, null) :
-                new TransformedOutputAndResult<>(r, HttpRequestTransformationStatus.ERROR, reason)
-        )
-                        .whenComplete((v,t)->{
+        return finalizedFuture.thenApply(r -> new TransformedOutputAndResult<>(r, makeStatus(reason), reason),
+                        () -> "redrive final packaging")
+                .whenComplete((v,t)->{
                             transformationContext.onTransformSkip();
                             transformationContext.close();
-                        }),
-                ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation().map()");
+                        },
+                        ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation().map()");
+    }
+
+    private static HttpRequestTransformationStatus makeStatus(Throwable reason) {
+        return reason == null ? HttpRequestTransformationStatus.SKIPPED : HttpRequestTransformationStatus.ERROR;
     }
 }

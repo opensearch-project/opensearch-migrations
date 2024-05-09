@@ -9,8 +9,8 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.replay.util.TextTrackedFuture;
 
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
@@ -26,8 +26,8 @@ import java.util.concurrent.atomic.AtomicReference;
 public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHandlerAdapter {
     final IPacketFinalizingConsumer<R> packetReceiver;
     // final Boolean value indicates if the handler received a LastHttpContent or EndOfInput message
-    DiagnosticTrackableCompletableFuture<String, Boolean> currentFuture;
-    private AtomicReference<DiagnosticTrackableCompletableFuture<String, TransformedOutputAndResult<R>>>
+    TrackedFuture<String, Boolean> currentFuture;
+    private AtomicReference<TrackedFuture<String, TransformedOutputAndResult<R>>>
             packetReceiverCompletionFutureRef;
     IReplayContexts.IReplayerHttpTransactionContext httpTransactionContext;
 
@@ -36,7 +36,7 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
         this.packetReceiver = packetReceiver;
         this.packetReceiverCompletionFutureRef = new AtomicReference<>();
         this.httpTransactionContext = httpTransactionContext;
-        currentFuture = DiagnosticTrackableCompletableFuture.Factory.completedFuture(null,
+        currentFuture = TrackedFuture.Factory.completedFuture(null,
                 ()->"currentFuture for NettySendByteBufsToPacketHandlerHandler initialized to the base case for " + httpTransactionContext);
     }
 
@@ -47,14 +47,14 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
         if (currentFuture.future.isDone()) {
             if (currentFuture.future.isCompletedExceptionally()) {
                 packetReceiverCompletionFutureRef.set(currentFuture.getDeferredFutureThroughHandle((v,t)->
-                                StringTrackableCompletableFuture.failedFuture(t, ()->"fixed failure"),
+                                TextTrackedFuture.failedFuture(t, ()->"fixed failure"),
                         ()->"handlerRemoved: packetReceiverCompletionFuture receiving exceptional value"));
                 return;
             } else if (currentFuture.get() == null) {
                 log.info("The handler responsible for writing data to the server was detached before writing " +
                         "bytes.  Throwing a NoContentException so that the calling context can handle appropriately.");
                 packetReceiverCompletionFutureRef.set(
-                        StringTrackableCompletableFuture.failedFuture(new NoContentException(),
+                        TextTrackedFuture.failedFuture(new NoContentException(),
                                 ()->"Setting NoContentException to the exposed CompletableFuture" +
                                         " of NettySendByteBufsToPacketHandlerHandler"));
                 return;
@@ -76,7 +76,7 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
                 },
                 () -> "handlerRemoved: waiting for the currentFuture to finish");
         currentFuture = packetReceiverCompletionFuture.getDeferredFutureThroughHandle((v,t)->
-                StringTrackableCompletableFuture.<Boolean>completedFuture(true,
+                TextTrackedFuture.<Boolean>completedFuture(true,
                         ()->"ignoring return type of packetReceiver.finalizeRequest() but waiting for it to finish"),
                 ()->"Waiting for packetReceiver.finalizeRequest() and will return once that is done");
         packetReceiverCompletionFutureRef.set(packetReceiverCompletionFuture);
@@ -84,17 +84,17 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
         super.handlerRemoved(ctx);
     }
 
-    private static <R> StringTrackableCompletableFuture<TransformedOutputAndResult<R>>
+    private static <R> TextTrackedFuture<TransformedOutputAndResult<R>>
     wrapFinalizedResultWithExceptionHandling(Throwable t1, R v2, Throwable t2,
                                              HttpRequestTransformationStatus transformationStatus) {
         if (t1 != null) {
-            return StringTrackableCompletableFuture.<TransformedOutputAndResult<R>>failedFuture(t1,
+            return TextTrackedFuture.<TransformedOutputAndResult<R>>failedFuture(t1,
                     () -> "fixed failure from currentFuture.getDeferredFutureThroughHandle()");
         } else if (t2 != null) {
-            return StringTrackableCompletableFuture.<TransformedOutputAndResult<R>>failedFuture(t2,
+            return TextTrackedFuture.<TransformedOutputAndResult<R>>failedFuture(t2,
                     () -> "fixed failure from packetReceiver.finalizeRequest()");
         } else {
-            return StringTrackableCompletableFuture.completedFuture(Optional.ofNullable(v2)
+            return TextTrackedFuture.completedFuture(Optional.ofNullable(v2)
                             .map(r -> new TransformedOutputAndResult<R>(r, transformationStatus,
                                     null))
                             .orElse(null),
@@ -103,7 +103,7 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
         }
     }
 
-    public DiagnosticTrackableCompletableFuture<String, TransformedOutputAndResult<R>>
+    public TrackedFuture<String, TransformedOutputAndResult<R>>
     getPacketReceiverCompletionFuture() {
         assert packetReceiverCompletionFutureRef.get() != null :
                 "expected close() to have removed the handler and for this to be non-null";
@@ -112,7 +112,7 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
 
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
-        currentFuture = DiagnosticTrackableCompletableFuture.Factory.failedFuture(cause,
+        currentFuture = TrackedFuture.Factory.failedFuture(cause,
                 () -> "NettySendByteBufsToPacketHandlerHandler got an exception");
         super.exceptionCaught(ctx, cause);
     }
@@ -133,7 +133,7 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
                             if (t != null) {
                                 log.atInfo().setCause(t).setMessage(() -> "got exception from a previous future that " +
                                         "will prohibit sending any more data to the packetReceiver").log();
-                                return StringTrackableCompletableFuture.failedFuture(t, () -> "failed previous future");
+                                return TextTrackedFuture.failedFuture(t, () -> "failed previous future");
                             } else {
                                 log.atTrace().setMessage(() -> "chaining consumingBytes with " + msg +
                                         " lastFuture=" + preexistingFutureForCapture).log();
