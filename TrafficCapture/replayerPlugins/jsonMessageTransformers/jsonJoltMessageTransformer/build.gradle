@@ -9,6 +9,7 @@ plugins {
 }
 
 dependencies {
+    implementation project(":trafficCaptureDependencies")
     implementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
     implementation group: 'com.bazaarvoice.jolt', name: 'jolt-core'
