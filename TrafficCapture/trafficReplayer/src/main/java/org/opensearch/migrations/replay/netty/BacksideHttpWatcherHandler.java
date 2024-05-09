@@ -1,12 +1,9 @@
 package org.opensearch.migrations.replay.netty;
 
 import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.SimpleChannelInboundHandler;
-import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpObject;
 import io.netty.handler.codec.http.LastHttpContent;
-import io.netty.util.ReferenceCountUtil;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
@@ -54,7 +51,8 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Http
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         aggregatedRawResponseBuilder.addErrorCause(cause);
         triggerResponseCallbackAndRemoveCallback();
-        super.exceptionCaught(ctx, cause);
+        // AggregatedRawResponseBuilder will contain exception context so
+        // Exception caught event should not to propagate downstream
     }
 
     private void triggerResponseCallbackAndRemoveCallback() {

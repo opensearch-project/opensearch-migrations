@@ -85,7 +85,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                                               String targetConnectionPoolName) throws SSLException {
             super(context, serverUri, authTransformerFactory, jsonTransformer,
                     TrafficReplayerTopLevel.makeClientConnectionPool(serverUri, allowInsecureConnections, numSendingThreads,
-                            targetConnectionPoolName, Duration.ofSeconds(30)),
+                            targetConnectionPoolName),
                     new TrafficStreamLimiter(maxConcurrentOutstandingRequests), new OrderedWorkerTracker<>());
             this.maxWaitTime = maxWaitTime;
         }

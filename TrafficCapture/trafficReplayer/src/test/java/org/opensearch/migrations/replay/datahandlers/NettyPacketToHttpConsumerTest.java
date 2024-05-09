@@ -7,6 +7,7 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import io.netty.handler.timeout.ReadTimeoutException;
 import io.netty.util.concurrent.DefaultThreadFactory;
+import java.util.concurrent.locks.LockSupport;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -150,8 +151,8 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 var eventLoop = new NioEventLoopGroup(1, new DefaultThreadFactory("test")).next();
                 var replaySession = new ConnectionReplaySession(eventLoop, channelContext,
                         () -> NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext,
-                                testServer.localhostEndpoint(), channelContext, REGULAR_RESPONSE_TIMEOUT));
-                var nphc = new NettyPacketToHttpConsumer(replaySession, httpContext);
+                                testServer.localhostEndpoint(), channelContext));
+                var nphc = new NettyPacketToHttpConsumer(replaySession, httpContext, REGULAR_RESPONSE_TIMEOUT);
                 nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
                 var aggregatedResponse = nphc.finalizeRequest().get();
                 var responseBytePackets = aggregatedResponse.getCopyOfPackets();
@@ -195,7 +196,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                                 Duration readTimeout, Duration resultWaitTimeout) throws Exception {
         ClientConnectionPool clientConnectionPool = null;
         try (var testServer = SimpleNettyHttpServer.makeServer(useTls,
-                withServerReadTimeout ? Duration.ofMillis(100) : null,
+                withServerReadTimeout ? readTimeout : null,
                 NettyPacketToHttpConsumerTest::makeResponseContext)) {
             log.atError().setMessage("Got port " + testServer.port).log();
             var sslContext = !useTls ? null :
@@ -203,12 +204,11 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             var timeShifter = new TimeShifter();
             timeShifter.setFirstTimestamp(Instant.now());
             clientConnectionPool = new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
-                    "targetPool for testThatConnectionsAreKeptAliveAndShared", 1,
-                    readTimeout);
+                    "targetPool for testThatConnectionsAreKeptAliveAndShared", 1);
 
             var reqCtx = rootContext.getTestConnectionRequestContext(1);
             var nphc = new NettyPacketToHttpConsumer(clientConnectionPool
-                    .buildConnectionReplaySession(reqCtx.getChannelKeyContext()), reqCtx);
+                    .buildConnectionReplaySession(reqCtx.getChannelKeyContext()), reqCtx, readTimeout);
             // purposefully send ONLY the beginning of a request
             nphc.consumeBytes("GET ".getBytes(StandardCharsets.UTF_8));
             if (resultWaitTimeout.minus(readTimeout).isNegative()) {
@@ -260,9 +260,10 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             var timeShifter = new TimeShifter();
             timeShifter.setFirstTimestamp(Instant.now());
             var clientConnectionPool =  new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
-                    "targetPool for testThatConnectionsAreKeptAliveAndShared", 1, REGULAR_RESPONSE_TIMEOUT);
+                    "targetPool for testThatConnectionsAreKeptAliveAndShared", 1);
             var sendingFactory = new ReplayEngine(
-                    new RequestSenderOrchestrator(clientConnectionPool, NettyPacketToHttpConsumer::new),
+                    new RequestSenderOrchestrator(clientConnectionPool,
+                        (replaySession, ctx1) -> new NettyPacketToHttpConsumer(replaySession, ctx1, REGULAR_RESPONSE_TIMEOUT)),
                     new TestFlowController(), timeShifter);
             for (int j = 0; j < 2; ++j) {
                 for (int i = 0; i < 2; ++i) {
@@ -313,6 +314,100 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         Assertions.assertEquals(2, tcpOpenConnectionCount);
         Assertions.assertEquals(2, connectionsOpenedCount);
         Assertions.assertEquals(2, connectionsClosedCount);
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false", "true"})
+    public void testResponseTakesLongerThanTimeout(boolean useTls) throws Exception {
+        var responseTimeout = Duration.ofMillis(50);
+        // Response shouldn't come back before everything else finishes
+        var responseDuration = Duration.ofHours(1);
+        try (var testServer = SimpleNettyHttpServer.makeServer(useTls, (requestFirstLine) -> {
+            parkForAtLeast(responseDuration);
+            return NettyPacketToHttpConsumerTest.makeResponseContext(requestFirstLine);
+        })) {
+            var sslContext = !testServer.localhostEndpoint().getScheme().equalsIgnoreCase("https") ? null :
+                SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
+            var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
+                new TransformationLoader().getTransformerFactoryLoader(null), null);
+
+            var clientConnectionPool =  new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
+                "targetPool for testReadTimeoutHandler_responseTakesLongerThanTimeout", 1);
+
+            var timeShifter = new TimeShifter();
+            var firstRequestTime = Instant.now();
+            timeShifter.setFirstTimestamp(firstRequestTime);
+            log.atInfo().setMessage("Initial Timestamp: " + firstRequestTime).log();
+
+            var sendingFactory = new ReplayEngine(
+                new RequestSenderOrchestrator(clientConnectionPool,
+                    (replaySession, ctx1) -> new NettyPacketToHttpConsumer(replaySession, ctx1, responseTimeout)),
+                new TestFlowController(), timeShifter);
+
+            var ctx = rootContext.getTestConnectionRequestContext("TEST", 0);
+            var requestFinishFuture = TrafficReplayerTopLevel.transformAndSendRequest(transformingHttpHandlerFactory,
+                sendingFactory, ctx, Instant.now(), Instant.now(),
+                () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
+            var maxTimeToWaitForTimeoutOrResponse = Duration.ofSeconds(10);
+            var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
+            log.atInfo().setMessage("RequestFinishFuture finished").log();
+            Assertions.assertInstanceOf(ReadTimeoutException.class, aggregatedResponse.getError());
+        }
+    }
+
+    @ParameterizedTest
+    @CsvSource({"false", "true"})
+    public void testTimeBetweenRequestsLongerThanResponseTimeout(boolean useTls) throws Exception {
+        var responseTimeout = Duration.ofMillis(100);
+        var timeBetweenRequests = responseTimeout.plus(Duration.ofMillis(10));
+        log.atInfo().setMessage("Running testTimeBetweenRequestsLongerThanResponseTimeout with responseTimeout " +
+                                responseTimeout + " and timeBetweenRequests" + timeBetweenRequests).log();
+        try (var testServer = SimpleNettyHttpServer.makeServer(useTls,
+            NettyPacketToHttpConsumerTest::makeResponseContext)) {
+            var sslContext = !testServer.localhostEndpoint().getScheme().equalsIgnoreCase("https") ? null :
+                SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
+            var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
+                new TransformationLoader().getTransformerFactoryLoader(null), null);
+
+            var clientConnectionPool = new ClientConnectionPool(testServer.localhostEndpoint(), sslContext,
+                "targetPool for testTimeBetweenRequestsLongerThanResponseTimeout", 1);
+
+            var timeShifter = new TimeShifter();
+            var firstRequestTime = Instant.now();
+            timeShifter.setFirstTimestamp(firstRequestTime);
+            log.atInfo().setMessage("Initial Timestamp: " + firstRequestTime).log();
+            var sendingFactory = new ReplayEngine(
+                new RequestSenderOrchestrator(clientConnectionPool,
+                    (replaySession, ctx1) -> new NettyPacketToHttpConsumer(replaySession, ctx1, responseTimeout)),
+                new TestFlowController(), timeShifter);
+            int i = 0;
+            while (true) {
+                var ctx = rootContext.getTestConnectionRequestContext("TEST", i);
+                log.atInfo().setMessage("Starting transformAndSendRequest for request " + i).log();
+                var requestFinishFuture = TrafficReplayerTopLevel.transformAndSendRequest(
+                    transformingHttpHandlerFactory,
+                    sendingFactory, ctx, Instant.now(), Instant.now(),
+                    () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
+                var maxTimeToWaitForTimeoutOrResponse = Duration.ofSeconds(10);
+                var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
+                log.atInfo().setMessage("RequestFinishFuture finished for request " + i).log();
+                Assertions.assertNull(aggregatedResponse.getError());
+                var responseAsString = getResponsePacketsAsString(aggregatedResponse);
+                Assertions.assertEquals(EXPECTED_RESPONSE_STRING, responseAsString);
+                if (i > 1) {
+                    break;
+                }
+                parkForAtLeast(timeBetweenRequests);
+                i++;
+            }
+        }
+    }
+
+    private static void parkForAtLeast(Duration waitDuration) {
+        var responseTime = Instant.now().toEpochMilli() + waitDuration.toMillis();
+        while (Instant.now().toEpochMilli() < responseTime) {
+            LockSupport.parkUntil(responseTime);
+        }
     }
 
     private class TestFlowController implements BufferedFlowController {
