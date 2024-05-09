@@ -152,7 +152,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
      * it returns a completed future with null.
      *
      * @param requiredSize The size required to write to the current stream.
-     * @return CompletableFuture<T> A future that completes immediately with null if there is enough space,
+     * @return CompletableFuture{@code <T>} A future that completes immediately with null if there is enough space,
      *         or completes with the future returned by flushCommitAndResetStream if a flush is needed.
      * @throws IOException if there are I/O errors when checking the stream's space or flushing.
      */
@@ -262,7 +262,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
      * otherwise a continuation. Returns a CompletableFuture that resolves upon the stream's closure.
      *
      * @param isFinal Indicates if this should be the final operation on the stream.
-     * @return CompletableFuture<T> A future that completes when the stream is closed. Returns null if already closed or no stream exists and 'isFinal' is false.
+     * @return CompletableFuture{@code <T>} A future that completes when the stream is closed. Returns null if already closed or no stream exists and 'isFinal' is false.
      * @throws IOException if there are I/O errors during the operation.
      */
 
