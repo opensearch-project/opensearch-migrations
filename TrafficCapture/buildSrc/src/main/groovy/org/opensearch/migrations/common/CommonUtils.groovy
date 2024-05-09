@@ -55,10 +55,8 @@ class CommonUtils {
                 from "migrations/${dependentDockerImageName}:${hashNonce}"
                 dependsOn "buildDockerImage_${baseImageOverrideProjectName}"
                 runCommand("sed -i -e \"s|mirrorlist=|#mirrorlist=|g\" /etc/yum.repos.d/CentOS-* ;  sed -i -e \"s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g\" /etc/yum.repos.d/CentOS-*")
-                runCommand("yum -y install nmap-ncat")
             } else {
                 from 'amazoncorretto:11-al2023-headless'
-                runCommand("dnf install -y nmap-ncat")
             }
 
             copyFile("jars", "/jars")
