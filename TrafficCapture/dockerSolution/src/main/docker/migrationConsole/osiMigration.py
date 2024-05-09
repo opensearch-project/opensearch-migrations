@@ -92,7 +92,7 @@ def sanitize_endpoint(endpoint: str, remove_port: bool):
 
 
 def parse_args():
-    pipeline_name_description='The name of the OSI pipeline'
+    pipeline_name_description = 'The name of the OSI pipeline'
     parser = argparse.ArgumentParser(description="Script to control migration OSI pipeline operations. Note: This tool "
                                                  "is still in an experimental state and currently being developed")
     subparsers = parser.add_subparsers(dest="subcommand")
