@@ -16,7 +16,7 @@ MIGRATION_CDK_PATH="$ROOT_REPO_PATH/deployment/cdk/opensearch-service-migration"
 # to mediate if this is not the case.
 prepare_source_nodes_for_capture () {
   deploy_stage=$1
-  instance_ids=($(aws ec2 describe-instances --filters 'Name=tag:Name,Values=opensearch-infra-stack*' 'Name=instance-state-name,Values=running' --query 'Reservations[*].Instances[*].InstanceId' --output text))
+  instance_ids=($(aws ec2 describe-instances --filters "Name=tag:Name,Values=$SOURCE_INFRA_STACK_NAME/*" 'Name=instance-state-name,Values=running' --query 'Reservations[*].Instances[*].InstanceId' --output text))
   kafka_brokers=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/kafkaBrokers" --query 'Parameter.Value' --output text)
   # Substitute @ to be used instead of ',' for cases where ',' would disrupt formatting of arguments, i.e. AWS SSM commands
   kafka_brokers=$(echo "$kafka_brokers" | tr ',' '@')
@@ -70,7 +70,7 @@ prepare_source_nodes_for_capture () {
 
 restore_and_record () {
   deploy_stage=$1
-  source_lb_endpoint=$(aws cloudformation describe-stacks --stack-name opensearch-infra-stack-Migration-Source --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
+  source_lb_endpoint=$(aws cloudformation describe-stacks --stack-name "$SOURCE_INFRA_STACK_NAME" --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
   source_endpoint="http://${source_lb_endpoint}:19200"
   kafka_brokers=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/kafkaBrokers" --query 'Parameter.Value' --output text)
   console_task_arn=$(aws ecs list-tasks --cluster migration-${deploy_stage}-ecs-cluster --family "migration-${deploy_stage}-migration-console" | jq --raw-output '.taskArns[0]')
@@ -93,7 +93,7 @@ clean_up_all () {
   cdk_context_var=$1
   vpc_id=$2
   default_sg=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$vpc_id" "Name=group-name,Values=default" --query "SecurityGroups[*].GroupId" --output text)
-  instance_ids=($(aws ec2 describe-instances --filters 'Name=tag:Name,Values=opensearch-infra-stack*' 'Name=instance-state-name,Values=running' --query 'Reservations[*].Instances[*].InstanceId' --output text))
+  instance_ids=($(aws ec2 describe-instances --filters "Name=tag:Name,Values=$SOURCE_INFRA_STACK_NAME/*" 'Name=instance-state-name,Values=running' --query 'Reservations[*].Instances[*].InstanceId' --output text))
   # Revert source cluster back to default SG to remove added SGs
   for id in "${instance_ids[@]}"
   do
@@ -102,15 +102,15 @@ clean_up_all () {
   done
 
   cd "$MIGRATION_CDK_PATH" || exit
-  cdk destroy "*" --force --c aws-existing-source=$cdk_context_var --c contextId=aws-existing-source
+  cdk destroy "*" --force --c contextFile="$GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID"
   cd "$EC2_SOURCE_CDK_PATH" || exit
-  cdk destroy "*" --force --c suffix="Migration-Source" --c distVersion="7.10.2" --c distributionUrl="https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz" --c securityDisabled=true --c minDistribution=false --c cpuArch="x64" --c isInternal=true --c singleNodeCluster=false --c networkAvailabilityZones=2 --c dataNodeCount=2 --c managerNodeCount=0 --c serverAccessType="ipv4" --c restrictServerAccessTo="0.0.0.0/0" --c captureProxyEnabled=false
+  cdk destroy "*" --force --c contextFile="$GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID"
 }
 
 # One-time required CDK bootstrap setup for a given region. Only required if the 'CDKToolkit' CFN stack does not exist
 bootstrap_region () {
   # Picking arbitrary context values to satisfy required values for CDK synthesis. These should not need to be kept in sync with the actual deployment context values
-  cdk bootstrap --require-approval never --c suffix="Migration-Source" --c distVersion="7.10.2" --c distributionUrl="https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz" --c securityDisabled=true --c minDistribution=false --c cpuArch="x64" --c isInternal=true --c singleNodeCluster=false --c networkAvailabilityZones=2 --c dataNodeCount=2 --c managerNodeCount=0 --c serverAccessType="ipv4" --c restrictServerAccessTo="0.0.0.0/0" --c captureProxyEnabled=false
+  cdk bootstrap --require-approval never --c contextFile="$GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID"
 }
 
 usage() {
@@ -125,7 +125,6 @@ usage() {
   echo "  --context-file                                   A file path for a given context file from which source and target context options will be used, default is './defaultCDKContext.json'."
   echo "  --source-context-id                              The CDK context block identifier within the context-file to use, default is 'source-single-node-ec2'."
   echo "  --migration-context-id                           The CDK context block identifier within the context-file to use, default is 'migration-default'."
-
   echo "  --migrations-git-url                             The Github http url used for building the capture proxy on setups with a dedicated source cluster, default is 'https://github.com/opensearch-project/opensearch-migrations.git'."
   echo "  --migrations-git-branch                          The Github branch associated with the 'git-url' to pull from, default is 'main'."
   echo "  --stage                                          The stage name to use for naming/grouping of AWS deployment resources, default is 'aws-integ'."
@@ -181,17 +180,17 @@ while [[ $# -gt 0 ]]; do
       shift # past argument
       ;;
     --context-file)
-      MIGRATIONS_GIT_URL="$2"
+      CONTEXT_FILE="$2"
       shift # past argument
       shift # past value
       ;;
     --source-context-id)
-      MIGRATIONS_GIT_URL="$2"
+      SOURCE_CONTEXT_ID="$2"
       shift # past argument
       shift # past value
       ;;
     --migration-context-id)
-      MIGRATIONS_GIT_URL="$2"
+      MIGRATION_CONTEXT_ID="$2"
       shift # past argument
       shift # past value
       ;;
@@ -236,9 +235,14 @@ if [ "$CREATE_SLR" = true ] ; then
   create_service_linked_roles
 fi
 
+SOURCE_NETWORK_STACK_NAME="opensearch-network-stack-ec2-source-$STAGE"
+SOURCE_INFRA_STACK_NAME="opensearch-infra-stack-ec2-source-$STAGE"
+GEN_CONTEXT_FILE="$TMP_DIR_PATH/generatedCDKContext.json"
+
+# Replace preliminary placeholders in CDK context into a generated context file
 mkdir -p "$TMP_DIR_PATH"
-cp $CONTEXT_FILE "$TMP_DIR_PATH/generatedCDKContext.json"
-sed -i -e "s/<STAGE>/$STAGE/g" "$TMP_DIR_PATH/generatedCDKContext.json"
+cp $CONTEXT_FILE "$GEN_CONTEXT_FILE"
+sed -i -e "s/<STAGE>/$STAGE/g" "$GEN_CONTEXT_FILE"
 
 if [ ! -d "opensearch-cluster-cdk" ]; then
   git clone https://github.com/lewijacn/opensearch-cluster-cdk.git
@@ -253,24 +257,23 @@ fi
 
 if [ "$SKIP_SOURCE_DEPLOY" = false ] && [ "$CLEAN_UP_ALL" = false ] ; then
   # Deploy source cluster on EC2 instances
-  cdk deploy "*" --c contextFile="$TMP_DIR_PATH/generatedCDKContext.json" --c contextId="$SOURCE_CONTEXT_ID" --require-approval never
+  cdk deploy "*" --c contextFile="$GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID" --require-approval never
   if [ $? -ne 0 ]; then
     echo "Error: deploy source cluster failed, exiting."
     exit 1
   fi
 fi
 
-source_endpoint=$(aws cloudformation describe-stacks --stack-name "opensearch-infra-stack-ec2-source-$STAGE" --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
+source_endpoint=$(aws cloudformation describe-stacks --stack-name "$SOURCE_INFRA_STACK_NAME" --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
 echo "Source endpoint: $source_endpoint"
-vpc_id=$(aws cloudformation describe-stacks --stack-name "opensearch-network-stack-ec2-source-$STAGE" --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue" --output text)
+vpc_id=$(aws cloudformation describe-stacks --stack-name "$SOURCE_NETWORK_STACK_NAME" --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue" --output text)
 echo "VPC ID: $vpc_id"
 
-# Replace source specific placeholders
-sed -i -e "s/<VPC_ID>/$vpc_id/g" "$TMP_DIR_PATH/generatedCDKContext.json"
-sed -i -e "s/<SOURCE_CLUSTER_ENDPOINT>/$source_endpoint/g" "$TMP_DIR_PATH/generatedCDKContext.json"
+# Replace source dependent placeholders in CDK context
+sed -i -e "s/<VPC_ID>/$vpc_id/g" "$GEN_CONTEXT_FILE"
+sed -i -e "s/<SOURCE_CLUSTER_ENDPOINT>/$source_endpoint/g" "$GEN_CONTEXT_FILE"
 
 if [ "$CLEAN_UP_ALL" = true ] ; then
-  #TODO adjust for file
   clean_up_all "$cdk_context" "$vpc_id"
   exit 0
 fi
@@ -283,7 +286,7 @@ if [ "$SKIP_MIGRATION_DEPLOY" = false ] ; then
     exit 1
   fi
   npm install
-  cdk deploy "*" --c contextFile="$TMP_DIR_PATH/generatedCDKContext.json" --c contextId="$MIGRATION_CONTEXT_ID" --require-approval never --concurrency 3
+  cdk deploy "*" --c contextFile="$GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID" --require-approval never --concurrency 3
   if [ $? -ne 0 ]; then
     echo "Error: deploying migration stacks failed, exiting."
     exit 1
