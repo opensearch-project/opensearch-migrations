@@ -15,14 +15,16 @@ configurations {
 dependencies {
     implementation project(":trafficCaptureDependencies")
 
-    implementation 'org.opensearch.plugin:opensearch-security:2.11.1.0'
-    implementation 'org.opensearch:opensearch-common:2.11.0'
-    implementation 'org.opensearch:opensearch-core:2.11.0'
-    implementation 'org.opensearch:opensearch:2.11.0'
-    opensearchSecurityPlugin 'org.opensearch.plugin:opensearch-security:2.11.1.0'
+    def openSearch = '2.11.1'
+    implementation "org.opensearch.plugin:opensearch-security:${openSearch}.0"
+    implementation "org.opensearch:opensearch-common:${openSearch}"
+    implementation "org.opensearch:opensearch-core:${openSearch}"
+    implementation "org.opensearch:opensearch:${openSearch}"
+    opensearchSecurityPlugin "org.opensearch.plugin:opensearch-security:${openSearch}.0"
     implementation files(zipTree("$configurations.opensearchSecurityPlugin.singleFile").matching {
         include "*.jar"
         exclude "slf*.jar"
+        exclude "netty*.jar"
     })
 
     implementation project(':captureOffloader')
