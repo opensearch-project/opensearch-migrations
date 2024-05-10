@@ -1,6 +1,7 @@
 plugins {
     id 'jacoco'
     id 'org.owasp.dependencycheck' version '8.2.1'
+    id 'io.freefair.lombok' version '8.6' apply false
 }
 
 allprojects {

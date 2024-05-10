@@ -41,6 +41,8 @@ include('captureKafkaOffloader',
 )
 
 addSubProjects('', new File(rootProject.projectDir,'replayerPlugins'))
+addSubProjects('', new File(rootProject.projectDir,'trafficCaptureDependencies'))
+
 
 if (System.getenv().containsKey("OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED")) {
     gradleEnterprise {

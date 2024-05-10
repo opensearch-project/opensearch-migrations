@@ -4,7 +4,7 @@
 
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
-    id("io.freefair.lombok") version "8.0.1"
+    id 'io.freefair.lombok'
     id 'java-test-fixtures'
 }
 
@@ -20,22 +20,23 @@ sourceSets {
     }
 }
 dependencies {
-    api group: 'io.netty', name: 'netty-buffer', version: '4.1.100.Final'
+    api project(":trafficCaptureDependencies")
+    api group: 'io.netty', name: 'netty-buffer'
 
     implementation project(':captureProtobufs')
     implementation project(':coreUtilities')
-    implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.22.2'
-    implementation group: 'org.projectlombok', name: 'lombok', version: '1.18.26'
-    implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
+    implementation group: 'com.google.protobuf', name: 'protobuf-java'
+    implementation group: 'org.projectlombok', name: 'lombok'
+    implementation group: 'org.slf4j', name: 'slf4j-api'
 
     testImplementation testFixtures(project(path: ':testUtilities'))
     testImplementation project(':coreUtilities')
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
-    testImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    testImplementation group: 'org.slf4j', name: 'slf4j-api'
 
     testFixturesImplementation project(':captureProtobufs')
     testFixturesImplementation project(':coreUtilities')
-    testFixturesImplementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.22.2'
+    testFixturesImplementation group: 'com.google.protobuf', name: 'protobuf-java'
 }

@@ -19,7 +19,7 @@ buildscript {
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id 'org.owasp.dependencycheck' version '8.2.1'
-    id "io.freefair.lombok" version "8.0.1"
+    id 'io.freefair.lombok'
 }
 
 repositories {
@@ -27,6 +27,7 @@ repositories {
 }
 
 dependencies {
+    api project(":trafficCaptureDependencies")
 }
 
 tasks.named('test') {
