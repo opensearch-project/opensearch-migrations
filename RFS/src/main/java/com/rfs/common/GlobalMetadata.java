@@ -18,14 +18,14 @@ public class GlobalMetadata {
     * Defines the behavior required to read a snapshot's global metadata as JSON and convert it into a Data object
     */
     public static interface Factory {
-        private JsonNode getJsonNode(SourceRepo repo, SnapshotRepo.Provider repoDataProvider, String snapshotName, SmileFactory smileFactory) throws Exception {
+        private JsonNode getJsonNode(SnapshotRepo.Provider repoDataProvider, String snapshotName, SmileFactory smileFactory) {
             String snapshotId = repoDataProvider.getSnapshotId(snapshotName);
 
             if (snapshotId == null) {
-                throw new Exception("Snapshot not found");
+                throw new CantFindSnapshotInRepo(snapshotName);
             }
 
-            Path filePath = repo.getGlobalMetadataFilePath(snapshotId);
+            Path filePath = repoDataProvider.getRepo().getGlobalMetadataFilePath(snapshotId);
 
             try (InputStream fis = new FileInputStream(filePath.toFile())) {
                 // Don't fully understand what the value of this code is, but it progresses the stream so we need to do it
@@ -39,20 +39,26 @@ public class GlobalMetadata {
 
                 ObjectMapper smileMapper = new ObjectMapper(smileFactory);
                 return smileMapper.readTree(bis);
+            } catch (Exception e) {
+                throw new CantReadGlobalMetadataFromSnapshot(snapshotName, e);
             }
         }
 
-        default GlobalMetadata.Data fromRepo(SourceRepo repo, SnapshotRepo.Provider repoDataProvider, String snapshotName) throws Exception {
+        default GlobalMetadata.Data fromRepo(String snapshotName) {
+            SnapshotRepo.Provider repoDataProvider = getRepoDataProvider();
             SmileFactory smileFactory = getSmileFactory();
-            JsonNode root = getJsonNode(repo, repoDataProvider, snapshotName, smileFactory);
+            JsonNode root = getJsonNode(repoDataProvider, snapshotName, smileFactory);
             return fromJsonNode(root);
         }
 
         // Version-specific implementation
-        public GlobalMetadata.Data fromJsonNode(JsonNode root) throws Exception;
+        public GlobalMetadata.Data fromJsonNode(JsonNode root);
 
         // Version-specific implementation
         public SmileFactory getSmileFactory();
+
+        // Get the underlying SnapshotRepo Provider
+        public SnapshotRepo.Provider getRepoDataProvider();
     }
 
     /**
@@ -61,7 +67,19 @@ public class GlobalMetadata {
     * See: https://github.com/elastic/elasticsearch/blob/v6.8.23/server/src/main/java/org/elasticsearch/cluster/metadata/MetaData.java#L1214
     */
     public static interface Data {
-        public ObjectNode toObjectNode() throws Exception;
+        public ObjectNode toObjectNode();
+    }
+
+    public static class CantFindSnapshotInRepo extends RfsException {
+        public CantFindSnapshotInRepo(String snapshotName) {
+            super("Can't find snapshot in repo: " + snapshotName);
+        }
+    }
+
+    public static class CantReadGlobalMetadataFromSnapshot extends RfsException {
+        public CantReadGlobalMetadataFromSnapshot(String snapshotName, Throwable cause) {
+            super("Can't read the global metadata from snapshot: " + snapshotName, cause);
+        }
     }
     
 }

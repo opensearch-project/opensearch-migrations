@@ -1,15 +1,11 @@
 package com.rfs.version_os_2_11;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.common.IndexMetadata;
 import com.rfs.common.OpenSearchClient;
 
 public class IndexCreator_OS_2_11 {
-    private static final Logger logger = LogManager.getLogger(IndexCreator_OS_2_11.class);
     private static final ObjectMapper mapper = new ObjectMapper();
 
     public static void create(String indexName, IndexMetadata.Data indexMetadata, OpenSearchClient client) throws Exception {
@@ -28,6 +24,6 @@ public class IndexCreator_OS_2_11 {
         body.set("settings", settings);
 
         // Idempotently create the index
-        client.createIndexIdempotent(indexName, body);
+        client.createIndex(indexName, body);
     }
 }

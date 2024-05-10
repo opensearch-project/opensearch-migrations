@@ -10,20 +10,25 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.rfs.common.SourceRepo;
 import com.rfs.common.SnapshotRepo;
+import com.rfs.common.SnapshotRepo.CantParseRepoFile;
 
 public class SnapshotRepoData_ES_6_8 {
 
-    public static SnapshotRepoData_ES_6_8 fromRepoFile(Path filePath) throws IOException {
+    public static SnapshotRepoData_ES_6_8 fromRepoFile(Path filePath) {
         ObjectMapper mapper = new ObjectMapper();
-        SnapshotRepoData_ES_6_8 data = mapper.readValue(new File(filePath.toString()), SnapshotRepoData_ES_6_8.class);
-        data.filePath = filePath;
-        return data;
+        try {
+            SnapshotRepoData_ES_6_8 data = mapper.readValue(new File(filePath.toString()), SnapshotRepoData_ES_6_8.class);
+            data.filePath = filePath;
+            return data;
+        } catch (IOException e) {
+            throw new CantParseRepoFile("Can't read or parse the Repo Metadata file: " + filePath.toString(), e);
+        }        
     }
 
-    public static SnapshotRepoData_ES_6_8 fromRepo(SourceRepo repo) throws IOException {
+    public static SnapshotRepoData_ES_6_8 fromRepo(SourceRepo repo) {
         Path file = repo.getSnapshotRepoDataFilePath();
         if (file == null) {
-            throw new IOException("No index file found in " + repo.getRepoRootDir());
+            throw new CantParseRepoFile("No index file found in " + repo.getRepoRootDir());
         }
         return fromRepoFile(file);
     }

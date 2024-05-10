@@ -19,6 +19,9 @@ public class SnapshotRepo {
     
         // Get the ID of an index from its name
         public String getIndexId(String indexName);
+
+        // Get the underlying repo
+        public SourceRepo getRepo();
         
     }
 
@@ -39,6 +42,15 @@ public class SnapshotRepo {
         List<String> getSnapshots();
     }
 
+    public static class CantParseRepoFile extends RfsException {
+        public CantParseRepoFile(String message) {
+            super(message);
+        }
+
+        public CantParseRepoFile(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
 }
 
 

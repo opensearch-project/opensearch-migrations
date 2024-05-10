@@ -10,11 +10,11 @@ public class GlobalMetadataData_ES_6_8 implements com.rfs.common.GlobalMetadata.
     }
 
     @Override
-    public ObjectNode toObjectNode() throws Exception {
+    public ObjectNode toObjectNode() {
         return root;
     }
 
-    public ObjectNode getTemplates() throws Exception {
+    public ObjectNode getTemplates() {
         return (ObjectNode) root.get("templates");
     }
     

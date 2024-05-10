@@ -3,7 +3,6 @@ package com.rfs.common;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -39,7 +38,7 @@ public class S3Repo implements SourceRepo {
         try {
             return Integer.parseInt(key.substring(key.lastIndexOf('-') + 1));
         } catch (NumberFormatException e) {
-            throw new RuntimeException("Failed to extract version from S3 object key: " + key, e);
+            throw new CantExtractIndexFileVersion(key, e);
         }
     }
 
@@ -61,15 +60,19 @@ public class S3Repo implements SourceRepo {
         return new S3Uri(rawUri);
     }
 
-    protected void ensureS3LocalDirectoryExists(Path localPath) throws IOException {
-        Files.createDirectories(localPath);
+    protected void ensureS3LocalDirectoryExists(Path localPath) {
+        try {
+            Files.createDirectories(localPath);
+        } catch (IOException e) {
+            throw new CantCreateS3LocalDir(localPath, e);
+        }
     }
 
     protected boolean doesFileExistLocally(Path localPath) {
         return Files.exists(localPath);
     }
 
-    private void ensureFileExistsLocally(S3Uri s3Uri, Path localPath) throws IOException {
+    private void ensureFileExistsLocally(S3Uri s3Uri, Path localPath) {
         ensureS3LocalDirectoryExists(localPath.getParent());
 
         if (doesFileExistLocally(localPath)) {
@@ -112,7 +115,7 @@ public class S3Repo implements SourceRepo {
     }
 
     @Override
-    public Path getSnapshotRepoDataFilePath() throws IOException {
+    public Path getSnapshotRepoDataFilePath() {
         S3Uri repoFileS3Uri = findRepoFileUri();
         
         String relativeFileS3Uri = repoFileS3Uri.uri.substring(s3RepoUri.uri.length() + 1);
@@ -124,7 +127,7 @@ public class S3Repo implements SourceRepo {
     }
 
     @Override
-    public Path getGlobalMetadataFilePath(String snapshotId) throws IOException {
+    public Path getGlobalMetadataFilePath(String snapshotId) {
         String suffix = "meta-" + snapshotId + ".dat";
         Path filePath = s3LocalDir.resolve(suffix);
         S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + suffix);
@@ -133,7 +136,7 @@ public class S3Repo implements SourceRepo {
     }
 
     @Override
-    public Path getSnapshotMetadataFilePath(String snapshotId) throws IOException {
+    public Path getSnapshotMetadataFilePath(String snapshotId) {
         String suffix = "snap-" + snapshotId + ".dat";
         Path filePath = s3LocalDir.resolve(suffix);
         S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + suffix);
@@ -142,7 +145,7 @@ public class S3Repo implements SourceRepo {
     }
 
     @Override
-    public Path getIndexMetadataFilePath(String indexId, String indexFileId) throws IOException {
+    public Path getIndexMetadataFilePath(String indexId, String indexFileId) {
         String suffix = "indices/" + indexId + "/meta-" + indexFileId + ".dat";
         Path filePath = s3LocalDir.resolve(suffix);
         S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + suffix);
@@ -151,14 +154,14 @@ public class S3Repo implements SourceRepo {
     }
 
     @Override
-    public Path getShardDirPath(String indexId, int shardId) throws IOException {
+    public Path getShardDirPath(String indexId, int shardId) {
         String suffix = "indices/" + indexId + "/" + shardId;
         Path shardDirPath = s3LocalDir.resolve(suffix);
         return shardDirPath;
     }
 
     @Override
-    public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) throws IOException {
+    public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) {
         String suffix = "indices/" + indexId + "/" + shardId + "/snap-" + snapshotId + ".dat";
         Path filePath = s3LocalDir.resolve(suffix);
         S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + suffix);
@@ -167,7 +170,7 @@ public class S3Repo implements SourceRepo {
     }
 
     @Override
-    public Path getBlobFilePath(String indexId, int shardId, String blobName) throws IOException {
+    public Path getBlobFilePath(String indexId, int shardId, String blobName) {
         String suffix = "indices/" + indexId + "/" + shardId + "/" + blobName;
         Path filePath = s3LocalDir.resolve(suffix);
         S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + suffix);
@@ -176,7 +179,7 @@ public class S3Repo implements SourceRepo {
     }
 
     @Override
-    public void prepBlobFiles(ShardMetadata.Data shardMetadata) throws IOException {
+    public void prepBlobFiles(ShardMetadata.Data shardMetadata) {
         S3TransferManager transferManager = S3TransferManager.builder().s3Client(s3Client).build();
         
         Path shardDirPath = getShardDirPath(shardMetadata.getIndexId(), shardMetadata.getShardId());
@@ -200,5 +203,17 @@ public class S3Repo implements SourceRepo {
 
         // Print out any failed downloads
         completedDirectoryDownload.failedTransfers().forEach(logger::error);
+    }
+
+    public static class CantCreateS3LocalDir extends RfsException {
+        public CantCreateS3LocalDir(Path localPath, Throwable cause) {
+            super("Failed to create the S3 local download directory: " + localPath, cause);
+        }
+    }
+
+    public static class CantExtractIndexFileVersion extends RfsException {
+        public CantExtractIndexFileVersion(String key, Throwable cause) {
+            super("Failed to extract the Index File version from S3 object key: " + key, cause);
+        }
     }
 }

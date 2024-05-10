@@ -3,7 +3,6 @@ package com.rfs;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
@@ -162,11 +161,11 @@ public class ReindexFromSnapshot {
 
         SourceRepo repo;
         if (snapshotDirPath != null) {
-            repo = new FilesystemRepo(snapshotDirPath);
+            repo = new FileSystemRepo(snapshotDirPath);
         } else if (s3RepoUri != null && s3Region != null && s3LocalDirPath != null) {
             repo = S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
         } else if (snapshotLocalRepoDirPath != null) {
-            repo = new FilesystemRepo(snapshotLocalRepoDirPath);
+            repo = new FileSystemRepo(snapshotLocalRepoDirPath);
         } else {
             throw new IllegalArgumentException("Could not construct a source repo from the available, user-supplied arguments");
         }
@@ -255,9 +254,9 @@ public class ReindexFromSnapshot {
                 logger.info("Attempting to read Global Metadata details...");
                 GlobalMetadata.Data globalMetadata;
                 if (sourceVersion == ClusterVersion.ES_6_8) {
-                    globalMetadata = new GlobalMetadataFactory_ES_6_8().fromRepo(repo, repoDataProvider, snapshotName);
+                    globalMetadata = new GlobalMetadataFactory_ES_6_8(repoDataProvider).fromRepo(snapshotName);
                 } else {
-                    globalMetadata = new GlobalMetadataFactory_ES_7_10().fromRepo(repo, repoDataProvider, snapshotName);
+                    globalMetadata = new GlobalMetadataFactory_ES_7_10(repoDataProvider).fromRepo(snapshotName);
                 }
                 logger.info("Global Metadata read successfully");
 
@@ -269,13 +268,15 @@ public class ReindexFromSnapshot {
 
                 OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
                 if (sourceVersion == ClusterVersion.ES_6_8) {
+                    GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, templateWhitelist, componentTemplateWhitelist, List.of());
                     ObjectNode root = globalMetadata.toObjectNode();
-                    ObjectNode transformedRoot = transformer.transformGlobalMetadata(root);                    
-                    GlobalMetadataCreator_OS_2_11.create(transformedRoot, targetClient, Collections.emptyList(), templateWhitelist);
+                    ObjectNode transformedRoot = transformer.transformGlobalMetadata(root);
+                    metadataCreator.create(transformedRoot);
                 } else if (sourceVersion == ClusterVersion.ES_7_10) {
+                    GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateWhitelist, templateWhitelist);
                     ObjectNode root = globalMetadata.toObjectNode();
-                    ObjectNode transformedRoot = transformer.transformGlobalMetadata(root);                    
-                    GlobalMetadataCreator_OS_2_11.create(transformedRoot, targetClient, componentTemplateWhitelist, templateWhitelist);
+                    ObjectNode transformedRoot = transformer.transformGlobalMetadata(root);
+                    metadataCreator.create(transformedRoot);
                 }
             }
 

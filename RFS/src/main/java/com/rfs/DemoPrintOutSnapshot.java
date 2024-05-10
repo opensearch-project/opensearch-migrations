@@ -27,7 +27,7 @@ import com.rfs.common.SnapshotMetadata;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.ClusterVersion;
-import com.rfs.common.FilesystemRepo;
+import com.rfs.common.FileSystemRepo;
 import com.rfs.version_es_7_10.*;
 
 public class DemoPrintOutSnapshot {
@@ -62,7 +62,7 @@ public class DemoPrintOutSnapshot {
             throw new IllegalArgumentException("Unsupported source version: " + sourceVersion);
         }
 
-        SourceRepo repo = new FilesystemRepo(Path.of(snapshotDirPath));
+        SourceRepo repo = new FileSystemRepo(Path.of(snapshotDirPath));
 
         try {
             // ==========================================================================================================
@@ -123,9 +123,9 @@ public class DemoPrintOutSnapshot {
 
             GlobalMetadata.Data globalMetadata;
             if (sourceVersion == ClusterVersion.ES_6_8) {
-                globalMetadata = new GlobalMetadataFactory_ES_6_8().fromRepo(repo, repoDataProvider, snapshotName);
+                globalMetadata = new GlobalMetadataFactory_ES_6_8(repoDataProvider).fromRepo(snapshotName);
             } else {
-                globalMetadata = new GlobalMetadataFactory_ES_7_10().fromRepo(repo, repoDataProvider, snapshotName);
+                globalMetadata = new GlobalMetadataFactory_ES_7_10(repoDataProvider).fromRepo(snapshotName);
             }
 
             if (sourceVersion == ClusterVersion.ES_6_8) { 
