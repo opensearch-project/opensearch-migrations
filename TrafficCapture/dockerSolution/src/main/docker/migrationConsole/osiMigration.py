@@ -26,7 +26,7 @@ SOURCE_BASIC_AUTH_CONFIG_TEMPLATE = """
 """
 SOURCE_DEFAULT_INDEX_TEMPLATE = """
         exclude:
-        - index_name_regex: \.*
+          - index_name_regex: \.*
 """
 
 
@@ -232,22 +232,30 @@ pipeline_configurations:
         secret_id: {source_auth_secret}
         region: {aws_region}
         sts_role_arn: {pipeline_role_arn}
-"""
+""".strip()
 
 
-def generate_sigv4_auth_config(pipeline_role_arn, aws_region):
+def generate_source_sigv4_auth_config(pipeline_role_arn, aws_region):
     return f"""
       aws:
         region: {aws_region}
         sts_role_arn: {pipeline_role_arn}
-"""
+""".strip()
+
+
+def generate_target_sigv4_auth_config(pipeline_role_arn, aws_region):
+    return f"""
+        aws:
+          region: {aws_region}
+          sts_role_arn: {pipeline_role_arn}
+""".strip()
 
 
 def generate_source_index_config(include_index_regex_list=None):
     if include_index_regex_list is not None:
         include_template_str = "include:\n"
         for regex_str in include_index_regex_list:
-            include_template_str = include_template_str + f"        - index_name_regex: {regex_str}\n"
+            include_template_str = include_template_str + f"          - index_name_regex: {regex_str}\n"
         # Return template after removing last new line character
         return include_template_str[:-1]
     else:
@@ -297,16 +305,17 @@ def construct_pipeline_config(pipeline_config_file_path: str, source_endpoint: s
     if source_auth_type == 'BASIC_AUTH':
         secret_config = generate_source_secret_config(source_auth_secret, pipeline_role_arn, aws_region)
         pipeline_config = pipeline_config.replace(AWS_SECRET_CONFIG_PLACEHOLDER, secret_config)
-        pipeline_config = pipeline_config.replace(SOURCE_AUTH_OPTIONS_PLACEHOLDER, SOURCE_BASIC_AUTH_CONFIG_TEMPLATE)
+        pipeline_config = pipeline_config.replace(SOURCE_AUTH_OPTIONS_PLACEHOLDER,
+                                                  SOURCE_BASIC_AUTH_CONFIG_TEMPLATE.strip())
     else:
         pipeline_config = pipeline_config.replace(AWS_SECRET_CONFIG_PLACEHOLDER, "")
 
     if source_auth_type == 'SIGV4':
-        aws_source_config = generate_sigv4_auth_config(pipeline_role_arn, aws_region)
+        aws_source_config = generate_source_sigv4_auth_config(pipeline_role_arn, aws_region)
         pipeline_config = pipeline_config.replace(SOURCE_AUTH_OPTIONS_PLACEHOLDER, aws_source_config)
 
     if target_auth_type == 'SIGV4':
-        aws_target_config = generate_sigv4_auth_config(pipeline_role_arn, aws_region)
+        aws_target_config = generate_target_sigv4_auth_config(pipeline_role_arn, aws_region)
         pipeline_config = pipeline_config.replace(TARGET_AUTH_OPTIONS_PLACEHOLDER, aws_target_config)
 
     pipeline_config = pipeline_config.replace(SOURCE_ENDPOINT_PLACEHOLDER, source_endpoint)
@@ -406,12 +415,17 @@ def create_pipeline_from_stage(osi_client, pipeline_name: str, pipeline_config_p
         exit(0)
 
     if print_command_only:
-        command_str = (f"./osiMigration.py create-pipeline --source-endpoint={source_endpoint} "
-                       f"--target-endpoint={target_endpoint} --aws-region={region} "
+        command_str = (f"./osiMigration.py create-pipeline "
+                       f"--source-endpoint={source_endpoint} "
+                       f"--target-endpoint={target_endpoint} "
+                       f"--aws-region={region} "
                        f"--subnet-ids={','.join(map(str,subnet_ids))} "
                        f"--security-group-ids={','.join(map(str,security_groups))} "
-                       f"--source-auth-type='SIGV4' --target-auth-type='SIGV4' --pipeline-role-arn={pipeline_role_arn} "
-                       f"--tag=migration_deployment={solution_version} --log-group-name={log_group_name}")
+                       f"--source-auth-type='SIGV4' "
+                       f"--target-auth-type='SIGV4' "
+                       f"--pipeline-role-arn={pipeline_role_arn} "
+                       f"--tag=migration_deployment={solution_version} "
+                       f"--log-group-name={log_group_name}")
         print(command_str)
         exit(0)
 
