@@ -2,6 +2,8 @@ package com.rfs.common;
 
 import java.net.HttpURLConnection;
 import java.time.Duration;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -252,7 +254,11 @@ public class OpenSearchClient {
             // The OpenSearch Bulk API response body is JSON and contains a top-level "errors" field that indicates
             // whether any of the individual operations in the bulk request failed.  Rather than marshalling the entire
             // response as JSON, just check for the string value.
-            return body.contains("\"errors\":true");
+
+            String regexPattern = "\"errors\"\\s*:\\s*true";
+            Pattern pattern = Pattern.compile(regexPattern);
+            Matcher matcher = pattern.matcher(body);
+            return matcher.find();
         }
 
         public String getFailureMessage() {

@@ -11,8 +11,20 @@ import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
 
-import com.rfs.cms.*;
-import com.rfs.common.*;
+
+import com.rfs.cms.CmsClient;
+import com.rfs.cms.OpenSearchCmsClient;
+import com.rfs.common.ClusterVersion;
+import com.rfs.common.ConnectionDetails;
+import com.rfs.common.GlobalMetadata;
+import com.rfs.common.Logging;
+import com.rfs.common.OpenSearchClient;
+import com.rfs.common.S3Uri;
+import com.rfs.common.S3Repo;
+import com.rfs.common.SnapshotCreator;
+import com.rfs.common.SourceRepo;
+import com.rfs.common.S3SnapshotCreator;
+import com.rfs.common.SnapshotRepo;
 import com.rfs.transformers.TransformFunctions;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_es_7_10.GlobalMetadataFactory_ES_7_10;

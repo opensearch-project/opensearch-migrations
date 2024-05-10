@@ -12,7 +12,7 @@ public interface CmsClient {
     public boolean createSnapshotEntry(String snapshotName);
 
     /*
-     * Attempt to retrieve the Snapshot entry from the CMS, if it exists; null if it doesn't
+     * Attempt to retrieve the Snapshot entry from the CMS, if it exists; null if it doesn't currently exist
      */
     public CmsEntry.Snapshot getSnapshotEntry(String snapshotName);
 
@@ -29,7 +29,7 @@ public interface CmsClient {
     public boolean createMetadataEntry();
 
     /*
-     * Attempt to retrieve the Metadata Migration entry from the CMS, if it exists; null if it doesn't
+     * Attempt to retrieve the Metadata Migration entry from the CMS, if it exists; null if it doesn't currently exist
      */
     public CmsEntry.Metadata getMetadataEntry();
 

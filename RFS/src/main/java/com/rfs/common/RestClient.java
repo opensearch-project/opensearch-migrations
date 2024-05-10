@@ -29,7 +29,7 @@ public class RestClient {
             .baseUrl(connectionDetails.url)
             .headers(h -> {
                 h.add("Content-Type", "application/json");
-                h.add("User-Agent", "RfsWorker");
+                h.add("User-Agent", "RfsWorker-1.0");
                 if (connectionDetails.authType == ConnectionDetails.AuthType.BASIC) {
                     String credentials = connectionDetails.username + ":" + connectionDetails.password;
                     String encodedCredentials = Base64.getEncoder().encodeToString(credentials.getBytes());

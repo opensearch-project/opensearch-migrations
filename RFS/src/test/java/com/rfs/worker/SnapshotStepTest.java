@@ -1,7 +1,5 @@
 package com.rfs.worker;
 
-import java.util.stream.Stream;
-
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
@@ -9,6 +7,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import org.mockito.Mockito;
@@ -25,27 +24,23 @@ import com.rfs.worker.SnapshotStep.WaitForSnapshot;
 
 import static org.mockito.Mockito.*;
 
+import java.util.stream.Stream;
+
 
 @ExtendWith(MockitoExtension.class)
 public class SnapshotStepTest {
+    private GlobalState globalState;
+    private CmsClient cmsClient;
+    private SnapshotCreator snapshotCreator;
 
-    @Test
-    void EnterPhase_run_AsExpected() {
-        // Set up the test
-        GlobalState globalState = Mockito.mock(GlobalState.class);
-        CmsClient cmsClient = Mockito.mock(CmsClient.class);
-        SnapshotCreator snapshotCreator = Mockito.mock(SnapshotCreator.class);
-        Snapshot snapshotEntry = Mockito.mock(Snapshot.class);
-
-        // Run the test
-        SnapshotStep.EnterPhase enterPhase = new SnapshotStep.EnterPhase(globalState, cmsClient, snapshotCreator, snapshotEntry);
-        enterPhase.run();
-
-        // Check the results
-        Mockito.verify(globalState, times(1)).updatePhase(GlobalState.Phase.SNAPSHOT_IN_PROGRESS);
+    @BeforeEach
+    void setUp() {
+        this.globalState = Mockito.mock(GlobalState.class);
+        this.cmsClient = Mockito.mock(CmsClient.class);
+        this.snapshotCreator = Mockito.mock(SnapshotCreator.class);
     }
 
-    static Stream<Arguments> provideEnterPhaseNextArgs() {
+    static Stream<Arguments > provideEnterPhaseArgs() {
         return Stream.of(
             Arguments.of(null, SnapshotStep.CreateEntry.class),
             Arguments.of(new Snapshot("test", SnapshotStatus.NOT_STARTED), SnapshotStep.InitiateSnapshot.class),
@@ -54,83 +49,48 @@ public class SnapshotStepTest {
     }
 
     @ParameterizedTest
-    @MethodSource("provideEnterPhaseNextArgs")
-    void EnterPhase_nextState_AsExpected(Snapshot snapshotEntry, Class<?> expected) {
-        // Set up the test
-        GlobalState globalState = Mockito.mock(GlobalState.class);
-        CmsClient cmsClient = Mockito.mock(CmsClient.class);
-        SnapshotCreator snapshotCreator = Mockito.mock(SnapshotCreator.class);
-
+    @MethodSource("provideEnterPhaseArgs")
+    void EnterPhase_AsExpected(Snapshot snapshotEntry, Class<?> expected) {
         // Run the test
-        SnapshotStep.EnterPhase enterPhase = new SnapshotStep.EnterPhase(globalState, cmsClient, snapshotCreator, snapshotEntry);
-        WorkerStep nextState = enterPhase.nextStep();
+        SnapshotStep.EnterPhase testStep = new SnapshotStep.EnterPhase(globalState, cmsClient, snapshotCreator, snapshotEntry);
+        testStep.run();
+        WorkerStep nextStep = testStep.nextStep();
 
         // Check the results
-        assertEquals(expected, nextState.getClass());
+        Mockito.verify(globalState, times(1)).updatePhase(GlobalState.Phase.SNAPSHOT_IN_PROGRESS);
+        assertEquals(expected, nextStep.getClass());
     }
 
     @Test
-    void CreateEntry_run_AsExpected() {
+    void CreateEntry_AsExpected() {
         // Set up the test
-        GlobalState globalState = Mockito.mock(GlobalState.class);
-        CmsClient cmsClient = Mockito.mock(CmsClient.class);
-        SnapshotCreator snapshotCreator = Mockito.mock(SnapshotCreator.class);
         when(snapshotCreator.getSnapshotName()).thenReturn("test");
 
         // Run the test
-        SnapshotStep.CreateEntry createPhase = new SnapshotStep.CreateEntry(globalState, cmsClient, snapshotCreator);
-        createPhase.run();
+        SnapshotStep.CreateEntry testStep = new SnapshotStep.CreateEntry(globalState, cmsClient, snapshotCreator);
+        testStep.run();
+        WorkerStep nextStep = testStep.nextStep();
 
         // Check the results
         Mockito.verify(cmsClient, times(1)).createSnapshotEntry("test");
+        assertEquals(SnapshotStep.InitiateSnapshot.class, nextStep.getClass());
     }
 
     @Test
-    void CreateEntry_nextState_AsExpected() {
+    void InitiateSnapshot_AsExpected() {
         // Set up the test
-        GlobalState globalState = Mockito.mock(GlobalState.class);
-        CmsClient cmsClient = Mockito.mock(CmsClient.class);
-        SnapshotCreator snapshotCreator = Mockito.mock(SnapshotCreator.class);
-
-        // Run the test
-        SnapshotStep.CreateEntry createPhase = new SnapshotStep.CreateEntry(globalState, cmsClient, snapshotCreator);
-        WorkerStep nextState = createPhase.nextStep();
-
-        // Check the results
-        assertEquals(SnapshotStep.InitiateSnapshot.class, nextState.getClass());
-    }
-
-    @Test
-    void InitiateSnapshot_run_AsExpected() {
-        // Set up the test
-        GlobalState globalState = Mockito.mock(GlobalState.class);
-        CmsClient cmsClient = Mockito.mock(CmsClient.class);
-        SnapshotCreator snapshotCreator = Mockito.mock(SnapshotCreator.class);
         when(snapshotCreator.getSnapshotName()).thenReturn("test");
 
         // Run the test
-        SnapshotStep.InitiateSnapshot initiatePhase = new SnapshotStep.InitiateSnapshot(globalState, cmsClient, snapshotCreator);
-        initiatePhase.run();
+        SnapshotStep.InitiateSnapshot testStep = new SnapshotStep.InitiateSnapshot(globalState, cmsClient, snapshotCreator);
+        testStep.run();
+        WorkerStep nextStep = testStep.nextStep();
 
         // Check the results
         Mockito.verify(snapshotCreator, times(1)).registerRepo();
         Mockito.verify(snapshotCreator, times(1)).createSnapshot();
         Mockito.verify(cmsClient, times(1)).updateSnapshotEntry("test", SnapshotStatus.IN_PROGRESS);
-    }
-
-    @Test
-    void InitiateSnapshot_nextState_AsExpected() {
-        // Set up the test
-        GlobalState globalState = Mockito.mock(GlobalState.class);
-        CmsClient cmsClient = Mockito.mock(CmsClient.class);
-        SnapshotCreator snapshotCreator = Mockito.mock(SnapshotCreator.class);
-
-        // Run the test
-        SnapshotStep.InitiateSnapshot initiatePhase = new SnapshotStep.InitiateSnapshot(globalState, cmsClient, snapshotCreator);
-        WorkerStep nextState = initiatePhase.nextStep();
-
-        // Check the results
-        assertEquals(SnapshotStep.WaitForSnapshot.class, nextState.getClass());
+        assertEquals(SnapshotStep.WaitForSnapshot.class, nextStep.getClass());
     }
 
     public static class TestableWaitForSnapshot extends WaitForSnapshot {
@@ -146,9 +106,6 @@ public class SnapshotStepTest {
     @Test
     void WaitForSnapshot_successful_AsExpected() {
         // Set up the test
-        GlobalState globalState = Mockito.mock(GlobalState.class);
-        CmsClient cmsClient = Mockito.mock(CmsClient.class);
-        SnapshotCreator snapshotCreator = Mockito.mock(SnapshotCreator.class);
         when(snapshotCreator.isSnapshotFinished())
             .thenReturn(false)
             .thenReturn(true);
@@ -156,19 +113,16 @@ public class SnapshotStepTest {
         // Run the test
         SnapshotStep.WaitForSnapshot waitPhase = new TestableWaitForSnapshot(globalState, cmsClient, snapshotCreator);
         waitPhase.run();
-        WorkerStep nextState = waitPhase.nextStep();
+        WorkerStep nextStep = waitPhase.nextStep();
 
         // Check the results
         Mockito.verify(snapshotCreator, times(2)).isSnapshotFinished();
-        assertEquals(SnapshotStep.ExitPhaseSuccess.class, nextState.getClass());
+        assertEquals(SnapshotStep.ExitPhaseSuccess.class, nextStep.getClass());
     }
 
     @Test
     void WaitForSnapshot_failedSnapshot_AsExpected() {
         // Set up the test
-        GlobalState globalState = Mockito.mock(GlobalState.class);
-        CmsClient cmsClient = Mockito.mock(CmsClient.class);
-        SnapshotCreator snapshotCreator = Mockito.mock(SnapshotCreator.class);
         when(snapshotCreator.isSnapshotFinished())
             .thenReturn(false)
             .thenThrow(new SnapshotCreationFailed("test"));
@@ -176,38 +130,32 @@ public class SnapshotStepTest {
         // Run the test
         SnapshotStep.WaitForSnapshot waitPhase = new TestableWaitForSnapshot(globalState, cmsClient, snapshotCreator);
         waitPhase.run();
-        WorkerStep nextState = waitPhase.nextStep();
+        WorkerStep nextStep = waitPhase.nextStep();
 
         // Check the results
         Mockito.verify(snapshotCreator, times(2)).isSnapshotFinished();
-        assertEquals(SnapshotStep.ExitPhaseSnapshotFailed.class, nextState.getClass());
+        assertEquals(SnapshotStep.ExitPhaseSnapshotFailed.class, nextStep.getClass());
     }
 
     @Test
     void ExitPhaseSuccess_AsExpected() {
         // Set up the test
-        GlobalState globalState = Mockito.mock(GlobalState.class);
-        CmsClient cmsClient = Mockito.mock(CmsClient.class);
-        SnapshotCreator snapshotCreator = Mockito.mock(SnapshotCreator.class);
         when(snapshotCreator.getSnapshotName()).thenReturn("test");
 
         // Run the test
         SnapshotStep.ExitPhaseSuccess exitPhase = new ExitPhaseSuccess(globalState, cmsClient, snapshotCreator);
         exitPhase.run();
-        WorkerStep nextState = exitPhase.nextStep();
+        WorkerStep nextStep = exitPhase.nextStep();
 
         // Check the results
         Mockito.verify(cmsClient, times(1)).updateSnapshotEntry("test", SnapshotStatus.COMPLETED);
         Mockito.verify(globalState, times(1)).updatePhase(GlobalState.Phase.SNAPSHOT_COMPLETED);
-        assertEquals(null, nextState);
+        assertEquals(null, nextStep);
     }
 
     @Test
     void ExitPhaseSnapshotFailed_AsExpected() {
         // Set up the test
-        GlobalState globalState = Mockito.mock(GlobalState.class);
-        CmsClient cmsClient = Mockito.mock(CmsClient.class);
-        SnapshotCreator snapshotCreator = Mockito.mock(SnapshotCreator.class);
         when(snapshotCreator.getSnapshotName()).thenReturn("test");
         SnapshotCreationFailed e = new SnapshotCreationFailed("test");
 
@@ -221,6 +169,5 @@ public class SnapshotStepTest {
         // Check the results
         Mockito.verify(cmsClient, times(1)).updateSnapshotEntry("test", SnapshotStatus.FAILED);
         Mockito.verify(globalState, times(1)).updatePhase(GlobalState.Phase.SNAPSHOT_FAILED);
-    }
-    
+    }    
 }
