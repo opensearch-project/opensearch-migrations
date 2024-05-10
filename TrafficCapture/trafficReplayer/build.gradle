@@ -41,6 +41,7 @@ dependencies {
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
     implementation group: 'org.slf4j', name: 'slf4j-api'
+    implementation group: 'com.lmax', name: 'disruptor'
     implementation group: 'software.amazon.awssdk', name: 'arns'
     implementation group: 'software.amazon.awssdk', name: 'auth'
     implementation group: 'software.amazon.awssdk', name: 'sdk-core'
