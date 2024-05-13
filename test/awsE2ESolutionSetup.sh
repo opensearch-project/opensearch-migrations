@@ -68,6 +68,20 @@ prepare_source_nodes_for_capture () {
   done
 }
 
+validate_required_options () {
+  suffix_required_value='ec2-source-<STAGE>'
+  source_infra_suffix=$(jq ".[\"$SOURCE_CONTEXT_ID\"].suffix" "$GEN_CONTEXT_FILE" -r)
+  source_network_suffix=$(jq ".[\"$SOURCE_CONTEXT_ID\"].networkStackSuffix" "$GEN_CONTEXT_FILE" -r)
+  if [ "$source_infra_suffix" != "$suffix_required_value" ]; then
+    echo "Error: source CDK context must include the 'suffix' option with a value of '$suffix_required_value', however found a value of '$source_infra_suffix', exiting."
+    exit 1
+  fi
+  if [ "$source_network_suffix" != "$suffix_required_value" ]; then
+    echo "Error: source CDK context must include the 'networkStackSuffix' option with a value of '$suffix_required_value', however found a value of '$source_network_suffix', exiting."
+    exit 1
+  fi
+}
+
 restore_and_record () {
   deploy_stage=$1
   source_lb_endpoint=$(aws cloudformation describe-stacks --stack-name "$SOURCE_INFRA_STACK_NAME" --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
@@ -247,6 +261,7 @@ GEN_CONTEXT_FILE="$TMP_DIR_PATH/generatedCDKContext.json"
 # Replace preliminary placeholders in CDK context into a generated context file
 mkdir -p "$TMP_DIR_PATH"
 cp $CONTEXT_FILE "$GEN_CONTEXT_FILE"
+validate_required_options
 sed -i -e "s/<STAGE>/$STAGE/g" "$GEN_CONTEXT_FILE"
 
 if [ ! -d "opensearch-cluster-cdk" ]; then
@@ -254,7 +269,7 @@ if [ ! -d "opensearch-cluster-cdk" ]; then
 else
   echo "Repo already exists, skipping clone."
 fi
-cd opensearch-cluster-cdk && git pull && git checkout migration-es
+cd opensearch-cluster-cdk && git pull && git checkout migration-es && git pull
 npm install
 if [ "$BOOTSTRAP_REGION" = true ] ; then
   bootstrap_region

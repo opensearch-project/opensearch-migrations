@@ -16,7 +16,6 @@
     "migrationConsoleEnableOSI": true
   },
   "source-single-node-ec2": {
-    "stage": "<STAGE>",
     "suffix": "ec2-source-<STAGE>",
     "networkStackSuffix": "ec2-source-<STAGE>",
     "distVersion": "7.10.2",
