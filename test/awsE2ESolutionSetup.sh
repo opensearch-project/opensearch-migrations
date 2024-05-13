@@ -90,8 +90,7 @@ create_service_linked_roles () {
 }
 
 clean_up_all () {
-  cdk_context_var=$1
-  vpc_id=$2
+  vpc_id=$1
   default_sg=$(aws ec2 describe-security-groups --filters "Name=vpc-id,Values=$vpc_id" "Name=group-name,Values=default" --query "SecurityGroups[*].GroupId" --output text)
   instance_ids=($(aws ec2 describe-instances --filters "Name=tag:Name,Values=$SOURCE_INFRA_STACK_NAME/*" 'Name=instance-state-name,Values=running' --query 'Reservations[*].Instances[*].InstanceId' --output text))
   # Revert source cluster back to default SG to remove added SGs
@@ -115,8 +114,14 @@ bootstrap_region () {
 
 usage() {
   echo ""
-  echo "Script to setup E2E AWS infrastructure for an ES 7.10.2 source cluster running on EC2, as well as "
-  echo "an OpenSearch Service Domain as the target cluster, and the Migration infrastructure for simulating a migration from source to target."
+  echo "Script to setup E2E AWS infrastructure for simulating a test environment with a source cluster on EC2, the "
+  echo "opensearch-migrations tooling, and a target cluster. Once this script has deployed these resources, it will add "
+  echo "any needed security groups to the source cluster nodes as well as install and start the capture proxy on the "
+  echo "source cluster nodes. The source cluster, migration tooling, and target cluster can all be customized by use "
+  echo "of CDK context in the provided 'context-file' option"
+  echo ""
+  echo "The following placeholder values are replaced before a source deployment: <STAGE>, and the following"
+  echo "placeholder values are replaced after a source deployment: <SOURCE_CLUSTER_ENDPOINT> <VPC_ID>"
   echo ""
   echo "Usage: "
   echo "  ./awsE2ESolutionSetup.sh <>"
@@ -139,7 +144,7 @@ usage() {
   exit 1
 }
 
-STAGE='script-test'
+STAGE='aws-integ'
 RUN_POST_ACTIONS=false
 CREATE_SLR=false
 BOOTSTRAP_REGION=false
@@ -249,7 +254,7 @@ if [ ! -d "opensearch-cluster-cdk" ]; then
 else
   echo "Repo already exists, skipping clone."
 fi
-cd opensearch-cluster-cdk && git pull && git checkout tanner-migration-testing
+cd opensearch-cluster-cdk && git pull && git checkout migration-es
 npm install
 if [ "$BOOTSTRAP_REGION" = true ] ; then
   bootstrap_region
@@ -274,7 +279,7 @@ sed -i -e "s/<VPC_ID>/$vpc_id/g" "$GEN_CONTEXT_FILE"
 sed -i -e "s/<SOURCE_CLUSTER_ENDPOINT>/$source_endpoint/g" "$GEN_CONTEXT_FILE"
 
 if [ "$CLEAN_UP_ALL" = true ] ; then
-  clean_up_all "$cdk_context" "$vpc_id"
+  clean_up_all "$vpc_id"
   exit 0
 fi
 

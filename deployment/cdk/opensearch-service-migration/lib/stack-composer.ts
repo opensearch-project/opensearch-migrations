@@ -103,7 +103,12 @@ export class StackComposer {
         const contextFile = scope.node.tryGetContext("contextFile")
         if (contextFile) {
             const fileString = readFileSync(contextFile, 'utf-8');
-            const fileJSON = JSON.parse(fileString)
+            let fileJSON
+            try {
+                fileJSON = JSON.parse(fileString)
+            } catch (error) {
+                throw new Error(`Unable to parse context file ${contextFile} into JSON with following error: ${error}`);
+            }
             const contextBlock = fileJSON[contextId]
             if (!contextBlock) {
                 throw new Error(`No CDK context block found for contextId '${contextId}' in file ${contextFile}`)

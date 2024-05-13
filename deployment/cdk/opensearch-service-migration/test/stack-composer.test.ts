@@ -251,7 +251,6 @@ test('Test that loading context via a file errors if file does not exist', () =>
     expect(createStackFunc).toThrow()
 })
 
-//TODO add better error here
 test('Test that loading context via a file errors if file is not proper json', () => {
 
     const contextOptions = {
