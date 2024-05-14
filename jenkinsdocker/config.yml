@@ -1,0 +1,40 @@
+jenkins:
+  systemMessage: "Jenkins configured via JCasC"
+
+jobs:
+  - script: >
+      pipelineJob('example-pipeline') {
+        definition {
+          cpsScm {
+            scm {
+              git {
+                remote {
+                  url('/opensearch-migrations-src')
+                }
+                branches('*/main')
+                scriptPath('jenkins/release.jenkinsFile')
+              }
+            }
+          }
+        }
+      }
+
+#credentials:
+#  system:
+#    domainCredentials:
+#      - credentials:
+#          - usernamePassword:
+#              id: "github-credentials"
+#              username: "user"
+#              password: "password"
+#              description: "GitHub Credentials"
+
+tool:
+  git:
+    installations:
+      - name: "Default"
+        home: "/usr/bin/git"
+
+#unclassified:
+#  location:
+#    url: "http://your-jenkins-url.com"
