@@ -8,8 +8,8 @@ services:
     volumes:
       - ~/.aws:/root/.aws
       - ..:/opensearch-migrations-src
-      - ./buildAll.xml:/var/jenkins_home/jobs/buildAll/config.xml
-      - ./buildFromLocal.xml:/var/jenkins_home/jobs/localWorkspace/config.xml
+      - ./buildAll:/var/jenkins_home/jobs/buildAll
+      - ./localWorkspace:/var/jenkins_home/jobs/localWorkspace
       - /var/run/docker.sock:/var/run/docker.sock
     environment:
       - ADMIN_PASSWORD=admin
