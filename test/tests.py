@@ -111,7 +111,7 @@ class E2ETests(unittest.TestCase):
                 return True
         return False
 
-    def assert_source_target_doc_match(self, index_name, doc_id, doc_body : dict = None):
+    def assert_source_target_doc_match(self, index_name, doc_id, doc_body: dict = None):
         source_response = get_document(self.source_endpoint, index_name, doc_id, self.source_auth,
                                        self.source_verify_ssl)
         self.assertEqual(source_response.status_code, HTTPStatus.OK)
@@ -347,8 +347,8 @@ class E2ETests(unittest.TestCase):
         index_name = f"test_0008_{self.unique_id}"
         doc_id = "1"
 
-        # Create large document, 99MiB which is less than the default max of
-        # 100MiB in ES/OS settings (http.max_content_length)
+        # Create large document, 99MiB
+        # Default max 100MiB in ES/OS settings (http.max_content_length)
         large_doc = generate_large_doc(size_mib=99)
 
         # Measure the time taken by the create_document call
@@ -359,14 +359,14 @@ class E2ETests(unittest.TestCase):
         end_time = time.time()
         duration = end_time - start_time
 
-        # Set wait time to response time or 1 second
-        wait_time_seconds = min(round(duration, 3), 1)
+        # Set wait time to double the response time or 5 seconds
+        wait_time_seconds = min(round(duration, 3) * 2, 5)
 
         self.assertEqual(proxy_response.status_code, HTTPStatus.CREATED)
-        f" replay large doc creation")
 
         # Wait for the measured duration
         logger.debug(f"Waiting {wait_time_seconds} seconds for"
+                     f" replay of large doc creation")
 
         time.sleep(wait_time_seconds)
 
