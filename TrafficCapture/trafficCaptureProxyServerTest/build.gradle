@@ -20,9 +20,9 @@ def calculateDockerHash = { projectName ->
 }
 
 dependencies {
-    api project(":trafficCaptureDependencies")
+    api project(":TrafficCapture:trafficCaptureDependencies")
 
-    implementation project(':trafficCaptureProxyServer')
+    implementation project(':TrafficCapture:trafficCaptureProxyServer')
     compileOnly 'org.projectlombok:lombok:1.18.28'
     annotationProcessor 'org.projectlombok:lombok:1.18.28'
 

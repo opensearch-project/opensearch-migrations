@@ -9,6 +9,7 @@
 
 plugins {
     id("com.gradle.enterprise") version("3.16.2")
+    id 'org.gradle.toolchains.foojay-resolver-convention' version '0.7.0'
 }
 
 void addSubProjects(String path, File dir) {
@@ -27,22 +28,22 @@ void addSubProjects(String path, File dir) {
     }
 }
 
-rootProject.name = 'TrafficCapture'
-include('captureKafkaOffloader',
-        'captureOffloader',
-        'captureProtobufs',
-        'coreUtilities',
-        'nettyWireLogging',
-        'trafficCaptureProxyServer',
-        'trafficReplayer',
-        'testUtilities',
-        'dockerSolution',
-        'trafficCaptureProxyServerTest'
-)
+rootProject.name = 'MigrationsAssistant'
+include 'TrafficCapture:captureKafkaOffloader'
+include 'TrafficCapture:captureOffloader'
+include 'TrafficCapture:captureProtobufs'
+include 'TrafficCapture:nettyWireLogging'
+include 'TrafficCapture:trafficCaptureDependencies'
+include 'TrafficCapture:trafficCaptureProxyServer'
+include 'TrafficCapture:trafficReplayer'
+include 'TrafficCapture:testUtilities'
+include 'TrafficCapture:dockerSolution'
+include 'TrafficCapture:trafficCaptureProxyServerTest'
+include 'coreUtilities'
+include 'RFS'
 
-addSubProjects('', new File(rootProject.projectDir,'replayerPlugins'))
-addSubProjects('', new File(rootProject.projectDir,'trafficCaptureDependencies'))
 
+addSubProjects('', new File(rootProject.projectDir + "/" + TrafficCapture, 'replayerPlugins'))
 
 if (System.getenv().containsKey("OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED")) {
     gradleEnterprise {

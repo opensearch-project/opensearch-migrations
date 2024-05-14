@@ -12,7 +12,7 @@ repositories {
 }
 
 dependencies {
-    api project(":trafficCaptureDependencies")
+    api project(":TrafficCapture:trafficCaptureDependencies")
     api group: 'com.google.protobuf', name: 'protobuf-java', version: '3.22.2'
 }
 

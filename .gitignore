@@ -2,6 +2,7 @@
 coverage.xml
 .idea
 .DS_Store
+.gradle/
 .venv
 __pycache__
 *.egg-info*
@@ -13,7 +14,6 @@ logs
 plugins/opensearch/loggable-transport-netty4/.gradle/
 TrafficCapture/**/out/
 
-RFS/.gradle/
 RFS/bin/
 RFS/build/
 
@@ -22,3 +22,4 @@ TrafficCapture/**/bin/
 # CDK files from end-to-end testing
 opensearch-cluster-cdk/
 test/opensearch-cluster-cdk/
+buildSrc/build

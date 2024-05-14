@@ -9,12 +9,12 @@ plugins {
 }
 
 dependencies {
-    implementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
-    implementation project(':replayerPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformer')
+    implementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformer')
 
     implementation group: 'io.burt', name: 'jmespath-core'
 
-    testImplementation project(':trafficReplayer')
+    testImplementation project(':TrafficCapture:trafficReplayer')
     testImplementation testFixtures(project(path: ':testUtilities'))
     testImplementation testFixtures(project(path: ':trafficReplayer'))
 

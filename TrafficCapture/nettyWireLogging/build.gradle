@@ -8,9 +8,9 @@ plugins {
 }
 
 dependencies {
-    api project(":trafficCaptureDependencies")
+    api project(":TrafficCapture:trafficCaptureDependencies")
 
-    implementation project(':captureOffloader')
+    implementation project(':TrafficCapture:captureOffloader')
     implementation project(':coreUtilities')
     api            group: 'io.netty', name: 'netty-buffer'
     api            group: 'io.netty', name: 'netty-codec-http'
@@ -18,7 +18,7 @@ dependencies {
 
     implementation group: 'org.slf4j', name: 'slf4j-api'
 
-    testImplementation project(':captureProtobufs')
+    testImplementation project(':TrafficCapture:captureProtobufs')
     testImplementation group: 'com.google.guava', name: 'guava'
     testImplementation group: 'com.google.protobuf', name: 'protobuf-java'
     testImplementation group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
@@ -28,6 +28,6 @@ dependencies {
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
     testImplementation group: 'org.slf4j', name: 'slf4j-api'
 
-    testImplementation testFixtures(project(path: ':testUtilities'))
+    testImplementation testFixtures(project(path: ':TrafficCapture:testUtilities'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
 }

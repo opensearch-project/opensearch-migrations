@@ -27,7 +27,7 @@ repositories {
 }
 
 dependencies {
-    api project(":trafficCaptureDependencies")
+    api project(":TrafficCapture:trafficCaptureDependencies")
 }
 
 tasks.named('test') {

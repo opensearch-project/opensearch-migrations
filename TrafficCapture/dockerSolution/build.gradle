@@ -16,8 +16,8 @@ clean.doFirst {
 }
 
 dependencies {
-    implementation project(':trafficCaptureProxyServer')
-    implementation project(':trafficReplayer')
+    implementation project(':TrafficCapture:trafficCaptureProxyServer')
+    implementation project(':TrafficCapture:trafficReplayer')
     constraints {
         implementation('software.amazon.awssdk:secretsmanager:2.25.19') {
             because 'mend security issue'

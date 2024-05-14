@@ -29,7 +29,7 @@ repositories {
 }
 
 dependencies {
-    api project(":trafficCaptureDependencies")
+    api project(":TrafficCapture:trafficCaptureDependencies")
 
     testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     testFixturesImplementation group: 'com.google.guava', name: 'guava'
