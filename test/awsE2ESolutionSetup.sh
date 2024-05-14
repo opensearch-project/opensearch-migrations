@@ -97,10 +97,12 @@ restore_and_record () {
   aws ecs update-service --cluster "migration-${deploy_stage}-ecs-cluster" --service "migration-${deploy_stage}-traffic-replayer-default" --desired-count 0 > /dev/null 2>&1
 }
 
-# One-time required service-linked-role creation for AWS accounts which do not have these roles
+# One-time required service-linked-role creation for AWS accounts which do not have these roles, will ignore/fail if
+# any of these roles already exist
 create_service_linked_roles () {
   aws iam create-service-linked-role --aws-service-name opensearchservice.amazonaws.com
   aws iam create-service-linked-role --aws-service-name ecs.amazonaws.com
+  aws iam create-service-linked-role --aws-service-name osis.amazonaws.com
 }
 
 clean_up_all () {
