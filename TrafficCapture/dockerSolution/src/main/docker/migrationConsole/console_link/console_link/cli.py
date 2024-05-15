@@ -1,7 +1,6 @@
 import click
 from console_link.logic.clusters import cat_indices
 from console_link.logic.instantiation import Environment
-from pprint import pprint
 
 
 class Context(object):
@@ -11,7 +10,7 @@ class Context(object):
 
 
 @click.group()
-@click.option('--config-file', default='services.yaml', help='Path to config file')
+@click.option('--config-file', default='/etc/migration_services.yaml', help='Path to config file')
 @click.pass_context
 def cli(ctx, config_file):
     ctx.obj = Context(config_file)
@@ -21,7 +20,10 @@ def cli(ctx, config_file):
 @click.pass_obj
 def cat_indices_cmd(ctx):
     """Simple program that calls `_cat/indices` on both a source and target cluster."""
-    pprint(cat_indices(ctx.env))
+    click.echo("SOURCE CLUSTER")
+    click.echo(cat_indices(ctx.env.source_cluster))
+    click.echo("TARGET CLUSTER")
+    click.echo(cat_indices(ctx.env.target_cluster))
     pass
 
 

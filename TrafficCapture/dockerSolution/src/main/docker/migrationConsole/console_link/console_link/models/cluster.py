@@ -11,7 +11,7 @@ HttpMethod = Enum("HttpMethod", ["GET", "POST", "PUT", "DELETE"])
 
 class Cluster():
     """
-    An abstract class that represents a elasticsearch or opensearch cluster.
+    An elasticcsearch or opensearch cluster.
     """
     endpoint: str = ""
     auth_type: Optional[AuthMethod] = None
@@ -27,7 +27,7 @@ class Cluster():
 
     def call_api(self, path, method: HttpMethod = HttpMethod.GET) -> Dict:
         """
-        Calls an API on the source cluster.
+        Calls an API on the cluster.
         """
         if self.auth_type == AuthMethod.BASIC:
             auth = HTTPBasicAuth(self.auth_details["username"], self.auth_details["password"])
@@ -38,4 +38,4 @@ class Cluster():
         
         r = requests.request(method.name, f"{self.endpoint}{path}", verify=(not self.allow_insecure), auth=auth)
         r.raise_for_status()
-        return r.json()
+        return r
