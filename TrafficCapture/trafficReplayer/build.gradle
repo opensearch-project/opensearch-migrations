@@ -24,7 +24,7 @@ dependencies {
 
     implementation project(':TrafficCapture:captureProtobufs')
     implementation project(':coreUtilities')
-    implementation project('replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     runtimeOnly project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
     runtimeOnly project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     runtimeOnly project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
@@ -55,14 +55,14 @@ dependencies {
     testFixturesImplementation project(':TrafficCapture:captureProtobufs')
     testFixturesImplementation project(':coreUtilities')
     testFixturesImplementation testFixtures(project(path: ':coreUtilities'))
-    testFixturesImplementation testFixtures(project(path: ':testUtilities'))
+    testFixturesImplementation testFixtures(project(path: ':TrafficCapture:testUtilities'))
 
     testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api'
     testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     testFixturesImplementation group: 'io.netty', name: 'netty-all'
     testFixturesImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
 
-    testImplementation testFixtures(project(path: ':testUtilities'))
+    testImplementation testFixtures(project(path: ':TrafficCapture:testUtilities'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
     testImplementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')

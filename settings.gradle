@@ -6,6 +6,7 @@
  * Detailed information about configuring a multi-project build in Gradle can be found
  * in the user manual at https://docs.gradle.org/8.0.2/userguide/multi_project_builds.html
  */
+import java.nio.file.Paths
 
 plugins {
     id("com.gradle.enterprise") version("3.16.2")
@@ -13,16 +14,24 @@ plugins {
 }
 
 void addSubProjects(String path, File dir) {
-    if (dir.isDirectory() == false) return;
-    if (dir.name == 'buildSrc') return;
-    if (new File(dir, 'build.gradle').exists() == false) return;
-    if (findProject(dir) != null) return;
+    if (dir.isDirectory() == false) {
+        return;
+    }
+    if (dir.name == 'buildSrc') {
+        return;
+    }
+    if (new File(dir, 'build.gradle').exists() == false) {
+        return;
+    }
+    if (findProject(dir) != null) {
+        return;
+    }
 
     final String projectName = "${path}:${dir.name}"
     include projectName
-    if (path.isEmpty() || path.startsWith(':example-plugins')) {
-        project(projectName).projectDir = dir
-    }
+
+    project(projectName).projectDir = dir
+
     for (File subdir : dir.listFiles()) {
         addSubProjects(projectName, subdir)
     }
@@ -43,7 +52,7 @@ include 'coreUtilities'
 include 'RFS'
 
 
-addSubProjects('', new File(rootProject.projectDir + "/" + TrafficCapture, 'replayerPlugins'))
+addSubProjects(':TrafficCapture', Paths.get(rootProject.projectDir.getPath(), 'TrafficCapture', 'replayerPlugins').toFile())
 
 if (System.getenv().containsKey("OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED")) {
     gradleEnterprise {
