@@ -1,8 +1,6 @@
 from rest_framework.response import Response
 from rest_framework.decorators import api_view
-from strenum import StrEnum
 import datetime
-import sys
 import json
 import logging
 
@@ -15,6 +13,7 @@ console_handler = logging.StreamHandler()
 console_handler.setLevel(logging.INFO)
 root_logger.addHandler(console_handler)
 logger = logging.getLogger(__name__)
+
 
 def pretty_request(request, decoded_body):
     headers = ''
@@ -33,6 +32,7 @@ def pretty_request(request, decoded_body):
         headers=headers,
         body=decoded_body,
     )
+
 
 # TODO implement stub with backend
 @api_view(['POST'])

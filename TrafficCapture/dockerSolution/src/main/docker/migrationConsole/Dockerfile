@@ -48,5 +48,4 @@ COPY console /experimental/console
 RUN pip3 install markupsafe==2.0.1 -r /experimental/console/requirements.txt
 
 CMD python3 /experimental/console/console_api/manage.py runserver_plus 0.0.0.0:8000
-
-CMD tail -f /dev/null
+#CMD tail -f /dev/null
