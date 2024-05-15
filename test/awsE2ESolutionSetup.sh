@@ -247,6 +247,10 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+SOURCE_NETWORK_STACK_NAME="opensearch-network-stack-ec2-source-$STAGE"
+SOURCE_INFRA_STACK_NAME="opensearch-infra-stack-ec2-source-$STAGE"
+GEN_CONTEXT_FILE="$TMP_DIR_PATH/generatedCDKContext.json"
+
 if [ "$RUN_POST_ACTIONS" = true ] ; then
   restore_and_record "$STAGE"
   exit 0
@@ -255,10 +259,6 @@ fi
 if [ "$CREATE_SLR" = true ] ; then
   create_service_linked_roles
 fi
-
-SOURCE_NETWORK_STACK_NAME="opensearch-network-stack-ec2-source-$STAGE"
-SOURCE_INFRA_STACK_NAME="opensearch-infra-stack-ec2-source-$STAGE"
-GEN_CONTEXT_FILE="$TMP_DIR_PATH/generatedCDKContext.json"
 
 # Replace preliminary placeholders in CDK context into a generated context file
 mkdir -p "$TMP_DIR_PATH"
