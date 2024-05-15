@@ -46,7 +46,7 @@ class Cluster():
     def __init__(self, config: Dict) -> None:
         v = Validator(SCHEMA)
         if not v.validate(config):
-            raise ValueError(f"Invalid config file for cluster: {v.errors}")
+            raise ValueError("Invalid config file for cluster", v.errors)
 
         self.endpoint = config["endpoint"]
         if self.endpoint.startswith("https"):
