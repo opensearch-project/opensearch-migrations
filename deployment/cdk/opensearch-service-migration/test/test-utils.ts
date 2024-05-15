@@ -11,6 +11,7 @@ export function createStackComposer(contextBlock: { [x: string]: (any); }) {
         }
     })
     return new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"}
+        env: {account: "test-account", region: "us-east-1"},
+        migrationsSolutionVersion: "1.0.0"
     })
 }

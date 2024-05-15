@@ -1,0 +1,166 @@
+plugins {
+    id 'application'
+    id 'java'
+    id 'jacoco'
+    id "com.avast.gradle.docker-compose" version "0.17.4"
+    id 'com.bmuschko.docker-remote-api'
+    id 'io.freefair.lombok' version '8.6'
+}
+
+import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
+import groovy.transform.Canonical
+
+java.sourceCompatibility = JavaVersion.VERSION_11
+java.targetCompatibility = JavaVersion.VERSION_11
+
+@Canonical
+class DockerServiceProps {
+    String projectName = ""
+    String dockerImageName = ""
+    String inputDir = ""
+    Map<String, String> buildArgs = [:]
+    List<String> taskDependencies = []
+}
+
+repositories {
+    mavenCentral()
+}
+
+ext {
+    awsSdkVersion = '2.25.16'
+    dataset = findProperty('dataset') ?: 'skip_dataset'
+}
+
+dependencies {
+    implementation 'com.beust:jcommander:1.81'
+    implementation 'com.fasterxml.jackson.core:jackson-databind:2.16.2'
+    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-smile:2.16.2'
+    implementation 'com.fasterxml.jackson.core:jackson-annotations:2.16.2'
+    implementation 'com.fasterxml.jackson.core:jackson-core:2.16.2'
+    implementation 'io.netty:netty-codec-http:4.1.108.Final'
+    implementation 'org.apache.logging.log4j:log4j-api:2.23.1'
+    implementation 'org.apache.logging.log4j:log4j-core:2.23.1'
+    implementation 'org.apache.lucene:lucene-core:8.11.3'
+    implementation 'org.apache.lucene:lucene-analyzers-common:8.11.3'
+    implementation 'org.apache.lucene:lucene-backward-codecs:8.11.3'
+
+    implementation platform('io.projectreactor:reactor-bom:2023.0.5') 
+    implementation 'io.projectreactor.netty:reactor-netty-core' 
+    implementation 'io.projectreactor.netty:reactor-netty-http'
+
+    implementation platform("software.amazon.awssdk:bom:$awsSdkVersion")
+    implementation 'software.amazon.awssdk:s3'
+    implementation 'software.amazon.awssdk:s3-transfer-manager'
+    implementation 'software.amazon.awssdk.crt:aws-crt:0.29.18'
+
+    testImplementation 'io.projectreactor:reactor-test:3.6.5'
+    testImplementation 'org.apache.logging.log4j:log4j-core:2.23.1'
+    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.2'
+    testImplementation 'org.junit.jupiter:junit-jupiter-params:5.10.2'
+    testImplementation 'org.mockito:mockito-core:5.11.0'
+    testImplementation 'org.mockito:mockito-junit-jupiter:5.11.0'
+    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.10.2'
+}
+
+application {
+    mainClassName = 'com.rfs.ReindexFromSnapshot'
+}
+
+task runRfsWorker (type: JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.rfs.RunRfsWorker'
+}
+
+// Cleanup additional docker build directory
+clean.doFirst {
+    delete project.file("./docker/build")
+}
+
+// Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
+tasks.register('copyDependencies', Sync) {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from configurations.runtimeClasspath
+    into "${buildDir}/dependencies"
+}
+
+jacocoTestReport {
+    reports {
+        xml.required = true
+        xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
+        html.required = true
+        html.destination file("${buildDir}/reports/jacoco/test/html")
+    }
+}
+
+task demoPrintOutSnapshot (type: JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.rfs.DemoPrintOutSnapshot'
+}
+
+task copyDockerRuntimeJars (type: Sync) {
+    description = 'Copy runtime JARs and app jar to docker build directory'
+
+    // Define the destination directory
+    def buildDir = project.file("./docker/build/runtimeJars")
+    into buildDir
+
+    // Add all the required runtime JARs to be copied
+    from configurations.runtimeClasspath
+    from tasks.named('jar')
+    include '*.jar'
+}
+
+DockerServiceProps[] dockerServices = [
+        new DockerServiceProps([projectName:"reindexFromSnapshot",
+                                dockerImageName:"reindex_from_snapshot",
+                                inputDir:"./docker",
+                                taskDependencies:["copyDockerRuntimeJars"]]),
+        new DockerServiceProps([projectName:"elasticsearchRFSSource",
+                                dockerImageName:"elasticsearch_rfs_source",
+                                inputDir:"./docker/TestSource_ES_7_10",
+                                buildArgs:['DATASET': "${project.ext.dataset}"]]),
+] as DockerServiceProps[]
+
+
+for (dockerService in dockerServices) {
+    task "buildDockerImage_${dockerService.projectName}" (type: DockerBuildImage) {
+        for (dep in dockerService.taskDependencies) {
+            dependsOn dep
+        }
+        inputDir = project.file(dockerService.inputDir)
+        buildArgs = dockerService.buildArgs
+        images.add("migrations/${dockerService.dockerImageName}:${version}")
+        images.add("migrations/${dockerService.dockerImageName}:latest")
+    }
+}
+
+// ./gradlew composeUp
+// ./gradlew composeDown
+dockerCompose {
+    useComposeFiles = ['docker/docker-compose.yml']
+    projectName = 'rfs-compose'
+}
+
+// ./gradlew buildDockerImages
+task buildDockerImages {
+    for (dockerService in dockerServices) {
+        dependsOn "buildDockerImage_${dockerService.projectName}"
+    }
+}
+
+tasks.getByName('composeUp')
+        .dependsOn(tasks.getByName('buildDockerImages'))
+
+test {
+    useJUnitPlatform()
+
+    testLogging {
+        exceptionFormat = 'full'
+        events "failed"
+        showExceptions true
+        showCauses true
+        showStackTraces true
+        showStandardStreams = true
+    }
+}

@@ -5,15 +5,12 @@ import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.HttpRequestDecoder;
 import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.Utils;
-import org.opensearch.migrations.coreutils.MetricsAttributeKey;
-import org.opensearch.migrations.coreutils.MetricsEvent;
-import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.slf4j.event.Level;
@@ -49,7 +46,6 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     public static final int EXPECTED_PACKET_COUNT_GUESS_FOR_HEADERS = 4;
     private final RequestPipelineOrchestrator<R> pipelineOrchestrator;
     private final EmbeddedChannel channel;
-    private static final MetricsLogger metricsLogger = new MetricsLogger("HttpJsonTransformingConsumer");
     private IReplayContexts.IRequestTransformationContext transformationContext;
 
     /**
@@ -93,21 +89,17 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     }
 
     @Override
-    public DiagnosticTrackableCompletableFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
-        chunks.add(nextRequestPacket.duplicate().readerIndex(0).retain());
+    public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
+        chunks.add(nextRequestPacket.retainedDuplicate());
         chunkSizes.get(chunkSizes.size() - 1).add(nextRequestPacket.readableBytes());
-        if (log.isTraceEnabled()) {
-            byte[] copy = new byte[nextRequestPacket.readableBytes()];
-            nextRequestPacket.duplicate().readBytes(copy);
-            log.trace("HttpJsonTransformingConsumer[" + this + "]: writing into embedded channel: "
-                    + new String(copy, StandardCharsets.UTF_8));
-        }
-        return StringTrackableCompletableFuture.completedFuture(null, ()->"initialValue")
-                .map(cf->cf.thenAccept(x -> channel.writeInbound(nextRequestPacket)),
-                        ()->"HttpJsonTransformingConsumer sending bytes to its EmbeddedChannel");
+        log.atTrace().setMessage("{}").addArgument(() -> "HttpJsonTransformingConsumer[" + this + "]: writing into embedded channel: "
+                   + nextRequestPacket.toString(StandardCharsets.UTF_8)).log();
+        return TextTrackedFuture.completedFuture(null, ()->"initialValue")
+            .map(cf->cf.thenAccept(x -> channel.writeInbound(nextRequestPacket)),
+                ()->"HttpJsonTransformingConsumer sending bytes to its EmbeddedChannel");
     }
 
-    public DiagnosticTrackableCompletableFuture<String, TransformedOutputAndResult<R>> finalizeRequest() {
+    public TrackedFuture<String, TransformedOutputAndResult<R>> finalizeRequest() {
         var offloadingHandler = getOffloadingHandler();
         try {
             channel.checkException();
@@ -115,7 +107,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                 channel.writeInbound(new EndOfInput());   // so send our own version of 'EOF'
             }
         } catch (Exception e) {
-            this.transformationContext.addException(e);
+            this.transformationContext.addCaughtException(e);
             log.atLevel(e instanceof NettyJsonBodyAccumulateHandler.IncompleteJsonBodyException ?
                             Level.DEBUG : Level.WARN)
                     .setMessage("Caught IncompleteJsonBodyException when sending the end of content")
@@ -123,6 +115,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                     .log();
             return redriveWithoutTransformation(pipelineOrchestrator.packetReceiver, e);
         } finally {
+            channel.finishAndReleaseAll();
             var cf = channel.close();
             if (cf.cause() != null) {
                 log.atInfo().setCause(cf.cause()).setMessage("Exception encountered during write").log();
@@ -143,20 +136,12 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                                     return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
                                 } else {
                                     transformationContext.close();
-                                    metricsLogger.atError(MetricsEvent.TRANSFORMING_REQUEST_FAILED, t)
-                                            .setAttribute(MetricsAttributeKey.REQUEST_ID, transformationContext.toString())
-                                            .setAttribute(MetricsAttributeKey.CONNECTION_ID, transformationContext.getLogicalEnclosingScope().getConnectionId())
-                                            .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
                                     throw new CompletionException(t);
                                 }
                             } else {
                                 transformationContext.close();
                                 transformationContext.onTransformSuccess();
-                                metricsLogger.atSuccess(MetricsEvent.REQUEST_WAS_TRANSFORMED)
-                                        .setAttribute(MetricsAttributeKey.REQUEST_ID, transformationContext)
-                                        .setAttribute(MetricsAttributeKey.CONNECTION_ID, transformationContext.getLogicalEnclosingScope().getConnectionId())
-                                        .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
-                                return StringTrackableCompletableFuture.completedFuture(v, ()->"transformedHttpMessageValue");
+                                return TextTrackedFuture.completedFuture(v, ()->"transformedHttpMessageValue");
                             }
                         }, ()->"HttpJsonTransformingConsumer.finalizeRequest() is waiting to handle");
     }
@@ -168,29 +153,26 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         return t;
     }
 
-    private DiagnosticTrackableCompletableFuture<String, TransformedOutputAndResult<R>>
+    private TrackedFuture<String, TransformedOutputAndResult<R>>
     redriveWithoutTransformation(IPacketFinalizingConsumer<R> packetConsumer, Throwable reason) {
-        DiagnosticTrackableCompletableFuture<String,Void> consumptionChainedFuture =
+        var consumptionChainedFuture =
                 chunks.stream().collect(
-                        Utils.foldLeft(DiagnosticTrackableCompletableFuture.Factory.
-                                        completedFuture(null, ()->"Initial value"),
-                                (dcf, bb) -> dcf.thenCompose(v -> packetConsumer.consumeBytes(bb),
+                        Utils.foldLeft(TrackedFuture.Factory.completedFuture((Void) null, ()->"Initial value"),
+                                (tf, bb) -> tf.thenCompose(v -> packetConsumer.consumeBytes(bb),
                                         ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation collect()")));
-        DiagnosticTrackableCompletableFuture<String,R> finalizedFuture =
+        var finalizedFuture =
                 consumptionChainedFuture.thenCompose(v -> packetConsumer.finalizeRequest(),
                         ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation.compose()");
-        metricsLogger.atError(MetricsEvent.REQUEST_REDRIVEN_WITHOUT_TRANSFORMATION, reason)
-                .setAttribute(MetricsAttributeKey.REQUEST_ID, transformationContext)
-                .setAttribute(MetricsAttributeKey.CONNECTION_ID, transformationContext.getLogicalEnclosingScope().getConnectionId())
-                .setAttribute(MetricsAttributeKey.CHANNEL_ID, channel.id().asLongText()).emit();
-        return finalizedFuture.map(f->f.thenApply(r -> reason == null ?
-                new TransformedOutputAndResult<>(r, HttpRequestTransformationStatus.SKIPPED, null) :
-                new TransformedOutputAndResult<>(r, HttpRequestTransformationStatus.ERROR, reason)
-        )
-                        .whenComplete((v,t)->{
+        return finalizedFuture.thenApply(r -> new TransformedOutputAndResult<>(r, makeStatus(reason), reason),
+                        () -> "redrive final packaging")
+                .whenComplete((v,t)->{
                             transformationContext.onTransformSkip();
                             transformationContext.close();
-                        }),
-                ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation().map()");
+                        },
+                        ()->"HttpJsonTransformingConsumer.redriveWithoutTransformation().map()");
+    }
+
+    private static HttpRequestTransformationStatus makeStatus(Throwable reason) {
+        return reason == null ? HttpRequestTransformationStatus.SKIPPED : HttpRequestTransformationStatus.ERROR;
     }
 }

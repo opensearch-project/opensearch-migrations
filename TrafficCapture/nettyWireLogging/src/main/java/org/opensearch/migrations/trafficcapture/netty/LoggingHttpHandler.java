@@ -19,9 +19,6 @@ import lombok.Getter;
 import lombok.Lombok;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.coreutils.MetricsAttributeKey;
-import org.opensearch.migrations.coreutils.MetricsEvent;
-import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
@@ -32,7 +29,6 @@ import java.time.Instant;
 
 @Slf4j
 public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
-    private static final MetricsLogger metricsLogger = new MetricsLogger("LoggingHttpRequestHandler");
 
     static class CaptureIgnoreState {
         static final byte CAPTURE = 0;
@@ -196,19 +192,23 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         super.handlerRemoved(ctx);
     }
 
+    /**
+     * This provides a callback that subclasses can use to override the default behavior of cycling the
+     * instrumentation context and continuing to read.  Subclasses may determine if additional processing
+     * or triggers should occur before proceeding, given the current context.
+     * @param ctx the instrumentation context for this request
+     * @param msg the original message, which is likely a ByteBuf, that helped to form the httpRequest
+     * @param shouldCapture false if the current request has been determined to be ignorable
+     * @param httpRequest the request that has just been fully received (excluding its body)
+     */
     protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, boolean shouldCapture,
                                                        HttpRequest httpRequest) throws Exception {
         messageContext = messageContext.createWaitingForResponseContext();
         super.channelRead(ctx, msg);
-
-        metricsLogger.atSuccess(MetricsEvent.RECEIVED_FULL_HTTP_REQUEST)
-                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText())
-                .setAttribute(MetricsAttributeKey.HTTP_METHOD, httpRequest.method().toString())
-                .setAttribute(MetricsAttributeKey.HTTP_ENDPOINT, httpRequest.uri()).emit();
     }
 
     @Override
-    public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+    public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
         IWireCaptureContexts.IRequestContext requestContext;
         if (!(messageContext instanceof IWireCaptureContexts.IRequestContext)) {
             messageContext = requestContext = messageContext.createNextRequestContext();
@@ -232,8 +232,6 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             captureState.liveReadObservationsInOffloader = false;
         }
 
-        metricsLogger.atSuccess(MetricsEvent.RECEIVED_REQUEST_COMPONENT)
-                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
         requestContext.onBytesRead(bb.readableBytes());
 
 
@@ -271,8 +269,6 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         if (getHandlerThatHoldsParsedHttpRequest().captureState.shouldCapture()) {
             trafficOffloader.addWriteEvent(Instant.now(), bb);
         }
-        metricsLogger.atSuccess(MetricsEvent.RECEIVED_RESPONSE_COMPONENT)
-                .setAttribute(MetricsAttributeKey.CHANNEL_ID, ctx.channel().id().asLongText()).emit();
         responseContext.onBytesWritten(bb.readableBytes());
 
         super.write(ctx, msg, promise);
@@ -281,7 +277,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
     @Override
     public void exceptionCaught(ChannelHandlerContext ctx, Throwable cause) throws Exception {
         trafficOffloader.addExceptionCaughtEvent(Instant.now(), cause);
-        messageContext.addException(cause);
+        messageContext.addCaughtException(cause);
         httpDecoderChannel.close();
         super.exceptionCaught(ctx, cause);
     }

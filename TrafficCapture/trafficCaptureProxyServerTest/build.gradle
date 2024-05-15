@@ -20,6 +20,7 @@ def calculateDockerHash = { projectName ->
 }
 
 dependencies {
+    api project(":trafficCaptureDependencies")
 
     implementation project(':trafficCaptureProxyServer')
     compileOnly 'org.projectlombok:lombok:1.18.28'
@@ -27,34 +28,10 @@ dependencies {
 
     testCompileOnly 'org.projectlombok:lombok:1.18.28'
     testAnnotationProcessor 'org.projectlombok:lombok:1.18.28'
-    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_core', version: '5.6.2', withoutBom
-    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_http', version: '5.6.2', withoutBom
-    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_config', version: '5.6.2', withoutBom
-    implementation group: 'com.beust', name: 'jcommander', version: '1.82'
-
-    constraints {
-        implementation('net.minidev:json-smart:2.4.9') {
-            because 'mend security issue'
-        }
-        implementation('xalan:xalan:2.7.3') {
-            because 'mend security issue'
-        }
-        implementation('com.fasterxml.jackson.core:jackson-databind:2.14.3') {
-            because 'mend security issue'
-        }
-        implementation('com.thoughtworks.xstream:xstream:1.4.20') {
-            because 'mend security issue'
-        }
-        implementation('commons-net:commons-net:3.9.0') {
-            because 'mend security issue'
-        }
-        implementation('org.jsoup:jsoup:1.15.3') {
-            because 'mend security issue'
-        }
-        implementation('org.apache.tika:tika-core:1.28.4') {
-            because 'mend security issue'
-        }
-    }
+    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_core', withoutBom
+    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_http', withoutBom
+    implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_config', withoutBom
+    implementation group: 'com.beust', name: 'jcommander'
 }
 
 CommonConfigurations.applyCommonConfigurations(project)

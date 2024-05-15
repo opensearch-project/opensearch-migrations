@@ -11,16 +11,25 @@ def calculateDockerHash = { projectName ->
     CommonUtils.calculateDockerHash(projectName, project)
 }
 
+clean.doFirst {
+    delete project.file("./src/main/docker/migrationConsole/build")
+}
+
 dependencies {
     implementation project(':trafficCaptureProxyServer')
     implementation project(':trafficReplayer')
+    constraints {
+        implementation('software.amazon.awssdk:secretsmanager:2.25.19') {
+            because 'mend security issue'
+        }
+    }
 }
 
 def dockerFilesForExternalServices = [
         "elasticsearchWithSearchGuard": "elasticsearch_searchguard",
         "migrationConsole": "migration_console",
-        "opensearchDashboards": "opensearch_dashboards",
-        "otelCollector": "otel_collector"
+        "otelCollector": "otel_collector",
+        "grafana": "grafana"
 ]
 // Create the static docker files that aren't hosting migrations java code from this repo
 dockerFilesForExternalServices.each { projectName, dockerImageName ->
@@ -66,16 +75,16 @@ dockerCompose {
             ['src/main/docker/docker-compose.yml',
              "${extensionsDir}/" + (project.hasProperty("otel-collector") ?
                      "${project.getProperty('otel-collector')}" :
-                     "otel-prometheus-jaeger-opensearch.yml"),
+                     "otel-prometheus-jaeger.yml"),
              "${extensionsDir}" + (project.hasProperty("multiProxy") ? "proxy-multi.yml" : "proxy-single.yml")
-                     ]
+            ]
 }
 
 task buildDockerImages {
     dependsOn buildDockerImage_elasticsearchWithSearchGuard
     dependsOn buildDockerImage_migrationConsole
-    dependsOn buildDockerImage_opensearchDashboards
     dependsOn buildDockerImage_otelCollector
+    dependsOn buildDockerImage_grafana
     
     dependsOn buildDockerImage_trafficCaptureProxyServer
     dependsOn buildDockerImage_trafficReplayer

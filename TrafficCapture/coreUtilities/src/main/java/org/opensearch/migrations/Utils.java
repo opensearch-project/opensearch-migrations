@@ -1,11 +1,15 @@
 package org.opensearch.migrations;
 
+import lombok.AllArgsConstructor;
+
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.stream.Collector;
 import java.util.stream.Collectors;
 
 public class Utils {
+    private Utils() {}
+
     /**
      * See https://en.wikipedia.org/wiki/Fold_(higher-order_function)
      */

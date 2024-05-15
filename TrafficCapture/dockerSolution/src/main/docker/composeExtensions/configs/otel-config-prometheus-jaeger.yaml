@@ -1,0 +1,44 @@
+receivers:
+  otlp:
+    protocols:
+      grpc:
+processors:
+  batch:
+    timeout: 10s
+    send_batch_size: 8192
+    send_batch_max_size: 10000
+extensions:
+  zpages:
+    endpoint: :55679
+  pprof:
+    endpoint: :1888
+  health_check:
+exporters:
+  logging:
+    verbosity: detailed
+    sampling_initial: 5
+    sampling_thereafter: 200
+  prometheus:
+    endpoint: "0.0.0.0:8889"
+    send_timestamps: true
+    metric_expiration: 5m
+    enable_open_metrics: true
+  otlp/jaeger: # Jaeger supports OTLP directly. The default port for OTLP/gRPC is 4317
+    endpoint: jaeger:4317
+    tls:
+      insecure: true
+service:
+  extensions: [zpages, pprof, health_check]
+  pipelines:
+    metrics:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging, prometheus]
+    traces:
+      receivers: [otlp]
+      processors: [batch]
+      exporters: [logging, otlp/jaeger]
+    logs:
+      receivers: [otlp]
+      processors:
+      exporters: [logging]

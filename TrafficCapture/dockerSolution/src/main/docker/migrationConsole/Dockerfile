@@ -1,36 +1,19 @@
-ARG CONSOLE_TYPE=console
-FROM ubuntu:jammy AS console
+FROM ubuntu:jammy
 
 ENV DEBIAN_FRONTEND noninteractive
 
+COPY lib /root/lib
+
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    python3.9 \
-    python3-pip \
-    python3-dev \
-    openjdk-11-jre-headless \
-    wget \
-    gcc \
-    libc-dev \
-    git \
-    curl \
-    vim \
-    jq \
-    unzip \
-    less
-
-RUN pip3 install urllib3 opensearch-benchmark awscurl awscli==1.29.85 tqdm pexpect StrEnum
-
-# AWS CLI v2 is not available on PYPI: https://github.com/aws/aws-cli/issues/4947, following command is needed to install
-#RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip awscliv2.zip && ./aws/install && rm -rf aws awscliv2.zip
-
+    apt-get install -y --no-install-recommends python3.9 python3-pip python3-dev openjdk-11-jre-headless wget gcc libc-dev git curl vim jq unzip less && \
+    pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl tqdm awscli -r /root/lib/osiMigrationLib/requirements.txt
 RUN mkdir /root/kafka-tools
 RUN mkdir /root/kafka-tools/aws
 
 WORKDIR /root/kafka-tools
 # Get kafka distribution and unpack to 'kafka'
 RUN wget -qO- https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz | tar --transform 's!^[^/]*!kafka!' -xvz
-RUN wget -O kafka/libs/msk-iam-auth.jar https://github.com/aws/aws-msk-iam-auth/releases/download/v1.1.9/aws-msk-iam-auth-1.1.9-all.jar
+RUN wget -O kafka/libs/msk-iam-auth.jar https://github.com/aws/aws-msk-iam-auth/releases/download/v2.0.3/aws-msk-iam-auth-2.0.3-all.jar
 WORKDIR /root
 
 # Add Traffic Replayer jars for running KafkaPrinter from this container
@@ -40,37 +23,25 @@ RUN chmod +x /root/kafka-tools/runJavaWithClasspath.sh
 
 COPY runTestBenchmarks.sh /root/
 COPY humanReadableLogs.py /root/
-COPY migrationUtils.py /root/
-COPY startFetchMigration.py /root/
-COPY startLiveCaptureMigration.py /root/
-COPY stopFetchMigration.py /root/
-COPY stopLiveCaptureMigration.py /root/
-COPY getFetchMigrationStatus.py /root/
-COPY getLiveCaptureMigrationStatus.py /root/
-COPY simpleDocumentGenerator.py /root/test/
+COPY simpleDocumentGenerator.py /root/
 COPY catIndices.sh /root/
-COPY setupIntegTests.sh /root/test/
+COPY showFetchMigrationCommand.sh /root/
+COPY setupIntegTests.sh /root/
+COPY osiMigration.py /root/
+COPY osiPipelineTemplate.yaml /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
 COPY kafkaExport.sh /root/kafka-tools
 RUN ln -s /usr/bin/python3 /usr/bin/python
 RUN chmod ug+x /root/runTestBenchmarks.sh
 RUN chmod ug+x /root/humanReadableLogs.py
-RUN chmod ug+x /root/migrationUtils.py
-RUN chmod ug+x /root/startFetchMigration.py
-RUN chmod ug+x /root/startLiveCaptureMigration.py
-RUN chmod ug+x /root/stopFetchMigration.py
-RUN chmod ug+x /root/stopLiveCaptureMigration.py
-RUN chmod ug+x /root/getFetchMigrationStatus.py
-RUN chmod ug+x /root/getLiveCaptureMigrationStatus.py
-RUN chmod ug+x /root/test/simpleDocumentGenerator.py
+RUN chmod ug+x /root/simpleDocumentGenerator.py
 RUN chmod ug+x /root/catIndices.sh
+RUN chmod ug+x /root/showFetchMigrationCommand.sh
+RUN chmod ug+x /root/osiMigration.py
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
-CMD tail -f /dev/null
-
-FROM console AS django-console
-
+#TODO update CMD
 # Experimental Django API
 COPY console /experimental/console
 
@@ -78,4 +49,4 @@ RUN pip3 install markupsafe==2.0.1 -r /experimental/console/requirements.txt
 
 CMD python3 /experimental/console/console_api/manage.py runserver_plus 0.0.0.0:8000
 
-FROM ${CONSOLE_TYPE}
+CMD tail -f /dev/null

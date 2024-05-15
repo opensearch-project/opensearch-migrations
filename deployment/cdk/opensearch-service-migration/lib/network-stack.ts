@@ -10,8 +10,8 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string
-    readonly availabilityZoneCount?: number
-    readonly migrationAnalyticsEnabled?: boolean
+    readonly vpcAZCount?: number
+    readonly otelCollectorEnabled?: boolean
     readonly targetClusterEndpoint?: string
 }
 
@@ -45,6 +45,20 @@ export class NetworkStack extends Stack {
         return formattedUrlString
     }
 
+    private validateVPC(vpc: IVpc) {
+        let uniqueAzPrivateSubnets: string[] = []
+        if (vpc.privateSubnets.length > 0) {
+            uniqueAzPrivateSubnets = vpc.selectSubnets({
+                subnetType: SubnetType.PRIVATE_WITH_EGRESS,
+                onePerAz: true
+            }).subnetIds
+        }
+        console.info(`Detected VPC with ${vpc.privateSubnets.length} private subnets, ${vpc.publicSubnets.length} public subnets, and ${vpc.isolatedSubnets.length} isolated subnets`)
+        if (uniqueAzPrivateSubnets.length < 2) {
+            throw new Error(`Not enough AZs (${uniqueAzPrivateSubnets.length} unique AZs detected) used for private subnets to meet 2 or 3 AZ requirement`)
+        }
+    }
+
     constructor(scope: Construct, id: string, props: NetworkStackProps) {
         super(scope, id, props);
 
@@ -63,10 +77,15 @@ export class NetworkStack extends Stack {
         }
         // Create new VPC
         else {
+            const zoneCount = props.vpcAZCount
+            // Either 2 or 3 AZ count must be used
+            if (zoneCount && zoneCount !== 2 && zoneCount !== 3) {
+                throw new Error(`Required vpcAZCount is 2 or 3 but received: ${zoneCount}`)
+            }
             this.vpc = new Vpc(this, 'domainVPC', {
                 // IP space should be customized for use cases that have specific IP range needs
                 ipAddresses: IpAddresses.cidr('10.0.0.0/16'),
-                maxAzs: props.availabilityZoneCount ? props.availabilityZoneCount : 1,
+                maxAzs: zoneCount ? zoneCount : 2,
                 subnetConfiguration: [
                     // Outbound internet access for private subnets require a NAT Gateway which must live in
                     // a public subnet
@@ -84,9 +103,9 @@ export class NetworkStack extends Stack {
                 ],
             });
         }
+        this.validateVPC(this.vpc)
 
         if (!props.addOnMigrationDeployId) {
-
             new StringParameter(this, 'SSMParameterVpcId', {
                 description: 'OpenSearch migration parameter for VPC id',
                 parameterName: `/migration/${props.stage}/${props.defaultDeployId}/vpcId`,
@@ -106,16 +125,16 @@ export class NetworkStack extends Stack {
                 stringValue: defaultSecurityGroup.securityGroupId
             });
 
-            if (props.migrationAnalyticsEnabled) {
-                const analyticsSecurityGroup = new SecurityGroup(this, 'migrationAnalyticsSG', {
+            if (props.otelCollectorEnabled) {
+                const otelCollectorSecurityGroup = new SecurityGroup(this, 'otelCollectorSG', {
                     vpc: this.vpc
                 });
-                analyticsSecurityGroup.addIngressRule(analyticsSecurityGroup, Port.allTraffic());
+                otelCollectorSecurityGroup.addIngressRule(otelCollectorSecurityGroup, Port.allTraffic());
 
-                new StringParameter(this, 'SSMParameterMigrationAnalyticsSGId', {
-                    description: 'Migration Assistant parameter for analytics domain access security group id',
-                    parameterName: `/migration/${props.stage}/${props.defaultDeployId}/analyticsDomainSGId`,
-                    stringValue: analyticsSecurityGroup.securityGroupId
+                new StringParameter(this, 'SSMParameterOtelCollectorSGId', {
+                    description: 'Migration Assistant parameter for otel-collector access security group id',
+                    parameterName: `/migration/${props.stage}/${props.defaultDeployId}/otelCollectorSGId`,
+                    stringValue: otelCollectorSecurityGroup.securityGroupId
                 });
             }
         }

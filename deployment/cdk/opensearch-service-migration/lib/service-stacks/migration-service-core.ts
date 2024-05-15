@@ -1,21 +1,25 @@
 import {StackPropsExt} from "../stack-composer";
 import {ISecurityGroup, IVpc, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {
-    CfnService as FargateCfnService,
+    CfnService as FargateCfnService, CloudMapOptions,
     Cluster,
-    ContainerImage,
+    ContainerImage, CpuArchitecture,
     FargateService,
     FargateTaskDefinition,
     LogDrivers,
     MountPoint,
-    PortMapping, Ulimit,
-    Volume
+    PortMapping,
+    ServiceConnectService,
+    Ulimit,
+    OperatingSystemFamily,
+    Volume,
+    AwsLogDriverMode,
+    ContainerDependencyCondition
 } from "aws-cdk-lib/aws-ecs";
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
-import {RemovalPolicy, Stack} from "aws-cdk-lib";
+import {Duration, RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {PolicyStatement} from "aws-cdk-lib/aws-iam";
-import {CloudMapOptions, ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 import {CfnService as DiscoveryCfnService, PrivateDnsNamespace} from "aws-cdk-lib/aws-servicediscovery";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {createDefaultECSTaskRole} from "../common-utilities";
@@ -25,6 +29,7 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly serviceName: string,
     readonly vpc: IVpc,
     readonly securityGroups: ISecurityGroup[],
+    readonly cpuArchitecture: CpuArchitecture,
     readonly dockerFilePath?: string,
     readonly dockerDirectoryPath?: string,
     readonly dockerImageRegistryName?: string,
@@ -45,7 +50,8 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly taskCpuUnits?: number,
     readonly taskMemoryLimitMiB?: number,
     readonly taskInstanceCount?: number,
-    readonly ulimits?: Ulimit[]
+    readonly ulimits?: Ulimit[],
+    readonly maxUptime?: Duration
 }
 
 export class MigrationServiceCore extends Stack {
@@ -90,6 +96,10 @@ export class MigrationServiceCore extends Stack {
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {
             ephemeralStorageGiB: 75,
+            runtimePlatform: {
+                operatingSystemFamily: OperatingSystemFamily.LINUX,
+                cpuArchitecture: props.cpuArchitecture
+            },
             family: `migration-${props.stage}-${props.serviceName}`,
             memoryLimitMiB: props.taskMemoryLimitMiB ? props.taskMemoryLimitMiB : 1024,
             cpu: props.taskCpuUnits ? props.taskCpuUnits : 256,
@@ -127,7 +137,14 @@ export class MigrationServiceCore extends Stack {
             portMappings: props.portMappings,
             logging: LogDrivers.awsLogs({
                 streamPrefix: `${props.serviceName}-logs`,
-                logGroup: serviceLogGroup
+                logGroup: serviceLogGroup,
+                // E.g. "[INFO ] 2024-12-31 23:59:59..."
+                // and  "[ERROR] 2024-12-31 23:59:59..."
+                // and  "2024-12-31 23:59:59..."
+                // and  "2024-12-31T23:59:59..."
+                multilinePattern: "^(\\[[A-Z ]{1,5}\\] )?\\d{4}-\\d{2}-\\d{2}[ T]\\d{2}:\\d{2}:\\d{2}",
+                // Defer buffering behavior to log4j2 for greater flexibility
+                mode: AwsLogDriverMode.BLOCKING,
             }),
             ulimits: props.ulimits
         });
@@ -135,13 +152,57 @@ export class MigrationServiceCore extends Stack {
             serviceContainer.addMountPoints(...props.mountPoints)
         }
 
+        if (props.maxUptime) {
+            let maxUptimeSeconds = Math.max(props.maxUptime.toSeconds(), Duration.minutes(5).toSeconds());
+
+            // This sets the minimum time that a task should be running before considering it healthy.
+            // This is needed because we don't have health checks configured for our service containers.
+            // We can reduce it lower than 30 seconds, and possibly remove it, but then we increase the delay
+            // between the current task being shutdown and the new task being ready to take work. This means
+            // health checks for this container will fail initially and startPeriod will stop ECS from treating
+            // failing health checks as unhealthy during this period.
+            let startupPeriodSeconds = 30;
+            // Add a separate container to monitor and fail healthcheck after a given maxUptime
+            const maxUptimeContainer = serviceTaskDef.addContainer("MaxUptimeContainer", {
+                image: ContainerImage.fromRegistry("public.ecr.aws/amazonlinux/amazonlinux:2023-minimal"), 
+                memoryLimitMiB: 64, 
+                entryPoint: [
+                    "/bin/sh",
+                    "-c",
+                    "sleep infinity"
+                ],
+                essential: true,
+                // Every time this healthcheck is called, it verifies container uptime is within given
+                // bounds of startupPeriodSeconds and maxUptimeSeconds otherwise reporting unhealthy which
+                // signals ECS to start up a replacement task and kill this one once the replacement is healthy
+                healthCheck: {
+                    command: [
+                        "CMD-SHELL",
+                        "UPTIME=$(awk '{print int($1)}' /proc/uptime); " +
+                        `test $UPTIME -gt ${startupPeriodSeconds} && ` +
+                        `test $UPTIME -lt ${maxUptimeSeconds}`
+                    ],
+                    timeout: Duration.seconds(2),
+                    retries: 1,
+                    startPeriod: Duration.seconds(startupPeriodSeconds * 2)
+                }
+            });
+            // Dependency on maxUptimeContainer to wait until serviceContainer is started
+            // Cannot depend on Healthy given serviceContainer does not have a healthcheck configured.
+            maxUptimeContainer.addContainerDependencies({
+                container: serviceContainer,
+                condition: ContainerDependencyCondition.START,
+            });
+        }
+
+
         let cloudMapOptions: CloudMapOptions|undefined = undefined
         if (props.serviceDiscoveryEnabled) {
             const namespaceId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/cloudMapNamespaceId`)
             const namespace = PrivateDnsNamespace.fromPrivateDnsNamespaceAttributes(this, "PrivateDNSNamespace", {
                 namespaceName: `migration.${props.stage}.local`,
                 namespaceId: namespaceId,
-                namespaceArn: `arn:aws:servicediscovery:${props.env?.region}:${props.env?.account}:namespace/${namespaceId}`
+                namespaceArn: `arn:aws:servicediscovery:${this.region}:${this.account}:namespace/${namespaceId}`
             })
             cloudMapOptions = {
                 name: props.serviceName,
@@ -157,8 +218,7 @@ export class MigrationServiceCore extends Stack {
             desiredCount: props.taskInstanceCount,
             enableExecuteCommand: true,
             securityGroups: props.securityGroups,
-            // This should be confirmed to be a requirement for Service Connect communication, otherwise be Private
-            vpcSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PUBLIC}),
+            vpcSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PRIVATE_WITH_EGRESS}),
             serviceConnectConfiguration: {
                 namespace: `migration.${props.stage}.local`,
                 services: props.serviceConnectServices ? props.serviceConnectServices : undefined,

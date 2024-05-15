@@ -15,6 +15,9 @@ import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpRequestDecoder;
+import io.netty.handler.codec.http.HttpResponseDecoder;
+import io.netty.handler.codec.http.HttpResponseEncoder;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpServerCodec;
 import io.netty.handler.codec.http.HttpVersion;
@@ -58,14 +61,14 @@ public class SimpleNettyHttpServer implements AutoCloseable {
     private Duration timeout;
 
     public static SimpleNettyHttpServer makeServer(boolean useTls,
-                                                   Function<HttpFirstLine, SimpleHttpResponse> makeContext)
+                                                   Function<HttpRequestFirstLine, SimpleHttpResponse> makeContext)
         throws PortFinder.ExceededMaxPortAssigmentAttemptException
     {
         return makeServer(useTls, null, makeContext);
     }
 
     public static SimpleNettyHttpServer makeServer(boolean useTls, Duration readTimeout,
-                                              Function<HttpFirstLine, SimpleHttpResponse> makeContext)
+                                              Function<HttpRequestFirstLine, SimpleHttpResponse> makeContext)
             throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         var testServerRef = new AtomicReference<SimpleNettyHttpServer>();
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
@@ -78,7 +81,7 @@ public class SimpleNettyHttpServer implements AutoCloseable {
         return testServerRef.get();
     }
 
-    private static class RequestToFirstLineAdapter implements HttpFirstLine {
+    private static class RequestToFirstLineAdapter implements HttpRequestFirstLine {
         private final FullHttpRequest request;
 
         public RequestToFirstLineAdapter(FullHttpRequest request) {
@@ -109,11 +112,15 @@ public class SimpleNettyHttpServer implements AutoCloseable {
     }
 
     private SimpleChannelInboundHandler<FullHttpRequest>
-    makeHandlerFromResponseContext(Function<HttpFirstLine, SimpleHttpResponse> responseBuilder) {
+    makeHandlerFromResponseContext(Function<HttpRequestFirstLine, SimpleHttpResponse> responseBuilder) {
         return new SimpleChannelInboundHandler<>() {
             @Override
             protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest req) {
                 try {
+                    if (req.decoderResult().isFailure()) {
+                        ctx.close();
+                        return;
+                    }
                     var specifiedResponse = responseBuilder.apply(new RequestToFirstLineAdapter(req));
                     var fullResponse = new DefaultFullHttpResponse(
                             HttpVersion.HTTP_1_1,
@@ -136,7 +143,7 @@ public class SimpleNettyHttpServer implements AutoCloseable {
     }
 
     SimpleNettyHttpServer(boolean useTLS, int port, Duration timeout,
-                          Function<HttpFirstLine, SimpleHttpResponse> responseBuilder)
+                          Function<HttpRequestFirstLine, SimpleHttpResponse> responseBuilder)
             throws Exception {
         this.useTls = useTLS;
         this.port = port;
@@ -158,8 +165,9 @@ public class SimpleNettyHttpServer implements AutoCloseable {
                         if (timeout != null) {
                             pipeline.addLast(new ReadTimeoutHandler(timeout.toMillis(), TimeUnit.MILLISECONDS));
                         }
-                        pipeline.addLast(new HttpServerCodec());
+                        pipeline.addLast(new HttpRequestDecoder());
                         pipeline.addLast(new HttpObjectAggregator(16*1024));
+                        pipeline.addLast(new HttpResponseEncoder());
                         pipeline.addLast(makeHandlerFromResponseContext(responseBuilder));
                     }
                 });

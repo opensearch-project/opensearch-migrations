@@ -47,13 +47,14 @@ export interface OpensearchDomainStackProps extends StackPropsExt {
   readonly vpc?: IVpc,
   readonly vpcSubnetIds?: string[],
   readonly vpcSecurityGroupIds?: string[],
-  readonly availabilityZoneCount?: number,
+  readonly domainAZCount?: number,
   readonly domainRemovalPolicy?: RemovalPolicy,
-  readonly domainAccessSecurityGroupParameter?: string,
-  readonly endpointParameterName?: string
+  readonly domainAccessSecurityGroupParameter?: string
 
 }
 
+
+export const osClusterEndpointParameterName = "osClusterEndpoint";
 
 export class OpenSearchDomainStack extends Stack {
 
@@ -94,23 +95,25 @@ export class OpenSearchDomainStack extends Stack {
     return accessPolicies
   }
 
-  createSSMParameters(domain: Domain, endpointParameterName: string|undefined, adminUserName: string|undefined, adminUserSecret: ISecret|undefined, stage: string, deployId: string) {
-    const endpointParameter = endpointParameterName ?? "osClusterEndpoint"
-    new StringParameter(this, 'SSMParameterOpenSearchEndpoint', {
+  createSSMParameters(domain: Domain, adminUserName: string|undefined, adminUserSecret: ISecret|undefined, stage: string, deployId: string) {
+    const endpointParameter = osClusterEndpointParameterName
+    const endpointSSM = new StringParameter(this, 'SSMParameterOpenSearchEndpoint', {
       description: 'OpenSearch migration parameter for OpenSearch endpoint',
       parameterName: `/migration/${stage}/${deployId}/${endpointParameter}`,
       stringValue: `https://${domain.domainEndpoint}:443`
     });
+    endpointSSM.node.addDependency(domain)
     
     if (domain.masterUserPassword && !adminUserSecret) {
       console.log(`An OpenSearch domain fine-grained access control user was configured without an existing Secrets Manager secret, will not create SSM Parameter: /migration/${stage}/${deployId}/osUserAndSecret`)
     }
     else if (domain.masterUserPassword && adminUserSecret) {
-      new StringParameter(this, 'SSMParameterOpenSearchFGACUserAndSecretArn', {
+      const secretSSM = new StringParameter(this, 'SSMParameterOpenSearchFGACUserAndSecretArn', {
         description: 'OpenSearch migration parameter for OpenSearch configured fine-grained access control user and associated Secrets Manager secret ARN ',
         parameterName: `/migration/${stage}/${deployId}/osUserAndSecretArn`,
         stringValue: `${adminUserName} ${adminUserSecret.secretArn}`
       });
+      secretSSM.node.addDependency(adminUserSecret)
     }
   }
 
@@ -122,9 +125,6 @@ export class OpenSearchDomainStack extends Stack {
     const earKmsKey: IKey|undefined = props.encryptionAtRestKmsKeyARN && props.encryptionAtRestEnabled ?
         Key.fromKeyArn(this, "earKey", props.encryptionAtRestKmsKeyARN) : undefined
 
-    let adminUserSecret: ISecret|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
-        Secret.fromSecretCompleteArn(this, "managerSecret", props.fineGrainedManagerUserSecretManagerKeyARN) : undefined
-
     const appLG: ILogGroup|undefined = props.appLogGroup && props.appLogEnabled ?
         LogGroup.fromLogGroupArn(this, "appLogGroup", props.appLogGroup) : undefined
 
@@ -132,19 +132,20 @@ export class OpenSearchDomainStack extends Stack {
     const defaultOSClusterAccessGroup = SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG",
         StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/${domainAccessSecurityGroupParameter}`))
 
+    let adminUserSecret: ISecret|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
+        Secret.fromSecretCompleteArn(this, "managerSecret", props.fineGrainedManagerUserSecretManagerKeyARN) : undefined
     // Map objects from props
     let adminUserName: string|undefined = props.fineGrainedManagerUserName
-    // Enable demo mode setting
-    if (props.enableDemoAdmin) {
+    if (props.enableDemoAdmin) { // Enable demo mode setting
       adminUserName = "admin"
       adminUserSecret = new Secret(this, "demoUserSecret", {
         secretName: `demo-user-secret-${props.stage}-${deployId}`,
         // This is unsafe and strictly for ease of use in a demo mode setup
-        secretStringValue: SecretValue.unsafePlainText("Admin123!")
+        secretStringValue: SecretValue.unsafePlainText("myStrongPassword123!")
       })
     }
-    const zoneAwarenessConfig: ZoneAwarenessConfig|undefined = props.availabilityZoneCount ?
-        {enabled: true, availabilityZoneCount: props.availabilityZoneCount} : undefined
+    const zoneAwarenessConfig: ZoneAwarenessConfig|undefined = props.domainAZCount && props.domainAZCount > 1 ?
+        {enabled: true, availabilityZoneCount: props.domainAZCount} : undefined
 
     // If specified, these subnets will be selected to place the Domain nodes in. Otherwise, this is not provided
     // to the Domain as it has existing behavior to select private subnets from a given VPC
@@ -216,7 +217,6 @@ export class OpenSearchDomainStack extends Stack {
       removalPolicy: props.domainRemovalPolicy
     });
 
-    this.createSSMParameters(domain, props.endpointParameterName, adminUserName, adminUserSecret, props.stage, deployId)
-
+    this.createSSMParameters(domain, adminUserName, adminUserSecret, props.stage, deployId)
   }
 }

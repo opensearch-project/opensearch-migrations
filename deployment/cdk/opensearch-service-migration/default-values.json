@@ -6,10 +6,13 @@
   "nodeToNodeEncryptionEnabled": true,
   "encryptionAtRestEnabled": true,
   "vpcEnabled": true,
+  "vpcAZCount": 2,
+  "domainAZCount": 2,
+  "mskAZCount": 2,
   "migrationAssistanceEnabled": true,
+  "replayerOutputEFSRemovalPolicy": "DESTROY",
   "migrationConsoleServiceEnabled": true,
   "trafficReplayerServiceEnabled": true,
-  "migrationAnalyticsServiceEnabled": true,
-  "migrationAnalyticsBastionEnabled": false,
+  "otelCollectorEnabled": true,
   "dpPipelineTemplatePath": "./dp_pipeline_template.yaml"
 }

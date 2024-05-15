@@ -7,8 +7,8 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
-import org.opensearch.migrations.replay.util.StringTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.replay.util.TextTrackedFuture;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -23,6 +23,9 @@ public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer
     private final AtomicInteger numFinalizations;
     @Getter
     private byte[] bytesCaptured;
+
+    @Getter
+    private final AtomicInteger numConsumes;
     private final AggregatedRawResponse dummyAggregatedResponse;
     ByteArrayOutputStream byteArrayOutputStream;
 
@@ -30,15 +33,17 @@ public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer
                                           @NonNull AggregatedRawResponse dummyAggregatedResponse) {
         this.consumeDuration = consumeDuration;
         this.numFinalizations = new AtomicInteger();
+        this.numConsumes = new AtomicInteger();
         this.dummyAggregatedResponse = dummyAggregatedResponse;
         byteArrayOutputStream = new ByteArrayOutputStream();
     }
 
     @Override
-    public DiagnosticTrackableCompletableFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
+    public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
+        numConsumes.incrementAndGet();
         log.info("incoming buffer refcnt="+nextRequestPacket.refCnt());
-        var duplicatedPacket = nextRequestPacket.duplicate().retain();
-        return new DiagnosticTrackableCompletableFuture<>(CompletableFuture.runAsync(() -> {
+        var duplicatedPacket = nextRequestPacket.retainedDuplicate();
+        return new TrackedFuture<>(CompletableFuture.runAsync(() -> {
             try {
                 log.info("Running async future for " + nextRequestPacket);
                 Thread.sleep(consumeDuration.toMillis());
@@ -59,11 +64,11 @@ public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer
     }
 
     @Override
-    public DiagnosticTrackableCompletableFuture<String,AggregatedRawResponse> finalizeRequest() {
+    public TrackedFuture<String,AggregatedRawResponse> finalizeRequest() {
         numFinalizations.incrementAndGet();
         Assertions.assertEquals(1, numFinalizations.get());
         bytesCaptured = byteArrayOutputStream.toByteArray();
-        return StringTrackableCompletableFuture.completedFuture(dummyAggregatedResponse,
+        return TextTrackedFuture.completedFuture(dummyAggregatedResponse,
                 ()->"TestCapturePacketToHttpHandler.dummy");
     }
 

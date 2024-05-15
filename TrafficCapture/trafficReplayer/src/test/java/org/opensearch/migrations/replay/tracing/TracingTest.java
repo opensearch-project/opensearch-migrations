@@ -14,6 +14,7 @@ import org.opensearch.migrations.tracing.TestContext;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
+import java.util.Collection;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -59,16 +60,16 @@ public class TracingTest extends InstrumentationTest {
             }
         }
 
-        var recordedSpans = rootContext.inMemoryInstrumentationBundle.testSpanExporter.getFinishedSpanItems();
-        var recordedMetrics = rootContext.inMemoryInstrumentationBundle.testMetricExporter.getFinishedMetricItems();
+        var recordedSpans = rootContext.inMemoryInstrumentationBundle.getFinishedSpans();
+        var recordedMetrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
 
         checkSpans(recordedSpans);
         checkMetrics(recordedMetrics);
 
-        Assertions.assertTrue(rootContext.contextTracker.getAllRemainingActiveScopes().isEmpty());
+        Assertions.assertTrue(rootContext.getBacktracingContextTracker().getAllRemainingActiveScopes().isEmpty());
     }
 
-    private void checkMetrics(List<MetricData> recordedMetrics) {
+    private void checkMetrics(Collection<MetricData> recordedMetrics) {
     }
 
     private void checkSpans(List<SpanData> recordedSpans) {

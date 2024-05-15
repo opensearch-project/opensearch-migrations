@@ -7,6 +7,7 @@ import com.google.protobuf.CodedOutputStream;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import java.io.OutputStream;
 import lombok.Lombok;
 import lombok.NonNull;
 import lombok.SneakyThrows;
@@ -15,8 +16,10 @@ import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
-import org.apache.logging.log4j.core.util.NullOutputStream;
 import org.opensearch.common.settings.Settings;
+import org.opensearch.migrations.tracing.ActiveContextTracker;
+import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
+import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.FileConnectionCaptureFactory;
@@ -55,94 +58,94 @@ public class CaptureProxy {
     private static final String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
     public static final String DEFAULT_KAFKA_CLIENT_ID = "HttpCaptureProxyProducer";
 
-    static class Parameters {
+    public static class Parameters {
         @Parameter(required = false,
                 names = {"--traceDirectory"},
                 arity = 1,
                 description = "Directory to store trace files in.")
-        String traceDirectory;
+        public String traceDirectory;
         @Parameter(required = false,
                 names = {"--noCapture"},
                 arity = 0,
                 description = "If enabled, Does NOT capture traffic to ANY sink.")
-        boolean noCapture;
+        public boolean noCapture;
         @Parameter(required = false,
                 names = {"--kafkaConfigFile"},
                 arity = 1,
                 description = "Kafka properties file for additional client customization.")
-        String kafkaPropertiesFile;
+        public String kafkaPropertiesFile;
         @Parameter(required = false,
                 names = {"--kafkaClientId"},
                 arity = 1,
                 description = "clientId to use for interfacing with Kafka.")
-        String kafkaClientId = DEFAULT_KAFKA_CLIENT_ID;
+        public String kafkaClientId = DEFAULT_KAFKA_CLIENT_ID;
         @Parameter(required = false,
                 names = {"--kafkaConnection"},
                 arity = 1,
                 description = "Sequence of <HOSTNAME:PORT> values delimited by ','.")
-        String kafkaConnection;
+        public String kafkaConnection;
         @Parameter(required = false,
             names = {"--enableMSKAuth"},
             arity = 0,
             description = "Enables SASL Kafka properties required for connecting to MSK with IAM auth.")
-        boolean mskAuthEnabled = false;
+        public boolean mskAuthEnabled = false;
         @Parameter(required = false,
                 names = {"--sslConfigFile"},
                 arity = 1,
                 description = "YAML configuration of the HTTPS settings.  When this is not set, the proxy will not use TLS.")
-        String sslConfigFilePath;
+        public String sslConfigFilePath;
         @Parameter(required = false,
                 names = {"--maxTrafficBufferSize"},
                 arity = 1,
                 description = "The maximum number of bytes that will be written to a single TrafficStream object.")
-        int maximumTrafficStreamSize = 1024*1024;
+        public int maximumTrafficStreamSize = 1024*1024;
         @Parameter(required = false,
             names = {"--insecureDestination"},
             arity = 0,
             description = "Do not check the destination server's certificate")
-        boolean allowInsecureConnectionsToBackside;
+        public boolean allowInsecureConnectionsToBackside;
         @Parameter(required = true,
                 names = {"--destinationUri"},
                 arity = 1,
                 description = "URI of the server that the proxy is capturing traffic for.")
-        String backsideUriString;
+        public String backsideUriString;
         @Parameter(required = true,
                 names = {"--listenPort"},
                 arity = 1,
                 description = "Exposed port for clients to connect to this proxy.")
-        int frontsidePort = 0;
+        public int frontsidePort = 0;
         @Parameter(required = false,
                 names = {"--numThreads"},
                 arity = 1,
                 description = "How many threads netty should create in its event loop group")
-        int numThreads = 1;
+        public int numThreads = 1;
         @Parameter(required = false,
         names = {"--destinationConnectionPoolSize"},
         arity = 1,
         description = "Number of socket connections that should be maintained to the destination server " +
                 "to reduce the perceived latency to clients.  Each thread will have its own cache, so the " +
                 "total number of outstanding warm connections will be multiplied by numThreads.")
-        int destinationConnectionPoolSize = 0;
+        public int destinationConnectionPoolSize = 0;
         @Parameter(required = false,
                 names = {"--destinationConnectionPoolTimeout"},
                 arity = 1,
                 description = "Of the socket connections maintained by the destination connection pool, " +
                         "how long after connection should the be recycled " +
                         "(closed with a new connection taking its place)")
-        String destinationConnectionPoolTimeout = "PT30S";
+        public String destinationConnectionPoolTimeout = "PT30S";
         @Parameter(required = false,
         names = {"--otelCollectorEndpoint"},
         arity = 1,
         description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be forwarded." +
                 "If this is not provided, metrics will not be sent to a collector.")
-        String otelCollectorEndpoint;
+        public String otelCollectorEndpoint;
         @Parameter(required = false,
                 names = "--suppressCaptureForHeaderMatch",
                 arity = 2,
                 description = "The header name (which will be interpreted in a case-insensitive manner) and a regex " +
                         "pattern.  When the incoming request has a header that matches the regex, it will be passed " +
                         "through to the service but will NOT be captured.  E.g. user-agent 'healthcheck'.")
-        private List<String> suppressCaptureHeaderPairs = new ArrayList<>();
+        public List<String> suppressCaptureHeaderPairs = new ArrayList<>();
     }
 
     static Parameters parseArgs(String[] args) {
@@ -167,7 +170,7 @@ public class CaptureProxy {
     }
 
     @SneakyThrows
-    private static Settings getSettings(@NonNull String configFile) {
+    protected static Settings getSettings(@NonNull String configFile) {
         var builder = Settings.builder();
         try (var lines = Files.lines(Paths.get(configFile))) {
             lines
@@ -184,13 +187,25 @@ public class CaptureProxy {
         return builder.build();
     }
 
-    private static IConnectionCaptureFactory<Object> getNullConnectionCaptureFactory() {
+    protected static IConnectionCaptureFactory<Object> getNullConnectionCaptureFactory() {
         System.err.println("No trace log directory specified.  Logging to /dev/null");
         return ctx -> new StreamChannelConnectionCaptureSerializer<>(null, ctx.getConnectionId(),
                 new StreamLifecycleManager<>() {
                     @Override
                     public CodedOutputStreamHolder createStream() {
-                        return () -> CodedOutputStream.newInstance(NullOutputStream.getInstance());
+                        return new CodedOutputStreamHolder() {
+                            final CodedOutputStream nullOutputStream = CodedOutputStream.newInstance(OutputStream.nullOutputStream());
+
+                            @Override
+                            public int getOutputStreamBytesLimit() {
+                                return -1;
+                            }
+
+                            @Override
+                            public @NonNull CodedOutputStream getOutputStream() {
+                                return nullOutputStream;
+                            }
+                        };
                     }
 
                     @Override
@@ -201,7 +216,7 @@ public class CaptureProxy {
                 });
     }
 
-    private static String getNodeId() {
+    protected static String getNodeId() {
         return UUID.randomUUID().toString();
     }
 
@@ -234,7 +249,7 @@ public class CaptureProxy {
         return kafkaProps;
     }
 
-    private static IConnectionCaptureFactory
+    protected static IConnectionCaptureFactory
     getConnectionCaptureFactory(Parameters params, RootCaptureContext rootContext) throws IOException {
         var nodeId = getNodeId();
         // Resist the urge for now though until it comes in as a request/need.
@@ -252,7 +267,7 @@ public class CaptureProxy {
 
     // Utility method for converting uri string to an actual URI object. Similar logic is placed in the trafficReplayer
     // module: TrafficReplayer.java
-    private static URI convertStringToUri(String uriString) {
+    protected static URI convertStringToUri(String uriString) {
         URI serverUri;
         try {
             serverUri = new URI(uriString);
@@ -274,7 +289,7 @@ public class CaptureProxy {
         return serverUri;
     }
 
-    private static SslContext loadBacksideSslContext(URI serverUri, boolean allowInsecureConnections) throws
+    protected static SslContext loadBacksideSslContext(URI serverUri, boolean allowInsecureConnections) throws
         SSLException {
         if (serverUri.getScheme().equalsIgnoreCase("https")) {
             var sslContextBuilder = SslContextBuilder.forClient();
@@ -287,7 +302,7 @@ public class CaptureProxy {
         }
     }
 
-    private static Map<String, String> convertPairListToMap(List<String> list) {
+    protected static Map<String, String> convertPairListToMap(List<String> list) {
         var map = new TreeMap<String, String>();
         for (int i=0; i<list.size(); i+=2) {
             map.put(list.get(i), list.get(i+1));
@@ -303,7 +318,8 @@ public class CaptureProxy {
         var backsideUri = convertStringToUri(params.backsideUriString);
 
         var rootContext = new RootCaptureContext(
-                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "capture"));
+                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "capture"),
+                new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
 
         var sksOp = Optional.ofNullable(params.sslConfigFilePath)
                 .map(sslConfigFile->new DefaultSecurityKeyStore(getSettings(sslConfigFile),

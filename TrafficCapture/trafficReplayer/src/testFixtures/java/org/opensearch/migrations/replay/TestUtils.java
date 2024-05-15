@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.replay.datahandlers.IPacketConsumer;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -58,25 +58,25 @@ public class TestUtils {
                 .toString();
     }
 
-    static DiagnosticTrackableCompletableFuture<String,Void> writeStringToBoth(String s, StringBuilder referenceStringBuilder,
-                                                                               IPacketConsumer transformingHandler) {
+    static TrackedFuture<String,Void> writeStringToBoth(String s, StringBuilder referenceStringBuilder,
+                                                        IPacketConsumer transformingHandler) {
         log.info("Sending string to transformer: "+s);
         referenceStringBuilder.append(s);
         var bytes = s.getBytes(StandardCharsets.UTF_8);
         return transformingHandler.consumeBytes(bytes);
     }
 
-    static DiagnosticTrackableCompletableFuture<String,Void> chainedWriteHeadersAndDualWritePayloadParts(IPacketConsumer packetConsumer,
-                                                                                                  List<String> stringParts,
-                                                                                                  StringBuilder referenceStringAccumulator,
-                                                                                                  String headers) {
+    static TrackedFuture<String,Void> chainedWriteHeadersAndDualWritePayloadParts(IPacketConsumer packetConsumer,
+                                                                                  List<String> stringParts,
+                                                                                  StringBuilder referenceStringAccumulator,
+                                                                                  String headers) {
         return stringParts.stream().collect(
                 Utils.foldLeft(packetConsumer.consumeBytes(headers.getBytes(StandardCharsets.UTF_8)),
                         (cf, s) -> cf.thenCompose(v -> writeStringToBoth(s, referenceStringAccumulator, packetConsumer),
                         ()->"TestUtils.chainedWriteHeadersAndDualWritePayloadParts")));
     }
 
-    public static DiagnosticTrackableCompletableFuture<String,Void>
+    public static TrackedFuture<String,Void>
     chainedDualWriteHeaderAndPayloadParts(IPacketConsumer packetConsumer,
                                           List<String> stringParts,
                                           StringBuilder referenceStringAccumulator,
@@ -115,13 +115,10 @@ public class TestUtils {
         fullRequest.release();
     }
 
-    private static String getStringFromContent(FullHttpRequest fullRequest) throws IOException {
-        try (var baos = new ByteArrayOutputStream()) {
-            var bb = fullRequest.content();
-            bb.readBytes(baos, bb.readableBytes());
-            return baos.toString(StandardCharsets.UTF_8);
-        }
+    private static String getStringFromContent(FullHttpRequest fullRequest) {
+        return fullRequest.content().toString(StandardCharsets.UTF_8);
     }
+
     static void runPipelineAndValidate(TestContext rootContext,
                                        IAuthTransformerFactory authTransformer,
                                        String extraHeaders,

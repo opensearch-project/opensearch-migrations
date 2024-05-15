@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay.traffic.source;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 
-import java.io.Closeable;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
@@ -11,10 +10,10 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
-public interface ITrafficCaptureSource extends Closeable {
+public interface ITrafficCaptureSource extends AutoCloseable {
 
     enum CommitResult {
-        Immediate, AfterNextRead, BlockedByOtherCommits, Ignored
+        IMMEDIATE, AFTER_NEXT_READ, BLOCKED_BY_OTHER_COMMITS, IGNORED
     }
 
     CompletableFuture<List<ITrafficStreamWithKey>>
@@ -22,7 +21,7 @@ public interface ITrafficCaptureSource extends Closeable {
 
     CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException;
 
-    default void close() throws IOException {}
+    default void close() throws Exception {}
 
     /**
      * Keep-alive call to be used by the BlockingTrafficSource to keep this connection alive if

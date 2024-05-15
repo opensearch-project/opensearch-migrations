@@ -17,14 +17,14 @@ import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
+import org.apache.logging.log4j.core.impl.Log4jContextFactory;
+import org.apache.logging.log4j.core.selector.ClassLoaderContextSelector;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
-import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
-import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
@@ -33,9 +33,27 @@ import org.slf4j.LoggerFactory;
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 4)
 class ResultsToLogsConsumerTest extends InstrumentationTest {
+    static {
+        // Synchronize logging to for assertions
+        LogManager.setFactory(new Log4jContextFactory(new ClassLoaderContextSelector()));
+    }
     private static final String NODE_ID = "n";
     private static final ObjectMapper mapper = new ObjectMapper();
     public static final String TEST_EXCEPTION_MESSAGE = "TEST_EXCEPTION";
+
+    public final static String EXPECTED_RESPONSE_STRING =
+            "HTTP/1.1 200 OK\r\n" +
+                    "Content-transfer-encoding: chunked\r\n" +
+                    "Date: Thu, 08 Jun 2023 23:06:23 GMT\r\n" + // This should be OK since it's always the same length
+                    "Transfer-encoding: chunked\r\n" +
+                    "Content-type: text/plain\r\n" +
+                    "Funtime: checkIt!\r\n" +
+                    "\r\n" +
+                    "1e\r\n" +
+                    "I should be decrypted tester!\r\n" +
+                    "\r\n" +
+                    "0\r\n" +
+                    "\r\n";
 
     @Override
     protected TestContext makeInstrumentationContext() {
@@ -92,9 +110,6 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     @Test
     @ResourceLock("TestContext")
     public void testOutputterWithNulls() throws IOException {
-
-        var urk = new UniqueReplayerRequestKey(PojoTrafficStreamKeyAndContext.build(NODE_ID, "c", 0,
-                rootContext::createTrafficStreamContextForTest), 0, 0);
         var emptyTuple = new SourceTargetCaptureTuple(rootContext.getTestTupleContext(),
                 null, null, null, null, null, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
@@ -138,56 +153,56 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     public void testOutputterForGet() throws IOException {
         final String EXPECTED_LOGGED_OUTPUT =
                 "" +
-                        "{\n" +
-                        "    \"sourceRequest\": {\n" +
-                        "        \"Request-URI\": \"/test\",\n" +
-                        "        \"Method\": \"GET\",\n" +
-                        "        \"HTTP-Version\": \"HTTP/1.1\",\n" +
-                        "        \"body\": \"\",\n" +
-                        "        \"Host\": \"foo.example\",\n" +
-                        "        \"auTHorization\": \"Basic YWRtaW46YWRtaW4=\",\n" +
-                        "        \"Content-Type\": \"application/json\",\n" +
-                        "        \"content-length\": \"0\"\n" +
-                        "    },\n" +
-                        "    \"sourceResponse\": {\n" +
-                        "        \"HTTP-Version\": {\n" +
-                        "            \"keepAliveDefault\": true\n" +
-                        "        },\n" +
-                        "        \"Status-Code\": 200,\n" +
-                        "        \"Reason-Phrase\": \"OK\",\n" +
-                        "        \"response_time_ms\": 0,\n" +
-                        "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEK\",\n" +
-                        "        \"Content-transfer-encoding\": \"chunked\",\n" +
-                        "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\n" +
-                        "        \"Content-type\": \"text/plain\",\n" +
-                        "        \"Funtime\": \"checkIt!\",\n" +
-                        "        \"content-length\": \"30\"\n" +
-                        "    },\n" +
-                        "    \"targetRequest\": {\n" +
-                        "        \"Request-URI\": \"/test\",\n" +
-                        "        \"Method\": \"GET\",\n" +
-                        "        \"HTTP-Version\": \"HTTP/1.1\",\n" +
-                        "        \"body\": \"\",\n" +
-                        "        \"Host\": \"foo.example\",\n" +
-                        "        \"auTHorization\": \"Basic YWRtaW46YWRtaW4=\",\n" +
-                        "        \"Content-Type\": \"application/json\",\n" +
-                        "        \"content-length\": \"0\"\n" +
-                        "    },\n" +
-                        "    \"targetResponse\": {\n" +
-                        "        \"HTTP-Version\": {\n" +
-                        "            \"keepAliveDefault\": true\n" +
-                        "        },\n" +
-                        "        \"Status-Code\": 200,\n" +
-                        "        \"Reason-Phrase\": \"OK\",\n" +
-                        "        \"response_time_ms\": 267,\n" +
-                        "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEK\",\n" +
-                        "        \"Content-transfer-encoding\": \"chunked\",\n" +
-                        "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\n" +
-                        "        \"Content-type\": \"text/plain\",\n" +
-                        "        \"Funtime\": \"checkIt!\",\n" +
-                        "        \"content-length\": \"30\"\n" +
-                        "    },\n" +
-                        "    \"connectionId\": \"testConnection.1\"\n" +
+                        "{\r\n" +
+                        "    \"sourceRequest\": {\r\n" +
+                        "        \"Request-URI\": \"/test\",\r\n" +
+                        "        \"Method\": \"GET\",\r\n" +
+                        "        \"HTTP-Version\": \"HTTP/1.1\",\r\n" +
+                        "        \"Host\": \"foo.example\",\r\n" +
+                        "        \"auTHorization\": \"Basic YWRtaW46YWRtaW4=\",\r\n" +
+                        "        \"Content-Type\": \"application/json\",\r\n" +
+                        "        \"content-length\": \"0\",\r\n" +
+                        "        \"body\": \"\"\r\n" +
+                        "    },\r\n" +
+                        "    \"sourceResponse\": {\r\n" +
+                        "        \"HTTP-Version\": {\r\n" +
+                        "            \"keepAliveDefault\": true\r\n" +
+                        "        },\r\n" +
+                        "        \"Status-Code\": 200,\r\n" +
+                        "        \"Reason-Phrase\": \"OK\",\r\n" +
+                        "        \"response_time_ms\": 0,\r\n" +
+                        "        \"Content-transfer-encoding\": \"chunked\",\r\n" +
+                        "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\r\n" +
+                        "        \"Content-type\": \"text/plain\",\r\n" +
+                        "        \"Funtime\": \"checkIt!\",\r\n" +
+                        "        \"content-length\": \"30\",\r\n" +
+                        "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\"\r\n" +
+                        "    },\r\n" +
+                        "    \"targetRequest\": {\r\n" +
+                        "        \"Request-URI\": \"/test\",\r\n" +
+                        "        \"Method\": \"GET\",\r\n" +
+                        "        \"HTTP-Version\": \"HTTP/1.1\",\r\n" +
+                        "        \"Host\": \"foo.example\",\r\n" +
+                        "        \"auTHorization\": \"Basic YWRtaW46YWRtaW4=\",\r\n" +
+                        "        \"Content-Type\": \"application/json\",\r\n" +
+                        "        \"content-length\": \"0\",\r\n" +
+                        "        \"body\": \"\"\r\n" +
+                        "    },\r\n" +
+                        "    \"targetResponse\": {\r\n" +
+                        "        \"HTTP-Version\": {\r\n" +
+                        "            \"keepAliveDefault\": true\r\n" +
+                        "        },\r\n" +
+                        "        \"Status-Code\": 200,\r\n" +
+                        "        \"Reason-Phrase\": \"OK\",\r\n" +
+                        "        \"response_time_ms\": 267,\r\n" +
+                        "        \"Content-transfer-encoding\": \"chunked\",\r\n" +
+                        "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\r\n" +
+                        "        \"Content-type\": \"text/plain\",\r\n" +
+                        "        \"Funtime\": \"checkIt!\",\r\n" +
+                        "        \"content-length\": \"30\",\r\n" +
+                        "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\"\r\n" +
+                        "    },\r\n" +
+                        "    \"connectionId\": \"testConnection.1\"\r\n" +
                         "}";
         testOutputterForRequest("get_withAuthHeader.txt", EXPECTED_LOGGED_OUTPUT);
     }
@@ -196,54 +211,54 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     @ResourceLock("TestContext")
     public void testOutputterForPost() throws IOException {
         final String EXPECTED_LOGGED_OUTPUT = "" +
-                "{\n" +
-                "    \"sourceRequest\": {\n" +
-                "        \"Request-URI\": \"/test\",\n" +
-                "        \"Method\": \"POST\",\n" +
-                "        \"HTTP-Version\": \"HTTP/1.1\",\n" +
-                "        \"body\": \"ewogICJzZXR0aW5ncyI6IHsKICAgICJpbmRleCI6IHsKICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LAogICAgICAibnVtYmVyX29mX3JlcGxpY2FzIjogMwogICAgfSwKICAgICJhbmFseXNpcyI6IHsKICAgICAgImFuYWx5emVyIjogewogICAgICAgICJuYW1lQW5hbHl6ZXIiOiB7CiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLAogICAgICAgICAgInRva2VuaXplciI6ICJrZXl3b3JkIiwKICAgICAgICAgICJmaWx0ZXIiOiAidXBwZXJjYXNlIgogICAgICAgIH0KICAgICAgfQogICAgfQogIH0sCiAgIm1hcHBpbmdzIjogewogICAgImVtcGxveWVlIjogewogICAgICAicHJvcGVydGllcyI6IHsKICAgICAgICAiYWdlIjogewogICAgICAgICAgInR5cGUiOiAibG9uZyIKICAgICAgICB9LAogICAgICAgICJsZXZlbCI6IHsKICAgICAgICAgICJ0eXBlIjogImxvbmciCiAgICAgICAgfSwKICAgICAgICAidGl0bGUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IgogICAgICAgIH0sCiAgICAgICAgIm5hbWUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IiwKICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiCiAgICAgICAgfQogICAgICB9CiAgICB9CiAgfQp9Cg==\",\n" +
-                "        \"Host\": \"foo.example\",\n" +
-                "        \"Content-Type\": \"application/json\",\n" +
-                "        \"Content-Length\": \"616\"\n" +
-                "    },\n" +
-                "    \"sourceResponse\": {\n" +
-                "        \"HTTP-Version\": {\n" +
-                "            \"keepAliveDefault\": true\n" +
-                "        },\n" +
-                "        \"Status-Code\": 200,\n" +
-                "        \"Reason-Phrase\": \"OK\",\n" +
-                "        \"response_time_ms\": 0,\n" +
-                "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEK\",\n" +
-                "        \"Content-transfer-encoding\": \"chunked\",\n" +
-                "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\n" +
-                "        \"Content-type\": \"text/plain\",\n" +
-                "        \"Funtime\": \"checkIt!\",\n" +
-                "        \"content-length\": \"30\"\n" +
-                "    },\n" +
-                "    \"targetRequest\": {\n" +
-                "        \"Request-URI\": \"/test\",\n" +
-                "        \"Method\": \"POST\",\n" +
-                "        \"HTTP-Version\": \"HTTP/1.1\",\n" +
-                "        \"body\": \"ewogICJzZXR0aW5ncyI6IHsKICAgICJpbmRleCI6IHsKICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LAogICAgICAibnVtYmVyX29mX3JlcGxpY2FzIjogMwogICAgfSwKICAgICJhbmFseXNpcyI6IHsKICAgICAgImFuYWx5emVyIjogewogICAgICAgICJuYW1lQW5hbHl6ZXIiOiB7CiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLAogICAgICAgICAgInRva2VuaXplciI6ICJrZXl3b3JkIiwKICAgICAgICAgICJmaWx0ZXIiOiAidXBwZXJjYXNlIgogICAgICAgIH0KICAgICAgfQogICAgfQogIH0sCiAgIm1hcHBpbmdzIjogewogICAgImVtcGxveWVlIjogewogICAgICAicHJvcGVydGllcyI6IHsKICAgICAgICAiYWdlIjogewogICAgICAgICAgInR5cGUiOiAibG9uZyIKICAgICAgICB9LAogICAgICAgICJsZXZlbCI6IHsKICAgICAgICAgICJ0eXBlIjogImxvbmciCiAgICAgICAgfSwKICAgICAgICAidGl0bGUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IgogICAgICAgIH0sCiAgICAgICAgIm5hbWUiOiB7CiAgICAgICAgICAidHlwZSI6ICJ0ZXh0IiwKICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiCiAgICAgICAgfQogICAgICB9CiAgICB9CiAgfQp9Cg==\",\n" +
-                "        \"Host\": \"foo.example\",\n" +
-                "        \"Content-Type\": \"application/json\",\n" +
-                "        \"Content-Length\": \"616\"\n" +
-                "    },\n" +
-                "    \"targetResponse\": {\n" +
-                "        \"HTTP-Version\": {\n" +
-                "            \"keepAliveDefault\": true\n" +
-                "        },\n" +
-                "        \"Status-Code\": 200,\n" +
-                "        \"Reason-Phrase\": \"OK\",\n" +
-                "        \"response_time_ms\": 267,\n" +
-                "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEK\",\n" +
-                "        \"Content-transfer-encoding\": \"chunked\",\n" +
-                "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\n" +
-                "        \"Content-type\": \"text/plain\",\n" +
-                "        \"Funtime\": \"checkIt!\",\n" +
-                "        \"content-length\": \"30\"\n" +
-                "    },\n" +
-                "    \"connectionId\": \"testConnection.1\"\n" +
+                "{\r\n" +
+                "    \"sourceRequest\": {\r\n" +
+                "        \"Request-URI\": \"/test\",\r\n" +
+                "        \"Method\": \"POST\",\r\n" +
+                "        \"HTTP-Version\": \"HTTP/1.1\",\r\n" +
+                "        \"Host\": \"foo.example\",\r\n" +
+                "        \"Content-Type\": \"application/json\",\r\n" +
+                "        \"Content-Length\": \"652\",\r\n" +
+                "        \"body\": \"ew0KICAic2V0dGluZ3MiOiB7DQogICAgImluZGV4Ijogew0KICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LA0KICAgICAgIm51bWJlcl9vZl9yZXBsaWNhcyI6IDMNCiAgICB9LA0KICAgICJhbmFseXNpcyI6IHsNCiAgICAgICJhbmFseXplciI6IHsNCiAgICAgICAgIm5hbWVBbmFseXplciI6IHsNCiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLA0KICAgICAgICAgICJ0b2tlbml6ZXIiOiAia2V5d29yZCIsDQogICAgICAgICAgImZpbHRlciI6ICJ1cHBlcmNhc2UiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0sDQogICJtYXBwaW5ncyI6IHsNCiAgICAiZW1wbG95ZWUiOiB7DQogICAgICAicHJvcGVydGllcyI6IHsNCiAgICAgICAgImFnZSI6IHsNCiAgICAgICAgICAidHlwZSI6ICJsb25nIg0KICAgICAgICB9LA0KICAgICAgICAibGV2ZWwiOiB7DQogICAgICAgICAgInR5cGUiOiAibG9uZyINCiAgICAgICAgfSwNCiAgICAgICAgInRpdGxlIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiDQogICAgICAgIH0sDQogICAgICAgICJuYW1lIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiLA0KICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0NCn0NCg==\"\r\n" +
+                "    },\r\n" +
+                "    \"sourceResponse\": {\r\n" +
+                "        \"HTTP-Version\": {\r\n" +
+                "            \"keepAliveDefault\": true\r\n" +
+                "        },\r\n" +
+                "        \"Status-Code\": 200,\r\n" +
+                "        \"Reason-Phrase\": \"OK\",\r\n" +
+                "        \"response_time_ms\": 0,\r\n" +
+                "        \"Content-transfer-encoding\": \"chunked\",\r\n" +
+                "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\r\n" +
+                "        \"Content-type\": \"text/plain\",\r\n" +
+                "        \"Funtime\": \"checkIt!\",\r\n" +
+                "        \"content-length\": \"30\",\r\n" +
+                "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\"\r\n" +
+                "    },\r\n" +
+                "    \"targetRequest\": {\r\n" +
+                "        \"Request-URI\": \"/test\",\r\n" +
+                "        \"Method\": \"POST\",\r\n" +
+                "        \"HTTP-Version\": \"HTTP/1.1\",\r\n" +
+                "        \"Host\": \"foo.example\",\r\n" +
+                "        \"Content-Type\": \"application/json\",\r\n" +
+                "        \"Content-Length\": \"652\",\r\n" +
+                "        \"body\": \"ew0KICAic2V0dGluZ3MiOiB7DQogICAgImluZGV4Ijogew0KICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LA0KICAgICAgIm51bWJlcl9vZl9yZXBsaWNhcyI6IDMNCiAgICB9LA0KICAgICJhbmFseXNpcyI6IHsNCiAgICAgICJhbmFseXplciI6IHsNCiAgICAgICAgIm5hbWVBbmFseXplciI6IHsNCiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLA0KICAgICAgICAgICJ0b2tlbml6ZXIiOiAia2V5d29yZCIsDQogICAgICAgICAgImZpbHRlciI6ICJ1cHBlcmNhc2UiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0sDQogICJtYXBwaW5ncyI6IHsNCiAgICAiZW1wbG95ZWUiOiB7DQogICAgICAicHJvcGVydGllcyI6IHsNCiAgICAgICAgImFnZSI6IHsNCiAgICAgICAgICAidHlwZSI6ICJsb25nIg0KICAgICAgICB9LA0KICAgICAgICAibGV2ZWwiOiB7DQogICAgICAgICAgInR5cGUiOiAibG9uZyINCiAgICAgICAgfSwNCiAgICAgICAgInRpdGxlIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiDQogICAgICAgIH0sDQogICAgICAgICJuYW1lIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiLA0KICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0NCn0NCg==\"\r\n" +
+                "    },\r\n" +
+                "    \"targetResponse\": {\r\n" +
+                "        \"HTTP-Version\": {\r\n" +
+                "            \"keepAliveDefault\": true\r\n" +
+                "        },\r\n" +
+                "        \"Status-Code\": 200,\r\n" +
+                "        \"Reason-Phrase\": \"OK\",\r\n" +
+                "        \"response_time_ms\": 267,\r\n" +
+                "        \"Content-transfer-encoding\": \"chunked\",\r\n" +
+                "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\r\n" +
+                "        \"Content-type\": \"text/plain\",\r\n" +
+                "        \"Funtime\": \"checkIt!\",\r\n" +
+                "        \"content-length\": \"30\",\r\n" +
+                "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\"\r\n" +
+                "    },\r\n" +
+                "    \"connectionId\": \"testConnection.1\"\r\n" +
                 "}";
         testOutputterForRequest("post_formUrlEncoded_withFixedLength.txt", EXPECTED_LOGGED_OUTPUT);
     }
@@ -255,7 +270,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 0, 0);
         var rawRequestData = loadResourceAsBytes("/requests/raw/" + requestResourceName);
         sourcePair.addRequestData(Instant.EPOCH, rawRequestData);
-        var rawResponseData = NettyPacketToHttpConsumerTest.EXPECTED_RESPONSE_STRING.getBytes(StandardCharsets.UTF_8);
+        var rawResponseData = EXPECTED_RESPONSE_STRING.getBytes(StandardCharsets.UTF_8);
         sourcePair.addResponseData(Instant.EPOCH, rawResponseData);
 
         var targetRequest = new TransformedPackets();
@@ -280,7 +295,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         } catch (InterruptedException e) {
             throw new RuntimeException(e);
         }
-        var allMetricData = rootContext.inMemoryInstrumentationBundle.testMetricExporter.getFinishedMetricItems();
+        var allMetricData = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         var filteredMetrics = allMetricData.stream().filter(md->md.getName().startsWith("tupleResult"))
                 .collect(Collectors.toList());
         // TODO - find out how to verify these metrics

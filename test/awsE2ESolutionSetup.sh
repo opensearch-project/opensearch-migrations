@@ -15,7 +15,7 @@ prepare_source_nodes_for_capture () {
   # Substitute @ to be used instead of ',' for cases where ',' would disrupt formatting of arguments, i.e. AWS SSM commands
   kafka_brokers=$(echo "$kafka_brokers" | tr ',' '@')
   kafka_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/trafficStreamSourceAccessSecurityGroupId" --query 'Parameter.Value' --output text)
-  otel_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/analyticsDomainSGId" --query 'Parameter.Value' --output text)
+  otel_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/otelCollectorSGId" --query 'Parameter.Value' --output text)
   for id in "${instance_ids[@]}"
   do
     echo "Performing capture proxy source node setup for: $id"
@@ -42,8 +42,9 @@ prepare_source_nodes_for_capture () {
       printf -v group_ids_string '%s ' "${group_ids[@]}"
       aws ec2 modify-instance-attribute --instance-id $id --groups $group_ids_string
     fi
-    echo "Executing ./startCaptureProxy.sh --kafka-endpoints $kafka_brokers --git-url $MIGRATIONS_GIT_URL --git-branch $MIGRATIONS_GIT_BRANCH on node: $id"
-    command_id=$(aws ssm send-command --instance-ids "$id" --document-name "AWS-RunShellScript" --parameters commands="cd /home/ec2-user/capture-proxy && ./startCaptureProxy.sh --stage $deploy_stage --kafka-endpoints $kafka_brokers --git-url $MIGRATIONS_GIT_URL --git-branch $MIGRATIONS_GIT_BRANCH" --output text --query 'Command.CommandId')
+    start_proxy_command="./startCaptureProxy.sh --stage $deploy_stage --kafka-endpoints $kafka_brokers --git-url $MIGRATIONS_GIT_URL --git-branch $MIGRATIONS_GIT_BRANCH"
+    echo "Executing $start_proxy_command on node: $id"
+    command_id=$(aws ssm send-command --instance-ids "$id" --document-name "AWS-RunShellScript" --parameters commands="cd /home/ec2-user/capture-proxy && $start_proxy_command" --output text --query 'Command.CommandId')
     sleep 10
     command_status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$id" --output text --query 'Status')
     # TODO for multi-node setups, we should collect all command ids and allow to run in parallel
@@ -104,6 +105,8 @@ usage() {
   echo "  --create-service-linked-roles                    Flag to create required service linked roles for the AWS account"
   echo "  --bootstrap-region                               Flag to CDK bootstrap the region to allow CDK deployments"
   echo "  --skip-capture-proxy                             Flag to skip setting up the Capture Proxy on source cluster nodes"
+  echo "  --skip-source-deploy                             Flag to skip deploying the EC2 source cluster"
+  echo "  --skip-migration-deploy                          Flag to skip deploying the Migration solution"
   echo ""
   exit 1
 }
@@ -113,6 +116,8 @@ RUN_POST_ACTIONS=false
 CREATE_SLR=false
 BOOTSTRAP_REGION=false
 SKIP_CAPTURE_PROXY=false
+SKIP_SOURCE_DEPLOY=false
+SKIP_MIGRATION_DEPLOY=false
 MIGRATIONS_GIT_URL='https://github.com/opensearch-project/opensearch-migrations.git'
 MIGRATIONS_GIT_BRANCH='main'
 
@@ -132,6 +137,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --skip-capture-proxy)
       SKIP_CAPTURE_PROXY=true
+      shift # past argument
+      ;;
+    --skip-source-deploy)
+      SKIP_SOURCE_DEPLOY=true
+      shift # past argument
+      ;;
+    --skip-migration-deploy)
+      SKIP_MIGRATION_DEPLOY=true
       shift # past argument
       ;;
     --migrations-git-url)
@@ -176,47 +189,73 @@ read -r -d '' cdk_context << EOM
 {
     "stage": "$STAGE",
     "vpcId": "<VPC_ID>",
-    "engineVersion": "OS_2.9",
+    "engineVersion": "OS_2.11",
     "domainName": "opensearch-cluster-aws-integ",
     "dataNodeCount": 2,
-    "availabilityZoneCount": 2,
-    "mskBrokerNodeCount": 2,
     "openAccessPolicyEnabled": true,
     "domainRemovalPolicy": "DESTROY",
+    "artifactBucketRemovalPolicy": "DESTROY",
     "trafficReplayerExtraArgs": "--speedup-factor 10.0",
-    "migrationAnalyticsServiceEnabled": true,
     "fetchMigrationEnabled": true,
+    "reindexFromSnapshotServiceEnabled": true,
     "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
     "dpPipelineTemplatePath": "../../../test/dp_pipeline_aws_integ.yaml"
 }
 EOM
 
-git clone https://github.com/lewijacn/opensearch-cluster-cdk.git || echo "Repo already exists, skipping.."
+if [ ! -d "opensearch-cluster-cdk" ]; then
+  git clone https://github.com/lewijacn/opensearch-cluster-cdk.git
+else
+  echo "Repo already exists, skipping clone."
+fi
 cd opensearch-cluster-cdk && git checkout migration-es
 git pull
 npm install
 if [ "$BOOTSTRAP_REGION" = true ] ; then
   bootstrap_region
 fi
-# Deploy source cluster on EC2 instances
-cdk deploy "*" --require-approval never --c suffix="Migration-Source" --c distVersion="7.10.2" --c distributionUrl="https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz" --c captureProxyEnabled=true --c securityDisabled=true --c minDistribution=false --c cpuArch="x64" --c isInternal=true --c singleNodeCluster=true --c networkAvailabilityZones=2 --c dataNodeCount=1 --c managerNodeCount=0 --c serverAccessType="ipv4" --c restrictServerAccessTo="0.0.0.0/0"
+
+if [ "$SKIP_SOURCE_DEPLOY" = false ] ; then
+  # Deploy source cluster on EC2 instances
+  cdk deploy "*" --require-approval never --c suffix="Migration-Source" --c distVersion="7.10.2" --c distributionUrl="https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz" --c captureProxyEnabled=true --c securityDisabled=true --c minDistribution=false --c cpuArch="x64" --c isInternal=true --c singleNodeCluster=true --c networkAvailabilityZones=2 --c dataNodeCount=1 --c managerNodeCount=0 --c serverAccessType="ipv4" --c restrictServerAccessTo="0.0.0.0/0"
+  if [ $? -ne 0 ]; then
+    echo "Error: deploy source cluster failed, exiting."
+    exit 1
+  fi
+fi
+
 source_endpoint=$(aws cloudformation describe-stacks --stack-name opensearch-infra-stack-Migration-Source --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
-echo $source_endpoint
+echo "Source endpoint: $source_endpoint"
 vpc_id=$(aws cloudformation describe-stacks --stack-name opensearch-network-stack --query "Stacks[0].Outputs[?contains(OutputValue, 'vpc')].OutputValue" --output text)
-echo $vpc_id
+echo "VPC ID: $vpc_id"
 
-cdk_context=$(echo "${cdk_context/<VPC_ID>/$vpc_id}")
-cdk_context=$(echo "${cdk_context/<SOURCE_CLUSTER_ENDPOINT>/http://${source_endpoint}:9200}")
-cdk_context=$(echo $cdk_context | jq '@json')
-# TODO Further verify space escaping for JSON
-# Escape spaces for CDK JSON parsing to handle
-cdk_context=$(echo "${cdk_context/ /\\u0020}")
-echo $cdk_context
+if [ "$SKIP_MIGRATION_DEPLOY" = false ] ; then
+  cdk_context=$(echo "${cdk_context/<VPC_ID>/$vpc_id}")
+  cdk_context=$(echo "${cdk_context/<SOURCE_CLUSTER_ENDPOINT>/http://${source_endpoint}:9200}")
+  cdk_context=$(echo $cdk_context | jq '@json')
+  # TODO Further verify space escaping for JSON
+  # Escape spaces for CDK JSON parsing to handle
+  cdk_context=$(echo "${cdk_context/ /\\u0020}")
+  echo $cdk_context
 
-cd ../../deployment/cdk/opensearch-service-migration
-./buildDockerImages.sh
-npm install
-cdk deploy "*" --c aws-existing-source=$cdk_context --c contextId=aws-existing-source --require-approval never --concurrency 3
+  cd ../../deployment/cdk/opensearch-service-migration || exit
+  ./buildDockerImages.sh
+  if [ $? -ne 0 ]; then
+    echo "Error: building docker images failed, exiting."
+    exit 1
+  fi
+  npm install
+  cdk deploy "*" --c aws-existing-source=$cdk_context --c contextId=aws-existing-source --require-approval never --concurrency 3
+  if [ $? -ne 0 ]; then
+    echo "Error: deploying migration stacks failed, exiting."
+    exit 1
+  fi
+fi
+
 if [ "$SKIP_CAPTURE_PROXY" = false ] ; then
   prepare_source_nodes_for_capture "$STAGE"
+  if [ $? -ne 0 ]; then
+    echo "Error: enabling capture proxy on source cluster, exiting."
+    exit 1
+  fi
 fi

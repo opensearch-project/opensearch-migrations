@@ -1,7 +1,7 @@
 package org.opensearch.migrations.replay;
 
 import lombok.Lombok;
-import org.opensearch.migrations.testutils.HttpFirstLine;
+import org.opensearch.migrations.testutils.HttpRequestFirstLine;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 
 import java.nio.charset.StandardCharsets;
@@ -31,11 +31,11 @@ public class TestHttpServerContext {
                 getUriForIthRequest(i));
     }
 
-    public static SimpleHttpResponse makeResponse(Random rand, HttpFirstLine response) {
-        return makeResponse(response, Duration.ofMillis(rand.nextInt(MAX_RESPONSE_TIME_MS)));
+    public static SimpleHttpResponse makeResponse(Random rand, HttpRequestFirstLine firstLine) {
+        return makeResponse(firstLine, Duration.ofMillis(rand.nextInt(MAX_RESPONSE_TIME_MS)));
     }
 
-    public static SimpleHttpResponse makeResponse(HttpFirstLine r, Duration responseWaitTime) {
+    public static SimpleHttpResponse makeResponse(HttpRequestFirstLine r, Duration responseWaitTime) {
         try {
             Thread.sleep(responseWaitTime.toMillis());
         } catch (InterruptedException e) {
@@ -50,5 +50,4 @@ public class TestHttpServerContext {
                 "Content-Length", ""+payloadBytes.length);
         return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
     }
-
 }

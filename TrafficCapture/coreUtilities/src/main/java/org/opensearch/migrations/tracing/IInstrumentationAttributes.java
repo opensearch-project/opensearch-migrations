@@ -7,12 +7,9 @@ import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.LongHistogram;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
-import io.opentelemetry.api.trace.Span;
 import lombok.NonNull;
-import org.opensearch.migrations.Utils;
 
 import java.time.Duration;
-import java.util.ArrayDeque;
 
 public interface IInstrumentationAttributes {
     AttributeKey<Boolean> HAD_EXCEPTION_KEY = AttributeKey.booleanKey("hadException");
@@ -28,7 +25,11 @@ public interface IInstrumentationAttributes {
         return e == null ? attributesBuilder.build() : attributesBuilder.put(HAD_EXCEPTION_KEY, true).build();
     }
 
-    default void addException(Throwable e) {
+    default void addCaughtException(Throwable e) {
+        addTraceException(e, false);
+    }
+
+    default void addTraceException(Throwable e, boolean exceptionIsPropagating) {
         meterIncrementEvent(getMetrics().exceptionCounter);
     }
 

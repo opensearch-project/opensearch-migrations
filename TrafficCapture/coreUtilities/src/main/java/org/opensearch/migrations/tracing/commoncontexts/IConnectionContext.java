@@ -2,7 +2,6 @@ package org.opensearch.migrations.tracing.commoncontexts;
 
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributesBuilder;
-import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 public interface IConnectionContext extends IScopedInstrumentationAttributes {

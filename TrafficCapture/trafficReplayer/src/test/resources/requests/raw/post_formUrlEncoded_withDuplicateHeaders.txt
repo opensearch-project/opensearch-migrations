@@ -1,0 +1,50 @@
+POST /test HTTP/1.1
+Host: foo.example
+Content-Type: application/json
+Header1: ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl
+Header1: abc
+Header1: bar
+Header1: ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl
+Header1: abc
+Header1: bar
+Header1: bar
+Header1: abc
+Header1: ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijkl
+Content-Length: 652
+
+{
+  "settings": {
+    "index": {
+      "number_of_shards": 7,
+      "number_of_replicas": 3
+    },
+    "analysis": {
+      "analyzer": {
+        "nameAnalyzer": {
+          "type": "custom",
+          "tokenizer": "keyword",
+          "filter": "uppercase"
+        }
+      }
+    }
+  },
+  "mappings": {
+    "employee": {
+      "properties": {
+        "age": {
+          "type": "long"
+        },
+        "level": {
+          "type": "long"
+        },
+        "title": {
+          "type": "text"
+        },
+        "name": {
+          "type": "text",
+          "analyzer": "nameAnalyzer"
+        }
+      }
+    }
+  }
+}

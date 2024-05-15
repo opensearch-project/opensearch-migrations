@@ -16,11 +16,11 @@ import java.io.IOException;
 import java.util.function.Supplier;
 
 public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel> {
-    private final IConnectionCaptureFactory<T> connectionCaptureFactory;
-    private final Supplier<SSLEngine> sslEngineProvider;
-    private final IRootWireLoggingContext rootContext;
-    private final BacksideConnectionPool backsideConnectionPool;
-    private final RequestCapturePredicate requestCapturePredicate;
+    protected final IConnectionCaptureFactory<T> connectionCaptureFactory;
+    protected final Supplier<SSLEngine> sslEngineProvider;
+    protected final IRootWireLoggingContext rootContext;
+    protected final BacksideConnectionPool backsideConnectionPool;
+    protected final RequestCapturePredicate requestCapturePredicate;
 
     public ProxyChannelInitializer(IRootWireLoggingContext rootContext,
                                    BacksideConnectionPool backsideConnectionPool,

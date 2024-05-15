@@ -4,7 +4,6 @@ import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
-import org.opensearch.migrations.tracing.IInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 public class TrafficSourceContexts {

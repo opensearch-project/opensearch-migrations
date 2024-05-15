@@ -1,10 +1,9 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping, Protocol, ServiceConnectService} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
-import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {StreamingSourceType} from "../streaming-source-type";
 import {createMSKProducerIAMPolicies} from "../common-utilities";
@@ -13,8 +12,9 @@ import {createMSKProducerIAMPolicies} from "../common-utilities";
 export interface CaptureProxyProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly streamingSourceType: StreamingSourceType,
+    readonly fargateCpuArch: CpuArchitecture,
     readonly customSourceClusterEndpoint?: string,
-    readonly analyticsServiceEnabled?: boolean,
+    readonly otelCollectorEnabled?: boolean,
     readonly extraArgs?: string,
 }
 
@@ -48,9 +48,9 @@ export class CaptureProxyStack extends MigrationServiceCore {
 
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
         const sourceClusterEndpoint = props.customSourceClusterEndpoint ? props.customSourceClusterEndpoint : "https://elasticsearch:9200"
-        let command = `/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection ${brokerEndpoints} --destinationUri ${sourceClusterEndpoint} --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`
+        let command = `/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection ${brokerEndpoints} --destinationUri ${sourceClusterEndpoint} --insecureDestination --listenPort 9200`
         command = props.streamingSourceType === StreamingSourceType.AWS_MSK ? command.concat(" --enableMSKAuth") : command
-        command = props.analyticsServiceEnabled ? command.concat(" --otelCollectorEndpoint http://otel-collector:4317") : command
+        command = props.otelCollectorEnabled ? command.concat(" --otelCollectorEndpoint http://otel-collector:4317") : command
         command = props.extraArgs ? command.concat(` ${props.extraArgs}`) : command
         this.createService({
             serviceName: "capture-proxy",
@@ -60,6 +60,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
             taskRolePolicies: servicePolicies,
             portMappings: [servicePort],
             serviceConnectServices: [serviceConnectService],
+            cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 2048,
             ...props

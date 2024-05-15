@@ -2,6 +2,11 @@
 
 This directory contains the infrastructure-as-code CDK solution for deploying an OpenSearch Domain as well as the infrastructure for the Migration solution. Users have the ability to easily deploy their infrastructure using default values or provide [configuration options](./options.md) for a more customized setup. The goal of this repo is not to become a one-size-fits-all solution for users- rather, this code base should be viewed as a starting point for users to use and add to individually as their custom use case requires.
 
+## Infrastructure Requirements
+### VPC Requirements
+There are certain requirements for imported and created VPCs used in this solution that come from its dependencies on other AWS services such as MSK(Kafka), OpenSearch Service, and ECS. These requirements should be met before using an imported VPC with this solution.
+* At least 2 private subnets should be available which span at least 2 Availability Zones
+
 ## Getting Started
 
 ### Install Prerequisites
@@ -191,19 +196,68 @@ With the [required setup](#importing-target-clusters) on the target cluster havi
 The pipeline configuration file can be viewed (and updated) via AWS Secrets Manager.
 Please note that it will be base64 encoded.
 
-## Accessing the Migration Analytics Domain
+## Kicking off OpenSearch Ingestion Service
 
-The analytics domain receives metrics and events from the Capture Proxy and Replayer (if configured) and allows a user to visualize the progress and success of their migration.
+**Note**: Using OpenSearch Ingestion Service is currently an experimental feature that must be enabled with the `migrationConsoleEnableOSI` option. Currently only Managed OpenSearch service as a source to Managed OpenSearch service as a target migrations are supported
 
-The domain & dashboard are only accessible from within the VPC, but a BastionHost is optionally set up within the VPC that allows a user to use Session Manager to make the dashboard avaiable locally via port forwarding.
-
-For the Bastion Host to be available, add `"migrationAnalyticsBastionEnabled": true` to cdk.context.json and redeploy at least the MigrationAnalytics stack.
-
-Run the `accessAnalyticsDashboard` script, and then open https://localhost:8157/_dashboards to view your dashboard.
+After enabling and deploying the CDK, log into the Migration Console
 ```shell
-# ./accessAnalyticsDashboard.sh STAGE REGION
-./accessAnalyticsDashboard.sh dev us-east-1
+# ./accessContainer.sh migration-console STAGE REGION
+./accessContainer.sh migration-console dev us-east-1
 ```
+Make any modifications to the `osiPipelineTemplate.yaml` on the Migration Console, if needed. Note: Placeholder values exist in the file to automatically populate source/target endpoints and corresponding auth options by the python tool that uses this yaml file.
+
+The OpenSearch Ingestion pipeline can then be created by giving an existing source cluster endpoint and running the below command
+```shell
+./osiMigration.py create-pipeline-from-solution --source-endpoint=<SOURCE_ENDPOINT>
+```
+
+When OpenSearch Ingestion pipelines are created they begin running immediately and can be stopped with the following command
+```shell
+./osiMigration.py stop-pipeline
+```
+Or restarted with the following command
+```shell
+./osiMigration.py start-pipeline
+```
+
+## Kicking off Reindex from Snapshot (RFS)
+
+When the RFS service gets deployed, it does not start running immediately. Instead, the user controls when they want to kick off a historical data migration.
+
+The following command can be run from the Migration Console to initiate the RFS historical data migration
+```shell
+aws ecs update-service --cluster migration-<STAGE>-ecs-cluster --service migration-<STAGE>-reindex-from-snapshot --desired-count 1
+```
+
+Currently, the RFS application will enter an idle state with the ECS container still running upon completion. This can be cleaned up by using the same command with `--desired-count 0`
+
+
+## Monitoring Progress via Instrumentation
+
+The replayer and capture proxy (if started with the `--otelCollectorEndpoint` argument) emit metrics through an 
+otel-collector endpoint, which is deployed as an ECS task alongside other Migrations Assistant components.  The
+otel-collector will publish metrics and traces to Amazon CloudWatch and AWS X-Ray.
+
+Some of these metrics will show simple progress, such as bytes or records transmitted.  Other records can show higher
+level information, such the number of responses with status codes that match vs those that don't.  To observe those,
+search for `statusCodesMatch` in the CloudWatch Console.  That's emitted as an attribute along with the method and
+the source/target status code (rounded down to the last hundred; i.e. a status code of 201 has a 200 attribute).
+
+Other metrics will show latencies, the number of requests, unique connections at a time and more.  Low-level and 
+high-level metrics are being improved and added.  For the latest information, see the
+[README.md](../../../TrafficCapture/coreUtilities/README.md).
+
+Along with metrics, traces are emitted by the replayer and the proxy (ehen proxy is run with metrics enabled, e.g. by 
+launching with --otelCollectorEndpoint set to the otel-collector deployed as part of the Migration Assistant ECS 
+cluster).  Traces will include very granular data for each connection, including how long the TCP connections are open,
+how long the source and target clusters took to send a response, as well as other internal details that can explain
+the progress of each request.  
+
+Notice that traces for the replayer will show connections and Kafka records open, in some cases, much longer than their
+representative HTTP transactions.  This is because records are considered 'active' to the replayer until they are 
+committed and records are only committed once _all_ previous records have also been committed.  Details such as that
+are defensive for when further diagnosis is necessary. 
 
 ## Configuring Capture Proxy IAM and Security Groups
 Although this CDK does not set up the Capture Proxy on source cluster nodes (except in the case of the demo solution), the Capture Proxy instances do need to communicate with resources deployed by this CDK (e.g. Kafka) which this section covers
@@ -259,7 +313,6 @@ To give an example of this process, a user could decide to configure an addition
     "engineVersion": "OS_1.3",
     "domainName": "demo-cluster-1-3",
     "dataNodeCount": 2,
-    "availabilityZoneCount": 2,
     "openAccessPolicyEnabled": true,
     "domainRemovalPolicy": "DESTROY",
     "enableDemoAdmin": true,

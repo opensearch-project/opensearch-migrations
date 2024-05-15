@@ -11,30 +11,16 @@
 
 plugins {
     id 'org.opensearch.migrations.java-application-conventions'
-//    id "com.github.spotbugs" version "4.7.3"
-//    id 'checkstyle'
-    id "io.freefair.lombok" version "8.0.1"
+    id 'io.freefair.lombok'
     id 'java-test-fixtures'
 }
-
-//spotbugs {
-//    includeFilter = new File(rootDir, 'config/spotbugs/spotbugs-include.xml')
-//}
-
-//checkstyle {
-//    toolVersion = '10.12.3'
-//    configFile = new File(rootDir, 'config/checkstyle/checkstyle.xml')
-//    System.setProperty('checkstyle.cache.file', String.format('%s/%s',
-//            buildDir, 'checkstyle.cachefile'))
-//}
 
 repositories {
     mavenCentral()
 }
 
 dependencies {
-    //spotbugs 'com.github.spotbugs:spotbugs:4.7.3'
-    def resilience4jVersion = "1.7.0";
+    implementation project(":trafficCaptureDependencies")
 
     implementation project(':captureProtobufs')
     implementation project(':coreUtilities')
@@ -43,71 +29,54 @@ dependencies {
     runtimeOnly project(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     runtimeOnly project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
-    implementation group: 'com.beust', name: 'jcommander', version: '1.82'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
-    implementation group: 'com.google.guava', name: 'guava', version: '32.0.1-jre'
-    implementation group: 'com.google.protobuf', name: 'protobuf-java', version: '3.22.2'
-    implementation group: 'io.github.resilience4j', name: 'resilience4j-ratelimiter', version:"${resilience4jVersion}"
-    implementation group: 'io.github.resilience4j', name: 'resilience4j-retry', version:"${resilience4jVersion}"
-    implementation group: 'io.netty', name: 'netty-all', version: '4.1.100.Final'
-    implementation group: 'org.apache.kafka', name: 'kafka-clients', version: '3.6.0'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
-    implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
-    implementation group: 'software.amazon.awssdk', name: 'arns', version: '2.20.102'
-    implementation group: 'software.amazon.awssdk', name: 'auth', version: '2.20.102'
-    implementation group: 'software.amazon.awssdk', name: 'sdk-core', version: '2.20.102'
-    implementation group: 'software.amazon.awssdk', name: 'secretsmanager', version: '2.20.127'
-    implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth', version: '1.1.9'
-    implementation 'org.apache.commons:commons-compress:1.24.0'
+    implementation group: 'com.beust', name: 'jcommander'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    implementation group: 'com.google.guava', name: 'guava'
+    implementation group: 'com.google.protobuf', name: 'protobuf-java'
+    implementation group: 'io.github.resilience4j', name: 'resilience4j-ratelimiter'
+    implementation group: 'io.github.resilience4j', name: 'resilience4j-retry'
+    implementation group: 'io.netty', name: 'netty-all'
+    implementation group: 'org.apache.kafka', name: 'kafka-clients'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    implementation group: 'org.slf4j', name: 'slf4j-api'
+    implementation group: 'com.lmax', name: 'disruptor'
+    implementation group: 'software.amazon.awssdk', name: 'arns'
+    implementation group: 'software.amazon.awssdk', name: 'auth'
+    implementation group: 'software.amazon.awssdk', name: 'sdk-core'
+    implementation group: 'software.amazon.awssdk', name: 'secretsmanager'
+    implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth'
+    implementation 'org.apache.commons:commons-compress'
 
     testFixturesImplementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    testFixturesImplementation project(':captureOffloader')
+    testFixturesImplementation testFixtures(project(':captureOffloader'))
+    testFixturesImplementation project(':captureProtobufs')
     testFixturesImplementation project(':coreUtilities')
     testFixturesImplementation testFixtures(project(path: ':coreUtilities'))
     testFixturesImplementation testFixtures(project(path: ':testUtilities'))
 
-    testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
-    testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
-    testFixturesImplementation group: 'io.netty', name: 'netty-all', version: '4.1.100.Final'
-    testFixturesImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api', version:'5.9.3'
+    testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api'
+    testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    testFixturesImplementation group: 'io.netty', name: 'netty-all'
+    testFixturesImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
 
-    testImplementation project(':captureOffloader')
-    testImplementation testFixtures(project(path: ':captureOffloader'))
     testImplementation testFixtures(project(path: ':testUtilities'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation project(':replayerPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
     testImplementation project(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     testImplementation project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
-    testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
-    testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api', version:'5.x.x'
-    testImplementation group: 'org.testcontainers', name: 'junit-jupiter', version: '1.19.5'
-    testImplementation group: 'org.testcontainers', name: 'kafka', version: '1.19.5'
-    testImplementation group: 'org.testcontainers', name: 'testcontainers', version: '1.19.5'
-    testImplementation group: 'org.mockito', name:'mockito-core', version:'4.6.1'
-    testImplementation group: 'org.mockito', name:'mockito-junit-jupiter', version:'4.6.1'
-    testRuntimeOnly group:'org.junit.jupiter', name:'junit-jupiter-engine', version:'5.x.x'
-}
+    testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
+    testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
+    testImplementation group: 'org.testcontainers', name: 'junit-jupiter'
+    testImplementation group: 'org.testcontainers', name: 'kafka'
+    testImplementation group: 'org.testcontainers', name: 'testcontainers'
 
-configurations.all {
-    resolutionStrategy.eachDependency { DependencyResolveDetails details ->
-        if (details.requested.group == 'org.apache.commons' && details.requested.name == 'commons-text') {
-            def targetVersion = '1.10.0'
-            if (CommonUtils.wasRequestedVersionReleasedBeforeTargetVersion(details.requested.version, targetVersion)) {
-                details.useVersion targetVersion
-            }
-        }
-        if (details.requested.group == 'org.apache.bcel' && details.requested.name == 'bcel') {
-            def targetVersion = '6.7.0'
-            if (CommonUtils.wasRequestedVersionReleasedBeforeTargetVersion(details.requested.version, targetVersion)) {
-                details.useVersion targetVersion
-            }
-        }
-        if (details.requested.group == 'io.netty') {
-            details.useVersion '4.1.100.Final'
-        }
-    }
+    testImplementation group: 'org.mockito', name:'mockito-core'
+    testImplementation group: 'org.mockito', name:'mockito-junit-jupiter'
+    testRuntimeOnly group:'org.junit.jupiter', name:'junit-jupiter-engine'
 }
 
 application {
@@ -118,11 +87,4 @@ jar {
     manifest {
         attributes 'Main-Class': application.mainClass
     }
-}
-
-// TODO: Fix Parallel Execution for junit trafficReplayer tests
-//  with resourceSharing of TrafficReplayerRunner to eliminate forking and rely on threads
-slowTest {
-    forkEvery(1)
-    maxParallelForks = Runtime.runtime.availableProcessors()
 }

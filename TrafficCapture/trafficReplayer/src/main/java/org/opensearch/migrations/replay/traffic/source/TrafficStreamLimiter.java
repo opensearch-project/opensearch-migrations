@@ -1,37 +1,91 @@
 package org.opensearch.migrations.replay.traffic.source;
 
+import lombok.AllArgsConstructor;
 import lombok.Lombok;
+import lombok.NonNull;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.LinkedTransferQueue;
 import java.util.concurrent.Semaphore;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.function.Consumer;
 
 @Slf4j
-public class TrafficStreamLimiter {
+public class TrafficStreamLimiter implements AutoCloseable {
+
+    @AllArgsConstructor
+    public static class WorkItem {
+        private final @NonNull Consumer<WorkItem> task;
+        private final IHttpTransactionContext context;
+        private final int cost;
+    }
 
     public final Semaphore liveTrafficStreamCostGate;
+    private final LinkedTransferQueue<WorkItem> workQueue;
+    private final Thread consumerThread;
+    private final AtomicBoolean stopped;
 
     public TrafficStreamLimiter(int maxConcurrentCost) {
         this.liveTrafficStreamCostGate = new Semaphore(maxConcurrentCost);
+        this.workQueue = new LinkedTransferQueue<>();
+        this.stopped = new AtomicBoolean();
+        this.consumerThread = new Thread(this::consumeFromQueue, "requestFeederThread");
+        this.consumerThread.start();
     }
 
-    public void addWork(int cost) {
-        log.atDebug().setMessage(()->"liveTrafficStreamCostGate.permits: {} acquiring: {}")
-                .addArgument(liveTrafficStreamCostGate.availablePermits())
-                .addArgument(cost)
-                .log();
+    public boolean isStopped() {
+        return stopped.get();
+    }
+
+    @SneakyThrows
+    private void consumeFromQueue() {
+        WorkItem workItem = null;
         try {
-            liveTrafficStreamCostGate.acquire(cost);
-            log.atDebug().setMessage(()->"Acquired liveTrafficStreamCostGate (available=" +
-                    liveTrafficStreamCostGate.availablePermits()+")").log();
+            while (!stopped.get()) {
+                workItem = workQueue.take();
+                log.atDebug().setMessage(() -> "liveTrafficStreamCostGate.permits: {} acquiring: {}")
+                        .addArgument(liveTrafficStreamCostGate.availablePermits())
+                        .addArgument(workItem.cost)
+                        .log();
+                liveTrafficStreamCostGate.acquire(workItem.cost);
+                WorkItem finalWorkItem = workItem;
+                log.atDebug().setMessage(() -> "Acquired liveTrafficStreamCostGate (available=" +
+                        liveTrafficStreamCostGate.availablePermits() + ") to process " + finalWorkItem.context).log();
+                workItem.task.accept(workItem);
+                workItem = null;
+            }
         } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw Lombok.sneakyThrow(e);
+            if (!stopped.get()) {
+                WorkItem finalWorkItem = workItem;
+                log.atError().setMessage(()->"consumeFromQueue() was interrupted with " +
+                                (finalWorkItem != null ? "an active task and " : "") +
+                        workQueue.size() + " enqueued items").log();
+            }
+            throw e;
         }
     }
 
-    public void doneProcessing(int cost) {
-        liveTrafficStreamCostGate.release(cost);
-        log.atDebug().setMessage(()->"released "+cost+
-                " liveTrafficStreamCostGate.availablePermits="+liveTrafficStreamCostGate.availablePermits()).log();
+    public WorkItem queueWork(int cost, IHttpTransactionContext context, @NonNull Consumer<WorkItem> task) {
+        var workItem = new WorkItem(task, context, cost);
+        var rval = workQueue.offer(workItem);
+        assert rval;
+        return workItem;
+    }
+
+    public void doneProcessing(@NonNull WorkItem workItem) {
+        liveTrafficStreamCostGate.release(workItem.cost);
+        log.atDebug().setMessage(()->"released " + workItem.cost +
+                " liveTrafficStreamCostGate.availablePermits=" + liveTrafficStreamCostGate.availablePermits() +
+                " for " + workItem.context).log();
+    }
+
+    @Override
+    public void close() throws Exception {
+        stopped.set(true);
+        this.consumerThread.interrupt();
+        this.consumerThread.join();
     }
 }

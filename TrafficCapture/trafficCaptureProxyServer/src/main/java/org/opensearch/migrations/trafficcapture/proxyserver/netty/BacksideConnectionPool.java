@@ -65,10 +65,8 @@ public class BacksideConnectionPool {
     private void logProgressAtInterval(Level logLevel, EventLoop eventLoop,
                                        ExpiringSubstitutableItemPool<ChannelFuture, Void> channelPoolMap,
                                        Duration frequency) {
-        eventLoop.schedule(() -> {
-            log.atLevel(logLevel).log(channelPoolMap.getStats().toString());
-            logProgressAtInterval(logLevel, eventLoop, channelPoolMap, frequency);
-        }, frequency.toMillis(), TimeUnit.MILLISECONDS);
+        eventLoop.scheduleAtFixedRate(() -> log.atLevel(logLevel).log(channelPoolMap.getStats().toString()),
+                frequency.toMillis(), frequency.toMillis(), TimeUnit.MILLISECONDS);
     }
 
     private ChannelFuture buildConnectionFuture(EventLoop eventLoop) {

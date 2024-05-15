@@ -16,10 +16,10 @@ import javax.net.ssl.SSLEngine;
 import java.util.function.Supplier;
 
 public class NettyScanningHttpProxy {
-    private final int proxyPort;
-    private Channel mainChannel;
-    private EventLoopGroup workerGroup;
-    private EventLoopGroup bossGroup;
+    protected final int proxyPort;
+    protected Channel mainChannel;
+    protected EventLoopGroup workerGroup;
+    protected EventLoopGroup bossGroup;
 
     public NettyScanningHttpProxy(int proxyPort) {
         this.proxyPort = proxyPort;

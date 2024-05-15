@@ -1,6 +1,6 @@
 package org.opensearch.migrations.common
 
-import org.gradle.api.tasks.Copy
+import org.gradle.api.tasks.Sync
 import org.gradle.api.Project
 import com.bmuschko.gradle.docker.tasks.image.Dockerfile
 
@@ -27,7 +27,9 @@ class CommonUtils {
         copyArtifact(project, projectName, projectName, destDir)
     }
     static def copyArtifact(Project project, String artifactProjectName, String destProjectName, String destDir) {
-        project.task("copyArtifact_${destProjectName}", type: Copy) {
+        // Sync performs a copy, while also deleting items from the destination directory that are not in the source directory
+        // In our case, jars of old versions were getting "stuck" and causing conflicts when the program was run
+        project.task("copyArtifact_${destProjectName}", type: Sync) {
             dependsOn ":${artifactProjectName}:build"
             dependsOn ":${artifactProjectName}:jar"
             if (destProjectName == "trafficCaptureProxyServerTest") {
@@ -53,18 +55,17 @@ class CommonUtils {
                 from "migrations/${dependentDockerImageName}:${hashNonce}"
                 dependsOn "buildDockerImage_${baseImageOverrideProjectName}"
                 runCommand("sed -i -e \"s|mirrorlist=|#mirrorlist=|g\" /etc/yum.repos.d/CentOS-* ;  sed -i -e \"s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g\" /etc/yum.repos.d/CentOS-*")
-                runCommand("yum -y install nmap-ncat")
             } else {
-                from 'openjdk:11-jre'
-                runCommand("apt-get update && apt-get install -y netcat")
+                from 'amazoncorretto:11-al2023-headless'
             }
 
             copyFile("jars", "/jars")
+            def jvmParams = "-XX:MaxRAMPercentage=80.0 -XX:+ExitOnOutOfMemoryError"
             // can't set the environment variable from the runtimeClasspath because the Dockerfile is
             // constructed in the configuration phase and the classpath won't be realized until the
             // execution phase.  Therefore, we need to have docker run the command to resolve the classpath
             // and it's simplest to pack that up into a helper script.
-            runCommand("printf \"#!/bin/sh\\njava -cp `echo /jars/*.jar | tr \\   :` \\\"\\\$@\\\" \" > /runJavaWithClasspath.sh");
+            runCommand("printf \"#!/bin/sh\\njava ${jvmParams} -cp `echo /jars/*.jar | tr \\   :` \\\"\\\$@\\\" \" > /runJavaWithClasspath.sh");
             runCommand("chmod +x /runJavaWithClasspath.sh")
             // container stay-alive
             defaultCommand('tail', '-f', '/dev/null')

@@ -201,7 +201,8 @@ test('Test that app registry association is created when migrationsAppRegistryAR
     })
     const stacks = new StackComposer(app, {
         migrationsAppRegistryARN: "arn:aws:servicecatalog:us-west-2:12345678912:/applications/12345abcdef",
-        env: {account: "test-account", region: "us-east-1"}
+        env: {account: "test-account", region: "us-east-1"},
+        migrationsSolutionVersion: "1.0.1"
     })
 
     const domainStack = stacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
@@ -209,10 +210,10 @@ test('Test that app registry association is created when migrationsAppRegistryAR
     domainTemplate.resourceCountIs("AWS::ServiceCatalogAppRegistry::ResourceAssociation", 1)
 })
 
-test('Test that with analytics and assistance stacks enabled, creates two opensearch domains', () => {
+test('Test that with analytics and assistance stacks enabled, creates one opensearch domains', () => {
 
     const contextOptions = {
-        migrationAnalyticsServiceEnabled: true,
+        otelCollectorEnabled: true,
         migrationAssistanceEnabled: true,
         vpcEnabled: true,
         migrationConsoleServiceEnabled: true,
@@ -220,5 +221,5 @@ test('Test that with analytics and assistance stacks enabled, creates two opense
 
     const openSearchStacks =  createStackComposer(contextOptions)
     const domainStacks = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)
-    expect(domainStacks.length).toEqual(2)
+    expect(domainStacks.length).toEqual(1)
 })

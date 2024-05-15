@@ -20,53 +20,29 @@ buildscript {
 
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
-//    id "com.github.spotbugs" version "4.7.3"
-//    id 'checkstyle'
-    id "io.freefair.lombok" version "8.0.1"
+    id 'io.freefair.lombok'
     id 'java-test-fixtures'
 }
-
-//spotbugs {
-//    includeFilter = new File(rootDir, 'config/spotbugs/spotbugs-include.xml')
-//}
-
-//checkstyle {
-//    toolVersion = '10.12.3'
-//    configFile = new File(rootDir, 'config/checkstyle/checkstyle.xml')
-//    System.setProperty('checkstyle.cache.file', String.format('%s/%s',
-//            buildDir, 'checkstyle.cachefile'))
-//}
 
 repositories {
     mavenCentral()
 }
 
 dependencies {
-//    spotbugs 'com.github.spotbugs:spotbugs:4.7.3'
+    api project(":trafficCaptureDependencies")
 
-    testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: '2.15.0'
-    testFixturesImplementation group: 'com.google.guava', name: 'guava', version: '32.0.1-jre'
-    testFixturesImplementation group: 'io.netty', name: 'netty-all', version: '4.1.100.Final'
-    testFixturesImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5', version: '5.2.1'
-    testFixturesImplementation group: 'org.bouncycastle', name: 'bcprov-jdk18on', version: '1.74'
-    testFixturesImplementation group: 'org.bouncycastle', name: 'bcpkix-jdk18on', version: '1.74'
-    testFixturesImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api', version: '5.9.3'
-    testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
+    testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    testFixturesImplementation group: 'com.google.guava', name: 'guava'
+    testFixturesImplementation group: 'io.netty', name: 'netty-all'
+    testFixturesImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
+    testFixturesImplementation group: 'org.bouncycastle', name: 'bcprov-jdk18on'
+    testFixturesImplementation group: 'org.bouncycastle', name: 'bcpkix-jdk18on'
+    testFixturesImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
+    testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api'
 
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
-    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
-}
-
-configurations.all {
-    resolutionStrategy.eachDependency { DependencyResolveDetails details ->
-        if (details.requested.group == 'org.apache.bcel' && details.requested.name == 'bcel') {
-            def targetVersion = '6.7.0'
-            if (CommonUtils.wasRequestedVersionReleasedBeforeTargetVersion(details.requested.version, targetVersion)) {
-                details.useVersion targetVersion
-            }
-        }
-    }
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
 }
 
 tasks.named('test') {

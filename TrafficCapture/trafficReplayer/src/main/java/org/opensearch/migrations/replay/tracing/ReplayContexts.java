@@ -97,11 +97,13 @@ public abstract class ReplayContexts extends IReplayContexts {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             final LongUpDownCounter activeChannelCounter;
+            final LongCounter failedConnectionAttempts;
 
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName);
                 activeChannelCounter = meter
                         .upDownCounterBuilder(MetricNames.ACTIVE_CHANNELS_YET_TO_BE_FULLY_DISCARDED).build();
+                failedConnectionAttempts = meter.counterBuilder(MetricNames.FAILED_CONNECTION_ATTEMPTS).build();
             }
         }
 
@@ -122,6 +124,11 @@ public abstract class ReplayContexts extends IReplayContexts {
         public void sendMeterEventsForEnd() {
             super.sendMeterEventsForEnd();
             meterDeltaEvent(getMetrics().activeChannelCounter, -1);
+        }
+
+        @Override
+        public void addFailedChannelCreation() {
+            meterIncrementEvent(getMetrics().failedConnectionAttempts);
         }
     }
 
@@ -741,7 +748,7 @@ public abstract class ReplayContexts extends IReplayContexts {
         public void sendMeterEventsForEnd() {
             super.sendMeterEventsForEnd();
             AttributesBuilder attributesBuilderForAggregate = getSharedAttributes(Attributes.builder());
-            getCurrentSpan().setAllAttributes(attributesBuilderForAggregate.build());
+            setAllAttributes(attributesBuilderForAggregate.build());
             meterIncrementEvent(getMetrics().resultCounter, 1, attributesBuilderForAggregate);
         }
 
@@ -762,7 +769,7 @@ public abstract class ReplayContexts extends IReplayContexts {
          */
         @Override
         public void setEndpoint(String endpointUrl) {
-            getCurrentSpan().setAttribute(ENDPOINT_KEY, endpointUrl);
+            setAttribute(ENDPOINT_KEY, endpointUrl);
         }
 
         /**
@@ -772,7 +779,7 @@ public abstract class ReplayContexts extends IReplayContexts {
          */
         @Override
         public void setHttpVersion(String httpVersion) {
-            getCurrentSpan().setAttribute(HTTP_VERSION_KEY, httpVersion);
+            setAttribute(HTTP_VERSION_KEY, httpVersion);
         }
 
         @Override

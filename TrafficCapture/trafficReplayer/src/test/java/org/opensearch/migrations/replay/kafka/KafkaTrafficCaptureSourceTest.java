@@ -55,96 +55,88 @@ class KafkaTrafficCaptureSourceTest extends InstrumentationTest {
     }
 
     @Test
-    public void testSupplyTrafficFromSource() {
+    public void testSupplyTrafficFromSource() throws Exception {
         int numTrafficStreams = 10;
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
-        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(rootContext,
-                mockConsumer, TEST_TOPIC_NAME, Duration.ofHours(1));
-        initializeMockConsumerTopic(mockConsumer);
+        try (var protobufConsumer = new KafkaTrafficCaptureSource(rootContext,
+                mockConsumer, TEST_TOPIC_NAME, Duration.ofHours(1))) {
+            initializeMockConsumerTopic(mockConsumer);
 
-        List<Integer> substreamCounts = new ArrayList<>();
-        // On a single poll() add records to the topic
-        mockConsumer.schedulePollTask(() -> {
-            // Required rebalance to add records to topic
-            mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
-            addGeneratedTrafficStreamsToTopic(numTrafficStreams, 1, mockConsumer, substreamCounts);
-            Assertions.assertEquals(substreamCounts.size(), numTrafficStreams);
-        });
+            List<Integer> substreamCounts = new ArrayList<>();
+            // On a single poll() add records to the topic
+            mockConsumer.schedulePollTask(() -> {
+                // Required rebalance to add records to topic
+                mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
+                addGeneratedTrafficStreamsToTopic(numTrafficStreams, 1, mockConsumer, substreamCounts);
+                Assertions.assertEquals(substreamCounts.size(), numTrafficStreams);
+            });
 
-        AtomicInteger foundStreamsCount = new AtomicInteger(0);
-        // This assertion will fail the test case if not completed within its duration, as would be the case if there
-        // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
+            AtomicInteger foundStreamsCount = new AtomicInteger(0);
+            // This assertion will fail the test case if not completed within its duration, as would be the case if there
+            // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
 
-        var tsCount = new AtomicInteger();
-        Assertions.assertTimeoutPreemptively(TEST_TIMEOUT, () -> {
-            while (tsCount.get() < numTrafficStreams) {
-                protobufConsumer.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get().stream()
-                        .forEach(streamWithKey -> {
-                            tsCount.incrementAndGet();
-                            log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
-                            Assertions.assertInstanceOf(ITrafficStreamWithKey.class, streamWithKey);
-                            Assertions.assertEquals(streamWithKey.getStream().getSubStreamCount(),
-                                    substreamCounts.get(foundStreamsCount.getAndIncrement()));
-                        });
-            }
-        });
-        Assertions.assertEquals(foundStreamsCount.get(), numTrafficStreams);
-        try {
-            protobufConsumer.close();
-        } catch (IOException e) {
-            e.printStackTrace();
+            var tsCount = new AtomicInteger();
+            Assertions.assertTimeoutPreemptively(TEST_TIMEOUT, () -> {
+                while (tsCount.get() < numTrafficStreams) {
+                    protobufConsumer.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get().stream()
+                            .forEach(streamWithKey -> {
+                                tsCount.incrementAndGet();
+                                log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
+                                Assertions.assertInstanceOf(ITrafficStreamWithKey.class, streamWithKey);
+                                Assertions.assertEquals(streamWithKey.getStream().getSubStreamCount(),
+                                        substreamCounts.get(foundStreamsCount.getAndIncrement()));
+                            });
+                }
+            });
+            Assertions.assertEquals(foundStreamsCount.get(), numTrafficStreams);
         }
     }
 
     @Test
-    public void testSupplyTrafficWithUnformattedMessages() {
+    public void testSupplyTrafficWithUnformattedMessages() throws Exception {
         int numTrafficStreams = 10;
         MockConsumer<String, byte[]> mockConsumer = new MockConsumer<>(OffsetResetStrategy.EARLIEST);
-        KafkaTrafficCaptureSource protobufConsumer = new KafkaTrafficCaptureSource(rootContext,
-                mockConsumer, TEST_TOPIC_NAME, Duration.ofHours(1));
-        initializeMockConsumerTopic(mockConsumer);
+        try (var protobufConsumer = new KafkaTrafficCaptureSource(rootContext,
+                mockConsumer, TEST_TOPIC_NAME, Duration.ofHours(1))) {
+            initializeMockConsumerTopic(mockConsumer);
 
-        List<Integer> substreamCounts = new ArrayList<>();
-        // On a single poll() add records to the topic
-        mockConsumer.schedulePollTask(() -> {
-            // Required rebalance to add records
-            mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
+            List<Integer> substreamCounts = new ArrayList<>();
+            // On a single poll() add records to the topic
+            mockConsumer.schedulePollTask(() -> {
+                // Required rebalance to add records
+                mockConsumer.rebalance(Collections.singletonList(new TopicPartition(TEST_TOPIC_NAME, 0)));
 
-            // Add invalid records that can't be parsed and should be dropped
-            int partitionOffset = 1;
-            for (; partitionOffset < 3; partitionOffset++) {
-                mockConsumer.addRecord(new ConsumerRecord(TEST_TOPIC_NAME, 0, partitionOffset, Instant.now().toString(),
-                    "Invalid Data".getBytes(StandardCharsets.UTF_8)));
-            }
+                // Add invalid records that can't be parsed and should be dropped
+                int partitionOffset = 1;
+                for (; partitionOffset < 3; partitionOffset++) {
+                    mockConsumer.addRecord(new ConsumerRecord(TEST_TOPIC_NAME, 0, partitionOffset, Instant.now().toString(),
+                            "Invalid Data".getBytes(StandardCharsets.UTF_8)));
+                }
 
-            // Add valid records
-            addGeneratedTrafficStreamsToTopic(numTrafficStreams, partitionOffset, mockConsumer, substreamCounts);
-            Assertions.assertEquals(substreamCounts.size(), numTrafficStreams);
-        });
+                // Add valid records
+                addGeneratedTrafficStreamsToTopic(numTrafficStreams, partitionOffset, mockConsumer, substreamCounts);
+                Assertions.assertEquals(substreamCounts.size(), numTrafficStreams);
+            });
 
-        AtomicInteger foundStreamsCount = new AtomicInteger(0);
-        // This assertion will fail the test case if not completed within its duration, as would be the case if there
-        // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
+            AtomicInteger foundStreamsCount = new AtomicInteger(0);
+            // This assertion will fail the test case if not completed within its duration, as would be the case if there
+            // were missing traffic streams. Its task currently is limited to the numTrafficStreams where it will stop the stream
 
-        var tsCount = new AtomicInteger();
-        Assertions.assertTimeoutPreemptively(TEST_TIMEOUT, () -> {
-            while (tsCount.get() < numTrafficStreams) {
-                protobufConsumer.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get().stream()
-                        .forEach(streamWithKey->{
-                            tsCount.incrementAndGet();
-                            log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
-                            Assertions.assertInstanceOf(ITrafficStreamWithKey.class, streamWithKey);
-                            Assertions.assertEquals(streamWithKey.getStream().getSubStreamCount(),
-                                    substreamCounts.get(foundStreamsCount.getAndIncrement()));
-                        });
-            }
-        });
+            var tsCount = new AtomicInteger();
+            Assertions.assertTimeoutPreemptively(TEST_TIMEOUT, () -> {
+                while (tsCount.get() < numTrafficStreams) {
+                    protobufConsumer.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get().stream()
+                            .forEach(streamWithKey -> {
+                                tsCount.incrementAndGet();
+                                log.trace("Stream has substream count: " + streamWithKey.getStream().getSubStreamCount());
+                                Assertions.assertInstanceOf(ITrafficStreamWithKey.class, streamWithKey);
+                                Assertions.assertEquals(streamWithKey.getStream().getSubStreamCount(),
+                                        substreamCounts.get(foundStreamsCount.getAndIncrement()));
+                            });
+                }
+            });
 
-        Assertions.assertEquals(foundStreamsCount.get(), numTrafficStreams);
-        try {
-            protobufConsumer.close();
-        } catch (IOException e) {
-            e.printStackTrace();
+            Assertions.assertEquals(foundStreamsCount.get(), numTrafficStreams);
         }
     }
 

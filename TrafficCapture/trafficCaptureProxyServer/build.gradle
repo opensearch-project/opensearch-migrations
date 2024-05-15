@@ -4,7 +4,7 @@
 
 plugins {
     id 'org.opensearch.migrations.java-application-conventions'
-    id("io.freefair.lombok") version "8.0.1"
+    id 'io.freefair.lombok'
 }
 
 configurations {
@@ -13,14 +13,18 @@ configurations {
 }
 
 dependencies {
-    implementation 'org.opensearch.plugin:opensearch-security:2.11.1.0'
-    implementation 'org.opensearch:opensearch-common:2.11.0'
-    implementation 'org.opensearch:opensearch-core:2.11.0'
-    implementation 'org.opensearch:opensearch:2.11.0'
-    opensearchSecurityPlugin 'org.opensearch.plugin:opensearch-security:2.11.1.0'
+    implementation project(":trafficCaptureDependencies")
+
+    def openSearch = '2.11.1'
+    implementation "org.opensearch.plugin:opensearch-security:${openSearch}.0"
+    implementation "org.opensearch:opensearch-common:${openSearch}"
+    implementation "org.opensearch:opensearch-core:${openSearch}"
+    implementation "org.opensearch:opensearch:${openSearch}"
+    opensearchSecurityPlugin "org.opensearch.plugin:opensearch-security:${openSearch}.0"
     implementation files(zipTree("$configurations.opensearchSecurityPlugin.singleFile").matching {
         include "*.jar"
         exclude "slf*.jar"
+        exclude "netty*.jar"
     })
 
     implementation project(':captureOffloader')
@@ -28,24 +32,25 @@ dependencies {
     implementation project(':captureKafkaOffloader')
     implementation project(':coreUtilities')
 
-    implementation group: 'io.netty', name: 'netty-all', version: '4.1.100.Final'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-api', version: '2.20.0'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-core', version: '2.20.0'
-    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl', version: '2.20.0'
-    implementation group: 'org.slf4j', name: 'slf4j-api', version: '2.0.7'
+    implementation group: 'io.netty', name: 'netty-all'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    implementation group: 'org.slf4j', name: 'slf4j-api'
+    implementation group: 'com.lmax', name: 'disruptor'
 
-    implementation group: 'com.beust', name: 'jcommander', version: '1.82'
-    implementation 'com.google.protobuf:protobuf-java:3.22.2'
+    implementation group: 'com.beust', name: 'jcommander'
+    implementation group: "com.google.protobuf", name: "protobuf-java"
 
     testImplementation project(':captureProtobufs')
     testImplementation testFixtures(project(path: ':testUtilities'))
     testImplementation testFixtures(project(path: ':captureOffloader'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
-    testImplementation group: 'eu.rekawek.toxiproxy', name: 'toxiproxy-java', version: '2.1.7'
-    testImplementation group: 'org.testcontainers', name: 'junit-jupiter', version: '1.19.5'
-    testImplementation group: 'org.testcontainers', name: 'kafka', version: '1.19.5'
-    testImplementation group: 'org.testcontainers', name: 'testcontainers', version: '1.19.5'
-    testImplementation group: 'org.testcontainers', name: 'toxiproxy', version: '1.19.5'
+    testImplementation group: 'eu.rekawek.toxiproxy', name: 'toxiproxy-java'
+    testImplementation group: 'org.testcontainers', name: 'junit-jupiter'
+    testImplementation group: 'org.testcontainers', name: 'kafka'
+    testImplementation group: 'org.testcontainers', name: 'testcontainers'
+    testImplementation group: 'org.testcontainers', name: 'toxiproxy'
 }
 
 tasks.withType(Tar){

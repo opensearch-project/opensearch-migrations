@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -12,17 +12,20 @@ import {
     createOpenSearchServerlessIAMAccessPolicy
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
+import { Duration } from "aws-cdk-lib";
 
 
 export interface TrafficReplayerProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly enableClusterFGACAuth: boolean,
     readonly streamingSourceType: StreamingSourceType,
+    readonly fargateCpuArch: CpuArchitecture,
     readonly addOnMigrationId?: string,
     readonly customKafkaGroupId?: string,
     readonly userAgentSuffix?: string,
     readonly extraArgs?: string,
-    readonly analyticsServiceEnabled?: boolean
+    readonly otelCollectorEnabled?: boolean,
+    readonly maxUptime?: Duration
 }
 
 export class TrafficReplayerStack extends MigrationServiceCore {
@@ -50,7 +53,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             readOnly: false,
             sourceVolume: volumeName
         }
-        const replayerOutputEFSArn = `arn:aws:elasticfilesystem:${props.env?.region}:${props.env?.account}:file-system/${volumeId}`
+        const replayerOutputEFSArn = `arn:aws:elasticfilesystem:${this.region}:${this.account}:file-system/${volumeId}`
         const replayerOutputMountPolicy = new PolicyStatement( {
             effect: Effect.ALLOW,
             resources: [replayerOutputEFSArn],
@@ -88,7 +91,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         }
         replayerCommand = props.streamingSourceType === StreamingSourceType.AWS_MSK ? replayerCommand.concat(" --kafka-traffic-enable-msk-auth") : replayerCommand
         replayerCommand = props.userAgentSuffix ? replayerCommand.concat(` --user-agent ${props.userAgentSuffix}`) : replayerCommand
-        replayerCommand = props.analyticsServiceEnabled ? replayerCommand.concat(" --otelCollectorEndpoint http://otel-collector:4317") : replayerCommand
+        replayerCommand = props.otelCollectorEnabled ? replayerCommand.concat(" --otelCollectorEndpoint http://otel-collector:4317") : replayerCommand
         replayerCommand = props.extraArgs ? replayerCommand.concat(` ${props.extraArgs}`) : replayerCommand
         this.createService({
             serviceName: `traffic-replayer-${deployId}`,
@@ -102,10 +105,10 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             environment: {
                 "TUPLE_DIR_PATH": `/shared-replayer-output/traffic-replayer-${deployId}`
             },
+            cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,
             ...props
         });
     }
-
 }

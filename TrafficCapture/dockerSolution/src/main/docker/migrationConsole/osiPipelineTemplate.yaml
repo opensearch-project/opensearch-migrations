@@ -1,0 +1,27 @@
+version: "2"
+# NOTE: Placeholder values will be automatically populated and do not need to be changed
+<AWS_SECRET_CONFIG_PLACEHOLDER>
+
+historical-data-migration:
+
+  # Source cluster configuration
+  source:
+    opensearch:
+      hosts:
+      - <SOURCE_CLUSTER_ENDPOINT_PLACEHOLDER>
+      indices:
+        # Indices to exclude - exclude system indices by default
+        exclude:
+        - index_name_regex: \.*
+      <SOURCE_AUTH_OPTIONS_PLACEHOLDER>
+
+  # Target cluster configuration
+  sink:
+  - opensearch:
+      hosts:
+      - <TARGET_CLUSTER_ENDPOINT_PLACEHOLDER>
+      # Derive index name from record metadata
+      index: ${getMetadata("opensearch-index")}
+      # Use the same document ID as the source cluster document
+      document_id: ${getMetadata("opensearch-document_id")}
+      <TARGET_AUTH_OPTIONS_PLACEHOLDER>

@@ -22,5 +22,6 @@ const customReplayerUserAgent = process.env.CUSTOM_REPLAYER_USER_AGENT
 new StackComposer(app, {
     migrationsAppRegistryARN: migrationsAppRegistryARN,
     customReplayerUserAgent: customReplayerUserAgent,
+    migrationsSolutionVersion: version,
     env: { account: account, region: region }
 });

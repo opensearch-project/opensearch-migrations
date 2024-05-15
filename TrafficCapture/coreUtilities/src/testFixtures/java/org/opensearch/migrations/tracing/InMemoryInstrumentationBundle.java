@@ -1,104 +1,127 @@
 package org.opensearch.migrations.tracing;
 
 import io.opentelemetry.sdk.OpenTelemetrySdk;
-import io.opentelemetry.sdk.common.CompletableResultCode;
-import io.opentelemetry.sdk.metrics.InstrumentType;
 import io.opentelemetry.sdk.metrics.SdkMeterProvider;
-import io.opentelemetry.sdk.metrics.data.AggregationTemporality;
 import io.opentelemetry.sdk.metrics.data.MetricData;
-import io.opentelemetry.sdk.metrics.export.MetricExporter;
-import io.opentelemetry.sdk.metrics.export.PeriodicMetricReader;
-import io.opentelemetry.sdk.testing.exporter.InMemoryMetricExporter;
+import io.opentelemetry.sdk.testing.exporter.InMemoryMetricReader;
 import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
+import io.opentelemetry.sdk.trace.data.SpanData;
 import io.opentelemetry.sdk.trace.export.SimpleSpanProcessor;
 import lombok.Getter;
-import lombok.NonNull;
+import lombok.Lombok;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 
+import java.io.IOException;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Collection;
-import java.util.Collections;
 import java.util.List;
+import java.util.NoSuchElementException;
 import java.util.Optional;
-import java.util.Queue;
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.atomic.AtomicReference;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
-@Getter
+@Slf4j
 public class InMemoryInstrumentationBundle implements AutoCloseable {
 
-    public static class LastMetricsExporter implements MetricExporter {
-        private final Queue<MetricData> finishedMetricItems = new ConcurrentLinkedQueue<>();
-        boolean isStopped;
-
-        public List<MetricData> getFinishedMetricItems() {
-            return Collections.unmodifiableList(new ArrayList<>(finishedMetricItems));
-        }
-
-        @Override
-        public CompletableResultCode export(@NonNull Collection<MetricData> metrics) {
-            if (isStopped) {
-                return CompletableResultCode.ofFailure();
-            }
-            finishedMetricItems.clear();
-            finishedMetricItems.addAll(metrics);
-            return CompletableResultCode.ofSuccess();
-        }
-
-        @Override
-        public CompletableResultCode flush() {
-            return CompletableResultCode.ofSuccess();
-        }
-
-        @Override
-        public CompletableResultCode shutdown() {
-            isStopped = true;
-            return CompletableResultCode.ofSuccess();
-        }
-
-        @Override
-        public AggregationTemporality getAggregationTemporality(@NonNull InstrumentType instrumentType) {
-            return AggregationTemporality.CUMULATIVE;
-        }
-    }
-
+    @Getter
     public final OpenTelemetrySdk openTelemetrySdk;
-    public final InMemorySpanExporter testSpanExporter;
-    public final LastMetricsExporter testMetricExporter;
+    private final InMemorySpanExporter testSpanExporter;
+    private final InMemoryMetricReader testMetricReader;
 
     public InMemoryInstrumentationBundle(boolean collectTraces,
                                          boolean collectMetrics) {
         this(collectTraces ? InMemorySpanExporter.create() : null,
-                collectMetrics ? new LastMetricsExporter() : null);
+                collectMetrics ? InMemoryMetricReader.create() : null);
     }
 
     public InMemoryInstrumentationBundle(InMemorySpanExporter testSpanExporter,
-                                         LastMetricsExporter testMetricExporter) {
+                                         InMemoryMetricReader testMetricReader) {
         this.testSpanExporter = testSpanExporter;
-        this.testMetricExporter = testMetricExporter;
+        this.testMetricReader = testMetricReader;
 
         var otelBuilder = OpenTelemetrySdk.builder();
         if (testSpanExporter != null) {
             otelBuilder = otelBuilder.setTracerProvider(SdkTracerProvider.builder()
                     .addSpanProcessor(SimpleSpanProcessor.create(testSpanExporter)).build());
         }
-        if (testMetricExporter != null) {
+        if (testMetricReader != null) {
             otelBuilder = otelBuilder.setMeterProvider(SdkMeterProvider.builder()
-                    .registerMetricReader(PeriodicMetricReader.builder(testMetricExporter)
-                            .setInterval(Duration.ofMillis(100))
-                            .build())
+                    .registerMetricReader(testMetricReader)
                     .build());
         }
         openTelemetrySdk = otelBuilder.build();
     }
 
+    public List<SpanData> getFinishedSpans() {
+        if (testSpanExporter == null) {
+            throw new IllegalStateException("Metrics collector was not configured");
+        }
+        return testSpanExporter.getFinishedSpanItems();
+    }
+
+    /**
+     * Waits double the collectionPeriod time (once) before returning the collected metrics
+     * @return
+     */
+    @SneakyThrows
+    public Collection<MetricData> getFinishedMetrics() {
+        if (testMetricReader == null) {
+            throw new IllegalStateException("Metrics collector was not configured");
+        }
+        return testMetricReader.collectAllMetrics();
+    }
+
     @Override
     public void close() {
-        Optional.ofNullable(testMetricExporter).ifPresent(MetricExporter::close);
+        Optional.ofNullable(testMetricReader).ifPresent(me -> {
+            try {
+                me.close();
+            } catch (IOException e) {
+                throw Lombok.sneakyThrow(e);
+            }
+        });
         Optional.ofNullable(testSpanExporter).ifPresent(te -> {
             te.close();
             te.reset();
         });
     }
 
+    public List<MetricData> getMetricsUntil(String metricName, IntStream sleepTimes,
+                                            Predicate<List<MetricData>> untilPredicate) {
+        AtomicReference<List<MetricData>> matchingMetrics = new AtomicReference<>();
+        sleepTimes
+                .mapToObj(sleepAmount -> {
+                    matchingMetrics.set(getFinishedMetrics().stream()
+                            .filter(md -> md.getName().equals(metricName))
+                            .collect(Collectors.toList()));
+                    if (untilPredicate.test(matchingMetrics.get())) {
+                        return true;
+                    } else {
+                        try {
+                            log.atInfo().setMessage(()->"Waiting " + sleepAmount +
+                                    "ms for predicate to pass because the last test for metrics from " +
+                                    metricName + " on " + matchingMetrics.get() +
+                                    " did not").log();
+                            Thread.sleep(sleepAmount);
+                        } catch (InterruptedException e) {
+                            Thread.currentThread().interrupt();
+                            throw Lombok.sneakyThrow(e);
+                        }
+                        return false;
+                    }
+                })
+                .takeWhile(x->!x)
+                .forEach(b->{});
+        if (matchingMetrics.get() == null) {
+            throw new NoSuchElementException("Could not find matching metrics.  Last metrics: " + matchingMetrics);
+        } else {
+            return matchingMetrics.get();
+        }
+    }
 }

@@ -3,13 +3,10 @@ package org.opensearch.migrations.replay;
 import io.netty.buffer.ByteBuf;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.coreutils.MetricsAttributeKey;
-import org.opensearch.migrations.coreutils.MetricsEvent;
-import org.opensearch.migrations.coreutils.MetricsLogger;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -18,6 +15,13 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+/**
+ * This class is responsible for managing the BufferedFlowController, which is responsible for releasing
+ * backpressure on the traffic source so that this class can schedule those requests to run on a
+ * RequestSenderOrchestrator at the appropriate time.  This class uses a TimeShifter, the current time,
+ * progress of tasks, and periods of inactivity, to move determine
+ * from the current time, what the frontier time value should be for the traffic source
+ */
 @Slf4j
 public class ReplayEngine {
     public static final int BACKPRESSURE_UPDATE_FREQUENCY = 8;
@@ -28,7 +32,7 @@ public class ReplayEngine {
     private final AtomicLong lastCompletedSourceTimeEpochMs;
     private final AtomicLong lastIdleUpdatedTimestampEpochMs;
     private final TimeShifter timeShifter;
-    private static final MetricsLogger metricsLogger = new MetricsLogger("ReplayEngine");
+
     /**
      * If this proves to be a contention bottleneck, we can move to a scheme with ThreadLocals
      * and on a scheduled basis, submit work to each thread to find out if they're idle or not.
@@ -94,11 +98,11 @@ public class ReplayEngine {
     // See the comment on totalCountOfScheduledTasksOutstanding.  We could do this on a per-thread basis and
     // join the results all via `networkSendOrchestrator.clientConnectionPool.eventLoopGroup`
     public boolean isWorkOutstanding() {
-        return totalCountOfScheduledTasksOutstanding.get() > 1;
+        return totalCountOfScheduledTasksOutstanding.get() > 0;
     }
 
-    private <T> DiagnosticTrackableCompletableFuture<String, T>
-    hookWorkFinishingUpdates(DiagnosticTrackableCompletableFuture<String, T> future, Instant timestamp,
+    private <T> TrackedFuture<String, T>
+    hookWorkFinishingUpdates(TrackedFuture<String, T> future, Instant timestamp,
                              Object stringableKey, String taskDescription) {
         return future.map(f->f
                         .whenComplete((v,t)->Utils.setIfLater(lastCompletedSourceTimeEpochMs, timestamp.toEpochMilli()))
@@ -120,9 +124,9 @@ public class ReplayEngine {
                 ") to run at " + start + " incremented tasksOutstanding to "+ newCount).log();
     }
 
-    public <T> DiagnosticTrackableCompletableFuture<String, T>
+    public <T> TrackedFuture<String, T>
     scheduleTransformationWork(IReplayContexts.IReplayerHttpTransactionContext requestCtx, Instant originalStart,
-                               Supplier<DiagnosticTrackableCompletableFuture<String,T>> task) {
+                               Supplier<TrackedFuture<String,T>> task) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "processing";
         var start = timeShifter.transformSourceTimeToRealTime(originalStart);
@@ -132,7 +136,7 @@ public class ReplayEngine {
         return hookWorkFinishingUpdates(result, originalStart, requestCtx, label);
     }
 
-    public DiagnosticTrackableCompletableFuture<String, AggregatedRawResponse>
+    public TrackedFuture<String, AggregatedRawResponse>
     scheduleRequest(IReplayContexts.IReplayerHttpTransactionContext ctx,
                     Instant originalStart, Instant originalEnd,
                     int numPackets, Stream<ByteBuf> packets) {
@@ -143,29 +147,24 @@ public class ReplayEngine {
         var interval = numPackets > 1 ? Duration.between(start, end).dividedBy(numPackets-1L) : Duration.ZERO;
         var requestKey = ctx.getReplayerRequestKey();
         logStartOfWork(requestKey, newCount, start, label);
-        metricsLogger.atSuccess(MetricsEvent.SCHEDULED_REQUEST_TO_BE_SENT)
-                .setAttribute(MetricsAttributeKey.REQUEST_ID, requestKey.toString())
-                .setAttribute(MetricsAttributeKey.CONNECTION_ID, requestKey.getTrafficStreamKey().getConnectionId())
-                .setAttribute(MetricsAttributeKey.DELAY_FROM_ORIGINAL_TO_SCHEDULED_START, Duration.between(originalStart, start).toMillis())
-                .setAttribute(MetricsAttributeKey.SCHEDULED_SEND_TIME, start.toString()).emit();
+
+        log.atDebug().setMessage(()->"Scheduling request for " + ctx + " to run from [" + start + ", " + end +
+                " with an interval of " + interval + " for " + numPackets + " packets").log();
         var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packets);
         return hookWorkFinishingUpdates(sendResult, originalStart, requestKey, label);
     }
 
-    public DiagnosticTrackableCompletableFuture<String, Void>
+    public TrackedFuture<String, Void>
     closeConnection(int channelInteractionNum,
-                    IReplayContexts.IChannelKeyContext ctx, Instant timestamp) {
+                    IReplayContexts.IChannelKeyContext ctx,
+                    int channelSessionNumber, Instant timestamp) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "close";
         var atTime = timeShifter.transformSourceTimeToRealTime(timestamp);
         var channelKey = ctx.getChannelKey();
         logStartOfWork(new IndexedChannelInteraction(channelKey, channelInteractionNum), newCount, atTime, label);
-        var future = networkSendOrchestrator.scheduleClose(ctx, channelInteractionNum, atTime);
+        var future = networkSendOrchestrator.scheduleClose(ctx, channelSessionNumber, channelInteractionNum, atTime);
         return hookWorkFinishingUpdates(future, timestamp, channelKey, label);
-    }
-
-    public DiagnosticTrackableCompletableFuture<String, Void> closeConnectionsAndShutdown() {
-        return networkSendOrchestrator.clientConnectionPool.closeConnectionsAndShutdown();
     }
 
     public void setFirstTimestamp(Instant firstPacketTimestamp) {

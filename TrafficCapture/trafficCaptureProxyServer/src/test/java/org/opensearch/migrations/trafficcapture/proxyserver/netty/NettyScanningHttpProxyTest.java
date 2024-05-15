@@ -5,13 +5,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.common.collect.Tuple;
-import org.opensearch.migrations.testutils.HttpFirstLine;
+import org.opensearch.migrations.testutils.HttpRequestFirstLine;
 import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
+import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
-import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.InMemoryConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
@@ -91,7 +91,8 @@ class NettyScanningHttpProxyTest {
         var captureFactory = new InMemoryConnectionCaptureFactory(TEST_NODE_ID_STRING, 1024*1024,
                 () -> interactionsCapturedCountdown.countDown());
         var inMemoryInstrumentationBundle = new InMemoryInstrumentationBundle(true, true);
-        var rootCtx = new RootWireLoggingContext(inMemoryInstrumentationBundle.openTelemetrySdk);
+        var rootCtx = new RootWireLoggingContext(inMemoryInstrumentationBundle.openTelemetrySdk,
+                IContextTracker.DO_NOTHING_TRACKER);
         var servers = startServers(rootCtx, captureFactory);
 
         try (var client = new SimpleHttpClientForTesting()) {
@@ -215,7 +216,7 @@ class NettyScanningHttpProxyTest {
         return new Tuple<>(nshp.get(), underlyingPort);
     }
 
-    private static SimpleHttpResponse makeContext(HttpFirstLine request) {
+    private static SimpleHttpResponse makeContext(HttpRequestFirstLine request) {
         var headers = Map.of(
         "Content-Type", "text/plain",
         "Funtime", "checkIt!",

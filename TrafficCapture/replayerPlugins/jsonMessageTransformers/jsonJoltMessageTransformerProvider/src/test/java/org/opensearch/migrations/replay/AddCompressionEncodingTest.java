@@ -1,11 +1,16 @@
 package org.opensearch.migrations.replay;
 
+import io.netty.buffer.Unpooled;
+import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpServerCodec;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
-import org.opensearch.migrations.replay.util.DiagnosticTrackableCompletableFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
@@ -44,10 +49,9 @@ public class AddCompressionEncodingTest extends InstrumentationTest {
                 "host: localhost\n" +
                 "content-length: " + (numParts * payloadPartSize) + "\n";
 
-        DiagnosticTrackableCompletableFuture<String, Void> tail =
-                compressingTransformer.consumeBytes(sourceHeaders.getBytes(StandardCharsets.UTF_8))
-                        .thenCompose(v -> compressingTransformer.consumeBytes("\n".getBytes(StandardCharsets.UTF_8)),
-                                () -> "AddCompressionEncodingTest.compressingTransformer");
+        var tail = compressingTransformer.consumeBytes(sourceHeaders.getBytes(StandardCharsets.UTF_8))
+                .thenCompose(v -> compressingTransformer.consumeBytes("\n".getBytes(StandardCharsets.UTF_8)),
+                        () -> "AddCompressionEncodingTest.compressingTransformer");
         final byte[] payloadPart = new byte[payloadPartSize];
         Arrays.fill(payloadPart, BYTE_FILL_VALUE);
         for (var i = new AtomicInteger(numParts); i.get() > 0; i.decrementAndGet()) {
@@ -59,7 +63,17 @@ public class AddCompressionEncodingTest extends InstrumentationTest {
                         () -> "AddCompressionEncodingTest.fullyProcessedResponse");
         fullyProcessedResponse.get();
 
-        try (var bais = new ByteArrayInputStream(testPacketCapture.getBytesCaptured());
+
+        EmbeddedChannel channel = new EmbeddedChannel(
+            new HttpServerCodec(),
+            new HttpObjectAggregator(Utils.MAX_PAYLOAD_BYTES_TO_PRINT)  // Set max content length if needed
+        );
+
+        channel.writeInbound(Unpooled.wrappedBuffer(testPacketCapture.getBytesCaptured()));
+        var compressedRequest = ((FullHttpRequest) channel.readInbound());
+        var compressedByteArr = new byte[compressedRequest.content().readableBytes()];
+        compressedRequest.content().getBytes(0, compressedByteArr);
+        try (var bais = new ByteArrayInputStream(compressedByteArr);
              var unzipStream = new GZIPInputStream(bais);
              var isr = new InputStreamReader(unzipStream, StandardCharsets.UTF_8);
              var br = new BufferedReader(isr)) {
@@ -76,5 +90,6 @@ public class AddCompressionEncodingTest extends InstrumentationTest {
             } while (true);
             Assertions.assertEquals(numParts*payloadPartSize, counter);
         }
+        compressedRequest.release();
     }
 }
