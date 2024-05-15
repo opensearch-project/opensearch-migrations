@@ -22,7 +22,7 @@ test('Test valid fargate cpu arch strings can be parsed', () => {
 test('Test invalid fargate cpu arch strings throws error', () => {
     const cpuArch = "arm32"
     const getArchFunction = () => validateFargateCpuArch(cpuArch)
-    expect(getArchFunction).toThrowError()
+    expect(getArchFunction).toThrow()
 })
 
 test('Test detected fargate cpu arch is valid', () => {
