@@ -31,7 +31,7 @@ jobs:
         uses: codecov/codecov-action@v4
         with:
           files: cluster_migration_core/coverage.xml
-  setup-python:
+  code-hygiene:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -39,18 +39,18 @@ jobs:
         with:
           python-version: '3.10'
       - run: python3 -m pip install isort flake8 mypy
-  code-hygiene-isort:
-    runs-on: ubuntu-latest
-    needs: setup-python
-    steps:
-      - run: python3 -m isort --check .
-  code-hygiene-flake8:
-    runs-on: ubuntu-latest
-    needs: setup-python
-    steps:
-      - run: python3 -m flake8 .
-  code-hygiene-mypy:
-    runs-on: ubuntu-latest
-    needs: setup-python
-    steps:
-      - run: python3 -m mypy --explicit-package-bases FetchMigration/python TrafficCapture/dockerSolution/otelConfigs TrafficCapture/dockerSolution/src/main/docker/migrationConsole experimental/. test
+      - id: isort
+        continue-on-error: true
+        run: python3 -m isort --check .
+      - id: flake8
+        continue-on-error: true
+        run: python3 -m flake8 .
+      - id: mypy
+        continue-on-error: true
+        run: python3 -m mypy --explicit-package-bases FetchMigration/python TrafficCapture/dockerSolution/otelConfigs TrafficCapture/dockerSolution/src/main/docker/migrationConsole experimental/. test
+      - name: Check previous steps
+        run: |
+          if [ "${{ steps.isort.outcome }}" != "success" ] || [ "${{ steps.flake8.outcome }}" != "success" ] || [ "${{ steps.mypy.outcome }}" != "success" ]; then
+            echo "One or more steps failed"
+            exit 1
+          fi
