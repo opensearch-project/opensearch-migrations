@@ -10,16 +10,16 @@ __pycache__
 logs
 .vscode/
 
-# Build files
+**/build/
+**/builds/
+jenkinsdocker/**/nextBuildNumber
+**/bin/
+
+# The whole plugins directory needs to be removed
 plugins/opensearch/loggable-transport-netty4/.gradle/
+# Build files
 TrafficCapture/**/out/
-
-RFS/bin/
-RFS/build/
-
-TrafficCapture/**/bin/
 
 # CDK files from end-to-end testing
 opensearch-cluster-cdk/
 test/opensearch-cluster-cdk/
-buildSrc/build

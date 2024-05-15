@@ -1,6 +1,6 @@
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
-    id "com.avast.gradle.docker-compose" version "0.16.12"
+    id "com.avast.gradle.docker-compose" version "0.17.4"
     //The 'com.bmushcko.docker-remote-api' line IS required (due to the remaining DockerBuildImage tasks) but W/O
     // a specified version. The version is managed within the buildSrc/build.gradle file.
     id 'com.bmuschko.docker-remote-api'
@@ -59,26 +59,26 @@ dockerFilesForExternalServices.each { projectName, dockerImageName ->
 }
 
 def javaContainerServices = [
-        "trafficCaptureProxyServer": "capture_proxy",
-        "trafficCaptureProxyServerTest": "jmeter"
+        ":TrafficCapture:trafficCaptureProxyServer": "capture_proxy",
+        ":TrafficCapture:trafficCaptureProxyServerTest": "jmeter"
 ]
 def baseImageProjectOverrides = [
         "nginx": "nginx-perf-test-webserver"
 ]
 
 def createContainerTasks = { projectName, dockerImageName ->
-    def dockerBuildDir = "build/docker/${projectName}"
-    CommonUtils.copyArtifact(project, projectName)
-
-    CommonUtils.createDockerfile(project, projectName, baseImageProjectOverrides, dockerFilesForExternalServices)
+    def sourceArtifactProject = project(projectName);
+    CommonUtils.copyArtifactFromProjectToProjectsDockerStaging(project, sourceArtifactProject)
+    CommonUtils.createDockerfile(project, sourceArtifactProject, baseImageProjectOverrides, dockerFilesForExternalServices)
 }
 
 javaContainerServices.each(createContainerTasks)
 
 (javaContainerServices).forEach { projectName, dockerImageName ->
-    def dockerBuildDir = "build/docker/${projectName}"
-    task "buildDockerImage_${projectName}"(type: DockerBuildImage) {
-        dependsOn "createDockerfile_${projectName}"
+    def escapedProjectName = project(projectName).name;
+    def dockerBuildDir = "build/docker/${escapedProjectName}"
+    task "buildDockerImage_${escapedProjectName}"(type: DockerBuildImage) {
+        dependsOn "createDockerfile_${escapedProjectName}"
         inputDir = project.file("${dockerBuildDir}")
         images.add("migrations/${dockerImageName}:${version}")
         images.add("migrations/${dockerImageName}:latest")
