@@ -51,6 +51,6 @@ jobs:
       - name: Check previous steps
         run: |
           if [ "${{ steps.isort.outcome }}" != "success" ] || [ "${{ steps.flake8.outcome }}" != "success" ] || [ "${{ steps.mypy.outcome }}" != "success" ]; then
-            echo "One or more steps failed"
+            echo "One or more hygiene step failed"
             exit 1
           fi
