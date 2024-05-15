@@ -17,5 +17,5 @@ Including another URLconf
 from django.urls import include, path
 
 urlpatterns = [
-    path("orchestrator/", include("console_api.orchestrator.urls")),
+    path("orchestrator/", include("console_api.apps.orchestrator.urls")),
 ]
