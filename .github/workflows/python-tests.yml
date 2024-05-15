@@ -33,21 +33,35 @@ jobs:
           files: cluster_migration_core/coverage.xml
   code-hygiene:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        location:
+          - FetchMigration/python
+          - TrafficCapture/dockerSolution/otelConfigs
+          - TrafficCapture/dockerSolution/src/main/docker/migrationConsole
+          - experimental/.
+          - test
+    defaults:
+      run:
+        working-directory: ${{ matrix.location }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.10'
+      - run: python3 -m pip install -r dev-requirements.txt
+        continue-on-error: true # Not all projects have dev-requirements.txt, safe to ignore
+      - run: python3 -m pip install -r requirements.txt
       - run: python3 -m pip install isort flake8 mypy
       - id: isort
-        continue-on-error: true
+        continue-on-error: true # Success/failure checked in last job step
         run: python3 -m isort --check .
       - id: flake8
-        continue-on-error: true
+        continue-on-error: true # Success/failure checked in last job step
         run: python3 -m flake8 .
       - id: mypy
-        continue-on-error: true
-        run: python3 -m mypy --explicit-package-bases FetchMigration/python TrafficCapture/dockerSolution/otelConfigs TrafficCapture/dockerSolution/src/main/docker/migrationConsole experimental/. test
+        continue-on-error: true # Success/failure checked in last job step
+        run: python3 -m mypy .
       - name: Check previous steps
         run: |
           if [ "${{ steps.isort.outcome }}" != "success" ] || [ "${{ steps.flake8.outcome }}" != "success" ] || [ "${{ steps.mypy.outcome }}" != "success" ]; then
