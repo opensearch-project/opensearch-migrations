@@ -9,7 +9,8 @@ setup(
         'requests',
         'boto3',
         'pyyaml',
-        'Click'
+        'Click',
+        'cerberus'
     ],
     entry_points={
         'console_scripts': [

@@ -1,5 +1,5 @@
 import click
-from console_link.logic.clusters import cat_indices
+import console_link.logic as logic
 from console_link.logic.instantiation import Environment
 
 
@@ -21,10 +21,16 @@ def cli(ctx, config_file):
 def cat_indices_cmd(ctx):
     """Simple program that calls `_cat/indices` on both a source and target cluster."""
     click.echo("SOURCE CLUSTER")
-    click.echo(cat_indices(ctx.env.source_cluster))
+    click.echo(logic.clusters.cat_indices(ctx.env.source_cluster))
     click.echo("TARGET CLUSTER")
-    click.echo(cat_indices(ctx.env.target_cluster))
+    click.echo(logic.clusters.cat_indices(ctx.env.target_cluster))
     pass
+
+
+@cli.command(name="start-replayer")
+@click.pass_obj
+def start_replayer_cmd(ctx):
+    logic.services.start_replayer(ctx.env.replayer)
 
 
 if __name__ == '__main__':
