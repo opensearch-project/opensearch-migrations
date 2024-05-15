@@ -14,7 +14,7 @@ setup(
     ],
     entry_points={
         'console_scripts': [
-            'console_link = console_link.cli:cli',
+            'console = console_link.cli:cli',
         ],
     },
     classifiers=[
