@@ -1,0 +1,16 @@
+source_cluster:
+  endpoint: "https://capture-proxy-es:9200"
+  allow_insecure: true
+  authorization:
+    type: "basic"
+    details:
+      username: "admin"
+      password: "admin"
+target_cluster:
+  endpoint: "https://opensearchtarget:9200"
+  allow_insecure: true
+  authorization:
+    type: "basic"
+    details:
+      username: "admin"
+      password: "myStrongPassword123!"
