@@ -1,0 +1,21 @@
+jobs:
+  - script: |
+        pipelineJob('DSL_Pipeline') {
+        
+          def repo = '/opensearch-migrations-src'
+          def branch = 'main'
+          description("Build All Pipeline")
+        
+          definition {
+            cpsScm {
+              scm {
+                git {
+                  remote { url(repo) }
+                  branches(branch)
+                }
+                scriptPath('jenkinsFile')
+                extensions { }  // required as otherwise it may try to tag the repo, which you may not want
+              }
+            }
+          }
+        }
