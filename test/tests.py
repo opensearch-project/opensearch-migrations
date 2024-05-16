@@ -1,21 +1,22 @@
+import boto3
 import json
+import logging
+import pytest
+import requests
+import secrets
+import string
 import subprocess
+import time
+import unittest
+from http import HTTPStatus
+from requests import Session
+from requests.adapters import HTTPAdapter
+from requests.exceptions import ConnectionError, SSLError
+from requests_aws4auth import AWS4Auth
+from typing import Tuple, Callable
 
 from operations import create_index, check_index, create_document, \
     delete_document, delete_index, get_document
-from http import HTTPStatus
-from typing import Tuple, Callable
-import unittest
-import logging
-import time
-import requests
-import string
-import secrets
-import pytest
-import boto3
-from requests_aws4auth import AWS4Auth
-
-from requests.exceptions import ConnectionError, SSLError
 
 logger = logging.getLogger(__name__)
 
@@ -109,6 +110,24 @@ class E2ETests(unittest.TestCase):
                 return True
         return False
 
+    def assert_source_target_doc_match(self, index_name, doc_id):
+        source_response = get_document(self.source_endpoint, index_name, doc_id, self.source_auth,
+                                       self.source_verify_ssl)
+        self.assertEqual(source_response.status_code, HTTPStatus.OK)
+
+        target_response = retry_request(get_document, args=(self.target_endpoint, index_name, doc_id,
+                                                            self.target_auth, self.target_verify_ssl),
+                                        expected_status_code=HTTPStatus.OK)
+        self.assertEqual(target_response.status_code, HTTPStatus.OK)
+
+        # Comparing the document's content on both endpoints, asserting
+        # that they match.
+        source_document = source_response.json()
+        source_content = source_document['_source']
+        target_document = target_response.json()
+        target_content = target_document['_source']
+        self.assertEqual(source_content, target_content)
+
     def set_common_values(self):
         self.index_prefix_ignore_list = ["test_", ".", "searchguard", "sg7", "security-auditlog"]
 
@@ -179,21 +198,7 @@ class E2ETests(unittest.TestCase):
                                          self.source_verify_ssl)
         self.assertEqual(proxy_response.status_code, HTTPStatus.CREATED)
 
-        source_response = get_document(self.source_endpoint, index_name, doc_id, self.source_auth,
-                                       self.source_verify_ssl)
-        self.assertEqual(source_response.status_code, HTTPStatus.OK)
-
-        target_response = retry_request(get_document, args=(self.target_endpoint, index_name, doc_id,
-                                                            self.target_auth, self.target_verify_ssl),
-                                        expected_status_code=HTTPStatus.OK)
-        self.assertEqual(target_response.status_code, HTTPStatus.OK)
-
-        # Comparing the document's content on both endpoints, asserting that they match.
-        source_document = source_response.json()
-        source_content = source_document['_source']
-        target_document = target_response.json()
-        target_content = target_document['_source']
-        self.assertEqual(source_content, target_content)
+        self.assert_source_target_doc_match(index_name, doc_id)
 
         # Deleting the document that was created then asserting that it was deleted on both targets.
         proxy_response = delete_document(self.proxy_endpoint, index_name, doc_id, self.source_auth,
@@ -305,3 +310,32 @@ class E2ETests(unittest.TestCase):
             if source_count != target_count:
                 self.assertEqual(source_count, target_count, f'{index}: doc counts do not match - '
                                                              f'Source = {source_count}, Target = {target_count}')
+
+    def test_0007_timeBetweenRequestsOnSameConnection(self):
+        # This test will verify that the replayer functions correctly when
+        # requests on the same connection on the proxy that has a minute gap
+        seconds_between_requests = 60  # 1 minute
+
+        proxy_single_connection_session = Session()
+        adapter = HTTPAdapter(pool_connections=1, pool_maxsize=1, max_retries=1)
+        proxy_single_connection_session.mount(self.proxy_endpoint, adapter)
+
+        index_name = f"test_0007_{self.unique_id}"
+
+        number_of_docs = 3
+
+        for doc_id_int in range(number_of_docs):
+            doc_id = str(doc_id_int)
+            proxy_response = create_document(self.proxy_endpoint, index_name, doc_id, self.source_auth,
+                                             self.source_verify_ssl, proxy_single_connection_session)
+            self.assertEqual(proxy_response.status_code, HTTPStatus.CREATED)
+
+            if doc_id_int + 1 < number_of_docs:
+                time.sleep(seconds_between_requests)
+
+        try:
+            for doc_id_int in range(number_of_docs):
+                doc_id = str(doc_id_int)
+                self.assert_source_target_doc_match(index_name, doc_id)
+        finally:
+            proxy_single_connection_session.close()
