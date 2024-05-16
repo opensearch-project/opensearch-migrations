@@ -112,7 +112,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         let serviceConnectServices: ServiceConnectService[]|undefined
         let serviceDiscoveryPort: number|undefined
         let serviceDiscoveryEnabled = false
-        let dockerBuildArgs: { [key: string]: string }|undefined
+        let imageCommand: string[]|undefined
 
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
@@ -180,24 +180,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 "s3:PutObject"
             ]
         })
-        if (props.enableDjangoAPI) {
-            servicePortMappings = [{
-                name: "django-connect",
-                hostPort: 8000,
-                containerPort: 8000,
-                protocol: Protocol.TCP
-            }]
-            serviceConnectServices = [{
-                portMappingName: "django-connect",
-                dnsName: "migration-console",
-                port: 8000
-            }]
-            serviceDiscoveryPort = 8000
-            serviceDiscoveryEnabled = true
-            dockerBuildArgs = {
-                "CONSOLE_TYPE": "django-console"
-            }
-        }
 
         // Allow Console to determine proper subnets to use for any resource creation
         const describeVPCPolicy = new PolicyStatement( {
@@ -257,6 +239,23 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             servicePolicies.push(fetchMigrationPassRolePolicy)
         }
 
+        if (props.enableDjangoAPI) {
+            servicePortMappings = [{
+                name: "django-connect",
+                hostPort: 8000,
+                containerPort: 8000,
+                protocol: Protocol.TCP
+            }]
+            serviceConnectServices = [{
+                portMappingName: "django-connect",
+                dnsName: "migration-console",
+                port: 8000
+            }]
+            serviceDiscoveryPort = 8000
+            serviceDiscoveryEnabled = true
+            imageCommand = ['/bin/sh', '-c', 'python3 /root/django/manage.py runserver_plus 0.0.0.0:8000']
+        }
+
         if (props.migrationConsoleEnableOSI) {
             const pipelineRoleArn = this.configureOpenSearchIngestionPipelineRole(props.stage, props.defaultDeployId)
             servicePolicies.push(...this.createOpenSearchIngestionManagementPolicy(pipelineRoleArn))
@@ -277,10 +276,10 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/migrationConsole"),
             securityGroups: securityGroups,
             portMappings: servicePortMappings,
+            dockerImageCommand: imageCommand,
             serviceConnectServices: serviceConnectServices,
             serviceDiscoveryEnabled: serviceDiscoveryEnabled,
             serviceDiscoveryPort: serviceDiscoveryPort,
-            dockerBuildArgs: dockerBuildArgs,
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
             environment: environment,
