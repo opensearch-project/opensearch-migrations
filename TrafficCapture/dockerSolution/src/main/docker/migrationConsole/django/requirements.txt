@@ -2,3 +2,6 @@ Django==4.2.13
 django-extensions==3.2.3
 djangorestframework==3.15.1
 Werkzeug==3.0.3
+
+# Vulnerable library fixes
+sqlparse==0.5.0

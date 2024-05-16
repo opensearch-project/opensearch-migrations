@@ -34,16 +34,21 @@ def pretty_request(request, decoded_body):
     )
 
 
+def parse_json_body(request):
+    try:
+        return json.loads(request.body.decode("utf-8"))
+    except Exception as e:
+        logger.error(f"Unable to parse request body: {e}")
+        return None
+
+
 # TODO implement stub with backend
 @api_view(['POST'])
 def start_historical_migration(request):
-    body = ""
+    body = parse_json_body(request)
     status_code = 200
-    try:
-        body = json.loads(request.body.decode("utf-8"))
-    except Exception as e:
+    if body is None:
         status_code = 400
-        logger.error(f"Unable to parse request body: {e}")
     logger.info(pretty_request(request, body))
     data = {
         'Timestamp': datetime.datetime.now(datetime.timezone.utc)
@@ -54,13 +59,10 @@ def start_historical_migration(request):
 # TODO implement stub with backend
 @api_view(['POST'])
 def stop_historical_migration(request):
-    body = ""
+    body = parse_json_body(request)
     status_code = 200
-    try:
-        body = json.loads(request.body.decode("utf-8"))
-    except Exception as e:
+    if body is None:
         status_code = 400
-        logger.error(f"Unable to parse request body: {e}")
     logger.info(pretty_request(request, body))
     data = {
         'Timestamp': datetime.datetime.now(datetime.timezone.utc)
