@@ -241,19 +241,19 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
         if (props.migrationAPIEnabled) {
             servicePortMappings = [{
-                name: "django-connect",
+                name: "migration-console-connect",
                 hostPort: 8000,
                 containerPort: 8000,
                 protocol: Protocol.TCP
             }]
             serviceConnectServices = [{
-                portMappingName: "django-connect",
+                portMappingName: "migration-console-connect",
                 dnsName: "migration-console",
                 port: 8000
             }]
             serviceDiscoveryPort = 8000
             serviceDiscoveryEnabled = true
-            imageCommand = ['/bin/sh', '-c', 'python3 /root/django/manage.py runserver_plus 0.0.0.0:8000']
+            imageCommand = ['/bin/sh', '-c', 'python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000']
         }
 
         if (props.migrationConsoleEnableOSI) {
