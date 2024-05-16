@@ -55,7 +55,7 @@ class Cluster():
         self.auth_details = config["authorization"]["details"]
         pass
 
-    def call_api(self, path, method: HttpMethod = HttpMethod.GET) -> Dict:
+    def call_api(self, path, method: HttpMethod = HttpMethod.GET) -> requests.Response:
         """
         Calls an API on the cluster.
         """

@@ -41,7 +41,6 @@ RUN chmod ug+x /root/showFetchMigrationCommand.sh
 RUN chmod ug+x /root/osiMigration.py
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
-COPY console_link /root/console_link
-RUN pip install -e /root/console_link/
+RUN pip install -e /root/lib/console_link/
 
 CMD tail -f /dev/null

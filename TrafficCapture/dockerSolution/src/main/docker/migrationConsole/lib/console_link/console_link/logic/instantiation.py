@@ -31,7 +31,7 @@ class Environment:
             self.config = yaml.safe_load(f)
         v = Validator(SCHEMA)
         if not v.validate(self.config):
-            raise ValueError(f"Invalid config file: {v.errors}")
+            raise ValueError("Invalid config file", v.errors)
 
         self.source_cluster = Cluster(self.config['source_cluster'])
 

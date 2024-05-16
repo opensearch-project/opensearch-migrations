@@ -95,8 +95,9 @@ services:
       - migrations
     volumes:
       - sharedReplayerOutput:/shared-replayer-output
-      - ./migrationConsole/console_link/services.yaml:/etc/migration_services.yaml
-      - ./migrationConsole/console_link:/root/console_link
+      - ./migrationConsole/lib/console_link/services.yaml:/etc/migration_services.yaml
+      # this is a convenience thing for testing -- it should be removed before this makes it to prod.
+      - ./migrationConsole/lib/console_link:/root/lib/console_link
     environment:
       - MIGRATION_KAFKA_BROKER_ENDPOINTS=kafka:9092
 #    command: ./runTestBenchmarks.sh
