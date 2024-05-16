@@ -20,9 +20,11 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # Quick-start development settings - unsuitable for production
 # See https://docs.djangoproject.com/en/5.0/howto/deployment/checklist/
 
+# JIRA to improve posture here: https://opensearch.atlassian.net/browse/MIGRATIONS-1741
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = 'django-insecure-26h*wo1qzffhpum=bn#8d(7e8mo-w9fr6*wdy#%izy#5^85-a9'
 
+# JIRA to improve posture here: https://opensearch.atlassian.net/browse/MIGRATIONS-1741
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
@@ -42,6 +44,9 @@ INSTALLED_APPS = [
     'django_extensions',
     #'django.contrib.staticfiles',
 ]
+
+# Django middleware documentation
+# https://docs.djangoproject.com/en/5.0/topics/http/middleware/
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
@@ -71,38 +76,37 @@ TEMPLATES = [
     },
 ]
 
-WSGI_APPLICATION = 'console_api.wsgi.application'
-
-
-# Database
-# https://docs.djangoproject.com/en/5.0/ref/settings/#databases
-
-DATABASES = {
-    'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
-    }
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    # The style keyword allows you to specify { for str.format() or $ for string.Template formatting
+    'formatters': {
+        'default': {
+            'format': '{asctime} [{levelname}] {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'INFO',  # Set the console handler level
+            'class': 'logging.StreamHandler',
+            'formatter': 'default',
+        }
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': 'INFO',  # Set the root logger level
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',  # Set the Django logger level
+            'propagate': False,
+        }
+    },
 }
 
-
-# Password validation
-# https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
-
-AUTH_PASSWORD_VALIDATORS = [
-    {
-        'NAME': 'django.contrib.auth.password_validation.UserAttributeSimilarityValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.MinimumLengthValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.CommonPasswordValidator',
-    },
-    {
-        'NAME': 'django.contrib.auth.password_validation.NumericPasswordValidator',
-    },
-]
-
+WSGI_APPLICATION = 'console_api.wsgi.application'
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.0/topics/i18n/

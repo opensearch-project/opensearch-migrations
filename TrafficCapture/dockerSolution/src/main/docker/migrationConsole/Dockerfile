@@ -44,9 +44,9 @@ RUN chmod ug+x /root/showFetchMigrationCommand.sh
 RUN chmod ug+x /root/osiMigration.py
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
-# Experimental Django API, not started by default
-COPY django /root/django
-RUN pip3 install -r /root/django/requirements.txt
-#CMD python3 /root/django/manage.py runserver_plus 0.0.0.0:8000
+# Experimental console API, not started by default
+COPY console_api /root/console_api
+RUN pip3 install -r /root/console_api/requirements.txt
+#CMD python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000
 
 CMD tail -f /dev/null

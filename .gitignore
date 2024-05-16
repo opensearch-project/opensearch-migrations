@@ -8,7 +8,6 @@ __pycache__
 .python-version
 logs
 .vscode/
-db.sqlite3
 
 # Build files
 plugins/opensearch/loggable-transport-netty4/.gradle/

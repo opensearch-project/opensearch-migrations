@@ -24,7 +24,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly fargateCpuArch: CpuArchitecture,
     readonly otelCollectorEnabled: boolean,
     readonly migrationConsoleEnableOSI: boolean,
-    readonly enableDjangoAPI?: boolean
+    readonly migrationAPIEnabled?: boolean
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
@@ -239,7 +239,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             servicePolicies.push(fetchMigrationPassRolePolicy)
         }
 
-        if (props.enableDjangoAPI) {
+        if (props.migrationAPIEnabled) {
             servicePortMappings = [{
                 name: "django-connect",
                 hostPort: 8000,

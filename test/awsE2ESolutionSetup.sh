@@ -199,7 +199,8 @@ read -r -d '' cdk_context << EOM
     "fetchMigrationEnabled": true,
     "reindexFromSnapshotServiceEnabled": true,
     "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
-    "dpPipelineTemplatePath": "../../../test/dp_pipeline_aws_integ.yaml"
+    "dpPipelineTemplatePath": "../../../test/dp_pipeline_aws_integ.yaml",
+    "migrationAPIEnabled": true
 }
 EOM
 
