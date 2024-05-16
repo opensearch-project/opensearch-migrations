@@ -9,7 +9,7 @@ plugins {
 }
 
 dependencies {
-    implementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation project(':transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
     implementation group: 'io.burt', name: 'jmespath-core'
     implementation group: 'org.slf4j', name:"slf4j-api"

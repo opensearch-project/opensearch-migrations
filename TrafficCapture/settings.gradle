@@ -40,7 +40,7 @@ include('captureKafkaOffloader',
         'trafficCaptureProxyServerTest'
 )
 
-addSubProjects('', new File(rootProject.projectDir,'replayerPlugins'))
+addSubProjects('', new File(rootProject.projectDir,'transformationPlugins'))
 addSubProjects('', new File(rootProject.projectDir,'trafficCaptureDependencies'))
 
 
