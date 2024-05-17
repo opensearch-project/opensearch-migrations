@@ -1,0 +1,6 @@
+coverage:
+  status:
+    project:
+      default:
+        # Only fail if the coverage decreases by more than 1%
+        threshold: 1%

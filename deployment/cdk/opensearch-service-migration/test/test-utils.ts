@@ -15,3 +15,13 @@ export function createStackComposer(contextBlock: { [x: string]: (any); }) {
         migrationsSolutionVersion: "1.0.0"
     })
 }
+
+export function createStackComposerOnlyPassedContext(contextBlock: { [x: string]: (any); }) {
+    const app = new App({
+        context: contextBlock
+    })
+    return new StackComposer(app, {
+        env: {account: "test-account", region: "us-east-1"},
+        migrationsSolutionVersion: "1.0.0"
+    })
+}
