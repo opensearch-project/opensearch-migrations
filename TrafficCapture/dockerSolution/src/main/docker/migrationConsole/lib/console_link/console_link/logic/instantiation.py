@@ -1,24 +1,14 @@
 from console_link.models.cluster import Cluster
+from console_link.models.metrics_source import MetricsSource, get_metrics_source
 import yaml
 from cerberus import Validator
 
 SCHEMA = {
-    'source_cluster': {
-        'type': 'dict',
-        'required': True
-    },
-    'target_cluster': {
-        'type': 'dict',
-        'required': True
-    },
-    'replayer': {
-        'type': 'dict',
-        'required': False
-    },
-    'backfill': {
-        'type': 'dict',
-        'required': False
-    }
+    "source_cluster": {"type": "dict", "required": True},
+    "target_cluster": {"type": "dict", "required": True},
+    "replayer": {"type": "dict", "required": False},
+    "backfill": {"type": "dict", "required": False},
+    "metrics_source": {"type": "dict", "required": False},
 }
 
 
@@ -33,8 +23,12 @@ class Environment:
         if not v.validate(self.config):
             raise ValueError("Invalid config file", v.errors)
 
-        self.source_cluster = Cluster(self.config['source_cluster'])
+        self.source_cluster: Cluster = Cluster(self.config["source_cluster"])
 
         # At some point, target and replayers should be stored as pairs, but for the time being
         # we can probably assume one target cluster.
-        self.target_cluster = Cluster(self.config['target_cluster'])
+        self.target_cluster: Cluster = Cluster(self.config["target_cluster"])
+
+        self.metrics_source: MetricsSource = get_metrics_source(
+            self.config.get("metrics_source")
+        )

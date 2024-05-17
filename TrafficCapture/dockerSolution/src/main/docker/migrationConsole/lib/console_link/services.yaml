@@ -16,3 +16,6 @@ target_cluster:
       password: "myStrongPassword123!"
 replayer:
   deployment_type: "docker"
+metrics_source:
+  type: "prometheus"
+  endpoint: "http://prometheus:9090"
