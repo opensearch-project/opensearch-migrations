@@ -8,12 +8,14 @@ import logging
 import coloredlogs
 import boto3
 import os
+import re
 
 logger = logging.getLogger(__name__)
 DEFAULT_PIPELINE_NAME = "migration-assistant-pipeline"
 DEFAULT_PIPELINE_CONFIG_PATH = "./osiPipelineTemplate.yaml"
 
 AWS_SECRET_CONFIG_PLACEHOLDER = "<AWS_SECRET_CONFIG_PLACEHOLDER>"
+INDEX_SELECTION_OPTIONS_PLACEHOLDER = "<INDEX_SELECTION_OPTIONS_PLACEHOLDER>"
 SOURCE_ENDPOINT_PLACEHOLDER = "<SOURCE_CLUSTER_ENDPOINT_PLACEHOLDER>"
 TARGET_ENDPOINT_PLACEHOLDER = "<TARGET_CLUSTER_ENDPOINT_PLACEHOLDER>"
 SOURCE_AUTH_OPTIONS_PLACEHOLDER = "<SOURCE_AUTH_OPTIONS_PLACEHOLDER>"
@@ -21,6 +23,10 @@ TARGET_AUTH_OPTIONS_PLACEHOLDER = "<TARGET_AUTH_OPTIONS_PLACEHOLDER>"
 SOURCE_BASIC_AUTH_CONFIG_TEMPLATE = """
       username: "${{aws_secrets:source-secret-config:username}}"
       password: "${{aws_secrets:source-secret-config:password}}"
+"""
+SOURCE_DEFAULT_INDEX_TEMPLATE = """
+        exclude:
+          - index_name_regex: \.*
 """
 
 
@@ -86,16 +92,21 @@ def sanitize_endpoint(endpoint: str, remove_port: bool):
 
 
 def parse_args():
+    pipeline_name_description = 'The name of the OSI pipeline'
     parser = argparse.ArgumentParser(description="Script to control migration OSI pipeline operations. Note: This tool "
                                                  "is still in an experimental state and currently being developed")
     subparsers = parser.add_subparsers(dest="subcommand")
     parser_start_command = subparsers.add_parser('start-pipeline', help='Operation to start a given OSI pipeline')
-    parser_start_command.add_argument('--name', type=str, help='The name of the OSI pipeline',
+    parser_start_command.add_argument('--name', type=str, help=pipeline_name_description,
                                       default=DEFAULT_PIPELINE_NAME)
     parser_stop_command = subparsers.add_parser('stop-pipeline', help='Operation to stop a given OSI pipeline')
-    parser_stop_command.add_argument('--name', type=str, help='The name of the OSI pipeline',
+    parser_stop_command.add_argument('--name', type=str, help=pipeline_name_description,
                                      default=DEFAULT_PIPELINE_NAME)
 
+    include_index_arg_help = ('Regex string for selecting indices that should be migrated from source to target, '
+                              'e.g. \'index-.*\'. Argument can be used multiple times.')
+    include_index_arg = {'arg_name': '--include-index-regex', 'arg_settings': {'type': str, 'action': 'append',
+                                                                               'help': include_index_arg_help}}
     create_command = subparsers.add_parser('create-pipeline',
                                            help='Operation to create an OSI pipeline')
     create_command.add_argument('--source-endpoint',
@@ -108,7 +119,7 @@ def parse_args():
                                 required=True)
     create_command.add_argument('--name',
                                 type=str,
-                                help='The name of the OSI pipeline',
+                                help=pipeline_name_description,
                                 default=DEFAULT_PIPELINE_NAME)
     create_command.add_argument('--aws-region',
                                 type=str,
@@ -140,18 +151,16 @@ def parse_args():
                                      'target cluster',
                                 choices=['SIGV4'],
                                 required=True)
+    create_command.add_argument('--pipeline-role-arn',
+                                type=str,
+                                help='The ARN of the IAM role that the OSI pipeline will use to read from a source '
+                                     'cluster and write to a target cluster ',
+                                required=True)
     create_command.add_argument('--source-auth-secret',
                                 type=str,
                                 help='The AWS Secrets Manager Secret containing the \'username\' and \'password\' keys '
                                      'for the OSI pipeline to use when communicating with the source cluster')
-    create_command.add_argument('--source-pipeline-role-arn',
-                                type=str,
-                                help='The ARN of the IAM role that the OSI pipeline should assume when communicating '
-                                     'with the source cluster')
-    create_command.add_argument('--target-pipeline-role-arn',
-                                type=str,
-                                help='The ARN of the IAM role that the OSI pipeline should assume when communicating'
-                                     ' with the target cluster')
+    create_command.add_argument(include_index_arg['arg_name'], **include_index_arg['arg_settings'])
     create_command.add_argument('--log-group-name',
                                 type=str,
                                 help='The name of an existing Cloudwatch Log Group for OSI to publish logs to. '
@@ -176,8 +185,10 @@ def parse_args():
                                          required=True)
     create_command_solution.add_argument('--name',
                                          type=str,
-                                         help='The name of the OSI pipeline',
+                                         help=pipeline_name_description,
                                          default=DEFAULT_PIPELINE_NAME)
+    create_command_solution.add_argument(include_index_arg['arg_name'],
+                                         **include_index_arg['arg_settings'])
     create_command_solution.add_argument("--print-config-only",
                                          action="store_true",
                                          help="Flag to only output the pipeline config template "
@@ -212,7 +223,7 @@ def get_private_subnets(vpc_id):
     return private_subnets
 
 
-def generate_source_secret_config(source_auth_secret, source_pipeline_role_arn, aws_region):
+def generate_source_secret_config(source_auth_secret, pipeline_role_arn, aws_region):
     return f"""
 pipeline_configurations:
   aws:
@@ -220,51 +231,91 @@ pipeline_configurations:
       source-secret-config:
         secret_id: {source_auth_secret}
         region: {aws_region}
-        sts_role_arn: {source_pipeline_role_arn}
-"""
+        sts_role_arn: {pipeline_role_arn}
+""".strip()
 
 
-def generate_sigv4_auth_config(pipeline_role_arn, aws_region):
+def generate_source_sigv4_auth_config(pipeline_role_arn, aws_region):
     return f"""
       aws:
         region: {aws_region}
         sts_role_arn: {pipeline_role_arn}
-"""
+""".strip()
 
 
-def construct_pipeline_config(pipeline_config_file_path: str, source_endpoint: str, target_endpoint: str,
-                              source_auth_type: str, target_auth_type: str, source_auth_secret=None,
-                              source_pipeline_role_arn=None, target_pipeline_role_arn=None, aws_region=None):
+def generate_target_sigv4_auth_config(pipeline_role_arn, aws_region):
+    return f"""
+        aws:
+          region: {aws_region}
+          sts_role_arn: {pipeline_role_arn}
+""".strip()
+
+
+def generate_source_index_config(include_index_regex_list=None):
+    if include_index_regex_list is not None:
+        include_template_str = "include:\n"
+        for regex_str in include_index_regex_list:
+            include_template_str = include_template_str + f"          - index_name_regex: {regex_str}\n"
+        # Return template after removing last new line character
+        return include_template_str[:-1]
+    else:
+        # Return template after removing any leading or trailing new line
+        return SOURCE_DEFAULT_INDEX_TEMPLATE.strip()
+
+
+def validate_pipeline_config_arguments(source_auth_type: str, target_auth_type: str, source_auth_secret=None,
+                                       pipeline_role_arn=None, include_index_regex_list=None, aws_region=None):
     # Validation of auth options provided
     if aws_region is None and (source_auth_type == 'SIGV4' or target_auth_type == 'SIGV4'):
         raise InvalidAuthParameters('AWS region must be provided for a source or target auth type of SIGV4')
 
-    if source_pipeline_role_arn is None and source_auth_type == 'SIGV4':
+    if pipeline_role_arn is None and source_auth_type == 'SIGV4':
         raise InvalidAuthParameters('Source pipeline role ARN must be provided for an auth type of SIGV4')
 
-    if target_pipeline_role_arn is None and target_auth_type == 'SIGV4':
+    if pipeline_role_arn is None and target_auth_type == 'SIGV4':
         raise InvalidAuthParameters('Target pipeline role ARN must be provided for an auth type of SIGV4')
 
-    if (source_auth_secret is None or source_pipeline_role_arn is None) and source_auth_type == 'BASIC_AUTH':
+    if (source_auth_secret is None or pipeline_role_arn is None) and source_auth_type == 'BASIC_AUTH':
         raise InvalidAuthParameters('Source auth secret and pipeline role ARN to access secret, must be provided '
                                     'for an auth type of BASIC_AUTH')
 
+    if include_index_regex_list is not None:
+        for regex_string in include_index_regex_list:
+            try:
+                re.compile(regex_string)
+            except Exception as e:
+                logger.error(f"Unable to compile provided index inclusion regex string: {regex_string}")
+                raise e
+
+
+def construct_pipeline_config(pipeline_config_file_path: str, source_endpoint: str, target_endpoint: str,
+                              source_auth_type: str, target_auth_type: str, source_auth_secret=None,
+                              pipeline_role_arn=None, include_index_regex_list=None, aws_region=None):
+
+    validate_pipeline_config_arguments(source_auth_type=source_auth_type, target_auth_type=target_auth_type,
+                                       source_auth_secret=source_auth_secret, pipeline_role_arn=pipeline_role_arn,
+                                       include_index_regex_list=include_index_regex_list, aws_region=aws_region)
     pipeline_config = Path(pipeline_config_file_path).read_text()
+
+    # Fill in index selection config
+    index_config = generate_source_index_config(include_index_regex_list)
+    pipeline_config = pipeline_config.replace(INDEX_SELECTION_OPTIONS_PLACEHOLDER, index_config)
 
     # Fill in OSI pipeline template file from provided options
     if source_auth_type == 'BASIC_AUTH':
-        secret_config = generate_source_secret_config(source_auth_secret, source_pipeline_role_arn, aws_region)
+        secret_config = generate_source_secret_config(source_auth_secret, pipeline_role_arn, aws_region)
         pipeline_config = pipeline_config.replace(AWS_SECRET_CONFIG_PLACEHOLDER, secret_config)
-        pipeline_config = pipeline_config.replace(SOURCE_AUTH_OPTIONS_PLACEHOLDER, SOURCE_BASIC_AUTH_CONFIG_TEMPLATE)
+        pipeline_config = pipeline_config.replace(SOURCE_AUTH_OPTIONS_PLACEHOLDER,
+                                                  SOURCE_BASIC_AUTH_CONFIG_TEMPLATE.strip())
     else:
         pipeline_config = pipeline_config.replace(AWS_SECRET_CONFIG_PLACEHOLDER, "")
 
     if source_auth_type == 'SIGV4':
-        aws_source_config = generate_sigv4_auth_config(source_pipeline_role_arn, aws_region)
+        aws_source_config = generate_source_sigv4_auth_config(pipeline_role_arn, aws_region)
         pipeline_config = pipeline_config.replace(SOURCE_AUTH_OPTIONS_PLACEHOLDER, aws_source_config)
 
     if target_auth_type == 'SIGV4':
-        aws_target_config = generate_sigv4_auth_config(target_pipeline_role_arn, aws_region)
+        aws_target_config = generate_target_sigv4_auth_config(pipeline_role_arn, aws_region)
         pipeline_config = pipeline_config.replace(TARGET_AUTH_OPTIONS_PLACEHOLDER, aws_target_config)
 
     pipeline_config = pipeline_config.replace(SOURCE_ENDPOINT_PLACEHOLDER, source_endpoint)
@@ -292,14 +343,15 @@ def osi_create_pipeline(osi_client, pipeline_name: str, pipeline_config: str, su
     cw_log_options = {
         'IsLoggingEnabled': False
     }
-    # Seeing issues from CW log group naming that need further investigation
-    # if cw_log_group_name is not None:
-    #     cw_log_options = {
-    #         'IsLoggingEnabled': True,
-    #         'CloudWatchLogDestination': {
-    #             'LogGroup': cw_log_group_name
-    #         }
-    #     }
+    # Currently limited that CW log groups must already be created and follow naming pattern
+    # /aws/vendedlogs/<name>
+    if cw_log_group_name is not None:
+        cw_log_options = {
+            'IsLoggingEnabled': True,
+            'CloudWatchLogDestination': {
+                'LogGroup': cw_log_group_name
+            }
+        }
 
     osi_client.create_pipeline(
         PipelineName=pipeline_name,
@@ -328,7 +380,8 @@ def create_pipeline(osi_client, pipeline_name: str, pipeline_config: str, subnet
 
 
 def create_pipeline_from_stage(osi_client, pipeline_name: str, pipeline_config_path: str, source_endpoint: str,
-                               target_endpoint: str, print_config_only: bool, print_command_only: bool):
+                               target_endpoint: str, include_index_regex_list: List[str], print_config_only: bool,
+                               print_command_only: bool):
     region = os.environ.get("AWS_REGION")
     solution_version = os.environ.get("MIGRATION_SOLUTION_VERSION")
     stage = os.environ.get("MIGRATION_STAGE")
@@ -344,6 +397,7 @@ def create_pipeline_from_stage(osi_client, pipeline_name: str, pipeline_config_p
     param_dict = {}
     for param in parameters:
         param_dict[param['Name']] = param['Value']
+    log_group_name = param_dict[osi_log_group_key]
     vpc_id = param_dict[vpc_id_key]
     security_groups = [param_dict[target_sg_id_key], param_dict[source_sg_id_key]]
     subnet_ids = get_private_subnets(vpc_id)
@@ -353,23 +407,31 @@ def create_pipeline_from_stage(osi_client, pipeline_name: str, pipeline_config_p
     pipeline_config = construct_pipeline_config(pipeline_config_file_path=pipeline_config_path, aws_region=region,
                                                 source_endpoint=source_endpoint, target_endpoint=target_endpoint,
                                                 source_auth_type='SIGV4', target_auth_type='SIGV4',
-                                                source_pipeline_role_arn=pipeline_role_arn,
-                                                target_pipeline_role_arn=pipeline_role_arn)
+                                                include_index_regex_list=include_index_regex_list,
+                                                pipeline_role_arn=pipeline_role_arn)
 
     if print_config_only:
         print(pipeline_config)
         exit(0)
 
     if print_command_only:
-        print(f"./osiMigration.py create-pipeline --source-endpoint={source_endpoint} "
-              f"--target-endpoint={target_endpoint} --aws-region={region} --subnet-ids={','.join(map(str,subnet_ids))} "
-              f"--security-group-ids={','.join(map(str,security_groups))} --source-auth-type='SIGV4' "
-              f"--target-auth-type='SIGV4' --source-pipeline-role-arn={pipeline_role_arn} "
-              f"--target-pipeline-role-arn={pipeline_role_arn} --tag=migration_deployment={solution_version}")
+        command_str = (f"./osiMigration.py create-pipeline "
+                       f"--source-endpoint={source_endpoint} "
+                       f"--target-endpoint={target_endpoint} "
+                       f"--aws-region={region} "
+                       f"--subnet-ids={','.join(map(str,subnet_ids))} "
+                       f"--security-group-ids={','.join(map(str,security_groups))} "
+                       f"--source-auth-type='SIGV4' "
+                       f"--target-auth-type='SIGV4' "
+                       f"--pipeline-role-arn={pipeline_role_arn} "
+                       f"--tag=migration_deployment={solution_version} "
+                       f"--log-group-name={log_group_name}")
+        print(command_str)
         exit(0)
 
-    osi_create_pipeline(osi_client, pipeline_name, pipeline_config, subnet_ids, security_groups,
-                        param_dict[osi_log_group_key], tags)
+    osi_create_pipeline(osi_client=osi_client, pipeline_name=pipeline_name, pipeline_config=pipeline_config,
+                        subnet_ids=subnet_ids, security_group_ids=security_groups,
+                        cw_log_group_name=log_group_name, tags=tags)
 
 
 if __name__ == "__main__":
@@ -384,21 +446,32 @@ if __name__ == "__main__":
     elif args.subcommand == "stop-pipeline":
         stop_pipeline(client, args.name)
     elif args.subcommand == "create-pipeline":
-        source_endpoint = sanitize_endpoint(args.source_endpoint, False)
-        target_endpoint = sanitize_endpoint(args.target_endpoint, True)
-        pipeline_config_string = construct_pipeline_config(DEFAULT_PIPELINE_CONFIG_PATH, source_endpoint,
-                                                           target_endpoint, args.source_auth_type,
-                                                           args.target_auth_type,
-                                                           args.source_auth_secret, args.source_pipeline_role_arn,
-                                                           args.target_pipeline_role_arn, args.aws_region)
+        source_endpoint_clean = sanitize_endpoint(args.source_endpoint, False)
+        target_endpoint_clean = sanitize_endpoint(args.target_endpoint, True)
+        pipeline_config_string = construct_pipeline_config(pipeline_config_file_path=DEFAULT_PIPELINE_CONFIG_PATH,
+                                                           source_endpoint=source_endpoint_clean,
+                                                           source_auth_type=args.source_auth_type,
+                                                           source_auth_secret=args.source_auth_secret,
+                                                           target_endpoint=target_endpoint_clean,
+                                                           target_auth_type=args.target_auth_type,
+                                                           pipeline_role_arn=args.pipeline_role_arn,
+                                                           include_index_regex_list=args.include_index_regex,
+                                                           aws_region=args.aws_region)
         if args.print_config_only:
             print(pipeline_config_string)
             exit(0)
-        create_pipeline(client, args.name, pipeline_config_string, args.subnet_ids, args.security_group_ids,
-                        args.log_group_name, args.tag)
+        create_pipeline(osi_client=client, pipeline_name=args.name, pipeline_config=pipeline_config_string,
+                        subnet_ids=args.subnet_ids, security_group_ids=args.security_group_ids,
+                        cw_log_group_name=args.log_group_name, tags=args.tag)
     elif args.subcommand == "create-pipeline-from-solution":
         validate_environment()
-        source_endpoint = sanitize_endpoint(args.source_endpoint, False)
-        target_endpoint = sanitize_endpoint(os.environ.get("MIGRATION_DOMAIN_ENDPOINT"), True)
-        create_pipeline_from_stage(client, args.name, DEFAULT_PIPELINE_CONFIG_PATH, source_endpoint,
-                                   target_endpoint, args.print_config_only, args.print_command_only)
+        source_endpoint_clean = sanitize_endpoint(args.source_endpoint, False)
+        target_endpoint_clean = sanitize_endpoint(os.environ.get("MIGRATION_DOMAIN_ENDPOINT"), True)
+        create_pipeline_from_stage(osi_client=client,
+                                   pipeline_name=args.name,
+                                   pipeline_config_path=DEFAULT_PIPELINE_CONFIG_PATH,
+                                   source_endpoint=source_endpoint_clean,
+                                   target_endpoint=target_endpoint_clean,
+                                   include_index_regex_list=args.include_index_regex,
+                                   print_config_only=args.print_config_only,
+                                   print_command_only=args.print_command_only)

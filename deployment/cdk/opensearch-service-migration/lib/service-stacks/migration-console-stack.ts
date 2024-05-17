@@ -92,7 +92,17 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 "iam:PassRole"
             ]
         })
-        return [osiManagementPolicy, passPipelineRolePolicy]
+        const configureLogGroupPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: ["*"],
+            actions: [
+                "logs:CreateLogDelivery",
+                "logs:PutResourcePolicy",
+                "logs:DescribeResourcePolicies",
+                "logs:DescribeLogGroups"
+            ]
+        })
+        return [osiManagementPolicy, passPipelineRolePolicy, configureLogGroupPolicy]
     }
 
     constructor(scope: Construct, id: string, props: MigrationConsoleProps) {
@@ -218,7 +228,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             const osiLogGroup = new LogGroup(this, 'OSILogGroup',  {
                 retention: RetentionDays.ONE_MONTH,
                 removalPolicy: RemovalPolicy.DESTROY,
-                logGroupName: `/migration/${props.stage}/${props.defaultDeployId}/openSearchIngestion`
+                // Naming requirement from OSI
+                logGroupName: `/aws/vendedlogs/osi-${props.stage}-${props.defaultDeployId}`
             });
             new StringParameter(this, 'SSMParameterOSIPipelineLogGroupName', {
                 description: 'OpenSearch Migration Parameter for OpenSearch Ingestion Pipeline Log Group Name',
