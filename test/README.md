@@ -68,7 +68,7 @@ This script accepts various parameters to customize its behavior. Below is a lis
     - Default: `admin`
 
 - `--target_password`: Password for authentication with the target endpoint.
-    - Default: `admin`
+    - Default: `myStrongPassword123!`
 
 
 #### Clean Up

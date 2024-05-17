@@ -1,8 +1,9 @@
 import {Template} from "aws-cdk-lib/assertions";
 import {OpenSearchDomainStack} from "../lib/opensearch-domain-stack";
-import {createStackComposer} from "./test-utils";
+import {createStackComposer, createStackComposerOnlyPassedContext} from "./test-utils";
 import {App} from "aws-cdk-lib";
 import {StackComposer} from "../lib/stack-composer";
+import {KafkaStack, OpenSearchContainerStack, OtelCollectorStack} from "../lib";
 
 test('Test empty string provided for a parameter which has a default value, uses the default value', () => {
 
@@ -27,7 +28,7 @@ test('Test invalid engine version format throws error', () => {
 
     const createStackFunc = () => createStackComposer(contextOptions)
 
-    expect(createStackFunc).toThrowError()
+    expect(createStackFunc).toThrow()
 })
 
 test('Test ES 7.10 engine version format is parsed', () => {
@@ -117,7 +118,7 @@ test('Test access policy missing Statement throws error', () => {
 
     const createStackFunc = () => createStackComposer(contextOptions)
 
-    expect(createStackFunc).toThrowError()
+    expect(createStackFunc).toThrow()
 })
 
 test('Test access policy with empty Statement array throws error', () => {
@@ -128,7 +129,7 @@ test('Test access policy with empty Statement array throws error', () => {
 
     const createStackFunc = () => createStackComposer(contextOptions)
 
-    expect(createStackFunc).toThrowError()
+    expect(createStackFunc).toThrow()
 })
 
 test('Test access policy with empty Statement block throws error', () => {
@@ -139,7 +140,7 @@ test('Test access policy with empty Statement block throws error', () => {
 
     const createStackFunc = () => createStackComposer(contextOptions)
 
-    expect(createStackFunc).toThrowError()
+    expect(createStackFunc).toThrow()
 })
 
 test('Test access policy with improper Statement throws error', () => {
@@ -151,7 +152,7 @@ test('Test access policy with improper Statement throws error', () => {
 
     const createStackFunc = () => createStackComposer(contextOptions)
 
-    expect(createStackFunc).toThrowError()
+    expect(createStackFunc).toThrow()
 })
 
 test('Test invalid TLS security policy throws error', () => {
@@ -162,7 +163,7 @@ test('Test invalid TLS security policy throws error', () => {
 
     const createStackFunc = () => createStackComposer(contextOptions)
 
-    expect(createStackFunc).toThrowError()
+    expect(createStackFunc).toThrow()
 })
 
 test('Test invalid EBS volume type throws error', () => {
@@ -173,7 +174,7 @@ test('Test invalid EBS volume type throws error', () => {
 
     const createStackFunc = () => createStackComposer(contextOptions)
 
-    expect(createStackFunc).toThrowError()
+    expect(createStackFunc).toThrow()
 })
 
 test('Test invalid domain removal policy type throws error', () => {
@@ -184,7 +185,7 @@ test('Test invalid domain removal policy type throws error', () => {
 
     const createStackFunc = () => createStackComposer(contextOptions)
 
-    expect(createStackFunc).toThrowError()
+    expect(createStackFunc).toThrow()
 })
 
 test('Test that app registry association is created when migrationsAppRegistryARN is provided', () => {
@@ -222,4 +223,54 @@ test('Test that with analytics and assistance stacks enabled, creates one opense
     const openSearchStacks =  createStackComposer(contextOptions)
     const domainStacks = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)
     expect(domainStacks.length).toEqual(1)
+})
+
+
+test('Test that loading context via a file is successful', () => {
+
+    const contextOptions = {
+        contextFile: './test/resources/sample-context-file.json',
+        contextId: 'unit-test-1'
+    }
+    const stacks =  createStackComposerOnlyPassedContext(contextOptions)
+    const kafkaContainerStack = stacks.stacks.filter((s) => s instanceof KafkaStack)
+    expect(kafkaContainerStack.length).toEqual(1)
+    const otelContainerStack = stacks.stacks.filter((s) => s instanceof OtelCollectorStack)
+    expect(otelContainerStack.length).toEqual(0)
+})
+
+test('Test that loading context via a file errors if file does not exist', () => {
+
+    const contextOptions = {
+        contextFile: './test/resources/missing-file.json',
+        contextId: 'unit-test-1'
+    }
+
+    const createStackFunc = () => createStackComposerOnlyPassedContext(contextOptions)
+
+    expect(createStackFunc).toThrow()
+})
+
+test('Test that loading context via a file errors if file is not proper json', () => {
+
+    const contextOptions = {
+        contextFile: './test/resources/invalid-context-file.json',
+        contextId: 'unit-test-1'
+    }
+
+    const createStackFunc = () => createStackComposerOnlyPassedContext(contextOptions)
+
+    expect(createStackFunc).toThrow()
+})
+
+test('Test that loading context via a file errors if contextId does not exist', () => {
+
+    const contextOptions = {
+        contextFile: './test/resources/sample-context-file.json',
+        contextId: 'unit-test-fake'
+    }
+
+    const createStackFunc = () => createStackComposerOnlyPassedContext(contextOptions)
+
+    expect(createStackFunc).toThrow()
 })
