@@ -13,7 +13,7 @@ configurations {
 }
 
 dependencies {
-    implementation project(":TrafficCapture:trafficCaptureDependencies")
+    implementation project(":commonDependencyVersionConstraints")
 
     def openSearch = '2.11.1'
     implementation "org.opensearch.plugin:opensearch-security:${openSearch}.0"

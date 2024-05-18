@@ -20,7 +20,7 @@ sourceSets {
     }
 }
 dependencies {
-    api project(":TrafficCapture:trafficCaptureDependencies")
+    api project(":commonDependencyVersionConstraints")
     api group: 'io.netty', name: 'netty-buffer'
 
     implementation project(':TrafficCapture:captureProtobufs')

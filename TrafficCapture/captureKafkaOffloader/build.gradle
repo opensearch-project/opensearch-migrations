@@ -9,7 +9,7 @@ repositories {
 }
 
 dependencies {
-    api project(":TrafficCapture:trafficCaptureDependencies")
+    api project(":commonDependencyVersionConstraints")
     implementation project(':TrafficCapture:captureOffloader')
     implementation project(':coreUtilities')
     implementation group: 'com.google.protobuf', name:'protobuf-java'

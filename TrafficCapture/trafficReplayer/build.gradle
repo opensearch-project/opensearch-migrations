@@ -20,7 +20,7 @@ repositories {
 }
 
 dependencies {
-    implementation project(":TrafficCapture:trafficCaptureDependencies")
+    implementation project(":commonDependencyVersionConstraints")
 
     implementation project(':TrafficCapture:captureProtobufs')
     implementation project(':coreUtilities')

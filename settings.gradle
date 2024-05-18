@@ -38,18 +38,18 @@ void addSubProjects(String path, File dir) {
 }
 
 rootProject.name = 'OpensearchMigrations'
+include 'commonDependencyVersionConstraints'
+include 'coreUtilities'
+include 'RFS'
 include 'TrafficCapture:captureKafkaOffloader'
 include 'TrafficCapture:captureOffloader'
 include 'TrafficCapture:captureProtobufs'
-include 'TrafficCapture:nettyWireLogging'
-include 'TrafficCapture:trafficCaptureDependencies'
-include 'TrafficCapture:trafficCaptureProxyServer'
-include 'TrafficCapture:trafficReplayer'
-include 'TrafficCapture:testUtilities'
 include 'TrafficCapture:dockerSolution'
+include 'TrafficCapture:nettyWireLogging'
+include 'TrafficCapture:testUtilities'
+include 'TrafficCapture:trafficCaptureProxyServer'
 include 'TrafficCapture:trafficCaptureProxyServerTest'
-include 'coreUtilities'
-include 'RFS'
+include 'TrafficCapture:trafficReplayer'
 
 
 addSubProjects(':TrafficCapture', Paths.get(rootProject.projectDir.getPath(), 'TrafficCapture', 'replayerPlugins').toFile())
