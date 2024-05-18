@@ -8,7 +8,7 @@ import org.opensearch.migrations.common.CommonUtils
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
 
 def calculateDockerHash = { projectName ->
-    CommonUtils.calculateDockerHash(projectName, project)
+    CommonUtils.calculateDockerHash(project.fileTree("src/main/docker/${projectName}"))
 }
 
 clean.doFirst {
@@ -27,6 +27,7 @@ dependencies {
 
 def dockerFilesForExternalServices = [
         "elasticsearchWithSearchGuard": "elasticsearch_searchguard",
+        "elasticSearchTestConsole": "elasticsearch_client_test_console",
         "migrationConsole": "migration_console",
         "otelCollector": "otel_collector",
         "grafana": "grafana"
@@ -40,6 +41,7 @@ dockerFilesForExternalServices.each { projectName, dockerImageName ->
             CommonUtils.copyArtifactFromProjectToProjectsDockerStaging(project,
                     project(":TrafficCapture:trafficReplayer"), projectName, destDir)
             dependsOn "copyArtifact_${projectName}"
+            dependsOn "buildDockerImage_elasticSearchTestConsole"
         }
         def hash = calculateDockerHash(projectName)
         images.add("migrations/${dockerImageName}:$hash")
@@ -55,7 +57,6 @@ def javaContainerServices = [
 def baseImageProjectOverrides = [
         "trafficCaptureProxyServer": "elasticsearchWithSearchGuard"
 ]
-
 javaContainerServices.each { projectName, dockerImageName ->
     def artifactProject = project(projectName);
     CommonUtils.copyArtifactFromProjectToProjectsDockerStaging(project as Project, artifactProject)

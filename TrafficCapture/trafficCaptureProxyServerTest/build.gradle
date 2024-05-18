@@ -16,7 +16,7 @@ def withoutBom = {
 }
 
 def calculateDockerHash = { projectName ->
-    CommonUtils.calculateDockerHash(projectName, project)
+    CommonUtils.calculateDockerHash(project.fileTree("src/main/docker/${projectName}"))
 }
 
 dependencies {

@@ -1,7 +1,7 @@
 #!/bin/bash
 
 generate_data_requests() {
-  endpoint="http://localhost:9200"
+  endpoint=$1
   # If auth or SSL is used, the correlating OSB options should be provided in this array
   options=()
   client_options=$(IFS=,; echo "${options[*]}")
@@ -21,7 +21,7 @@ generate_data_requests() {
 dataset=$1
 
 if [[ "$dataset" == "default_osb_test_workloads" ]]; then
-   /usr/local/bin/docker-entrypoint.sh eswrapper & echo $! > /tmp/esWrapperProcess.pid && sleep 10 && generate_data_requests
+   generate_data_requests $2
 elif [[ "$dataset" == "skip_dataset" ]]; then
    echo "Skipping data generation step"
    mkdir -p /usr/share/elasticsearch/data/nodes

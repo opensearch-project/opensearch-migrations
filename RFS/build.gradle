@@ -9,6 +9,7 @@ plugins {
 
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
 import groovy.transform.Canonical
+import org.opensearch.migrations.common.CommonUtils
 
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
@@ -32,6 +33,9 @@ ext {
 }
 
 dependencies {
+    implementation project(':coreUtilities')
+    implementation project(':TrafficCapture:dockerSolution')
+
     implementation 'com.beust:jcommander:1.81'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.16.2'
     implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-smile:2.16.2'
@@ -52,6 +56,9 @@ dependencies {
     implementation 'software.amazon.awssdk:s3'
     implementation 'software.amazon.awssdk:s3-transfer-manager'
     implementation 'software.amazon.awssdk.crt:aws-crt:0.29.18'
+
+    implementation    'com.github.docker-java:docker-java-core:3.3.6'
+    implementation    'com.github.docker-java:docker-java-transport-httpclient5:3.3.6'
 
     testImplementation 'io.projectreactor:reactor-test:3.6.5'
     testImplementation 'org.apache.logging.log4j:log4j-core:2.23.1'
@@ -99,6 +106,7 @@ task demoPrintOutSnapshot (type: JavaExec) {
 }
 
 task copyDockerRuntimeJars (type: Sync) {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     description = 'Copy runtime JARs and app jar to docker build directory'
 
     // Define the destination directory
@@ -116,27 +124,30 @@ DockerServiceProps[] dockerServices = [
                                 dockerImageName:"reindex_from_snapshot",
                                 inputDir:"./docker",
                                 taskDependencies:["copyDockerRuntimeJars"]]),
-        new DockerServiceProps([projectName:"elasticsearchRFSSource",
-                                dockerImageName:"elasticsearch_rfs_source",
-                                inputDir:"./docker/TestSource_ES_7_10",
-                                buildArgs:['DATASET': "${project.ext.dataset}"]]),
+        new DockerServiceProps([projectName:"emptyElasticsearchSource",
+                                dockerImageName:"empty_elasticsearch_source",
+                                inputDir:"./docker/TestSource_ES_7_10"]),
+        new DockerServiceProps([projectName:"trafficGenerator",
+                                dockerImageName:"osb_traffic_generator",
+                                inputDir:"./docker/TrafficGenerator"]),
 ] as DockerServiceProps[]
-
 
 for (dockerService in dockerServices) {
     task "buildDockerImage_${dockerService.projectName}" (type: DockerBuildImage) {
+        def hash = CommonUtils.calculateDockerHash(project.fileTree("docker/${dockerService.projectName}"))
         for (dep in dockerService.taskDependencies) {
             dependsOn dep
         }
         inputDir = project.file(dockerService.inputDir)
         buildArgs = dockerService.buildArgs
+        images.add("migrations/${dockerService.dockerImageName}:${hash}")
         images.add("migrations/${dockerService.dockerImageName}:${version}")
         images.add("migrations/${dockerService.dockerImageName}:latest")
     }
 }
 
-// ./gradlew composeUp
-// ./gradlew composeDown
+apply from: 'build-preloaded-source-image.gradle'
+
 dockerCompose {
     useComposeFiles = ['docker/docker-compose.yml']
     projectName = 'rfs-compose'
@@ -149,6 +160,9 @@ task buildDockerImages {
     }
 }
 
+tasks.named("buildDockerImage_elasticsearchRFSSource") {
+    dependsOn(':TrafficCapture:dockerSolution:buildDockerImage_elasticSearchTestConsole')
+}
 tasks.getByName('composeUp')
         .dependsOn(tasks.getByName('buildDockerImages'))
 

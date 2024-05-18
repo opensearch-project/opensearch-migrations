@@ -37,7 +37,7 @@ void addSubProjects(String path, File dir) {
     }
 }
 
-rootProject.name = 'MigrationsAssistant'
+rootProject.name = 'OpensearchMigrations'
 include 'TrafficCapture:captureKafkaOffloader'
 include 'TrafficCapture:captureOffloader'
 include 'TrafficCapture:captureProtobufs'
