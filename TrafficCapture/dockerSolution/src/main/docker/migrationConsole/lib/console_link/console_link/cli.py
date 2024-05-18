@@ -118,6 +118,7 @@ def get_metrics_data_cmd(ctx, component, metric_name, statistic, lookback):
     click.echo(f"Metric Name: {metric_name}")
     click.echo(f"Statistic: {statistic}")
     click.echo(f"Start Time: {starttime.isoformat()}")
+    click.echo(f"Metrics Source Type: {type(ctx.env.metrics_source)}")
     pprint(
         ctx.env.metrics_source.get_metric_data(
             Component[component.upper()],

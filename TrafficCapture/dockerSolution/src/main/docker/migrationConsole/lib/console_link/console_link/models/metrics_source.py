@@ -119,7 +119,7 @@ class CloudwatchMetricsSource(MetricsSource):
         self,
         component: Component,
         metric: str,
-        statistc: MetricStatistic,
+        statistic: MetricStatistic,
         startTime: datetime,
         period_in_seconds: int = 60,
         endTime: Optional[datetime] = None,
@@ -141,7 +141,7 @@ class CloudwatchMetricsSource(MetricsSource):
                             "Dimensions": aws_dimensions,
                         },
                         "Period": period_in_seconds,
-                        "Stat": statistc.name,
+                        "Stat": statistic.name,
                     },
                 },
             ],
@@ -175,8 +175,10 @@ class PrometheusMetricsSource(MetricsSource):
         assert "endpoint" in config  # TODO: add to validation
         self.endpoint = config["endpoint"]
 
-    def get_metrics(self) -> Dict[str, List[str]]:
+    def get_metrics(self, recent=True) -> Dict[str, List[str]]:
         metrics_by_component = {}
+        if recent:
+            pass
         for c in Component:
             exported_job = prometheus_component_names(c)
             r = requests.get(
@@ -202,19 +204,23 @@ class PrometheusMetricsSource(MetricsSource):
     ) -> List[Tuple[str, float]]:
         if not endTime:
             endTime = datetime.now()
+        print(
+            f'delta({metric}{{exported_job="{prometheus_component_names(component)}}}[$__interval])"'
+        )
         r = requests.get(
             f"{self.endpoint}/api/v1/query_range",
-            params={
+            params={  # type: ignore
                 "query": f'{metric}{{exported_job="{prometheus_component_names(component)}"}}',
+                # delta(kafkaCommitCount_total{exported_job="capture"}[$__interval])
+                # "query": f'delta({metric}{{exported_job="{prometheus_component_names(component)}}}[$__interval])"',
                 "start": startTime.timestamp(),
                 "end": endTime.timestamp(),
                 "step": period_in_seconds,
             },
         )
         r.raise_for_status()
-        pprint(r.json())
         assert "data" in r.json() and "result" in r.json()["data"]
-        if len(r.json()["data"]) == 0:
+        if not r.json()["data"]["result"]:
             return []
         return [
             (datetime.fromtimestamp(ts).isoformat(), float(v))
