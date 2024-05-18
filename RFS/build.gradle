@@ -153,7 +153,7 @@ dockerCompose {
     projectName = 'rfs-compose'
 }
 
-// ./gradlew buildDockerImages
+// ../gradlew buildDockerImages
 task buildDockerImages {
     for (dockerService in dockerServices) {
         dependsOn "buildDockerImage_${dockerService.projectName}"

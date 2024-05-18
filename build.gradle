@@ -1,3 +1,8 @@
 plugins {
     id 'io.freefair.lombok' version '8.6' apply false
 }
+
+task buildDockerImages() {
+    dependsOn(':TrafficCapture:dockerSolution:buildDockerImages')
+    dependsOn(':RFS:buildDockerImages')
+}

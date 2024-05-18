@@ -38,7 +38,7 @@ dockerFilesForExternalServices.each { projectName, dockerImageName ->
     task("buildDockerImage_${escapedProjectName}", type: DockerBuildImage) {
         if (projectName == "migrationConsole") {
             def destDir = "src/main/docker/${projectName}/build/jars"
-            CommonUtils.copyArtifactFromProjectToProjectsDockerStaging(project,
+            CommonUtils.copyArtifactFromProjectToProjectsDockerStaging(project as Project,
                     project(":TrafficCapture:trafficReplayer"), projectName, destDir)
             dependsOn "copyArtifact_${projectName}"
             dependsOn "buildDockerImage_elasticSearchTestConsole"

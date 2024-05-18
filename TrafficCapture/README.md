@@ -146,7 +146,7 @@ The building process for this project is streamlined through the use of Gradle. 
 To compile the project and execute unit tests, use the following command:
 
 ```sh
-./gradlew build
+../gradlew build
 ```
 
 This command compiles the source code and runs the quick unit tests, ensuring the project is correctly assembled and functional.
@@ -154,7 +154,7 @@ This command compiles the source code and runs the quick unit tests, ensuring th
 For a comprehensive test run, including both quick unit tests and more extensive slow tests, execute:
 
 ```sh
-./gradlew test slowTest --rerun
+../gradlew test slowTest --rerun
 ```
 
 This command initiates all tests, ensuring thorough validation of the project. The `--rerun` option is used to ignore existing task output cache for the specified tasks.
@@ -181,7 +181,7 @@ Access your detailed build reports by following the link provided at the end of 
 
 This project can be published to a local maven repository with:
 ```sh
-./gradlew publishToMavenLocal
+../gradlew publishToMavenLocal
 ```
 
 And subsequently imported into a separate gradle project with (replacing name with any subProject name) 
