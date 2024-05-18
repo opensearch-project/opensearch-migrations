@@ -27,7 +27,7 @@ dependencies {
 
 def dockerFilesForExternalServices = [
         "elasticsearchWithSearchGuard": "elasticsearch_searchguard",
-        "elasticSearchTestConsole": "elasticsearch_client_test_console",
+        "elasticsearchTestConsole": "elasticsearch_client_test_console",
         "migrationConsole": "migration_console",
         "otelCollector": "otel_collector",
         "grafana": "grafana"
@@ -41,7 +41,7 @@ dockerFilesForExternalServices.each { projectName, dockerImageName ->
             CommonUtils.copyArtifactFromProjectToProjectsDockerStaging(project as Project,
                     project(":TrafficCapture:trafficReplayer"), projectName, destDir)
             dependsOn "copyArtifact_${projectName}"
-            dependsOn "buildDockerImage_elasticSearchTestConsole"
+            dependsOn "buildDockerImage_elasticsearchTestConsole"
         }
         def hash = calculateDockerHash(projectName)
         images.add("migrations/${dockerImageName}:$hash")

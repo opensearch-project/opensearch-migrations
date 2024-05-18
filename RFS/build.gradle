@@ -161,7 +161,7 @@ task buildDockerImages {
 }
 
 tasks.named("buildDockerImage_elasticsearchRFSSource") {
-    dependsOn(':TrafficCapture:dockerSolution:buildDockerImage_elasticSearchTestConsole')
+    dependsOn(':TrafficCapture:dockerSolution:buildDockerImage_elasticsearchTestConsole')
 }
 tasks.getByName('composeUp')
         .dependsOn(tasks.getByName('buildDockerImages'))
