@@ -29,8 +29,7 @@ class CommonUtils {
                                                               String destProjectName, String destDir) {
         // Sync performs a copy, while also deleting items from the destination directory that are not in the source directory
         // In our case, jars of old versions were getting "stuck" and causing conflicts when the program was run
-        dockerBuildProject.task("copyArtifact_${destProjectName}", type: Sync) {
-            dependsOn sourceArtifactProject.tasks.getByName("jar")
+        var dstCopyTask = dockerBuildProject.task("copyArtifact_${destProjectName}", type: Sync) {
             if (destProjectName == "trafficCaptureProxyServerTest") {
                 include "*.properties"
             }
@@ -40,6 +39,8 @@ class CommonUtils {
             include "*.jar"
             duplicatesStrategy = 'WARN'
         }
+        dstCopyTask.dependsOn(sourceArtifactProject.tasks.named("assemble"))
+        dstCopyTask.dependsOn(sourceArtifactProject.tasks.named("build"))
     }
 
     static def createDockerfile(Project dockerBuildProject, Project sourceArtifactProject,
