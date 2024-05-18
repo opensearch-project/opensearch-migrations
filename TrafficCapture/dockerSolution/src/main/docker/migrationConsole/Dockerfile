@@ -17,20 +17,20 @@ COPY build/jars /root/kafka-tools/replayer-jars
 RUN printf "#!/bin/sh\njava -cp `echo /root/kafka-tools/replayer-jars/*.jar | tr \   :` \"\$@\" " > /root/kafka-tools/runJavaWithClasspath.sh
 RUN chmod +x /root/kafka-tools/runJavaWithClasspath.sh
 
-COPY humanReadableLogs.py /root/
-COPY showFetchMigrationCommand.sh /root/
-COPY osiMigration.py /root/
 COPY osiPipelineTemplate.yaml /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
-COPY kafkaExport.sh /root/kafka-tools
+
 COPY humanReadableLogs.py /root/
-COPY setupIntegTests.sh /root/
-
 RUN chmod ug+x /root/humanReadableLogs.py
-RUN chmod ug+x /root/showFetchMigrationCommand.sh
-RUN chmod ug+x /root/osiMigration.py
-RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
+COPY showFetchMigrationCommand.sh /root/
+RUN chmod ug+x /root/showFetchMigrationCommand.sh
+
+COPY osiMigration.py /root/
+RUN chmod ug+x /root/osiMigration.py
+
+COPY kafkaExport.sh /root/kafka-tools
+RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
 CMD tail -f /dev/null
