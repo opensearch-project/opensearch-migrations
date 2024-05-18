@@ -9,6 +9,7 @@ __pycache__
 .python-version
 logs
 .vscode/
+tmp/
 
 **/build/
 **/builds/

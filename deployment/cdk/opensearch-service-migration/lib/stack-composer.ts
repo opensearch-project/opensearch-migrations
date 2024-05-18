@@ -1,5 +1,6 @@
 import {Construct} from "constructs";
 import {Duration, Stack, StackProps} from "aws-cdk-lib";
+import {readFileSync} from 'fs';
 import {OpenSearchDomainStack} from "./opensearch-domain-stack";
 import {EngineVersion, TLSSecurityPolicy} from "aws-cdk-lib/aws-opensearchservice";
 import * as defaultValuesJson from "../default-values.json"
@@ -98,6 +99,36 @@ export class StackComposer {
         }
     }
 
+    private parseContextBlock(scope: Construct, contextId: string) {
+        const contextFile = scope.node.tryGetContext("contextFile")
+        if (contextFile) {
+            const fileString = readFileSync(contextFile, 'utf-8');
+            let fileJSON
+            try {
+                fileJSON = JSON.parse(fileString)
+            } catch (error) {
+                throw new Error(`Unable to parse context file ${contextFile} into JSON with following error: ${error}`);
+            }
+            const contextBlock = fileJSON[contextId]
+            if (!contextBlock) {
+                throw new Error(`No CDK context block found for contextId '${contextId}' in file ${contextFile}`)
+            }
+            return contextBlock
+        }
+
+        let contextJSON = scope.node.tryGetContext(contextId)
+        if (!contextJSON) {
+            throw new Error(`No CDK context block found for contextId '${contextId}'`)
+        }
+        // For a context block to be provided as a string (as in the case of providing via command line) it will need to be properly escaped
+        // to be captured. This requires JSON to parse twice, 1. Returns a normal JSON string with no escaping 2. Returns a JSON object for use
+        if (typeof contextJSON === 'string') {
+            contextJSON = JSON.parse(JSON.parse(contextJSON))
+        }
+        return contextJSON
+
+    }
+
     constructor(scope: Construct, props: StackComposerProps) {
 
         const defaultValues: { [x: string]: (any); } = defaultValuesJson
@@ -108,18 +139,11 @@ export class StackComposer {
         if (!contextId) {
             throw new Error("Required context field 'contextId' not provided")
         }
-        let contextJSON = scope.node.tryGetContext(contextId)
-        if (!contextJSON) {
-            throw new Error(`No CDK context block found for contextId '${contextId}'`)
-        }
+        const contextJSON = this.parseContextBlock(scope, contextId)
         console.log('Received following context block for deployment: ')
         console.log(contextJSON)
         console.log('End of context block.')
-        // For a context block to be provided as a string (as in the case of providing via command line) it will need to be properly escaped
-        // to be captured. This requires JSON to parse twice, 1. Returns a normal JSON string with no escaping 2. Returns a JSON object for use
-        if (typeof contextJSON === 'string') {
-            contextJSON = JSON.parse(JSON.parse(contextJSON))
-        }
+
         const stage = this.getContextForType('stage', 'string', defaultValues, contextJSON)
 
         let version: EngineVersion
