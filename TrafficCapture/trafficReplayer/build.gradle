@@ -24,10 +24,10 @@ dependencies {
 
     implementation project(':captureProtobufs')
     implementation project(':coreUtilities')
-    implementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
-    runtimeOnly project(':replayerPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
-    runtimeOnly project(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
-    runtimeOnly project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
+    implementation project(':transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    runtimeOnly project(':transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
+    runtimeOnly project(':transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
+    runtimeOnly project(':transformationPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
     implementation group: 'com.beust', name: 'jcommander'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
@@ -49,7 +49,7 @@ dependencies {
     implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth'
     implementation 'org.apache.commons:commons-compress'
 
-    testFixturesImplementation project(':replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    testFixturesImplementation project(':transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     testFixturesImplementation project(':captureOffloader')
     testFixturesImplementation testFixtures(project(':captureOffloader'))
     testFixturesImplementation project(':captureProtobufs')
@@ -64,9 +64,9 @@ dependencies {
 
     testImplementation testFixtures(project(path: ':testUtilities'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
-    testImplementation project(':replayerPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
-    testImplementation project(':replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
-    testImplementation project(':replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
+    testImplementation project(':transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
+    testImplementation project(':transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
+    testImplementation project(':transformationPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
     testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'

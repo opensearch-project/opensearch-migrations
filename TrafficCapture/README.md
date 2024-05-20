@@ -211,7 +211,7 @@ jsonMessageTransformerInterface
 jsonMessageTransformers
 nettyWireLogging
 openSearch23PlusTargetTransformerProvider
-replayerPlugins
+transformationPlugins
 testUtilities
 trafficCaptureProxyServer
 trafficCaptureProxyServerTest
