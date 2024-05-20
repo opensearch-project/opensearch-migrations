@@ -4,6 +4,6 @@ awscli==1.32.106
 awscurl==0.33
 tqdm==4.66.4
 
-# Specified as 3.11.0 version was causing issues with ARM64 builds
+# Specified [h5py==3.10.0] as 3.11.0 version was causing issues with ARM64 builds
 # Error: Building h5py requires pkg-config unless the HDF5 path is explicitly specified using the environment variable HDF5_DIR
 h5py==3.10.0

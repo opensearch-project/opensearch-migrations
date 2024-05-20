@@ -293,7 +293,7 @@ echo "VPC ID: $vpc_id"
 
 # Replace source dependent placeholders in CDK context
 sed -i -e "s/<VPC_ID>/$vpc_id/g" "$GEN_CONTEXT_FILE"
-sed -i -e "s/<SOURCE_CLUSTER_ENDPOINT>/$source_endpoint/g" "$GEN_CONTEXT_FILE"
+sed -i -e "s/<SOURCE_CLUSTER_ENDPOINT>/http://${source_endpoint}:9200/g" "$GEN_CONTEXT_FILE"
 
 if [ "$CLEAN_UP_ALL" = true ] ; then
   clean_up_all "$vpc_id"
