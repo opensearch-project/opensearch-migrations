@@ -8,7 +8,6 @@ import {MigrationConsoleStack} from "../lib/service-stacks/migration-console-sta
 import {KafkaStack} from "../lib/service-stacks/kafka-stack";
 import {ContainerImage} from "aws-cdk-lib/aws-ecs";
 import {OpenSearchContainerStack} from "../lib/service-stacks/opensearch-container-stack";
-import {OtelCollectorStack} from "../lib/service-stacks/migration-otel-collector-stack";
 import {ReindexFromSnapshotStack} from "../lib/service-stacks/reindex-from-snapshot-stack";
 
 // Mock using local Dockerfile (which may not exist and would fail synthesis) with the intent of using a "fake-image" from a public registry
@@ -39,7 +38,7 @@ test('Test all migration services with MSK get created when enabled', () => {
     const stacks = createStackComposer(contextOptions)
 
     const services = [CaptureProxyESStack, CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
-        TrafficReplayerStack, OpenSearchContainerStack, OtelCollectorStack, ReindexFromSnapshotStack]
+        TrafficReplayerStack, OpenSearchContainerStack, ReindexFromSnapshotStack]
     services.forEach( (stackClass) => {
         const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
         const template = Template.fromStack(stack)
@@ -72,7 +71,7 @@ test('Test all migration services with Kafka container get created when enabled'
     const stacks = createStackComposer(contextOptions)
 
     const services = [CaptureProxyESStack, CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
-        TrafficReplayerStack, KafkaStack, OpenSearchContainerStack, OtelCollectorStack, ReindexFromSnapshotStack]
+        TrafficReplayerStack, KafkaStack, OpenSearchContainerStack, ReindexFromSnapshotStack]
     services.forEach( (stackClass) => {
         const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
         const template = Template.fromStack(stack)
@@ -105,7 +104,7 @@ test('Test no migration services get deployed when disabled', () => {
     const stacks = createStackComposer(contextOptions)
 
     const services = [CaptureProxyESStack, CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
-        TrafficReplayerStack, KafkaStack, OpenSearchContainerStack, OtelCollectorStack, ReindexFromSnapshotStack]
+        TrafficReplayerStack, KafkaStack, OpenSearchContainerStack, ReindexFromSnapshotStack]
     services.forEach( (stackClass) => {
         const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
         expect(stack).toBeUndefined()

@@ -111,6 +111,7 @@ export function createDefaultECSTaskRole(scope: Construct, serviceName: string):
         effect: Effect.ALLOW,
         resources: ['*'],
         actions: [
+            "logs:CreateLogGroup",
             "logs:CreateLogStream",
             "logs:DescribeLogGroups",
             "logs:DescribeLogStreams",
