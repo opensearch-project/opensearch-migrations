@@ -23,7 +23,7 @@ test('Test that IAM policy contains fetch migration IAM statements when fetch mi
         })
     })
     const allStatements: any[] = statementCapture.asArray()
-    const runTaskStatement = allStatements.find(statement => statement.Action == "ecs:RunTask")
+    const runTaskStatement = allStatements.find(statement => statement.Action.includes("ecs:RunTask"))
     const iamPassRoleStatement = allStatements.find(statement => statement.Action == "iam:PassRole")
     expect(runTaskStatement).toBeTruthy()
     expect(iamPassRoleStatement).toBeTruthy()

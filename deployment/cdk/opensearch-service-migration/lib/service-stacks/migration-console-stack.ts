@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {CpuArchitecture, MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping, Protocol, MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -13,6 +13,7 @@ import {
 import {StreamingSourceType} from "../streaming-source-type";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {RemovalPolicy} from "aws-cdk-lib";
+import {ServiceConnectService} from "aws-cdk-lib/aws-ecs/lib/base/base-service";
 
 
 export interface MigrationConsoleProps extends StackPropsExt {
@@ -22,7 +23,8 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly fetchMigrationEnabled: boolean,
     readonly fargateCpuArch: CpuArchitecture,
     readonly otelCollectorEnabled: boolean,
-    readonly migrationConsoleEnableOSI: boolean
+    readonly migrationConsoleEnableOSI: boolean,
+    readonly migrationAPIEnabled?: boolean
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
@@ -116,6 +118,11 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         if (props.otelCollectorEnabled) {
             securityGroups.push(SecurityGroup.fromSecurityGroupId(this, "otelCollectorSGId", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/otelCollectorSGId`)))
         }
+        let servicePortMappings: PortMapping[]|undefined
+        let serviceConnectServices: ServiceConnectService[]|undefined
+        let serviceDiscoveryPort: number|undefined
+        let serviceDiscoveryEnabled = false
+        let imageCommand: string[]|undefined
 
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
@@ -151,7 +158,26 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             effect: Effect.ALLOW,
             resources: [allReplayerServiceArn, reindexFromSnapshotServiceArn],
             actions: [
-                "ecs:UpdateService"
+                "ecs:UpdateService",
+                "ecs:DescribeServices"
+            ]
+        })
+
+        const allClusterTasksArn = `arn:aws:ecs:${props.env?.region}:${props.env?.account}:task/migration-${props.stage}-ecs-cluster/*`
+        const clusterTasksPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [allClusterTasksArn],
+            actions: [
+                "ecs:StopTask",
+                "ecs:DescribeTasks"
+            ]
+        })
+
+        const listTasksPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: ["*"],
+            actions: [
+                "ecs:ListTasks",
             ]
         })
 
@@ -192,7 +218,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         }
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.region, this.account)
-        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy]
+        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy, listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
@@ -205,7 +231,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 effect: Effect.ALLOW,
                 resources: [fetchMigrationTaskDefArn],
                 actions: [
-                    "ecs:RunTask"
+                    "ecs:RunTask",
+                    "ecs:StopTask"
                 ]
             })
             const fetchMigrationTaskRoleArn = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskRoleArn`);
@@ -220,6 +247,23 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             })
             servicePolicies.push(fetchMigrationTaskRunPolicy)
             servicePolicies.push(fetchMigrationPassRolePolicy)
+        }
+
+        if (props.migrationAPIEnabled) {
+            servicePortMappings = [{
+                name: "migration-console-connect",
+                hostPort: 8000,
+                containerPort: 8000,
+                protocol: Protocol.TCP
+            }]
+            serviceConnectServices = [{
+                portMappingName: "migration-console-connect",
+                dnsName: "migration-console",
+                port: 8000
+            }]
+            serviceDiscoveryPort = 8000
+            serviceDiscoveryEnabled = true
+            imageCommand = ['/bin/sh', '-c', 'python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000']
         }
 
         if (props.migrationConsoleEnableOSI) {
@@ -242,6 +286,11 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             serviceName: "migration-console",
             dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/migrationConsole"),
             securityGroups: securityGroups,
+            portMappings: servicePortMappings,
+            dockerImageCommand: imageCommand,
+            serviceConnectServices: serviceConnectServices,
+            serviceDiscoveryEnabled: serviceDiscoveryEnabled,
+            serviceDiscoveryPort: serviceDiscoveryPort,
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
             environment: environment,

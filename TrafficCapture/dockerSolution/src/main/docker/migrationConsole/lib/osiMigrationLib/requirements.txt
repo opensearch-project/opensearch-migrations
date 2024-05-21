@@ -1,2 +1,2 @@
-boto3
-coloredlogs
+boto3==1.34.106
+coloredlogs==15.0.1

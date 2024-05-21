@@ -100,7 +100,7 @@ services:
       - ./migrationConsole/lib/console_link:/root/lib/console_link
     environment:
       - MIGRATION_KAFKA_BROKER_ENDPOINTS=kafka:9092
-#    command: ./runTestBenchmarks.sh
+    #command: ./runTestBenchmarks.sh
 
 volumes:
   sharedComparatorSqlResults:
