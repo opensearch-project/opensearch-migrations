@@ -27,10 +27,9 @@ public class SnapshotStateTest {
     public void MultiSnapshot_SingleDocument_Then_DeletedDocument() {
         // Setup
         // PSUEDO: Create an 1 index with 1 document
-        // PSUEDO: Save snapshot1
         // PSUEDO: Delete the document
-        // PSUEDO: Save snapshot2
-        // PSUEDO: Start RFS worker reader, point to the snapshot2
+        // PSUEDO: Save snapshot1
+        // PSUEDO: Start RFS worker reader, point to the snapshot1
         // PSUEDO: Attach sink to inspect all of the operations performed on the target cluster
 
         // Action
@@ -50,10 +49,9 @@ public class SnapshotStateTest {
     public void MultiSnapshot_SingleDocument_Then_UpdateDocument() {
         // Setup
         // PSUEDO: Create an 1 index with 1 document
+        // PSUEDO: Update the 1 document
         // PSUEDO: Save snapshot1
-        // PSUEDO: Update the document
-        // PSUEDO: Save snapshot2
-        // PSUEDO: Start RFS worker reader, point to the snapshot2
+        // PSUEDO: Start RFS worker reader, point to the snapshot1
         // PSUEDO: Attach sink to inspect all of the operations performed on the target cluster
 
         // Action
