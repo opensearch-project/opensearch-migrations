@@ -160,16 +160,23 @@ public class MetadataStepTest {
     static Stream<Arguments> provideCreateEntryArgs() {
         return Stream.of(
             // We were able to create the CMS entry ourselves, so we have the work lease
-            Arguments.of(true, MetadataStep.MigrateTemplates.class),
+            Arguments.of(                
+                new CmsEntry.Metadata(
+                    CmsEntry.MetadataStatus.IN_PROGRESS,
+                    String.valueOf(Instant.now().plus(Duration.ofDays(1)).toEpochMilli()),
+                    1
+                ),
+                MetadataStep.MigrateTemplates.class
+            ),
 
             // We were unable to create the CMS entry ourselves, so we do not have the work lease
-            Arguments.of(false, MetadataStep.GetEntry.class)
+            Arguments.of(null, MetadataStep.GetEntry.class)
         );
     }
 
     @ParameterizedTest
     @MethodSource("provideCreateEntryArgs")
-    void CreateEntry_AsExpected(boolean createdEntry, Class<?> nextStepClass) {
+    void CreateEntry_AsExpected(CmsEntry.Metadata createdEntry, Class<?> nextStepClass) {
         // Set up the test
         Mockito.when(testMembers.cmsClient.createMetadataEntry()).thenReturn(createdEntry);
 
@@ -186,8 +193,8 @@ public class MetadataStepTest {
     public static class TestAcquireLease extends MetadataStep.AcquireLease {
         public static final int milliSinceEpoch = 42; // Arbitrarily chosen, but predictable
 
-        public TestAcquireLease(SharedMembers members, CmsEntry.Metadata existingEntry) {
-            super(members, existingEntry);
+        public TestAcquireLease(SharedMembers members) {
+            super(members);
         }
 
         @Override
@@ -199,29 +206,37 @@ public class MetadataStepTest {
     static Stream<Arguments> provideAcquireLeaseArgs() {
         return Stream.of(
             // We were able to acquire the lease
-            Arguments.of(true, MetadataStep.MigrateTemplates.class),
+            Arguments.of(                
+                new CmsEntry.Metadata(
+                    CmsEntry.MetadataStatus.IN_PROGRESS,
+                    String.valueOf(Instant.now().plus(Duration.ofDays(1)).toEpochMilli()),
+                    1
+                ),
+                MetadataStep.MigrateTemplates.class
+            ),
 
             // We were unable to acquire the lease
-            Arguments.of(false, MetadataStep.RandomWait.class)
+            Arguments.of(null, MetadataStep.RandomWait.class)
         );
     }
 
     @ParameterizedTest
     @MethodSource("provideAcquireLeaseArgs")
-    void AcquireLease_AsExpected(boolean acquiredLease, Class<?> nextStepClass) {
+    void AcquireLease_AsExpected(CmsEntry.Metadata updatedEntry, Class<?> nextStepClass) {
         // Set up the test
         CmsEntry.Metadata existingEntry = new CmsEntry.Metadata(
             CmsEntry.MetadataStatus.IN_PROGRESS,
             CmsEntry.Metadata.getLeaseExpiry(0L, CmsEntry.Metadata.MAX_ATTEMPTS - 1),
             CmsEntry.Metadata.MAX_ATTEMPTS - 1
         );
+        testMembers.cmsEntry = existingEntry;
 
         Mockito.when(testMembers.cmsClient.updateMetadataEntry(
             any(CmsEntry.MetadataStatus.class), anyString(), anyInt()
-        )).thenReturn(acquiredLease);
+        )).thenReturn(updatedEntry);
 
         // Run the test
-        MetadataStep.AcquireLease testStep = new TestAcquireLease(testMembers, existingEntry);
+        MetadataStep.AcquireLease testStep = new TestAcquireLease(testMembers);
         testStep.run();
         WorkerStep nextStep = testStep.nextStep();
 
@@ -237,24 +252,43 @@ public class MetadataStepTest {
     static Stream<Arguments> provideMigrateTemplatesArgs() {
         return Stream.of(
             // We were able to acquire the lease
-            Arguments.of(true, MetadataStep.ExitPhaseSuccess.class),
+            Arguments.of(                
+                new CmsEntry.Metadata(
+                    CmsEntry.MetadataStatus.COMPLETED,
+                    String.valueOf(42),
+                    1
+                ),
+                MetadataStep.ExitPhaseSuccess.class
+            ),
 
             // We were unable to acquire the lease
-            Arguments.of(false, MetadataStep.GetEntry.class)
+            Arguments.of(null, MetadataStep.GetEntry.class)
         );
     }
 
     @ParameterizedTest
     @MethodSource("provideMigrateTemplatesArgs")
-    void MigrateTemplates_AsExpected(boolean updatedEntry, Class<?> nextStepClass) {
+    void MigrateTemplates_AsExpected(CmsEntry.Metadata updatedEntry, Class<?> nextStepClass) {
         // Set up the test
+        CmsEntry.Metadata existingEntry = new CmsEntry.Metadata(
+            CmsEntry.MetadataStatus.IN_PROGRESS,
+            String.valueOf(42),
+            1
+        );
+        testMembers.cmsEntry = existingEntry;
+        
         GlobalMetadata.Data testGlobalMetadata = Mockito.mock(GlobalMetadata.Data.class);
         ObjectNode testNode = Mockito.mock(ObjectNode.class);
         ObjectNode testTransformedNode = Mockito.mock(ObjectNode.class);
         Mockito.when(testMembers.metadataFactory.fromRepo(testMembers.snapshotName)).thenReturn(testGlobalMetadata);
         Mockito.when(testGlobalMetadata.toObjectNode()).thenReturn(testNode);
         Mockito.when(testMembers.transformer.transformGlobalMetadata(testNode)).thenReturn(testTransformedNode);
-        Mockito.when(testMembers.cmsClient.setMetadataMigrationStatus(CmsEntry.MetadataStatus.COMPLETED)).thenReturn(updatedEntry);
+        Mockito.when(testMembers.cmsClient.updateMetadataEntry(
+            CmsEntry.MetadataStatus.COMPLETED,
+            existingEntry.leaseExpiry,
+            existingEntry.numAttempts
+        
+        )).thenReturn(updatedEntry);
 
         // Run the test
         MetadataStep.MigrateTemplates testStep = new MetadataStep.MigrateTemplates(testMembers);
@@ -281,8 +315,10 @@ public class MetadataStepTest {
         Mockito.verify(testMembers.metadataCreator, times(1)).create(
             testTransformedNode
         );
-        Mockito.verify(testMembers.cmsClient, times(1)).setMetadataMigrationStatus(
-            CmsEntry.MetadataStatus.COMPLETED
+        Mockito.verify(testMembers.cmsClient, times(1)).updateMetadataEntry(
+            CmsEntry.MetadataStatus.COMPLETED,
+            existingEntry.leaseExpiry,
+            existingEntry.numAttempts
         );
         Mockito.verify(testMembers.globalState, times(1)).updateWorkItem(
             null
@@ -321,9 +357,6 @@ public class MetadataStepTest {
         WorkerStep nextStep = testStep.nextStep();
 
         // Check the results
-        Mockito.verify(testMembers.cmsClient, times(1)).setMetadataMigrationStatus(
-            CmsEntry.MetadataStatus.COMPLETED
-        );
         Mockito.verify(testMembers.globalState, times(1)).updatePhase(
             GlobalState.Phase.METADATA_COMPLETED
         );
@@ -335,6 +368,13 @@ public class MetadataStepTest {
         // Set up the test
         MaxAttemptsExceeded e = new MaxAttemptsExceeded();
 
+        CmsEntry.Metadata existingEntry = new CmsEntry.Metadata(
+            CmsEntry.MetadataStatus.IN_PROGRESS,
+            String.valueOf(42),
+            1
+        );
+        testMembers.cmsEntry = existingEntry;
+
         // Run the test
         MetadataStep.ExitPhaseFailed testStep = new MetadataStep.ExitPhaseFailed(testMembers, e);
         testStep.run();
@@ -343,8 +383,10 @@ public class MetadataStepTest {
         });
 
         // Check the results
-        Mockito.verify(testMembers.cmsClient, times(1)).setMetadataMigrationStatus(
-            CmsEntry.MetadataStatus.FAILED
+        Mockito.verify(testMembers.cmsClient, times(1)).updateMetadataEntry(
+            CmsEntry.MetadataStatus.FAILED,
+            existingEntry.leaseExpiry,
+            existingEntry.numAttempts
         );
         Mockito.verify(testMembers.globalState, times(1)).updatePhase(
             GlobalState.Phase.METADATA_FAILED

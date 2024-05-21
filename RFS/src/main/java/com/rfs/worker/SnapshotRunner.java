@@ -25,7 +25,8 @@ public class SnapshotRunner {
         Snapshot snapshotEntry = cmsClient.getSnapshotEntry(snapshotCreator.getSnapshotName());
         
         if (snapshotEntry == null || snapshotEntry.status != SnapshotStatus.COMPLETED) {
-            WorkerStep nextState = new SnapshotStep.EnterPhase(globalState, cmsClient, snapshotCreator, snapshotEntry);
+            SnapshotStep.SharedMembers sharedMembers = new SnapshotStep.SharedMembers(globalState, cmsClient, snapshotCreator);
+            WorkerStep nextState = new SnapshotStep.EnterPhase(sharedMembers, snapshotEntry);
 
             while (nextState != null) {
                 nextState.run();

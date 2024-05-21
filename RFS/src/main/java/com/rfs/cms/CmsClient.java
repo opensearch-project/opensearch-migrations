@@ -9,7 +9,7 @@ public interface CmsClient {
      * Creates a new entry in the CMS for the Snapshot's progress.  Returns true if we created the entry, and false if
      * the entry already exists.
      */
-    public boolean createSnapshotEntry(String snapshotName);
+    public CmsEntry.Snapshot createSnapshotEntry(String snapshotName);
 
     /*
      * Attempt to retrieve the Snapshot entry from the CMS, if it exists; null if it doesn't currently exist
@@ -20,13 +20,13 @@ public interface CmsClient {
      * Updates the status of the Snapshot entry in the CMS.  Returns true if the update was successful, and false if
      * something else updated it before we could
      */
-    public boolean updateSnapshotEntry(String snapshotName, CmsEntry.SnapshotStatus status);
+    public CmsEntry.Snapshot updateSnapshotEntry(String snapshotName, CmsEntry.SnapshotStatus status);
 
     /*
-     * Creates a new entry in the CMS for the Metadata Migration's progress.  Returns true if we created the entry, and
-     * false if the entry already exists.
+     * Creates a new entry in the CMS for the Metadata Migration's progress.  Returns the created entry if we created it,
+     * and null if the entry already exists.
      */
-    public boolean createMetadataEntry();
+    public CmsEntry.Metadata createMetadataEntry();
 
     /*
      * Attempt to retrieve the Metadata Migration entry from the CMS, if it exists; null if it doesn't currently exist
@@ -34,13 +34,8 @@ public interface CmsClient {
     public CmsEntry.Metadata getMetadataEntry();
 
     /*
-     * Updates just the status field of the Metadata Migration entry in the CMS.  Returns true if the update was successful,
+     * Updates all fields of the Metadata Migration entry in the CMS.  Returns the updated entry if successful, and
+     * null if something else updated it before we could
      */
-    public boolean setMetadataMigrationStatus(CmsEntry.MetadataStatus status);
-
-    /*
-     * Updates all fields of the Metadata Migration entry in the CMS.  Returns true if the update was successful, and
-     * false if something else updated it before we could
-     */
-    public boolean updateMetadataEntry(CmsEntry.MetadataStatus status, String leaseExpiry, Integer numAttempts);
+    public CmsEntry.Metadata updateMetadataEntry(CmsEntry.MetadataStatus status, String leaseExpiry, Integer numAttempts);
 }
