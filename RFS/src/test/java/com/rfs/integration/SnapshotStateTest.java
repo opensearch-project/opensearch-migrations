@@ -7,13 +7,16 @@ import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
 import org.apache.http.util.EntityUtils;
+import org.apache.lucene.util.IOUtils;
 import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.images.builder.Transferable;
 import org.testcontainers.utility.DockerImageName;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -25,92 +28,102 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Duration;
-import java.util.List;
 
 public class SnapshotStateTest {
 
-    private static final String SNAPSHOT_DIR = "./snapshotRepo";
+    private final File SNAPSHOT_DIR = new File("./snapshotRepo");
     private static GenericContainer<?> clusterContainer;
     private static CloseableHttpClient httpClient;
     private static String clusterUrl;
 
-    @BeforeAll
-    public static void setUp() throws Exception {
-        new File(SNAPSHOT_DIR).mkdir();
+    @BeforeEach
+    public void setUp() throws Exception {
+        IOUtils.rm(Path.of(SNAPSHOT_DIR.getAbsolutePath()));
+        SNAPSHOT_DIR.mkdir();
 
         clusterContainer = new GenericContainer<>(DockerImageName.parse("docker.elastic.co/elasticsearch/elasticsearch:7.10.2"))
                 .withExposedPorts(9200, 9300)
                 .withEnv("discovery.type", "single-node")
                 .withEnv("path.repo", "/usr/share/elasticsearch/snapshots")
-                .withFileSystemBind(SNAPSHOT_DIR, "/usr/share/elasticsearch/snapshots", BindMode.READ_WRITE)
+                .withFileSystemBind(SNAPSHOT_DIR.getName(), "/usr/share/elasticsearch/snapshots", BindMode.READ_WRITE)
                 .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(1)));
 
         clusterContainer.start();
 
-         httpClient = HttpClients.createDefault();
-        final String address = clusterContainer.getHost();
-        final Integer port = clusterContainer.getMappedPort(9200);
+        final var address = clusterContainer.getHost();
+        final var port = clusterContainer.getMappedPort(9200);
+        httpClient = HttpClients.createDefault();
         clusterUrl = "http://" + address + ":" + port;
 
         // Create snapshot repository
-        String repositoryJson = "{\n" +
+        final var repositoryJson = "{\n" +
         "  \"type\": \"fs\",\n" +
         "  \"settings\": {\n" +
         "    \"location\": \"/usr/share/elasticsearch/snapshots\",\n" +
-        "    \"compress\": true\n" +
+        "    \"compress\": false\n" +
         "  }\n" +
         "}";
 
-        HttpPut createRepoRequest = new HttpPut(clusterUrl + "/_snapshot/test-repo");
+        final var createRepoRequest = new HttpPut(clusterUrl + "/_snapshot/test-repo");
         createRepoRequest.setEntity(new StringEntity(repositoryJson));
         createRepoRequest.setHeader("Content-Type", "application/json");
 
-        try (CloseableHttpResponse response = httpClient.execute(createRepoRequest)) {
+        try (var response = httpClient.execute(createRepoRequest)) {
             assertThat(response.getStatusLine().getStatusCode(), equalTo(200));
         }
     }
 
-    @AfterAll
-    public static void tearDown() throws IOException {
+    @AfterEach
+    public void tearDown() throws IOException {
         System.out.println("Container Logs:\n" + clusterContainer.getLogs());
 
         httpClient.close();
         clusterContainer.stop();
+        IOUtils.rm(Path.of(SNAPSHOT_DIR.getAbsolutePath()));
     }
 
+    public void createDocument(final String index, final String docId, final String body) throws IOException {
+        var indexDocumentRequset = new HttpPut(clusterUrl + "/" + index + "/_doc/" + docId);
+        indexDocumentRequset.setEntity(new StringEntity(body));
+        indexDocumentRequset.setHeader("Content-Type", "application/json");
 
-    public void takeSnapshot() throws IOException {
+        try (var response = httpClient.execute(indexDocumentRequset)) {
+            assertThat(response.getStatusLine().getStatusCode(), equalTo(201));
+        }
+    }
+
+    public void takeSnapshot(final String snapshotName, final String indexPattern) throws IOException {
         // Create snapshot
-        String snapshotJson = "{\n" +
-                "  \"indices\": \"_all\",\n" +
+        final var snapshotJson = "{\n" +
+                "  \"indices\": \"" + indexPattern + "\",\n" +
                 "  \"ignore_unavailable\": true,\n" +
                 "  \"include_global_state\": false\n" +
                 "}";
 
-        HttpPut createSnapshotRequest = new HttpPut(clusterUrl + "/_snapshot/test-repo/snapshot_1?wait_for_completion=true");
+        final var createSnapshotRequest = new HttpPut(clusterUrl + "/_snapshot/test-repo/" + snapshotName + "?wait_for_completion=true");
         createSnapshotRequest.setEntity(new StringEntity(snapshotJson));
         createSnapshotRequest.setHeader("Content-Type", "application/json");
 
-        try (CloseableHttpResponse response = httpClient.execute(createSnapshotRequest)) {
+        try (var response = httpClient.execute(createSnapshotRequest)) {
             assertThat(response.getStatusLine().getStatusCode(), equalTo(200));
-
-            HttpEntity entity = response.getEntity();
-            String responseString = EntityUtils.toString(entity);
-            EntityUtils.consume(entity);
         }
 
         // Read snapshot file contents
-        List<String> snapshotFiles = Files.readAllLines(Paths.get(SNAPSHOT_DIR, "index-0"));
+        for (File file : SNAPSHOT_DIR.listFiles()) {
+            System.out.println(file);
+        }
+        var snapshotFiles = Files.readAllLines(Paths.get(SNAPSHOT_DIR.getAbsolutePath(), "index-0"));
         System.out.println("Snapshot Files: " + snapshotFiles);
     }
 
 
     @Test
     public void SingleSnapshot_SingleDocument() throws Exception {
-        takeSnapshot();
         // Setup
         // PSUEDO: Create an 1 index with 1 document
+        createDocument("my-index", "doc1", "{\"foo\":\"bar\"}");
         // PSUEDO: Save snapshot1
+        takeSnapshot("snapshot-1", "my-index");
         // PSUEDO: Start RFS worker reader, point to snapshot1
         // PSUEDO: Attach sink to inspect all of the operations performed on the target cluster
 
