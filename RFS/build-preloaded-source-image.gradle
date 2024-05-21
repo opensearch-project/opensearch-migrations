@@ -42,7 +42,6 @@ task createClientContainer(type: DockerCreateContainer) {
     targetImageId 'migrations/osb_traffic_generator:latest'
     containerName = "traffic-generator-container-${uniqueId}"
     hostConfig.network = myNetworkName
-    //cmd = ['skip_dataset']
     cmd = ['default_osb_test_workloads', "http://elasticsearch:9200"]
 }
 
@@ -63,8 +62,6 @@ def sourceContainerCommitTask = task commitSourceContainer() {
     doLast {
         def client = createDockerClient()
         def containerId = createInitialElasticsearchContainer.getContainerId().get()
-
-        println "Committing container ${containerId} to image my-new-primary-image:latest"
 
         client.commitCmd(containerId)
                 .withRepository("elasticsearch_rfs_source")
