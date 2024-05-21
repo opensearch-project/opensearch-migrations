@@ -34,7 +34,6 @@ ext {
 
 dependencies {
     implementation project(':coreUtilities')
-    implementation project(':TrafficCapture:dockerSolution')
 
     implementation 'com.beust:jcommander:1.81'
     implementation 'com.fasterxml.jackson.core:jackson-databind:2.16.2'
@@ -129,7 +128,8 @@ DockerServiceProps[] dockerServices = [
                                 inputDir:"./docker/TestSource_ES_7_10"]),
         new DockerServiceProps([projectName:"trafficGenerator",
                                 dockerImageName:"osb_traffic_generator",
-                                inputDir:"./docker/TrafficGenerator"]),
+                                inputDir:"./docker/TrafficGenerator",
+                                taskDependencies:[":TrafficCapture:dockerSolution:buildDockerImage_elasticsearchTestConsole"]]),
 ] as DockerServiceProps[]
 
 for (dockerService in dockerServices) {

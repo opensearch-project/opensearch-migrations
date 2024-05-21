@@ -30,8 +30,6 @@ repositories {
 dependencies {
     api project(":commonDependencyVersionConstraints")
 
-    implementation project(':TrafficCapture:captureProtobufs')
-
     implementation group: "com.google.protobuf", name: "protobuf-java"
     implementation group: 'org.slf4j', name: 'slf4j-api'
 
