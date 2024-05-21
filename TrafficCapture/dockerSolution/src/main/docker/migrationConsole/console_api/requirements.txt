@@ -1,3 +1,5 @@
+-e ../lib/console_link
+
 Django==4.2.13
 django-extensions==3.2.3
 djangorestframework==3.15.1
