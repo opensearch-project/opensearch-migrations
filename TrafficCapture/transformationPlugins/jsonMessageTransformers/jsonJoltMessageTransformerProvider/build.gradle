@@ -9,10 +9,10 @@ plugins {
 }
 
 dependencies {
-    implementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
-    implementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformer')
+    implementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformer')
 
-    testImplementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformer')
+    testImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformer')
     testImplementation project(':coreUtilities')
     testImplementation project(':TrafficCapture:trafficReplayer')
     testImplementation testFixtures(project(path: ':coreUtilities'))
