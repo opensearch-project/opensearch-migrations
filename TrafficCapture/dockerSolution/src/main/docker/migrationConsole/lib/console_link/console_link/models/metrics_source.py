@@ -1,12 +1,17 @@
 from datetime import datetime
 from enum import Enum
-from pprint import pprint
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
 from cerberus import Validator
 from console_link.logic.utils import raise_for_aws_api_error
 import requests
+
+
+class UnsupportedMetricsSourceError(Exception):
+    def __init__(self, supplied_metrics_source: str):
+        super().__init__("Unsupported metrics source type", supplied_metrics_source)
+
 
 MetricsSourceType = Enum("MetricsSourceType", ["CLOUDWATCH", "PROMETHEUS"])
 MetricStatistic = Enum(
@@ -31,22 +36,29 @@ SCHEMA = {
     },
 }
 
+PROMETHEUS_SCHEMA = {k: v.copy() for k, v in SCHEMA.items()}
+PROMETHEUS_SCHEMA["endpoint"]["required"] = True
+
 
 def get_metrics_source(config):
-    metric_source_type = MetricsSourceType[config["type"].upper()]
+    try:
+        metric_source_type = MetricsSourceType[config["type"].upper()]
+    except KeyError:
+        raise UnsupportedMetricsSourceError(config["type"])
+    
     if metric_source_type == MetricsSourceType.CLOUDWATCH:
         return CloudwatchMetricsSource(config)
     elif metric_source_type == MetricsSourceType.PROMETHEUS:
         return PrometheusMetricsSource(config)
     else:
-        raise ValueError(f"Unsupported metrics source type: {config['type']}")
+        raise UnsupportedMetricsSourceError(config["type"])
 
 
 class MetricsSource:
     def __init__(self, config: Dict) -> None:
         v = Validator(SCHEMA)
         if not v.validate(config):
-            raise ValueError("Invalid config file for cluster", v.errors)
+            raise ValueError("Invalid config file for MetricsSource", v.errors)
 
     def get_metrics(self) -> Dict[str, List[str]]:
         raise NotImplementedError()
@@ -172,7 +184,9 @@ def prometheus_component_names(c: Component) -> str:
 class PrometheusMetricsSource(MetricsSource):
     def __init__(self, config: Dict) -> None:
         super().__init__(config)
-        assert "endpoint" in config  # TODO: add to validation
+        v = Validator(PROMETHEUS_SCHEMA)
+        if not v.validate(config):
+            raise ValueError("Invalid config file for PrometheusMetricsSource", v.errors)
         self.endpoint = config["endpoint"]
 
     def get_metrics(self, recent=True) -> Dict[str, List[str]]:
