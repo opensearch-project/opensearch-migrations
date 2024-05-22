@@ -7,6 +7,7 @@ import org.apache.http.impl.client.HttpClients;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.util.IOUtils;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -38,9 +39,13 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
+import static org.hamcrest.CoreMatchers.allOf;
+import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.notNullValue;
 
@@ -199,10 +204,13 @@ public class SnapshotStateTest {
     public void SingleSnapshot_SingleDocument() throws Exception {
         // Setup
         // PSUEDO: Create an 1 index with 1 document
-        createDocument("my-index", "doc1", "{\"foo\":\"bar\"}");
+        final var indexName = "my-index";
+        final var document1Id = "doc1";
+        final var document1Body = "{\"foo\":\"bar\"}";
+        createDocument(indexName, document1Id, document1Body);
         // PSUEDO: Save snapshot1
         final var snapshotName = "snapshot-1";
-        takeSnapshot(snapshotName, "my-index");
+        takeSnapshot(snapshotName, indexName);
         // PSUEDO: Start RFS worker reader, point to snapshot1
         final var unpackedShardDataDir = Path.of(Files.createTempDirectory("unpacked-shard-data").toFile().getAbsolutePath());
         final var indices = extraSnapshotIndexData(snapshotName, unpackedShardDataDir);
@@ -216,31 +224,20 @@ public class SnapshotStateTest {
         // PSUEDO: Wait until the operations sink has settled with expected operations. 
         updateTargetCluster(indices, unpackedShardDataDir, client);
 
-        final var bodyCaptor = ArgumentCaptor.forClass(String.class);
-        verify(client).sendBulkRequest(eq("my-index"), bodyCaptor.capture());
-
-        logger.info("Captured Body:\n" +bodyCaptor.getValue());
-
-        final var bulkRequest = asJson(bodyCaptor.getValue());
-        assertThat(bulkRequest, notNullValue());
-        assertThat(bulkRequest.toPrettyString(), bulkRequest.at(JsonPointer.valueOf("/index/_id/doc1")).asText(), equalTo("hello"));
-
-
-        verifyNoInteractions(client);
-
-
         // Validation
-        // verify(targetConnection); Not viable
-
-
         // PSUEDO: Read the actions from the sink
+        final var bodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(client, times(1)).sendBulkRequest(eq(indexName), bodyCaptor.capture());
         // PSUEDO: Flush all read-only operations from the sink, such as refresh, searchs, etc...
         // PSUEDO: Scan the sink for ONLY the following:
         //    PSUEDO: Should see create index
         //    PSUEDO: Should see bulk put document, with single document
+        final var bulkRequestRaw = bodyCaptor.getValue();
+        assertThat(bulkRequestRaw, allOf(containsString(document1Id), containsString(document1Body)));
         //    PSUEDO: Should see more than one refresh index calls (other misc expected write operations)
 
         // PSUEDO: Verify no other items were present in the sync
+        verifyNoMoreInteractions(client);
     }
 
     public void MultiSnapshot_SingleDocument_Then_DeletedDocument() {
