@@ -9,10 +9,15 @@ import java.util.concurrent.TimeUnit;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.rfs.tracing.RootRfsContext;
 import org.apache.lucene.document.Document;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
+import org.opensearch.migrations.tracing.ActiveContextTracker;
+import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
+import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.RootOtelContext;
 import reactor.core.publisher.Flux;
 
 import com.rfs.common.*;
@@ -125,6 +130,11 @@ public class ReindexFromSnapshot {
 
         Logging.setLevel(logLevel);
 
+        var rootContext = new RootRfsContext(
+                RootOtelContext.initializeNoopOpenTelemetry(),
+                new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
+
+
         ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);        
         ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
@@ -183,8 +193,8 @@ public class ReindexFromSnapshot {
                 logger.info("Attempting to create the snapshot...");
                 OpenSearchClient sourceClient = new OpenSearchClient(sourceConnection);
                 SnapshotCreator snapshotCreator = repo instanceof S3Repo
-                    ? new S3SnapshotCreator(snapshotName, sourceClient, s3RepoUri, s3Region)
-                    : new FileSystemSnapshotCreator(snapshotName, sourceClient, snapshotLocalRepoDirPath.toString());
+                    ? new S3SnapshotCreator(snapshotName, sourceClient, s3RepoUri, s3Region, rootContext.createSnapshotCreateContext())
+                    : new FileSystemSnapshotCreator(snapshotName, sourceClient, snapshotLocalRepoDirPath.toString(), rootContext.createSnapshotCreateContext());
                 snapshotCreator.registerRepo();
                 snapshotCreator.createSnapshot();
                 while (!snapshotCreator.isSnapshotFinished()) {
@@ -268,12 +278,16 @@ public class ReindexFromSnapshot {
 
                 OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
                 if (sourceVersion == ClusterVersion.ES_6_8) {
-                    GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, templateWhitelist, componentTemplateWhitelist, List.of());
+                    GlobalMetadataCreator_OS_2_11 metadataCreator =
+                            new GlobalMetadataCreator_OS_2_11(targetClient, templateWhitelist,
+                                    componentTemplateWhitelist, List.of(), rootContext.createMetadataMigrationContext());
                     ObjectNode root = globalMetadata.toObjectNode();
                     ObjectNode transformedRoot = transformer.transformGlobalMetadata(root);
                     metadataCreator.create(transformedRoot);
                 } else if (sourceVersion == ClusterVersion.ES_7_10) {
-                    GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateWhitelist, templateWhitelist);
+                    GlobalMetadataCreator_OS_2_11 metadataCreator =
+                            new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateWhitelist,
+                                    templateWhitelist, rootContext.createMetadataMigrationContext());
                     ObjectNode root = globalMetadata.toObjectNode();
                     ObjectNode transformedRoot = transformer.transformGlobalMetadata(root);
                     metadataCreator.create(transformedRoot);
@@ -312,7 +326,7 @@ public class ReindexFromSnapshot {
                     ObjectNode root = indexMetadata.toObjectNode();
                     ObjectNode transformedRoot = transformer.transformIndexMetadata(root);
                     IndexMetadataData_OS_2_11 indexMetadataOS211 = new IndexMetadataData_OS_2_11(transformedRoot, indexMetadata.getId(), reindexName);
-                    IndexCreator_OS_2_11.create(reindexName, indexMetadataOS211, targetClient);
+                    IndexCreator_OS_2_11.create(reindexName, indexMetadataOS211, targetClient, rootContext.createIndexContext());
                 }
             }
 
@@ -356,6 +370,7 @@ public class ReindexFromSnapshot {
                 logger.info("==================================================================");
                 logger.info("Reindexing the documents...");
 
+                var reindexCtx = rootContext.createReindexContext();
                 for (IndexMetadata.Data indexMetadata : indexMetadatas) {
                     for (int shardId = 0; shardId < indexMetadata.getNumberOfShards(); shardId++) {
                         logger.info("=== Index Id: " + indexMetadata.getName() + ", Shard ID: " + shardId + " ===");
@@ -364,7 +379,7 @@ public class ReindexFromSnapshot {
                         String targetIndex = indexMetadata.getName() + indexSuffix;
 
                         final int finalShardId = shardId; // Define in local context for the lambda
-                        DocumentReindexer.reindex(targetIndex, documents, targetConnection)
+                        DocumentReindexer.reindex(targetIndex, documents, targetConnection, reindexCtx)
                             .doOnError(error -> logger.error("Error during reindexing: " + error))
                             .doOnSuccess(done -> logger.info("Reindexing completed for index " + targetIndex + ", shard " + finalShardId))
                             // Wait for the shard reindexing to complete before proceeding; fine in this demo script, but
@@ -373,7 +388,7 @@ public class ReindexFromSnapshot {
                     }
                 }
                 logger.info("Refreshing target cluster to reflect newly added documents");
-                DocumentReindexer.refreshAllDocuments(targetConnection);
+                DocumentReindexer.refreshAllDocuments(targetConnection, reindexCtx);
                 logger.info("Refresh complete");
             }
             

@@ -23,7 +23,7 @@ public class KafkaConsumerContexts {
             implements IKafkaConsumerContexts.IAsyncListeningContext {
         @Getter
         @NonNull
-        public final RootReplayerContext enclosingScope;
+        public final RootReplayerContext enclosingScope; // TODO - rename this to rootScope
         @Getter
         @Setter
         Exception observedExceptionToIncludeInMetrics;

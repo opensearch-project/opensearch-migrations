@@ -3,6 +3,7 @@ package com.rfs.common;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.rfs.tracing.IRfsContexts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -13,11 +14,14 @@ public abstract class SnapshotCreator {
     private static final ObjectMapper mapper = new ObjectMapper();
 
     private final OpenSearchClient client;
+    private final IRfsContexts.ICreateSnapshotContext context;
     private final String snapshotName;
 
-    public SnapshotCreator(String snapshotName, OpenSearchClient client) {
+    public SnapshotCreator(String snapshotName, OpenSearchClient client,
+                           IRfsContexts.ICreateSnapshotContext context) {
         this.snapshotName = snapshotName;
         this.client = client;
+        this.context = context;
     }
 
     abstract ObjectNode getRequestBodyForRegisterRepo();
@@ -34,7 +38,7 @@ public abstract class SnapshotCreator {
         ObjectNode settings = getRequestBodyForRegisterRepo();
 
         // Register the repo; it's fine if it already exists
-        RestClient.Response response = client.registerSnapshotRepo(getRepoName(), settings);
+        RestClient.Response response = client.registerSnapshotRepo(getRepoName(), settings, context);
         if (response.code == HttpURLConnection.HTTP_OK || response.code == HttpURLConnection.HTTP_CREATED) {
             logger.info("Snapshot repo registration successful");
         } else {
@@ -51,7 +55,7 @@ public abstract class SnapshotCreator {
         body.put("include_global_state", true);
 
         // Create the snapshot; idempotent operation
-        RestClient.Response response = client.createSnapshot(getRepoName(), snapshotName, body);
+        RestClient.Response response = client.createSnapshot(getRepoName(), snapshotName, body, context);
         if (response.code == HttpURLConnection.HTTP_OK || response.code == HttpURLConnection.HTTP_CREATED) {
             logger.info("Snapshot " + snapshotName + " creation initiated");
         } else {
@@ -61,7 +65,7 @@ public abstract class SnapshotCreator {
     }
 
     public boolean isSnapshotFinished() {
-        RestClient.Response response = client.getSnapshotStatus(getRepoName(), snapshotName);
+        RestClient.Response response = client.getSnapshotStatus(getRepoName(), snapshotName, context);
         if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
             logger.error("Snapshot " + snapshotName + " does not exist");
             throw new SnapshotDoesNotExist(snapshotName);

@@ -2,6 +2,7 @@ package com.rfs.common;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.rfs.tracing.IRfsContexts;
 
 public class FileSystemSnapshotCreator extends SnapshotCreator {
     private static final ObjectMapper mapper = new ObjectMapper();
@@ -10,8 +11,9 @@ public class FileSystemSnapshotCreator extends SnapshotCreator {
     private final String snapshotName;
     private final String snapshotRepoDirectoryPath;
 
-    public FileSystemSnapshotCreator(String snapshotName, OpenSearchClient client, String snapshotRepoDirectoryPath) {
-        super(snapshotName, client);
+    public FileSystemSnapshotCreator(String snapshotName, OpenSearchClient client, String snapshotRepoDirectoryPath,
+                                     IRfsContexts.ICreateSnapshotContext context) {
+        super(snapshotName, client, context);
         this.snapshotName = snapshotName;
         this.client = client;
         this.snapshotRepoDirectoryPath = snapshotRepoDirectoryPath;
