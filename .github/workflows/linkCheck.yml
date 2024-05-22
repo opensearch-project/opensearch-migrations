@@ -19,6 +19,7 @@ jobs:
         uses: lycheeverse/lychee-action@v1
         with:
           args: --verbose --accept=200,403,429  "**/*.html" "**/*.md" "**/*.txt" "**/*.json"
+            --offline
             --exclude "file:///github/workspace/*"
             --exclude "http://localhost*"
             --exclude "https://localhost*"
