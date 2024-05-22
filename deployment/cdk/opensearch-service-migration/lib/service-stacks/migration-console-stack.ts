@@ -182,6 +182,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
         const environment: { [key: string]: string; } = {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
+            // Temporary fix for source domain endpoint until we move to either alb or migration console yaml configuration
+            "SOURCE_DOMAIN_ENDPOINT": `https://capture-proxy-es.migration.${props.stage}.local:9200`,
             "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints,
             "MIGRATION_STAGE": props.stage,
             "MIGRATION_SOLUTION_VERSION": props.migrationsSolutionVersion
