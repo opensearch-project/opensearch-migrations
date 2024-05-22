@@ -22,7 +22,7 @@ RUN chmod +x /root/kafka-tools/runJavaWithClasspath.sh
 # Copy libraries and requirements.txt that need to be installed
 COPY lib /root/lib
 COPY requirements.txt /root/requirements.txt
-RUN pip3 install -r /root/requirements.txt -r /root/lib/osiMigrationLib/requirements.txt
+RUN pip3 install -r /root/requirements.txt
 
 COPY runTestBenchmarks.sh /root/
 COPY humanReadableLogs.py /root/
@@ -30,7 +30,6 @@ COPY simpleDocumentGenerator.py /root/
 COPY catIndices.sh /root/
 COPY showFetchMigrationCommand.sh /root/
 COPY setupIntegTests.sh /root/
-COPY osiMigration.py /root/
 COPY osiPipelineTemplate.yaml /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
@@ -41,7 +40,6 @@ RUN chmod ug+x /root/humanReadableLogs.py
 RUN chmod ug+x /root/simpleDocumentGenerator.py
 RUN chmod ug+x /root/catIndices.sh
 RUN chmod ug+x /root/showFetchMigrationCommand.sh
-RUN chmod ug+x /root/osiMigration.py
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
 RUN pip install -e /root/lib/console_link/

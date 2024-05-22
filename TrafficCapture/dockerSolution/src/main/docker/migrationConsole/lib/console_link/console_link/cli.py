@@ -1,5 +1,6 @@
 import click
 import console_link.logic as logic
+from console_link.models.migration import MigrationType
 from console_link.logic.instantiation import Environment
 
 
@@ -14,6 +15,13 @@ class Context(object):
 @click.pass_context
 def cli(ctx, config_file):
     ctx.obj = Context(config_file)
+
+
+@cli.command(name="create-migration-osi")
+@click.pass_obj
+def create_migration_osi_cmd(ctx):
+    """Create migration action"""
+    ctx.env.osi_migration.create()
 
 
 @cli.command(name="cat-indices")

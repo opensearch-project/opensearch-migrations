@@ -14,6 +14,10 @@ SCHEMA = {
         'type': 'string',
         'required': True
     },
+    'aws_security_group': {
+        'type': 'string',
+        'required': False
+    },
     'allow_insecure': {
         'type': 'boolean',
         'required': False
@@ -28,7 +32,22 @@ SCHEMA = {
                 'allowed': [e.name.lower() for e in AuthMethod]
             },
             'details': {
-                'type': 'dict'
+                'type': 'dict',
+                'required': True,
+                'schema': {
+                    'username': {
+                        'type': 'string',
+                        'required': False
+                    },
+                    'password': {
+                        'type': 'string',
+                        'required': False
+                    },
+                    'aws_secret_arn': {
+                        'type': 'string',
+                        'required': False
+                    },
+                }
             }
         }
     }
@@ -40,6 +59,8 @@ class Cluster():
     An elasticcsearch or opensearch cluster.
     """
     endpoint: str = ""
+    aws_security_group: str = ""
+    aws_secret_arn: str = ""
     auth_type: Optional[AuthMethod] = None
     auth_details: Optional[Dict] = None
 
@@ -53,7 +74,8 @@ class Cluster():
             self.allow_insecure = config.get("allow_insecure", False)
         self.auth_type = AuthMethod[config["authorization"]["type"].upper()]
         self.auth_details = config["authorization"]["details"]
-        pass
+        self.aws_security_group = config["aws_security_group"]
+        self.aws_secret_arn = config["authorization"]["details"]["aws_secret_arn"]
 
     def call_api(self, path, method: HttpMethod = HttpMethod.GET) -> requests.Response:
         """

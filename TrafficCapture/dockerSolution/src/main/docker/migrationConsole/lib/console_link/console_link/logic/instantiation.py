@@ -1,4 +1,5 @@
 from console_link.models.cluster import Cluster
+from console_link.models.migration import OpenSearchIngestionMigration
 import yaml
 from cerberus import Validator
 
@@ -12,6 +13,10 @@ SCHEMA = {
         'required': True
     },
     'replayer': {
+        'type': 'dict',
+        'required': False
+    },
+    'opensearch_ingestion': {
         'type': 'dict',
         'required': False
     },
@@ -38,3 +43,7 @@ class Environment:
         # At some point, target and replayers should be stored as pairs, but for the time being
         # we can probably assume one target cluster.
         self.target_cluster = Cluster(self.config['target_cluster'])
+
+        self.osi_migration = OpenSearchIngestionMigration(config=self.config['opensearch_ingestion'],
+                                                          source_cluster=self.source_cluster,
+                                                          target_cluster=self.target_cluster)

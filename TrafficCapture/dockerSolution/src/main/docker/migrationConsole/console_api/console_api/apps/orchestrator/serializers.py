@@ -12,6 +12,7 @@ class DataProviderSerializer(serializers.Serializer):
 class OpenSearchIngestionCreateRequestSerializer(serializers.Serializer):
     PipelineRoleArn = serializers.CharField(max_length=255)
     PipelineName = serializers.CharField(max_length=28)
+    AwsRegion = serializers.CharField(max_length=28)
     IndexRegexSelections = serializers.ListField(
         child=serializers.CharField(max_length=50),
         required=False
@@ -24,11 +25,19 @@ class OpenSearchIngestionCreateRequestSerializer(serializers.Serializer):
     SourceDataProvider = DataProviderSerializer()
     TargetDataProvider = DataProviderSerializer()
     VpcSubnetIds = serializers.ListField(
-        child=serializers.CharField(max_length=50)
+        child=serializers.CharField(min_length=15, max_length=24)
     )
     VpcSecurityGroupIds = serializers.ListField(
-        child=serializers.CharField(max_length=50)
+        child=serializers.CharField(min_length=11, max_length=20)
     )
+
+    # def validate(self, data):
+    #     """
+    #     Check that start is before finish.
+    #     """
+    #     if data['start'] > data['finish']:
+    #         raise serializers.ValidationError("finish must occur after start")
+    #     return data
 
 
 class OpenSearchIngestionStartRequestSerializer(serializers.Serializer):
