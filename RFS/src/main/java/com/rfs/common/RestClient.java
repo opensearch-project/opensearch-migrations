@@ -44,8 +44,9 @@ public class RestClient {
                 .uri("/" + path)
                 .responseSingle((response, bytes) -> bytes.asString()
                 .map(body -> new Response(response.status().code(), body, response.status().reasonPhrase())))
-                .doOnError(t->context.addTraceException(t, true))
-                .doFinally(r->context.close());
+//                .doOnError(t->context.addTraceException(t, true))
+//                .doFinally(r->context.close())
+                ;
     }
 
     public Response get(String path, IRfsContexts.IRequestContext context) {
