@@ -298,13 +298,13 @@ public class ReindexFromSnapshot {
             }
             logger.info("Index Metadata read successfully");
 
-            OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
             if ((movementType == MovementType.EVERYTHING) || (movementType == MovementType.METADATA)){
                 // ==========================================================================================================
                 // Recreate the Indices
                 // ==========================================================================================================
                 logger.info("==================================================================");
                 logger.info("Attempting to recreate the indices...");
+                OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
                 for (IndexMetadata.Data indexMetadata : indexMetadatas) {
                     String reindexName = indexMetadata.getName() + indexSuffix;
                     logger.info("Recreating index " + indexMetadata.getName() + " as " + reindexName + " on target...");
@@ -364,7 +364,7 @@ public class ReindexFromSnapshot {
                         String targetIndex = indexMetadata.getName() + indexSuffix;
 
                         final int finalShardId = shardId; // Define in local context for the lambda
-                        DocumentReindexer.reindex(targetIndex, documents, targetClient)
+                        DocumentReindexer.reindex(targetIndex, documents, targetConnection)
                             .doOnError(error -> logger.error("Error during reindexing: " + error))
                             .doOnSuccess(done -> logger.info("Reindexing completed for index " + targetIndex + ", shard " + finalShardId))
                             // Wait for the shard reindexing to complete before proceeding; fine in this demo script, but
