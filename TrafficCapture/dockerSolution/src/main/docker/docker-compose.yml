@@ -106,6 +106,7 @@ services:
       - AWS_PROFILE=default
 #    command: ./runTestBenchmarks.sh
 
+
 volumes:
   sharedComparatorSqlResults:
     driver: local

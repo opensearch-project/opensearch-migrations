@@ -13,7 +13,9 @@ RUN cd /etc/yum.repos.d/ && \
     sed -i 's/mirrorlist/#mirrorlist/g' /etc/yum.repos.d/CentOS-* && \
     sed -i 's|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g' /etc/yum.repos.d/CentOS-*
 RUN yum install -y gcc python3.9 python39-devel vim git less
-RUN pip3 install opensearch-benchmark
+# Specified [h5py==3.10.0] as 3.11.0 version was causing issues with ARM64 builds
+# Error: Building h5py requires pkg-config unless the HDF5 path is explicitly specified using the environment variable HDF5_DIR
+RUN pip3 install opensearch-benchmark==1.5.0 h5py==3.10.0
 
 
 FROM base AS generateDatasetStage

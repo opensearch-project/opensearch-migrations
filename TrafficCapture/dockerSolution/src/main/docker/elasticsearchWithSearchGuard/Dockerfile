@@ -5,6 +5,8 @@ RUN echo y | /usr/share/elasticsearch/bin/elasticsearch-plugin install https://m
 RUN pushd /usr/share/elasticsearch/plugins/search-guard-7/tools ; chmod ugo+x ./install_demo_configuration.sh ; yes | ./install_demo_configuration.sh ; popd
 ENV ELASTIC_SEARCH_CONFIG_FILE=/usr/share/elasticsearch/config/elasticsearch.yml
 ENV PROXY_TLS_CONFIG_FILE=/usr/share/elasticsearch/config/proxy_tls.yml
+ENV ELASTIC_SEARCH_JVM_CONFIG_FILE=/usr/share/elasticsearch/config/jvm.options
+
 # without this line, elasticsearch will complain that there aren't enough nodes
 RUN echo "discovery.type: single-node" >> $ELASTIC_SEARCH_CONFIG_FILE
 COPY disableTlsConfig.sh enableTlsConfig.sh /root/
@@ -18,6 +20,12 @@ RUN sed 's/searchguard/plugins.security/g' $ELASTIC_SEARCH_CONFIG_FILE |  \
 RUN /root/enableTlsConfig.sh $ELASTIC_SEARCH_CONFIG_FILE
 # Alter this config line to either enable(searchguard.disabled: false) or disable(searchguard.disabled: true) HTTP auth
 RUN echo "searchguard.disabled: false" >> $ELASTIC_SEARCH_CONFIG_FILE
+
+RUN sed -i '/^-Xms/i # Increase default heap to 80% RAM, Requires JDK >= 10' $ELASTIC_SEARCH_JVM_CONFIG_FILE && \
+    sed -i 's/^-Xms/#&/' $ELASTIC_SEARCH_JVM_CONFIG_FILE && \
+    sed -i 's/^-Xmx/#&/' $ELASTIC_SEARCH_JVM_CONFIG_FILE && \
+    sed -i '/^#-Xmx/s/$/\n-XX:MaxRAMPercentage=80.0/' $ELASTIC_SEARCH_JVM_CONFIG_FILE
+
 
 #CMD tail -f /dev/null
 CMD /usr/local/bin/docker-entrypoint.sh eswrapper

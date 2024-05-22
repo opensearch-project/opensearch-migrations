@@ -2,14 +2,12 @@ FROM ubuntu:jammy
 
 ENV DEBIAN_FRONTEND noninteractive
 
-COPY lib /root/lib
-
 RUN apt-get update && \
     apt-get install -y --no-install-recommends python3.9 python3-pip python3-dev openjdk-11-jre-headless wget gcc libc-dev git curl vim jq unzip less && \
-    pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl tqdm awscli -r /root/lib/osiMigrationLib/requirements.txt
+    apt-get clean
+
 RUN mkdir /root/kafka-tools
 RUN mkdir /root/kafka-tools/aws
-
 WORKDIR /root/kafka-tools
 # Get kafka distribution and unpack to 'kafka'
 RUN wget -qO- https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz | tar --transform 's!^[^/]*!kafka!' -xvz
@@ -20,6 +18,11 @@ WORKDIR /root
 COPY build/jars /root/kafka-tools/replayer-jars
 RUN printf "#!/bin/sh\njava -cp `echo /root/kafka-tools/replayer-jars/*.jar | tr \   :` \"\$@\" " > /root/kafka-tools/runJavaWithClasspath.sh
 RUN chmod +x /root/kafka-tools/runJavaWithClasspath.sh
+
+# Copy libraries and requirements.txt that need to be installed
+COPY lib /root/lib
+COPY requirements.txt /root/requirements.txt
+RUN pip3 install -r /root/requirements.txt -r /root/lib/osiMigrationLib/requirements.txt
 
 COPY runTestBenchmarks.sh /root/
 COPY humanReadableLogs.py /root/
@@ -42,5 +45,10 @@ RUN chmod ug+x /root/osiMigration.py
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
 RUN pip install -e /root/lib/console_link/
+
+# Experimental console API, not started by default
+COPY console_api /root/console_api
+RUN pip3 install -r /root/console_api/requirements.txt
+#CMD python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000
 
 CMD tail -f /dev/null

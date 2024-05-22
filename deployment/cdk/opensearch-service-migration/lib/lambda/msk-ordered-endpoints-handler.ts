@@ -29,6 +29,14 @@ export const handler = async (event: any, context: Context) => {
     console.log('Lambda is invoked with event:' + JSON.stringify(event));
     console.log('Lambda is invoked with context:' + JSON.stringify(context));
 
+    if (event.RequestType === 'Delete') {
+        console.log('Skipping processing for Delete event...')
+        return {
+            statusCode: 200,
+            UniqueId: "getMSKBrokers"
+        }
+    }
+
     if (!process.env.MSK_ARN) {
         throw Error(`Missing at least one required environment variable [MSK_ARN: ${process.env.MSK_ARN}]`)
     }
