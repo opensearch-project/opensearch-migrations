@@ -1,0 +1,119 @@
+// Note:
+// 1. We are using an existing common VPC for now until we move to a proper Jenkins accounts and can create a setup without
+//    public subnets as well as request an extension to allow more than 5 VPCs per region
+// 2. There is a still a manual step needed on the EC2 source load balancer to replace its security group rule which allows all traffic (0.0.0.0/0) to
+//    allow traffic for the relevant serviceConnect security group. This needs a better story around accepting user security groups in our Migration CDK.
+// 3. This ARM64 disables FetchMigration as the Data Prepper base image does not seem to support this ARCH
+def cdk_context = """
+{
+  "migration-default": {
+    "stage": "<STAGE>",
+    "vpcId": "vpc-07d3e089b8e9139e4",
+    "defaultFargateCpuArch": "ARM64",
+    "engineVersion": "OS_2.11",
+    "domainName": "os-cluster-<STAGE>",
+    "dataNodeCount": 2,
+    "openAccessPolicyEnabled": true,
+    "domainRemovalPolicy": "DESTROY",
+    "artifactBucketRemovalPolicy": "DESTROY",
+    "trafficReplayerExtraArgs": "--speedup-factor 10.0",
+    "fetchMigrationEnabled": false,
+    "reindexFromSnapshotServiceEnabled": true,
+    "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
+    "dpPipelineTemplatePath": "../../../test/dp_pipeline_aws_integ.yaml",
+    "migrationConsoleEnableOSI": true,
+    "migrationAPIEnabled": true
+  },
+  "source-single-node-ec2": {
+    "suffix": "ec2-source-<STAGE>",
+    "networkStackSuffix": "ec2-source-<STAGE>",
+    "vpcId": "vpc-07d3e089b8e9139e4",
+    "distVersion": "7.10.2",
+    "cidr": "12.0.0.0/16",
+    "distributionUrl": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz",
+    "captureProxyEnabled": true,
+    "securityDisabled": true,
+    "minDistribution": false,
+    "cpuArch": "arm64",
+    "isInternal": true,
+    "singleNodeCluster": true,
+    "networkAvailabilityZones": 2,
+    "dataNodeCount": 1,
+    "managerNodeCount": 0,
+    "serverAccessType": "ipv4",
+    "restrictServerAccessTo": "0.0.0.0/0"
+  }
+}
+"""
+def context_file_name = 'jenkinsContext.json'
+pipeline {
+    environment {
+        //GIT_URL = 'https://github.com/sumobrian/opensearch-migrations.git'
+        GIT_URL = 'https://github.com/opensearch-project/opensearch-migrations.git'
+        GIT_BRANCH = 'e2e-tests-q2'
+        STAGE = 'arm64-integ'
+    }
+
+    agent { label 'Jenkins-Agent-AL2023-Arm64-C6g4xlarge-Single-Host' }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                git branch: "${env.GIT_BRANCH}", url: "${env.GIT_URL}"
+            }
+        }
+
+        stage('Test Caller Identity') {
+            steps {
+                sh 'aws sts get-caller-identity'
+            }
+        }
+
+        stage('Setup E2E CDK Context') {
+            steps {
+                writeFile (file: "test/$context_file_name", text: cdk_context)
+                sh "echo 'Using context file options: ' && cat test/$context_file_name"
+            }
+        }
+
+        stage('Build') {
+            steps {
+                timeout(time: 1, unit: 'HOURS') {
+                    dir('TrafficCapture') {
+                        sh './gradlew build -x test'
+                    }
+                }
+            }
+        }
+
+        stage('Deploy') {
+            steps {
+                dir('test') {
+                    sh 'sudo usermod -aG docker $USER'
+                    sh 'sudo newgrp docker'
+                    sh "sudo ./awsE2ESolutionSetup.sh --context-file './$context_file_name' --stage ${env.STAGE} --migrations-git-url ${env.GIT_URL} --migrations-git-branch ${env.GIT_BRANCH}"
+                }
+            }
+        }
+
+        stage('Integ Tests') {
+            steps {
+                dir('test') {
+                  script {
+                    def time = new Date().getTime()
+                    def uniqueId = "integ_min_${time}_${currentBuild.number}"
+                    sh "sudo ./awsRunIntegTests.sh --stage ${env.STAGE} --migrations-git-url ${env.GIT_URL} --migrations-git-branch ${env.GIT_BRANCH} --unique-id ${uniqueId}"
+                  }
+                }
+
+            }
+        }
+    }
+    post {
+        always {
+            dir('test') {
+                sh "sudo ./awsE2ESolutionSetup.sh --stage ${env.STAGE} --run-post-actions"
+            }
+        }
+    }
+}
