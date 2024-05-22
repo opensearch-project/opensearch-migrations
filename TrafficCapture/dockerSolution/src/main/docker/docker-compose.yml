@@ -98,7 +98,7 @@ services:
       - ./migrationConsole/lib/console_link/services.yaml:/etc/migration_services.yaml
       # this is a convenience thing for testing -- it should be removed before this makes it to prod.
       - ./migrationConsole/lib/console_link:/root/lib/console_link
-      - ~/.aws:/home/.aws
+      - ~/.aws:/root/.aws
     environment:
       - MIGRATION_KAFKA_BROKER_ENDPOINTS=kafka:9092
       - AWS_REGION=us-east-2

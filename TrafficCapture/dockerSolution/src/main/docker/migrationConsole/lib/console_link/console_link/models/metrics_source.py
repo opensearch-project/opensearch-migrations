@@ -1,5 +1,6 @@
 from datetime import datetime
 from enum import Enum
+import json
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
@@ -189,10 +190,10 @@ class PrometheusMetricsSource(MetricsSource):
             raise ValueError("Invalid config file for PrometheusMetricsSource", v.errors)
         self.endpoint = config["endpoint"]
 
-    def get_metrics(self, recent=True) -> Dict[str, List[str]]:
+    def get_metrics(self, recent=False) -> Dict[str, List[str]]:
         metrics_by_component = {}
         if recent:
-            pass
+            raise NotImplementedError("Recent metrics are not implemented for Prometheus")
         for c in Component:
             exported_job = prometheus_component_names(c)
             r = requests.get(
@@ -218,15 +219,10 @@ class PrometheusMetricsSource(MetricsSource):
     ) -> List[Tuple[str, float]]:
         if not endTime:
             endTime = datetime.now()
-        print(
-            f'delta({metric}{{exported_job="{prometheus_component_names(component)}}}[$__interval])"'
-        )
         r = requests.get(
             f"{self.endpoint}/api/v1/query_range",
             params={  # type: ignore
                 "query": f'{metric}{{exported_job="{prometheus_component_names(component)}"}}',
-                # delta(kafkaCommitCount_total{exported_job="capture"}[$__interval])
-                # "query": f'delta({metric}{{exported_job="{prometheus_component_names(component)}}}[$__interval])"',
                 "start": startTime.timestamp(),
                 "end": endTime.timestamp(),
                 "step": period_in_seconds,

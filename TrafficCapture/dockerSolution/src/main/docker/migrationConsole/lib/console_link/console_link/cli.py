@@ -94,7 +94,6 @@ def metrics_group(ctx):
 @metrics_group.command(name="list")
 @click.pass_obj
 def list_metrics_cmd(ctx):
-    # TODO: this should go through a logic class
     if ctx.json:
         click.echo(json.dumps(ctx.env.metrics_source.get_metrics()))
         return
@@ -112,6 +111,7 @@ def list_metrics_cmd(ctx):
 @click.option("--lookback", type=int, default=60, help="Lookback in minutes")
 @click.pass_obj
 def get_metrics_data_cmd(ctx, component, metric_name, statistic, lookback):
+    # TODO: this should go through a logic class
     starttime = datetime.datetime.now() - datetime.timedelta(minutes=lookback)
 
     click.echo(f"Component: {component}")
