@@ -16,20 +16,25 @@ import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.DockerImageName;
 
-import com.rfs.common.ConnectionDetails;
+
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.IndexMetadata;
 import com.rfs.common.LuceneDocumentsReader;
+import com.rfs.common.OpenSearchClient;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.version_es_7_10.IndexMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 
+import reactor.core.publisher.Mono;
 
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.when;
 import static org.hamcrest.CoreMatchers.equalTo;
 
 import java.io.File;
@@ -92,7 +97,7 @@ public class SnapshotStateTest {
 
     @AfterEach
     public void tearDown() throws IOException {
-        System.out.println("Container Logs:\n" + clusterContainer.getLogs());
+        System.err.println("Container Logs:\n" + clusterContainer.getLogs());
 
         httpClient.close();
         clusterContainer.stop();
@@ -114,7 +119,7 @@ public class SnapshotStateTest {
         final var snapshotJson = "{\n" +
                 "  \"indices\": \"" + indexPattern + "\",\n" +
                 "  \"ignore_unavailable\": true,\n" +
-                "  \"include_global_state\": false\n" +
+                "  \"include_global_state\": true\n" +
                 "}";
 
         final var createSnapshotRequest = new HttpPut(clusterUrl + "/_snapshot/test-repo/" + snapshotName + "?wait_for_completion=true");
@@ -156,23 +161,26 @@ public class SnapshotStateTest {
             })
             .collect(Collectors.toList());
         
-        var sourceFileBasePath = new File("./unpacked");
+        var unpackedShardData = Path.of(Files.createTempDirectory("unpacked-shard-data").toFile().getAbsolutePath());
+
+        IOUtils.rm(unpackedShardData);
 
         for (final IndexMetadata.Data index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
                 var shardMetadata = new ShardMetadataFactory_ES_7_10().fromRepo(repo, snapShotProvider, snapshotName, index.getName(), shardId);
-                SnapshotShardUnpacker.unpack(repo, shardMetadata, Paths.get(sourceFileBasePath.getAbsolutePath()), Integer.MAX_VALUE);
+                SnapshotShardUnpacker.unpack(repo, shardMetadata, unpackedShardData, Integer.MAX_VALUE);
             }
         }
 
-        var targetConnection = mock(ConnectionDetails.class);
+        var client = mock(OpenSearchClient.class);
+        when(client.sendBulkRequest(any(), any())).thenReturn(Mono.empty());
 
         for (final IndexMetadata.Data index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
-                final var documents = new LuceneDocumentsReader().readDocuments(Paths.get(sourceFileBasePath.getAbsolutePath()), index.getName(), shardId);
+                final var documents = new LuceneDocumentsReader().readDocuments(unpackedShardData, index.getName(), shardId);
 
                 final var finalShardId = shardId; // Define in local context for the lambda
-                DocumentReindexer.reindex(index.getName(), documents, targetConnection)
+                DocumentReindexer.reindex(index.getName(), documents, client)
                     .doOnError(error -> logger.error("Error during reindexing: " + error))
                     .doOnSuccess(done -> logger.info("Reindexing completed for index " + index.getName() + ", shard " + finalShardId))
                     // Wait for the shard reindexing to complete before proceeding; fine in this demo script, but
@@ -180,6 +188,8 @@ public class SnapshotStateTest {
                     .block();
             }
         }
+
+        verifyNoInteractions(client);
 
         // PSUEDO: Attach sink to inspect all of the operations performed on the target cluster
 

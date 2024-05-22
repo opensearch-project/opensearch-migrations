@@ -15,8 +15,7 @@ public class DocumentReindexer {
     private static final Logger logger = LogManager.getLogger(DocumentReindexer.class);
     private static final int MAX_BATCH_SIZE = 1000; // Arbitrarily chosen
 
-    public static Mono<Void> reindex(String indexName, Flux<Document> documentStream, ConnectionDetails targetConnection) throws Exception {   
-        OpenSearchClient client = new OpenSearchClient(targetConnection);
+    public static Mono<Void> reindex(String indexName, Flux<Document> documentStream, OpenSearchClient client) throws Exception {   
 
         return documentStream
             .map(DocumentReindexer::convertDocumentToBulkSection)  // Convert each Document to part of a bulk operation
