@@ -71,7 +71,7 @@ export class OpenSearchDomainStack extends Stack {
         effect: Effect.ALLOW,
         principals: [new AnyPrincipal()],
         actions: ["es:*"],
-        resources: [`arn:aws:es:${this.region}:${this.account}:domain/${domainName}/*`]
+        resources: [`arn:${this.partition}:es:${this.region}:${this.account}:domain/${domainName}/*`]
       })
   }
 
