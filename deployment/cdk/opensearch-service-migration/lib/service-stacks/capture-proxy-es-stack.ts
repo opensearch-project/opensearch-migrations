@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {CpuArchitecture, PortMapping, Protocol, ServiceConnectService} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -28,7 +28,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: CaptureProxyESProps) {
         super(scope, id, props)
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`))
         ]
 
@@ -38,21 +38,11 @@ export class CaptureProxyESStack extends MigrationServiceCore {
             containerPort: 9200,
             protocol: Protocol.TCP
         }
-        const serviceConnectService: ServiceConnectService = {
-            portMappingName: "capture-proxy-es-connect",
-            dnsName: "capture-proxy-es",
-            port: 9200
-        }
         const esServicePort: PortMapping = {
             name: "es-connect",
             hostPort: 19200,
             containerPort: 19200,
             protocol: Protocol.TCP
-        }
-        const esServiceConnectService: ServiceConnectService = {
-            portMappingName: "es-connect",
-            dnsName: "capture-proxy-es",
-            port: 19200
         }
 
         const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.region, this.account, props.stage, props.defaultDeployId) : []
@@ -73,7 +63,6 @@ export class CaptureProxyESStack extends MigrationServiceCore {
                 // Set Elasticsearch port to 19200 to allow capture proxy at port 9200
                 "http.port": "19200"
             },
-            serviceConnectServices: [serviceConnectService, esServiceConnectService],
             serviceDiscoveryEnabled: true,
             serviceDiscoveryPort: 19200,
             cpuArchitecture: props.fargateCpuArch,

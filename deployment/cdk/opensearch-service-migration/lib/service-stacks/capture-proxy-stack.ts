@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
-import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {CpuArchitecture, PortMapping, Protocol, ServiceConnectService} from "aws-cdk-lib/aws-ecs";
+import {IVpc, Port, SecurityGroup} from "aws-cdk-lib/aws-ec2";
+import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -29,7 +29,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: CaptureProxyProps) {
         super(scope, id, props)
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`))
         ]
 
@@ -38,11 +38,6 @@ export class CaptureProxyStack extends MigrationServiceCore {
             hostPort: 9200,
             containerPort: 9200,
             protocol: Protocol.TCP
-        }
-        const serviceConnectService: ServiceConnectService = {
-            portMappingName: "capture-proxy-connect",
-            dnsName: "capture-proxy",
-            port: 9200
         }
 
         const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.region, this.account, props.stage, props.defaultDeployId) : []
@@ -60,7 +55,6 @@ export class CaptureProxyStack extends MigrationServiceCore {
             securityGroups: securityGroups,
             taskRolePolicies: servicePolicies,
             portMappings: [servicePort],
-            serviceConnectServices: [serviceConnectService],
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 2048,
