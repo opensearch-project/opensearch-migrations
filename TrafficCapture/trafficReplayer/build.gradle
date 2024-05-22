@@ -24,10 +24,11 @@ dependencies {
 
     implementation project(':TrafficCapture:captureProtobufs')
     implementation project(':coreUtilities')
-    implementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
-    runtimeOnly project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
-    runtimeOnly project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
-    runtimeOnly project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
+
+    implementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    runtimeOnly project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
+    runtimeOnly project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
+    runtimeOnly project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
     implementation group: 'com.beust', name: 'jcommander'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
@@ -49,24 +50,24 @@ dependencies {
     implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth'
     implementation 'org.apache.commons:commons-compress'
 
-    testFixturesImplementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    testFixturesImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     testFixturesImplementation project(':TrafficCapture:captureOffloader')
     testFixturesImplementation testFixtures(project(':TrafficCapture:captureOffloader'))
     testFixturesImplementation project(':TrafficCapture:captureProtobufs')
     testFixturesImplementation project(':coreUtilities')
     testFixturesImplementation testFixtures(project(path: ':coreUtilities'))
-    testFixturesImplementation testFixtures(project(path: ':TrafficCapture:testUtilities'))
+    testFixturesImplementation testFixtures(project(path: ':testHelperFixtures'))
 
     testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api'
     testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     testFixturesImplementation group: 'io.netty', name: 'netty-all'
     testFixturesImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
 
-    testImplementation testFixtures(project(path: ':TrafficCapture:testUtilities'))
+    testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
-    testImplementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
-    testImplementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
-    testImplementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
+    testImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
+    testImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
+    testImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
     testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'

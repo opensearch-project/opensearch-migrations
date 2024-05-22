@@ -9,14 +9,13 @@ plugins {
 }
 
 dependencies {
-    implementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
-    implementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformer')
+    implementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformer')
 
-    testImplementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonJoltMessageTransformer')
-    testImplementation project(':coreUtilities')
+    implementation group: 'io.burt', name: 'jmespath-core'
+
     testImplementation project(':TrafficCapture:trafficReplayer')
-    testImplementation testFixtures(project(path: ':coreUtilities'))
-    testImplementation testFixtures(project(path: ':TrafficCapture:testUtilities'))
+    testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))
 
     testImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'

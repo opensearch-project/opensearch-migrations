@@ -43,7 +43,7 @@ dependencies {
     implementation group: "com.google.protobuf", name: "protobuf-java"
 
     testImplementation project(':TrafficCapture:captureProtobufs')
-    testImplementation testFixtures(project(path: ':TrafficCapture:testUtilities'))
+    testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':TrafficCapture:captureOffloader'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation group: 'eu.rekawek.toxiproxy', name: 'toxiproxy-java'

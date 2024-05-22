@@ -10,7 +10,7 @@ plugins {
 
 dependencies {
     implementation project(":commonDependencyVersionConstraints")
-    implementation project(':TrafficCapture:replayerPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
     implementation group: 'com.bazaarvoice.jolt', name: 'jolt-core'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'

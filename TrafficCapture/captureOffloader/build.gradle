@@ -29,7 +29,7 @@ dependencies {
     implementation group: 'org.projectlombok', name: 'lombok'
     implementation group: 'org.slf4j', name: 'slf4j-api'
 
-    testImplementation testFixtures(project(path: ':TrafficCapture:testUtilities'))
+    testImplementation testFixtures(project(':testHelperFixtures'))
     testImplementation project(':coreUtilities')
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
