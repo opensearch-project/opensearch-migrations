@@ -4,22 +4,27 @@ import org.apache.http.client.methods.HttpPut;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
 import org.apache.http.impl.client.HttpClients;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 import org.apache.lucene.util.IOUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+import org.mockito.ArgumentCaptor;
 import org.testcontainers.containers.BindMode;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.DockerImageName;
 
-
+import com.fasterxml.jackson.core.JsonPointer;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.IndexMetadata;
+import com.rfs.common.IndexMetadata.Data;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.SnapshotShardUnpacker;
@@ -31,11 +36,13 @@ import reactor.core.publisher.Mono;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 import static org.hamcrest.CoreMatchers.equalTo;
+import static org.hamcrest.CoreMatchers.notNullValue;
 
 import java.io.File;
 import java.io.IOException;
@@ -45,11 +52,12 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.List;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 public class SnapshotStateTest {
 
      
-    private static final Logger logger = LoggerFactory.getLogger(SnapshotStateTest.class);
+    private static final Logger logger = LogManager.getLogger(SnapshotStateTest.class);
 
     private final File SNAPSHOT_DIR = new File("./snapshotRepo");
     private static GenericContainer<?> clusterContainer;
@@ -67,7 +75,6 @@ public class SnapshotStateTest {
                 .withEnv("discovery.type", "single-node")
                 .withEnv("path.repo", "/usr/share/elasticsearch/snapshots")
                 .withFileSystemBind(SNAPSHOT_DIR.getName(), "/usr/share/elasticsearch/snapshots", BindMode.READ_WRITE)
-                .withLogConsumer(new Slf4jLogConsumer(logger))
                 .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(1)));
 
         clusterContainer.start();
@@ -131,26 +138,23 @@ public class SnapshotStateTest {
         }
 
         // Read snapshot file contents
-        for (File file : SNAPSHOT_DIR.listFiles()) {
-            System.out.println(file);
+        var filesList = Stream.of(SNAPSHOT_DIR.listFiles())
+            .map(f -> f.getName())
+            .collect(Collectors.joining(", "));
+        logger.info("Snapshot directory contents:\n" + filesList);
+
+        var firstIndexPath = Paths.get(SNAPSHOT_DIR.getAbsolutePath(), "index-0");
+        if (Files.exists(firstIndexPath)) {
+            logger.info("First index metadata:\n" + Files.readAllLines(firstIndexPath));
         }
-        var snapshotFiles = Files.readAllLines(Paths.get(SNAPSHOT_DIR.getAbsolutePath(), "index-0"));
-        System.out.println("Snapshot Files: " + snapshotFiles);
     }
 
+    public List<IndexMetadata.Data> extraSnapshotIndexData(final String snapshotName, final Path unpackedShardDataDir) throws Exception {
+        IOUtils.rm(unpackedShardDataDir);
 
-    @Test
-    public void SingleSnapshot_SingleDocument() throws Exception {
-        // Setup
-        // PSUEDO: Create an 1 index with 1 document
-        createDocument("my-index", "doc1", "{\"foo\":\"bar\"}");
-        // PSUEDO: Save snapshot1
-        final var snapshotName = "snapshot-1";
-        takeSnapshot(snapshotName, "my-index");
-        // PSUEDO: Start RFS worker reader, point to snapshot1
-        var repo = new FileSystemRepo(Path.of(SNAPSHOT_DIR.getAbsolutePath()));
-        var snapShotProvider = new SnapshotRepoProvider_ES_7_10(repo);
-        List<IndexMetadata.Data> indices = snapShotProvider.getIndicesInSnapshot(snapshotName)
+        final var repo = new FileSystemRepo(Path.of(SNAPSHOT_DIR.getAbsolutePath()));
+        final var snapShotProvider = new SnapshotRepoProvider_ES_7_10(repo);
+        final List<IndexMetadata.Data> indices = snapShotProvider.getIndicesInSnapshot(snapshotName)
             .stream()
             .map(index -> {
                 try {
@@ -161,23 +165,19 @@ public class SnapshotStateTest {
             })
             .collect(Collectors.toList());
         
-        var unpackedShardData = Path.of(Files.createTempDirectory("unpacked-shard-data").toFile().getAbsolutePath());
-
-        IOUtils.rm(unpackedShardData);
-
         for (final IndexMetadata.Data index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
                 var shardMetadata = new ShardMetadataFactory_ES_7_10().fromRepo(repo, snapShotProvider, snapshotName, index.getName(), shardId);
-                SnapshotShardUnpacker.unpack(repo, shardMetadata, unpackedShardData, Integer.MAX_VALUE);
+                SnapshotShardUnpacker.unpack(repo, shardMetadata, unpackedShardDataDir, Integer.MAX_VALUE);
             }
         }
+        return indices;
+    }
 
-        var client = mock(OpenSearchClient.class);
-        when(client.sendBulkRequest(any(), any())).thenReturn(Mono.empty());
-
+    public void updateTargetCluster(final List<IndexMetadata.Data> indices, final Path unpackedShardDataDir, final OpenSearchClient client) throws Exception {
         for (final IndexMetadata.Data index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
-                final var documents = new LuceneDocumentsReader().readDocuments(unpackedShardData, index.getName(), shardId);
+                final var documents = new LuceneDocumentsReader().readDocuments(unpackedShardDataDir, index.getName(), shardId);
 
                 final var finalShardId = shardId; // Define in local context for the lambda
                 DocumentReindexer.reindex(index.getName(), documents, client)
@@ -188,14 +188,46 @@ public class SnapshotStateTest {
                     .block();
             }
         }
+    }
 
-        verifyNoInteractions(client);
+    public JsonNode asJson(final String data) throws Exception {
+        ObjectMapper mapper = new ObjectMapper();
+        return mapper.readTree(data);
+    }
+
+    @Test
+    public void SingleSnapshot_SingleDocument() throws Exception {
+        // Setup
+        // PSUEDO: Create an 1 index with 1 document
+        createDocument("my-index", "doc1", "{\"foo\":\"bar\"}");
+        // PSUEDO: Save snapshot1
+        final var snapshotName = "snapshot-1";
+        takeSnapshot(snapshotName, "my-index");
+        // PSUEDO: Start RFS worker reader, point to snapshot1
+        final var unpackedShardDataDir = Path.of(Files.createTempDirectory("unpacked-shard-data").toFile().getAbsolutePath());
+        final var indices = extraSnapshotIndexData(snapshotName, unpackedShardDataDir);
 
         // PSUEDO: Attach sink to inspect all of the operations performed on the target cluster
+        final var client = mock(OpenSearchClient.class);
+        when(client.sendBulkRequest(any(), any())).thenReturn(Mono.empty());
 
         // Action
         // PSUEDO: Start reindex on the worker
         // PSUEDO: Wait until the operations sink has settled with expected operations. 
+        updateTargetCluster(indices, unpackedShardDataDir, client);
+
+        final var bodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(client).sendBulkRequest(eq("my-index"), bodyCaptor.capture());
+
+        logger.info("Captured Body:\n" +bodyCaptor.getValue());
+
+        final var bulkRequest = asJson(bodyCaptor.getValue());
+        assertThat(bulkRequest, notNullValue());
+        assertThat(bulkRequest.toPrettyString(), bulkRequest.at(JsonPointer.valueOf("/index/_id/doc1")).asText(), equalTo("hello"));
+
+
+        verifyNoInteractions(client);
+
 
         // Validation
         // verify(targetConnection); Not viable
