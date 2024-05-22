@@ -45,7 +45,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
             port: 9200
         }
 
-        const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.region, this.account, props.stage, props.defaultDeployId) : []
+        const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId) : []
 
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
         const sourceClusterEndpoint = props.customSourceClusterEndpoint ? props.customSourceClusterEndpoint : "https://elasticsearch:9200"
