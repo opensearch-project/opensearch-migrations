@@ -10,46 +10,46 @@ import com.rfs.common.GlobalMetadata;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
 
-public class MetadataRunner {
-    private static final Logger logger = LogManager.getLogger(SnapshotRunner.class);
-    private final CmsClient cmsClient;
-    private final GlobalState globalState;
-    private final String snapshotName;
-    private final GlobalMetadata.Factory metadataFactory;
-    private final GlobalMetadataCreator_OS_2_11 metadataCreator;
-    private final Transformer transformer;
+public class MetadataRunner implements Runner {
+    private static final Logger logger = LogManager.getLogger(MetadataRunner.class);
+    private final MetadataStep.SharedMembers members;
 
     public MetadataRunner(GlobalState globalState, CmsClient cmsClient, String snapshotName, GlobalMetadata.Factory metadataFactory,
             GlobalMetadataCreator_OS_2_11 metadataCreator, Transformer transformer) {
-        this.globalState = globalState;
-        this.cmsClient = cmsClient;
-        this.snapshotName = snapshotName;
-        this.metadataFactory = metadataFactory;
-        this.metadataCreator = metadataCreator;
-        this.transformer = transformer;
+        this.members = new MetadataStep.SharedMembers(globalState, cmsClient, snapshotName, metadataFactory, metadataCreator, transformer);
     }
 
-    public void run() throws Exception {
-        logger.info("Checking if work remains in the Metadata Phase...");
-        Metadata metadataEntry = cmsClient.getMetadataEntry();
-        
-        if (metadataEntry == null || metadataEntry.status != MetadataStatus.COMPLETED) {
-            MetadataStep.SharedMembers members = new MetadataStep.SharedMembers(
-                globalState, 
-                cmsClient, 
-                snapshotName, 
-                metadataFactory, 
-                metadataCreator, 
-                transformer
-            );
-            WorkerStep nextState = new MetadataStep.EnterPhase(members);
+    @Override
+    public void run() {
+        WorkerStep nextStep = null;
+        try {
+            logger.info("Checking if work remains in the Metadata Phase...");
+            Metadata metadataEntry = members.cmsClient.getMetadataEntry();
+            
+            if (metadataEntry == null || metadataEntry.status != MetadataStatus.COMPLETED) {
+                nextStep = new MetadataStep.EnterPhase(members);
 
-            while (nextState != null) {
-                nextState.run();
-                nextState = nextState.nextStep();
+                while (nextStep != null) {
+                    nextStep.run();
+                    nextStep = nextStep.nextStep();
+                }
             }
+
+            logger.info("Metadata Phase is complete");
+        } catch (Exception e) {
+            logger.error("Metadata Migration Phase failed w/ an exception");
+            logger.error(
+                getPhaseFailureRecord(
+                    members.globalState.getPhase(), 
+                    nextStep, 
+                    members.cmsEntry, 
+                    e
+                ).toString()
+            );
+
+            throw e;
         }
 
-        logger.info("Metadata Phase is complete");
+        
     }    
 }

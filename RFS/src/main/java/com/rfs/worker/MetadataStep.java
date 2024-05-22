@@ -147,6 +147,7 @@ public class MetadataStep {
 
         @Override
         public WorkerStep nextStep() {
+            // Migrate the templates if we successfully created the CMS entry; otherwise, circle back to the beginning
             if (members.cmsEntry != null) {
                 return new MigrateTemplates(members);
             } else {
@@ -189,6 +190,7 @@ public class MetadataStep {
 
         @Override
         public WorkerStep nextStep() {
+            // Migrate the templates if we acquired the lease; otherwise, circle back to the beginning after a backoff
             if (members.cmsEntry != null) {
                 return new MigrateTemplates(members);
             } else {

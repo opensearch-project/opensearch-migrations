@@ -41,6 +41,11 @@ public class OpenSearchCmsEntry {
             node.put(FIELD_STATUS, status.toString());
             return node;
         }
+
+        @Override
+        public String toString() {
+            return this.toJson().toString();
+        }
     }
 
     public static class Metadata extends CmsEntry.Metadata {
@@ -83,6 +88,11 @@ public class OpenSearchCmsEntry {
             node.put(FIELD_LEASE_EXPIRY, leaseExpiry);
             node.put(FIELD_NUM_ATTEMPTS, numAttempts);
             return node;
+        }
+
+        @Override
+        public String toString() {
+            return this.toJson().toString();
         }
     }
 

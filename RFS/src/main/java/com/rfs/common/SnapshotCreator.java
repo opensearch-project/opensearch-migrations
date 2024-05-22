@@ -34,11 +34,11 @@ public abstract class SnapshotCreator {
         ObjectNode settings = getRequestBodyForRegisterRepo();
 
         // Register the repo; it's fine if it already exists
-        RestClient.Response response = client.registerSnapshotRepo(getRepoName(), settings);
-        if (response.code == HttpURLConnection.HTTP_OK || response.code == HttpURLConnection.HTTP_CREATED) {
+        try {
+            client.registerSnapshotRepo(getRepoName(), settings);
             logger.info("Snapshot repo registration successful");
-        } else {
-            logger.error("Snapshot repo registration failed");
+        } catch (Exception e) {
+            logger.error("Snapshot repo registration failed", e);
             throw new RepoRegistrationFailed(getRepoName());
         }
     }
@@ -51,17 +51,24 @@ public abstract class SnapshotCreator {
         body.put("include_global_state", true);
 
         // Create the snapshot; idempotent operation
-        RestClient.Response response = client.createSnapshot(getRepoName(), snapshotName, body);
-        if (response.code == HttpURLConnection.HTTP_OK || response.code == HttpURLConnection.HTTP_CREATED) {
+        try {
+            client.createSnapshot(getRepoName(), snapshotName, body);
             logger.info("Snapshot " + snapshotName + " creation initiated");
-        } else {
-            logger.error("Snapshot " + snapshotName + " creation failed");
+        } catch (Exception e) {
+            logger.error("Snapshot " + snapshotName + " creation failed", e);
             throw new SnapshotCreationFailed(snapshotName);
         }
     }
 
     public boolean isSnapshotFinished() {
-        RestClient.Response response = client.getSnapshotStatus(getRepoName(), snapshotName);
+        RestClient.Response response;
+        try {
+            response = client.getSnapshotStatus(getRepoName(), snapshotName);
+        } catch (Exception e) {
+            logger.error("Failed to get snapshot status", e);
+            throw new SnapshotStatusCheckFailed(snapshotName);
+        }
+
         if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
             logger.error("Snapshot " + snapshotName + " does not exist");
             throw new SnapshotDoesNotExist(snapshotName);
@@ -103,6 +110,12 @@ public abstract class SnapshotCreator {
     public static class SnapshotDoesNotExist extends RfsException {
         public SnapshotDoesNotExist(String snapshotName) {
             super("Snapshot " + snapshotName + " does not exist");
+        }
+    }
+
+    public static class SnapshotStatusCheckFailed extends RfsException {
+        public SnapshotStatusCheckFailed(String snapshotName) {
+            super("We were unable to retrieve the status of Snapshot " + snapshotName);
         }
     }
 

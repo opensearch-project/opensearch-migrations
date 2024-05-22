@@ -122,7 +122,7 @@ public class OpenSearchClient {
         String targetPath = "_snapshot/" + repoName + "/" + snapshotName;
         return client.getAsync(targetPath)
             .flatMap(resp -> {
-                if (resp.code == HttpURLConnection.HTTP_OK) {
+                if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_NOT_FOUND) {
                     return Mono.just(resp);
                 } else {
                     String errorMessage = "Could get status of snapshot: " + targetPath + ". Response Code: " + resp.code + ", Response Body: " + resp.body;

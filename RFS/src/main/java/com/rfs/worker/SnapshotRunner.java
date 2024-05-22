@@ -8,33 +8,45 @@ import com.rfs.cms.CmsEntry.Snapshot;
 import com.rfs.cms.CmsEntry.SnapshotStatus;
 import com.rfs.common.SnapshotCreator;
 
-public class SnapshotRunner {
+public class SnapshotRunner implements Runner {
     private static final Logger logger = LogManager.getLogger(SnapshotRunner.class);
-    private final CmsClient cmsClient;
-    private final GlobalState globalState;
-    private final SnapshotCreator snapshotCreator;
+    private final SnapshotStep.SharedMembers members;
 
     public SnapshotRunner(GlobalState globalState, CmsClient cmsClient, SnapshotCreator snapshotCreator) {
-        this.globalState = globalState;
-        this.cmsClient = cmsClient;
-        this.snapshotCreator = snapshotCreator;
+        this.members = new SnapshotStep.SharedMembers(globalState, cmsClient, snapshotCreator);
     }
 
-    public void run() throws Exception {
-        logger.info("Checking if work remains in the Snapshot Phase...");
-        Snapshot snapshotEntry = cmsClient.getSnapshotEntry(snapshotCreator.getSnapshotName());
-        
-        if (snapshotEntry == null || snapshotEntry.status != SnapshotStatus.COMPLETED) {
-            SnapshotStep.SharedMembers sharedMembers = new SnapshotStep.SharedMembers(globalState, cmsClient, snapshotCreator);
-            WorkerStep nextState = new SnapshotStep.EnterPhase(sharedMembers, snapshotEntry);
+    @Override
+    public void run() {
+        WorkerStep nextStep = null;
 
-            while (nextState != null) {
-                nextState.run();
-                nextState = nextState.nextStep();
+        try {
+            logger.info("Checking if work remains in the Snapshot Phase...");
+            Snapshot snapshotEntry = members.cmsClient.getSnapshotEntry(members.snapshotCreator.getSnapshotName());
+            
+            if (snapshotEntry == null || snapshotEntry.status != SnapshotStatus.COMPLETED) {
+                nextStep = new SnapshotStep.EnterPhase(members, snapshotEntry);
+
+                while (nextStep != null) {
+                    nextStep.run();
+                    nextStep = nextStep.nextStep();
+                }
             }
-        }
 
-        logger.info("Snapshot Phase is complete");
-    }
-    
+            logger.info("Snapshot Phase is complete");
+        } catch (Exception e) {
+            logger.error("Snapshot Phase failed w/ an exception");
+            logger.error(
+                getPhaseFailureRecord(
+                    members.globalState.getPhase(), 
+                    nextStep, 
+                    members.cmsEntry, 
+                    e
+                ).toString()
+            );
+
+            throw e;
+        }
+        
+    }    
 }
