@@ -3,11 +3,11 @@ plugins {
 }
 
 dependencies {
-    implementation project(':transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
-    testImplementation project(':trafficReplayer')
-    testImplementation testFixtures(project(path: ':testUtilities'))
-    testImplementation testFixtures(project(path: ':trafficReplayer'))
+    testImplementation project(':TrafficCapture:trafficReplayer')
+    testImplementation testFixtures(project(path: ':testHelperFixtures'))
+    testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))
 
     testImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     testImplementation group: 'com.google.guava', name: 'guava'

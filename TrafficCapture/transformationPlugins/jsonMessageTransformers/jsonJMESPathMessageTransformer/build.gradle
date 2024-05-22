@@ -9,12 +9,12 @@ plugins {
 }
 
 dependencies {
-    implementation project(':transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
     implementation group: 'io.burt', name: 'jmespath-core'
     implementation group: 'org.slf4j', name:"slf4j-api"
 
-    testImplementation project(':trafficReplayer')
+    testImplementation project(':TrafficCapture:trafficReplayer')
     testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
     testRuntimeOnly group:'org.junit.jupiter', name:'junit-jupiter-engine'
 }

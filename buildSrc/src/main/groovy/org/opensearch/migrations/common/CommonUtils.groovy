@@ -5,11 +5,10 @@ import org.gradle.api.Project
 import com.bmuschko.gradle.docker.tasks.image.Dockerfile
 
 class CommonUtils {
-    static def calculateDockerHash(def projectName, def project) {
+    static def calculateDockerHash(def files) {
         def MessageDigest = java.security.MessageDigest
         def digest = MessageDigest.getInstance('SHA-256')
-        project.fileTree("src/main/docker/${projectName}")
-                .each { file ->
+        files.each { file ->
                     file.withInputStream { is ->
                         byte[] buffer = new byte[1024]
                         int read
@@ -21,39 +20,45 @@ class CommonUtils {
         return digest.digest().encodeHex().toString()
     }
 
-    static def copyArtifact(Project project, String projectName) {
-        def destBuildDir = "build/docker/${projectName}"
+    static def copyArtifactFromProjectToProjectsDockerStaging(Project dockerBuildProject, Project project) {
+        def destBuildDir = "build/docker/${project.name}"
         def destDir = "${destBuildDir}/jars"
-        copyArtifact(project, projectName, projectName, destDir)
+        copyArtifactFromProjectToProjectsDockerStaging(dockerBuildProject, project, project.name, destDir)
     }
-    static def copyArtifact(Project project, String artifactProjectName, String destProjectName, String destDir) {
+    static def copyArtifactFromProjectToProjectsDockerStaging(Project dockerBuildProject, Project sourceArtifactProject,
+                                                              String destProjectName, String destDir) {
         // Sync performs a copy, while also deleting items from the destination directory that are not in the source directory
         // In our case, jars of old versions were getting "stuck" and causing conflicts when the program was run
-        project.task("copyArtifact_${destProjectName}", type: Sync) {
-            dependsOn ":${artifactProjectName}:build"
-            dependsOn ":${artifactProjectName}:jar"
+        var dstCopyTask = dockerBuildProject.task("copyArtifact_${destProjectName}", type: Sync) {
             if (destProjectName == "trafficCaptureProxyServerTest") {
                 include "*.properties"
             }
-            from { project.project(":${artifactProjectName}").configurations.findByName("runtimeClasspath").files }
-            from { project.project(":${artifactProjectName}").tasks.getByName('jar') }
+            from { sourceArtifactProject.configurations.findByName("runtimeClasspath").files }
+            from { sourceArtifactProject.tasks.getByName('jar') }
             into destDir
             include "*.jar"
             duplicatesStrategy = 'WARN'
         }
+        dstCopyTask.dependsOn(sourceArtifactProject.tasks.named("assemble"))
+        dstCopyTask.dependsOn(sourceArtifactProject.tasks.named("build"))
     }
 
-    static def createDockerfile(Project project, String projectName, Map<String, String> baseImageProjectOverrides, Map<String, String> dockerFilesForExternalServices) {
+    static def createDockerfile(Project dockerBuildProject, Project sourceArtifactProject,
+                                Map<String, String> baseImageProjectOverrides,
+                                Map<String, String> dockerFilesForExternalServices) {
+        def projectName = sourceArtifactProject.name;
         def dockerBuildDir = "build/docker/${projectName}"
-        project.task("createDockerfile_${projectName}", type: Dockerfile) {
-            destFile = project.file("${dockerBuildDir}/Dockerfile")
+        dockerBuildProject.task("createDockerfile_${projectName}", type: Dockerfile) {
+            destFile = dockerBuildProject.file("${dockerBuildDir}/Dockerfile")
             dependsOn "copyArtifact_${projectName}"
             def baseImageOverrideProjectName = baseImageProjectOverrides.get(projectName)
             if (baseImageOverrideProjectName) {
                 def dependentDockerImageName = dockerFilesForExternalServices.get(baseImageOverrideProjectName)
-                def hashNonce = CommonUtils.calculateDockerHash(baseImageOverrideProjectName, project)
+                def hashNonce = CommonUtils.calculateDockerHash(
+                        dockerBuildProject.fileTree("src/main/docker/${baseImageOverrideProjectName}"))
                 from "migrations/${dependentDockerImageName}:${hashNonce}"
-                dependsOn "buildDockerImage_${baseImageOverrideProjectName}"
+                def dependencyName = "buildDockerImage_${baseImageOverrideProjectName}";
+                dependsOn dependencyName
                 runCommand("sed -i -e \"s|mirrorlist=|#mirrorlist=|g\" /etc/yum.repos.d/CentOS-* ;  sed -i -e \"s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g\" /etc/yum.repos.d/CentOS-*")
             } else {
                 from 'amazoncorretto:11-al2023-headless'
