@@ -1,6 +1,5 @@
 from datetime import datetime
 from enum import Enum
-import json
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3

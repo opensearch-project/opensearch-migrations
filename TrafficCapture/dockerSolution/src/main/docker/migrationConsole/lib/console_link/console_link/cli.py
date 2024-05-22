@@ -7,7 +7,7 @@ from console_link.logic.instantiation import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
 
 
-#################### UNIVERSAL #################### noqa: E266
+# ################### UNIVERSAL ####################
 
 
 class Context(object):
@@ -28,7 +28,7 @@ def cli(ctx, config_file, json):
     ctx.obj.json = json
 
 
-###################### CLUSTERS ###################  noqa: E266
+# ##################### CLUSTERS ###################
 
 
 @cli.group(name="clusters")
@@ -65,7 +65,7 @@ def cat_indices_cmd(ctx):
     pass
 
 
-###################### REPLAYER ###################  noqa: E266
+# ##################### REPLAYER ###################
 
 
 @cli.group(name="replayer")
@@ -81,8 +81,7 @@ def start_replayer_cmd(ctx):
     logic.services.start_replayer(ctx.env.replayer)
 
 
-###################### METRICS ###################  noqa: E266
-
+# ##################### METRICS ###################
 
 @cli.group(name="metrics")
 @click.pass_obj
@@ -111,7 +110,7 @@ def list_metrics_cmd(ctx):
 @click.option("--lookback", type=int, default=60, help="Lookback in minutes")
 @click.pass_obj
 def get_metrics_data_cmd(ctx, component, metric_name, statistic, lookback):
-    # TODO: this should go through a logic class
+    # TODO: this should go through a logic function, not directly to the metrics source
     starttime = datetime.datetime.now() - datetime.timedelta(minutes=lookback)
 
     click.echo(f"Component: {component}")
