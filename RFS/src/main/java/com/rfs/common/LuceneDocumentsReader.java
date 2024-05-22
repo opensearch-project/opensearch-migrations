@@ -2,6 +2,7 @@ package com.rfs.common;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.stream.Stream;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -43,6 +44,21 @@ public class LuceneDocumentsReader {
                 }
             }
         );
+    }
+
+    public Stream<Document> readDocuments2(Path luceneFilesBasePath, String indexName, int shardId) throws Exception {
+        final var indexDirectoryPath = luceneFilesBasePath.resolve(indexName).resolve(String.valueOf(shardId));
+        try (final var indexReader = openIndexReader(indexDirectoryPath)) {
+            return indexReader.leaves().stream().flatMap(leafContext -> {
+                final var reader = leafContext.reader();
+                final var liveDocs = reader.getLiveDocs();
+                final Stream<Document> docs = Stream.iterate(0, i -> i + 1)
+                        .limit(reader.maxDoc())
+                        .filter(i -> liveDocs == null || liveDocs.get(i)) // Filter out deleted documents
+                        .map(i -> getDocument(reader, i));
+                return docs;
+            });
+        }
     }
 
     protected IndexReader openIndexReader(Path indexDirectoryPath) throws IOException {
