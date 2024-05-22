@@ -44,9 +44,6 @@ export class OtelCollectorSidecar {
             containerName: "otel-collector",
             command: ["--config=/etc/otel-config-aws.yaml"],
             portMappings: [otelCollectorPort, otelCollectorHealthcheckPort],
-            environment: {
-                "OTEL_CONFIG": "/etc/otel/config.yaml"
-            },
             logging: LogDrivers.awsLogs({
                 streamPrefix: "otel-collector-logs",
                 logGroup: serviceLogGroup,
