@@ -28,6 +28,7 @@ public class RfsContexts {
                                      IScopedInstrumentationAttributes enclosingScope,
                                      String label) {
             super(rootScope);
+            initializeSpan(rootScope);
             this.enclosingScope = enclosingScope;
             this.label = label;
         }
@@ -65,6 +66,7 @@ public class RfsContexts {
                                                   IScopedInstrumentationAttributes enclosingScope,
                                                   String label) {
             super(rootScope);
+            initializeSpan(rootScope);
             this.enclosingScope = enclosingScope;
             this.label = label;
         }
@@ -110,6 +112,7 @@ public class RfsContexts {
 
         protected CreateSnapshotContext(RootRfsContext rootScope) {
             super(rootScope);
+            initializeSpan(rootScope);
         }
 
         @Override
@@ -158,6 +161,7 @@ public class RfsContexts {
 
         protected ClusterMetadataContext(RootRfsContext rootScope) {
             super(rootScope);
+            initializeSpan(rootScope);
         }
 
         @Override
@@ -208,6 +212,7 @@ public class RfsContexts {
         protected MigrateIndexTemplateContext(RootRfsContext rootScope,
                                               IRfsContexts.IClusterMetadataContext enclosingScope) {
             super(rootScope, enclosingScope);
+            initializeSpan(rootScope);
         }
 
         @Override
@@ -247,6 +252,7 @@ public class RfsContexts {
 
         protected CreateIndexContext(RootRfsContext rootScope) {
             super(rootScope);
+            initializeSpan(rootScope);
         }
 
         @Override
@@ -291,6 +297,7 @@ public class RfsContexts {
 
         protected DocumentReindexContext(RootRfsContext rootScope) {
             super(rootScope);
+            initializeSpan(rootScope);
         }
 
         @Override
