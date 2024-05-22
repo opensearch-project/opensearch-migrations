@@ -1,5 +1,6 @@
 package com.rfs.integration;
 
+import org.apache.http.client.methods.HttpDelete;
 import org.apache.http.client.methods.HttpPut;
 import org.apache.http.entity.StringEntity;
 import org.apache.http.impl.client.CloseableHttpClient;
@@ -7,7 +8,6 @@ import org.apache.http.impl.client.HttpClients;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.util.IOUtils;
-import org.hamcrest.Matchers;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -35,19 +35,19 @@ import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 
 import reactor.core.publisher.Mono;
 
-import static org.hamcrest.MatcherAssert.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static org.hamcrest.CoreMatchers.allOf;
+import static org.hamcrest.CoreMatchers.anyOf;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.CoreMatchers.notNullValue;
+import static org.hamcrest.CoreMatchers.not;
+import static org.hamcrest.MatcherAssert.assertThat;
 
 import java.io.File;
 import java.io.IOException;
@@ -117,12 +117,20 @@ public class SnapshotStateTest {
     }
 
     public void createDocument(final String index, final String docId, final String body) throws IOException {
-        var indexDocumentRequset = new HttpPut(clusterUrl + "/" + index + "/_doc/" + docId);
-        indexDocumentRequset.setEntity(new StringEntity(body));
-        indexDocumentRequset.setHeader("Content-Type", "application/json");
+        var indexDocumentRequest = new HttpPut(clusterUrl + "/" + index + "/_doc/" + docId);
+        indexDocumentRequest.setEntity(new StringEntity(body));
+        indexDocumentRequest.setHeader("Content-Type", "application/json");
 
-        try (var response = httpClient.execute(indexDocumentRequset)) {
-            assertThat(response.getStatusLine().getStatusCode(), equalTo(201));
+        try (var response = httpClient.execute(indexDocumentRequest)) {
+            assertThat(response.getStatusLine().getStatusCode(), anyOf(equalTo(201), equalTo(200)));
+        }
+    }
+
+    public void deleteDocument(final String index, final String docId) throws IOException {
+        var deleteDocumentRequest = new HttpDelete(clusterUrl + "/" + index + "/_doc/" + docId);
+
+        try (var response = httpClient.execute(deleteDocumentRequest)) {
+            assertThat(response.getStatusLine().getStatusCode(), equalTo(200));
         }
     }
 
@@ -240,48 +248,87 @@ public class SnapshotStateTest {
         verifyNoMoreInteractions(client);
     }
 
-    public void MultiSnapshot_SingleDocument_Then_DeletedDocument() {
+    @Test
+    public void MultiSnapshot_SingleDocument_Then_DeletedDocument() throws Exception {
         // Setup
         // PSUEDO: Create an 1 index with 1 document
+        final var indexName = "my-index-with-deleted-item";
+        final var document1Id = "doc1-going-to-be-deleted";
+        final var document1Body = "{\"foo\":\"bar\"}";
+        createDocument(indexName, document1Id, document1Body);
         // PSUEDO: Delete the document
+        deleteDocument(indexName, document1Id);
         // PSUEDO: Save snapshot1
-        // PSUEDO: Start RFS worker reader, point to the snapshot1
+        final var snapshotName = "snapshot-delete-item";
+        takeSnapshot(snapshotName, indexName);
+        // PSUEDO: Start RFS worker reader, point to snapshot1
+        final var unpackedShardDataDir = Path.of(Files.createTempDirectory("unpacked-shard-data").toFile().getAbsolutePath());
+        final var indices = extraSnapshotIndexData(snapshotName, unpackedShardDataDir);
+
         // PSUEDO: Attach sink to inspect all of the operations performed on the target cluster
+        final var client = mock(OpenSearchClient.class);
+        when(client.sendBulkRequest(any(), any())).thenReturn(Mono.empty());
 
         // Action
         // PSUEDO: Start reindex on the worker
         // PSUEDO: Wait until the operations sink has settled with expected operations. 
+        updateTargetCluster(indices, unpackedShardDataDir, client);
 
         // Validation
         // PSUEDO: Read the actions from the sink
+        final var bodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(client, times(1)).sendBulkRequest(eq(indexName), bodyCaptor.capture());
         // PSUEDO: Flush all read-only operations from the sink, such as refresh, searchs, etc...
         // PSUEDO: Scan the sink for ONLY the following:
         //    PSUEDO: Should see create index
         //    PSUEDO: Should see more than one refresh index calls (other misc expected write operations)
+        final var bulkRequestRaw = bodyCaptor.getValue();
+        assertThat(bulkRequestRaw, not(anyOf(containsString(document1Id), containsString(document1Body))));
 
         // PSUEDO: Verify no other items were present in the sync
+        verifyNoMoreInteractions(client);
     }
 
-    public void MultiSnapshot_SingleDocument_Then_UpdateDocument() {
+    @Test
+    public void MultiSnapshot_SingleDocument_Then_UpdateDocument() throws Exception {
         // Setup
         // PSUEDO: Create an 1 index with 1 document
+        final var indexName = "my-index-with-updated-item";
+        final var document1Id = "doc1-going-to-be-updated";
+        final var document1BodyOrginal = "{\"foo\":\"bar\"}";
+        createDocument(indexName, document1Id, document1BodyOrginal);
         // PSUEDO: Update the 1 document
+        final var document1BodyUpdated = "{\"actor\":\"troy mcclure\"}";
+        createDocument(indexName, document1Id, document1BodyUpdated);
         // PSUEDO: Save snapshot1
+        final var snapshotName = "snapshot-delete-item";
+        takeSnapshot(snapshotName, indexName);
         // PSUEDO: Start RFS worker reader, point to the snapshot1
+        final var unpackedShardDataDir = Path.of(Files.createTempDirectory("unpacked-shard-data").toFile().getAbsolutePath());
+        final var indices = extraSnapshotIndexData(snapshotName, unpackedShardDataDir);
+
         // PSUEDO: Attach sink to inspect all of the operations performed on the target cluster
+        final var client = mock(OpenSearchClient.class);
+        when(client.sendBulkRequest(any(), any())).thenReturn(Mono.empty());
 
         // Action
         // PSUEDO: Start reindex on the worker
         // PSUEDO: Wait until the operations sink has settled with expected operations. 
+        updateTargetCluster(indices, unpackedShardDataDir, client);
 
         // Validation
         // PSUEDO: Read the actions from the sink
+        final var bodyCaptor = ArgumentCaptor.forClass(String.class);
+        verify(client, times(1)).sendBulkRequest(eq(indexName), bodyCaptor.capture());
         // PSUEDO: Flush all read-only operations from the sink, such as refresh, searchs, etc...
         // PSUEDO: Scan the sink for ONLY the following:
         //    PSUEDO: Should see create index
         //    PSUEDO: Should see bulk put document, with single document which is updated version
+        final var bulkRequestRaw = bodyCaptor.getValue();
+        assertThat(bulkRequestRaw, allOf(containsString(document1Id), containsString(document1BodyUpdated), not(containsString(document1BodyOrginal))));
         //    PSUEDO: Should see more than one refresh index calls (other misc expected write operations)
 
         // PSUEDO: Verify no other items were present in the sync
+        verifyNoMoreInteractions(client);
     }
 }
