@@ -13,7 +13,7 @@ configurations {
 }
 
 dependencies {
-    implementation project(":commonDependencyVersionConstraints")
+    implementation project(":common:dependencyVersionConstraints")
 
     def openSearch = '2.11.1'
     implementation "org.opensearch.plugin:opensearch-security:${openSearch}.0"
@@ -30,7 +30,7 @@ dependencies {
     implementation project(':TrafficCapture:captureOffloader')
     implementation project(':TrafficCapture:nettyWireLogging')
     implementation project(':TrafficCapture:captureKafkaOffloader')
-    implementation project(':coreUtilities')
+    implementation project(':common:coreUtilities')
 
     implementation group: 'io.netty', name: 'netty-all'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
@@ -43,9 +43,9 @@ dependencies {
     implementation group: "com.google.protobuf", name: "protobuf-java"
 
     testImplementation project(':TrafficCapture:captureProtobufs')
-    testImplementation testFixtures(project(path: ':testHelperFixtures'))
+    testImplementation testFixtures(project(path: ':common:testHelperFixtures'))
     testImplementation testFixtures(project(path: ':TrafficCapture:captureOffloader'))
-    testImplementation testFixtures(project(path: ':coreUtilities'))
+    testImplementation testFixtures(project(path: ':common:coreUtilities'))
     testImplementation group: 'eu.rekawek.toxiproxy', name: 'toxiproxy-java'
     testImplementation group: 'org.testcontainers', name: 'junit-jupiter'
     testImplementation group: 'org.testcontainers', name: 'kafka'

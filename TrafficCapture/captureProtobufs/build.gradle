@@ -12,7 +12,7 @@ repositories {
 }
 
 dependencies {
-    api project(":commonDependencyVersionConstraints")
+    api project(":common:dependencyVersionConstraints")
     api group: 'com.google.protobuf', name: 'protobuf-java', version: '3.22.2'
 }
 

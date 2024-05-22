@@ -20,10 +20,10 @@ repositories {
 }
 
 dependencies {
-    implementation project(":commonDependencyVersionConstraints")
+    implementation project(":common:dependencyVersionConstraints")
 
     implementation project(':TrafficCapture:captureProtobufs')
-    implementation project(':coreUtilities')
+    implementation project(':common:coreUtilities')
 
     implementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     runtimeOnly project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
@@ -54,17 +54,17 @@ dependencies {
     testFixturesImplementation project(':TrafficCapture:captureOffloader')
     testFixturesImplementation testFixtures(project(':TrafficCapture:captureOffloader'))
     testFixturesImplementation project(':TrafficCapture:captureProtobufs')
-    testFixturesImplementation project(':coreUtilities')
-    testFixturesImplementation testFixtures(project(path: ':coreUtilities'))
-    testFixturesImplementation testFixtures(project(path: ':testHelperFixtures'))
+    testFixturesImplementation project(':common:coreUtilities')
+    testFixturesImplementation testFixtures(project(path: ':common:coreUtilities'))
+    testFixturesImplementation testFixtures(project(path: ':common:testHelperFixtures'))
 
     testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api'
     testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     testFixturesImplementation group: 'io.netty', name: 'netty-all'
     testFixturesImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
 
-    testImplementation testFixtures(project(path: ':testHelperFixtures'))
-    testImplementation testFixtures(project(path: ':coreUtilities'))
+    testImplementation testFixtures(project(path: ':common:testHelperFixtures'))
+    testImplementation testFixtures(project(path: ':common:coreUtilities'))
     testImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
     testImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     testImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')

@@ -20,7 +20,7 @@ def calculateDockerHash = { projectName ->
 }
 
 dependencies {
-    api project(":commonDependencyVersionConstraints")
+    api project(":common:dependencyVersionConstraints")
 
     implementation project(':TrafficCapture:trafficCaptureProxyServer')
     compileOnly 'org.projectlombok:lombok:1.18.28'

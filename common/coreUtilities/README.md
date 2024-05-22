@@ -57,7 +57,7 @@ any specific metric structures in order to add activities.  Instead, contexts ex
 components that they're designed to work with.
 
 For example, the
-[RequestTransformationContext](../TrafficCapture/trafficReplayer/src/main/java/org/opensearch/migrations/replay/tracing/ReplayContexts.java)
+[RequestTransformationContext](../../TrafficCapture/trafficReplayer/src/main/java/org/opensearch/migrations/replay/tracing/ReplayContexts.java)
 class tracks network activity and performance of the http transformation code. That class manages how those
 interactions and values are converted to otel instrumentation. That frees application code from implementation details,
 makes the application cleaner, and allows all instrumentation concerns to be consolidated.

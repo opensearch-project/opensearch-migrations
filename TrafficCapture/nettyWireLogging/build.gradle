@@ -8,10 +8,10 @@ plugins {
 }
 
 dependencies {
-    api project(":commonDependencyVersionConstraints")
+    api project(":common:dependencyVersionConstraints")
 
     implementation project(':TrafficCapture:captureOffloader')
-    implementation project(':coreUtilities')
+    implementation project(':common:coreUtilities')
     api            group: 'io.netty', name: 'netty-buffer'
     api            group: 'io.netty', name: 'netty-codec-http'
     api            group: 'io.netty', name: 'netty-handler'
@@ -28,6 +28,6 @@ dependencies {
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
     testImplementation group: 'org.slf4j', name: 'slf4j-api'
 
-    testImplementation testFixtures(project(path: ':testHelperFixtures'))
-    testImplementation testFixtures(project(path: ':coreUtilities'))
+    testImplementation testFixtures(project(path: ':common:testHelperFixtures'))
+    testImplementation testFixtures(project(path: ':common:coreUtilities'))
 }

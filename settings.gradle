@@ -38,9 +38,9 @@ void addSubProjects(String path, File dir) {
 }
 
 rootProject.name = 'OpensearchMigrations'
-include 'commonDependencyVersionConstraints'
-include 'coreUtilities'
-include 'testHelperFixtures'
+include 'common:dependencyVersionConstraints'
+include ':common:coreUtilities'
+include ':common:testHelperFixtures'
 include 'RFS'
 include 'TrafficCapture:captureKafkaOffloader'
 include 'TrafficCapture:captureOffloader'

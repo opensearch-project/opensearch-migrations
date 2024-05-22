@@ -246,7 +246,7 @@ the source/target status code (rounded down to the last hundred; i.e. a status c
 
 Other metrics will show latencies, the number of requests, unique connections at a time and more.  Low-level and 
 high-level metrics are being improved and added.  For the latest information, see the
-[README.md](../../../coreUtilities/README.md).
+[README.md](../../../common/coreUtilities/README.md).
 
 Along with metrics, traces are emitted by the replayer and the proxy (ehen proxy is run with metrics enabled, e.g. by 
 launching with --otelCollectorEndpoint set to the otel-collector deployed as part of the Migration Assistant ECS 

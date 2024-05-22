@@ -13,10 +13,10 @@ dependencies {
     implementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformer')
 
     testImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformer')
-    testImplementation project(':coreUtilities')
+    testImplementation project(':common:coreUtilities')
     testImplementation project(':TrafficCapture:trafficReplayer')
-    testImplementation testFixtures(project(path: ':coreUtilities'))
-    testImplementation testFixtures(project(path: ':testHelperFixtures'))
+    testImplementation testFixtures(project(path: ':common:coreUtilities'))
+    testImplementation testFixtures(project(path: ':common:testHelperFixtures'))
     testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))
 
     testImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'

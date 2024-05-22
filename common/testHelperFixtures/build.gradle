@@ -29,7 +29,7 @@ repositories {
 }
 
 dependencies {
-    api project(":commonDependencyVersionConstraints")
+    api project(":common:dependencyVersionConstraints")
 
     testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     testFixturesImplementation group: 'com.google.guava', name: 'guava'

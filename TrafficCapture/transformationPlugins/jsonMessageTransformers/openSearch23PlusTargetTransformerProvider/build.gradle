@@ -6,7 +6,7 @@ dependencies {
     implementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
     testImplementation project(':TrafficCapture:trafficReplayer')
-    testImplementation testFixtures(project(path: ':testHelperFixtures'))
+    testImplementation testFixtures(project(path: ':common:testHelperFixtures'))
     testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))
 
     testImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
