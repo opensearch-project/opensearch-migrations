@@ -43,7 +43,7 @@ public class ElasticsearchContainer implements AutoCloseable {
 
     @Override
     public void close() throws Exception {
-        logger.info("Starting ElasticsearchContainer version:" + version.prettyName);
+        logger.info("Stopping ElasticsearchContainer version:" + version.prettyName);
         logger.debug("Instance logs:\n" + container.getLogs());
         container.stop();
     }
