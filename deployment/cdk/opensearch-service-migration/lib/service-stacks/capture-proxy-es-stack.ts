@@ -1,12 +1,13 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {CpuArchitecture, PortMapping, Protocol, ServiceConnectService} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {StreamingSourceType} from "../streaming-source-type";
 import {createMSKProducerIAMPolicies} from "../common-utilities";
+import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 
 
 export interface CaptureProxyESProps extends StackPropsExt {
@@ -27,7 +28,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: CaptureProxyESProps) {
         super(scope, id, props)
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`))
         ]
 
@@ -37,29 +38,19 @@ export class CaptureProxyESStack extends MigrationServiceCore {
             containerPort: 9200,
             protocol: Protocol.TCP
         }
-        const serviceConnectService: ServiceConnectService = {
-            portMappingName: "capture-proxy-es-connect",
-            dnsName: "capture-proxy-es",
-            port: 9200
-        }
         const esServicePort: PortMapping = {
             name: "es-connect",
             hostPort: 19200,
             containerPort: 19200,
             protocol: Protocol.TCP
         }
-        const esServiceConnectService: ServiceConnectService = {
-            portMappingName: "es-connect",
-            dnsName: "capture-proxy-es",
-            port: 19200
-        }
 
-        const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.region, this.account, props.stage, props.defaultDeployId) : []
+        const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId) : []
 
         let brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
         let command = `/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy --kafkaConnection ${brokerEndpoints} --destinationUri https://localhost:19200 --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`
         command = props.streamingSourceType === StreamingSourceType.AWS_MSK ? command.concat(" --enableMSKAuth") : command
-        command = props.otelCollectorEnabled ? command.concat(" --otelCollectorEndpoint http://otel-collector:4317") : command
+        command = props.otelCollectorEnabled ? command.concat(` --otelCollectorEndpoint http://localhost:${OtelCollectorSidecar.OTEL_CONTAINER_PORT}`) : command
         command = props.extraArgs ? command.concat(` ${props.extraArgs}`) : command
         this.createService({
             serviceName: "capture-proxy-es",
@@ -72,7 +63,6 @@ export class CaptureProxyESStack extends MigrationServiceCore {
                 // Set Elasticsearch port to 19200 to allow capture proxy at port 9200
                 "http.port": "19200"
             },
-            serviceConnectServices: [serviceConnectService, esServiceConnectService],
             serviceDiscoveryEnabled: true,
             serviceDiscoveryPort: 19200,
             cpuArchitecture: props.fargateCpuArch,

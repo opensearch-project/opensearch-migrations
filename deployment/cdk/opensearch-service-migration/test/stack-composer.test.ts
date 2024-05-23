@@ -3,7 +3,7 @@ import {OpenSearchDomainStack} from "../lib/opensearch-domain-stack";
 import {createStackComposer, createStackComposerOnlyPassedContext} from "./test-utils";
 import {App} from "aws-cdk-lib";
 import {StackComposer} from "../lib/stack-composer";
-import {KafkaStack, OpenSearchContainerStack, OtelCollectorStack} from "../lib";
+import {KafkaStack, OpenSearchContainerStack} from "../lib";
 
 test('Test empty string provided for a parameter which has a default value, uses the default value', () => {
 
@@ -235,8 +235,6 @@ test('Test that loading context via a file is successful', () => {
     const stacks =  createStackComposerOnlyPassedContext(contextOptions)
     const kafkaContainerStack = stacks.stacks.filter((s) => s instanceof KafkaStack)
     expect(kafkaContainerStack.length).toEqual(1)
-    const otelContainerStack = stacks.stacks.filter((s) => s instanceof OtelCollectorStack)
-    expect(otelContainerStack.length).toEqual(0)
 })
 
 test('Test that loading context via a file errors if file does not exist', () => {

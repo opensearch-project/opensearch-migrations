@@ -21,30 +21,19 @@ prepare_source_nodes_for_capture () {
   # Substitute @ to be used instead of ',' for cases where ',' would disrupt formatting of arguments, i.e. AWS SSM commands
   kafka_brokers=$(echo "$kafka_brokers" | tr ',' '@')
   kafka_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/trafficStreamSourceAccessSecurityGroupId" --query 'Parameter.Value' --output text)
-  otel_sg_id=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/otelCollectorSGId" --query 'Parameter.Value' --output text)
   for id in "${instance_ids[@]}"
   do
     echo "Performing capture proxy source node setup for: $id"
     group_ids=($(aws ec2 describe-instance-attribute --instance-id $id --attribute groupSet  --query 'Groups[*].GroupId' --output text))
     kafka_sg_match=false
-    otel_sg_match=false
     for group_id in "${group_ids[@]}"; do
         if [[ $group_id = "$kafka_sg_id" ]]; then
             kafka_sg_match=true
         fi
-        if [[ $group_id = "$otel_sg_id" ]]; then
-            otel_sg_match=true
-        fi
     done
-    if [ $kafka_sg_match = false ] || [ $otel_sg_match = false ]; then
-      if [[ $kafka_sg_match = false ]]; then
-          echo "Adding security group: $kafka_sg_id to node: $id"
-          group_ids+=("$kafka_sg_id")
-      fi
-      if [[ $otel_sg_match = false ]]; then
-          echo "Adding security group: $otel_sg_id to node: $id"
-          group_ids+=("$otel_sg_id")
-      fi
+    if [[ $kafka_sg_match = false ]]; then
+      echo "Adding security group: $kafka_sg_id to node: $id"
+      group_ids+=("$kafka_sg_id")
       printf -v group_ids_string '%s ' "${group_ids[@]}"
       aws ec2 modify-instance-attribute --instance-id $id --groups $group_ids_string
     fi
@@ -293,7 +282,7 @@ echo "VPC ID: $vpc_id"
 
 # Replace source dependent placeholders in CDK context
 sed -i -e "s/<VPC_ID>/$vpc_id/g" "$GEN_CONTEXT_FILE"
-sed -i -e "s/<SOURCE_CLUSTER_ENDPOINT>/http://${source_endpoint}:9200/g" "$GEN_CONTEXT_FILE"
+sed -i -e "s/<SOURCE_CLUSTER_ENDPOINT>/http:\/\/${source_endpoint}:9200/g" "$GEN_CONTEXT_FILE"
 
 if [ "$CLEAN_UP_ALL" = true ] ; then
   clean_up_all "$vpc_id"

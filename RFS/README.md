@@ -74,18 +74,18 @@ gradle run --args='-n global_state_snapshot --source-host $SOURCE_HOST --source-
 ### Using Docker
 RFS has support for packaging its java application as a Docker image by using the Dockerfile located in the `RFS/docker` directory. This support is directly built into Gradle as well so that a user can perform the below action, and generate a fresh Docker image (`migrations/reindex_from_snapshot:latest`) with the latest local code changes available.
 ```shell
-./gradlew buildDockerImages
+../gradlew buildDockerImages
 ```
 Also built into this Docker/Gradle support is the ability to spin up a testing RFS environment using Docker compose. This compose file can be seen [here](./docker/docker-compose.yml) and includes the RFS container, a source cluster container, and a target cluster container.
 
 This environment can be spun up with the Gradle command, and use the optional `-Pdataset` flag to preload a dataset from the `generateDatasetStage` in the multi-stage Docker [here](docker/TestSource_ES_7_10/Dockerfile). This stage will take a few minutes to run on its first attempt if it is generating data, as it will be making requests with OSB. This will be cached for future runs.
 ```shell
-./gradlew composeUp -Pdataset=default_osb_test_workloads
+../gradlew composeUp -Pdataset=default_osb_test_workloads
 ```
 
 And deleted with the Gradle command
 ```shell
-./gradlew composeDown
+../gradlew composeDown
 ```
 
 After the Docker compose containers are created the elasticsearch/opensearch source and target clusters can be interacted with like normal. For RFS testing, a user can also load custom templates/indices/documents into the source cluster before kicking off RFS.
@@ -123,13 +123,13 @@ The one hour limit is annoying but workable, given the only thing it's needed fo
 Anyways, we pipe those ENV variables into the source cluster's container via the Docker Compose file, so you can just launch the test setup as normal: 
 
 ```shell
-./gradlew composeUp -Pdataset=default_osb_test_workloads
+../gradlew composeUp -Pdataset=default_osb_test_workloads
 ```
 
 If you need to renew the creds, you can just kill the existing source container, renew the creds, and spin up a new container.
 
 ```
-./gradlew composeDown
+../gradlew composeDown
 ```
 
 ### Handling auth

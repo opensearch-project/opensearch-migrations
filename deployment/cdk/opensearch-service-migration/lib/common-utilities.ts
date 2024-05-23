@@ -4,27 +4,27 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 import {RemovalPolicy} from "aws-cdk-lib";
 
-export function createOpenSearchIAMAccessPolicy(region: string, accountId: string): PolicyStatement {
+export function createOpenSearchIAMAccessPolicy(partition: string, region: string, accountId: string): PolicyStatement {
     return new PolicyStatement({
         effect: Effect.ALLOW,
-        resources: [`arn:aws:es:${region}:${accountId}:domain/*`],
+        resources: [`arn:${partition}:es:${region}:${accountId}:domain/*`],
         actions: [
             "es:ESHttp*"
         ]
     })
 }
 
-export function createOpenSearchServerlessIAMAccessPolicy(region: string, accountId: string): PolicyStatement {
+export function createOpenSearchServerlessIAMAccessPolicy(partition: string, region: string, accountId: string): PolicyStatement {
     return new PolicyStatement({
         effect: Effect.ALLOW,
-        resources: [`arn:aws:aoss:${region}:${accountId}:collection/*`],
+        resources: [`arn:${partition}:aoss:${region}:${accountId}:collection/*`],
         actions: [
             "aoss:APIAccessAll"
         ]
     })
 }
 
-export function createMSKConsumerIAMPolicies(scope: Construct, region: string, accountId: string, stage: string, deployId: string): PolicyStatement[] {
+export function createMSKConsumerIAMPolicies(scope: Construct, partition: string, region: string, accountId: string, stage: string, deployId: string): PolicyStatement[] {
     const mskClusterARN = StringParameter.valueForStringParameter(scope, `/migration/${stage}/${deployId}/mskClusterARN`);
     const mskClusterName = StringParameter.valueForStringParameter(scope, `/migration/${stage}/${deployId}/mskClusterName`);
     const mskClusterConnectPolicy = new PolicyStatement({
@@ -34,7 +34,7 @@ export function createMSKConsumerIAMPolicies(scope: Construct, region: string, a
             "kafka-cluster:Connect"
         ]
     })
-    const mskClusterAllTopicArn = `arn:aws:kafka:${region}:${accountId}:topic/${mskClusterName}/*`
+    const mskClusterAllTopicArn = `arn:${partition}:kafka:${region}:${accountId}:topic/${mskClusterName}/*`
     const mskTopicConsumerPolicy = new PolicyStatement({
         effect: Effect.ALLOW,
         resources: [mskClusterAllTopicArn],
@@ -43,7 +43,7 @@ export function createMSKConsumerIAMPolicies(scope: Construct, region: string, a
             "kafka-cluster:ReadData"
         ]
     })
-    const mskClusterAllGroupArn = `arn:aws:kafka:${region}:${accountId}:group/${mskClusterName}/*`
+    const mskClusterAllGroupArn = `arn:${partition}:kafka:${region}:${accountId}:group/${mskClusterName}/*`
     const mskConsumerGroupPolicy = new PolicyStatement({
         effect: Effect.ALLOW,
         resources: [mskClusterAllGroupArn],
@@ -56,7 +56,7 @@ export function createMSKConsumerIAMPolicies(scope: Construct, region: string, a
 
 }
 
-export function createMSKProducerIAMPolicies(scope: Construct, region: string, accountId: string, stage: string, deployId: string): PolicyStatement[] {
+export function createMSKProducerIAMPolicies(scope: Construct, partition: string, region: string, accountId: string, stage: string, deployId: string): PolicyStatement[] {
     const mskClusterARN = StringParameter.valueForStringParameter(scope, `/migration/${stage}/${deployId}/mskClusterARN`);
     const mskClusterName = StringParameter.valueForStringParameter(scope, `/migration/${stage}/${deployId}/mskClusterName`);
     const mskClusterConnectPolicy = new PolicyStatement({
@@ -66,7 +66,7 @@ export function createMSKProducerIAMPolicies(scope: Construct, region: string, a
             "kafka-cluster:Connect"
         ]
     })
-    const mskClusterAllTopicArn = `arn:aws:kafka:${region}:${accountId}:topic/${mskClusterName}/*`
+    const mskClusterAllTopicArn = `arn:${partition}:kafka:${region}:${accountId}:topic/${mskClusterName}/*`
     const mskTopicProducerPolicy = new PolicyStatement({
         effect: Effect.ALLOW,
         resources: [mskClusterAllTopicArn],
@@ -111,6 +111,7 @@ export function createDefaultECSTaskRole(scope: Construct, serviceName: string):
         effect: Effect.ALLOW,
         resources: ['*'],
         actions: [
+            "logs:CreateLogGroup",
             "logs:CreateLogStream",
             "logs:DescribeLogGroups",
             "logs:DescribeLogStreams",

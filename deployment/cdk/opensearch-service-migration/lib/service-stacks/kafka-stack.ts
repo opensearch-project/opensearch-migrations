@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {CpuArchitecture, PortMapping, Protocol, ServiceConnectService} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
@@ -19,7 +19,7 @@ export class KafkaStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: KafkaBrokerProps) {
         super(scope, id, props)
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`))
         ]
 
@@ -28,11 +28,6 @@ export class KafkaStack extends MigrationServiceCore {
             hostPort: 9092,
             containerPort: 9092,
             protocol: Protocol.TCP
-        }
-        const serviceConnectService: ServiceConnectService = {
-            portMappingName: "kafka-connect",
-            dnsName: "kafka",
-            port: 9092
         }
 
         new StringParameter(this, 'SSMParameterKafkaBrokers', {
@@ -63,7 +58,6 @@ export class KafkaStack extends MigrationServiceCore {
                 "KAFKA_LOG_DIRS": '/tmp/kraft-combined-logs'
             },
             portMappings: [servicePort],
-            serviceConnectServices: [serviceConnectService],
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 256,
             taskMemoryLimitMiB: 2048,
