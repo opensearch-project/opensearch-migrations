@@ -2,6 +2,7 @@ FROM migrations/elasticsearch_client_test_console:latest
 
 COPY lib /root/lib
 
+RUN pip3 install -r /root/lib/osiMigrationLib/requirements.txt
 RUN mkdir /root/kafka-tools
 RUN mkdir /root/kafka-tools/aws
 
@@ -23,19 +24,20 @@ COPY kafkaCmdRef.md /root/kafka-tools
 COPY humanReadableLogs.py /root/
 RUN chmod ug+x /root/humanReadableLogs.py
 
+COPY setupIntegTests.sh /root/
+RUN chmod ug+x /root/setupIntegTests.sh
+
 COPY showFetchMigrationCommand.sh /root/
 RUN chmod ug+x /root/showFetchMigrationCommand.sh
 
 COPY kafkaExport.sh /root/kafka-tools
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
-COPY requirements.txt /root/requirements.txt
-RUN pip3 install -r /root/requirements.txt
 RUN pip install -e /root/lib/console_link/
 
 # Experimental console API, not started by default
-#COPY console_api /root/console_api
-#RUN pip3 install -r /root/console_api/requirements.txt
+COPY console_api /root/console_api
+RUN pip3 install -r /root/console_api/requirements.txt
 #CMD python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000
 
 CMD tail -f /dev/null

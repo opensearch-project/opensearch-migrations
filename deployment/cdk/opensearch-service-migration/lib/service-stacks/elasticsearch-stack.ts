@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {CpuArchitecture, PortMapping, Protocol, ServiceConnectService} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -22,7 +22,7 @@ export class ElasticsearchStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: ElasticsearchProps) {
         super(scope, id, props)
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
         ]
 
         const servicePort: PortMapping = {
@@ -31,18 +31,12 @@ export class ElasticsearchStack extends MigrationServiceCore {
             containerPort: 9200,
             protocol: Protocol.TCP
         }
-        const serviceConnectService: ServiceConnectService = {
-            portMappingName: "elasticsearch-connect",
-            dnsName: "elasticsearch",
-            port: 9200
-        }
 
         this.createService({
             serviceName: "elasticsearch",
             dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard"),
             securityGroups: securityGroups,
             portMappings: [servicePort],
-            serviceConnectServices: [serviceConnectService],
             serviceDiscoveryEnabled: true,
             serviceDiscoveryPort: 9200,
             cpuArchitecture: props.fargateCpuArch,

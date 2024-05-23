@@ -211,17 +211,17 @@ export class MigrationAssistanceStack extends Stack {
             stringValue: replayerOutputEFS.fileSystemId
         });
 
-        const serviceConnectSecurityGroup = new SecurityGroup(this, 'serviceConnectSecurityGroup', {
+        const serviceSecurityGroup = new SecurityGroup(this, 'serviceSecurityGroup', {
             vpc: props.vpc,
             // Required for retrieving ECR image at service startup
             allowAllOutbound: true,
         })
-        serviceConnectSecurityGroup.addIngressRule(serviceConnectSecurityGroup, Port.allTraffic());
+        serviceSecurityGroup.addIngressRule(serviceSecurityGroup, Port.allTraffic());
 
-        new StringParameter(this, 'SSMParameterServiceConnectGroupId', {
-            description: 'OpenSearch migration parameter for Service Connect security group id',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`,
-            stringValue: serviceConnectSecurityGroup.securityGroupId
+        new StringParameter(this, 'SSMParameterServiceGroupId', {
+            description: 'OpenSearch migration parameter for service security group id',
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`,
+            stringValue: serviceSecurityGroup.securityGroupId
         });
 
         const artifactBucket = new Bucket(this, 'migrationArtifactsS3', {
@@ -244,7 +244,6 @@ export class MigrationAssistanceStack extends Stack {
         ecsCluster.addDefaultCloudMapNamespace( {
             name: `migration.${props.stage}.local`,
             type: NamespaceType.DNS_PRIVATE,
-            useForServiceConnect: true,
             vpc: props.vpc
         })
         const cloudMapNamespaceId = ecsCluster.defaultCloudMapNamespace!.namespaceId

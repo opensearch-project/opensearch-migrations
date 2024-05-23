@@ -9,7 +9,6 @@ import {
     LogDrivers,
     MountPoint,
     PortMapping,
-    ServiceConnectService,
     Ulimit,
     OperatingSystemFamily,
     Volume,
@@ -45,7 +44,6 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly environment?: {
         [key: string]: string;
     },
-    readonly serviceConnectServices?: ServiceConnectService[],
     readonly serviceDiscoveryEnabled?: boolean,
     readonly serviceDiscoveryPort?: number,
     readonly taskCpuUnits?: number,
@@ -225,14 +223,6 @@ export class MigrationServiceCore extends Stack {
             enableExecuteCommand: true,
             securityGroups: props.securityGroups,
             vpcSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PRIVATE_WITH_EGRESS}),
-            serviceConnectConfiguration: {
-                namespace: `migration.${props.stage}.local`,
-                services: props.serviceConnectServices ? props.serviceConnectServices : undefined,
-                logDriver: LogDrivers.awsLogs({
-                    streamPrefix: "service-connect-logs",
-                    logGroup: serviceLogGroup
-                })
-            },
             cloudMapOptions: cloudMapOptions
         });
 

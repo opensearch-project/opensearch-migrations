@@ -44,7 +44,7 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
         const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
 
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
         ]
 
         let adminUserSecret: ISecret|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
@@ -65,11 +65,7 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
             containerPort: 9200,
             protocol: Protocol.TCP
         }
-        const serviceConnectService: ServiceConnectService = {
-            portMappingName: "opensearch-connect",
-            dnsName: dnsNameForContainer,
-            port: 9200
-        }
+
         const ulimits: Ulimit[] = [
             {
                 name: UlimitName.MEMLOCK,
@@ -96,7 +92,6 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
                 "OPENSEARCH_INITIAL_ADMIN_PASSWORD": opensearch_target_initial_admin_password
             },
             portMappings: [servicePort],
-            serviceConnectServices: [serviceConnectService],
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,
             cpuArchitecture: props.fargateCpuArch,

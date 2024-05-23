@@ -518,8 +518,8 @@ export class StackComposer {
                 fargateCpuArch: fargateCpuArch,
                 env: props.env
             })
-            // To enable the Migration Console to make requests to other service endpoints with Service Connect,
-            // it must be deployed after any Service Connect services
+            // To enable the Migration Console to make requests to other service endpoints with services,
+            // it must be deployed after any connected services
             this.addDependentStacks(migrationConsoleStack, [captureProxyESStack, captureProxyStack, elasticsearchStack,
                 fetchMigrationStack, openSearchStack, osContainerStack, migrationStack, kafkaBrokerStack, mskUtilityStack])
             this.stacks.push(migrationConsoleStack)
