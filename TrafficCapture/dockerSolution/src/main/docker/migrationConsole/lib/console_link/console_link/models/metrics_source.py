@@ -3,6 +3,7 @@ from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
+import botocore
 from cerberus import Validator
 from console_link.logic.utils import raise_for_aws_api_error
 import requests
@@ -33,6 +34,10 @@ SCHEMA = {
     "endpoint": {
         "type": "string",
         "required": False,
+    },
+    "region": {
+        "type": "string",
+        "required": False
     },
 }
 
@@ -106,10 +111,16 @@ class CloudwatchMetricMetadata:
 
 
 class CloudwatchMetricsSource(MetricsSource):
-    client = boto3.client("cloudwatch")
-
     def __init__(self, config: Dict) -> None:
         super().__init__(config)
+        if "region" in config:
+            self.region = config["region"]
+            self.boto_config = botocore.config.Config(region_name=self.region)
+            print("overriding client with a region-specific one")
+        else:
+            self.region = None
+            self.boto_config = None
+        self.client = boto3.client("cloudwatch", config=self.boto_config)
 
     def get_metrics(self, recent=True) -> Dict[str, List[str]]:
         response = self.client.list_metrics(  # TODO: implement pagination

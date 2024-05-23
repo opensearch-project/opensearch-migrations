@@ -47,7 +47,6 @@ class Cluster:
         if "authorization" in config:
             self.auth_type = AuthMethod[config["authorization"]["type"].upper()]
             self.auth_details = config["authorization"]["details"]
-        pass
 
     def call_api(self, path, method: HttpMethod = HttpMethod.GET) -> requests.Response:
         """

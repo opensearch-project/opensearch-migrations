@@ -1,9 +1,8 @@
 import json
 
 import requests
-from console_link.models.metrics_source import MetricsSource, CloudwatchMetricsSource, PrometheusMetricsSource
-from console_link.models.metrics_source import MetricStatistic, get_metrics_source, Component
-from console_link.models.metrics_source import UnsupportedMetricsSourceError
+from console_link.models.metrics_source import MetricsSource, CloudwatchMetricsSource, PrometheusMetricsSource, \
+    MetricStatistic, get_metrics_source, Component, UnsupportedMetricsSourceError
 import pytest
 import requests_mock
 

@@ -1,7 +1,8 @@
 import json
 from pprint import pprint
 import click
-import console_link.logic as logic
+import console_link.logic.clusters as logic_clusters
+import console_link.logic.metrics as logic_metrics
 from console_link.logic.instantiation import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
 
@@ -47,10 +48,10 @@ def cat_indices_cmd(ctx):
         click.echo(
             json.dumps(
                 {
-                    "source_cluster": logic.clusters.cat_indices(
+                    "source_cluster": logic_clusters.cat_indices(
                         ctx.env.source_cluster, as_json=True
                     ),
-                    "target_cluster": logic.clusters.cat_indices(
+                    "target_cluster": logic_clusters.cat_indices(
                         ctx.env.target_cluster, as_json=True
                     ),
                 }
@@ -58,9 +59,9 @@ def cat_indices_cmd(ctx):
         )
         return
     click.echo("SOURCE CLUSTER")
-    click.echo(logic.clusters.cat_indices(ctx.env.source_cluster))
+    click.echo(logic_clusters.cat_indices(ctx.env.source_cluster))
     click.echo("TARGET CLUSTER")
-    click.echo(logic.clusters.cat_indices(ctx.env.target_cluster))
+    click.echo(logic_clusters.cat_indices(ctx.env.target_cluster))
     pass
 
 
@@ -77,7 +78,7 @@ def replayer_group(ctx):
 @replayer_group.command(name="start")
 @click.pass_obj
 def start_replayer_cmd(ctx):
-    logic.services.start_replayer(ctx.env.replayer)
+    ctx.env.replayer.start()
 
 
 # ##################### METRICS ###################
@@ -109,7 +110,7 @@ def list_metrics_cmd(ctx):
 @click.option("--lookback", type=int, default=60, help="Lookback in minutes")
 @click.pass_obj
 def get_metrics_data_cmd(ctx, component, metric_name, statistic, lookback):
-    metric_data = logic.metrics.get_metric_data(
+    metric_data = logic_metrics.get_metric_data(
         ctx.env.metrics_source,
         component,
         metric_name,
