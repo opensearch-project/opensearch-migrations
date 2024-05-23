@@ -115,7 +115,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         ]
 
         let servicePortMappings: PortMapping[]|undefined
-        let serviceConnectServices: ServiceConnectService[]|undefined
         let serviceDiscoveryPort: number|undefined
         let serviceDiscoveryEnabled = false
         let imageCommand: string[]|undefined
@@ -254,11 +253,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 containerPort: 8000,
                 protocol: Protocol.TCP
             }]
-            serviceConnectServices = [{
-                portMappingName: "migration-console-connect",
-                dnsName: "migration-console",
-                port: 8000
-            }]
             serviceDiscoveryPort = 8000
             serviceDiscoveryEnabled = true
             imageCommand = ['/bin/sh', '-c', 'python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000']
@@ -286,7 +280,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             securityGroups: securityGroups,
             portMappings: servicePortMappings,
             dockerImageCommand: imageCommand,
-            serviceConnectServices: serviceConnectServices,
             serviceDiscoveryEnabled: serviceDiscoveryEnabled,
             serviceDiscoveryPort: serviceDiscoveryPort,
             volumes: [replayerOutputEFSVolume],
