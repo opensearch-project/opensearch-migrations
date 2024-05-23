@@ -1,4 +1,3 @@
-import datetime
 import json
 from pprint import pprint
 import click
@@ -110,21 +109,24 @@ def list_metrics_cmd(ctx):
 @click.option("--lookback", type=int, default=60, help="Lookback in minutes")
 @click.pass_obj
 def get_metrics_data_cmd(ctx, component, metric_name, statistic, lookback):
-    # TODO: this should go through a logic function, not directly to the metrics source
-    starttime = datetime.datetime.now() - datetime.timedelta(minutes=lookback)
+    metric_data = logic.metrics.get_metric_data(
+        ctx.env.metrics_source,
+        component,
+        metric_name,
+        statistic,
+        lookback
+    )
+    if ctx.json:
+        click.echo(json.dumps(metric_data))
+        return
 
     click.echo(f"Component: {component}")
     click.echo(f"Metric Name: {metric_name}")
     click.echo(f"Statistic: {statistic}")
-    click.echo(f"Start Time: {starttime.isoformat()}")
+    click.echo(f"Lookback: {lookback} minutes")
     click.echo(f"Metrics Source Type: {type(ctx.env.metrics_source)}")
     pprint(
-        ctx.env.metrics_source.get_metric_data(
-            Component[component.upper()],
-            metric_name,
-            MetricStatistic[statistic],
-            startTime=starttime,
-        )
+        metric_data
     )
 
 
