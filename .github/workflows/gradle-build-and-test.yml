@@ -24,14 +24,12 @@ jobs:
           gradle-home-cache-cleanup: true
 
       - name: Run Gradle Build
-        run: ../gradlew build -x test --scan --stacktrace
-        working-directory: TrafficCapture
+        run: ./gradlew build -x test --scan --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
       - name: Run Tests with Coverage
-        run: ../gradlew test jacocoTestReport --scan --stacktrace
-        working-directory: TrafficCapture
+        run: ./gradlew test jacocoTestReport --scan --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
@@ -40,11 +38,18 @@ jobs:
         with:
           name: traffic-capture-test-reports
           path: |
-            ./TrafficCapture/*/build/reports/
+            ./TrafficCapture*/*/build/reports/
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: RFS-test-reports
+          path: |
+            ./RFS*/*/build/reports/
   
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
         with:
-          files: "TrafficCapture/**/jacocoTestReport.xml"
+          files: "**/jacocoTestReport.xml"
           flags: unittests
           fail_ci_if_error: false
