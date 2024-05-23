@@ -16,6 +16,13 @@ OSI_SCHEMA = {
             'type': 'string',
         }
     },
+    'security_group_ids': {
+        'type': 'list',
+        'required': True,
+        'schema': {
+            'type': 'string',
+        }
+    },
     'aws_region': {
         'type': 'string',
         'required': True
@@ -41,7 +48,7 @@ OSI_SCHEMA = {
         'schema': {
             'type': 'string',
         }
-    },
+    }
 }
 
 class MigrationType(str, Enum):
@@ -80,8 +87,12 @@ class OpenSearchIngestionMigration(Migration):
         self.source_cluster = source_cluster
         self.target_cluster = target_cluster
 
-    def create(self, pipeline_template_path = '/root/osiPipelineTemplate.yaml'):
-        self.migration_logic.create_pipeline_from_env(pipeline_template_path=pipeline_template_path)
+    def create(self, pipeline_template_path = '/root/osiPipelineTemplate.yaml', print_config_only = False):
+        self.migration_logic.create_pipeline_from_env(pipeline_template_path=pipeline_template_path,
+                                                      osi_props=self.osi_props,
+                                                      source_cluster=self.source_cluster,
+                                                      target_cluster=self.target_cluster,
+                                                      print_config_only=print_config_only)
 
     def create_from_json(self, config_json: Dict, pipeline_template_path: str) -> None:
         self.migration_logic.create_pipeline_from_json(input_json=config_json,

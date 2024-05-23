@@ -26,9 +26,6 @@ RUN chmod ug+x /root/humanReadableLogs.py
 COPY showFetchMigrationCommand.sh /root/
 RUN chmod ug+x /root/showFetchMigrationCommand.sh
 
-COPY osiMigration.py /root/
-RUN chmod ug+x /root/osiMigration.py
-
 COPY kafkaExport.sh /root/kafka-tools
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
@@ -37,8 +34,8 @@ RUN pip3 install -r /root/requirements.txt
 RUN pip install -e /root/lib/console_link/
 
 # Experimental console API, not started by default
-COPY console_api /root/console_api
-RUN pip3 install -r /root/console_api/requirements.txt
+#COPY console_api /root/console_api
+#RUN pip3 install -r /root/console_api/requirements.txt
 #CMD python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000
 
 CMD tail -f /dev/null

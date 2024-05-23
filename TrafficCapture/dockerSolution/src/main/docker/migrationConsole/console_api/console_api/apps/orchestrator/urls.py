@@ -2,7 +2,7 @@ from django.urls import path
 from . import views
 
 urlpatterns = [
-    path('create-migration', views.create_migration, name='create-migration'),
-    path('start-migration', views.start_migration, name='start-migration'),
-    path('stop-migration', views.stop_migration, name='stop-migration'),
+    path('osi-create-migration', views.osi_create_migration, name='osi-create-migration'),
+    path('osi-start-migration', views.osi_start_migration, name='osi-start-migration'),
+    path('osi-stop-migration', views.osi_stop_migration, name='osi-stop-migration'),
 ]

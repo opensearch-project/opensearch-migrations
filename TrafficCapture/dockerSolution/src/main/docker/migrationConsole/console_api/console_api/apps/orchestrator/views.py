@@ -1,5 +1,6 @@
-from console_api.apps.orchestrator.serializers import GenericMigrationSerializer, OpenSearchIngestionCreateRequestSerializer
-from console_link.models.migration import MigrationType, Migration, OpenSearchIngestionMigration
+from console_api.apps.orchestrator.serializers import OpenSearchIngestionCreateRequestSerializer
+from console_link.logic.osi_migration import OSIMigrationLogic, InvalidAuthParameters
+from console_link.models.migration import MigrationType
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import JSONParser
 from rest_framework.response import Response
@@ -10,7 +11,6 @@ import logging
 
 logger = logging.getLogger(__name__)
 
-MIGRATION_TYPE_FIELD = "MigrationType"
 PIPELINE_TEMPLATE_PATH = f"{Path(__file__).parents[4]}/osiPipelineTemplate.yaml"
 
 
@@ -35,50 +35,66 @@ def pretty_request(request, data):
 
 @api_view(['POST'])
 @parser_classes([JSONParser])
-def create_migration(request):
+def osi_create_migration(request):
     request_data = request.data
     logger.info(pretty_request(request, request_data))
-    migration_serializer = GenericMigrationSerializer(data=request_data)
-    # TODO remove slow serializer
-    #migration_serializer.is_valid(raise_exception=True)
-    migration_type = request_data[MIGRATION_TYPE_FIELD]
-    if migration_type == MigrationType.OSI_HISTORICAL_MIGRATION:
-        osi_serializer = OpenSearchIngestionCreateRequestSerializer(data=request_data)
-        osi_serializer.is_valid(raise_exception=True)
-        migration = OpenSearchIngestionMigration()
-        migration.create_from_json(request_data, PIPELINE_TEMPLATE_PATH)
-    else:
-        return Response(f"Unknown migration type accepted: {migration_type}",
-                        status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    osi_serializer = OpenSearchIngestionCreateRequestSerializer(data=request_data)
+    osi_serializer.is_valid(raise_exception=True)
+    migration = OSIMigrationLogic()
+    try:
+        migration.create_pipeline_from_json(input_json = request_data, pipeline_template_path=PIPELINE_TEMPLATE_PATH)
+    except InvalidAuthParameters as i:
+        logger.error(f"Error performing osi_create_migration API: {i}")
+        return Response(str(i), status=status.HTTP_400_BAD_REQUEST)
+    except Exception as e:
+        logger.error(f"Error performing osi_create_migration API: {e}")
+        return Response(str(e), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     response_data = {
         'Timestamp': datetime.datetime.now(datetime.timezone.utc),
-        'MigrationType': migration_type
+        'MigrationType': MigrationType.OSI_HISTORICAL_MIGRATION
     }
     return Response(response_data, status=status.HTTP_200_OK)
 
 
-# TODO implement stub with backend
 @api_view(['POST'])
 @parser_classes([JSONParser])
-def start_migration(request):
+def osi_start_migration(request):
     request_data = request.data
-    status_code = 200
     logger.info(pretty_request(request, request_data))
+
+    pipeline_name = request_data.get("PipelineName")
+    migration = OSIMigrationLogic()
+    try:
+        migration.start_pipeline(pipeline_name=pipeline_name)
+    except Exception as e:
+        logger.error(f"Error performing osi_start_migration API: {e}")
+        return Response(str(e), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     response_data = {
-        'Timestamp': datetime.datetime.now(datetime.timezone.utc)
+        'Timestamp': datetime.datetime.now(datetime.timezone.utc),
+        'MigrationType': MigrationType.OSI_HISTORICAL_MIGRATION
     }
-    return Response(response_data, status=status_code)
+    return Response(response_data, status=status.HTTP_200_OK)
 
 
-# TODO implement stub with backend
 @api_view(['POST'])
 @parser_classes([JSONParser])
-def stop_migration(request):
+def osi_stop_migration(request):
     request_data = request.data
-    status_code = 200
     logger.info(pretty_request(request, request_data))
+
+    pipeline_name = request_data.get("PipelineName")
+    migration = OSIMigrationLogic()
+    try:
+        migration.stop_pipeline(pipeline_name=pipeline_name)
+    except Exception as e:
+        logger.error(f"Error performing osi_start_migration API: {e}")
+        return Response(str(e), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
     response_data = {
-        'Timestamp': datetime.datetime.now(datetime.timezone.utc)
+        'Timestamp': datetime.datetime.now(datetime.timezone.utc),
+        'MigrationType': MigrationType.OSI_HISTORICAL_MIGRATION
     }
-    return Response(response_data, status=status_code)
+    return Response(response_data, status=status.HTTP_200_OK)

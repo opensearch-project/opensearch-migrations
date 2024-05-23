@@ -6,7 +6,7 @@ from cerberus import Validator
 
 requests.packages.urllib3.disable_warnings()
 
-AuthMethod = Enum("AuthMethod", ["BASIC", "SIGV4"])
+AuthMethod = Enum("AuthMethod", ["NO_AUTH", "BASIC_AUTH", "SIGV4"])
 HttpMethod = Enum("HttpMethod", ["GET", "POST", "PUT", "DELETE"])
 
 SCHEMA = {
@@ -14,17 +14,9 @@ SCHEMA = {
         'type': 'string',
         'required': True
     },
-    'aws_security_group': {
-        'type': 'string',
-        'required': False
-    },
-    'allow_insecure': {
-        'type': 'boolean',
-        'required': False
-    },
     'authorization': {
         'type': 'dict',
-        'required': False,
+        'required': True,
         'schema': {
             'type': {
                 'type': 'string',
@@ -33,7 +25,7 @@ SCHEMA = {
             },
             'details': {
                 'type': 'dict',
-                'required': True,
+                'required': False,
                 'schema': {
                     'username': {
                         'type': 'string',
@@ -50,7 +42,11 @@ SCHEMA = {
                 }
             }
         }
-    }
+    },
+    'allow_insecure': {
+        'type': 'boolean',
+        'required': False
+    },
 }
 
 
@@ -59,8 +55,7 @@ class Cluster():
     An elasticcsearch or opensearch cluster.
     """
     endpoint: str = ""
-    aws_security_group: str = ""
-    aws_secret_arn: str = ""
+    aws_secret_arn: Optional[str] = None
     auth_type: Optional[AuthMethod] = None
     auth_details: Optional[Dict] = None
 
@@ -72,16 +67,24 @@ class Cluster():
         self.endpoint = config["endpoint"]
         if self.endpoint.startswith("https"):
             self.allow_insecure = config.get("allow_insecure", False)
-        self.auth_type = AuthMethod[config["authorization"]["type"].upper()]
-        self.auth_details = config["authorization"]["details"]
-        self.aws_security_group = config["aws_security_group"]
-        self.aws_secret_arn = config["authorization"]["details"]["aws_secret_arn"]
+        try:
+            self.auth_type = AuthMethod[config["authorization"]["type"].upper()]
+        except KeyError:
+            self.auth_type = None
+        try:
+            self.auth_details = config["authorization"]["details"]
+        except KeyError:
+            self.auth_details = None
+        try:
+            self.aws_secret_arn = config["authorization"]["details"]["aws_secret_arn"]
+        except KeyError:
+            self.aws_secret_arn = None
 
     def call_api(self, path, method: HttpMethod = HttpMethod.GET) -> requests.Response:
         """
         Calls an API on the cluster.
         """
-        if self.auth_type == AuthMethod.BASIC:
+        if self.auth_type == AuthMethod.BASIC_AUTH:
             auth = HTTPBasicAuth(self.auth_details["username"], self.auth_details["password"])
         elif self.auth_type is None:
             auth = None
