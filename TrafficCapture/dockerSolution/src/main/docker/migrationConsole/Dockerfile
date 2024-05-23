@@ -1,13 +1,10 @@
-FROM ubuntu:jammy
+FROM migrations/elasticsearch_client_test_console:latest
 
-ENV DEBIAN_FRONTEND noninteractive
-
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3.9 python3-pip python3-dev openjdk-11-jre-headless wget gcc libc-dev git curl vim jq unzip less && \
-    apt-get clean
+COPY lib /root/lib
 
 RUN mkdir /root/kafka-tools
 RUN mkdir /root/kafka-tools/aws
+
 WORKDIR /root/kafka-tools
 # Get kafka distribution and unpack to 'kafka'
 RUN wget -qO- https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz | tar --transform 's!^[^/]*!kafka!' -xvz
@@ -19,29 +16,24 @@ COPY build/jars /root/kafka-tools/replayer-jars
 RUN printf "#!/bin/sh\njava -cp `echo /root/kafka-tools/replayer-jars/*.jar | tr \   :` \"\$@\" " > /root/kafka-tools/runJavaWithClasspath.sh
 RUN chmod +x /root/kafka-tools/runJavaWithClasspath.sh
 
-# Copy libraries and requirements.txt that need to be installed
-COPY lib /root/lib
-COPY requirements.txt /root/requirements.txt
-RUN pip3 install -r /root/requirements.txt
-
-COPY runTestBenchmarks.sh /root/
-COPY humanReadableLogs.py /root/
-COPY simpleDocumentGenerator.py /root/
-COPY catIndices.sh /root/
-COPY showFetchMigrationCommand.sh /root/
-COPY setupIntegTests.sh /root/
 COPY osiPipelineTemplate.yaml /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
-COPY kafkaExport.sh /root/kafka-tools
-RUN ln -s /usr/bin/python3 /usr/bin/python
-RUN chmod ug+x /root/runTestBenchmarks.sh
+
+COPY humanReadableLogs.py /root/
 RUN chmod ug+x /root/humanReadableLogs.py
-RUN chmod ug+x /root/simpleDocumentGenerator.py
-RUN chmod ug+x /root/catIndices.sh
+
+COPY showFetchMigrationCommand.sh /root/
 RUN chmod ug+x /root/showFetchMigrationCommand.sh
+
+COPY osiMigration.py /root/
+RUN chmod ug+x /root/osiMigration.py
+
+COPY kafkaExport.sh /root/kafka-tools
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
+COPY requirements.txt /root/requirements.txt
+RUN pip3 install -r /root/requirements.txt
 RUN pip install -e /root/lib/console_link/
 
 # Experimental console API, not started by default

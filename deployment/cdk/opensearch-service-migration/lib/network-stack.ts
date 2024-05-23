@@ -11,7 +11,6 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string
     readonly vpcAZCount?: number
-    readonly otelCollectorEnabled?: boolean
     readonly targetClusterEndpoint?: string
 }
 
@@ -124,19 +123,6 @@ export class NetworkStack extends Stack {
                 parameterName: `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`,
                 stringValue: defaultSecurityGroup.securityGroupId
             });
-
-            if (props.otelCollectorEnabled) {
-                const otelCollectorSecurityGroup = new SecurityGroup(this, 'otelCollectorSG', {
-                    vpc: this.vpc
-                });
-                otelCollectorSecurityGroup.addIngressRule(otelCollectorSecurityGroup, Port.allTraffic());
-
-                new StringParameter(this, 'SSMParameterOtelCollectorSGId', {
-                    description: 'Migration Assistant parameter for otel-collector access security group id',
-                    parameterName: `/migration/${props.stage}/${props.defaultDeployId}/otelCollectorSGId`,
-                    stringValue: otelCollectorSecurityGroup.securityGroupId
-                });
-            }
         }
 
         if (props.targetClusterEndpoint) {

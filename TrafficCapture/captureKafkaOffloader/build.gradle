@@ -9,8 +9,8 @@ repositories {
 }
 
 dependencies {
-    api project(":trafficCaptureDependencies")
-    implementation project(':captureOffloader')
+    api project(":commonDependencyVersionConstraints")
+    implementation project(':TrafficCapture:captureOffloader')
     implementation project(':coreUtilities')
     implementation group: 'com.google.protobuf', name:'protobuf-java'
     api            group:'io.netty', name:'netty-buffer'
@@ -19,7 +19,7 @@ dependencies {
     implementation group: 'org.slf4j', name:'slf4j-api'
     implementation group: 'software.amazon.msk', name:'aws-msk-iam-auth'
 
-    testImplementation project(':captureProtobufs')
+    testImplementation project(':TrafficCapture:captureProtobufs')
     testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'

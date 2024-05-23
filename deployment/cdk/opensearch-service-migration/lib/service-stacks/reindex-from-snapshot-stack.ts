@@ -39,8 +39,8 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             ]
         })
 
-        const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.region, this.account)
-        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.region, this.account)
+        const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
+        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
         let servicePolicies = [artifactS3PublishPolicy, openSearchPolicy, openSearchServerlessPolicy]
 
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
