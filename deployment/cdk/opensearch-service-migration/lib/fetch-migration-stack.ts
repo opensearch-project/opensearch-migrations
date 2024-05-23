@@ -35,7 +35,7 @@ export class FetchMigrationStack extends Stack {
         const targetClusterEndpoint = StringParameter.fromStringParameterName(this, "targetClusterEndpoint", `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
         const domainAccessGroupId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`)
         // This SG allows outbound access for ECR access as well as communication with other services in the cluster
-        const serviceConnectGroupId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)
+        const serviceGroupId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)
 
         const ecsCluster = Cluster.fromClusterAttributes(this, 'ecsCluster', {
             clusterName: `migration-${props.stage}-ecs-cluster`,
@@ -106,7 +106,7 @@ export class FetchMigrationStack extends Stack {
         let networkConfigJson = {
             "awsvpcConfiguration": {
                 "subnets": props.vpc.privateSubnets.map(_ => _.subnetId),
-                "securityGroups": [domainAccessGroupId, serviceConnectGroupId]
+                "securityGroups": [domainAccessGroupId, serviceGroupId]
             }
         }
         let networkConfigString = JSON.stringify(networkConfigJson)

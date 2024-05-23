@@ -1,10 +1,14 @@
 #!/bin/bash
 
-# Default values
-source_endpoint="https://capture-proxy-es:9200"
-source_auth_user_and_pass="admin:admin"
-source_no_auth=false
-target_no_auth=false
+
+# Check for the presence of SOURCE_DOMAIN_ENDPOINT environment variable
+if [ -n "$SOURCE_DOMAIN_ENDPOINT" ]; then
+    source_endpoint="${SOURCE_DOMAIN_ENDPOINT}"
+    source_auth_user_and_pass="admin:admin"
+else
+    source_endpoint="https://capture-proxy-es:9200"
+    source_auth_user_and_pass="admin:admin"
+fi
 
 # Check for the presence of MIGRATION_DOMAIN_ENDPOINT environment variable
 if [ -n "$MIGRATION_DOMAIN_ENDPOINT" ]; then
@@ -14,6 +18,10 @@ else
     target_endpoint="https://opensearchtarget:9200"
     target_auth_user_and_pass="admin:myStrongPassword123!"
 fi
+
+# Default values
+source_no_auth=false
+target_no_auth=false
 
 usage() {
   echo ""
