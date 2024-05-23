@@ -30,7 +30,7 @@ jobs:
           cache-read-only: false
 
       - name: Start Docker Solution
-        run: ./gradlew dockerSolution:ComposeUp -x test --scan --info --stacktrace
+        run: ../gradlew dockerSolution:ComposeUp -x test --scan --info --stacktrace
         working-directory: TrafficCapture
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''

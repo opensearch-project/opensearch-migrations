@@ -9,7 +9,6 @@ import {
     LogDrivers,
     MountPoint,
     PortMapping,
-    ServiceConnectService,
     Ulimit,
     OperatingSystemFamily,
     Volume,
@@ -23,6 +22,7 @@ import {PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {CfnService as DiscoveryCfnService, PrivateDnsNamespace} from "aws-cdk-lib/aws-servicediscovery";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {createDefaultECSTaskRole} from "../common-utilities";
+import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 
 
 export interface MigrationServiceCoreProps extends StackPropsExt {
@@ -44,14 +44,14 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly environment?: {
         [key: string]: string;
     },
-    readonly serviceConnectServices?: ServiceConnectService[],
     readonly serviceDiscoveryEnabled?: boolean,
     readonly serviceDiscoveryPort?: number,
     readonly taskCpuUnits?: number,
     readonly taskMemoryLimitMiB?: number,
     readonly taskInstanceCount?: number,
     readonly ulimits?: Ulimit[],
-    readonly maxUptime?: Duration
+    readonly maxUptime?: Duration,
+    readonly otelCollectorEnabled?: boolean
 }
 
 export class MigrationServiceCore extends Stack {
@@ -202,12 +202,16 @@ export class MigrationServiceCore extends Stack {
             const namespace = PrivateDnsNamespace.fromPrivateDnsNamespaceAttributes(this, "PrivateDNSNamespace", {
                 namespaceName: `migration.${props.stage}.local`,
                 namespaceId: namespaceId,
-                namespaceArn: `arn:aws:servicediscovery:${this.region}:${this.account}:namespace/${namespaceId}`
+                namespaceArn: `arn:${this.partition}:servicediscovery:${this.region}:${this.account}:namespace/${namespaceId}`
             })
             cloudMapOptions = {
                 name: props.serviceName,
                 cloudMapNamespace: namespace,
             }
+        }
+
+        if (props.otelCollectorEnabled) {
+            OtelCollectorSidecar.addOtelCollectorContainer(serviceTaskDef, serviceLogGroup.logGroupName);
         }
 
         const fargateService = new FargateService(this, "ServiceFargateService", {
@@ -219,14 +223,6 @@ export class MigrationServiceCore extends Stack {
             enableExecuteCommand: true,
             securityGroups: props.securityGroups,
             vpcSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PRIVATE_WITH_EGRESS}),
-            serviceConnectConfiguration: {
-                namespace: `migration.${props.stage}.local`,
-                services: props.serviceConnectServices ? props.serviceConnectServices : undefined,
-                logDriver: LogDrivers.awsLogs({
-                    streamPrefix: "service-connect-logs",
-                    logGroup: serviceLogGroup
-                })
-            },
             cloudMapOptions: cloudMapOptions
         });
 
