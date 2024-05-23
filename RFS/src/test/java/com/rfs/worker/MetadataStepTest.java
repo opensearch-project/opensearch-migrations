@@ -191,8 +191,8 @@ public class MetadataStepTest {
         }
 
         @Override
-        protected Instant getNow() {
-            return Instant.ofEpochMilli(milliSinceEpoch);
+        protected long getNowMs() {
+            return milliSinceEpoch;
         }
     }
 
@@ -212,7 +212,7 @@ public class MetadataStepTest {
         // Set up the test
         CmsEntry.Metadata existingEntry = new CmsEntry.Metadata(
             CmsEntry.MetadataStatus.IN_PROGRESS,
-            "0",
+            CmsEntry.Metadata.getLeaseExpiry(0L, CmsEntry.Metadata.MAX_ATTEMPTS - 1),
             CmsEntry.Metadata.MAX_ATTEMPTS - 1
         );
 
@@ -228,7 +228,7 @@ public class MetadataStepTest {
         // Check the results
         Mockito.verify(testMembers.cmsClient, times(1)).updateMetadataEntry(
             CmsEntry.MetadataStatus.IN_PROGRESS,
-            String.valueOf(TestAcquireLease.milliSinceEpoch + CmsEntry.Metadata.METADATA_LEASE_MS),
+            CmsEntry.Metadata.getLeaseExpiry(TestAcquireLease.milliSinceEpoch, CmsEntry.Metadata.MAX_ATTEMPTS),
             CmsEntry.Metadata.MAX_ATTEMPTS
         );
         assertEquals(nextStepClass, nextStep.getClass());

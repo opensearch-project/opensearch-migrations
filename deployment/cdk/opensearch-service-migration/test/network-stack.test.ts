@@ -99,17 +99,17 @@ test('Test valid imported target cluster endpoint having port and ending in slas
 test('Test target cluster endpoint with no protocol throws error', () => {
     const inputTargetEndpoint = "vpc-domain-abcdef.us-east-1.es.amazonaws.com:443/"
     const validateAndFormatURL = () => NetworkStack.validateAndReturnFormattedHttpURL(inputTargetEndpoint)
-    expect(validateAndFormatURL).toThrowError()
+    expect(validateAndFormatURL).toThrow()
 })
 
 test('Test target cluster endpoint with path throws error', () => {
     const inputTargetEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443/indexes"
     const validateAndFormatURL = () => NetworkStack.validateAndReturnFormattedHttpURL(inputTargetEndpoint)
-    expect(validateAndFormatURL).toThrowError()
+    expect(validateAndFormatURL).toThrow()
 })
 
 test('Test invalid target cluster endpoint throws error', () => {
     const inputTargetEndpoint = "vpc-domain-abcdef"
     const validateAndFormatURL = () => NetworkStack.validateAndReturnFormattedHttpURL(inputTargetEndpoint)
-    expect(validateAndFormatURL).toThrowError()
+    expect(validateAndFormatURL).toThrow()
 })

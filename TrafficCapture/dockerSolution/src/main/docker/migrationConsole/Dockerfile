@@ -1,12 +1,8 @@
-FROM ubuntu:jammy
-
-ENV DEBIAN_FRONTEND noninteractive
+FROM migrations/elasticsearch_client_test_console:latest
 
 COPY lib /root/lib
 
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3.9 python3-pip python3-dev openjdk-11-jre-headless wget gcc libc-dev git curl vim jq unzip less && \
-    pip3 install urllib3 opensearch-benchmark==1.2.0 awscurl tqdm awscli -r /root/lib/osiMigrationLib/requirements.txt
+RUN pip3 install -r /root/lib/osiMigrationLib/requirements.txt
 RUN mkdir /root/kafka-tools
 RUN mkdir /root/kafka-tools/aws
 
@@ -21,24 +17,23 @@ COPY build/jars /root/kafka-tools/replayer-jars
 RUN printf "#!/bin/sh\njava -cp `echo /root/kafka-tools/replayer-jars/*.jar | tr \   :` \"\$@\" " > /root/kafka-tools/runJavaWithClasspath.sh
 RUN chmod +x /root/kafka-tools/runJavaWithClasspath.sh
 
-COPY runTestBenchmarks.sh /root/
-COPY humanReadableLogs.py /root/
-COPY simpleDocumentGenerator.py /root/
-COPY catIndices.sh /root/
-COPY showFetchMigrationCommand.sh /root/
-COPY setupIntegTests.sh /root/
-COPY osiMigration.py /root/
 COPY osiPipelineTemplate.yaml /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
-COPY kafkaExport.sh /root/kafka-tools
-RUN ln -s /usr/bin/python3 /usr/bin/python
-RUN chmod ug+x /root/runTestBenchmarks.sh
+
+COPY humanReadableLogs.py /root/
 RUN chmod ug+x /root/humanReadableLogs.py
-RUN chmod ug+x /root/simpleDocumentGenerator.py
-RUN chmod ug+x /root/catIndices.sh
+
+COPY setupIntegTests.sh /root/
+RUN chmod ug+x /root/setupIntegTests.sh
+
+COPY showFetchMigrationCommand.sh /root/
 RUN chmod ug+x /root/showFetchMigrationCommand.sh
+
+COPY osiMigration.py /root/
 RUN chmod ug+x /root/osiMigration.py
+
+COPY kafkaExport.sh /root/kafka-tools
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
 CMD tail -f /dev/null

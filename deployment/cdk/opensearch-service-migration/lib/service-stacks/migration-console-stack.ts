@@ -1,5 +1,5 @@
 import {StackPropsExt} from "../stack-composer";
-import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
+import {IVpc, SecurityGroup, Port, ISecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
@@ -21,7 +21,6 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly streamingSourceType: StreamingSourceType,
     readonly fetchMigrationEnabled: boolean,
     readonly fargateCpuArch: CpuArchitecture,
-    readonly otelCollectorEnabled: boolean,
     readonly migrationConsoleEnableOSI: boolean
 }
 
@@ -37,7 +36,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 "kafka-cluster:*"
             ]
         })
-        const mskClusterAllTopicArn = `arn:aws:kafka:${this.region}:${this.account}:topic/${mskClusterName}/*`
+        const mskClusterAllTopicArn = `arn:${this.partition}:kafka:${this.region}:${this.account}:topic/${mskClusterName}/*`
         const mskTopicAdminPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: [mskClusterAllTopicArn],
@@ -45,7 +44,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 "kafka-cluster:*"
             ]
         })
-        const mskClusterAllGroupArn = `arn:aws:kafka:${this.region}:${this.account}:group/${mskClusterName}/*`
+        const mskClusterAllGroupArn = `arn:${this.partition}:kafka:${this.region}:${this.account}:group/${mskClusterName}/*`
         const mskConsumerGroupAdminPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: [mskClusterAllGroupArn],
@@ -65,7 +64,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         osiPipelineRole.addToPolicy(new PolicyStatement({
             effect: Effect.ALLOW,
             actions: ["es:DescribeDomain", "es:ESHttp*"],
-            resources: [`arn:aws:es:${this.region}:${this.account}:domain/*`]
+            resources: [`arn:${this.partition}:es:${this.region}:${this.account}:domain/*`]
         }))
 
         new StringParameter(this, 'SSMParameterOSIPipelineRoleArn', {
@@ -77,7 +76,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
     }
 
     createOpenSearchIngestionManagementPolicy(pipelineRoleArn: string): PolicyStatement[] {
-        const allMigrationPipelineArn = `arn:aws:osis:${this.region}:${this.account}:pipeline/*`
+        const allMigrationPipelineArn = `arn:${this.partition}:osis:${this.region}:${this.account}:pipeline/*`
         const osiManagementPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: [allMigrationPipelineArn],
@@ -92,20 +91,27 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 "iam:PassRole"
             ]
         })
-        return [osiManagementPolicy, passPipelineRolePolicy]
+        const configureLogGroupPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: ["*"],
+            actions: [
+                "logs:CreateLogDelivery",
+                "logs:PutResourcePolicy",
+                "logs:DescribeResourcePolicies",
+                "logs:DescribeLogGroups"
+            ]
+        })
+        return [osiManagementPolicy, passPipelineRolePolicy, configureLogGroupPolicy]
     }
 
     constructor(scope: Construct, id: string, props: MigrationConsoleProps) {
         super(scope, id, props)
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceConnectSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceConnectSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "replayerOutputAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputAccessSecurityGroupId`))
         ]
-        if (props.otelCollectorEnabled) {
-            securityGroups.push(SecurityGroup.fromSecurityGroupId(this, "otelCollectorSGId", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/otelCollectorSGId`)))
-        }
 
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
@@ -124,7 +130,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             readOnly: false,
             sourceVolume: volumeName
         }
-        const replayerOutputEFSArn = `arn:aws:elasticfilesystem:${this.region}:${this.account}:file-system/${volumeId}`
+        const replayerOutputEFSArn = `arn:${this.partition}:elasticfilesystem:${this.region}:${this.account}:file-system/${volumeId}`
         const replayerOutputMountPolicy = new PolicyStatement( {
             effect: Effect.ALLOW,
             resources: [replayerOutputEFSArn],
@@ -134,7 +140,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
-        const ecsClusterArn = `arn:aws:ecs:${this.region}:${this.account}:service/migration-${props.stage}-ecs-cluster`
+        const ecsClusterArn = `arn:${this.partition}:ecs:${this.region}:${this.account}:service/migration-${props.stage}-ecs-cluster`
         const allReplayerServiceArn = `${ecsClusterArn}/migration-${props.stage}-traffic-replayer*`
         const reindexFromSnapshotServiceArn = `${ecsClusterArn}/migration-${props.stage}-reindex-from-snapshot`
         const ecsUpdateServicePolicy = new PolicyStatement({
@@ -168,7 +174,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         // Allow Console to retrieve SSM Parameters
         const getSSMParamsPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
-            resources: [`arn:aws:ssm:${this.region}:${this.account}:parameter/migration/${props.stage}/${props.defaultDeployId}/*`],
+            resources: [`arn:${this.partition}:ssm:${this.region}:${this.account}:parameter/migration/${props.stage}/${props.defaultDeployId}/*`],
             actions: [
                 "ssm:GetParameters"
             ]
@@ -176,12 +182,14 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
         const environment: { [key: string]: string; } = {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
+            // Temporary fix for source domain endpoint until we move to either alb or migration console yaml configuration
+            "SOURCE_DOMAIN_ENDPOINT": `https://capture-proxy-es.migration.${props.stage}.local:9200`,
             "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints,
             "MIGRATION_STAGE": props.stage,
             "MIGRATION_SOLUTION_VERSION": props.migrationsSolutionVersion
         }
-        const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.region, this.account)
-        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.region, this.account)
+        const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
+        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
         let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
@@ -218,7 +226,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             const osiLogGroup = new LogGroup(this, 'OSILogGroup',  {
                 retention: RetentionDays.ONE_MONTH,
                 removalPolicy: RemovalPolicy.DESTROY,
-                logGroupName: `/migration/${props.stage}/${props.defaultDeployId}/openSearchIngestion`
+                // Naming requirement from OSI
+                logGroupName: `/aws/vendedlogs/osi-${props.stage}-${props.defaultDeployId}`
             });
             new StringParameter(this, 'SSMParameterOSIPipelineLogGroupName', {
                 description: 'OpenSearch Migration Parameter for OpenSearch Ingestion Pipeline Log Group Name',

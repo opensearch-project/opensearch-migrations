@@ -57,6 +57,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+SOURCE_INFRA_STACK_NAME="opensearch-infra-stack-ec2-source-$STAGE"
+
 task_arn=$(aws ecs list-tasks --cluster migration-${STAGE}-ecs-cluster --family "migration-${STAGE}-migration-console" | jq --raw-output '.taskArns[0]')
 # Delete and re-create topic
 kafka_brokers=$(aws ssm get-parameter --name "/migration/${STAGE}/default/kafkaBrokers" --query 'Parameter.Value' --output text)
@@ -66,7 +68,7 @@ unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --ta
 echo "Done creating 'logging-traffic-topic'"
 
 # Remove all non-system indices
-source_lb_endpoint=$(aws cloudformation describe-stacks --stack-name opensearch-infra-stack-Migration-Source --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
+source_lb_endpoint=$(aws cloudformation describe-stacks --stack-name "$SOURCE_INFRA_STACK_NAME" --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
 source_endpoint="http://${source_lb_endpoint}:19200"
 proxy_endpoint="http://${source_lb_endpoint}:9200"
 target_endpoint=$(aws ssm get-parameter --name "/migration/${STAGE}/default/osClusterEndpoint" --query 'Parameter.Value' --output text)

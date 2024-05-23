@@ -1,6 +1,6 @@
 package com.rfs.cms;
 
-import java.util.Date;
+import java.time.Instant;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -58,7 +58,7 @@ public class OpenSearchCmsEntry {
 
             // TODO: We should be ideally setting the lease using the server's clock, but it's unclear on the best way
             // to do this.  For now, we'll just use the client's clock.
-            metadataDoc.put(FIELD_LEASE_EXPIRY, new Date().getTime() + CmsEntry.Metadata.METADATA_LEASE_MS);
+            metadataDoc.put(FIELD_LEASE_EXPIRY, CmsEntry.Metadata.getLeaseExpiry(Instant.now().toEpochMilli(), 1));
 
             return metadataDoc;
         }

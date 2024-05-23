@@ -155,8 +155,8 @@ public class MetadataStep {
             this.existingEntry = existingEntry;
         }
 
-        protected Instant getNow() {
-            return Instant.now();
+        protected long getNowMs() {
+            return Instant.now().toEpochMilli();
         }
 
         @Override
@@ -166,7 +166,7 @@ public class MetadataStep {
             // TODO: Should be using the server-side clock here
             this.acquiredLease = members.cmsClient.updateMetadataEntry(
                 CmsEntry.MetadataStatus.IN_PROGRESS,
-                String.valueOf(getNow().plusMillis(CmsEntry.Metadata.METADATA_LEASE_MS).toEpochMilli()),
+                CmsEntry.Metadata.getLeaseExpiry(getNowMs(), existingEntry.numAttempts + 1),
                 existingEntry.numAttempts + 1
             );
 

@@ -1,7 +1,6 @@
 plugins {
     id 'jacoco'
     id 'org.owasp.dependencycheck' version '8.2.1'
-    id 'io.freefair.lombok' version '8.6' apply false
 }
 
 allprojects {
@@ -122,7 +121,7 @@ allprojects {
         dependsOn project.javadoc
 
         // Provide way to exclude particular tests from CLI
-        // e.g. ./gradlew test -PexcludeTests=**/KafkaProtobufConsumerLongTermTest*
+        // e.g. ../gradlew test -PexcludeTests=**/KafkaProtobufConsumerLongTermTest*
         if (project.hasProperty('excludeTests')) {
             exclude project.property('excludeTests')
         }

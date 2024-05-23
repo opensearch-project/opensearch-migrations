@@ -1,5 +1,6 @@
 import {Construct} from "constructs";
 import {Duration, Stack, StackProps} from "aws-cdk-lib";
+import {readFileSync} from 'fs';
 import {OpenSearchDomainStack} from "./opensearch-domain-stack";
 import {EngineVersion, TLSSecurityPolicy} from "aws-cdk-lib/aws-opensearchservice";
 import * as defaultValuesJson from "../default-values.json"
@@ -7,7 +8,6 @@ import {NetworkStack} from "./network-stack";
 import {MigrationAssistanceStack} from "./migration-assistance-stack";
 import {FetchMigrationStack} from "./fetch-migration-stack";
 import {MSKUtilityStack} from "./msk-utility-stack";
-import {OtelCollectorStack} from "./service-stacks/migration-otel-collector-stack";
 import {MigrationConsoleStack} from "./service-stacks/migration-console-stack";
 import {CaptureProxyESStack} from "./service-stacks/capture-proxy-es-stack";
 import {TrafficReplayerStack} from "./service-stacks/traffic-replayer-stack";
@@ -98,6 +98,36 @@ export class StackComposer {
         }
     }
 
+    private parseContextBlock(scope: Construct, contextId: string) {
+        const contextFile = scope.node.tryGetContext("contextFile")
+        if (contextFile) {
+            const fileString = readFileSync(contextFile, 'utf-8');
+            let fileJSON
+            try {
+                fileJSON = JSON.parse(fileString)
+            } catch (error) {
+                throw new Error(`Unable to parse context file ${contextFile} into JSON with following error: ${error}`);
+            }
+            const contextBlock = fileJSON[contextId]
+            if (!contextBlock) {
+                throw new Error(`No CDK context block found for contextId '${contextId}' in file ${contextFile}`)
+            }
+            return contextBlock
+        }
+
+        let contextJSON = scope.node.tryGetContext(contextId)
+        if (!contextJSON) {
+            throw new Error(`No CDK context block found for contextId '${contextId}'`)
+        }
+        // For a context block to be provided as a string (as in the case of providing via command line) it will need to be properly escaped
+        // to be captured. This requires JSON to parse twice, 1. Returns a normal JSON string with no escaping 2. Returns a JSON object for use
+        if (typeof contextJSON === 'string') {
+            contextJSON = JSON.parse(JSON.parse(contextJSON))
+        }
+        return contextJSON
+
+    }
+
     constructor(scope: Construct, props: StackComposerProps) {
 
         const defaultValues: { [x: string]: (any); } = defaultValuesJson
@@ -108,18 +138,11 @@ export class StackComposer {
         if (!contextId) {
             throw new Error("Required context field 'contextId' not provided")
         }
-        let contextJSON = scope.node.tryGetContext(contextId)
-        if (!contextJSON) {
-            throw new Error(`No CDK context block found for contextId '${contextId}'`)
-        }
+        const contextJSON = this.parseContextBlock(scope, contextId)
         console.log('Received following context block for deployment: ')
         console.log(contextJSON)
         console.log('End of context block.')
-        // For a context block to be provided as a string (as in the case of providing via command line) it will need to be properly escaped
-        // to be captured. This requires JSON to parse twice, 1. Returns a normal JSON string with no escaping 2. Returns a JSON object for use
-        if (typeof contextJSON === 'string') {
-            contextJSON = JSON.parse(JSON.parse(contextJSON))
-        }
+
         const stage = this.getContextForType('stage', 'string', defaultValues, contextJSON)
 
         let version: EngineVersion
@@ -243,7 +266,6 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 addOnMigrationDeployId: addOnMigrationDeployId,
-                otelCollectorEnabled: otelCollectorEnabled,
                 env: props.env
             })
             this.stacks.push(networkStack)
@@ -336,21 +358,6 @@ export class StackComposer {
             }
         }
 
-        let otelCollectorStack;
-        if (otelCollectorEnabled && networkStack) {
-            otelCollectorStack = new OtelCollectorStack(scope, "otel-collector", {
-                stackName: `OSMigrations-${stage}-${region}-OtelCollector`,
-                description: "This stack contains the OpenTelemetry Collector",
-                fargateCpuArch: fargateCpuArch,
-                vpc:networkStack.vpc,
-                stage: stage,
-                defaultDeployId: defaultDeployId,
-                env: props.env
-            })
-            this.addDependentStacks(otelCollectorStack, [networkStack, migrationStack])
-            this.stacks.push(otelCollectorStack)
-        }
-
         let osContainerStack
         if (osContainerServiceEnabled && networkStack && migrationStack) {
             osContainerStack = new OpenSearchContainerStack(scope, `opensearch-container-${deployId}`, {
@@ -431,7 +438,7 @@ export class StackComposer {
                 fargateCpuArch: fargateCpuArch,
                 env: props.env
             })
-            this.addDependentStacks(captureProxyESStack, [migrationStack, mskUtilityStack, kafkaBrokerStack, otelCollectorStack])
+            this.addDependentStacks(captureProxyESStack, [migrationStack, mskUtilityStack, kafkaBrokerStack])
             this.stacks.push(captureProxyESStack)
         }
 
@@ -455,7 +462,7 @@ export class StackComposer {
                 env: props.env
             })
             this.addDependentStacks(trafficReplayerStack, [networkStack, migrationStack, mskUtilityStack,
-                kafkaBrokerStack, otelCollectorStack, openSearchStack, osContainerStack])
+                kafkaBrokerStack, openSearchStack, osContainerStack])
             this.stacks.push(trafficReplayerStack)
         }
 
@@ -489,7 +496,7 @@ export class StackComposer {
                 fargateCpuArch: fargateCpuArch,
                 env: props.env
             })
-            this.addDependentStacks(captureProxyStack, [elasticsearchStack, otelCollectorStack, migrationStack,
+            this.addDependentStacks(captureProxyStack, [elasticsearchStack, migrationStack,
                 kafkaBrokerStack, mskUtilityStack])
             this.stacks.push(captureProxyStack)
         }
@@ -501,7 +508,6 @@ export class StackComposer {
                 vpc: networkStack.vpc,
                 streamingSourceType: streamingSourceType,
                 fetchMigrationEnabled: fetchMigrationEnabled,
-                otelCollectorEnabled: otelCollectorEnabled,
                 migrationConsoleEnableOSI: migrationConsoleEnableOSI,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
@@ -510,10 +516,10 @@ export class StackComposer {
                 fargateCpuArch: fargateCpuArch,
                 env: props.env
             })
-            // To enable the Migration Console to make requests to other service endpoints with Service Connect,
-            // it must be deployed after any Service Connect services
+            // To enable the Migration Console to make requests to other service endpoints with services,
+            // it must be deployed after any connected services
             this.addDependentStacks(migrationConsoleStack, [captureProxyESStack, captureProxyStack, elasticsearchStack,
-                fetchMigrationStack, otelCollectorStack, openSearchStack, osContainerStack, migrationStack, kafkaBrokerStack, mskUtilityStack])
+                fetchMigrationStack, openSearchStack, osContainerStack, migrationStack, kafkaBrokerStack, mskUtilityStack])
             this.stacks.push(migrationConsoleStack)
         }
 

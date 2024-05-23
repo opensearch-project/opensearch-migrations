@@ -1,8 +1,8 @@
 # Overview
 
-To launch the end-2-end (E2E) services in containers, simply run `./gradlew :dockerSolution:composeUp` from the
+To launch the end-2-end (E2E) services in containers, simply run `../gradlew :dockerSolution:composeUp` from the
 TrafficCapture directory (parent of this directory). That will build all java artifacts and create the necessary images
-for each service.  `./gradlew :dockerSolution:composeDown` will tear everything (volumes, networks, containers) back
+for each service.  `../gradlew :dockerSolution:composeDown` will tear everything (volumes, networks, containers) back
 down again.
 
 Notice that most of the Dockerfiles are dynamically constructed in the build hierarchy. Some efforts have been made
@@ -12,7 +12,7 @@ to ensure that changes will make it into containers to be launched.
 
 While in the TrafficCapture directory, run the following command:
 
-`./gradlew :dockerSolution:composeUp`
+`../gradlew :dockerSolution:composeUp`
 
 ### Interacting with the Docker Solution
 
@@ -45,7 +45,7 @@ from either data source. Traces for the capture proxy and replayer are available
 
 By default, composeUp will run an otel-collector that exports instrumentation to other local containers within the
 migrations network.  However, the collector's export configuration can be overridden via the otel-collector property:
-`TrafficCapture % ./gradlew :dockerSolution:composeUp -Potel-collector=otel-aws.yml`
+`TrafficCapture % ../gradlew :dockerSolution:composeUp -Potel-collector=otel-aws.yml`
 
 The [otel-aws.yml](src/main/docker/composeExtensions/otel-aws.yml) will use that docker-compose extension.
 That extension uses the collector configurations (from the container's base image) and wires the ~/.aws/credentials
@@ -100,7 +100,7 @@ Any attempt to use a different version will cause the build to fail and will res
 depending on which tool/project is being built. Below is an example error when attempting to build with an incompatible Java version.
 
 ```
-./gradlew trafficCaptureProxyServer:build
+../gradlew trafficCaptureProxyServer:build
 
 * What went wrong:
 A problem occurred evaluating project ':trafficCaptureProxyServer'.
