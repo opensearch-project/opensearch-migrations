@@ -45,12 +45,14 @@ def cw_stubber():
 def cw_ms():
     return CloudwatchMetricsSource({
         "type": "cloudwatch",
+        "aws_region": AWS_REGION
     })
 
 
 def test_get_metrics_source():
     cw_config = {
         "type": "cloudwatch",
+        "aws_region": AWS_REGION
     }
     cw_metrics_source = get_metrics_source(cw_config)
     assert isinstance(cw_metrics_source, CloudwatchMetricsSource)
