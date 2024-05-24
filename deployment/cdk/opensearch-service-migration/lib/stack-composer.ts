@@ -20,6 +20,7 @@ import {determineStreamingSourceType, StreamingSourceType} from "./streaming-sou
 import {parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
 import { ServicesYaml } from "./migration-services-yaml";
+import { StringParameter } from "aws-cdk-lib/aws-ssm";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -521,7 +522,7 @@ export class StackComposer {
             targetClusterProxyStack = new CaptureProxyStack(scope, "target-cluster-proxy", {
                 serviceName: "target-cluster-proxy",
                 vpc: networkStack.vpc,
-                customSourceClusterEndpoint: targetClusterEndpoint,
+                customSourceClusterEndpointSSMParam: `/migration/${stage}/${defaultDeployId}/osClusterEndpoint`,
                 otelCollectorEnabled: false,
                 streamingSourceType: StreamingSourceType.DISABLED,
                 extraArgs: "--noCapture",

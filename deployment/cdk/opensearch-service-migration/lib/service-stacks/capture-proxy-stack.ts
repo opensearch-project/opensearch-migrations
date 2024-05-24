@@ -17,6 +17,7 @@ export interface CaptureProxyProps extends StackPropsExt {
     readonly streamingSourceType: StreamingSourceType,
     readonly fargateCpuArch: CpuArchitecture,
     readonly customSourceClusterEndpoint?: string,
+    readonly customSourceClusterEndpointSSMParam?: string,
     readonly otelCollectorEnabled?: boolean,
     readonly alb?: IApplicationLoadBalancer,
     readonly albListenerCert?: ICertificate,
@@ -60,7 +61,10 @@ export class CaptureProxyStack extends MigrationServiceCore {
         const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId) : []
 
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
-        const sourceClusterEndpoint = props.customSourceClusterEndpoint ?? "https://elasticsearch:9200"
+
+        const sourceClusterEndpoint = props.customSourceClusterEndpoint ? props.customSourceClusterEndpoint :
+                                    props.customSourceClusterEndpointSSMParam ? StringParameter.valueForStringParameter(this, props.customSourceClusterEndpointSSMParam) :
+                                    "https://elasticsearch:9200";
         let command = `/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy --destinationUri ${sourceClusterEndpoint} --insecureDestination --listenPort 9200`
         command = props.streamingSourceType !== StreamingSourceType.DISABLED ? command.concat(`  --kafkaConnection ${brokerEndpoints}`) : command
         command = props.streamingSourceType === StreamingSourceType.AWS_MSK ? command.concat(" --enableMSKAuth") : command
