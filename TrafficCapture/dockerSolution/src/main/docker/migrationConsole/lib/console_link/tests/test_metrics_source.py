@@ -13,6 +13,7 @@ from botocore.stub import Stubber
 from console_link.logic.utils import AWSAPIError
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
+AWS_REGION = "us-east-1"
 
 mock_metrics_list = {'captureProxy': ['kafkaCommitCount', 'captureConnectionDuration'],
                      'replayer': ['kafkaCommitCount']}
@@ -31,6 +32,13 @@ def prometheus_ms():
         "type": "prometheus",
         "endpoint": endpoint
     })
+
+
+@pytest.fixture
+def cw_stubber():
+    cw_session = botocore.session.get_session().create_client("cloudwatch", region_name=AWS_REGION)
+    stubber = Stubber(cw_session)
+    return stubber
 
 
 @pytest.fixture
@@ -75,30 +83,26 @@ def test_prometheus_metrics_source_validates_endpoint():
     assert "endpoint" in str(excinfo.value.args[1])
 
 
-def test_cloudwatch_metrics_get_metrics(cw_ms):
-    cw_session = botocore.session.get_session().create_client("cloudwatch")
-    stubber = Stubber(cw_session)
+def test_cloudwatch_metrics_get_metrics(cw_ms, cw_stubber):
     with open(TEST_DATA_DIRECTORY / 'cloudwatch_list_metrics_response.json') as f:
-        stubber.add_response("list_metrics", json.load(f))
-    stubber.activate()
+        cw_stubber.add_response("list_metrics", json.load(f))
+    cw_stubber.activate()
 
-    cw_ms.client = cw_session
-    metrics = cw_ms.get_metrics(cw_session)
+    cw_ms.client = cw_stubber.client
+    metrics = cw_ms.get_metrics()
     assert sorted(metrics.keys()) == sorted(mock_metrics_list.keys())
     assert sorted(metrics['captureProxy']) == sorted(mock_metrics_list['captureProxy'])
     assert sorted(metrics['replayer']) == sorted(mock_metrics_list['replayer'])
 
 
-def test_cloudwatch_metrics_get_metrics_error(cw_ms):
-    cw_session = botocore.session.get_session().create_client("cloudwatch")
-    stubber = Stubber(cw_session)
+def test_cloudwatch_metrics_get_metrics_error(cw_ms, cw_stubber):
     with open(TEST_DATA_DIRECTORY / 'cloudwatch_error.json') as f:
-        stubber.add_response("list_metrics", json.load(f))
-    stubber.activate()
+        cw_stubber.add_response("list_metrics", json.load(f))
+    cw_stubber.activate()
 
-    cw_ms.client = cw_session
+    cw_ms.client = cw_stubber.client
     with pytest.raises(AWSAPIError):
-        cw_ms.get_metrics(cw_session)
+        cw_ms.get_metrics()
 
 
 # This one doesn't serialize to json nicely because of the datetime objects
@@ -130,13 +134,11 @@ cw_get_metric_data = {
 }
 
 
-def test_cloudwatch_metrics_get_metric_data(cw_ms):
-    cw_session = botocore.session.get_session().create_client("cloudwatch")
-    stubber = Stubber(cw_session)
-    stubber.add_response("get_metric_data", cw_get_metric_data)
-    stubber.activate()
+def test_cloudwatch_metrics_get_metric_data(cw_ms, cw_stubber):
+    cw_stubber.add_response("get_metric_data", cw_get_metric_data)
+    cw_stubber.activate()
 
-    cw_ms.client = cw_session
+    cw_ms.client = cw_stubber.client
     metrics = cw_ms.get_metric_data(Component.CAPTUREPROXY, "kafkaCommitCount",
                                     MetricStatistic.Average, startTime=datetime.datetime.now())
     assert metrics == mock_metric_data
