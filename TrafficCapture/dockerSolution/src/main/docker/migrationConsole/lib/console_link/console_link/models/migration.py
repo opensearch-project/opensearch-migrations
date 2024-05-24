@@ -51,6 +51,7 @@ OSI_SCHEMA = {
     }
 }
 
+
 class MigrationType(str, Enum):
     OSI_HISTORICAL_MIGRATION = "OSI_HISTORICAL_MIGRATION"
 
@@ -87,7 +88,7 @@ class OpenSearchIngestionMigration(Migration):
         self.source_cluster = source_cluster
         self.target_cluster = target_cluster
 
-    def create(self, pipeline_template_path = '/root/osiPipelineTemplate.yaml', print_config_only = False):
+    def create(self, pipeline_template_path='/root/osiPipelineTemplate.yaml', print_config_only=False):
         self.migration_logic.create_pipeline_from_env(pipeline_template_path=pipeline_template_path,
                                                       osi_props=self.osi_props,
                                                       source_cluster=self.source_cluster,
@@ -97,8 +98,13 @@ class OpenSearchIngestionMigration(Migration):
     def create_from_json(self, config_json: Dict, pipeline_template_path: str) -> None:
         self.migration_logic.create_pipeline_from_json(input_json=config_json,
                                                        pipeline_template_path=pipeline_template_path)
-    def start(self, pipeline_name = None):
+
+    def start(self, pipeline_name=None):
+        if pipeline_name is None:
+            pipeline_name = self.osi_props.pipeline_name
         self.migration_logic.start_pipeline(pipeline_name=pipeline_name)
 
-    def stop(self, pipeline_name = None):
+    def stop(self, pipeline_name=None):
+        if pipeline_name is None:
+            pipeline_name = self.osi_props.pipeline_name
         self.migration_logic.stop_pipeline(pipeline_name=pipeline_name)

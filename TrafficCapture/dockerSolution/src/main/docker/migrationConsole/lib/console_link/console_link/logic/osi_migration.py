@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-from console_link.models.cluster import AuthMethod,Cluster
+from console_link.models.cluster import AuthMethod, Cluster
 from pathlib import Path
 from typing import List, Dict, Optional
 from urllib.parse import urlparse
@@ -28,6 +28,7 @@ SOURCE_DEFAULT_INDEX_TEMPLATE = """
 
 class MissingEnvironmentVariable(Exception):
     pass
+
 
 class InvalidAuthParameters(Exception):
     pass
@@ -59,7 +60,6 @@ class OpenSearchIngestionMigrationProps:
         tags = config.get('tags')
         if tags:
             self.tags = convert_str_tags_to_dict(tags)
-
 
 
 # Allowing ability to remove port, as port is currently not supported by OpenSearch Ingestion
@@ -188,7 +188,6 @@ def construct_pipeline_config(pipeline_config_file_path: str, source_endpoint: s
     pipeline_config = pipeline_config.replace(SOURCE_ENDPOINT_PLACEHOLDER, source_endpoint)
     pipeline_config = pipeline_config.replace(TARGET_ENDPOINT_PLACEHOLDER, target_endpoint)
     return pipeline_config
-
 
 
 class OSIMigrationLogic:

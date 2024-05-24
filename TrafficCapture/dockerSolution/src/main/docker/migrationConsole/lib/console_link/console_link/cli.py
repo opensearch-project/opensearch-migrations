@@ -5,6 +5,7 @@ from console_link.logic.instantiation import Environment
 
 logger = logging.getLogger(__name__)
 
+
 class Context(object):
     def __init__(self, config_file) -> None:
         self.config_file = config_file
@@ -26,12 +27,10 @@ def cli(ctx, config_file):
 def create_migration_osi_cmd(ctx, pipeline_template_file, print_config_only):
     """Create OSI migration action"""
     if ctx.env.osi_migration:
-        print(ctx.env.osi_migration.osi_props.__dict__)
-        print(ctx.env.source_cluster.__dict__)
-        print(ctx.env.target_cluster.__dict__)
         ctx.env.osi_migration.create(pipeline_template_path=pipeline_template_file, print_config_only=print_config_only)
     else:
         logger.error(f"Error: OpenSearch Ingestion has not been configured via the config file: {ctx.config_file}")
+
 
 @cli.command(name="osi-start-migration")
 @click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
@@ -42,6 +41,7 @@ def start_migration_osi_cmd(ctx, pipeline_name):
         ctx.env.osi_migration.start(pipeline_name=pipeline_name)
     else:
         logger.error(f"Error: OpenSearch Ingestion has not been configured via the config file: {ctx.config_file}")
+
 
 @cli.command(name="osi-stop-migration")
 @click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')

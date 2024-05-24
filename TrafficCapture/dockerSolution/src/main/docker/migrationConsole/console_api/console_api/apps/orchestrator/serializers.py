@@ -30,4 +30,3 @@ class OpenSearchIngestionCreateRequestSerializer(serializers.Serializer):
     VpcSecurityGroupIds = serializers.ListField(
         child=serializers.CharField(min_length=11, max_length=20)
     )
-

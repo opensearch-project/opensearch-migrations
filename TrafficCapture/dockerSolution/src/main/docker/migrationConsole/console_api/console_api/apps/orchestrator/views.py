@@ -43,7 +43,7 @@ def osi_create_migration(request):
     osi_serializer.is_valid(raise_exception=True)
     migration = OSIMigrationLogic()
     try:
-        migration.create_pipeline_from_json(input_json = request_data, pipeline_template_path=PIPELINE_TEMPLATE_PATH)
+        migration.create_pipeline_from_json(input_json=request_data, pipeline_template_path=PIPELINE_TEMPLATE_PATH)
     except InvalidAuthParameters as i:
         logger.error(f"Error performing osi_create_migration API: {i}")
         return Response(str(i), status=status.HTTP_400_BAD_REQUEST)
