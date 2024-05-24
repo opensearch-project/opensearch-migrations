@@ -4,7 +4,7 @@ from console_link.models.migration import OpenSearchIngestionMigration
 
 # Define a valid cluster configuration
 valid_osi_migration_config = {
-    "pipeline_role_arn": "arn:aws:iam::123456789012:role/OSMigrations-aws-integ-us--osisPipelineRole44D91614-KVWTbzRTCb0T",
+    "pipeline_role_arn": "arn:aws:iam::123456789012:role/OSMigrations-pipelineRole",
     "vpc_subnet_ids": [
         "subnet-024004957a02ce923"
     ],
@@ -31,13 +31,14 @@ def missing_attribute_test_helper(config, attribute):
 
 
 def test_valid_full_osi_migration_config():
-    migration = OpenSearchIngestionMigration(valid_osi_migration_config, source_cluster=mock_cluster, target_cluster=mock_cluster)
+    migration = OpenSearchIngestionMigration(valid_osi_migration_config, source_cluster=mock_cluster,
+                                             target_cluster=mock_cluster)
     assert isinstance(migration, OpenSearchIngestionMigration)
 
 
 def test_valid_min_osi_migration_config():
     min_valid_osi_migration_config = {
-        "pipeline_role_arn": "arn:aws:iam::123456789012:role/OSMigrations-aws-integ-us--osisPipelineRole44D91614-KVWTbzRTCb0T",
+        "pipeline_role_arn": "arn:aws:iam::123456789012:role/OSMigrations-pipelineRole",
         "vpc_subnet_ids": [
             "subnet-024004957a02ce923"
         ],
@@ -46,7 +47,8 @@ def test_valid_min_osi_migration_config():
         ],
         "aws_region": "us-west-2"
     }
-    migration = OpenSearchIngestionMigration(min_valid_osi_migration_config, source_cluster=mock_cluster, target_cluster=mock_cluster)
+    migration = OpenSearchIngestionMigration(min_valid_osi_migration_config, source_cluster=mock_cluster,
+                                             target_cluster=mock_cluster)
     assert isinstance(migration, OpenSearchIngestionMigration)
 
 
@@ -65,7 +67,7 @@ def test_osi_missing_pipeline_role_refused():
 
 def test_osi_missing_subnets_refused():
     missing_attribute_config = {
-        "pipeline_role_arn": "arn:aws:iam::123456789012:role/OSMigrations-aws-integ-us--osisPipelineRole44D91614-KVWTbzRTCb0T",
+        "pipeline_role_arn": "arn:aws:iam::123456789012:role/OSMigrations-pipelineRole",
         "security_group_ids": [
             "sg-04536940716d101f6"
         ],
@@ -76,7 +78,7 @@ def test_osi_missing_subnets_refused():
 
 def test_osi_missing_security_groups_refused():
     missing_attribute_config = {
-        "pipeline_role_arn": "arn:aws:iam::123456789012:role/OSMigrations-aws-integ-us--osisPipelineRole44D91614-KVWTbzRTCb0T",
+        "pipeline_role_arn": "arn:aws:iam::123456789012:role/OSMigrations-pipelineRole",
         "vpc_subnet_ids": [
             "subnet-024004957a02ce923"
         ],
@@ -87,7 +89,7 @@ def test_osi_missing_security_groups_refused():
 
 def test_osi_missing_aws_region_refused():
     missing_attribute_config = {
-        "pipeline_role_arn": "arn:aws:iam::123456789012:role/OSMigrations-aws-integ-us--osisPipelineRole44D91614-KVWTbzRTCb0T",
+        "pipeline_role_arn": "arn:aws:iam::123456789012:role/OSMigrations-pipelineRole",
         "vpc_subnet_ids": [
             "subnet-024004957a02ce923"
         ],
