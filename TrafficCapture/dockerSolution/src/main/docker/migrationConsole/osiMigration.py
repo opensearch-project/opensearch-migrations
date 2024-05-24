@@ -419,8 +419,8 @@ def create_pipeline_from_stage(osi_client, pipeline_name: str, pipeline_config_p
                        f"--source-endpoint={source_endpoint} "
                        f"--target-endpoint={target_endpoint} "
                        f"--aws-region={region} "
-                       f"--subnet-ids={','.join(map(str,subnet_ids))} "
-                       f"--security-group-ids={','.join(map(str,security_groups))} "
+                       f"--subnet-ids={','.join(map(str,subnet_ids))} "  # noqa: E231
+                       f"--security-group-ids={','.join(map(str,security_groups))} "  # noqa: E231
                        f"--source-auth-type='SIGV4' "
                        f"--target-auth-type='SIGV4' "
                        f"--pipeline-role-arn={pipeline_role_arn} "
