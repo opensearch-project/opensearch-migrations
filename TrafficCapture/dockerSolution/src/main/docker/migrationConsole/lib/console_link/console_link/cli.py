@@ -24,12 +24,12 @@ class Context(object):
     "--config-file", default="/etc/migration_services.yaml", help="Path to config file"
 )
 @click.option("--json", is_flag=True)
-@click.option('-v', '--verbose', count=True, help="Verbosity level. -v is warnings, -vv is info, -vvv is debug.")
+@click.option('-v', '--verbose', count=True, help="Verbosity level. Default is warn, -v is info, -vv is debug.")
 @click.pass_context
 def cli(ctx, config_file, json, verbose):
     ctx.obj = Context(config_file)
     ctx.obj.json = json
-    logging.basicConfig(level=logging.ERROR - (10 * verbose))
+    logging.basicConfig(level=logging.WARN - (10 * verbose))
     logger.info(f"Logging set to {logging.getLevelName(logger.getEffectiveLevel())}")
 
 # ##################### CLUSTERS ###################

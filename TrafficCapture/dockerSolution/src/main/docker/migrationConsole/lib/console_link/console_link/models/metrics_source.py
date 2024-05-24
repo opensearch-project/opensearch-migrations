@@ -127,7 +127,7 @@ class CloudwatchMetricsSource(MetricsSource):
         self.client = boto3.client("cloudwatch", config=self.boto_config)
 
     def get_metrics(self, recent=True) -> Dict[str, List[str]]:
-        logger.info(f"{self.__name__} get_metrics called with {recent=}")
+        logger.info(f"{self.__class__.__name__}.get_metrics called with {recent=}")
         response = self.client.list_metrics(  # TODO: implement pagination
             Namespace=CLOUDWATCH_METRICS_NAMESPACE,
             RecentlyActive="PT3H" if recent else None,
@@ -155,7 +155,7 @@ class CloudwatchMetricsSource(MetricsSource):
         endTime: Optional[datetime] = None,
         dimensions: Optional[Dict[str, str]] = None,
     ) -> List[Tuple[str, float]]:
-        logger.info(f"{self.__name__} get_metric_data called with {component=}, {metric=}, {statistic=},"
+        logger.info(f"{self.__class__.__name__}.get_metric_data called with {component=}, {metric=}, {statistic=},"
                     f"{startTime=}, {period_in_seconds=}, {endTime=}, {dimensions=}")
 
         aws_dimensions = [{"Name": "OTelLib", "Value": component.value}]
@@ -217,7 +217,7 @@ class PrometheusMetricsSource(MetricsSource):
         self.endpoint = config["endpoint"]
 
     def get_metrics(self, recent=False) -> Dict[str, List[str]]:
-        logger.info(f"{self.__name__} get_metrics called with {recent=}")
+        logger.info(f"{self.__class__.__name__}.get_metrics called with {recent=}")
         metrics_by_component = {}
         if recent:
             raise NotImplementedError("Recent metrics are not implemented for Prometheus")
@@ -246,7 +246,7 @@ class PrometheusMetricsSource(MetricsSource):
         endTime: Optional[datetime] = None,
         dimensions: Optional[Dict] = None,
     ) -> List[Tuple[str, float]]:
-        logger.info(f"{self.__name__} get_metric_data called with {component=}, {metric=}, {statistic=},"
+        logger.info(f"{self.__class__.__name__} get_metric_data called with {component=}, {metric=}, {statistic=},"
                     f"{startTime=}, {period_in_seconds=}, {endTime=}, {dimensions=}")
         if not endTime:
             endTime = datetime.now()
