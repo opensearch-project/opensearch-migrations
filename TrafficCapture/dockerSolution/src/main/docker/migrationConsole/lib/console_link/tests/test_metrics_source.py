@@ -1,4 +1,5 @@
 import json
+import pathlib
 
 import requests
 from console_link.models.metrics_source import MetricsSource, CloudwatchMetricsSource, PrometheusMetricsSource, \
@@ -10,6 +11,8 @@ import botocore.session
 from botocore.stub import Stubber
 
 from console_link.logic.utils import AWSAPIError
+
+TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 
 mock_metrics_list = {'captureProxy': ['kafkaCommitCount', 'captureConnectionDuration'],
                      'replayer': ['kafkaCommitCount']}
@@ -75,7 +78,7 @@ def test_prometheus_metrics_source_validates_endpoint():
 def test_cloudwatch_metrics_get_metrics(cw_ms):
     cw_session = botocore.session.get_session().create_client("cloudwatch")
     stubber = Stubber(cw_session)
-    with open('lib/console_link/tests/data/cloudwatch_list_metrics_response.json') as f:
+    with open(TEST_DATA_DIRECTORY / 'cloudwatch_list_metrics_response.json') as f:
         stubber.add_response("list_metrics", json.load(f))
     stubber.activate()
 
@@ -89,7 +92,7 @@ def test_cloudwatch_metrics_get_metrics(cw_ms):
 def test_cloudwatch_metrics_get_metrics_error(cw_ms):
     cw_session = botocore.session.get_session().create_client("cloudwatch")
     stubber = Stubber(cw_session)
-    with open('lib/console_link/tests/data/cloudwatch_error.json') as f:
+    with open(TEST_DATA_DIRECTORY / 'cloudwatch_error.json') as f:
         stubber.add_response("list_metrics", json.load(f))
     stubber.activate()
 
@@ -141,11 +144,11 @@ def test_cloudwatch_metrics_get_metric_data(cw_ms):
 
 def test_prometheus_get_metrics(prometheus_ms):
     with requests_mock.Mocker() as rm:
-        with open('lib/console_link/tests/data/prometheus_list_metrics_capture_response.json') as f:
+        with open(TEST_DATA_DIRECTORY / 'prometheus_list_metrics_capture_response.json') as f:
             rm.get(f"{prometheus_ms.endpoint}/api/v1/query?query=%7Bexported_job%3D%22capture%22%7D",
                    status_code=200,
                    json=json.load(f))
-        with open('lib/console_link/tests/data/prometheus_list_metrics_replay_response.json') as f:
+        with open(TEST_DATA_DIRECTORY / 'prometheus_list_metrics_replay_response.json') as f:
             rm.get(f"{prometheus_ms.endpoint}/api/v1/query?query=%7Bexported_job%3D%22replay%22%7D",
                    status_code=200,
                    json=json.load(f))
