@@ -249,12 +249,17 @@ export class MigrationServiceCore extends Stack {
         });
     }
 
-    createSecureTargetGroup(serviceName: string, containerPort: number, vpc: IVpc) {
+    createSecureTargetGroup(serviceName: string, containerPort: number, vpc: IVpc, expectUnauthenticatedHealthcheck: boolean = false) {
         return new ApplicationTargetGroup(this, `${serviceName}TG`, {
             protocol: ApplicationProtocol.HTTPS,
             protocolVersion: ApplicationProtocolVersion.HTTP1,
             port: containerPort,
-            vpc: vpc
+            vpc: vpc,
+            healthCheck: {
+                port: containerPort.toString(),
+                path: "/",
+                healthyHttpCodes: expectUnauthenticatedHealthcheck ? "401" : "200"
+            }
         });
     }
 }
