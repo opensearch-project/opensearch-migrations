@@ -1,5 +1,5 @@
 import {StackPropsExt} from "../stack-composer";
-import {ISecurityGroup, IVpc, SubnetType} from "aws-cdk-lib/aws-ec2";
+import {ISecurityGroup, IVpc, Port, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {
     CfnService as FargateCfnService, CloudMapOptions,
     Cluster,
@@ -13,7 +13,7 @@ import {
     OperatingSystemFamily,
     Volume,
     AwsLogDriverMode,
-    ContainerDependencyCondition
+    ContainerDependencyCondition,
 } from "aws-cdk-lib/aws-ecs";
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {Duration, RemovalPolicy, Stack} from "aws-cdk-lib";
@@ -23,6 +23,8 @@ import {CfnService as DiscoveryCfnService, PrivateDnsNamespace} from "aws-cdk-li
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {createDefaultECSTaskRole} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
+import { ApplicationListener, ApplicationProtocol, ApplicationProtocolVersion, ApplicationTargetGroup, IApplicationListener, IApplicationLoadBalancer, IApplicationTargetGroup, IListenerCertificate, SslPolicy } from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 
 
 export interface MigrationServiceCoreProps extends StackPropsExt {
@@ -51,7 +53,8 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly taskInstanceCount?: number,
     readonly ulimits?: Ulimit[],
     readonly maxUptime?: Duration,
-    readonly otelCollectorEnabled?: boolean
+    readonly otelCollectorEnabled?: boolean,
+    readonly albTargetGroups?: (IApplicationTargetGroup | undefined)[],
 }
 
 export class MigrationServiceCore extends Stack {
@@ -223,12 +226,35 @@ export class MigrationServiceCore extends Stack {
             enableExecuteCommand: true,
             securityGroups: props.securityGroups,
             vpcSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PRIVATE_WITH_EGRESS}),
-            cloudMapOptions: cloudMapOptions
+            cloudMapOptions: cloudMapOptions,
         });
+        
+        if (props.albTargetGroups) {
+            props.albTargetGroups.forEach(tg => tg?.addTarget(fargateService));
+        }
 
         if (props.serviceDiscoveryEnabled) {
             this.addServiceDiscoveryRecords(fargateService, props.serviceDiscoveryPort)
         }
     }
 
+    createSecureListener(serviceName: string, listeningPort: number, alb: IApplicationLoadBalancer, cert: ICertificate, albTargetGroup: IApplicationTargetGroup) {
+        return new ApplicationListener(this, `${serviceName}ALBListener`, {
+            loadBalancer: alb,
+            port: listeningPort,
+            protocol: ApplicationProtocol.HTTPS,
+            certificates: [cert],
+            defaultTargetGroups: [albTargetGroup],
+            sslPolicy: (this.partition === "aws-us-gov") ? SslPolicy.FIPS_TLS13_12_EXT2 : SslPolicy.RECOMMENDED_TLS
+        });
+    }
+
+    createSecureTargetGroup(serviceName: string, containerPort: number, vpc: IVpc) {
+        return new ApplicationTargetGroup(this, `${serviceName}TG`, {
+            protocol: ApplicationProtocol.HTTPS,
+            protocolVersion: ApplicationProtocolVersion.HTTP1,
+            port: containerPort,
+            vpc: vpc
+        });
+    }
 }

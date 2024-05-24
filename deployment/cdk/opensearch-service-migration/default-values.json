@@ -14,5 +14,6 @@
   "migrationConsoleServiceEnabled": true,
   "trafficReplayerServiceEnabled": true,
   "otelCollectorEnabled": true,
-  "dpPipelineTemplatePath": "./dp_pipeline_template.yaml"
+  "dpPipelineTemplatePath": "./dp_pipeline_template.yaml",
+  "deployALB": false
 }

@@ -8,6 +8,9 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {StreamingSourceType} from "../streaming-source-type";
 import {createMSKProducerIAMPolicies} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
+import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
+import { ApplicationProtocol, ApplicationProtocolVersion, ApplicationTargetGroup, IApplicationListener, IApplicationLoadBalancer, IApplicationTargetGroup} from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import { Duration } from "aws-cdk-lib";
 
 
 export interface CaptureProxyESProps extends StackPropsExt {
@@ -15,6 +18,8 @@ export interface CaptureProxyESProps extends StackPropsExt {
     readonly streamingSourceType: StreamingSourceType,
     readonly otelCollectorEnabled: boolean,
     readonly fargateCpuArch: CpuArchitecture,
+    readonly alb?: IApplicationLoadBalancer,
+    readonly albListenerCert?: ICertificate,
     readonly extraArgs?: string,
 }
 
@@ -24,6 +29,8 @@ export interface CaptureProxyESProps extends StackPropsExt {
  * items split into their own services to give more flexibility in setup.
  */
 export class CaptureProxyESStack extends MigrationServiceCore {
+    private readonly albListener?: IApplicationListener;
+    private readonly albTargetGroup?: IApplicationTargetGroup;
 
     constructor(scope: Construct, id: string, props: CaptureProxyESProps) {
         super(scope, id, props)
@@ -45,6 +52,13 @@ export class CaptureProxyESStack extends MigrationServiceCore {
             protocol: Protocol.TCP
         }
 
+        if(props.alb) {
+            if (!props.albListenerCert) {
+                throw new Error("Must have alb cert defined if specifying alb");
+            }
+            this.albTargetGroup = this.createSecureTargetGroup("CaptureProxy", 9200, props.vpc);
+            this.albListener = this.createSecureListener("CaptureProxy", 9200, props.alb, props.albListenerCert, this.albTargetGroup);
+        }
         const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId) : []
 
         let brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
@@ -68,6 +82,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,
+            albTargetGroups: [this.albTargetGroup],
             ...props
         });
     }
