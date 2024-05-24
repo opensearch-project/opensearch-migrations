@@ -14,7 +14,7 @@ export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string;
     readonly vpcAZCount?: number;
     readonly targetClusterEndpoint?: string;
-    readonly deployALB?: boolean;
+    readonly albEnabled?: boolean;
     readonly albAcmCertArn?: string;
     readonly env?: { [key: string]: any };
 }
@@ -111,7 +111,7 @@ export class NetworkStack extends Stack {
         }
         this.validateVPC(this.vpc)
 
-        if (props.deployALB) {
+        if (props.albEnabled) {
             // Create the ALB with the strongest TLS 1.3 security policy
             this.alb = new ApplicationLoadBalancer(this, 'ALB', {
                 vpc: this.vpc,

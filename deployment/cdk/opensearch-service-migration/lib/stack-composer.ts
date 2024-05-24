@@ -203,6 +203,7 @@ export class StackComposer {
         const trafficReplayerExtraArgs = this.getContextForType('trafficReplayerExtraArgs', 'string', defaultValues, contextJSON)
         const captureProxyServiceEnabled = this.getContextForType('captureProxyServiceEnabled', 'boolean', defaultValues, contextJSON)
         const captureProxySourceEndpoint = this.getContextForType('captureProxySourceEndpoint', 'string', defaultValues, contextJSON)
+        const targetClusterProxyServiceEnabled = this.getContextForType('targetClusterProxyServiceEnabled', 'boolean', defaultValues, contextJSON)
         const captureProxyExtraArgs = this.getContextForType('captureProxyExtraArgs', 'string', defaultValues, contextJSON)
         const elasticsearchServiceEnabled = this.getContextForType('elasticsearchServiceEnabled', 'boolean', defaultValues, contextJSON)
         const kafkaBrokerServiceEnabled = this.getContextForType('kafkaBrokerServiceEnabled', 'boolean', defaultValues, contextJSON)
@@ -214,7 +215,7 @@ export class StackComposer {
         const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotServiceEnabled = this.getContextForType('reindexFromSnapshotServiceEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotExtraArgs = this.getContextForType('reindexFromSnapshotExtraArgs', 'string', defaultValues, contextJSON)
-        const deployALB = this.getContextForType('deployALB', 'boolean', defaultValues, contextJSON);
+        const albEnabled = this.getContextForType('albEnabled', 'boolean', defaultValues, contextJSON);
         const albAcmCertArn = this.getContextForType('albAcmCertArn', 'string', defaultValues, contextJSON);
 
         const requiredFields: { [key: string]: any; } = {"stage":stage, "domainName":domainName}
@@ -270,7 +271,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 addOnMigrationDeployId: addOnMigrationDeployId,
-                deployALB: deployALB,
+                albEnabled: albEnabled,
                 albAcmCertArn: albAcmCertArn,
                 env: props.env
             })
@@ -506,11 +507,36 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
+                alb: networkStack.alb,
+                albListenerCert: networkStack.albListenerCert,
                 env: props.env
             })
             this.addDependentStacks(captureProxyStack, [elasticsearchStack, migrationStack,
                 kafkaBrokerStack, mskUtilityStack])
             this.stacks.push(captureProxyStack)
+        }
+
+        let targetClusterProxyStack
+        if (targetClusterProxyServiceEnabled && networkStack && migrationStack) {
+            targetClusterProxyStack = new CaptureProxyStack(scope, "target-cluster-proxy", {
+                serviceName: "target-cluster-proxy",
+                vpc: networkStack.vpc,
+                customSourceClusterEndpoint: targetClusterEndpoint,
+                otelCollectorEnabled: false,
+                streamingSourceType: StreamingSourceType.DISABLED,
+                extraArgs: "--noCapture",
+                stackName: `OSMigrations-${stage}-${region}-TargetClusterProxy`,
+                description: "This stack contains resources for the Target Cluster Proxy ECS service",
+                stage: stage,
+                defaultDeployId: defaultDeployId,
+                fargateCpuArch: fargateCpuArch,
+                alb: networkStack.alb,
+                albListenerCert: networkStack.albListenerCert,
+                albListenerPort: 29200,
+                env: props.env,
+            })
+            this.addDependentStacks(targetClusterProxyStack, [migrationStack])
+            this.stacks.push(targetClusterProxyStack)
         }
 
         let migrationConsoleStack
