@@ -1,4 +1,5 @@
 import pytest  # type: ignore
+from tests.utils import create_valid_cluster
 from console_link.models.cluster import Cluster
 
 # Define a valid cluster configuration
@@ -13,7 +14,7 @@ valid_cluster_config = {
 
 
 def test_valid_cluster_config():
-    cluster = Cluster(valid_cluster_config)
+    cluster = create_valid_cluster()
     assert isinstance(cluster, Cluster)
 
 

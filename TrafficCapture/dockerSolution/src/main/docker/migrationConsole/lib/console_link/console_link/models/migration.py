@@ -56,7 +56,7 @@ class MigrationType(str, Enum):
     OSI_HISTORICAL_MIGRATION = "OSI_HISTORICAL_MIGRATION"
 
 
-class Migration():
+class Migration:
     """
     A base migration manager.
     """
