@@ -20,10 +20,15 @@ public abstract class IRfsContexts {
 
     public static class MetricNames {
         private MetricNames() {}
+        public static final String BYTES_READ = "bytesRead";
+        public static final String BYTES_SENT = "bytesSent";
     }
 
     public interface IRequestContext extends IScopedInstrumentationAttributes {
         String ACTIVITY_NAME = ActivityNames.HTTP_REQUEST;
+
+        void addBytesSent(int i);
+        void addBytesRead(int i);
     }
 
     public interface ICheckedIdempotentPutRequestContext extends IScopedInstrumentationAttributes {

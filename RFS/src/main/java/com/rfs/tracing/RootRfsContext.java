@@ -9,7 +9,7 @@ public class RootRfsContext extends RootOtelContext {
     public final RfsContexts.CreateSnapshotContext.MetricInstruments snapshotInstruments;
     public final RfsContexts.ClusterMetadataContext.MetricInstruments metadataMetrics;
     public final RfsContexts.MigrateIndexTemplateContext.MetricInstruments indexTemplateInstruments;
-    public final RfsContexts.MigrateIndexTemplateContext.MetricInstruments genericRequestInstruments;
+    public final RfsContexts.GenericRequestContext.MetricInstruments genericRequestInstruments;
     public final RfsContexts.CheckedIdempotentPutRequestContext.MetricInstruments getTwoStepIdempotentRequestInstruments;
     public final RfsContexts.CreateIndexContext.MetricInstruments createIndexInstruments;
     public final RfsContexts.DocumentReindexContext.MetricInstruments documentReindexInstruments;
@@ -22,7 +22,7 @@ public class RootRfsContext extends RootOtelContext {
         snapshotInstruments = RfsContexts.CreateSnapshotContext.makeMetrics(meter);
         metadataMetrics = RfsContexts.ClusterMetadataContext.makeMetrics(meter);
         indexTemplateInstruments = RfsContexts.MigrateIndexTemplateContext.makeMetrics(meter);
-        genericRequestInstruments = RfsContexts.MigrateIndexTemplateContext.makeMetrics(meter);
+        genericRequestInstruments = RfsContexts.GenericRequestContext.makeMetrics(meter);
         getTwoStepIdempotentRequestInstruments = RfsContexts.CheckedIdempotentPutRequestContext.makeMetrics(meter);
         createIndexInstruments = RfsContexts.CreateIndexContext.makeMetrics(meter);
         documentReindexInstruments = RfsContexts.DocumentReindexContext.makeMetrics(meter);
