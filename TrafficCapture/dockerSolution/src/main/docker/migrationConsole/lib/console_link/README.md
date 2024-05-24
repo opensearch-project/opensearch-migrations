@@ -2,7 +2,7 @@
 
 The console link library is designed to provide a unified interface for the many possible backend services involved in a migration. The interface can be used by multiple frontends--a CLI app and a web API, for instance.
 
-![alt text](diagram.png)
+![Console_link Library Diagram](console_library_diagram.svg)
 
 
 The user defines their migration services in a `migration_services.yaml` file, by default found at `/etc/migration_services.yaml`.
@@ -44,7 +44,7 @@ Currently, the two supported metrics source types are `prometheus` and `cloudwat
 
 - `type`: required, `prometheus` or `cloudwatch`
 - `endpoint`: required for `prometheus` (ignored for `cloudwatch`)
-- `region`: optional for `cloudwatch` (ignored for `prometheus`). if not provided, the usual rules are followed for determining aws region (`AWS_DEFAULT_REGION`, `~/.aws/config`)
+- `aws_region`: optional for `cloudwatch` (ignored for `prometheus`). if not provided, the usual rules are followed for determining aws region (`AWS_DEFAULT_REGION`, `~/.aws/config`)
 
 # Usage
 ### Library

@@ -7,6 +7,9 @@ import botocore
 from cerberus import Validator
 from console_link.logic.utils import raise_for_aws_api_error
 import requests
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class UnsupportedMetricsSourceError(Exception):
@@ -35,7 +38,7 @@ SCHEMA = {
         "type": "string",
         "required": False,
     },
-    "region": {
+    "aws_region": {
         "type": "string",
         "required": False
     },
@@ -56,6 +59,7 @@ def get_metrics_source(config):
     elif metric_source_type == MetricsSourceType.PROMETHEUS:
         return PrometheusMetricsSource(config)
     else:
+        logger.error(f"An unsupported metrics source type was provided: {config['type']}")
         raise UnsupportedMetricsSourceError(config["type"])
 
 
@@ -72,7 +76,7 @@ class MetricsSource:
         self,
         component: Component,
         metric: str,
-        statistc: MetricStatistic,
+        statistic: MetricStatistic,
         startTime: datetime,
         period_in_seconds: int = 60,
         endTime: Optional[datetime] = None,
@@ -113,24 +117,27 @@ class CloudwatchMetricMetadata:
 class CloudwatchMetricsSource(MetricsSource):
     def __init__(self, config: Dict) -> None:
         super().__init__(config)
-        if "region" in config:
-            self.region = config["region"]
-            self.boto_config = botocore.config.Config(region_name=self.region)
-            print("overriding client with a region-specific one")
+        logger.info(f"Initializing CloudwatchMetricsSource from config {config}")
+        if "aws_region" in config:
+            self.aws_region = config["aws_region"]
+            self.boto_config = botocore.config.Config(region_name=self.aws_region)
         else:
-            self.region = None
+            self.aws_region = None
             self.boto_config = None
         self.client = boto3.client("cloudwatch", config=self.boto_config)
 
     def get_metrics(self, recent=True) -> Dict[str, List[str]]:
+        logger.info(f"{self.__name__} get_metrics called with {recent=}")
         response = self.client.list_metrics(  # TODO: implement pagination
             Namespace=CLOUDWATCH_METRICS_NAMESPACE,
             RecentlyActive="PT3H" if recent else None,
         )
         raise_for_aws_api_error(response)
+        logger.debug(f"ResponseMetadata from list_metrics: {response['ResponseMetadata']}")
         assert "Metrics" in response
         metrics = [CloudwatchMetricMetadata(m) for m in response["Metrics"]]
         components = set([m.component for m in metrics])
+        logger.debug(f"Components found in returned metrics: {components}")
         metrics_by_component = {}
         for component in components:
             metrics_by_component[component] = [
@@ -148,11 +155,16 @@ class CloudwatchMetricsSource(MetricsSource):
         endTime: Optional[datetime] = None,
         dimensions: Optional[Dict[str, str]] = None,
     ) -> List[Tuple[str, float]]:
+        logger.info(f"{self.__name__} get_metric_data called with {component=}, {metric=}, {statistic=},"
+                    f"{startTime=}, {period_in_seconds=}, {endTime=}, {dimensions=}")
+
         aws_dimensions = [{"Name": "OTelLib", "Value": component.value}]
         if dimensions:
             aws_dimensions += [{"Name": k, "Value": v} for k, v in dimensions.items()]
+        logger.debug(f"AWS Dimensions set to: {aws_dimensions}")
         if not endTime:
             endTime = datetime.now()
+            logger.debug(f"No endTime provided, using current time: {endTime}")
         response = self.client.get_metric_data(
             MetricDataQueries=[
                 {
@@ -173,7 +185,9 @@ class CloudwatchMetricsSource(MetricsSource):
             ScanBy="TimestampAscending",
         )
         raise_for_aws_api_error(response)
+        logger.debug(f"ResponseMetadata from get_metric_data: {response['ResponseMetadata']}")
         data_length = len(response["MetricDataResults"][0]["Timestamps"])
+        logger.debug(f"Number of datapoints returned: {data_length}")
         return [
             (
                 response["MetricDataResults"][0]["Timestamps"][i].isoformat(),
@@ -195,12 +209,15 @@ def prometheus_component_names(c: Component) -> str:
 class PrometheusMetricsSource(MetricsSource):
     def __init__(self, config: Dict) -> None:
         super().__init__(config)
+        logger.info(f"Initializing PrometheusMetricsSource from config {config}")
+
         v = Validator(PROMETHEUS_SCHEMA)
         if not v.validate(config):
             raise ValueError("Invalid config file for PrometheusMetricsSource", v.errors)
         self.endpoint = config["endpoint"]
 
     def get_metrics(self, recent=False) -> Dict[str, List[str]]:
+        logger.info(f"{self.__name__} get_metrics called with {recent=}")
         metrics_by_component = {}
         if recent:
             raise NotImplementedError("Recent metrics are not implemented for Prometheus")
@@ -210,6 +227,8 @@ class PrometheusMetricsSource(MetricsSource):
                 f"{self.endpoint}/api/v1/query",
                 params={"query": f'{{exported_job="{exported_job}"}}'},
             )
+            logger.debug(f"Request to Prometheus: {r.request}")
+            logger.debug(f"Response status code: {r.status_code}")
             r.raise_for_status()
             assert "data" in r.json() and "result" in r.json()["data"]
             metrics_by_component[c.value] = list(
@@ -221,12 +240,14 @@ class PrometheusMetricsSource(MetricsSource):
         self,
         component: Component,
         metric: str,
-        statistc: MetricStatistic,
+        statistic: MetricStatistic,
         startTime: datetime,
         period_in_seconds: int = 60,
         endTime: Optional[datetime] = None,
         dimensions: Optional[Dict] = None,
     ) -> List[Tuple[str, float]]:
+        logger.info(f"{self.__name__} get_metric_data called with {component=}, {metric=}, {statistic=},"
+                    f"{startTime=}, {period_in_seconds=}, {endTime=}, {dimensions=}")
         if not endTime:
             endTime = datetime.now()
         r = requests.get(
@@ -238,6 +259,8 @@ class PrometheusMetricsSource(MetricsSource):
                 "step": period_in_seconds,
             },
         )
+        logger.debug(f"Request to Prometheus: {r.request}")
+        logger.debug(f"Response status code: {r.status_code}")
         r.raise_for_status()
         assert "data" in r.json() and "result" in r.json()["data"]
         if not r.json()["data"]["result"]:

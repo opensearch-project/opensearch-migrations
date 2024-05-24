@@ -5,7 +5,9 @@ import console_link.logic.clusters as logic_clusters
 import console_link.logic.metrics as logic_metrics
 from console_link.logic.instantiation import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
+import logging
 
+logger = logging.getLogger(__name__)
 
 # ################### UNIVERSAL ####################
 
@@ -22,11 +24,13 @@ class Context(object):
     "--config-file", default="/etc/migration_services.yaml", help="Path to config file"
 )
 @click.option("--json", is_flag=True)
+@click.option('-v', '--verbose', count=True, help="Verbosity level. -v is warnings, -vv is info, -vvv is debug.")
 @click.pass_context
-def cli(ctx, config_file, json):
+def cli(ctx, config_file, json, verbose):
     ctx.obj = Context(config_file)
     ctx.obj.json = json
-
+    logging.basicConfig(level=logging.ERROR - (10 * verbose))
+    logger.info(f"Logging set to {logging.getLevelName(logger.getEffectiveLevel())}")
 
 # ##################### CLUSTERS ###################
 
@@ -62,7 +66,6 @@ def cat_indices_cmd(ctx):
     click.echo(logic_clusters.cat_indices(ctx.env.source_cluster))
     click.echo("TARGET CLUSTER")
     click.echo(logic_clusters.cat_indices(ctx.env.target_cluster))
-    pass
 
 
 # ##################### REPLAYER ###################

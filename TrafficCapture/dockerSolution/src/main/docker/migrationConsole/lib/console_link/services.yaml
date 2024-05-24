@@ -14,8 +14,8 @@ target_cluster:
     details:
       username: "admin"
       password: "myStrongPassword123!"
-replayer:
-  deployment_type: "docker"
 metrics_source:
   type: "prometheus"
   endpoint: "http://prometheus:9090"
+replayer:
+  deployment_type: "docker"

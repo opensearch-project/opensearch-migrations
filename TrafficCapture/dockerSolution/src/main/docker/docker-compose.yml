@@ -101,8 +101,6 @@ services:
       - ~/.aws:/root/.aws
     environment:
       - MIGRATION_KAFKA_BROKER_ENDPOINTS=kafka:9092
-      - AWS_REGION=us-east-2
-      - AWS_DEFAULT_REGION=us-east-2
       - AWS_PROFILE=default
 #    command: ./runTestBenchmarks.sh
 
