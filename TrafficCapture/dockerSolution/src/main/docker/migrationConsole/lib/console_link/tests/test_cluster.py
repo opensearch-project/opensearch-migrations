@@ -6,7 +6,7 @@ valid_cluster_config = {
     "endpoint": "https://opensearchtarget:9200",
     "allow_insecure": True,
     "authorization": {
-        "type": "basic",
+        "type": "basic_auth",
         "details": {"username": "admin", "password": "myStrongPassword123!"},
     },
 }
@@ -36,7 +36,7 @@ def test_missing_endpoint_refused():
     missing_endpoint = {
         "allow_insecure": True,
         "authorization": {
-            "type": "basic",
+            "type": "basic_auth",
             "details": {"username": "XXXXX", "password": "XXXXXXXXXXXXXXXXXXX!"},
         },
     }
