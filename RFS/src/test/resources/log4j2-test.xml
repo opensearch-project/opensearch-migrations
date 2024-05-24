@@ -9,9 +9,9 @@
         <Root level="debug">
             <AppenderRef ref="Console"/>
         </Root>
-        <!-- <Logger name="org.testcontainers" level="INFO"/>
+        <Logger name="org.testcontainers" level="INFO"/>
         <Logger name="tc" level="INFO"/>
         <Logger name="com.github.dockerjava" level="WARN"/>
-        <Logger name="com.github.dockerjava.zerodep.shaded.org.apache.hc.client5.http.wire" level="OFF"/> -->
+        <Logger name="com.github.dockerjava.zerodep.shaded.org.apache.hc.client5.http.wire" level="OFF"/>
     </Loggers>
 </Configuration>
