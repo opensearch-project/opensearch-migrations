@@ -8,6 +8,8 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {StreamingSourceType} from "../streaming-source-type";
 import {createMSKProducerIAMPolicies} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
+import { IApplicationListener, IApplicationLoadBalancer, IApplicationTargetGroup } from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 
 
 export interface CaptureProxyProps extends StackPropsExt {
@@ -16,6 +18,10 @@ export interface CaptureProxyProps extends StackPropsExt {
     readonly fargateCpuArch: CpuArchitecture,
     readonly customSourceClusterEndpoint?: string,
     readonly otelCollectorEnabled?: boolean,
+    readonly alb?: IApplicationLoadBalancer,
+    readonly albListenerCert?: ICertificate,
+    readonly albListenerPort?: number,
+    readonly serviceName?: string,
     readonly extraArgs?: string,
 }
 
@@ -25,31 +31,43 @@ export interface CaptureProxyProps extends StackPropsExt {
  * Search Guard instance.
  */
 export class CaptureProxyStack extends MigrationServiceCore {
+    private readonly albListener?: IApplicationListener;
+    private readonly albTargetGroup?: IApplicationTargetGroup;
 
     constructor(scope: Construct, id: string, props: CaptureProxyProps) {
         super(scope, id, props)
+        const serviceName = props.serviceName || "capture-proxy";
         let securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
             SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`))
         ]
 
         const servicePort: PortMapping = {
-            name: "capture-proxy-connect",
+            name: `${serviceName}-connect`,
             hostPort: 9200,
             containerPort: 9200,
             protocol: Protocol.TCP
+        }
+
+        if(props.alb) {
+            if (!props.albListenerCert) {
+                throw new Error("Must have alb cert defined if specifying alb");
+            }
+            this.albTargetGroup = this.createSecureTargetGroup(serviceName, 9200, props.vpc);
+            this.albListener = this.createSecureListener(serviceName, props.albListenerPort || 9200, props.alb, props.albListenerCert, this.albTargetGroup);
         }
 
         const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId) : []
 
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
         const sourceClusterEndpoint = props.customSourceClusterEndpoint ?? "https://elasticsearch:9200"
-        let command = `/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --kafkaConnection ${brokerEndpoints} --destinationUri ${sourceClusterEndpoint} --insecureDestination --listenPort 9200`
+        let command = `/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy --destinationUri ${sourceClusterEndpoint} --insecureDestination --listenPort 9200`
+        command = props.streamingSourceType !== StreamingSourceType.DISABLED ? command.concat(`  --kafkaConnection ${brokerEndpoints}`) : command
         command = props.streamingSourceType === StreamingSourceType.AWS_MSK ? command.concat(" --enableMSKAuth") : command
         command = props.otelCollectorEnabled ? command.concat(` --otelCollectorEndpoint http://localhost:${OtelCollectorSidecar.OTEL_CONTAINER_PORT}`) : command
         command = props.extraArgs ? command.concat(` ${props.extraArgs}`) : command
         this.createService({
-            serviceName: "capture-proxy",
+            serviceName: serviceName,
             dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),
             dockerImageCommand: ['/bin/sh', '-c', command],
             securityGroups: securityGroups,
@@ -58,6 +76,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 2048,
+            albTargetGroups: [this.albTargetGroup],
             ...props
         });
     }

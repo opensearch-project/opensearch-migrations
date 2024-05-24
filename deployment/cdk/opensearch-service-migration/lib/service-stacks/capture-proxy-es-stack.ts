@@ -9,8 +9,7 @@ import {StreamingSourceType} from "../streaming-source-type";
 import {createMSKProducerIAMPolicies} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
-import { ApplicationProtocol, ApplicationProtocolVersion, ApplicationTargetGroup, IApplicationListener, IApplicationLoadBalancer, IApplicationTargetGroup} from "aws-cdk-lib/aws-elasticloadbalancingv2";
-import { Duration } from "aws-cdk-lib";
+import { IApplicationListener, IApplicationLoadBalancer, IApplicationTargetGroup} from "aws-cdk-lib/aws-elasticloadbalancingv2";
 
 
 export interface CaptureProxyESProps extends StackPropsExt {
@@ -20,6 +19,7 @@ export interface CaptureProxyESProps extends StackPropsExt {
     readonly fargateCpuArch: CpuArchitecture,
     readonly alb?: IApplicationLoadBalancer,
     readonly albListenerCert?: ICertificate,
+    readonly albListenerPort?: number,
     readonly extraArgs?: string,
 }
 
@@ -57,12 +57,13 @@ export class CaptureProxyESStack extends MigrationServiceCore {
                 throw new Error("Must have alb cert defined if specifying alb");
             }
             this.albTargetGroup = this.createSecureTargetGroup("CaptureProxy", 9200, props.vpc);
-            this.albListener = this.createSecureListener("CaptureProxy", 9200, props.alb, props.albListenerCert, this.albTargetGroup);
+            this.albListener = this.createSecureListener("CaptureProxy", props.albListenerPort || 9200, props.alb, props.albListenerCert, this.albTargetGroup);
         }
         const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId) : []
 
         let brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
-        let command = `/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy --kafkaConnection ${brokerEndpoints} --destinationUri https://localhost:19200 --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`
+        let command = `/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy --destinationUri https://localhost:19200 --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`
+        command = props.streamingSourceType !== StreamingSourceType.DISABLED ? command.concat(`  --kafkaConnection ${brokerEndpoints}`) : command
         command = props.streamingSourceType === StreamingSourceType.AWS_MSK ? command.concat(" --enableMSKAuth") : command
         command = props.otelCollectorEnabled ? command.concat(` --otelCollectorEndpoint http://localhost:${OtelCollectorSidecar.OTEL_CONTAINER_PORT}`) : command
         command = props.extraArgs ? command.concat(` ${props.extraArgs}`) : command
