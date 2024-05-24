@@ -47,18 +47,18 @@ public abstract class IRfsContexts {
         IRequestContext createGetSnapshotContext();
     }
 
-    public interface IIndexTemplateContext extends ICheckedIdempotentPutRequestContext {
+    public interface ITemplateContext extends ICheckedIdempotentPutRequestContext {
         String ACTIVITY_NAME = ActivityNames.MIGRATE_INDEX_TEMPLATE;
     }
 
     public interface IClusterMetadataContext extends IScopedInstrumentationAttributes {
         String ACTIVITY_NAME = ActivityNames.MIGRATE_METADATA;
 
-        IIndexTemplateContext createMigrateLegacyIndexTemplateContext();
+        ITemplateContext createMigrateLegacyTemplateContext();
 
         ICheckedIdempotentPutRequestContext createComponentTemplateContext();
 
-        ICheckedIdempotentPutRequestContext createMigrateIndexTemplateContext();
+        ICheckedIdempotentPutRequestContext createMigrateTemplateContext();
     }
 
     public interface ICreateIndexContext extends ICheckedIdempotentPutRequestContext {

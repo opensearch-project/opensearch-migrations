@@ -62,7 +62,7 @@ public class GlobalMetadataCreator_OS_2_11 {
                 logger.info("Setting Legacy Template: " + templateName);
                 ObjectNode settings = (ObjectNode) globalMetadata.getTemplates().get(templateName);
                 client.createLegacyTemplate(templateName, settings,
-                        context.createMigrateLegacyIndexTemplateContext()); // purposefully make a new one each loop iteration
+                        context.createMigrateLegacyTemplateContext()); // purposefully make a new one each loop iteration
             }
         } else {
             // Get the template names
@@ -74,7 +74,7 @@ public class GlobalMetadataCreator_OS_2_11 {
                 logger.info("Setting Legacy Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
                 client.createLegacyTemplate(templateName, settings,
-                        context.createMigrateLegacyIndexTemplateContext()); // purposefully make a new one each loop iteration
+                        context.createMigrateLegacyTemplateContext()); // purposefully make a new one each loop iteration
             }
         }
     }
@@ -139,7 +139,7 @@ public class GlobalMetadataCreator_OS_2_11 {
                 logger.info("Setting Index Template: " + templateName);
                 ObjectNode settings = (ObjectNode) globalMetadata.getIndexTemplates().get(templateName);
                 client.createIndexTemplate(templateName, settings,
-                        context.createMigrateIndexTemplateContext()); // purposefully make a new one each loop iteration
+                        context.createMigrateTemplateContext()); // purposefully make a new one each loop iteration
             }
         } else {
             // Get the template names
@@ -151,7 +151,7 @@ public class GlobalMetadataCreator_OS_2_11 {
                 logger.info("Setting Index Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
                 client.createIndexTemplate(templateName, settings,
-                        context.createMigrateIndexTemplateContext()); // purposefully make a new one each loop iteration
+                        context.createMigrateTemplateContext()); // purposefully make a new one each loop iteration
             }
         }
     }

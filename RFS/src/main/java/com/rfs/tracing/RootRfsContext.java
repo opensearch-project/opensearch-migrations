@@ -8,7 +8,7 @@ public class RootRfsContext extends RootOtelContext {
     public static final String SCOPE_NAME = "rfs";
     public final RfsContexts.CreateSnapshotContext.MetricInstruments snapshotInstruments;
     public final RfsContexts.ClusterMetadataContext.MetricInstruments metadataMetrics;
-    public final RfsContexts.MigrateIndexTemplateContext.MetricInstruments indexTemplateInstruments;
+    public final RfsContexts.MigrateTemplateContext.MetricInstruments indexTemplateInstruments;
     public final RfsContexts.GenericRequestContext.MetricInstruments genericRequestInstruments;
     public final RfsContexts.CheckedIdempotentPutRequestContext.MetricInstruments getTwoStepIdempotentRequestInstruments;
     public final RfsContexts.CreateIndexContext.MetricInstruments createIndexInstruments;
@@ -21,7 +21,7 @@ public class RootRfsContext extends RootOtelContext {
 
         snapshotInstruments = RfsContexts.CreateSnapshotContext.makeMetrics(meter);
         metadataMetrics = RfsContexts.ClusterMetadataContext.makeMetrics(meter);
-        indexTemplateInstruments = RfsContexts.MigrateIndexTemplateContext.makeMetrics(meter);
+        indexTemplateInstruments = RfsContexts.MigrateTemplateContext.makeMetrics(meter);
         genericRequestInstruments = RfsContexts.GenericRequestContext.makeMetrics(meter);
         getTwoStepIdempotentRequestInstruments = RfsContexts.CheckedIdempotentPutRequestContext.makeMetrics(meter);
         createIndexInstruments = RfsContexts.CreateIndexContext.makeMetrics(meter);

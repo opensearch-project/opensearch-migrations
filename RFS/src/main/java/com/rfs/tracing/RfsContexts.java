@@ -230,8 +230,8 @@ public class RfsContexts extends IRfsContexts {
         }
 
         @Override
-        public IRfsContexts.IIndexTemplateContext createMigrateLegacyIndexTemplateContext() {
-            return new MigrateIndexTemplateContext(rootInstrumentationScope, this);
+        public IRfsContexts.ITemplateContext createMigrateLegacyTemplateContext() {
+            return new MigrateTemplateContext(rootInstrumentationScope, this);
         }
 
         @Override
@@ -241,17 +241,17 @@ public class RfsContexts extends IRfsContexts {
         }
 
         @Override
-        public IRfsContexts.ICheckedIdempotentPutRequestContext createMigrateIndexTemplateContext() {
+        public IRfsContexts.ICheckedIdempotentPutRequestContext createMigrateTemplateContext() {
             return new CheckedIdempotentPutRequestContext(rootInstrumentationScope, this,
                     "createGetSnapshotContext");
         }
     }
 
-    public static class MigrateIndexTemplateContext
+    public static class MigrateTemplateContext
             extends BaseNestedSpanContext<RootRfsContext, IRfsContexts.IClusterMetadataContext>
-            implements IRfsContexts.IIndexTemplateContext {
+            implements IRfsContexts.ITemplateContext {
 
-        protected MigrateIndexTemplateContext(RootRfsContext rootScope,
+        protected MigrateTemplateContext(RootRfsContext rootScope,
                                               IRfsContexts.IClusterMetadataContext enclosingScope) {
             super(rootScope, enclosingScope);
             initializeSpan(rootScope);
