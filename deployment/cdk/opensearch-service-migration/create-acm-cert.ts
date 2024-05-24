@@ -55,6 +55,12 @@ private generateSelfSignedCertificate(certPath: string, keyPath: string, chainPa
     name: 'basicConstraints',
     cA: true
   }, {
+    name: 'subjectAltName',
+    altNames: [{
+      type: 2, // DNS
+      value: 'localhost'
+    }]
+  }, {
     name: 'keyUsage',
     keyCertSign: true,
     digitalSignature: true,
@@ -63,8 +69,8 @@ private generateSelfSignedCertificate(certPath: string, keyPath: string, chainPa
     name: 'extKeyUsage',
     serverAuth: true,
     clientAuth: true
-  }]);
-  cert.sign(keys.privateKey, forge.md.sha384.create());
+  },]);
+  cert.sign(keys.privateKey, forge.md.sha384.create()); // Using SHA-384 for signing
 
   const pemCert = forge.pki.certificateToPem(cert);
   const pemKey = forge.pki.privateKeyToPem(keys.privateKey);

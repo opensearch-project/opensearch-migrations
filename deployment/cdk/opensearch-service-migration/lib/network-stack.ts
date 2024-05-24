@@ -7,15 +7,22 @@ import {
 import {Construct} from "constructs";
 import {StackPropsExt} from "./stack-composer";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import { ApplicationLoadBalancer, ApplicationProtocol, ApplicationTargetGroup, IApplicationLoadBalancer, ListenerAction, SslPolicy, TargetType } from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import { Certificate, ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 
 export interface NetworkStackProps extends StackPropsExt {
-    readonly vpcId?: string
-    readonly vpcAZCount?: number
-    readonly targetClusterEndpoint?: string
+    readonly vpcId?: string;
+    readonly vpcAZCount?: number;
+    readonly targetClusterEndpoint?: string;
+    readonly deployALB?: boolean;
+    readonly albAcmCertArn?: string;
+    readonly env?: { [key: string]: any };
 }
 
 export class NetworkStack extends Stack {
     public readonly vpc: IVpc;
+    public readonly alb?: IApplicationLoadBalancer;
+    public readonly albListenerCert?: ICertificate
 
     // Validate a proper url string is provided and return an url string which contains a protocol, host name, and port.
     // If a port is not provided, the default protocol port (e.g. 443, 80) will be explicitly added
@@ -103,6 +110,20 @@ export class NetworkStack extends Stack {
             });
         }
         this.validateVPC(this.vpc)
+
+        if (props.deployALB) {
+            // Create the ALB with the strongest TLS 1.3 security policy
+            this.alb = new ApplicationLoadBalancer(this, 'ALB', {
+                vpc: this.vpc,
+                internetFacing: false,
+                http2Enabled: false,      
+            });
+            this.exportValue(this.alb.loadBalancerArn);
+            if (props.albAcmCertArn) {
+                const cert = Certificate.fromCertificateArn(this, 'ALBListenerCert', props.albAcmCertArn);
+                this.albListenerCert = cert;
+            }
+        }
 
         if (!props.addOnMigrationDeployId) {
             new StringParameter(this, 'SSMParameterVpcId', {
