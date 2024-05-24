@@ -18,9 +18,9 @@ AWS_REGION = "us-east-1"
 mock_metrics_list = {'captureProxy': ['kafkaCommitCount', 'captureConnectionDuration'],
                      'replayer': ['kafkaCommitCount']}
 
-mock_metric_data = [('2024-05-22T20:06:00-06:00', 0.0), ('2024-05-22T20:07:00-06:00', 1.0),
-                    ('2024-05-22T20:08:00-06:00', 2.0), ('2024-05-22T20:09:00-06:00', 3.0),
-                    ('2024-05-22T20:10:00-06:00', 4.0)]
+mock_metric_data = [('2024-05-22T20:06:00+00:00', 0.0), ('2024-05-22T20:07:00+00:00', 1.0),
+                    ('2024-05-22T20:08:00+00:00', 2.0), ('2024-05-22T20:09:00+00:00', 3.0),
+                    ('2024-05-22T20:10:00+00:00', 4.0)]
 
 
 @pytest.fixture
@@ -109,7 +109,7 @@ def test_cloudwatch_metrics_get_metrics_error(cw_ms, cw_stubber):
 
 # This one doesn't serialize to json nicely because of the datetime objects
 import datetime
-from dateutil.tz import tzlocal  # type: ignore
+from dateutil.tz import tzutc  # type: ignore
 cw_get_metric_data = {
     'Messages': [],
     'MetricDataResults': [
@@ -117,11 +117,11 @@ cw_get_metric_data = {
             'Id': 'kafkaCommitCount',
             'Label': 'kafkaCommitCount',
             'StatusCode': 'Complete',
-            'Timestamps': [datetime.datetime(2024, 5, 22, 20, 6, tzinfo=tzlocal()),
-                           datetime.datetime(2024, 5, 22, 20, 7, tzinfo=tzlocal()),
-                           datetime.datetime(2024, 5, 22, 20, 8, tzinfo=tzlocal()),
-                           datetime.datetime(2024, 5, 22, 20, 9, tzinfo=tzlocal()),
-                           datetime.datetime(2024, 5, 22, 20, 10, tzinfo=tzlocal())
+            'Timestamps': [datetime.datetime(2024, 5, 22, 20, 6, tzinfo=tzutc()),
+                           datetime.datetime(2024, 5, 22, 20, 7, tzinfo=tzutc()),
+                           datetime.datetime(2024, 5, 22, 20, 8, tzinfo=tzutc()),
+                           datetime.datetime(2024, 5, 22, 20, 9, tzinfo=tzutc()),
+                           datetime.datetime(2024, 5, 22, 20, 10, tzinfo=tzutc())
                            ],
             'Values': [0.0, 1.0, 2.0, 3.0, 4.0]
         }
