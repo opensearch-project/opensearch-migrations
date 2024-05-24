@@ -136,7 +136,7 @@ def generate_source_index_config(include_index_regex_list=None):
         return SOURCE_DEFAULT_INDEX_TEMPLATE.strip()
 
 
-def validate_pipeline_config_arguments(source_auth_type: str, target_auth_type: str, source_auth_secret=None,
+def validate_pipeline_config_arguments(source_auth_type: AuthMethod, target_auth_type: AuthMethod, source_auth_secret=None,
                                        pipeline_role_arn=None, include_index_regex_list=None, aws_region=None):
     # Validation of auth options provided
     if aws_region is None and (source_auth_type == AuthMethod.SIGV4 or target_auth_type == AuthMethod.SIGV4):
@@ -155,7 +155,7 @@ def validate_pipeline_config_arguments(source_auth_type: str, target_auth_type: 
 
 
 def construct_pipeline_config(pipeline_config_file_path: str, source_endpoint: str, target_endpoint: str,
-                              source_auth_type: str, target_auth_type: str, source_auth_secret=None,
+                              source_auth_type: AuthMethod, target_auth_type: AuthMethod, source_auth_secret=None,
                               pipeline_role_arn=None, include_index_regex_list=None, aws_region=None):
     validate_pipeline_config_arguments(source_auth_type=source_auth_type, target_auth_type=target_auth_type,
                                        source_auth_secret=source_auth_secret,
