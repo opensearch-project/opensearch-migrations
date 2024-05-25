@@ -1,3 +1,4 @@
+# TODO remove -e when more production ready
 -e ../lib/console_link
 
 Django==4.2.13

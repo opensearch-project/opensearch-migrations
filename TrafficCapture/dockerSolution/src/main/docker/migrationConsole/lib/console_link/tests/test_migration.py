@@ -1,4 +1,5 @@
 import pytest  # type: ignore
+import os
 from tests.utils import create_valid_cluster
 from console_link.models.migration import OpenSearchIngestionMigration
 
@@ -21,6 +22,8 @@ valid_osi_migration_config = {
         "migration_deployment=1.0.0"
     ]
 }
+# Set AWS region for
+os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
 mock_cluster = create_valid_cluster()
 
 

@@ -15,30 +15,30 @@ HttpMethod = Enum("HttpMethod", ["GET", "POST", "PUT", "DELETE"])
 SCHEMA = {
     "endpoint": {"type": "string", "required": True},
     "allow_insecure": {"type": "boolean", "required": False},
-    'authorization': {
-        'type': 'dict',
-        'required': True,
-        'schema': {
-            'type': {
-                'type': 'string',
-                'required': True,
-                'allowed': [e.name.lower() for e in AuthMethod]
+    "authorization": {
+        "type": "dict",
+        "required": True,
+        "schema": {
+            "type": {
+                "type": "string",
+                "required": True,
+                "allowed": [e.name.lower() for e in AuthMethod]
             },
-            'details': {
-                'type': 'dict',
-                'required': False,
-                'schema': {
-                    'username': {
-                        'type': 'string',
-                        'required': False
+            "details": {
+                "type": "dict",
+                "required": False,
+                "schema": {
+                    "username": {
+                        "type": "string",
+                        "required": False
                     },
-                    'password': {
-                        'type': 'string',
-                        'required': False
+                    "password": {
+                        "type": "string",
+                        "required": False
                     },
-                    'aws_secret_arn': {
-                        'type': 'string',
-                        'required': False
+                    "aws_secret_arn": {
+                        "type": "string",
+                        "required": False
                     },
                 }
             }
@@ -66,18 +66,9 @@ class Cluster:
         self.endpoint = config["endpoint"]
         if self.endpoint.startswith("https"):
             self.allow_insecure = config.get("allow_insecure", False)
-        try:
-            self.auth_type = AuthMethod[config["authorization"]["type"].upper()]
-        except KeyError:
-            self.auth_type = None
-        try:
-            self.auth_details = config["authorization"]["details"]
-        except KeyError:
-            self.auth_details = None
-        try:
-            self.aws_secret_arn = config["authorization"]["details"]["aws_secret_arn"]
-        except KeyError:
-            self.aws_secret_arn = None
+        self.auth_type = AuthMethod[config["authorization"]["type"].upper()]
+        self.auth_details = config["authorization"].get("details", None)
+        self.aws_secret_arn = None if self.auth_details is None else self.auth_details.get("aws_secret_arn", None)
 
     def call_api(self, path, method: HttpMethod = HttpMethod.GET) -> requests.Response:
         """

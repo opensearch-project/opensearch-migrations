@@ -17,7 +17,7 @@ target_cluster:
 	endpoint: "https://opensearchtarget:9200"
 	allow_insecure: true
 	authorization:
-		type: "basic"
+		type: "basic_auth"
 		details:
 			username: "admin"
 			password: "myStrongPassword123!"
@@ -33,7 +33,7 @@ metrics_source:
 Source and target clusters have the following options:
 - `endpoint`: required, the endpoint to reach the cluster.
 - `authorization`: required, the auth method to use, if no auth the no_auth type must be specified.
-	- `type`: required, the only currently implemented options are "no_auth" and "basic", but "sigv4" should be available soon
+	- `type`: required, the only currently implemented options are "no_auth" and "basic_auth", but "sigv4" should be available soon
 	- `details`: for basic auth, the details should be a `username` and `password`
 
 Having a `source_cluster` and `target_cluster` is required.
