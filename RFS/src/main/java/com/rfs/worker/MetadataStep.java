@@ -1,6 +1,7 @@
 package com.rfs.worker;
 
 import java.time.Instant;
+import java.util.Optional;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -23,7 +24,7 @@ public class MetadataStep {
         protected final GlobalMetadata.Factory metadataFactory;
         protected final GlobalMetadataCreator_OS_2_11 metadataCreator;
         protected final Transformer transformer;
-        protected CmsEntry.Metadata cmsEntry;
+        protected Optional<CmsEntry.Metadata> cmsEntry;
 
         public SharedMembers(GlobalState globalState, CmsClient cmsClient, String snapshotName, GlobalMetadata.Factory metadataFactory,
                 GlobalMetadataCreator_OS_2_11 metadataCreator, Transformer transformer) {
@@ -33,16 +34,16 @@ public class MetadataStep {
             this.metadataFactory = metadataFactory;
             this.metadataCreator = metadataCreator;
             this.transformer = transformer;
-            this.cmsEntry = null;
+            this.cmsEntry = Optional.empty();
         }
 
-        // A convient way to check if the CMS entry is null before retrieving it.  In some places, it's fine/expected
-        // for the CMS entry to be null, but in others, it's a problem.
-        public CmsEntry.Metadata getCmsEntryNotNull() {
-            if (cmsEntry == null) {
+        // A convient way to check if the CMS entry is present before retrieving it.  In some places, it's fine/expected
+        // for the CMS entry to be missing, but in others, it's a problem.
+        public CmsEntry.Metadata getCmsEntryNotMissing() {
+            if (cmsEntry.isEmpty()) {
                 throw new MissingMigrationEntry("The Metadata Migration CMS entry we expected to be stored in local memory was null");
             }
-            return cmsEntry;
+            return cmsEntry.get();
         }
     }
 
@@ -98,36 +99,37 @@ public class MetadataStep {
 
         @Override
         public WorkerStep nextStep() {
-            if (members.cmsEntry == null) {
+            if (members.cmsEntry.isEmpty()) {
                 return new CreateEntry(members);
-            } else {
-                switch (members.cmsEntry.status) {
-                    case IN_PROGRESS:
-                        // TODO: This uses the client-side clock to evaluate the lease expiration, when we should
-                        // ideally be using the server-side clock.  Consider this a temporary solution until we find
-                        // out how to use the server-side clock.
-                        long leaseExpiryMillis = Long.parseLong(members.cmsEntry.leaseExpiry);
-                        Instant leaseExpiryInstant = Instant.ofEpochMilli(leaseExpiryMillis);
-                        boolean leaseExpired = leaseExpiryInstant.isBefore(Instant.now());
+            } 
+            
+            CmsEntry.Metadata currentEntry = members.cmsEntry.get();            
+            switch (currentEntry.status) {
+                case IN_PROGRESS:
+                    // TODO: This uses the client-side clock to evaluate the lease expiration, when we should
+                    // ideally be using the server-side clock.  Consider this a temporary solution until we find
+                    // out how to use the server-side clock.
+                    long leaseExpiryMillis = Long.parseLong(currentEntry.leaseExpiry);
+                    Instant leaseExpiryInstant = Instant.ofEpochMilli(leaseExpiryMillis);
+                    boolean leaseExpired = leaseExpiryInstant.isBefore(Instant.now());
 
-                        // Don't try to acquire the lease if we're already at the max number of attempts
-                        if (members.cmsEntry.numAttempts >= CmsEntry.Metadata.MAX_ATTEMPTS && leaseExpired) {
-                            return new ExitPhaseFailed(members, new MaxAttemptsExceeded());
-                        }
+                    // Don't try to acquire the lease if we're already at the max number of attempts
+                    if (currentEntry.numAttempts >= CmsEntry.Metadata.MAX_ATTEMPTS && leaseExpired) {
+                        return new ExitPhaseFailed(members, new MaxAttemptsExceeded());
+                    }
 
-                        if (leaseExpired) {
-                            return new AcquireLease(members);
-                        } 
-                        
-                        logger.info("Metadata Migration entry found, but there's already a valid work lease on it");
-                        return new RandomWait(members);
-                    case COMPLETED:
-                        return new ExitPhaseSuccess(members);
-                    case FAILED:
-                        return new ExitPhaseFailed(members, new FoundFailedMetadataMigration());
-                    default:
-                        throw new IllegalStateException("Unexpected metadata migration status: " + members.cmsEntry.status);
-                }
+                    if (leaseExpired) {
+                        return new AcquireLease(members);
+                    } 
+                    
+                    logger.info("Metadata Migration entry found, but there's already a valid work lease on it");
+                    return new RandomWait(members);
+                case COMPLETED:
+                    return new ExitPhaseSuccess(members);
+                case FAILED:
+                    return new ExitPhaseFailed(members, new FoundFailedMetadataMigration());
+                default:
+                    throw new IllegalStateException("Unexpected metadata migration status: " + currentEntry.status);
             }
         }
     }
@@ -148,7 +150,7 @@ public class MetadataStep {
         @Override
         public WorkerStep nextStep() {
             // Migrate the templates if we successfully created the CMS entry; otherwise, circle back to the beginning
-            if (members.cmsEntry != null) {
+            if (members.cmsEntry.isPresent()) {
                 return new MigrateTemplates(members);
             } else {
                 return new GetEntry(members);
@@ -169,7 +171,7 @@ public class MetadataStep {
         @Override
         public void run() {
             // We only get here if we know we want to acquire the lock, so we know the CMS entry should not be null
-            CmsEntry.Metadata currentCmsEntry = members.getCmsEntryNotNull();
+            CmsEntry.Metadata currentCmsEntry = members.getCmsEntryNotMissing();
 
             logger.info("Current Metadata Migration work lease appears to have expired; attempting to acquire it...");
 
@@ -181,7 +183,7 @@ public class MetadataStep {
                 currentCmsEntry.numAttempts + 1
             );
 
-            if (members.cmsEntry != null) {
+            if (members.cmsEntry.isPresent()) {
                 logger.info("Lease acquired");
             } else {
                 logger.info("Failed to acquire lease");
@@ -191,7 +193,7 @@ public class MetadataStep {
         @Override
         public WorkerStep nextStep() {
             // Migrate the templates if we acquired the lease; otherwise, circle back to the beginning after a backoff
-            if (members.cmsEntry != null) {
+            if (members.cmsEntry.isPresent()) {
                 return new MigrateTemplates(members);
             } else {
                 return new RandomWait(members);
@@ -208,7 +210,7 @@ public class MetadataStep {
         @Override
         public void run() {
             // We only get here if we acquired the lock, so we know the CMS entry should not be null
-            CmsEntry.Metadata currentCmsEntry = members.getCmsEntryNotNull();
+            CmsEntry.Metadata currentCmsEntry = members.getCmsEntryNotMissing();
 
             logger.info("Setting the worker's current work item to be the Metadata Migration...");
             members.globalState.updateWorkItem(new OpenSearchWorkItem(OpenSearchCmsClient.CMS_INDEX_NAME, OpenSearchCmsClient.CMS_METADATA_DOC_ID));
@@ -236,7 +238,7 @@ public class MetadataStep {
 
         @Override
         public WorkerStep nextStep() {
-            if (members.cmsEntry == null) {
+            if (members.cmsEntry.isEmpty()) {
                 // In this scenario, we've done all the work, but failed to update the CMS entry so that we know we've
                 // done the work.  We circle back around to try again, which is made more reasonable by the fact we
                 // don't re-migrate templates that already exist on the target cluster.  If we didn't circle back
@@ -307,7 +309,7 @@ public class MetadataStep {
         public void run() {
             // We either failed the Metadata Migration or found it had already been failed; either way this
             // should not be null
-            CmsEntry.Metadata currentCmsEntry = members.getCmsEntryNotNull();
+            CmsEntry.Metadata currentCmsEntry = members.getCmsEntryNotMissing();
 
             logger.error("Metadata Migration failed");
             members.cmsClient.updateMetadataEntry(

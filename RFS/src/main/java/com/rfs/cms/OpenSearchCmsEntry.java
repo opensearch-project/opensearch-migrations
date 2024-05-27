@@ -17,17 +17,14 @@ public class OpenSearchCmsEntry {
             return new Snapshot(name, CmsEntry.SnapshotStatus.NOT_STARTED);
         }
 
-        public static Snapshot fromJsonString(String json) {
+        public static Snapshot fromJson(ObjectNode node) {
             try {
-                ObjectNode node = objectMapper.readValue(json, ObjectNode.class);
-                ObjectNode sourceNode = (ObjectNode) node.get("_source");
-
                 return new Snapshot(
-                    sourceNode.get(FIELD_STATUS).asText(),
-                    CmsEntry.SnapshotStatus.valueOf(sourceNode.get(FIELD_STATUS).asText())
+                    node.get(FIELD_STATUS).asText(),
+                    CmsEntry.SnapshotStatus.valueOf(node.get(FIELD_STATUS).asText())
                 );
             } catch (Exception e) {
-                throw new CantParseCmsEntryFromJson(Snapshot.class, json, e);
+                throw new CantParseCmsEntryFromJson(Snapshot.class, node.toString(), e);
             }
         }
 
@@ -63,18 +60,15 @@ public class OpenSearchCmsEntry {
             );
         }
 
-        public static Metadata fromJsonString(String json) {
+        public static Metadata fromJson(ObjectNode node) {
             try {
-                ObjectNode node = objectMapper.readValue(json, ObjectNode.class);
-                ObjectNode sourceNode = (ObjectNode) node.get("_source");
-
                 return new Metadata(
-                    CmsEntry.MetadataStatus.valueOf(sourceNode.get(FIELD_STATUS).asText()),
-                    sourceNode.get(FIELD_LEASE_EXPIRY).asText(),
-                    sourceNode.get(FIELD_NUM_ATTEMPTS).asInt()
+                    CmsEntry.MetadataStatus.valueOf(node.get(FIELD_STATUS).asText()),
+                    node.get(FIELD_LEASE_EXPIRY).asText(),
+                    node.get(FIELD_NUM_ATTEMPTS).asInt()
                 );
             } catch (Exception e) {
-                throw new CantParseCmsEntryFromJson(Metadata.class, json, e);
+                throw new CantParseCmsEntryFromJson(Metadata.class, node.toString(), e);
             }
         }
 

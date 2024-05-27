@@ -25,6 +25,7 @@ import com.rfs.worker.SnapshotStep.WaitForSnapshot;
 
 import static org.mockito.Mockito.*;
 
+import java.util.Optional;
 import java.util.stream.Stream;
 
 
@@ -42,15 +43,15 @@ public class SnapshotStepTest {
 
     static Stream<Arguments > provideEnterPhaseArgs() {
         return Stream.of(
-            Arguments.of(null, SnapshotStep.CreateEntry.class),
-            Arguments.of(new Snapshot("test", SnapshotStatus.NOT_STARTED), SnapshotStep.InitiateSnapshot.class),
-            Arguments.of(new Snapshot("test", SnapshotStatus.IN_PROGRESS), SnapshotStep.WaitForSnapshot.class)
+            Arguments.of(Optional.empty(), SnapshotStep.CreateEntry.class),
+            Arguments.of(Optional.of(new Snapshot("test", SnapshotStatus.NOT_STARTED)), SnapshotStep.InitiateSnapshot.class),
+            Arguments.of(Optional.of(new Snapshot("test", SnapshotStatus.IN_PROGRESS)), SnapshotStep.WaitForSnapshot.class)
         );
     }
 
     @ParameterizedTest
     @MethodSource("provideEnterPhaseArgs")
-    void EnterPhase_AsExpected(Snapshot snapshotEntry, Class<?> expected) {
+    void EnterPhase_AsExpected(Optional<Snapshot> snapshotEntry, Class<?> expected) {
         // Run the test
         SnapshotStep.EnterPhase testStep = new SnapshotStep.EnterPhase(testMembers, snapshotEntry);
         testStep.run();

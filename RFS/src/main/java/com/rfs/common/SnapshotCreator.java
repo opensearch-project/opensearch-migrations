@@ -6,7 +6,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.net.HttpURLConnection;
+import java.util.Optional;
 
 public abstract class SnapshotCreator {
     private static final Logger logger = LogManager.getLogger(SnapshotCreator.class);
@@ -61,7 +61,7 @@ public abstract class SnapshotCreator {
     }
 
     public boolean isSnapshotFinished() {
-        RestClient.Response response;
+        Optional<ObjectNode> response;
         try {
             response = client.getSnapshotStatus(getRepoName(), snapshotName);
         } catch (Exception e) {
@@ -69,18 +69,12 @@ public abstract class SnapshotCreator {
             throw new SnapshotStatusCheckFailed(snapshotName);
         }
 
-        if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
+        if (response.isEmpty()) {
             logger.error("Snapshot " + snapshotName + " does not exist");
             throw new SnapshotDoesNotExist(snapshotName);
         }
 
-        JsonNode responseJson;
-        try {
-            responseJson = mapper.readTree(response.body);
-        } catch (Exception e) {
-            logger.error("Failed to parse snapshot status response", e);
-            throw new SnapshotStatusUnparsable(snapshotName);
-        }
+        JsonNode responseJson = response.get();
         JsonNode firstSnapshot = responseJson.path("snapshots").get(0);
         JsonNode stateNode = firstSnapshot.path("state");
         String state = stateNode.asText();        
@@ -116,12 +110,6 @@ public abstract class SnapshotCreator {
     public static class SnapshotStatusCheckFailed extends RfsException {
         public SnapshotStatusCheckFailed(String snapshotName) {
             super("We were unable to retrieve the status of Snapshot " + snapshotName);
-        }
-    }
-
-    public static class SnapshotStatusUnparsable extends RfsException {
-        public SnapshotStatusUnparsable(String snapshotName) {
-            super("Status of Snapshot " + snapshotName + " is not parsable");
         }
     }
 }

@@ -1,9 +1,13 @@
 package com.rfs.worker;
 
 import org.apache.logging.log4j.Logger;
+
+import java.util.Optional;
+
 import org.apache.logging.log4j.LogManager;
 
 import com.rfs.cms.CmsClient;
+import com.rfs.cms.CmsEntry;
 import com.rfs.cms.CmsEntry.Snapshot;
 import com.rfs.cms.CmsEntry.SnapshotStatus;
 import com.rfs.common.SnapshotCreator;
@@ -22,9 +26,9 @@ public class SnapshotRunner implements Runner {
 
         try {
             logger.info("Checking if work remains in the Snapshot Phase...");
-            Snapshot snapshotEntry = members.cmsClient.getSnapshotEntry(members.snapshotCreator.getSnapshotName());
+            Optional<Snapshot> snapshotEntry = members.cmsClient.getSnapshotEntry(members.snapshotCreator.getSnapshotName());
             
-            if (snapshotEntry == null || snapshotEntry.status != SnapshotStatus.COMPLETED) {
+            if (snapshotEntry.isEmpty() || snapshotEntry.get().status != SnapshotStatus.COMPLETED) {
                 nextStep = new SnapshotStep.EnterPhase(members, snapshotEntry);
 
                 while (nextStep != null) {
@@ -40,7 +44,7 @@ public class SnapshotRunner implements Runner {
                 getPhaseFailureRecord(
                     members.globalState.getPhase(), 
                     nextStep, 
-                    members.cmsEntry, 
+                    members.cmsEntry.map(bar -> (CmsEntry.Base) bar), 
                     e
                 ).toString()
             );

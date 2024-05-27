@@ -2,6 +2,7 @@ package com.rfs.common;
 
 import java.net.HttpURLConnection;
 import java.time.Duration;
+import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -27,38 +28,42 @@ public class OpenSearchClient {
     }
 
     /*
-     * Idempotently create a legacy template if it does not already exist; return true if created, false otherwise.
+     * Create a legacy template if it does not already exist.  Returns an Optional; if the template was created, it
+     * will be the created object and empty otherwise.
      */
-    public boolean createLegacyTemplate(String templateName, ObjectNode settings){
+    public Optional<ObjectNode> createLegacyTemplate(String templateName, ObjectNode settings){
         String targetPath = "_template/" + templateName;
         return createObjectIdempotent(targetPath, settings);
     }
 
     /*
-     * Idempotently create a component template if it does not already exist; return true if created, false otherwise.
+     * Create a component template if it does not already exist.  Returns an Optional; if the template was created, it
+     * will be the created object and empty otherwise.
      */
-    public boolean createComponentTemplate(String templateName, ObjectNode settings){
+    public Optional<ObjectNode> createComponentTemplate(String templateName, ObjectNode settings){
         String targetPath = "_component_template/" + templateName;
         return createObjectIdempotent(targetPath, settings);
     }
 
     /*
-     * Idempotently create an index template if it does not already exist; return true if created, false otherwise.
+     * Create an index template if it does not already exist.  Returns an Optional; if the template was created, it
+     * will be the created object and empty otherwise.
      */
-    public boolean createIndexTemplate(String templateName, ObjectNode settings){
+    public Optional<ObjectNode> createIndexTemplate(String templateName, ObjectNode settings){
         String targetPath = "_index_template/" + templateName;
         return createObjectIdempotent(targetPath, settings);
     }
 
     /*
-     * Idempotently create an index if it does not already exist; return true if created, false otherwise.
+     * Create an index if it does not already exist.  Returns an Optional; if the index was created, it
+     * will be the created object and empty otherwise.
      */
-    public boolean createIndex(String indexName, ObjectNode settings){
+    public Optional<ObjectNode> createIndex(String indexName, ObjectNode settings){
         String targetPath = indexName;
         return createObjectIdempotent(targetPath, settings);
     }
 
-    private boolean createObjectIdempotent(String objectPath, ObjectNode settings){
+    private Optional<ObjectNode> createObjectIdempotent(String objectPath, ObjectNode settings){
         RestClient.Response response = client.getAsync(objectPath)
         .flatMap(resp -> {
             if (resp.code == HttpURLConnection.HTTP_NOT_FOUND || resp.code == HttpURLConnection.HTTP_OK) {
@@ -75,18 +80,22 @@ public class OpenSearchClient {
 
         if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
             client.put(objectPath, settings.toString());
-            return true;
+            return Optional.of(settings);
         } else if (response.code == HttpURLConnection.HTTP_OK) {
             logger.info(objectPath + " already exists. Skipping creation.");
         } else {
             logger.warn("Could not confirm that " + objectPath + " does not already exist. Skipping creation.");
         }
-        return false;
+        return Optional.empty();
     }
 
-    public RestClient.Response registerSnapshotRepo(String repoName, ObjectNode settings){
+    /*
+     * Register a snapshot repository.  Returns an Optional; if the repository was registered, it will be the settings
+     * and empty otherwise.
+     */
+    public Optional<ObjectNode> registerSnapshotRepo(String repoName, ObjectNode settings){
         String targetPath = "_snapshot/" + repoName;
-        return client.putAsync(targetPath, settings.toString())
+        client.putAsync(targetPath, settings.toString())
             .flatMap(resp -> {
                 if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_CREATED) {
                     return Mono.just(resp);
@@ -99,11 +108,16 @@ public class OpenSearchClient {
             .doOnError(e -> logger.error(e.getMessage()))
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
+
+        return Optional.of(settings);
     }
 
-    public RestClient.Response createSnapshot(String repoName, String snapshotName, ObjectNode settings){
+    /*
+     * Create a snapshot.  Returns an Optional; if the snapshot was created, it will be the settings and empty otherwise.
+     */
+    public Optional<ObjectNode> createSnapshot(String repoName, String snapshotName, ObjectNode settings){
         String targetPath = "_snapshot/" + repoName + "/" + snapshotName;
-        return client.putAsync(targetPath, settings.toString())
+        client.putAsync(targetPath, settings.toString())
             .flatMap(resp -> {
                 if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_CREATED) {
                     return Mono.just(resp);
@@ -116,11 +130,17 @@ public class OpenSearchClient {
             .doOnError(e -> logger.error(e.getMessage()))
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
+
+        return Optional.of(settings);
     }
 
-    public RestClient.Response getSnapshotStatus(String repoName, String snapshotName){
+    /*
+     * Get the status of a snapshot.  Returns an Optional; if the snapshot was found, it will be the snapshot status
+     * and empty otherwise.
+     */
+    public Optional<ObjectNode> getSnapshotStatus(String repoName, String snapshotName){
         String targetPath = "_snapshot/" + repoName + "/" + snapshotName;
-        return client.getAsync(targetPath)
+        RestClient.Response response = client.getAsync(targetPath)
             .flatMap(resp -> {
                 if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_NOT_FOUND) {
                     return Mono.just(resp);
@@ -132,12 +152,27 @@ public class OpenSearchClient {
             .doOnError(e -> logger.error(e.getMessage()))
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
+
+        if (response.code == HttpURLConnection.HTTP_OK) {
+            try {
+                return Optional.of(objectMapper.readValue(response.body, ObjectNode.class));
+            } catch (Exception e) {
+                String errorMessage = "Could not parse response for: _snapshot/" + repoName + "/" + snapshotName;
+                throw new OperationFailed(errorMessage, response);
+            }
+        } else if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
+            return Optional.empty();
+        } else {
+            String errorMessage = "Should not have gotten here while parsing response for: _snapshot/" + repoName + "/" + snapshotName;
+            throw new OperationFailed(errorMessage, response);
+        }
     }
 
     /*
-     * Idempotently create a document if it does not already exist; return true if created, false otherwise.
+     * Create a document if it does not already exist.  Returns an Optional; if the document was created, it
+     * will be the created object and empty otherwise.
      */
-    public boolean createDocument(String indexName, String documentId, ObjectNode body) {
+    public Optional<ObjectNode> createDocument(String indexName, String documentId, ObjectNode body) {
         String targetPath = indexName + "/_doc/" + documentId + "?op_type=create";
         RestClient.Response response = client.putAsync(targetPath, body.toString())
             .flatMap(resp -> {
@@ -153,18 +188,21 @@ public class OpenSearchClient {
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
         if (response.code == HttpURLConnection.HTTP_CREATED) {
-            return true;
+            return Optional.of(body);
         } else {
             // The only response code that can end up here is HTTP_CONFLICT, as everything is an error above
-            return false;
+            return Optional.empty();
         }
     }
 
-    public RestClient.Response getDocument(String indexName, String documentId) {
+    /*
+     * Retrieve a document.  Returns an Optional; if the document was found, it will be the document and empty otherwise.
+     */
+    public Optional<ObjectNode> getDocument(String indexName, String documentId) {
         String targetPath = indexName + "/_doc/" + documentId;
-        return client.getAsync(targetPath)
+        RestClient.Response response = client.getAsync(targetPath)
             .flatMap(resp -> {
-                if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_NOT_FOUND) {
+                if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_NOT_FOUND) { 
                     return Mono.just(resp);
                 } else {
                     String errorMessage = ("Could not retrieve document: " + indexName + "/" + documentId + ". Response Code: " + resp.code
@@ -175,23 +213,40 @@ public class OpenSearchClient {
             .doOnError(e -> logger.error(e.getMessage()))
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
+
+        if (response.code == HttpURLConnection.HTTP_OK) {
+            try {
+                return Optional.of(objectMapper.readValue(response.body, ObjectNode.class));
+            } catch (Exception e) {
+                String errorMessage = "Could not parse response for: " + indexName + "/" + documentId;
+                throw new OperationFailed(errorMessage, response);
+            }            
+        } else if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
+            return Optional.empty();
+        } else {
+            String errorMessage = "Should not have gotten here while parsing response for: " + indexName + "/" + documentId;
+            throw new OperationFailed(errorMessage, response);
+        }
     }
 
     /*
-     * Update a document using optimistic locking; return true if updated, false otherwise.
+     * Update a document using optimistic locking.  Returns an Optional; if the document was updated, it
+     * will be the new value and empty otherwise.
      */
-    public boolean updateDocument(String indexName, String documentId, ObjectNode body) {
-        RestClient.Response getResponse = getDocument(indexName, documentId);
+    public Optional<ObjectNode> updateDocument(String indexName, String documentId, ObjectNode body) {
+        Optional<ObjectNode> document = getDocument(indexName, documentId);
+        if (document.isEmpty()) {
+            throw new UpdateFailed("Document not found: " + indexName + "/" + documentId);
+        }
 
         String currentSeqNum;
         String currentPrimaryTerm;
         try {
-            ObjectNode document = (ObjectNode) objectMapper.readTree(getResponse.body);
-            currentSeqNum = document.get("_seq_no").asText();
-            currentPrimaryTerm = document.get("_primary_term").asText();
+            currentSeqNum = document.get().get("_seq_no").asText();
+            currentPrimaryTerm = document.get().get("_primary_term").asText();
         } catch (Exception e) {
-            String errorMessage = "Could not update document: " + indexName + "/" + documentId + ". Response Code: " + getResponse.code;
-            throw new OperationFailed(errorMessage, getResponse);
+            String errorMessage = "Could not update document: " + indexName + "/" + documentId;
+            throw new RfsException(errorMessage, e);
         }
 
         ObjectNode upsertBody = new ObjectMapper().createObjectNode();
@@ -213,10 +268,10 @@ public class OpenSearchClient {
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
         if (response.code == HttpURLConnection.HTTP_OK) {
-            return true;
+            return Optional.of(body);
         } else {
             // The only response code that can end up here is HTTP_CONFLICT, as everything is an error above
-            return false;
+            return Optional.empty();
         }
     }
 
@@ -270,6 +325,12 @@ public class OpenSearchClient {
             }
 
             return failureMessage;
+        }
+    }
+
+    public static class UpdateFailed extends RfsException {
+        public UpdateFailed(String message) {
+            super(message);
         }
     }
 

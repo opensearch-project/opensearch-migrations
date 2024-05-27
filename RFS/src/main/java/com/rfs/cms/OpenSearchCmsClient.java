@@ -1,9 +1,9 @@
 package com.rfs.cms;
 
-import java.net.HttpURLConnection;
+import java.util.Optional;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.common.OpenSearchClient;
-import com.rfs.common.RestClient;
 
 public class OpenSearchCmsClient implements CmsClient {
     public static final String CMS_INDEX_NAME = "cms-reindex-from-snapshot";
@@ -17,73 +17,71 @@ public class OpenSearchCmsClient implements CmsClient {
     }
 
     @Override
-    public CmsEntry.Snapshot createSnapshotEntry(String snapshotName) {
+    public Optional<CmsEntry.Snapshot> createSnapshotEntry(String snapshotName) {
         OpenSearchCmsEntry.Snapshot newEntry = OpenSearchCmsEntry.Snapshot.getInitial(snapshotName);
-        boolean createdEntry = client.createDocument(CMS_INDEX_NAME, CMS_SNAPSHOT_DOC_ID, newEntry.toJson());
-        if (createdEntry) {
-            return newEntry;
+        Optional<ObjectNode> createdEntry = client.createDocument(CMS_INDEX_NAME, CMS_SNAPSHOT_DOC_ID, newEntry.toJson());
+
+        if (createdEntry.isPresent()) {
+            return Optional.of(OpenSearchCmsEntry.Snapshot.fromJson(createdEntry.get()));
         } else {
-            return null;            
+            return Optional.empty();
         }
     }
 
     @Override
-    public CmsEntry.Snapshot getSnapshotEntry(String snapshotName) {
-        RestClient.Response response = client.getDocument(CMS_INDEX_NAME, CMS_SNAPSHOT_DOC_ID);
-
-        if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
-            return null;
+    public Optional<CmsEntry.Snapshot> getSnapshotEntry(String snapshotName) {
+        Optional<ObjectNode> document = client.getDocument(CMS_INDEX_NAME, CMS_SNAPSHOT_DOC_ID);
+        if (document.isEmpty()) {
+            return Optional.empty();
         }
-        return OpenSearchCmsEntry.Snapshot.fromJsonString(response.body);
+
+        ObjectNode sourceNode = (ObjectNode) document.get().get("_source");
+        return Optional.of(OpenSearchCmsEntry.Snapshot.fromJson(sourceNode));
     }
 
     @Override
-    public CmsEntry.Snapshot updateSnapshotEntry(String snapshotName, CmsEntry.SnapshotStatus status) {
+    public Optional<CmsEntry.Snapshot> updateSnapshotEntry(String snapshotName, CmsEntry.SnapshotStatus status) {
         OpenSearchCmsEntry.Snapshot entry = new OpenSearchCmsEntry.Snapshot(snapshotName, status);
-        boolean updatedEntry = client.updateDocument(CMS_INDEX_NAME, CMS_SNAPSHOT_DOC_ID, entry.toJson());
-        if (updatedEntry) {
-            return entry;
-        } else {
-            return null;            
+        Optional<ObjectNode> updatedEntry = client.updateDocument(CMS_INDEX_NAME, CMS_SNAPSHOT_DOC_ID, entry.toJson());
+        if (updatedEntry.isEmpty()) {
+            return Optional.empty();
         }
+        return Optional.of(OpenSearchCmsEntry.Snapshot.fromJson(updatedEntry.get()));
     }
 
     @Override
-    public OpenSearchCmsEntry.Metadata createMetadataEntry() {
+    public Optional<CmsEntry.Metadata> createMetadataEntry() {
         OpenSearchCmsEntry.Metadata entry = OpenSearchCmsEntry.Metadata.getInitial();
+        Optional<ObjectNode> createdEntry = client.createDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID, entry.toJson());
 
-        boolean docCreated = client.createDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID, entry.toJson());
-
-        if (docCreated) {
-            return entry;
-        } else {
-            return null;
+        if (createdEntry.isEmpty()) {
+            return Optional.empty();
         }
+        return Optional.of(OpenSearchCmsEntry.Metadata.fromJson(createdEntry.get()));
 
     }
 
     @Override
-    public CmsEntry.Metadata getMetadataEntry() {
-        RestClient.Response response = client.getDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID);
+    public Optional<CmsEntry.Metadata> getMetadataEntry() {
+        Optional<ObjectNode> document = client.getDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID);
 
-        if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
-            return null;
+        if (document.isEmpty()) {
+            return Optional.empty();
         }
-        return OpenSearchCmsEntry.Metadata.fromJsonString(response.body);
+
+        ObjectNode sourceNode = (ObjectNode) document.get().get("_source");
+        return Optional.of(OpenSearchCmsEntry.Metadata.fromJson(sourceNode));
     }
 
     @Override
-    public CmsEntry.Metadata updateMetadataEntry(CmsEntry.MetadataStatus status, String leaseExpiry, Integer numAttempts) {
+    public Optional<CmsEntry.Metadata> updateMetadataEntry(CmsEntry.MetadataStatus status, String leaseExpiry, Integer numAttempts) {
         OpenSearchCmsEntry.Metadata metadata = new OpenSearchCmsEntry.Metadata(status, leaseExpiry, numAttempts);
+        Optional<ObjectNode> updatedEntry = client.updateDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID, metadata.toJson());
 
-        boolean updatedDoc = client.updateDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID, metadata.toJson());
-
-        if (updatedDoc) {
-            return metadata;
-        } else {
-            return null;
+        if (updatedEntry.isEmpty()) {
+            return Optional.empty();
         }
-
+        return Optional.of(OpenSearchCmsEntry.Metadata.fromJson(updatedEntry.get()));
     }
     
 }

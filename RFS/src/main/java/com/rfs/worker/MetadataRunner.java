@@ -1,9 +1,13 @@
 package com.rfs.worker;
 
 import org.apache.logging.log4j.Logger;
+
+import java.util.Optional;
+
 import org.apache.logging.log4j.LogManager;
 
 import com.rfs.cms.CmsClient;
+import com.rfs.cms.CmsEntry;
 import com.rfs.cms.CmsEntry.Metadata;
 import com.rfs.cms.CmsEntry.MetadataStatus;
 import com.rfs.common.GlobalMetadata;
@@ -24,9 +28,9 @@ public class MetadataRunner implements Runner {
         WorkerStep nextStep = null;
         try {
             logger.info("Checking if work remains in the Metadata Phase...");
-            Metadata metadataEntry = members.cmsClient.getMetadataEntry();
+            Optional<Metadata> metadataEntry = members.cmsClient.getMetadataEntry();
             
-            if (metadataEntry == null || metadataEntry.status != MetadataStatus.COMPLETED) {
+            if (metadataEntry.isEmpty() || metadataEntry.get().status != MetadataStatus.COMPLETED) {
                 nextStep = new MetadataStep.EnterPhase(members);
 
                 while (nextStep != null) {
@@ -42,7 +46,7 @@ public class MetadataRunner implements Runner {
                 getPhaseFailureRecord(
                     members.globalState.getPhase(), 
                     nextStep, 
-                    members.cmsEntry, 
+                    members.cmsEntry.map(bar -> (CmsEntry.Base) bar), 
                     e
                 ).toString()
             );

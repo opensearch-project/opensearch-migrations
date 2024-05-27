@@ -1,5 +1,7 @@
 package com.rfs.worker;
 
+import java.util.Optional;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -15,13 +17,13 @@ public class SnapshotStep {
         protected final CmsClient cmsClient;
         protected final GlobalState globalState;
         protected final SnapshotCreator snapshotCreator;
-        protected CmsEntry.Snapshot cmsEntry;
+        protected Optional<CmsEntry.Snapshot> cmsEntry;
 
         public SharedMembers(GlobalState globalState, CmsClient cmsClient, SnapshotCreator snapshotCreator) {
             this.globalState = globalState;
             this.cmsClient = cmsClient;
             this.snapshotCreator = snapshotCreator;
-            this.cmsEntry = null;
+            this.cmsEntry = Optional.empty();
         }
     }
 
@@ -45,7 +47,7 @@ public class SnapshotStep {
      */
     public static class EnterPhase extends Base {
 
-        public EnterPhase(SharedMembers members, CmsEntry.Snapshot currentEntry) {
+        public EnterPhase(SharedMembers members, Optional<CmsEntry.Snapshot> currentEntry) {
             super(members);
             this.members.cmsEntry = currentEntry;
         }
@@ -58,17 +60,18 @@ public class SnapshotStep {
 
         @Override
         public WorkerStep nextStep() {
-            if (members.cmsEntry == null) {
+            if (members.cmsEntry.isEmpty()) {
                 return new CreateEntry(members);
-            } else {
-                switch (members.cmsEntry.status) {
-                    case NOT_STARTED:
-                        return new InitiateSnapshot(members);
-                    case IN_PROGRESS:
-                        return new WaitForSnapshot(members);
-                    default:
-                        throw new IllegalStateException("Unexpected snapshot status: " + members.cmsEntry.status);
-                }
+            } 
+            
+            CmsEntry.Snapshot currentEntry = members.cmsEntry.get();
+            switch (currentEntry.status) {
+                case NOT_STARTED:
+                    return new InitiateSnapshot(members);
+                case IN_PROGRESS:
+                    return new WaitForSnapshot(members);
+                default:
+                    throw new IllegalStateException("Unexpected snapshot status: " + currentEntry.status);
             }
         }
     }
