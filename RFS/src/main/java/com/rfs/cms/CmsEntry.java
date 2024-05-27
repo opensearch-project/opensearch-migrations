@@ -5,6 +5,7 @@ import com.rfs.common.RfsException;
 public class CmsEntry {
     public abstract static class Base {
         protected Base() {}
+        public abstract String toString();
     }
 
     public static enum SnapshotStatus {
@@ -22,6 +23,14 @@ public class CmsEntry {
             super();
             this.name = name;
             this.status = status;
+        }
+
+        @Override
+        public String toString() {
+            return "Snapshot("
+                + "name='" + name + ","
+                + "status=" + status +
+                ")";
         }
     }
 
@@ -59,6 +68,15 @@ public class CmsEntry {
             this.status = status;
             this.leaseExpiry = leaseExpiry;
             this.numAttempts = numAttempts;
+        }
+
+        @Override
+        public String toString() {
+            return "Metadata("
+                + "status=" + status.toString() + ","
+                + "leaseExpiry=" + leaseExpiry + ","
+                + "numAttempts=" + numAttempts.toString() +
+                ")";
         }
     }
 

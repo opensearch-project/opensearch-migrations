@@ -40,10 +40,9 @@ public class MetadataStep {
         // A convient way to check if the CMS entry is present before retrieving it.  In some places, it's fine/expected
         // for the CMS entry to be missing, but in others, it's a problem.
         public CmsEntry.Metadata getCmsEntryNotMissing() {
-            if (cmsEntry.isEmpty()) {
-                throw new MissingMigrationEntry("The Metadata Migration CMS entry we expected to be stored in local memory was null");
-            }
-            return cmsEntry.get();
+            return cmsEntry.orElseThrow(
+                () -> new MissingMigrationEntry("The Metadata Migration CMS entry we expected to be stored in local memory was empty")
+            );
         }
     }
 
