@@ -21,11 +21,10 @@ public class SnapshotRunner implements Runner {
     }
 
     @Override
-    public void run() {
+    public void runInternal() {
         WorkerStep nextStep = null;
 
         try {
-            logger.info("Checking if work remains in the Snapshot Phase...");
             Optional<Snapshot> snapshotEntry = members.cmsClient.getSnapshotEntry(members.snapshotCreator.getSnapshotName());
             
             if (snapshotEntry.isEmpty() || snapshotEntry.get().status != SnapshotStatus.COMPLETED) {
@@ -36,21 +35,29 @@ public class SnapshotRunner implements Runner {
                     nextStep = nextStep.nextStep();
                 }
             }
-
-            logger.info("Snapshot Phase is complete");
         } catch (Exception e) {
-            logger.error("Snapshot Phase failed w/ an exception");
-            logger.error(
-                getPhaseFailureRecord(
-                    members.globalState.getPhase(), 
-                    nextStep, 
-                    members.cmsEntry.map(bar -> (CmsEntry.Base) bar), 
-                    e
-                ).toString()
+            throw new SnapshotPhaseFailed(
+                members.globalState.getPhase(), 
+                nextStep, 
+                members.cmsEntry.map(bar -> (CmsEntry.Base) bar), 
+                e
             );
+        }        
+    }
 
-            throw e;
+    @Override
+    public String getPhaseName() {
+        return "Snapshot";
+    }
+
+    @Override
+    public Logger getLogger() {
+        return logger;
+    }
+
+    public static class SnapshotPhaseFailed extends Runner.PhaseFailed {
+        public SnapshotPhaseFailed(GlobalState.Phase phase, WorkerStep nextStep, Optional<CmsEntry.Base> cmsEntry, Exception e) {
+            super("Snapshot Phase failed", phase, nextStep, cmsEntry, e);
         }
-        
-    }    
+    }
 }

@@ -24,10 +24,9 @@ public class MetadataRunner implements Runner {
     }
 
     @Override
-    public void run() {
+    public void runInternal() {
         WorkerStep nextStep = null;
         try {
-            logger.info("Checking if work remains in the Metadata Phase...");
             Optional<Metadata> metadataEntry = members.cmsClient.getMetadataEntry();
             
             if (metadataEntry.isEmpty() || metadataEntry.get().status != MetadataStatus.COMPLETED) {
@@ -38,22 +37,29 @@ public class MetadataRunner implements Runner {
                     nextStep = nextStep.nextStep();
                 }
             }
-
-            logger.info("Metadata Phase is complete");
         } catch (Exception e) {
-            logger.error("Metadata Migration Phase failed w/ an exception");
-            logger.error(
-                getPhaseFailureRecord(
-                    members.globalState.getPhase(), 
-                    nextStep, 
-                    members.cmsEntry.map(bar -> (CmsEntry.Base) bar), 
-                    e
-                ).toString()
+            throw new MetadataMigrationPhaseFailed(
+                members.globalState.getPhase(), 
+                nextStep, 
+                members.cmsEntry.map(bar -> (CmsEntry.Base) bar), 
+                e
             );
+        }        
+    }
 
-            throw e;
+    @Override
+    public String getPhaseName() {
+        return "Metadata Migration";
+    }
+
+    @Override
+    public Logger getLogger() {
+        return logger;
+    }
+
+    public static class MetadataMigrationPhaseFailed extends Runner.PhaseFailed {
+        public MetadataMigrationPhaseFailed(GlobalState.Phase phase, WorkerStep nextStep, Optional<CmsEntry.Base> cmsEntry, Exception e) {
+            super("Metadata Migration Phase failed", phase, nextStep, cmsEntry, e);
         }
-
-        
-    }    
+    }
 }
