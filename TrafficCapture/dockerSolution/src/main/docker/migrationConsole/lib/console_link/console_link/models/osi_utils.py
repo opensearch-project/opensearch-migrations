@@ -4,7 +4,6 @@ from pathlib import Path
 from typing import List, Dict, Optional
 from urllib.parse import urlparse
 import logging
-import boto3
 import re
 
 logger = logging.getLogger(__name__)
@@ -23,11 +22,7 @@ SOURCE_BASIC_AUTH_CONFIG_TEMPLATE = """
 SOURCE_DEFAULT_INDEX_TEMPLATE = """
         exclude:
           - index_name_regex: \.*
-"""
-
-
-class MissingEnvironmentVariable(Exception):
-    pass
+"""  # noqa: W605 - invalid escape sequence -- this is a required regex pattern for OSI template
 
 
 class InvalidAuthParameters(Exception):
@@ -87,7 +82,6 @@ def validate_index_regex_list(regex_list):
                 raise e
 
 
-# TODO add tests here
 def convert_str_tags_to_dict(tag_list: List[str]) -> List[Dict[str, str]]:
     tag_dict_list = []
     for pair in tag_list:
@@ -191,134 +185,131 @@ def construct_pipeline_config(pipeline_config_file_path: str, source_endpoint: s
     return pipeline_config
 
 
-class OSIMigrationLogic:
-    """
-    An OpenSearch Ingestion Migration manager.
-    """
+def start_pipeline(osi_client, pipeline_name: str):
+    name = pipeline_name if pipeline_name is not None else DEFAULT_PIPELINE_NAME
+    logger.info(f"Starting pipeline: {name}")
+    osi_client.start_pipeline(
+        PipelineName=name
+    )
 
-    def __init__(self) -> None:
-        self.osi_client = boto3.client('osis')
 
-    def start_pipeline(self, pipeline_name: str):
-        name = pipeline_name if pipeline_name is not None else DEFAULT_PIPELINE_NAME
-        logger.info(f"Starting pipeline: {name}")
-        self.osi_client.start_pipeline(
-            PipelineName=name
-        )
+def stop_pipeline(osi_client, pipeline_name: str):
+    name = pipeline_name if pipeline_name is not None else DEFAULT_PIPELINE_NAME
+    logger.info(f"Stopping pipeline: {name}")
+    osi_client.stop_pipeline(
+        PipelineName=name
+    )
 
-    def stop_pipeline(self, pipeline_name: str):
-        name = pipeline_name if pipeline_name is not None else DEFAULT_PIPELINE_NAME
-        logger.info(f"Stopping pipeline: {name}")
-        self.osi_client.stop_pipeline(
-            PipelineName=name
-        )
 
-    def create_pipeline(self, pipeline_name: str, pipeline_config: str, subnet_ids: List[str],
-                        security_group_ids: List[str], cw_log_group_name: str, tags: List[Dict[str, str]]):
-        logger.info(f"Creating pipeline: {pipeline_name}")
-        pipe_name = pipeline_name if pipeline_name else DEFAULT_PIPELINE_NAME
-        pipe_tags = tags if tags else []
+def create_pipeline(osi_client, pipeline_name: str, pipeline_config: str, subnet_ids: List[str],
+                    security_group_ids: List[str], cw_log_group_name: str, tags: List[Dict[str, str]]):
+    logger.info(f"Creating pipeline: {pipeline_name}")
+    pipe_name = pipeline_name if pipeline_name else DEFAULT_PIPELINE_NAME
+    pipe_tags = tags if tags else []
+    cw_log_options = {
+        'IsLoggingEnabled': False
+    }
+    # Currently limited that CW log groups must already be created and follow naming pattern
+    # /aws/vendedlogs/<name>
+    if cw_log_group_name is not None:
         cw_log_options = {
-            'IsLoggingEnabled': False
-        }
-        # Currently limited that CW log groups must already be created and follow naming pattern
-        # /aws/vendedlogs/<name>
-        if cw_log_group_name is not None:
-            cw_log_options = {
-                'IsLoggingEnabled': True,
-                'CloudWatchLogDestination': {
-                    'LogGroup': cw_log_group_name
-                }
+            'IsLoggingEnabled': True,
+            'CloudWatchLogDestination': {
+                'LogGroup': cw_log_group_name
             }
+        }
 
-        self.osi_client.create_pipeline(
-            PipelineName=pipe_name,
-            MinUnits=2,
-            MaxUnits=4,
-            PipelineConfigurationBody=pipeline_config,
-            LogPublishingOptions=cw_log_options,
-            VpcOptions={
-                'SubnetIds': subnet_ids,
-                'SecurityGroupIds': security_group_ids
-            },
-            # Documentation lists this as a requirement but does not seem to be the case from testing:
-            # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/osis/client/create_pipeline.html
-            # BufferOptions={
-            #    'PersistentBufferEnabled': False
-            # },
-            Tags=pipe_tags
-        )
+    osi_client.create_pipeline(
+        PipelineName=pipe_name,
+        MinUnits=2,
+        MaxUnits=4,
+        PipelineConfigurationBody=pipeline_config,
+        LogPublishingOptions=cw_log_options,
+        VpcOptions={
+            'SubnetIds': subnet_ids,
+            'SecurityGroupIds': security_group_ids
+        },
+        # Documentation lists this as a requirement but does not seem to be the case from testing:
+        # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/osis/client/create_pipeline.html
+        # BufferOptions={
+        #    'PersistentBufferEnabled': False
+        # },
+        Tags=pipe_tags
+    )
 
-    def create_pipeline_from_env(self,
-                                 osi_props: OpenSearchIngestionMigrationProps,
-                                 source_cluster: Cluster,
-                                 target_cluster: Cluster,
-                                 pipeline_template_path: str,
-                                 print_config_only: bool):
 
-        source_endpoint_clean = sanitize_endpoint(endpoint=source_cluster.endpoint, remove_port=False)
-        # Target endpoints for OSI are not currently allowed a port
-        target_endpoint_clean = sanitize_endpoint(target_cluster.endpoint, True)
+def create_pipeline_from_env(osi_client,
+                             osi_props: OpenSearchIngestionMigrationProps,
+                             source_cluster: Cluster,
+                             target_cluster: Cluster,
+                             pipeline_template_path: str,
+                             print_config_only: bool):
+    source_endpoint_clean = sanitize_endpoint(endpoint=source_cluster.endpoint, remove_port=False)
+    # Target endpoints for OSI are not currently allowed a port
+    target_endpoint_clean = sanitize_endpoint(target_cluster.endpoint, True)
 
-        pipeline_config_string = construct_pipeline_config(pipeline_config_file_path=pipeline_template_path,
-                                                           source_endpoint=source_endpoint_clean,
-                                                           source_auth_type=source_cluster.auth_type,
-                                                           source_auth_secret=source_cluster.aws_secret_arn,
-                                                           target_endpoint=target_endpoint_clean,
-                                                           target_auth_type=target_cluster.auth_type,
-                                                           pipeline_role_arn=osi_props.pipeline_role_arn,
-                                                           include_index_regex_list=osi_props.index_regex_selection,
-                                                           aws_region=osi_props.aws_region)
-        if print_config_only:
-            print(pipeline_config_string)
-            exit(0)
+    pipeline_config_string = construct_pipeline_config(pipeline_config_file_path=pipeline_template_path,
+                                                       source_endpoint=source_endpoint_clean,
+                                                       source_auth_type=source_cluster.auth_type,
+                                                       source_auth_secret=source_cluster.aws_secret_arn,
+                                                       target_endpoint=target_endpoint_clean,
+                                                       target_auth_type=target_cluster.auth_type,
+                                                       pipeline_role_arn=osi_props.pipeline_role_arn,
+                                                       include_index_regex_list=osi_props.index_regex_selection,
+                                                       aws_region=osi_props.aws_region)
+    if print_config_only:
+        print(pipeline_config_string)
+        exit(0)
 
-        self.create_pipeline(pipeline_name=osi_props.pipeline_name,
-                             pipeline_config=pipeline_config_string,
-                             subnet_ids=osi_props.vpc_subnet_ids,
-                             security_group_ids=osi_props.security_group_ids,
-                             cw_log_group_name=osi_props.log_group_name,
-                             tags=osi_props.tags)
+    create_pipeline(osi_client=osi_client,
+                    pipeline_name=osi_props.pipeline_name,
+                    pipeline_config=pipeline_config_string,
+                    subnet_ids=osi_props.vpc_subnet_ids,
+                    security_group_ids=osi_props.security_group_ids,
+                    cw_log_group_name=osi_props.log_group_name,
+                    tags=osi_props.tags)
 
-    def create_pipeline_from_json(self, input_json: Dict, pipeline_template_path: str):
-        source_provider = input_json.get('SourceDataProvider')
-        remove_source_port = False
-        source_auth_type = AuthMethod[source_provider.get('AuthType')]
-        if source_auth_type == AuthMethod.SIGV4:
-            remove_source_port = True
-        # Ports are not currently allowed for OSI SIGV4 sources or sinks
-        source_endpoint_clean = sanitize_endpoint(
-            endpoint=f"https://{source_provider.get('Host')}:{source_provider.get('Port')}",
-            remove_port=remove_source_port)
-        source_auth_secret = source_provider.get('SecretArn')
 
-        target_provider = input_json.get('TargetDataProvider')
-        # Target endpoints for OSI are not currently allowed a port
-        target_endpoint_clean = sanitize_endpoint(f"https://{target_provider.get('Host')}", False)
-        target_auth_type = AuthMethod[target_provider.get('AuthType')]
+def create_pipeline_from_json(osi_client, input_json: Dict, pipeline_template_path: str):
+    source_provider = input_json.get('SourceDataProvider')
+    remove_source_port = False
+    source_auth_type = AuthMethod[source_provider.get('AuthType')]
+    if source_auth_type == AuthMethod.SIGV4:
+        remove_source_port = True
+    # Ports are not currently allowed for OSI SIGV4 sources or sinks
+    source_endpoint_clean = sanitize_endpoint(
+        endpoint=f"https://{source_provider.get('Host')}:{source_provider.get('Port')}",
+        remove_port=remove_source_port)
+    source_auth_secret = source_provider.get('SecretArn')
 
-        pipeline_role_arn = input_json.get('PipelineRoleArn')
-        pipeline_name = input_json.get('PipelineName')
-        aws_region = input_json.get('AwsRegion')
-        log_group_name = input_json.get('LogGroupName')
-        include_index_regex_list = input_json.get('IndexRegexSelections')
-        tags_value = input_json.get('Tags')
-        tags = convert_str_tags_to_dict(tags_value) if tags_value is not None else None
-        subnet_ids = input_json.get('VpcSubnetIds')
-        security_group_ids = input_json.get('VpcSecurityGroupIds')
+    target_provider = input_json.get('TargetDataProvider')
+    # Target endpoints for OSI are not currently allowed a port
+    target_endpoint_clean = sanitize_endpoint(f"https://{target_provider.get('Host')}", False)
+    target_auth_type = AuthMethod[target_provider.get('AuthType')]
 
-        pipeline_config_string = construct_pipeline_config(pipeline_config_file_path=pipeline_template_path,
-                                                           source_endpoint=source_endpoint_clean,
-                                                           source_auth_type=source_auth_type,
-                                                           source_auth_secret=source_auth_secret,
-                                                           target_endpoint=target_endpoint_clean,
-                                                           target_auth_type=target_auth_type,
-                                                           pipeline_role_arn=pipeline_role_arn,
-                                                           include_index_regex_list=include_index_regex_list,
-                                                           aws_region=aws_region)
-        self.create_pipeline(pipeline_name=pipeline_name,
-                             pipeline_config=pipeline_config_string,
-                             subnet_ids=subnet_ids,
-                             security_group_ids=security_group_ids,
-                             cw_log_group_name=log_group_name,
-                             tags=tags)
+    pipeline_role_arn = input_json.get('PipelineRoleArn')
+    pipeline_name = input_json.get('PipelineName')
+    aws_region = input_json.get('AwsRegion')
+    log_group_name = input_json.get('LogGroupName')
+    include_index_regex_list = input_json.get('IndexRegexSelections')
+    tags_value = input_json.get('Tags')
+    tags = convert_str_tags_to_dict(tags_value) if tags_value is not None else None
+    subnet_ids = input_json.get('VpcSubnetIds')
+    security_group_ids = input_json.get('VpcSecurityGroupIds')
+
+    pipeline_config_string = construct_pipeline_config(pipeline_config_file_path=pipeline_template_path,
+                                                       source_endpoint=source_endpoint_clean,
+                                                       source_auth_type=source_auth_type,
+                                                       source_auth_secret=source_auth_secret,
+                                                       target_endpoint=target_endpoint_clean,
+                                                       target_auth_type=target_auth_type,
+                                                       pipeline_role_arn=pipeline_role_arn,
+                                                       include_index_regex_list=include_index_regex_list,
+                                                       aws_region=aws_region)
+    create_pipeline(osi_client=osi_client,
+                    pipeline_name=pipeline_name,
+                    pipeline_config=pipeline_config_string,
+                    subnet_ids=subnet_ids,
+                    security_group_ids=security_group_ids,
+                    cw_log_group_name=log_group_name,
+                    tags=tags)

@@ -22,7 +22,7 @@ valid_osi_migration_config = {
         "migration_deployment=1.0.0"
     ]
 }
-# Set AWS region for
+# Set mock AWS region for unit tests
 os.environ['AWS_DEFAULT_REGION'] = 'us-east-1'
 mock_cluster = create_valid_cluster()
 

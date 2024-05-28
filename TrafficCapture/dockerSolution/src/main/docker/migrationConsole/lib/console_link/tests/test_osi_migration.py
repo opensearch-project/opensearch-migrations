@@ -2,7 +2,7 @@ from pathlib import Path
 import unittest
 import os
 
-from console_link.logic.osi_migration import construct_pipeline_config, InvalidAuthParameters
+from console_link.models.osi_utils import construct_pipeline_config, InvalidAuthParameters
 from console_link.models.cluster import AuthMethod
 
 PIPELINE_TEMPLATE_PATH = f"{Path(__file__).parents[3]}/osiPipelineTemplate.yaml"

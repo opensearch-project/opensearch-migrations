@@ -1,8 +1,10 @@
-from console_link.logic.osi_migration import OSIMigrationLogic, OpenSearchIngestionMigrationProps
+from console_link.models.osi_utils import (create_pipeline_from_env, start_pipeline, stop_pipeline,
+                                           OpenSearchIngestionMigrationProps)
 from console_link.models.cluster import Cluster
 from typing import Dict
 from enum import Enum
 from cerberus import Validator
+import boto3
 
 OSI_SCHEMA = {
     'pipeline_role_arn': {
@@ -84,27 +86,25 @@ class OpenSearchIngestionMigration(Migration):
         if not v.validate(config):
             raise ValueError("Invalid config file for OpenSearchIngestion migration", v.errors)
         self.osi_props = OpenSearchIngestionMigrationProps(config=config)
-        self.migration_logic = OSIMigrationLogic()
+        self.osi_client = boto3.client('osis')
         self.source_cluster = source_cluster
         self.target_cluster = target_cluster
 
-    def create(self, pipeline_template_path='/root/osiPipelineTemplate.yaml', print_config_only=False):
-        self.migration_logic.create_pipeline_from_env(pipeline_template_path=pipeline_template_path,
-                                                      osi_props=self.osi_props,
-                                                      source_cluster=self.source_cluster,
-                                                      target_cluster=self.target_cluster,
-                                                      print_config_only=print_config_only)
-
-    def create_from_json(self, config_json: Dict, pipeline_template_path: str) -> None:
-        self.migration_logic.create_pipeline_from_json(input_json=config_json,
-                                                       pipeline_template_path=pipeline_template_path)
+    def create(self, pipeline_template_path='/root/osiPipelineTemplate.yaml',
+               print_config_only=False):
+        create_pipeline_from_env(osi_client=self.osi_client,
+                                 pipeline_template_path=pipeline_template_path,
+                                 osi_props=self.osi_props,
+                                 source_cluster=self.source_cluster,
+                                 target_cluster=self.target_cluster,
+                                 print_config_only=print_config_only)
 
     def start(self, pipeline_name=None):
         if pipeline_name is None:
             pipeline_name = self.osi_props.pipeline_name
-        self.migration_logic.start_pipeline(pipeline_name=pipeline_name)
+        start_pipeline(osi_client=self.osi_client, pipeline_name=pipeline_name)
 
     def stop(self, pipeline_name=None):
         if pipeline_name is None:
             pipeline_name = self.osi_props.pipeline_name
-        self.migration_logic.stop_pipeline(pipeline_name=pipeline_name)
+        stop_pipeline(osi_client=self.osi_client, pipeline_name=pipeline_name)

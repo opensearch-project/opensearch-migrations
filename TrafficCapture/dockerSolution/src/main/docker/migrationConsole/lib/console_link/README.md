@@ -7,7 +7,13 @@ The console link library is designed to provide a unified interface for the many
 
 The user defines their migration services in a `migration_services.yaml` file, by default found at `/etc/migration_services.yaml`.
 
-Currently, the supported services are a source and target cluster and a metrics source. For example:
+Currently, the supported services are:
+* `source_cluster`: Source cluster details
+* `target_cluster`: Target cluster details
+* `metrics_source`: Metrics source details
+* `backfill`: Backfill migration details
+
+For example:
 
 ```yaml
 source_cluster:
@@ -24,6 +30,20 @@ target_cluster:
 metrics_source:
 	type: "prometheus"
 	endpoint: "http://prometheus:9090"
+backfill:
+	opensearch_ingestion:
+		pipeline_role_arn: "arn:aws:iam::123456789012:role/OSMigrations-aws-integ-us--pipelineRole"
+		vpc_subnet_ids:
+			- "subnet-123456789"
+		security_group_ids:
+			- "sg-123456789"
+		aws_region: "us-west-2"
+		pipeline_name: "test-cli-pipeline"
+		index_regex_selection:
+			- "test-index*"
+		log_group_name: "/aws/vendedlogs/osi-aws-integ-default"
+		tags:
+			- "migration_deployment=1.0.6"
 ```
 
 ### Services.yaml spec
@@ -45,6 +65,20 @@ Currently, the two supported metrics source types are `prometheus` and `cloudwat
 - `type`: required, `prometheus` or `cloudwatch`
 - `endpoint`: required for `prometheus` (ignored for `cloudwatch`)
 - `aws_region`: optional for `cloudwatch` (ignored for `prometheus`). if not provided, the usual rules are followed for determining aws region (`AWS_DEFAULT_REGION`, `~/.aws/config`)
+
+#### Backfill
+
+Currently, the only supported backfill migration type is `opensearch_ingestion`.
+
+#### OpenSearch Ingestion
+- `pipeline_role_arn`: required, IAM pipeline role containing permissions to read from source and read/write to target, more details [here](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/pipeline-security-overview.html#pipeline-security-sink)
+- `vpc_subnet_ids`: required, VPC subnets to place the OSI pipeline in
+- `security_group_ids`: required, security groups to apply to OSI pipeline for accessing source and target clusters
+- `aws_region`: required, AWS region to look for pipeline role and secrets for cluster
+- `pipeline_name`: optional, name of OSI pipeline
+- `index_regex_selection`: optional, list of index inclusion regex strings for selecting indices to migrate
+- `log_group_name`: optional, name of existing CloudWatch log group to use for OSI logs
+- `tags`: optional, list of tags to apply to OSI pipeline
 
 # Usage
 ### Library

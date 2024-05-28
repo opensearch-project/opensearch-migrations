@@ -13,7 +13,6 @@ SCHEMA = {
     "replayer": {"type": "dict", "required": False},
     "backfill": {"type": "dict", "required": False},
     "metrics_source": {"type": "dict", "required": False},
-    'opensearch_ingestion': {'type': 'dict', 'required': False},
 }
 
 
@@ -40,9 +39,15 @@ class Environment:
         )
         logger.debug(f"Metrics source initialized: {self.metrics_source}")
 
-        if self.config.get('opensearch_ingestion'):
-            self.osi_migration = OpenSearchIngestionMigration(config=self.config.get('opensearch_ingestion'),
-                                                              source_cluster=self.source_cluster,
-                                                              target_cluster=self.target_cluster)
+        backfill = self.config.get('backfill')
+        if backfill:
+            osi_backfill = backfill.get('opensearch_ingestion')
+            if osi_backfill:
+                self.backfill = OpenSearchIngestionMigration(config=osi_backfill,
+                                                             source_cluster=self.source_cluster,
+                                                             target_cluster=self.target_cluster)
+            else:
+                self.backfill = None
         else:
-            self.osi_migration = None
+            self.backfill = None
+        logger.debug(f"Backfill migration initialized: {self.backfill}")
