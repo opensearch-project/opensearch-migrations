@@ -66,8 +66,7 @@ dependencies {
 
 
     // Integration tests
-    implementation platform('org.testcontainers:testcontainers-bom:1.19.8')
-    testImplementation('org.testcontainers:elasticsearch') //no version specified
+    testImplementation group: 'org.testcontainers', name: 'testcontainers'
     testImplementation group: 'org.hamcrest', name: 'hamcrest'
     testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
