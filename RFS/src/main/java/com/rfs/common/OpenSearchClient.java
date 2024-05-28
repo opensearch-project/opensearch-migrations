@@ -90,12 +90,12 @@ public class OpenSearchClient {
     }
 
     /*
-     * Register a snapshot repository.  Returns an Optional; if the repository was registered, it will be the settings
-     * and empty otherwise.
+     * Attempts to register a snapshot repository; no-op if the repo already exists.  Returns an Optional; if the repo
+     * was created, it will be the settings used and empty if it already existed.
      */
     public Optional<ObjectNode> registerSnapshotRepo(String repoName, ObjectNode settings){
         String targetPath = "_snapshot/" + repoName;
-        client.putAsync(targetPath, settings.toString())
+        RestClient.Response response = client.putAsync(targetPath, settings.toString())
             .flatMap(resp -> {
                 if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_CREATED) {
                     return Mono.just(resp);
@@ -109,15 +109,21 @@ public class OpenSearchClient {
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
 
-        return Optional.of(settings);
+        if (response.code == HttpURLConnection.HTTP_CREATED) {
+            return Optional.of(settings);
+        } else {
+            logger.info("Snapshot repo already exists. Registration is a no-op.");
+            return Optional.empty();
+        }
     }
 
     /*
-     * Create a snapshot.  Returns an Optional; if the snapshot was created, it will be the settings and empty otherwise.
+     * Attempts to create a snapshot; no-op if the snapshot already exists.  Returns an Optional; if the snapshot
+     * was created, it will be the settings used and empty if it already existed.
      */
     public Optional<ObjectNode> createSnapshot(String repoName, String snapshotName, ObjectNode settings){
         String targetPath = "_snapshot/" + repoName + "/" + snapshotName;
-        client.putAsync(targetPath, settings.toString())
+        RestClient.Response response = client.putAsync(targetPath, settings.toString())
             .flatMap(resp -> {
                 if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_CREATED) {
                     return Mono.just(resp);
@@ -131,7 +137,13 @@ public class OpenSearchClient {
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
 
-        return Optional.of(settings);
+
+        if (response.code == HttpURLConnection.HTTP_CREATED) {
+            return Optional.of(settings);
+        } else {
+            logger.info("Snapshot already exists. Creation is a no-op.");
+            return Optional.empty();
+        }
     }
 
     /*
@@ -191,6 +203,7 @@ public class OpenSearchClient {
             return Optional.of(body);
         } else {
             // The only response code that can end up here is HTTP_CONFLICT, as everything is an error above
+            // This indicates that the document already exists
             return Optional.empty();
         }
     }
@@ -271,6 +284,7 @@ public class OpenSearchClient {
             return Optional.of(body);
         } else {
             // The only response code that can end up here is HTTP_CONFLICT, as everything is an error above
+            // This indicates that we didn't acquire the optimistic lock
             return Optional.empty();
         }
     }

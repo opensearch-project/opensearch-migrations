@@ -20,68 +20,42 @@ public class OpenSearchCmsClient implements CmsClient {
     public Optional<CmsEntry.Snapshot> createSnapshotEntry(String snapshotName) {
         OpenSearchCmsEntry.Snapshot newEntry = OpenSearchCmsEntry.Snapshot.getInitial(snapshotName);
         Optional<ObjectNode> createdEntry = client.createDocument(CMS_INDEX_NAME, CMS_SNAPSHOT_DOC_ID, newEntry.toJson());
-
-        if (createdEntry.isPresent()) {
-            return Optional.of(OpenSearchCmsEntry.Snapshot.fromJson(createdEntry.get()));
-        } else {
-            return Optional.empty();
-        }
+        return createdEntry.map(OpenSearchCmsEntry.Snapshot::fromJson);
     }
 
     @Override
     public Optional<CmsEntry.Snapshot> getSnapshotEntry(String snapshotName) {
         Optional<ObjectNode> document = client.getDocument(CMS_INDEX_NAME, CMS_SNAPSHOT_DOC_ID);
-        if (document.isEmpty()) {
-            return Optional.empty();
-        }
-
-        ObjectNode sourceNode = (ObjectNode) document.get().get("_source");
-        return Optional.of(OpenSearchCmsEntry.Snapshot.fromJson(sourceNode));
+        return document.map(doc -> (ObjectNode) doc.get("_source"))
+                       .map(OpenSearchCmsEntry.Snapshot::fromJson);
     }
 
     @Override
     public Optional<CmsEntry.Snapshot> updateSnapshotEntry(String snapshotName, CmsEntry.SnapshotStatus status) {
         OpenSearchCmsEntry.Snapshot entry = new OpenSearchCmsEntry.Snapshot(snapshotName, status);
         Optional<ObjectNode> updatedEntry = client.updateDocument(CMS_INDEX_NAME, CMS_SNAPSHOT_DOC_ID, entry.toJson());
-        if (updatedEntry.isEmpty()) {
-            return Optional.empty();
-        }
-        return Optional.of(OpenSearchCmsEntry.Snapshot.fromJson(updatedEntry.get()));
+        return updatedEntry.map(OpenSearchCmsEntry.Snapshot::fromJson);
     }
 
     @Override
     public Optional<CmsEntry.Metadata> createMetadataEntry() {
         OpenSearchCmsEntry.Metadata entry = OpenSearchCmsEntry.Metadata.getInitial();
         Optional<ObjectNode> createdEntry = client.createDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID, entry.toJson());
-
-        if (createdEntry.isEmpty()) {
-            return Optional.empty();
-        }
-        return Optional.of(OpenSearchCmsEntry.Metadata.fromJson(createdEntry.get()));
+        return createdEntry.map(OpenSearchCmsEntry.Metadata::fromJson);
 
     }
 
     @Override
     public Optional<CmsEntry.Metadata> getMetadataEntry() {
         Optional<ObjectNode> document = client.getDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID);
-
-        if (document.isEmpty()) {
-            return Optional.empty();
-        }
-
-        ObjectNode sourceNode = (ObjectNode) document.get().get("_source");
-        return Optional.of(OpenSearchCmsEntry.Metadata.fromJson(sourceNode));
+        return document.map(doc -> (ObjectNode) doc.get("_source"))
+                       .map(OpenSearchCmsEntry.Metadata::fromJson);
     }
 
     @Override
     public Optional<CmsEntry.Metadata> updateMetadataEntry(CmsEntry.MetadataStatus status, String leaseExpiry, Integer numAttempts) {
         OpenSearchCmsEntry.Metadata metadata = new OpenSearchCmsEntry.Metadata(status, leaseExpiry, numAttempts);
         Optional<ObjectNode> updatedEntry = client.updateDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID, metadata.toJson());
-
-        if (updatedEntry.isEmpty()) {
-            return Optional.empty();
-        }
-        return Optional.of(OpenSearchCmsEntry.Metadata.fromJson(updatedEntry.get()));
-    }
-    
+        return updatedEntry.map(OpenSearchCmsEntry.Metadata::fromJson);
+    }    
 }
