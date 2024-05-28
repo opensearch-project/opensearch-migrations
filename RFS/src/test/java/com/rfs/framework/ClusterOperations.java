@@ -30,7 +30,7 @@ public class ClusterOperations {
         final var repositoryJson = "{\n" +
         "  \"type\": \"fs\",\n" +
         "  \"settings\": {\n" +
-        "    \"location\": \"/snapshots\",\n" +
+        "    \"location\": \"/usr/share/elasticsearch/snapshots\",\n" +
         "    \"compress\": false\n" +
         "  }\n" +
         "}";

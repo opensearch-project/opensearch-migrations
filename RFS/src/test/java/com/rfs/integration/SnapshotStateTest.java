@@ -1,10 +1,10 @@
 package com.rfs.integration;
 
-import org.apache.lucene.util.IOUtils;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 
 import com.rfs.common.OpenSearchClient;
@@ -27,7 +27,6 @@ import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 
 import java.io.File;
-import java.nio.file.Files;
 import java.nio.file.Path;
 
 /**
@@ -35,19 +34,16 @@ import java.nio.file.Path;
  */
 public class SnapshotStateTest {
 
-    private final File SNAPSHOT_DIR = new File("./snapshotRepo");
+    @TempDir
+    private File localDirectory;
     private ElasticsearchContainer cluster;
     private ClusterOperations operations;
     private SimpleRestoreFromSnapshot_ES_7_10 srfs;
 
     @BeforeEach
     public void setUp() throws Exception {
-        // Make sure the snapshot directory is clean before and after tests run
-        IOUtils.rm(Path.of(SNAPSHOT_DIR.getAbsolutePath()));
-        SNAPSHOT_DIR.mkdir();
-
         // Start the cluster for testing
-        cluster = new ElasticsearchContainer(ElasticsearchContainer.Version.V7_10_2, SNAPSHOT_DIR.getName());
+        cluster = new ElasticsearchContainer(ElasticsearchContainer.Version.V7_10_2);
         cluster.start();
 
         // Configure operations and rfs implementation
@@ -59,7 +55,6 @@ public class SnapshotStateTest {
     @AfterEach
     public void tearDown() throws Exception {
         cluster.close();
-        IOUtils.rm(Path.of(SNAPSHOT_DIR.getAbsolutePath()));
     }
 
     @Test
@@ -67,14 +62,17 @@ public class SnapshotStateTest {
         // Setup
         final var indexName = "my-index";
         final var document1Id = "doc1";
-        final var document1Body = "{\"foo\":\"bar\"}";
+        final var document1Body = "{\"fo$o\":\"bar\"}";
         operations.createDocument(indexName, document1Id, document1Body);
 
         final var snapshotName = "snapshot-1";
         operations.takeSnapshot(snapshotName, indexName);
 
-        final var unpackedShardDataDir = Path.of(Files.createTempDirectory("unpacked-shard-data").toFile().getAbsolutePath());
-        final var indices = srfs.extraSnapshotIndexData(SNAPSHOT_DIR.getAbsolutePath(), snapshotName, unpackedShardDataDir);
+        final File snapshotCopy = new File(localDirectory + "/snapshotCopy");
+        cluster.copySnapshotData(snapshotCopy.getAbsolutePath());
+
+        final var unpackedShardDataDir = Path.of(localDirectory.getAbsolutePath() + "/unpacked-shard-data");
+        final var indices = srfs.extraSnapshotIndexData(snapshotCopy.getAbsolutePath(), snapshotName, unpackedShardDataDir);
 
         final var client = mock(OpenSearchClient.class);
         when(client.sendBulkRequest(any(), any())).thenReturn(Mono.empty());
@@ -103,8 +101,11 @@ public class SnapshotStateTest {
         final var snapshotName = "snapshot-delete-item";
         operations.takeSnapshot(snapshotName, indexName);
 
-        final var unpackedShardDataDir = Path.of(Files.createTempDirectory("unpacked-shard-data").toFile().getAbsolutePath());
-        final var indices = srfs.extraSnapshotIndexData(SNAPSHOT_DIR.getAbsolutePath(), snapshotName, unpackedShardDataDir);
+        final File snapshotCopy = new File(localDirectory + "/snapshotCopy");
+        cluster.copySnapshotData(snapshotCopy.getAbsolutePath());
+
+        final var unpackedShardDataDir = Path.of(localDirectory.getAbsolutePath() + "/unpacked-shard-data");
+        final var indices = srfs.extraSnapshotIndexData(snapshotCopy.getAbsolutePath(), snapshotName, unpackedShardDataDir);
 
         final var client = mock(OpenSearchClient.class);
         when(client.sendBulkRequest(any(), any())).thenReturn(Mono.empty());
@@ -135,8 +136,11 @@ public class SnapshotStateTest {
         final var snapshotName = "snapshot-delete-item";
         operations.takeSnapshot(snapshotName, indexName);
 
-        final var unpackedShardDataDir = Path.of(Files.createTempDirectory("unpacked-shard-data").toFile().getAbsolutePath());
-        final var indices = srfs.extraSnapshotIndexData(SNAPSHOT_DIR.getAbsolutePath(), snapshotName, unpackedShardDataDir);
+        final File snapshotCopy = new File(localDirectory + "/snapshotCopy");
+        cluster.copySnapshotData(snapshotCopy.getAbsolutePath());
+
+        final var unpackedShardDataDir = Path.of(localDirectory.getAbsolutePath() + "/unpacked-shard-data");
+        final var indices = srfs.extraSnapshotIndexData(snapshotCopy.getAbsolutePath(), snapshotName, unpackedShardDataDir);
 
         final var client = mock(OpenSearchClient.class);
         when(client.sendBulkRequest(any(), any())).thenReturn(Mono.empty());
