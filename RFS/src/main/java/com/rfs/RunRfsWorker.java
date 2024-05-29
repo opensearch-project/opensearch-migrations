@@ -2,10 +2,14 @@ package com.rfs;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Arrays;
 import java.util.List;
+import java.util.Optional;
 
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.Logger;
@@ -13,6 +17,7 @@ import org.apache.logging.log4j.LogManager;
 
 
 import com.rfs.cms.CmsClient;
+import com.rfs.cms.CmsEntry;
 import com.rfs.cms.OpenSearchCmsClient;
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
@@ -32,7 +37,9 @@ import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
 import com.rfs.worker.GlobalState;
 import com.rfs.worker.MetadataRunner;
+import com.rfs.worker.Runner;
 import com.rfs.worker.SnapshotRunner;
+import com.rfs.worker.WorkerStep;
 
 public class RunRfsWorker {
     private static final Logger logger = LogManager.getLogger(RunRfsWorker.class);
@@ -133,9 +140,30 @@ public class RunRfsWorker {
             MetadataRunner metadataWorker = new MetadataRunner(globalState, cmsClient, snapshotName, metadataFactory, metadataCreator, transformer);
             metadataWorker.run();
             
+        } catch (Runner.PhaseFailed e) {
+            logPhaseFailureRecord(e.phase, e.nextStep, e.cmsEntry, e.e);
+            throw e;
         } catch (Exception e) {
-            logger.error("Error running RfsWorker", e);
+            logger.error("Unexpected error running RfsWorker", e);
             throw e;
         }
+    }
+
+    public static void logPhaseFailureRecord(GlobalState.Phase phase, WorkerStep nextStep, Optional<CmsEntry.Base> cmsEntry, Exception e) {
+        ObjectNode errorBlob = new ObjectMapper().createObjectNode();
+        errorBlob.put("exceptionMessage", e.getMessage());
+        errorBlob.put("exceptionClass", e.getClass().getSimpleName());
+        errorBlob.put("exceptionTrace", Arrays.toString(e.getStackTrace()));
+
+        errorBlob.put("phase", phase.toString());
+
+        String currentStep = (nextStep != null) ? nextStep.getClass().getSimpleName() : "null";
+        errorBlob.put("currentStep", currentStep);
+
+        String currentEntry = (cmsEntry.isPresent()) ? cmsEntry.toString() : "null";
+        errorBlob.put("cmsEntry", currentEntry);
+
+        
+        logger.error(errorBlob.toString());
     }
 }
