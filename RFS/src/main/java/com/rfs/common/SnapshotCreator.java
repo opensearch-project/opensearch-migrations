@@ -7,7 +7,7 @@ import com.rfs.tracing.IRfsContexts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.net.HttpURLConnection;
+import java.util.Optional;
 
 public abstract class SnapshotCreator {
     private static final Logger logger = LogManager.getLogger(SnapshotCreator.class);
@@ -38,11 +38,11 @@ public abstract class SnapshotCreator {
         ObjectNode settings = getRequestBodyForRegisterRepo();
 
         // Register the repo; it's fine if it already exists
-        RestClient.Response response = client.registerSnapshotRepo(getRepoName(), settings, context);
-        if (response.code == HttpURLConnection.HTTP_OK || response.code == HttpURLConnection.HTTP_CREATED) {
+        try {
+            client.registerSnapshotRepo(getRepoName(), settings, context);
             logger.info("Snapshot repo registration successful");
-        } else {
-            logger.error("Snapshot repo registration failed");
+        } catch (Exception e) {
+            logger.error("Snapshot repo registration failed", e);
             throw new RepoRegistrationFailed(getRepoName());
         }
     }
@@ -55,29 +55,30 @@ public abstract class SnapshotCreator {
         body.put("include_global_state", true);
 
         // Create the snapshot; idempotent operation
-        RestClient.Response response = client.createSnapshot(getRepoName(), snapshotName, body, context);
-        if (response.code == HttpURLConnection.HTTP_OK || response.code == HttpURLConnection.HTTP_CREATED) {
+        try {
+            client.createSnapshot(getRepoName(), snapshotName, body, context);
             logger.info("Snapshot " + snapshotName + " creation initiated");
-        } else {
-            logger.error("Snapshot " + snapshotName + " creation failed");
+        } catch (Exception e) {
+            logger.error("Snapshot " + snapshotName + " creation failed", e);
             throw new SnapshotCreationFailed(snapshotName);
         }
     }
 
     public boolean isSnapshotFinished() {
-        RestClient.Response response = client.getSnapshotStatus(getRepoName(), snapshotName, context);
-        if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
+        Optional<ObjectNode> response;
+        try {
+            response = client.getSnapshotStatus(getRepoName(), snapshotName, context);
+        } catch (Exception e) {
+            logger.error("Failed to get snapshot status", e);
+            throw new SnapshotStatusCheckFailed(snapshotName);
+        }
+
+        if (response.isEmpty()) {
             logger.error("Snapshot " + snapshotName + " does not exist");
             throw new SnapshotDoesNotExist(snapshotName);
         }
 
-        JsonNode responseJson;
-        try {
-            responseJson = mapper.readTree(response.body);
-        } catch (Exception e) {
-            logger.error("Failed to parse snapshot status response", e);
-            throw new SnapshotStatusUnparsable(snapshotName);
-        }
+        JsonNode responseJson = response.get();
         JsonNode firstSnapshot = responseJson.path("snapshots").get(0);
         JsonNode stateNode = firstSnapshot.path("state");
         String state = stateNode.asText();        
@@ -110,9 +111,9 @@ public abstract class SnapshotCreator {
         }
     }
 
-    public static class SnapshotStatusUnparsable extends RfsException {
-        public SnapshotStatusUnparsable(String snapshotName) {
-            super("Status of Snapshot " + snapshotName + " is not parsable");
+    public static class SnapshotStatusCheckFailed extends RfsException {
+        public SnapshotStatusCheckFailed(String snapshotName) {
+            super("We were unable to retrieve the status of Snapshot " + snapshotName);
         }
     }
 }

@@ -18,9 +18,8 @@ public class DocumentReindexer {
 
     public static Mono<Void> reindex(String indexName,
                                      Flux<Document> documentStream,
-                                     ConnectionDetails targetConnection,
+                                     OpenSearchClient client,
                                      IRfsContexts.IDocumentReindexContext context) {
-        OpenSearchClient client = new OpenSearchClient(targetConnection);
 
         return documentStream
             .map(DocumentReindexer::convertDocumentToBulkSection)  // Convert each Document to part of a bulk operation

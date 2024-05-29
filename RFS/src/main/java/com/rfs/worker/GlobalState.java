@@ -8,7 +8,7 @@ import java.util.concurrent.atomic.AtomicReference;
 public class GlobalState {
     private static final AtomicReference<GlobalState> instance = new AtomicReference<>();
 
-    enum Phase {
+    public enum Phase {
         UNSET,
         SNAPSHOT_IN_PROGRESS,
         SNAPSHOT_COMPLETED,

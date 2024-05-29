@@ -1,5 +1,7 @@
 package com.rfs.worker;
 
+import java.util.Optional;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -11,16 +13,26 @@ import com.rfs.common.SnapshotCreator.SnapshotCreationFailed;
 
 
 public class SnapshotStep {
-    public static abstract class Base implements WorkerStep {
-        protected final Logger logger = LogManager.getLogger(getClass());
+    public static class SharedMembers {
         protected final CmsClient cmsClient;
         protected final GlobalState globalState;
         protected final SnapshotCreator snapshotCreator;
-    
-        public Base(GlobalState globalState, CmsClient cmsClient, SnapshotCreator snapshotCreator) {
+        protected Optional<CmsEntry.Snapshot> cmsEntry;
+
+        public SharedMembers(GlobalState globalState, CmsClient cmsClient, SnapshotCreator snapshotCreator) {
             this.globalState = globalState;
             this.cmsClient = cmsClient;
             this.snapshotCreator = snapshotCreator;
+            this.cmsEntry = Optional.empty();
+        }
+    }
+
+    public static abstract class Base implements WorkerStep {
+        protected final Logger logger = LogManager.getLogger(getClass());
+        protected final SharedMembers members;
+    
+        public Base(SharedMembers members) {
+            this.members = members;
         }
     
         @Override
@@ -34,32 +46,32 @@ public class SnapshotStep {
      * Updates the Worker's phase to indicate we're doing work on a Snapshot
      */
     public static class EnterPhase extends Base {
-        private final CmsEntry.Snapshot snapshotEntry;
 
-        public EnterPhase(GlobalState globalState, CmsClient cmsClient, SnapshotCreator snapshotCreator, CmsEntry.Snapshot snapshotEntry) {
-            super(globalState, cmsClient, snapshotCreator);
-            this.snapshotEntry = snapshotEntry;
+        public EnterPhase(SharedMembers members, Optional<CmsEntry.Snapshot> currentEntry) {
+            super(members);
+            this.members.cmsEntry = currentEntry;
         }
 
         @Override
         public void run() {
             logger.info("Snapshot not yet completed, entering Snapshot Phase...");
-            globalState.updatePhase(GlobalState.Phase.SNAPSHOT_IN_PROGRESS);
+            members.globalState.updatePhase(GlobalState.Phase.SNAPSHOT_IN_PROGRESS);
         }
 
         @Override
         public WorkerStep nextStep() {
-            if (snapshotEntry == null) {
-                return new CreateEntry(globalState, cmsClient, snapshotCreator);
-            } else {
-                switch (snapshotEntry.status) {
-                    case NOT_STARTED:
-                        return new InitiateSnapshot(globalState, cmsClient, snapshotCreator);
-                    case IN_PROGRESS:
-                        return new WaitForSnapshot(globalState, cmsClient, snapshotCreator);
-                    default:
-                        throw new IllegalStateException("Unexpected snapshot status: " + snapshotEntry.status);
-                }
+            if (members.cmsEntry.isEmpty()) {
+                return new CreateEntry(members);
+            } 
+            
+            CmsEntry.Snapshot currentEntry = members.cmsEntry.get();
+            switch (currentEntry.status) {
+                case NOT_STARTED:
+                    return new InitiateSnapshot(members);
+                case IN_PROGRESS:
+                    return new WaitForSnapshot(members);
+                default:
+                    throw new IllegalStateException("Unexpected snapshot status: " + currentEntry.status);
             }
         }
     }
@@ -68,20 +80,20 @@ public class SnapshotStep {
      * Idempotently create a CMS Entry for the Snapshot
      */
     public static class CreateEntry extends Base {
-        public CreateEntry(GlobalState globalState, CmsClient cmsClient, SnapshotCreator snapshotCreator) {
-            super(globalState, cmsClient, snapshotCreator);
+        public CreateEntry(SharedMembers members) {
+            super(members);
         }
 
         @Override
         public void run() {
             logger.info("Snapshot CMS Entry not found, attempting to create it...");
-            cmsClient.createSnapshotEntry(snapshotCreator.getSnapshotName());
+            members.cmsClient.createSnapshotEntry(members.snapshotCreator.getSnapshotName());
             logger.info("Snapshot CMS Entry created");
         }
 
         @Override
         public WorkerStep nextStep() {
-            return new InitiateSnapshot(globalState, cmsClient, snapshotCreator);
+            return new InitiateSnapshot(members);
         }
     }
 
@@ -89,23 +101,23 @@ public class SnapshotStep {
      * Idempotently initiate the Snapshot creation process
      */
     public static class InitiateSnapshot extends Base {
-        public InitiateSnapshot(GlobalState globalState, CmsClient cmsClient, SnapshotCreator snapshotCreator) {
-            super(globalState, cmsClient, snapshotCreator);
+        public InitiateSnapshot(SharedMembers members) {
+            super(members);
         }
 
         @Override
         public void run() {
             logger.info("Attempting to initiate the snapshot...");
-            snapshotCreator.registerRepo();
-            snapshotCreator.createSnapshot();
+            members.snapshotCreator.registerRepo();
+            members.snapshotCreator.createSnapshot();
 
             logger.info("Snapshot in progress...");
-            cmsClient.updateSnapshotEntry(snapshotCreator.getSnapshotName(), SnapshotStatus.IN_PROGRESS);
+            members.cmsClient.updateSnapshotEntry(members.snapshotCreator.getSnapshotName(), SnapshotStatus.IN_PROGRESS);
         }
 
         @Override
         public WorkerStep nextStep() {
-            return new WaitForSnapshot(globalState, cmsClient, snapshotCreator);
+            return new WaitForSnapshot(members);
         }
     }
 
@@ -115,8 +127,8 @@ public class SnapshotStep {
     public static class WaitForSnapshot extends Base {
         private SnapshotCreationFailed e = null;
 
-        public WaitForSnapshot(GlobalState globalState, CmsClient cmsClient, SnapshotCreator snapshotCreator) {
-            super(globalState, cmsClient, snapshotCreator);
+        public WaitForSnapshot(SharedMembers members) {
+            super(members);
         }
 
         protected void waitABit() throws InterruptedException {
@@ -127,12 +139,12 @@ public class SnapshotStep {
         @Override
         public void run() {
             try{
-                while (!snapshotCreator.isSnapshotFinished()) {
+                while (!members.snapshotCreator.isSnapshotFinished()) {
                     waitABit();
                 }
             } catch (InterruptedException e) {
                 logger.error("Interrupted while waiting for Snapshot to complete", e);
-                throw new SnapshotCreationFailed(snapshotCreator.getSnapshotName());
+                throw new SnapshotCreationFailed(members.snapshotCreator.getSnapshotName());
             } catch (SnapshotCreationFailed e) {
                 this.e = e;
             } 
@@ -141,9 +153,9 @@ public class SnapshotStep {
         @Override
         public WorkerStep nextStep() {
             if (e == null) {
-                return new ExitPhaseSuccess(globalState, cmsClient, snapshotCreator);                
+                return new ExitPhaseSuccess(members);                
             } else {
-                return new ExitPhaseSnapshotFailed(globalState, cmsClient, snapshotCreator, e);
+                return new ExitPhaseSnapshotFailed(members, e);
             }
         }
     }
@@ -152,14 +164,14 @@ public class SnapshotStep {
      * Update the CMS Entry and the Worker's phase to indicate the Snapshot completed successfully
      */
     public static class ExitPhaseSuccess extends Base {
-        public ExitPhaseSuccess(GlobalState globalState, CmsClient cmsClient, SnapshotCreator snapshotCreator) {
-            super(globalState, cmsClient, snapshotCreator);
+        public ExitPhaseSuccess(SharedMembers members) {
+            super(members);
         }
 
         @Override
         public void run() {
-            cmsClient.updateSnapshotEntry(snapshotCreator.getSnapshotName(), SnapshotStatus.COMPLETED);
-            globalState.updatePhase(GlobalState.Phase.SNAPSHOT_COMPLETED);
+            members.cmsClient.updateSnapshotEntry(members.snapshotCreator.getSnapshotName(), SnapshotStatus.COMPLETED);
+            members.globalState.updatePhase(GlobalState.Phase.SNAPSHOT_COMPLETED);
             logger.info("Snapshot completed, exiting Snapshot Phase...");
         }
 
@@ -175,16 +187,16 @@ public class SnapshotStep {
     public static class ExitPhaseSnapshotFailed extends Base {
         private final SnapshotCreationFailed e;
 
-        public ExitPhaseSnapshotFailed(GlobalState globalState, CmsClient cmsClient, SnapshotCreator snapshotCreator, SnapshotCreationFailed e) {
-            super(globalState, cmsClient, snapshotCreator);
+        public ExitPhaseSnapshotFailed(SharedMembers members, SnapshotCreationFailed e) {
+            super(members);
             this.e = e;
         }
 
         @Override
         public void run() {
             logger.error("Snapshot creation failed");
-            cmsClient.updateSnapshotEntry(snapshotCreator.getSnapshotName(), SnapshotStatus.FAILED);
-            globalState.updatePhase(GlobalState.Phase.SNAPSHOT_FAILED);
+            members.cmsClient.updateSnapshotEntry(members.snapshotCreator.getSnapshotName(), SnapshotStatus.FAILED);
+            members.globalState.updatePhase(GlobalState.Phase.SNAPSHOT_FAILED);
         }
 
         @Override

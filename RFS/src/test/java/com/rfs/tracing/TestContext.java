@@ -25,4 +25,7 @@ public class TestContext extends RootRfsContext {  @Getter
         this.instrumentationBundle = inMemoryInstrumentationBundle;
     }
 
+    public IRfsContexts.IRequestContext createUnboundRequestContext() {
+        return new RfsContexts.GenericRequestContext(this, null, "testRequest");
+    }
 }

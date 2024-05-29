@@ -1,16 +1,13 @@
 package com.rfs.cms;
 
-import java.net.HttpURLConnection;
+import java.util.Optional;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.RestClient;
 import com.rfs.tracing.IRfsContexts;
 
 public class OpenSearchCmsClient implements CmsClient {
-    private static final ObjectMapper objectMapper = new ObjectMapper();
-
     public static final String CMS_INDEX_NAME = "cms-reindex-from-snapshot";
     public static final String CMS_SNAPSHOT_DOC_ID = "snapshot_status";
     public static final String CMS_METADATA_DOC_ID = "metadata_status";
@@ -24,62 +21,51 @@ public class OpenSearchCmsClient implements CmsClient {
     }
 
     @Override
-    public boolean createSnapshotEntry(String snapshotName) {
-        ObjectNode initial = OpenSearchCmsEntry.Snapshot.getInitial(snapshotName);
-        return client.createDocument(CMS_INDEX_NAME, CMS_SNAPSHOT_DOC_ID, initial,
+    public Optional<CmsEntry.Snapshot> createSnapshotEntry(String snapshotName) {
+        OpenSearchCmsEntry.Snapshot newEntry = OpenSearchCmsEntry.Snapshot.getInitial(snapshotName);
+        Optional<ObjectNode> createdEntry = client.createDocument(CMS_INDEX_NAME, CMS_SNAPSHOT_DOC_ID, newEntry.toJson(),
                 context.createCreateSnapshotEntryDocumentContext());
+        return createdEntry.map(OpenSearchCmsEntry.Snapshot::fromJson);
     }
 
     @Override
-    public CmsEntry.Snapshot getSnapshotEntry(String snapshotName) {
-        RestClient.Response response = client.getDocument(CMS_INDEX_NAME, CMS_SNAPSHOT_DOC_ID,
+    public Optional<CmsEntry.Snapshot> getSnapshotEntry(String snapshotName) {
+        Optional<ObjectNode> document = client.getDocument(CMS_INDEX_NAME, CMS_SNAPSHOT_DOC_ID,
                 context.createGetSnapshotEntryContext());
-
-        if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
-            return null;
-        }
-        return OpenSearchCmsEntry.Snapshot.fromJsonString(response.body);
+        return document.map(doc -> (ObjectNode) doc.get("_source"))
+                       .map(OpenSearchCmsEntry.Snapshot::fromJson);
     }
 
     @Override
-    public boolean updateSnapshotEntry(String snapshotName, CmsEntry.SnapshotStatus status) {
-        OpenSearchCmsEntry.Snapshot snapshot = new OpenSearchCmsEntry.Snapshot(snapshotName, status);
-        return client.updateDocument(CMS_INDEX_NAME, CMS_SNAPSHOT_DOC_ID, snapshot.toJson(),
+    public Optional<CmsEntry.Snapshot> updateSnapshotEntry(String snapshotName, CmsEntry.SnapshotStatus status) {
+        OpenSearchCmsEntry.Snapshot entry = new OpenSearchCmsEntry.Snapshot(snapshotName, status);
+        Optional<ObjectNode> updatedEntry = client.updateDocument(CMS_INDEX_NAME, CMS_SNAPSHOT_DOC_ID, entry.toJson(),
                 context.createUpdateSnapshotEntryContext());
+        return updatedEntry.map(OpenSearchCmsEntry.Snapshot::fromJson);
     }
 
     @Override
-    public boolean createMetadataEntry() {
-        ObjectNode metadataDoc = OpenSearchCmsEntry.Metadata.getInitial();
-        return client.createDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID, metadataDoc,
+    public Optional<CmsEntry.Metadata> createMetadataEntry() {
+        OpenSearchCmsEntry.Metadata entry = OpenSearchCmsEntry.Metadata.getInitial();
+        Optional<ObjectNode> createdEntry = client.createDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID, entry.toJson(),
                 context.createCreateMetadataEntryDocumentContext());
+        return createdEntry.map(OpenSearchCmsEntry.Metadata::fromJson);
+
     }
 
     @Override
-    public CmsEntry.Metadata getMetadataEntry() {
-        RestClient.Response response = client.getDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID,
+    public Optional<CmsEntry.Metadata> getMetadataEntry() {
+        Optional<ObjectNode> document = client.getDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID,
                 context.createGetMetadataEntryDocument());
-
-        if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
-            return null;
-        }
-        return OpenSearchCmsEntry.Metadata.fromJsonString(response.body);
+        return document.map(doc -> (ObjectNode) doc.get("_source"))
+                       .map(OpenSearchCmsEntry.Metadata::fromJson);
     }
 
     @Override
-    public boolean setMetadataMigrationStatus(CmsEntry.MetadataStatus status) {
-        ObjectNode statusUpdate = objectMapper.createObjectNode();
-        statusUpdate.put(OpenSearchCmsEntry.Metadata.FIELD_STATUS, status.toString());
-        // Is this right, It isn't clear if set should be creating or upserting.  The next call looks similar too
-        return client.updateDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID, statusUpdate,
-                context.createInitialMetadataMigrationStatusDocumentContext());
-    }
-
-    @Override
-    public boolean updateMetadataEntry(CmsEntry.MetadataStatus status, String leaseExpiry, Integer numAttempts) {
+    public Optional<CmsEntry.Metadata> updateMetadataEntry(CmsEntry.MetadataStatus status, String leaseExpiry, Integer numAttempts) {
         OpenSearchCmsEntry.Metadata metadata = new OpenSearchCmsEntry.Metadata(status, leaseExpiry, numAttempts);
-        return client.updateDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID, metadata.toJson(),
+        Optional<ObjectNode> updatedEntry = client.updateDocument(CMS_INDEX_NAME, CMS_METADATA_DOC_ID, metadata.toJson(),
                 context.createUpdateMetadataMigrationStatusDocumentContext());
+        return updatedEntry.map(OpenSearchCmsEntry.Metadata::fromJson);
     }
-    
 }
