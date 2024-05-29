@@ -1,4 +1,5 @@
 import pytest  # type: ignore
+from tests.utils import create_valid_cluster
 from console_link.models.cluster import Cluster
 
 # Define a valid cluster configuration
@@ -6,14 +7,14 @@ valid_cluster_config = {
     "endpoint": "https://opensearchtarget:9200",
     "allow_insecure": True,
     "authorization": {
-        "type": "basic",
+        "type": "basic_auth",
         "details": {"username": "admin", "password": "myStrongPassword123!"},
     },
 }
 
 
 def test_valid_cluster_config():
-    cluster = Cluster(valid_cluster_config)
+    cluster = create_valid_cluster()
     assert isinstance(cluster, Cluster)
 
 
@@ -36,7 +37,7 @@ def test_missing_endpoint_refused():
     missing_endpoint = {
         "allow_insecure": True,
         "authorization": {
-            "type": "basic",
+            "type": "basic_auth",
             "details": {"username": "XXXXX", "password": "XXXXXXXXXXXXXXXXXXX!"},
         },
     }
