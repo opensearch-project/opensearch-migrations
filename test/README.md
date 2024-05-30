@@ -6,11 +6,13 @@ Featured in this directory is a `./awsE2ESolutionSetup` script whose goal is to 
    * The CDK context options for this CDK can be used to customize this deployment and can be provided with a custom context file using the `--context-file` option
    * A sample CDK context file can be seen [here](defaultCDKContext.json)
 2. Build the Docker Images
+   * This includes all images related to Traffic Capture in the top-level `TrafficCapture` directory as well as Reindex from Snapshot images in the top-level `RFS` directory
 3. Deploy the Migration Assistant CDK (containing the Migration tooling and potentially an OpenSearch Domain) located in this repo [here](../deployment/cdk/opensearch-service-migration)
    * The CDK context options for this CDK can be used to customize this deployment and can be provided with a custom context file using the `--context-file` option
    * A sample CDK context file can be seen [here](defaultCDKContext.json)
-4. Add the traffic stream source security group created by the Migration Assistant CDK to the source cluster load balancer
-5. Run the `./startCaptureProxy.sh` script for starting the Capture Proxy process on each source cluster node/instance 
+4. Add the traffic stream source security group created by the Migration Assistant CDK to each source cluster node
+   * This is to allow source cluster nodes to send captured traffic from the Capture Proxy to the given traffic stream source, which is normally Kafka or AWS MSK
+5. Run the `./startCaptureProxy.sh` script for starting the Capture Proxy process on each source cluster node
    * This script is automatically added to each EC2 instance on creation
 
 #### Configuring a Historical Migration focused E2E environment
@@ -54,8 +56,23 @@ Note: That this deployment will still deploy an unused Kafka broker ECS service,
 
 In the same vein, the `--skip-capture-proxy` option can be provided to skip any capture proxy setup on source cluster nodes
 ```
-./awsE2ESolutionSetup.sh --context-file <CONTEXT_FILE> --migration-context-id rfs-backfill -skip-capture-proxy
+./awsE2ESolutionSetup.sh --context-file <CONTEXT_FILE> --source-context-id source-single-node-ec2 --migration-context-id rfs-backfill -skip-capture-proxy
 ```
+
+#### Placeholder substitution with awsE2ESolutionSetup.sh
+
+The following CDK context values will be replaced by the `awsE2ESolutionSetup.sh` script if specified
+
+Migration Context substitutable values
+* `<STAGE>` replaces with default stage or stage provided with `--stage` argument
+* `<VPC_ID>` replaces with VPC ID created or used by source cluster
+* `<SOURCE_CLUSTER_ENDPOINT>` replaces with source cluster load balancer endpoint from source deployment
+
+Source Context substitutable values
+* `<STAGE>` replaces with default stage or stage provided with `--stage` argument
+
+
+
 
 ### Docker E2E Testing
 Developers can run a test script which will verify the end-to-end Docker Solution.
