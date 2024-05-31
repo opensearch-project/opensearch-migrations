@@ -32,7 +32,6 @@ public class DocumentReindexer {
             .build();
     }
 
-
     private static final int MAX_BATCH_SIZE = 1000; // Arbitrarily chosen
 
     @WithSpan

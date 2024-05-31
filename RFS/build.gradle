@@ -87,6 +87,9 @@ dependencies {
     implementation('io.opentelemetry:opentelemetry-sdk-testing')
     implementation('io.opentelemetry:opentelemetry-sdk-extension-autoconfigure')
     implementation('io.opentelemetry.instrumentation:opentelemetry-instrumentation-annotations:2.4.0')
+
+    testImplementation testFixtures(project(path: ':coreUtilities'))
+    testImplementation testFixtures(project(path: ':testHelperFixtures'))
 }
 
 application {

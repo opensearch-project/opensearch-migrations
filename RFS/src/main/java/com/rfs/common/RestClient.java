@@ -1,25 +1,41 @@
 package com.rfs.common;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
 import com.rfs.netty.ReadMeteringHandler;
 import com.rfs.netty.WriteMeteringHandler;
-import com.rfs.tracing.IRfsContexts;
-import io.netty.buffer.Unpooled;
-import io.netty.handler.logging.LogLevel;
-import io.netty.handler.logging.LoggingHandler;
+import io.opentelemetry.api.GlobalOpenTelemetry;
+import io.opentelemetry.api.metrics.LongCounter;
+import io.opentelemetry.api.trace.Span;
+import io.opentelemetry.instrumentation.annotations.SpanAttribute;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.ByteBufMono;
 
 public class RestClient {
+
+    private static final LongCounter readBytesCounter;
+    private static final LongCounter writeBytesCounter;
+    static {
+        final var meter = GlobalOpenTelemetry.getMeter("RestClient");
+        readBytesCounter = meter.counterBuilder("readBytes")
+            .setDescription("Counts the number of bytes read")
+            .setUnit("1")
+            .build();
+        writeBytesCounter = meter.counterBuilder("writeBytes")
+            .setDescription("Counts the number of bytes written")
+            .setUnit("1")
+            .build();
+    }
+
     public static class Response {
         public final int code;
         public final String body;
         public final String message;
 
-        public Response(int responseCode, String responseBody, String responseMessage) {
+        @WithSpan
+        public Response(@SpanAttribute("responseCode") int responseCode, String responseBody, String responseMessage) {
             this.code = responseCode;
             this.body = responseBody;
             this.message = responseMessage;
@@ -45,11 +61,18 @@ public class RestClient {
             });
     }
 
+    @WithSpan
     public Mono<Response> getAsync(String path) {
-        return client.get()
+        return client
+            .doOnRequest((r, conn) -> {
+                conn.channel().pipeline().addFirst(new WriteMeteringHandler(writeBytesCounter::add));
+                conn.channel().pipeline().addFirst(new ReadMeteringHandler(readBytesCounter::add));
+            })
+            .get()
             .uri("/" + path)
             .responseSingle((response, bytes) -> bytes.asString()
-                .map(body -> new Response(response.status().code(), body, response.status().reasonPhrase())));
+            .map(body -> new Response(response.status().code(), body, response.status().reasonPhrase())))
+            .doOnError(Span.current()::recordException);
     }
 
     public Response get(String path) {
@@ -57,19 +80,31 @@ public class RestClient {
     }
 
     public Mono<Response> postAsync(String path, String body) {
-        return client.post()
-            .uri("/" + path)
-            .send(ByteBufMono.fromString(Mono.just(body)))
-            .responseSingle((response, bytes) -> bytes.asString()
-                .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())));
+        return client
+                .doOnRequest((r, conn) -> {
+                    conn.channel().pipeline().addFirst(new WriteMeteringHandler(writeBytesCounter::add));
+                    conn.channel().pipeline().addFirst(new ReadMeteringHandler(readBytesCounter::add));
+                })
+                .post()
+                .uri("/" + path)
+                .send(ByteBufMono.fromString(Mono.just(body)))
+                .responseSingle((response, bytes) -> bytes.asString()
+                .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())))
+                .doOnError(Span.current()::recordException);
     }
 
     public Mono<Response> putAsync(String path, String body) {
-        return client.put()
-            .uri("/" + path)
-            .send(ByteBufMono.fromString(Mono.just(body)))
-            .responseSingle((response, bytes) -> bytes.asString()
-                .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())));
+        return client
+                .doOnRequest((r, conn) -> {
+                    conn.channel().pipeline().addFirst(new WriteMeteringHandler(writeBytesCounter::add));
+                    conn.channel().pipeline().addFirst(new ReadMeteringHandler(readBytesCounter::add));
+                })
+                .put()
+                .uri("/" + path)
+                .send(ByteBufMono.fromString(Mono.just(body)))
+                .responseSingle((response, bytes) -> bytes.asString()
+                .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())))
+                .doOnError(Span.current()::recordException);
     }
 
     public Response put(String path, String body) {
