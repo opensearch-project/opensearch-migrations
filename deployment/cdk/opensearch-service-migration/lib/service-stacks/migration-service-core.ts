@@ -15,7 +15,7 @@ import {
     AwsLogDriverMode,
     ContainerDependencyCondition
 } from "aws-cdk-lib/aws-ecs";
-import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
+import {DockerImageAsset, Platform} from "aws-cdk-lib/aws-ecr-assets";
 import {Duration, RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {PolicyStatement} from "aws-cdk-lib/aws-iam";
@@ -110,6 +110,7 @@ export class MigrationServiceCore extends Stack {
         if (props.dockerDirectoryPath) {
             serviceImage = ContainerImage.fromDockerImageAsset(new DockerImageAsset(this, "ServiceImage", {
                 directory: props.dockerDirectoryPath,
+                platform: props.cpuArchitecture == CpuArchitecture.X86_64 ? Platform.LINUX_AMD64 : Platform.LINUX_ARM64,
                 // File path relative to above directory path
                 file: props.dockerFilePath
             }))
