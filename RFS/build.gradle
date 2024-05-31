@@ -5,6 +5,7 @@ plugins {
     id "com.avast.gradle.docker-compose" version "0.17.4"
     id 'com.bmuschko.docker-remote-api'
     id 'io.freefair.lombok' version '8.6'
+    id 'com.ryandens.javaagent-application' version "0.5.1"
 }
 
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
@@ -64,6 +65,7 @@ dependencies {
     testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter'
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
 
+    javaagent("io.opentelemetry.javaagent:opentelemetry-javaagent:1.11.1")
 
     // Integration tests
     testImplementation group: 'org.testcontainers', name: 'testcontainers'
@@ -74,6 +76,17 @@ dependencies {
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
+
+    implementation platform("io.opentelemetry:opentelemetry-bom:1.34.1")
+
+    implementation('io.opentelemetry:opentelemetry-api')
+    implementation('io.opentelemetry:opentelemetry-sdk')
+    implementation('io.opentelemetry:opentelemetry-sdk-metrics')
+    
+    implementation("io.opentelemetry:opentelemetry-exporter-logging")
+    implementation('io.opentelemetry:opentelemetry-sdk-testing')
+    implementation('io.opentelemetry:opentelemetry-sdk-extension-autoconfigure')
+    implementation('io.opentelemetry.instrumentation:opentelemetry-instrumentation-annotations:2.4.0')
 }
 
 application {

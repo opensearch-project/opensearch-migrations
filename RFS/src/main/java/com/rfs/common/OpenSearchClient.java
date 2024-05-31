@@ -12,6 +12,8 @@ import org.apache.logging.log4j.Logger;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import io.opentelemetry.instrumentation.annotations.SpanAttribute;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
@@ -289,7 +291,8 @@ public class OpenSearchClient {
         }
     }
 
-    public Mono<BulkResponse> sendBulkRequest(String indexName, String body) {
+    @WithSpan
+    public Mono<BulkResponse> sendBulkRequest(@SpanAttribute("indexName") String indexName, String body) {
         String targetPath = indexName + "/_bulk";
 
         return client.postAsync(targetPath, body)

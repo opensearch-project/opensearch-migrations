@@ -11,6 +11,7 @@ import com.rfs.common.OpenSearchClient;
 import com.rfs.framework.ClusterOperations;
 import com.rfs.framework.ElasticsearchContainer;
 import com.rfs.framework.SimpleRestoreFromSnapshot_ES_7_10;
+
 import reactor.core.publisher.Mono;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -23,8 +24,10 @@ import static org.mockito.Mockito.when;
 import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.CoreMatchers.anyOf;
 import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import java.io.File;
 import java.nio.file.Path;
@@ -80,6 +83,14 @@ public class SnapshotStateTest {
         // Action
         srfs.updateTargetCluster(indices, unpackedShardDataDir, client);
 
+        final var metrics = srfs.getMetrics("documentsProcessed");
+        final var processedDocumentsTotal = metrics.stream()
+                .flatMap(metric -> metric.getLongSumData().getPoints().stream())
+                .mapToLong(p -> p.getValue())
+                .sum();
+        assertThat(processedDocumentsTotal, equalTo(1L));
+
+        
         // Validation
         final var bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(client, times(1)).sendBulkRequest(eq(indexName), bodyCaptor.capture());

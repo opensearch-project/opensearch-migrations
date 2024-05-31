@@ -40,6 +40,7 @@ import com.rfs.worker.MetadataRunner;
 import com.rfs.worker.Runner;
 import com.rfs.worker.SnapshotRunner;
 import com.rfs.worker.WorkerStep;
+import io.opentelemetry.instrumentation.annotations.WithSpan;
 
 public class RunRfsWorker {
     private static final Logger logger = LogManager.getLogger(RunRfsWorker.class);
@@ -93,6 +94,7 @@ public class RunRfsWorker {
         public Level logLevel = Level.INFO;
     }
 
+    @WithSpan
     public static void main(String[] args) throws Exception {
         // Grab out args
         Args arguments = new Args();
