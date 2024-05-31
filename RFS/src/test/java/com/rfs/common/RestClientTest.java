@@ -2,33 +2,21 @@ package com.rfs.common;
 
 import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.metrics.SdkMeterProvider;
-import io.opentelemetry.sdk.metrics.data.MetricData;
-import io.opentelemetry.sdk.trace.data.SpanData;
-import lombok.extern.slf4j.Slf4j;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-import java.util.Comparator;
-import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
 
-import io.opentelemetry.sdk.OpenTelemetrySdk;
-import io.opentelemetry.sdk.metrics.SdkMeterProvider;
-import io.opentelemetry.sdk.metrics.data.MetricData;
+
 import io.opentelemetry.sdk.testing.exporter.InMemoryMetricReader;
 import org.opensearch.migrations.testutils.HttpRequestFirstLine;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 
-import static org.junit.jupiter.api.Assertions.*;
-
-@Slf4j
 class RestClientTest {
 
     private InMemoryMetricReader metricReader;
@@ -53,28 +41,32 @@ class RestClientTest {
             restClient.getAsync("/").block();
         }
 
-        Thread.sleep(200);
+        // Thread.sleep(200);
         var allMetricData = metricReader.collectAllMetrics();
 
+        allMetricData.forEach(m -> {
+            System.out.println(m);
+        });
+
         for (var kvp : Map.of(
-                "createGetSnapshotContext", new int[]{133, 66},
-                "createSnapshotContext", new int[]{139, 66},
+                "POST", new int[]{133, 66},
+                "GET", new int[]{139, 66},
                 "", new int[]{272, 132}).entrySet()) {
-            long bytesSent = allMetricData.stream().filter(md -> md.getName().startsWith("bytesSent"))
+            long bytesSent = allMetricData.stream().filter(md -> md.getName().startsWith("writeBytes"))
                     .reduce((a, b) -> b).get().getLongSumData().getPoints()
                     .stream()
-                    .filter(pd -> pd.getAttributes().asMap().values().stream().map(o -> (String) o).collect(Collectors.joining())
-                            .equals(kvp.getKey()))
-                    .reduce((a, b) -> b).get().getValue();
+                    .filter(pd -> pd.getAttributes().asMap().values().stream().noneMatch(attrVal -> attrVal.equals(kvp.getKey())))
+                    .mapToLong(pd -> pd.getValue())
+                    .sum();
             Assertions.assertEquals(kvp.getValue()[0], bytesSent);
 
 
-            long bytesRead = allMetricData.stream().filter(md -> md.getName().startsWith("bytesRead"))
+            long bytesRead = allMetricData.stream().filter(md -> md.getName().startsWith("readBytes"))
                     .reduce((a, b) -> b).get().getLongSumData().getPoints()
                     .stream()
-                    .filter(pd -> pd.getAttributes().asMap().values().stream().map(o -> (String) o).collect(Collectors.joining())
-                            .equals(kvp.getKey()))
-                    .reduce((a, b) -> b).get().getValue();
+                    .filter(pd -> pd.getAttributes().asMap().values().stream().noneMatch(attrVal -> attrVal.equals(kvp.getKey())))
+                    .mapToLong(pd -> pd.getValue())
+                    .sum();
             Assertions.assertEquals(kvp.getValue()[1], bytesRead);
         }
         // var finishedSpans = rootContext.instrumentationBundle.getFinishedSpans().stream()
