@@ -1,0 +1,18 @@
+{
+  "migration-default": {
+    "stage": "<STAGE>",
+    "vpcId": "<VPC_ID>",
+    "engineVersion": "OS_2.11",
+    "domainName": "os-cluster-<STAGE>",
+    "dataNodeCount": 2,
+    "openAccessPolicyEnabled": true,
+    "domainRemovalPolicy": "DESTROY",
+    "artifactBucketRemovalPolicy": "DESTROY",
+    "trafficReplayerExtraArgs": "--speedup-factor 10.0",
+    "fetchMigrationEnabled": true,
+    "reindexFromSnapshotServiceEnabled": true,
+    "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
+    "dpPipelineTemplatePath": "../../../test/dp_pipeline_aws_integ.yaml",
+    "migrationConsoleEnableOSI": true
+  }
+}
