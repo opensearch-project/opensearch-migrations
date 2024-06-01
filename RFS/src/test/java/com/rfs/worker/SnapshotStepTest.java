@@ -14,6 +14,7 @@ import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
 import com.rfs.cms.CmsClient;
+import com.rfs.cms.CmsEntry;
 import com.rfs.cms.CmsEntry.Snapshot;
 import com.rfs.cms.CmsEntry.SnapshotStatus;
 import com.rfs.common.SnapshotCreator;
@@ -80,6 +81,12 @@ public class SnapshotStepTest {
     @Test
     void InitiateSnapshot_AsExpected() {
         // Set up the test
+        var existingEntry = new CmsEntry.Snapshot(
+            "test",
+            SnapshotStatus.NOT_STARTED
+        );
+        testMembers.cmsEntry = Optional.of(existingEntry);
+
         when(testMembers.snapshotCreator.getSnapshotName()).thenReturn("test");
 
         // Run the test
@@ -90,7 +97,15 @@ public class SnapshotStepTest {
         // Check the results
         Mockito.verify(testMembers.snapshotCreator, times(1)).registerRepo();
         Mockito.verify(testMembers.snapshotCreator, times(1)).createSnapshot();
-        Mockito.verify(testMembers.cmsClient, times(1)).updateSnapshotEntry("test", SnapshotStatus.IN_PROGRESS);
+
+        var expectedEntry = new CmsEntry.Snapshot(
+            "test",
+            SnapshotStatus.IN_PROGRESS
+        );
+
+        Mockito.verify(testMembers.cmsClient, times(1)).updateSnapshotEntry(
+            expectedEntry, existingEntry
+        );
         assertEquals(SnapshotStep.WaitForSnapshot.class, nextStep.getClass());
     }
 
@@ -141,6 +156,12 @@ public class SnapshotStepTest {
     @Test
     void ExitPhaseSuccess_AsExpected() {
         // Set up the test
+        var existingEntry = new CmsEntry.Snapshot(
+            "test",
+            SnapshotStatus.IN_PROGRESS
+        );
+        testMembers.cmsEntry = Optional.of(existingEntry);
+
         when(testMembers.snapshotCreator.getSnapshotName()).thenReturn("test");
 
         // Run the test
@@ -149,7 +170,13 @@ public class SnapshotStepTest {
         WorkerStep nextStep = exitPhase.nextStep();
 
         // Check the results
-        Mockito.verify(testMembers.cmsClient, times(1)).updateSnapshotEntry("test", SnapshotStatus.COMPLETED);
+        var expectedEntry = new CmsEntry.Snapshot(
+            "test",
+            SnapshotStatus.COMPLETED
+        );
+        Mockito.verify(testMembers.cmsClient, times(1)).updateSnapshotEntry(
+            expectedEntry, existingEntry
+        );
         Mockito.verify(testMembers.globalState, times(1)).updatePhase(GlobalState.Phase.SNAPSHOT_COMPLETED);
         assertEquals(null, nextStep);
     }
@@ -157,6 +184,12 @@ public class SnapshotStepTest {
     @Test
     void ExitPhaseSnapshotFailed_AsExpected() {
         // Set up the test
+        var existingEntry = new CmsEntry.Snapshot(
+            "test",
+            SnapshotStatus.IN_PROGRESS
+        );
+        testMembers.cmsEntry = Optional.of(existingEntry);
+
         when(testMembers.snapshotCreator.getSnapshotName()).thenReturn("test");
         SnapshotCreationFailed e = new SnapshotCreationFailed("test");
 
@@ -168,7 +201,13 @@ public class SnapshotStepTest {
         });
 
         // Check the results
-        Mockito.verify(testMembers.cmsClient, times(1)).updateSnapshotEntry("test", SnapshotStatus.FAILED);
+        var expectedEntry = new CmsEntry.Snapshot(
+            "test",
+            SnapshotStatus.FAILED
+        );
+        Mockito.verify(testMembers.cmsClient, times(1)).updateSnapshotEntry(
+            expectedEntry, existingEntry
+        );
         Mockito.verify(testMembers.globalState, times(1)).updatePhase(GlobalState.Phase.SNAPSHOT_FAILED);
     }    
 }

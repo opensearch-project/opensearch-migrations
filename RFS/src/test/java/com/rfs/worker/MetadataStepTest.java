@@ -233,7 +233,7 @@ public class MetadataStepTest {
         testMembers.cmsEntry = existingEntry;
 
         Mockito.when(testMembers.cmsClient.updateMetadataEntry(
-            any(CmsEntry.MetadataStatus.class), anyString(), anyInt()
+            any(CmsEntry.Metadata.class), eq(existingEntry.get())
         )).thenReturn(updatedEntry);
 
         // Run the test
@@ -242,10 +242,13 @@ public class MetadataStepTest {
         WorkerStep nextStep = testStep.nextStep();
 
         // Check the results
-        Mockito.verify(testMembers.cmsClient, times(1)).updateMetadataEntry(
+        var expectedEntry = new CmsEntry.Metadata(
             CmsEntry.MetadataStatus.IN_PROGRESS,
             CmsEntry.Metadata.getLeaseExpiry(TestAcquireLease.milliSinceEpoch, CmsEntry.Metadata.MAX_ATTEMPTS),
             CmsEntry.Metadata.MAX_ATTEMPTS
+        );
+        Mockito.verify(testMembers.cmsClient, times(1)).updateMetadataEntry(
+            expectedEntry, existingEntry.get()
         );
         assertEquals(nextStepClass, nextStep.getClass());
     }
@@ -284,10 +287,14 @@ public class MetadataStepTest {
         Mockito.when(testMembers.metadataFactory.fromRepo(testMembers.snapshotName)).thenReturn(testGlobalMetadata);
         Mockito.when(testGlobalMetadata.toObjectNode()).thenReturn(testNode);
         Mockito.when(testMembers.transformer.transformGlobalMetadata(testNode)).thenReturn(testTransformedNode);
-        Mockito.when(testMembers.cmsClient.updateMetadataEntry(
+
+        var expectedEntry = new CmsEntry.Metadata(
             CmsEntry.MetadataStatus.COMPLETED,
             existingEntry.get().leaseExpiry,
             existingEntry.get().numAttempts
+        );
+        Mockito.when(testMembers.cmsClient.updateMetadataEntry(
+            eq(expectedEntry), eq(existingEntry.get())
         
         )).thenReturn(updatedEntry);
 
@@ -317,9 +324,7 @@ public class MetadataStepTest {
             testTransformedNode
         );
         Mockito.verify(testMembers.cmsClient, times(1)).updateMetadataEntry(
-            CmsEntry.MetadataStatus.COMPLETED,
-            existingEntry.get().leaseExpiry,
-            existingEntry.get().numAttempts
+            expectedEntry, existingEntry.get()
         );
         Mockito.verify(testMembers.globalState, times(1)).updateWorkItem(
             null
@@ -384,10 +389,13 @@ public class MetadataStepTest {
         });
 
         // Check the results
-        Mockito.verify(testMembers.cmsClient, times(1)).updateMetadataEntry(
+        var expectedEntry = new CmsEntry.Metadata(
             CmsEntry.MetadataStatus.FAILED,
             existingEntry.get().leaseExpiry,
             existingEntry.get().numAttempts
+        );
+        Mockito.verify(testMembers.cmsClient, times(1)).updateMetadataEntry(
+            expectedEntry, existingEntry.get()
         );
         Mockito.verify(testMembers.globalState, times(1)).updatePhase(
             GlobalState.Phase.METADATA_FAILED

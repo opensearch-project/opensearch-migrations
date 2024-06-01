@@ -229,7 +229,7 @@ public class MetadataStep {
                 lastCmsEntry.leaseExpiry,
                 lastCmsEntry.numAttempts
             );
-            members.cmsClient.updateMetadataEntry(updatedEntry, lastCmsEntry);
+            members.cmsEntry = members.cmsClient.updateMetadataEntry(updatedEntry, lastCmsEntry);
             logger.info("Metadata Migration entry updated");
 
             logger.info("Clearing the worker's current work item...");

@@ -163,6 +163,10 @@ public class OpenSearchCmsClient implements CmsClient {
 
     @Override
     public List<CmsEntry.IndexWorkItem> getAvailableIndexWorkItems(int maxItems) {
+        // Ensure we have a relatively fresh view of the index
+        client.refresh();
+
+        // Pull the docs
         String queryBody = "{\n" +
             "  \"query\": {\n" +
             "    \"function_score\": {\n" +
@@ -177,13 +181,6 @@ public class OpenSearchCmsClient implements CmsClient {
             "            {\n" +
             "              \"match\": {\n" +
             "                \"status\": \"NOT_STARTED\"\n" +
-            "              }\n" +
-            "            },\n" +
-            "            {\n" +
-            "              \"range\": {\n" +
-            "                \"numAttempts\": {\n" +
-            "                  \"lte\": " + CmsEntry.IndexWorkItem.ATTEMPTS_SOFT_LIMIT + "\n" + // Less than or equal to
-            "                }\n" +
             "              }\n" +
             "            }\n" +
             "          ]\n" +
