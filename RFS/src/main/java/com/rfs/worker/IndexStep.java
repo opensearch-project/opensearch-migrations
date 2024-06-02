@@ -11,7 +11,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.cms.CmsClient;
 import com.rfs.cms.CmsEntry;
 import com.rfs.cms.OpenSearchCmsClient;
-import com.rfs.cms.OpenSearchCmsEntry;
 import com.rfs.common.IndexMetadata;
 import com.rfs.common.RfsException;
 import com.rfs.common.SnapshotRepo;
@@ -123,8 +122,7 @@ public class IndexStep {
                     return new RandomWait(members);
 
                 case IN_PROGRESS:
-                    return new ExitPhaseSuccess(members);
-                    // return new GetIndicesToMigrate(members);
+                    return new GetIndicesToMigrate(members);
                 case COMPLETED:
                     return new ExitPhaseSuccess(members);
                 case FAILED:
@@ -202,7 +200,6 @@ public class IndexStep {
             }
         }
     }
-
     
     public static class SetupIndexWorkEntries extends Base {
 
@@ -229,8 +226,8 @@ public class IndexStep {
             logger.info("Finished setting up the Index Work Items.");
 
             logger.info("Updating the Index Migration entry to indicate setup has been completed...");
-            OpenSearchCmsEntry.Index updatedEntry = new OpenSearchCmsEntry.Index(
-                CmsEntry.IndexStatus.IN_PROGRESS,
+            CmsEntry.Index updatedEntry = new CmsEntry.Index(
+                CmsEntry.IndexStatus.COMPLETED,
                 lastCmsEntry.leaseExpiry,
                 lastCmsEntry.numAttempts
             );
@@ -338,20 +335,19 @@ public class IndexStep {
 
                     IndexMetadataData_OS_2_11 indexMetadataOS211 = new IndexMetadataData_OS_2_11(transformedRoot, indexMetadata.getId(), workItem.name);
                     members.indexCreator.create(workItem.name, indexMetadataOS211).ifPresentOrElse(
-                        value -> {
-                            logger.info("Index " + workItem.name + " created successfully");
-                            logger.info("Forcefully updating the Index Work Item to indicate it has been completed...");
-                            CmsEntry.IndexWorkItem updatedEntry = new CmsEntry.IndexWorkItem(
-                                workItem.name,
-                                CmsEntry.IndexWorkItemStatus.COMPLETED,
-                                workItem.numAttempts,
-                                workItem.numShards
-                            );
-                            members.cmsClient.updateIndexWorkItemForceful(updatedEntry);
-                            logger.info("Index Work Item updated");
-                        },
+                        value -> logger.info("Index " + workItem.name + " created successfully"),
                         () -> logger.info("Index " + workItem.name + " already existed; no work required")
                     );
+
+                    logger.info("Forcefully updating the Index Work Item to indicate it has been completed...");
+                    CmsEntry.IndexWorkItem updatedEntry = new CmsEntry.IndexWorkItem(
+                        workItem.name,
+                        CmsEntry.IndexWorkItemStatus.COMPLETED,
+                        workItem.numAttempts,
+                        workItem.numShards
+                    );
+                    members.cmsClient.updateIndexWorkItemForceful(updatedEntry);
+                    logger.info("Index Work Item updated");
                 } catch (Exception e) {
                     logger.info("Failed to migrate index: " + workItem.name, e);
                     logger.info("Updating the Index Work Item with incremented attempt count...");
@@ -375,20 +371,6 @@ public class IndexStep {
             return new GetIndicesToMigrate(members);
         }
     }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
     public static class RandomWait extends Base {
         private final static int WAIT_TIME_MS = 5 * 1000; // arbitrarily chosen

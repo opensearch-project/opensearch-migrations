@@ -29,8 +29,6 @@ import com.rfs.worker.MetadataStep.MaxAttemptsExceeded;
 import com.rfs.worker.MetadataStep.SharedMembers;
 
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyInt;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.Mockito.*;
 
@@ -130,7 +128,7 @@ public class MetadataStepTest {
                 MetadataStep.ExitPhaseSuccess.class
             ),
 
-            // The CMS entry is marked as completed, so we exit as success
+            // The CMS entry is marked as failed, so we exit as faile
             Arguments.of(
                 Optional.of(new CmsEntry.Metadata(
                     CmsEntry.MetadataStatus.FAILED,
