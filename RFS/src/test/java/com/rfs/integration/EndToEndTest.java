@@ -77,8 +77,8 @@ public class EndToEndTest {
         // PSUEDO: Create a target cluster running OS 2.X (Where x is the latest released version)
 
         // Action
-        // PSUEDO: Create snapshot on source cluster
         // PSUEDO: Migrate from the snapshot
+        simpleRfsInstance.fullMigrationViaLocalSnapshot(targetCluster.toString());
         // PSUEDO: Shutdown source cluster
 
         // Validation
