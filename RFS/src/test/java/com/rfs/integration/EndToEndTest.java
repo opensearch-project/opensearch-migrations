@@ -1,47 +1,7 @@
 package com.rfs.integration;
 
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.extension.ExtensionContext;
-import org.junit.jupiter.api.io.TempDir;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.ArgumentsProvider;
-import org.junit.jupiter.params.provider.ArgumentsSource;
-import org.mockito.ArgumentCaptor;
-
-import com.rfs.common.OpenSearchClient;
-import com.rfs.framework.ClusterOperations;
-import com.rfs.framework.ElasticsearchContainer;
 import com.rfs.framework.SimpleRestoreFromSnapshot;
-import com.rfs.framework.SimpleRestoreFromSnapshot_ES_6_8;
-import com.rfs.framework.SimpleRestoreFromSnapshot_ES_7_10;
-import com.rfs.framework.ElasticsearchContainer.Version;
-
-import lombok.Builder;
-import lombok.Data;
-import reactor.core.publisher.Mono;
-
-import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
-import static org.mockito.Mockito.when;
-import static org.hamcrest.CoreMatchers.allOf;
-import static org.hamcrest.CoreMatchers.anyOf;
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.CoreMatchers.not;
-import static org.hamcrest.MatcherAssert.assertThat;
-
-import java.io.File;
-import java.util.List;
-import java.nio.file.Path;
-import java.util.stream.Stream;
-import java.util.function.Supplier;
 
 /**
  * Tests focused on setting up whole source clusters, performing a migration, and validation on the target cluster
