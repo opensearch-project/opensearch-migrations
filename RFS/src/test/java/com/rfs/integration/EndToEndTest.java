@@ -15,46 +15,46 @@ public class EndToEndTest {
     @Test
     public void ES_v6_8_to_OS_v2_X_Migration() throws Exception {
         // Setup
-        // PSUEDO: Create a source cluster running ES 6.8
-        // PSUEOD: Update global cluster state
+        // PSEUDO: Create a source cluster running ES 6.8
+        // PSEUDO: Update global cluster state
         //    - Change a 6.8 relevant setting
-        // PSUEOD: Create 2 index templates on the cluster
+        // PSEUDO: Create 2 index templates on the cluster
         //    - logs-*
         //    - data-rolling
-        // PSUEOD: Create 5 indices on the cluster
+        // PSEUDO: Create 5 indices on the cluster
         //    - logs-01-2345
         //    - logs-12-3456
         //    - data-rolling
         //    - playground
         //    - playground2
-        // PSUEDO: Add documents 
+        // PSEUDO: Add documents 
         //    - 19x http-data docs into logs-01-2345 
         //    - 23x http-data docs into logs-12-3456
         //    - 29x data-rolling
         //    - 5x geonames docs into playground
         //    - 7x geopoint into playground2
 
-        // PSUEDO: Create a target cluster running OS 2.X (Where x is the latest released version)
+        // PSEUDO: Create a target cluster running OS 2.X (Where x is the latest released version)
 
         // Action
-        // PSUEDO: Migrate from the snapshot
+        // PSEUDO: Migrate from the snapshot
         simpleRfsInstance.fullMigrationViaLocalSnapshot(targetCluster.toString());
-        // PSUEDO: Shutdown source cluster
+        // PSEUDO: Shutdown source cluster
 
         // Validation
 
-        // PSUEOD: Verfiy global cluster state
+        // PSEUDO: Verfiy global cluster state
         //    - 6.8 Setting is transformed
-        // PSUEOD: Verify creation of 2 index templates on the cluster
-        // PSUEOD: Verify creation of 5 indices on the cluster
+        // PSEUDO: Verify creation of 2 index templates on the cluster
+        // PSEUDO: Verify creation of 5 indices on the cluster
         //    - logs-01-2345
         //    - logs-12-3456
         //    - data-rolling
         //    - playground
         //    - playground2
-        // PSUEDO: Verify documents
+        // PSEUDO: Verify documents
         
-        // PSUEDO: Additional validation:
+        // PSEUDO: Additional validation:
         //   - Mapping type parameter is removed
         // 
 
