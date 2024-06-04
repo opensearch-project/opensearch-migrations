@@ -1,17 +1,16 @@
 package com.rfs.common;
 
-import java.nio.charset.StandardCharsets;
 import java.util.Base64;
+import java.util.function.BiConsumer;
 
 import com.rfs.netty.ReadMeteringHandler;
 import com.rfs.netty.WriteMeteringHandler;
 import com.rfs.tracing.IRfsContexts;
-import io.netty.buffer.Unpooled;
-import io.netty.handler.logging.LogLevel;
-import io.netty.handler.logging.LoggingHandler;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
+import reactor.netty.http.client.HttpClientRequest;
 import reactor.netty.ByteBufMono;
+import reactor.netty.Connection;
 
 public class RestClient {
     public static class Response {
@@ -47,17 +46,13 @@ public class RestClient {
 
     public Mono<Response> getAsync(String path, IRfsContexts.IRequestContext context) {
         return client
-                .doOnRequest((r, conn) -> {
-                    conn.channel().pipeline().addFirst(new WriteMeteringHandler(context::addBytesSent));
-                    conn.channel().pipeline().addFirst(new ReadMeteringHandler(context::addBytesRead));
-                })
+                .doOnRequest(sizeMetricsHandler(context))
                 .get()
                 .uri("/" + path)
                 .responseSingle((response, bytes) -> bytes.asString()
-                .map(body -> new Response(response.status().code(), body, response.status().reasonPhrase())))
+                    .map(body -> new Response(response.status().code(), body, response.status().reasonPhrase())))
                 .doOnError(t->context.addTraceException(t, true))
-                .doFinally(r->context.close())
-                ;
+                .doFinally(r->context.close());
     }
 
     public Response get(String path, IRfsContexts.IRequestContext context) {
@@ -66,35 +61,36 @@ public class RestClient {
 
     public Mono<Response> postAsync(String path, String body, IRfsContexts.IRequestContext context) {
         return client
-                .doOnRequest((r, conn) -> {
-                    conn.channel().pipeline().addFirst(new WriteMeteringHandler(context::addBytesSent));
-                    conn.channel().pipeline().addFirst(new ReadMeteringHandler(context::addBytesRead));
-                })
+                .doOnRequest(sizeMetricsHandler(context))
                 .post()
                 .uri("/" + path)
                 .send(ByteBufMono.fromString(Mono.just(body)))
                 .responseSingle((response, bytes) -> bytes.asString()
-                .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())))
+                    .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())))
                 .doOnError(t->context.addTraceException(t, true))
                 .doFinally(r->context.close());
     }
 
     public Mono<Response> putAsync(String path, String body, IRfsContexts.IRequestContext context) {
         return client
-                .doOnRequest((r, conn) -> {
-                    conn.channel().pipeline().addFirst(new WriteMeteringHandler(context::addBytesSent));
-                    conn.channel().pipeline().addFirst(new ReadMeteringHandler(context::addBytesRead));
-                })
+                .doOnRequest(sizeMetricsHandler(context))
                 .put()
                 .uri("/" + path)
                 .send(ByteBufMono.fromString(Mono.just(body)))
                 .responseSingle((response, bytes) -> bytes.asString()
-                .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())))
+                    .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())))
                 .doOnError(t->context.addTraceException(t, true))
                 .doFinally(r->context.close());
     }
 
     public Response put(String path, String body, IRfsContexts.IRequestContext context) {
         return putAsync(path, body, context).block();
+    }
+
+    private BiConsumer<HttpClientRequest, Connection> sizeMetricsHandler(final IRfsContexts.IRequestContext context) {
+        return (r, conn) -> {
+            conn.channel().pipeline().addFirst(new WriteMeteringHandler(context::addBytesSent));
+            conn.channel().pipeline().addFirst(new ReadMeteringHandler(context::addBytesRead));
+        };
     }
 }
