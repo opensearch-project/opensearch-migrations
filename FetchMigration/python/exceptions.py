@@ -7,6 +7,7 @@
 # compatible open source license.
 #
 
+
 class RequestError(RuntimeError):
     def __init__(self, message=None):
         super().__init__(message)
