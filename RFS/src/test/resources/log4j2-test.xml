@@ -2,12 +2,16 @@
 <Configuration status="WARN">
     <Appenders>
         <Console name="Console" target="SYSTEM_OUT">
-            <PatternLayout pattern="%d{HH:mm:ss.SSS} %-5level %msg%n"/>
+            <PatternLayout pattern="%d{HH:mm:ss.SSS} %threadName %-5p %c{1}:%L - %m%n"/>
         </Console>
     </Appenders>
     <Loggers>
-        <Root level="info">
+        <Root level="debug">
             <AppenderRef ref="Console"/>
         </Root>
+        <Logger name="org.testcontainers" level="INFO"/>
+        <Logger name="tc" level="INFO"/>
+        <Logger name="com.github.dockerjava" level="WARN"/>
+        <Logger name="com.github.dockerjava.zerodep.shaded.org.apache.hc.client5.http.wire" level="OFF"/>
     </Loggers>
 </Configuration>

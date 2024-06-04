@@ -70,7 +70,6 @@ def cat_indices_cmd(ctx):
 
 # ##################### REPLAYER ###################
 
-
 @cli.group(name="replayer")
 @click.pass_obj
 def replayer_group(ctx):
@@ -82,6 +81,45 @@ def replayer_group(ctx):
 @click.pass_obj
 def start_replayer_cmd(ctx):
     ctx.env.replayer.start()
+
+
+# ##################### BACKFILL ###################
+
+# As we add other forms of backfill migrations, we should incorporate a way to dynamically allow different sets of
+# arguments depending on the type of backfill migration
+
+@cli.group(name="backfill")
+@click.pass_obj
+def backfill_group(ctx):
+    """All actions related to historical/backfill data migrations"""
+    if ctx.env.backfill is None:
+        raise ValueError("Backfill migration is not set")
+
+
+@backfill_group.command(name="create-migration")
+@click.option('--pipeline-template-file', default='/root/osiPipelineTemplate.yaml', help='Path to config file')
+@click.option("--print-config-only", is_flag=True, show_default=True, default=False,
+              help="Flag to only print populated pipeline config when executed")
+@click.pass_obj
+def create_migration_backfill_cmd(ctx, pipeline_template_file, print_config_only):
+    """Create migration action"""
+    ctx.env.backfill.create(pipeline_template_path=pipeline_template_file, print_config_only=print_config_only)
+
+
+@backfill_group.command(name="start-migration")
+@click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
+@click.pass_obj
+def start_migration_backfill_cmd(ctx, pipeline_name):
+    """Start migration action"""
+    ctx.env.backfill.start(pipeline_name=pipeline_name)
+
+
+@backfill_group.command(name="stop-migration")
+@click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
+@click.pass_obj
+def stop_migration_backfill_cmd(ctx, pipeline_name):
+    """Stop migration action"""
+    ctx.env.backfill.stop(pipeline_name=pipeline_name)
 
 
 # ##################### METRICS ###################

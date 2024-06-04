@@ -9,7 +9,7 @@ requests.packages.urllib3.disable_warnings()  # ignore: type
 
 logger = logging.getLogger(__name__)
 
-AuthMethod = Enum("AuthMethod", ["BASIC", "SIGV4"])
+AuthMethod = Enum("AuthMethod", ["NO_AUTH", "BASIC_AUTH", "SIGV4"])
 HttpMethod = Enum("HttpMethod", ["GET", "POST", "PUT", "DELETE"])
 
 SCHEMA = {
@@ -17,15 +17,32 @@ SCHEMA = {
     "allow_insecure": {"type": "boolean", "required": False},
     "authorization": {
         "type": "dict",
-        "required": False,
+        "required": True,
         "schema": {
             "type": {
                 "type": "string",
                 "required": True,
-                "allowed": [e.name.lower() for e in AuthMethod],
+                "allowed": [e.name.lower() for e in AuthMethod]
             },
-            "details": {"type": "dict", "required": False},
-        },
+            "details": {
+                "type": "dict",
+                "required": False,
+                "schema": {
+                    "username": {
+                        "type": "string",
+                        "required": False
+                    },
+                    "password": {
+                        "type": "string",
+                        "required": False
+                    },
+                    "aws_secret_arn": {
+                        "type": "string",
+                        "required": False
+                    },
+                }
+            }
+        }
     },
 }
 
@@ -36,6 +53,7 @@ class Cluster:
     """
 
     endpoint: str = ""
+    aws_secret_arn: Optional[str] = None
     auth_type: Optional[AuthMethod] = None
     auth_details: Optional[Dict[str, Any]] = None
 
@@ -48,15 +66,15 @@ class Cluster:
         self.endpoint = config["endpoint"]
         if self.endpoint.startswith("https"):
             self.allow_insecure = config.get("allow_insecure", False)
-        if "authorization" in config:
-            self.auth_type = AuthMethod[config["authorization"]["type"].upper()]
-            self.auth_details = config["authorization"]["details"]
+        self.auth_type = AuthMethod[config["authorization"]["type"].upper()]
+        self.auth_details = config["authorization"].get("details", None)
+        self.aws_secret_arn = None if self.auth_details is None else self.auth_details.get("aws_secret_arn", None)
 
     def call_api(self, path, method: HttpMethod = HttpMethod.GET) -> requests.Response:
         """
         Calls an API on the cluster.
         """
-        if self.auth_type == AuthMethod.BASIC:
+        if self.auth_type == AuthMethod.BASIC_AUTH:
             assert self.auth_details is not None  # for mypy's sake
             auth = HTTPBasicAuth(
                 self.auth_details.get("username", None),
