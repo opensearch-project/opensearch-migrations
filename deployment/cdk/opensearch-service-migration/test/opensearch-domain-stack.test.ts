@@ -2,6 +2,7 @@ import {Template} from 'aws-cdk-lib/assertions';
 import {OpenSearchDomainStack} from "../lib/opensearch-domain-stack";
 import {NetworkStack} from "../lib/network-stack";
 import {createStackComposer} from "./test-utils";
+import { ClusterYaml } from '../lib/migration-services-yaml';
 
 test('Test primary context options are mapped with standard data type', () => {
     // The cdk.context.json and default-values.json files allow multiple data types
@@ -219,6 +220,16 @@ test( 'Test default stack is created when empty context options are provided for
     domainTemplate.resourceCountIs("AWS::OpenSearchService::Domain", 1)
 })
 
+test('Test targetClusterYaml is populated', () => {
+    const contextOptions = {}
+    const openSearchStacks = createStackComposer(contextOptions)
+
+    const domainStack = openSearchStacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0] as OpenSearchDomainStack
+    const yaml = domainStack.targetClusterYaml
+    expect(yaml).toBeDefined()
+    expect(yaml).toBeInstanceOf(ClusterYaml)
+    expect(yaml.endpoint).toBeDefined()
+})
 
 /*
  * This function will make assertions on the primary config options, which contains the first set of options, all of

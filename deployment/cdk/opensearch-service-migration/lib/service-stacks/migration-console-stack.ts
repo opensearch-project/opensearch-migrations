@@ -13,7 +13,7 @@ import {
 import {StreamingSourceType} from "../streaming-source-type";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {RemovalPolicy} from "aws-cdk-lib";
-
+import { ServicesYaml } from "../migration-services-yaml";
 
 export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationsSolutionVersion: string,
@@ -22,11 +22,12 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly fetchMigrationEnabled: boolean,
     readonly fargateCpuArch: CpuArchitecture,
     readonly migrationConsoleEnableOSI: boolean,
-    readonly migrationAPIEnabled?: boolean
+    readonly migrationAPIEnabled?: boolean,
+    readonly servicesYaml: ServicesYaml,
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
-    
+
     createMSKAdminIAMPolicies(stage: string, deployId: string): PolicyStatement[] {
         const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${stage}/${deployId}/mskClusterARN`);
         const mskClusterName = StringParameter.valueForStringParameter(this, `/migration/${stage}/${deployId}/mskClusterName`);
