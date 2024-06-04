@@ -3,6 +3,11 @@ package com.rfs.cms;
 import com.rfs.common.RfsException;
 
 public class CmsEntry {
+    public abstract static class Base {
+        protected Base() {}
+        public abstract String toString();
+    }
+
     public static enum SnapshotStatus {
         NOT_STARTED,
         IN_PROGRESS,
@@ -10,13 +15,22 @@ public class CmsEntry {
         FAILED,
     }
 
-    public static class Snapshot {
+    public static class Snapshot extends Base {
         public final String name;
         public final SnapshotStatus status;
 
         public Snapshot(String name, SnapshotStatus status) {
+            super();
             this.name = name;
             this.status = status;
+        }
+
+        @Override
+        public String toString() {
+            return "Snapshot("
+                + "name='" + name + ","
+                + "status=" + status +
+                ")";
         }
     }
 
@@ -26,7 +40,7 @@ public class CmsEntry {
         FAILED,
     }
 
-    public static class Metadata {
+    public static class Metadata extends Base {
         public static final int METADATA_LEASE_MS = 1 * 60 * 1000; // 1 minute, arbitrarily chosen
         public static final int MAX_ATTEMPTS = 3; // arbitrarily chosen
 
@@ -50,9 +64,19 @@ public class CmsEntry {
         public final Integer numAttempts;
 
         public Metadata(MetadataStatus status, String leaseExpiry, int numAttempts) {
+            super();
             this.status = status;
             this.leaseExpiry = leaseExpiry;
             this.numAttempts = numAttempts;
+        }
+
+        @Override
+        public String toString() {
+            return "Metadata("
+                + "status=" + status.toString() + ","
+                + "leaseExpiry=" + leaseExpiry + ","
+                + "numAttempts=" + numAttempts.toString() +
+                ")";
         }
     }
 

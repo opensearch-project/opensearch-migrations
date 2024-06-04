@@ -1,10 +1,10 @@
 package com.rfs.framework;
 
-import org.apache.http.client.methods.HttpDelete;
-import org.apache.http.client.methods.HttpPut;
-import org.apache.http.entity.StringEntity;
-import org.apache.http.impl.client.CloseableHttpClient;
-import org.apache.http.impl.client.HttpClients;
+import org.apache.hc.client5.http.classic.methods.HttpDelete;
+import org.apache.hc.client5.http.classic.methods.HttpPut;
+import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
+import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.core5.http.io.entity.StringEntity;
 
 import java.io.IOException;
 
@@ -40,7 +40,7 @@ public class ClusterOperations {
         createRepoRequest.setHeader("Content-Type", "application/json");
 
         try (var response = httpClient.execute(createRepoRequest)) {
-            assertThat(response.getStatusLine().getStatusCode(), equalTo(200));
+            assertThat(response.getCode(), equalTo(200));
         }
     }
 
@@ -50,7 +50,7 @@ public class ClusterOperations {
         indexDocumentRequest.setHeader("Content-Type", "application/json");
 
         try (var response = httpClient.execute(indexDocumentRequest)) {
-            assertThat(response.getStatusLine().getStatusCode(), anyOf(equalTo(201), equalTo(200)));
+            assertThat(response.getCode(), anyOf(equalTo(201), equalTo(200)));
         }
     }
 
@@ -58,7 +58,7 @@ public class ClusterOperations {
         var deleteDocumentRequest = new HttpDelete(clusterUrl + "/" + index + "/_doc/" + docId);
 
         try (var response = httpClient.execute(deleteDocumentRequest)) {
-            assertThat(response.getStatusLine().getStatusCode(), equalTo(200));
+            assertThat(response.getCode(), equalTo(200));
         }
     }
 
@@ -74,7 +74,7 @@ public class ClusterOperations {
         createSnapshotRequest.setHeader("Content-Type", "application/json");
 
         try (var response = httpClient.execute(createSnapshotRequest)) {
-            assertThat(response.getStatusLine().getStatusCode(), equalTo(200));
+            assertThat(response.getCode(), equalTo(200));
         }
     }
 }

@@ -33,51 +33,47 @@ ext {
 }
 
 dependencies {
+    implementation project(":commonDependencyVersionConstraints")
+
     implementation project(':coreUtilities')
 
-    implementation 'com.beust:jcommander:1.81'
-    implementation 'com.fasterxml.jackson.core:jackson-databind:2.16.2'
-    implementation 'com.fasterxml.jackson.dataformat:jackson-dataformat-smile:2.16.2'
-    implementation 'com.fasterxml.jackson.core:jackson-annotations:2.16.2'
-    implementation 'com.fasterxml.jackson.core:jackson-core:2.16.2'
-    implementation 'io.netty:netty-codec-http:4.1.108.Final'
-    implementation 'org.apache.logging.log4j:log4j-api:2.23.1'
-    implementation 'org.apache.logging.log4j:log4j-core:2.23.1'
-    implementation 'org.apache.lucene:lucene-core:8.11.3'
-    implementation 'org.apache.lucene:lucene-analyzers-common:8.11.3'
-    implementation 'org.apache.lucene:lucene-backward-codecs:8.11.3'
+    implementation group: 'com.beust', name: 'jcommander'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    implementation group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-smile'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
+    implementation group: 'io.netty', name: 'netty-codec-http'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    implementation group: 'org.apache.lucene', name: 'lucene-core'
+    implementation group: 'org.apache.lucene', name: 'lucene-analyzers-common'
+    implementation group: 'org.apache.lucene', name: 'lucene-backward-codecs'
 
     implementation platform('io.projectreactor:reactor-bom:2023.0.5') 
     implementation 'io.projectreactor.netty:reactor-netty-core' 
     implementation 'io.projectreactor.netty:reactor-netty-http'
 
-    implementation platform("software.amazon.awssdk:bom:$awsSdkVersion")
-    implementation 'software.amazon.awssdk:s3'
-    implementation 'software.amazon.awssdk:s3-transfer-manager'
-    implementation 'software.amazon.awssdk.crt:aws-crt:0.29.18'
+    implementation group: 'software.amazon.awssdk', name: 's3'
+    implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
 
-    implementation    'com.github.docker-java:docker-java-core:3.3.6'
-    implementation    'com.github.docker-java:docker-java-transport-httpclient5:3.3.6'
-
-    testImplementation 'io.projectreactor:reactor-test:3.6.5'
-    testImplementation 'org.apache.logging.log4j:log4j-core:2.23.1'
-    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.10.2'
-    testImplementation 'org.junit.jupiter:junit-jupiter-params:5.10.2'
-    testImplementation 'org.mockito:mockito-core:5.11.0'
-    testImplementation 'org.mockito:mockito-junit-jupiter:5.11.0'
-    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.10.2'
+    testImplementation group: 'io.projectreactor', name: 'reactor-test'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
+    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-params'
+    testImplementation group: 'org.mockito', name: 'mockito-core'
+    testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter'
+    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
 
 
     // Integration tests
-    implementation platform('org.testcontainers:testcontainers-bom:1.19.8')
-    testImplementation('org.testcontainers:elasticsearch') //no version specified
-    testImplementation 'org.hamcrest:hamcrest:2.2'
-    testImplementation 'org.junit.jupiter:junit-jupiter-api:5.8.2'
-    testRuntimeOnly 'org.junit.jupiter:junit-jupiter-engine:5.8.2'
-    implementation 'org.apache.httpcomponents:httpclient:4.5.13'
-    implementation 'com.fasterxml.jackson.core:jackson-databind:2.12.3'
-    implementation 'com.fasterxml.jackson.core:jackson-core:2.12.3'
-    implementation 'com.fasterxml.jackson.core:jackson-annotations:2.12.3'
+    testImplementation group: 'org.testcontainers', name: 'testcontainers'
+    testImplementation group: 'org.hamcrest', name: 'hamcrest'
+    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
+    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
+    implementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
 }
 
 application {
