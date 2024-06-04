@@ -206,14 +206,39 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
+        // Allow Console to retrieve Cloudwatch Metrics
+        const getMetricsPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: ["*"],
+            actions: [
+                "cloudwatch:ListMetrics",
+                "cloudwatch:GetMetricData"
+            ]
+        })
+
+        // Upload the services.yaml file to Parameter Store
+        let servicesYaml = props.servicesYaml
+        servicesYaml.source_cluster = {
+            'endpoint': `https://capture-proxy-es.migration.${props.stage}.local:9200`,
+            'no_auth': ''
+        }
+        // Create a new parameter in Parameter Store
+        new StringParameter(this, 'SSMParameterServicesYamlFile', {
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/servicesYamlFile`,
+            stringValue: servicesYaml.stringify(),
+        });
+
+
         const environment: { [key: string]: string; } = {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
             // Temporary fix for source domain endpoint until we move to either alb or migration console yaml configuration
             "SOURCE_DOMAIN_ENDPOINT": `https://capture-proxy-es.migration.${props.stage}.local:9200`,
             "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints,
             "MIGRATION_STAGE": props.stage,
-            "MIGRATION_SOLUTION_VERSION": props.migrationsSolutionVersion
+            "MIGRATION_SOLUTION_VERSION": props.migrationsSolutionVersion,
+            "MIGRATION_SERVICES_YAML_PARAMETER": `/migration/${props.stage}/${props.defaultDeployId}/servicesYamlFile`,
         }
+
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
         let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy, listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy]
