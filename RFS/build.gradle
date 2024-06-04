@@ -56,6 +56,9 @@ dependencies {
     implementation group: 'software.amazon.awssdk', name: 's3'
     implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
 
+    testImplementation 'com.github.docker-java:docker-java-core:3.3.6'
+    testImplementation 'com.github.docker-java:docker-java-transport-httpclient5:3.3.6'
+
     testImplementation group: 'io.projectreactor', name: 'reactor-test'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
@@ -66,10 +69,13 @@ dependencies {
 
 
     // Integration tests
+    testImplementation testFixtures(project(path: ':testHelperFixtures'))
+    testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation group: 'org.testcontainers', name: 'testcontainers'
     testImplementation group: 'org.hamcrest', name: 'hamcrest'
     testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
+    // why are these under implementation with the above comment for integ tests?
     implementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'

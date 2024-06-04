@@ -4,11 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.common.IndexMetadata;
 import com.rfs.common.OpenSearchClient;
+import com.rfs.tracing.IRfsContexts;
 
 public class IndexCreator_OS_2_11 {
     private static final ObjectMapper mapper = new ObjectMapper();
 
-    public static void create(String indexName, IndexMetadata.Data indexMetadata, OpenSearchClient client) throws Exception {
+    public static void create(String indexName, IndexMetadata.Data indexMetadata, OpenSearchClient client,
+                              IRfsContexts.ICreateIndexContext context) throws Exception {
         // Remove some settings which will cause errors if you try to pass them to the API
         ObjectNode settings = indexMetadata.getSettings();
 
@@ -24,6 +26,6 @@ public class IndexCreator_OS_2_11 {
         body.set("settings", settings);
 
         // Idempotently create the index
-        client.createIndex(indexName, body);
+        client.createIndex(indexName, body, context);
     }
 }

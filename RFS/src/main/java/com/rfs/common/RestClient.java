@@ -1,7 +1,14 @@
 package com.rfs.common;
 
+import java.nio.charset.StandardCharsets;
 import java.util.Base64;
 
+import com.rfs.netty.ReadMeteringHandler;
+import com.rfs.netty.WriteMeteringHandler;
+import com.rfs.tracing.IRfsContexts;
+import io.netty.buffer.Unpooled;
+import io.netty.handler.logging.LogLevel;
+import io.netty.handler.logging.LoggingHandler;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.ByteBufMono;
@@ -38,34 +45,56 @@ public class RestClient {
             });
     }
 
-    public Mono<Response> getAsync(String path) {
-        return client.get()
-            .uri("/" + path)
-            .responseSingle((response, bytes) -> bytes.asString()
-                .map(body -> new Response(response.status().code(), body, response.status().reasonPhrase())));
+    public Mono<Response> getAsync(String path, IRfsContexts.IRequestContext context) {
+        return client
+                .doOnRequest((r, conn) -> {
+                    conn.channel().pipeline().addFirst(new WriteMeteringHandler(context::addBytesSent));
+                    conn.channel().pipeline().addFirst(new ReadMeteringHandler(context::addBytesRead));
+                })
+                .get()
+                .uri("/" + path)
+                .responseSingle((response, bytes) -> bytes.asString()
+                .map(body -> new Response(response.status().code(), body, response.status().reasonPhrase())))
+                .doOnError(t->context.addTraceException(t, true))
+                .doFinally(r->context.close())
+                ;
     }
 
-    public Response get(String path) {
-        return getAsync(path).block();
+    public Response get(String path, IRfsContexts.IRequestContext context) {
+        return getAsync(path, context).block();
     }
 
-    public Mono<Response> postAsync(String path, String body) {
-        return client.post()
-            .uri("/" + path)
-            .send(ByteBufMono.fromString(Mono.just(body)))
-            .responseSingle((response, bytes) -> bytes.asString()
-                .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())));
+    public Mono<Response> postAsync(String path, String body, IRfsContexts.IRequestContext context) {
+        return client
+                .doOnRequest((r, conn) -> {
+                    conn.channel().pipeline().addFirst(new WriteMeteringHandler(context::addBytesSent));
+                    conn.channel().pipeline().addFirst(new ReadMeteringHandler(context::addBytesRead));
+                })
+                .post()
+                .uri("/" + path)
+                .send(ByteBufMono.fromString(Mono.just(body)))
+                .responseSingle((response, bytes) -> bytes.asString()
+                .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())))
+                .doOnError(t->context.addTraceException(t, true))
+                .doFinally(r->context.close());
     }
 
-    public Mono<Response> putAsync(String path, String body) {
-        return client.put()
-            .uri("/" + path)
-            .send(ByteBufMono.fromString(Mono.just(body)))
-            .responseSingle((response, bytes) -> bytes.asString()
-                .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())));
+    public Mono<Response> putAsync(String path, String body, IRfsContexts.IRequestContext context) {
+        return client
+                .doOnRequest((r, conn) -> {
+                    conn.channel().pipeline().addFirst(new WriteMeteringHandler(context::addBytesSent));
+                    conn.channel().pipeline().addFirst(new ReadMeteringHandler(context::addBytesRead));
+                })
+                .put()
+                .uri("/" + path)
+                .send(ByteBufMono.fromString(Mono.just(body)))
+                .responseSingle((response, bytes) -> bytes.asString()
+                .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())))
+                .doOnError(t->context.addTraceException(t, true))
+                .doFinally(r->context.close());
     }
 
-    public Response put(String path, String body) {
-        return putAsync(path, body).block();
+    public Response put(String path, String body, IRfsContexts.IRequestContext context) {
+        return putAsync(path, body, context).block();
     }
 }

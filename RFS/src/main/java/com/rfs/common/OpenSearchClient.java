@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
+import com.rfs.tracing.IRfsContexts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -31,40 +32,45 @@ public class OpenSearchClient {
      * Create a legacy template if it does not already exist.  Returns an Optional; if the template was created, it
      * will be the created object and empty otherwise.
      */
-    public Optional<ObjectNode> createLegacyTemplate(String templateName, ObjectNode settings){
+    public Optional<ObjectNode> createLegacyTemplate(String templateName, ObjectNode settings,
+                                        IRfsContexts.ICheckedIdempotentPutRequestContext context) {
         String targetPath = "_template/" + templateName;
-        return createObjectIdempotent(targetPath, settings);
+        return createObjectIdempotent(targetPath, settings, context);
     }
 
     /*
      * Create a component template if it does not already exist.  Returns an Optional; if the template was created, it
      * will be the created object and empty otherwise.
      */
-    public Optional<ObjectNode> createComponentTemplate(String templateName, ObjectNode settings){
+    public Optional<ObjectNode> createComponentTemplate(String templateName, ObjectNode settings,
+                                           IRfsContexts.ICheckedIdempotentPutRequestContext context) {
         String targetPath = "_component_template/" + templateName;
-        return createObjectIdempotent(targetPath, settings);
+        return createObjectIdempotent(targetPath, settings, context);
     }
 
     /*
      * Create an index template if it does not already exist.  Returns an Optional; if the template was created, it
      * will be the created object and empty otherwise.
      */
-    public Optional<ObjectNode> createIndexTemplate(String templateName, ObjectNode settings){
+    public Optional<ObjectNode> createIndexTemplate(String templateName, ObjectNode settings,
+                                       IRfsContexts.ICheckedIdempotentPutRequestContext context) {
         String targetPath = "_index_template/" + templateName;
-        return createObjectIdempotent(targetPath, settings);
+        return createObjectIdempotent(targetPath, settings, context);
     }
 
     /*
      * Create an index if it does not already exist.  Returns an Optional; if the index was created, it
      * will be the created object and empty otherwise.
      */
-    public Optional<ObjectNode> createIndex(String indexName, ObjectNode settings){
+    public Optional<ObjectNode> createIndex(String indexName, ObjectNode settings,
+                               IRfsContexts.ICheckedIdempotentPutRequestContext context) {
         String targetPath = indexName;
-        return createObjectIdempotent(targetPath, settings);
+        return createObjectIdempotent(targetPath, settings, context);
     }
 
-    private Optional<ObjectNode> createObjectIdempotent(String objectPath, ObjectNode settings){
-        RestClient.Response response = client.getAsync(objectPath)
+    private Optional<ObjectNode> createObjectIdempotent(String objectPath, ObjectNode settings,
+                                           IRfsContexts.ICheckedIdempotentPutRequestContext context) {
+        RestClient.Response response = client.getAsync(objectPath, context.createCheckRequestContext())
         .flatMap(resp -> {
             if (resp.code == HttpURLConnection.HTTP_NOT_FOUND || resp.code == HttpURLConnection.HTTP_OK) {
                 return Mono.just(resp);
@@ -79,7 +85,7 @@ public class OpenSearchClient {
         .block();
 
         if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
-            client.put(objectPath, settings.toString());
+            client.put(objectPath, settings.toString(), context.createCheckRequestContext());
             return Optional.of(settings);
         } else if (response.code == HttpURLConnection.HTTP_OK) {
             logger.info(objectPath + " already exists. Skipping creation.");
@@ -93,9 +99,10 @@ public class OpenSearchClient {
      * Attempts to register a snapshot repository; no-op if the repo already exists.  Returns an Optional; if the repo
      * was created, it will be the settings used and empty if it already existed.
      */
-    public Optional<ObjectNode> registerSnapshotRepo(String repoName, ObjectNode settings){
+    public Optional<ObjectNode> registerSnapshotRepo(String repoName, ObjectNode settings,
+                                                    IRfsContexts.ICreateSnapshotContext context) {
         String targetPath = "_snapshot/" + repoName;
-        RestClient.Response response = client.putAsync(targetPath, settings.toString())
+        RestClient.Response response = client.putAsync(targetPath, settings.toString(), context.createRegisterRequest())
             .flatMap(resp -> {
                 if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_CREATED) {
                     return Mono.just(resp);
@@ -121,9 +128,10 @@ public class OpenSearchClient {
      * Attempts to create a snapshot; no-op if the snapshot already exists.  Returns an Optional; if the snapshot
      * was created, it will be the settings used and empty if it already existed.
      */
-    public Optional<ObjectNode> createSnapshot(String repoName, String snapshotName, ObjectNode settings){
+    public Optional<ObjectNode> createSnapshot(String repoName, String snapshotName, ObjectNode settings,
+                                               IRfsContexts.ICreateSnapshotContext context) {
         String targetPath = "_snapshot/" + repoName + "/" + snapshotName;
-        RestClient.Response response = client.putAsync(targetPath, settings.toString())
+        RestClient.Response response = client.putAsync(targetPath, settings.toString(), context.createSnapshotContext())
             .flatMap(resp -> {
                 if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_CREATED) {
                     return Mono.just(resp);
@@ -150,9 +158,10 @@ public class OpenSearchClient {
      * Get the status of a snapshot.  Returns an Optional; if the snapshot was found, it will be the snapshot status
      * and empty otherwise.
      */
-    public Optional<ObjectNode> getSnapshotStatus(String repoName, String snapshotName){
+    public Optional<ObjectNode> getSnapshotStatus(String repoName, String snapshotName,
+                                                  IRfsContexts.ICreateSnapshotContext context) {
         String targetPath = "_snapshot/" + repoName + "/" + snapshotName;
-        RestClient.Response response = client.getAsync(targetPath)
+        RestClient.Response response = client.getAsync(targetPath, context.createGetSnapshotContext())
             .flatMap(resp -> {
                 if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_NOT_FOUND) {
                     return Mono.just(resp);
@@ -184,9 +193,10 @@ public class OpenSearchClient {
      * Create a document if it does not already exist.  Returns an Optional; if the document was created, it
      * will be the created object and empty otherwise.
      */
-    public Optional<ObjectNode> createDocument(String indexName, String documentId, ObjectNode body) {
+    public Optional<ObjectNode> createDocument(String indexName, String documentId, ObjectNode body,
+                                  IRfsContexts.IRequestContext context) {
         String targetPath = indexName + "/_doc/" + documentId + "?op_type=create";
-        RestClient.Response response = client.putAsync(targetPath, body.toString())
+        RestClient.Response response = client.putAsync(targetPath, body.toString(), context)
             .flatMap(resp -> {
                 if (resp.code == HttpURLConnection.HTTP_CREATED || resp.code == HttpURLConnection.HTTP_CONFLICT) {
                     return Mono.just(resp);
@@ -211,11 +221,12 @@ public class OpenSearchClient {
     /*
      * Retrieve a document.  Returns an Optional; if the document was found, it will be the document and empty otherwise.
      */
-    public Optional<ObjectNode> getDocument(String indexName, String documentId) {
+    public Optional<ObjectNode> getDocument(String indexName, String documentId,
+                                           IRfsContexts.IRequestContext context) {
         String targetPath = indexName + "/_doc/" + documentId;
-        RestClient.Response response = client.getAsync(targetPath)
+        RestClient.Response response = client.getAsync(targetPath, context)
             .flatMap(resp -> {
-                if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_NOT_FOUND) { 
+                if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_NOT_FOUND) {
                     return Mono.just(resp);
                 } else {
                     String errorMessage = ("Could not retrieve document: " + indexName + "/" + documentId + ". Response Code: " + resp.code
@@ -233,7 +244,7 @@ public class OpenSearchClient {
             } catch (Exception e) {
                 String errorMessage = "Could not parse response for: " + indexName + "/" + documentId;
                 throw new OperationFailed(errorMessage, response);
-            }            
+            }
         } else if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
             return Optional.empty();
         } else {
@@ -246,8 +257,9 @@ public class OpenSearchClient {
      * Update a document using optimistic locking.  Returns an Optional; if the document was updated, it
      * will be the new value and empty otherwise.
      */
-    public Optional<ObjectNode> updateDocument(String indexName, String documentId, ObjectNode body) {
-        Optional<ObjectNode> document = getDocument(indexName, documentId);
+    public Optional<ObjectNode> updateDocument(String indexName, String documentId, ObjectNode body,
+                                  IRfsContexts.IRequestContext context) {
+        Optional<ObjectNode> document = getDocument(indexName, documentId, context);
         if (document.isEmpty()) {
             throw new UpdateFailed("Document not found: " + indexName + "/" + documentId);
         }
@@ -266,7 +278,7 @@ public class OpenSearchClient {
         upsertBody.set("doc", body);
 
         String targetPath = indexName + "/_update/" + documentId + "?if_seq_no=" + currentSeqNum + "&if_primary_term=" + currentPrimaryTerm;
-        RestClient.Response response = client.postAsync(targetPath, upsertBody.toString())
+        RestClient.Response response = client.postAsync(targetPath, upsertBody.toString(), context)
             .flatMap(resp -> {
                 if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_CONFLICT) {
                     return Mono.just(resp);
@@ -289,10 +301,11 @@ public class OpenSearchClient {
         }
     }
 
-    public Mono<BulkResponse> sendBulkRequest(String indexName, String body) {
+    public Mono<BulkResponse> sendBulkRequest(String indexName, String body,
+                                              IRfsContexts.IRequestContext context) {
         String targetPath = indexName + "/_bulk";
 
-        return client.postAsync(targetPath, body)
+        return client.postAsync(targetPath, body, context)
             .map(response -> new BulkResponse(response.code, response.body, response.message))
             .flatMap(resp -> {
                 if (resp.hasBadStatusCode() || resp.hasFailedOperations()) {
@@ -304,10 +317,9 @@ public class OpenSearchClient {
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)));
     }
 
-    public RestClient.Response refresh() {
+    public RestClient.Response refresh(IRfsContexts.IRequestContext context) {
         String targetPath = "_refresh";
-
-        return client.get(targetPath);
+        return client.get(targetPath, context);
     }
 
     public static class BulkResponse extends RestClient.Response {

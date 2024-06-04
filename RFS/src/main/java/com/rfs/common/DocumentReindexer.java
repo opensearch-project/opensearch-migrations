@@ -3,6 +3,7 @@ package com.rfs.common;
 import java.time.Duration;
 import java.util.List;
 
+import com.rfs.tracing.IRfsContexts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.document.Document;
@@ -15,14 +16,17 @@ public class DocumentReindexer {
     private static final Logger logger = LogManager.getLogger(DocumentReindexer.class);
     private static final int MAX_BATCH_SIZE = 1000; // Arbitrarily chosen
 
-    public static Mono<Void> reindex(String indexName, Flux<Document> documentStream, OpenSearchClient client) throws Exception {   
+    public static Mono<Void> reindex(String indexName,
+                                     Flux<Document> documentStream,
+                                     OpenSearchClient client,
+                                     IRfsContexts.IDocumentReindexContext context) {
 
         return documentStream
             .map(DocumentReindexer::convertDocumentToBulkSection)  // Convert each Document to part of a bulk operation
             .buffer(MAX_BATCH_SIZE) // Collect until you hit the batch size
             .doOnNext(bulk -> logger.info(bulk.size() + " documents in current bulk request"))
             .map(DocumentReindexer::convertToBulkRequestBody)  // Assemble the bulk request body from the parts
-            .flatMap(bulkJson -> client.sendBulkRequest(indexName, bulkJson) // Send the request
+            .flatMap(bulkJson -> client.sendBulkRequest(indexName, bulkJson, context.createBulkRequest()) // Send the request
                 .doOnSuccess(unused -> logger.debug("Batch succeeded"))
                 .doOnError(error -> logger.error("Batch failed", error))
                 .onErrorResume(e -> Mono.empty()) // Prevent the error from stopping the entire stream
@@ -48,9 +52,10 @@ public class DocumentReindexer {
         return builder.toString();
     }
 
-    public static void refreshAllDocuments(ConnectionDetails targetConnection) throws Exception {
+    public static void refreshAllDocuments(ConnectionDetails targetConnection,
+                                           IRfsContexts.IDocumentReindexContext context) throws Exception {
         // Send the request
         OpenSearchClient client = new OpenSearchClient(targetConnection);
-        client.refresh();
+        client.refresh(context.createRefreshContext());
     }
 }

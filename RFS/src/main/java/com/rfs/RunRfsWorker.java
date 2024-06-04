@@ -11,6 +11,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
+import com.rfs.tracing.RootRfsContext;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
@@ -40,6 +41,11 @@ import com.rfs.worker.MetadataRunner;
 import com.rfs.worker.Runner;
 import com.rfs.worker.SnapshotRunner;
 import com.rfs.worker.WorkerStep;
+
+import org.opensearch.migrations.tracing.ActiveContextTracker;
+import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
+import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.RootOtelContext;
 
 public class RunRfsWorker {
     private static final Logger logger = LogManager.getLogger(RunRfsWorker.class);
@@ -91,6 +97,14 @@ public class RunRfsWorker {
 
         @Parameter(names = {"--log-level"}, description = "What log level you want.  Default: 'info'", required = false, converter = Logging.ArgsConverter.class)
         public Level logLevel = Level.INFO;
+
+
+        @Parameter(required = false,
+                names = {"--otelCollectorEndpoint"},
+                arity = 1,
+                description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be" +
+                        "forwarded. If no value is provided, metrics will not be forwarded.")
+        String otelCollectorEndpoint;
     }
 
     public static void main(String[] args) throws Exception {
@@ -100,6 +114,10 @@ public class RunRfsWorker {
             .addObject(arguments)
             .build()
             .parse(args);
+
+        var rootContext = new RootRfsContext(
+                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "rfs"),
+                new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
 
         String snapshotName = arguments.snapshotName;
         Path s3LocalDirPath = Paths.get(arguments.s3LocalDirPath);
@@ -126,16 +144,19 @@ public class RunRfsWorker {
             GlobalState globalState = GlobalState.getInstance();
             OpenSearchClient sourceClient = new OpenSearchClient(sourceConnection);
             OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
-            CmsClient cmsClient = new OpenSearchCmsClient(targetClient);
+            CmsClient cmsClient = new OpenSearchCmsClient(targetClient, rootContext.createWorkingStateContext());
 
-            SnapshotCreator snapshotCreator = new S3SnapshotCreator(snapshotName, sourceClient, s3RepoUri, s3Region);
+            SnapshotCreator snapshotCreator = new S3SnapshotCreator(snapshotName, sourceClient, s3RepoUri, s3Region,
+                    rootContext.createSnapshotCreateContext());
             SnapshotRunner snapshotWorker = new SnapshotRunner(globalState, cmsClient, snapshotCreator);
             snapshotWorker.run();
 
             SourceRepo sourceRepo = S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
             SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
             GlobalMetadata.Factory metadataFactory = new GlobalMetadataFactory_ES_7_10(repoDataProvider);
-            GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateWhitelist, indexTemplateWhitelist);
+            GlobalMetadataCreator_OS_2_11 metadataCreator =
+                    new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateWhitelist,
+                            indexTemplateWhitelist, rootContext.createMetadataMigrationContext());
             Transformer transformer = TransformFunctions.getTransformer(ClusterVersion.ES_7_10, ClusterVersion.OS_2_11, awarenessDimensionality);
             MetadataRunner metadataWorker = new MetadataRunner(globalState, cmsClient, snapshotName, metadataFactory, metadataCreator, transformer);
             metadataWorker.run();
@@ -163,7 +184,7 @@ public class RunRfsWorker {
         String currentEntry = (cmsEntry.isPresent()) ? cmsEntry.toString() : "null";
         errorBlob.put("cmsEntry", currentEntry);
 
-        
+
         logger.error(errorBlob.toString());
     }
 }

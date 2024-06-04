@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Collectors;
 
+import com.rfs.tracing.IRfsContexts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.util.IOUtils;
@@ -50,13 +51,16 @@ public class SimpleRestoreFromSnapshot_ES_7_10 {
         return indices;
     }
 
-    public void updateTargetCluster(final List<IndexMetadata.Data> indices, final Path unpackedShardDataDir, final OpenSearchClient client) throws Exception {
+    public void updateTargetCluster(final List<IndexMetadata.Data> indices,
+                                    final Path unpackedShardDataDir,
+                                    final OpenSearchClient client,
+                                    IRfsContexts.IDocumentReindexContext context) {
         for (final IndexMetadata.Data index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
                 final var documents = new LuceneDocumentsReader().readDocuments(unpackedShardDataDir, index.getName(), shardId);
 
                 final var finalShardId = shardId;
-                DocumentReindexer.reindex(index.getName(), documents, client)
+                DocumentReindexer.reindex(index.getName(), documents, client, context)
                     .doOnError(error -> logger.error("Error during reindexing: " + error))
                     .doOnSuccess(done -> logger.info("Reindexing completed for index " + index.getName() + ", shard " + finalShardId))
                     .block();
