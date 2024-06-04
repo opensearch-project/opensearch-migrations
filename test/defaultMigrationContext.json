@@ -13,6 +13,7 @@
     "reindexFromSnapshotServiceEnabled": true,
     "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
     "dpPipelineTemplatePath": "../../../test/dp_pipeline_aws_integ.yaml",
-    "migrationConsoleEnableOSI": true
+    "migrationConsoleEnableOSI": true,
+    "migrationAPIEnabled": true
   }
 }
