@@ -312,8 +312,7 @@ public class ReindexFromSnapshot {
 
                     ObjectNode root = indexMetadata.toObjectNode();
                     ObjectNode transformedRoot = transformer.transformIndexMetadata(root);
-                    IndexMetadataData_OS_2_11 indexMetadataOS211 = new IndexMetadataData_OS_2_11(transformedRoot, indexMetadata.getId(), reindexName);
-                    indexCreator.create(reindexName, indexMetadataOS211);
+                    indexCreator.create(transformedRoot, reindexName, indexMetadata.getId());
                 }
             }
 

@@ -417,7 +417,7 @@ public class IndexStepTest {
         Mockito.when(indexMetadata.getId()).thenReturn("index-id");
         ObjectNode transformedRoot = Mockito.mock(ObjectNode.class);
         Mockito.when(testMembers.transformer.transformIndexMetadata(root)).thenReturn(transformedRoot);
-        Mockito.when(testMembers.indexCreator.create(eq(workItem.name), any(IndexMetadata.Data.class))).thenReturn(createResponse);        
+        Mockito.when(testMembers.indexCreator.create(transformedRoot,  workItem.name, "index-id")).thenReturn(createResponse);        
 
         // Run the test
         IndexStep.MigrateIndices testStep = new IndexStep.MigrateIndices(testMembers, List.of(workItem));

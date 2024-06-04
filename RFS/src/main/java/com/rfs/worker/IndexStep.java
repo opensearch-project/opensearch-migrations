@@ -16,7 +16,6 @@ import com.rfs.common.RfsException;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
-import com.rfs.version_os_2_11.IndexMetadataData_OS_2_11;
 
 public class IndexStep {
 
@@ -333,8 +332,7 @@ public class IndexStep {
                     ObjectNode root = indexMetadata.toObjectNode();
                     ObjectNode transformedRoot = members.transformer.transformIndexMetadata(root);
 
-                    IndexMetadataData_OS_2_11 indexMetadataOS211 = new IndexMetadataData_OS_2_11(transformedRoot, indexMetadata.getId(), workItem.name);
-                    members.indexCreator.create(workItem.name, indexMetadataOS211).ifPresentOrElse(
+                    members.indexCreator.create(transformedRoot, workItem.name, indexMetadata.getId()).ifPresentOrElse(
                         value -> logger.info("Index " + workItem.name + " created successfully"),
                         () -> logger.info("Index " + workItem.name + " already existed; no work required")
                     );

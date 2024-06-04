@@ -1,7 +1,7 @@
 package com.rfs.worker;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.fail;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.*;
 
 import java.util.Optional;
@@ -32,18 +32,13 @@ public class IndexRunnerTest {
         when(globalState.getPhase()).thenReturn(GlobalState.Phase.INDEX_IN_PROGRESS);        
 
         // Run the test
-        try {
-            IndexRunner testRunner = new IndexRunner(globalState, cmsClient, snapshotName, metadataFactory, creator, transformer);
-            testRunner.run();
-        } catch (IndexRunner.IndexMigrationPhaseFailed e) {
-            assertEquals(GlobalState.Phase.INDEX_IN_PROGRESS, e.phase);
-            assertEquals(IndexStep.GetEntry.class, e.nextStep.getClass());
-            assertEquals(Optional.empty(), e.cmsEntry);
-            assertEquals(testException, e.e);
+        IndexRunner testRunner = new IndexRunner(globalState, cmsClient, snapshotName, metadataFactory, creator, transformer);
+        final var e = assertThrows(IndexRunner.IndexMigrationPhaseFailed.class, () -> testRunner.run());
 
-        } catch (Exception e) {
-            fail("Unexpected exception thrown: " + e.getClass().getName());
-        }
-    }
-    
+        // Verify the results
+        assertEquals(GlobalState.Phase.INDEX_IN_PROGRESS, e.phase);
+        assertEquals(IndexStep.GetEntry.class, e.nextStep.getClass());
+        assertEquals(Optional.empty(), e.cmsEntry);
+        assertEquals(testException, e.e);
+    }    
 }

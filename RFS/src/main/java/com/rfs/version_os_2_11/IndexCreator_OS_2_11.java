@@ -4,7 +4,6 @@ import java.util.Optional;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.OpenSearchClient;
 
 public class IndexCreator_OS_2_11 {
@@ -15,7 +14,9 @@ public class IndexCreator_OS_2_11 {
         this.client = client;
     }
 
-    public Optional<ObjectNode> create(String indexName, IndexMetadata.Data indexMetadata) {
+    public Optional<ObjectNode> create(ObjectNode root, String indexName, String indexId) {
+        IndexMetadataData_OS_2_11 indexMetadata = new IndexMetadataData_OS_2_11(root, indexId, indexName);
+
         // Remove some settings which will cause errors if you try to pass them to the API
         ObjectNode settings = indexMetadata.getSettings();
 
