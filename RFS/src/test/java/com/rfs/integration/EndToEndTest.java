@@ -5,6 +5,7 @@ import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ArgumentsSource;
 
+import com.rfs.framework.ElasticsearchContainer;
 import com.rfs.framework.OpenSearchContainer;
 import com.rfs.framework.SimpleRestoreFromSnapshot;
 
@@ -26,7 +27,7 @@ public class EndToEndTest {
     public void ES_v6_8_Migration(final OpenSearchContainer.Version targetVersion) throws Exception {
         // Setup
         // PSEUDO: Create a source cluster running ES 6.8
-        // PSEUDO: Create 2 index templates on the cluster
+        // PSEUDO: Create 2 templates on the cluster, see https://www.elastic.co/guide/en/elasticsearch/reference/6.8/indices-templates.html
         //    - logs-*
         //    - data-rolling
         // PSEUDO: Create 5 indices on the cluster
@@ -35,8 +36,8 @@ public class EndToEndTest {
         //    - data-rolling
         //    - playground
         //    - playground2
-        // PSEUDO: Add documents 
-        //    - 19x http-data docs into logs-01-2345 
+        // PSEUDO: Add documents
+        //    - 19x http-data docs into logs-01-2345
         //    - 23x http-data docs into logs-12-3456
         //    - 29x data-rolling
         //    - 5x geonames docs into playground
@@ -46,7 +47,7 @@ public class EndToEndTest {
 
         // Action
         // PSEUDO: Migrate from the snapshot
-        // simpleRfsInstance.fullMigrationViaLocalSnapshot(targetCluster.toString()); 
+        // simpleRfsInstance.fullMigrationViaLocalSnapshot(targetCluster.toString());
         // PSEUDO: Shutdown source cluster
 
         // Validation
@@ -59,23 +60,69 @@ public class EndToEndTest {
         //    - playground
         //    - playground2
         // PSEUDO: Verify documents
-        
+
         // PSEUDO: Additional validation:
         //   - Mapping type parameter is removed
-        // 
+        //
     }
 
     @ParameterizedTest(name = "Target OpenSearch {0}")
     @ArgumentsSource(SupportedTargetCluster.class)
     @Disabled
-    public void ES_v7_10_Migration(final OpenSearchContainer.Version targetVersion) throws Exception {
-        // Placeholder
+    public void migrateFrom_ES_v7_10(final OpenSearchContainer.Version targetVersion) throws Exception {
+        // Setup
+        // PSEUDO: Create a source cluster running ES 6.8
+
+        migrateFrom_ES_v7_X(null);
     }
 
     @ParameterizedTest(name = "Target OpenSearch {0}")
     @ArgumentsSource(SupportedTargetCluster.class)
     @Disabled
-    public void ES_v7_17_Migration(final OpenSearchContainer.Version targetVersion) throws Exception {
-        // Placeholder
+    public void migrateFrom_ES_v7_17(final OpenSearchContainer.Version targetVersion) throws Exception {
+        // Setup
+        // PSEUDO: Create a source cluster running ES 6.8
+
+        migrateFrom_ES_v7_X(null);
+    }
+
+    private void migrateFrom_ES_v7_X(final ElasticsearchContainer sourceCluster) {
+        // PSEUDO: Create 2 index templates on the cluster, see https://www.elastic.co/guide/en/elasticsearch/reference/7.17/index-templates.html
+        //    - logs-*
+        //    - data-rolling
+        // PSEUDO: Create 5 indices on the cluster
+        //    - logs-01-2345
+        //    - logs-12-3456
+        //    - data-rolling
+        //    - playground
+        //    - playground2
+        // PSEUDO: Add documents
+        //    - 19x http-data docs into logs-01-2345
+        //    - 23x http-data docs into logs-12-3456
+        //    - 29x data-rolling
+        //    - 5x geonames docs into playground
+        //    - 7x geopoint into playground2
+
+        // PSEUDO: Create a target cluster running OS 2.X (Where x is the latest released version)
+
+        // Action
+        // PSEUDO: Migrate from the snapshot
+        // simpleRfsInstance.fullMigrationViaLocalSnapshot(targetCluster.toString());
+        // PSEUDO: Shutdown source cluster
+
+        // Validation
+
+        // PSEUDO: Verify creation of 2 index templates on the clustqer
+        // PSEUDO: Verify creation of 5 indices on the cluster
+        //    - logs-01-2345
+        //    - logs-12-3456
+        //    - data-rolling
+        //    - playground
+        //    - playground2
+        // PSEUDO: Verify documents
+
+        // PSEUDO: Additional validation:
+        //   - Mapping type parameter is removed
+        //
     }
 }
