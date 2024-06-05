@@ -1,5 +1,7 @@
 package com.rfs.integration;
 
+import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ArgumentsSource;
 
@@ -20,6 +22,7 @@ public class EndToEndTest {
 
     @ParameterizedTest(name = "Target OpenSearch {0}")
     @ArgumentsSource(SupportedTargetCluster.class)
+    @Disabled
     public void ES_v6_8_Migration(final OpenSearchContainer.Version targetVersion) throws Exception {
         // Setup
         // PSEUDO: Create a source cluster running ES 6.8
@@ -64,12 +67,14 @@ public class EndToEndTest {
 
     @ParameterizedTest(name = "Target OpenSearch {0}")
     @ArgumentsSource(SupportedTargetCluster.class)
+    @Disabled
     public void ES_v7_10_Migration(final OpenSearchContainer.Version targetVersion) throws Exception {
         // Placeholder
     }
 
     @ParameterizedTest(name = "Target OpenSearch {0}")
     @ArgumentsSource(SupportedTargetCluster.class)
+    @Disabled
     public void ES_v7_17_Migration(final OpenSearchContainer.Version targetVersion) throws Exception {
         // Placeholder
     }
