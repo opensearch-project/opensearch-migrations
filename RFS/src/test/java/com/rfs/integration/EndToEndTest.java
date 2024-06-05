@@ -1,6 +1,9 @@
 package com.rfs.integration;
 
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ArgumentsSource;
+
+import com.rfs.framework.OpenSearchContainer;
 import com.rfs.framework.SimpleRestoreFromSnapshot;
 
 /**
@@ -8,16 +11,15 @@ import com.rfs.framework.SimpleRestoreFromSnapshot;
  */
 public class EndToEndTest {
 
-    public Object sourceCluster;
-    public Object targetCluster;
-    public SimpleRestoreFromSnapshot simpleRfsInstance;
+    protected Object sourceCluster;
+    protected Object targetCluster;
+    protected SimpleRestoreFromSnapshot simpleRfsInstance;
 
-    @Test
-    public void ES_v6_8_to_OS_v2_X_Migration() throws Exception {
+    @ParameterizedTest(name = "Target OpenSearch {0}")
+    @ArgumentsSource(SupportedTargetCluster.class)
+    public void ES_v6_8_Migration(final OpenSearchContainer.Version targetVersion) throws Exception {
         // Setup
         // PSEUDO: Create a source cluster running ES 6.8
-        // PSEUDO: Update global cluster state
-        //    - Change a 6.8 relevant setting
         // PSEUDO: Create 2 index templates on the cluster
         //    - logs-*
         //    - data-rolling
@@ -38,13 +40,11 @@ public class EndToEndTest {
 
         // Action
         // PSEUDO: Migrate from the snapshot
-        simpleRfsInstance.fullMigrationViaLocalSnapshot(targetCluster.toString());
+        // simpleRfsInstance.fullMigrationViaLocalSnapshot(targetCluster.toString()); 
         // PSEUDO: Shutdown source cluster
 
         // Validation
 
-        // PSEUDO: Verfiy global cluster state
-        //    - 6.8 Setting is transformed
         // PSEUDO: Verify creation of 2 index templates on the cluster
         // PSEUDO: Verify creation of 5 indices on the cluster
         //    - logs-01-2345
@@ -57,9 +57,17 @@ public class EndToEndTest {
         // PSEUDO: Additional validation:
         //   - Mapping type parameter is removed
         // 
+    }
 
-        // Looking for inspriation?
-        //   - OS Breaking Changes https://opensearch.org/docs/latest/breaking-changes/
-        //   - ES Breaking Changes https://www.elastic.co/guide/en/elasticsearch/reference/7.0/breaking-changes-7.0.html
+    @ParameterizedTest(name = "Target OpenSearch {0}")
+    @ArgumentsSource(SupportedTargetCluster.class)
+    public void ES_v7_10_Migration(final OpenSearchContainer.Version targetVersion) throws Exception {
+        // Placeholder
+    }
+
+    @ParameterizedTest(name = "Target OpenSearch {0}")
+    @ArgumentsSource(SupportedTargetCluster.class)
+    public void ES_v7_17_Migration(final OpenSearchContainer.Version targetVersion) throws Exception {
+        // Placeholder
     }
 }
