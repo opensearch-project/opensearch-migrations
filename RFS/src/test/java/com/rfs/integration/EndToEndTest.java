@@ -6,9 +6,12 @@ import org.junit.jupiter.params.provider.ArgumentsSource;
 import com.rfs.framework.OpenSearchContainer;
 import com.rfs.framework.SimpleRestoreFromSnapshot;
 
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Tests focused on setting up whole source clusters, performing a migration, and validation on the target cluster
  */
+@Slf4j
 public class EndToEndTest {
 
     protected Object sourceCluster;

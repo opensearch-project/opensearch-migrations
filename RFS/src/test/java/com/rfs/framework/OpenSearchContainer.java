@@ -21,9 +21,10 @@ public class OpenSearchContainer implements AutoCloseable {
     public OpenSearchContainer(final Version version) {
         this.version = version;
         container = new GenericContainer<>(DockerImageName.parse(this.version.imageName))
-                .withExposedPorts(9200, 9300)
+                .withExposedPorts(9200)
                 .withEnv("discovery.type", "single-node")
                 .withEnv("plugins.security.disabled", "true")
+                .withEnv("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
                 .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(1)));
     }
 
@@ -33,9 +34,14 @@ public class OpenSearchContainer implements AutoCloseable {
         return "http://" + address + ":" + port;
     }
 
+    public void start() {
+        log.info("Starting version: " + version);
+        container.start();
+    }
+
     @Override
     public void close() throws Exception {
-        log.info("Stopping version:" + version.prettyName);
+        log.info("Stopping version: " + version);
         log.debug("Instance logs:\n" + container.getLogs());
         container.stop();
     }
