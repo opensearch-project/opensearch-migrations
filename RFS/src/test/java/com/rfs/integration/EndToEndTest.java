@@ -1,12 +1,12 @@
 package com.rfs.integration;
 
 import org.junit.jupiter.api.Disabled;
-import org.junit.jupiter.api.condition.DisabledIfSystemProperty;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ArgumentsSource;
 
 import com.rfs.framework.ElasticsearchContainer;
 import com.rfs.framework.OpenSearchContainer;
+import com.rfs.framework.OpenSearchContainer.Version;
 import com.rfs.framework.SimpleRestoreFromSnapshot;
 
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +24,7 @@ public class EndToEndTest {
     @ParameterizedTest(name = "Target OpenSearch {0}")
     @ArgumentsSource(SupportedTargetCluster.class)
     @Disabled
-    public void ES_v6_8_Migration(final OpenSearchContainer.Version targetVersion) throws Exception {
+    public void migrateFrom_ES_v6_8(final OpenSearchContainer.Version targetVersion) throws Exception {
         // Setup
         // PSEUDO: Create a source cluster running ES 6.8
         // PSEUDO: Create 2 templates on the cluster, see https://www.elastic.co/guide/en/elasticsearch/reference/6.8/indices-templates.html
@@ -62,8 +62,9 @@ public class EndToEndTest {
         // PSEUDO: Verify documents
 
         // PSEUDO: Additional validation:
-        //   - Mapping type parameter is removed
-        //
+        if (targetVersion == Version.V2_14_0) {
+            //   - Mapping type parameter is removed https://opensearch.org/docs/latest/breaking-changes/#remove-mapping-types-parameter
+        }
     }
 
     @ParameterizedTest(name = "Target OpenSearch {0}")
