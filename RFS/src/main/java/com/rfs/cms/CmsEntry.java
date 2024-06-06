@@ -3,12 +3,16 @@ package com.rfs.cms;
 
 import com.rfs.common.RfsException;
 
+import lombok.RequiredArgsConstructor;
+
 public class CmsEntry {
     public static enum EntryType {
         SNAPSHOT,
         METADATA,
         INDEX,
         INDEX_WORK_ITEM,
+        DOCUMENTS,
+        DOCUMENTS_WORK_ITEM
     }
 
     public abstract static class Base {
@@ -71,16 +75,11 @@ public class CmsEntry {
     /*
      * Used to track the progress of taking a snapshot of the source cluster
      */
+    @RequiredArgsConstructor
     public static class Snapshot extends Base {
         public final EntryType type = EntryType.SNAPSHOT;
         public final String name;
         public final SnapshotStatus status;
-
-        public Snapshot(String name, SnapshotStatus status) {
-            super();
-            this.name = name;
-            this.status = status;
-        }
 
         @Override
         public String toString() {
@@ -101,18 +100,12 @@ public class CmsEntry {
     /*
      * Used to track the progress of migrating all the templates from the source cluster
      */
+    @RequiredArgsConstructor
     public static class Metadata extends Leasable {
         public final EntryType type = EntryType.METADATA;
         public final MetadataStatus status;
         public final String leaseExpiry;
         public final Integer numAttempts;
-
-        public Metadata(MetadataStatus status, String leaseExpiry, int numAttempts) {
-            super();
-            this.status = status;
-            this.leaseExpiry = leaseExpiry;
-            this.numAttempts = numAttempts;
-        }
 
         @Override
         public String toString() {
@@ -135,18 +128,12 @@ public class CmsEntry {
     /*
      * Used to track the progress of migrating all the indices from the soruce cluster
      */
+    @RequiredArgsConstructor
     public static class Index extends Leasable {
         public final EntryType type = EntryType.INDEX;
         public final IndexStatus status;
         public final String leaseExpiry;
         public final Integer numAttempts;
-
-        public Index(IndexStatus status, String leaseExpiry, int numAttempts) {
-            super();
-            this.status = status;
-            this.leaseExpiry = leaseExpiry;
-            this.numAttempts = numAttempts;
-        }
 
         @Override
         public String toString() {
@@ -168,6 +155,7 @@ public class CmsEntry {
     /*
      * Used to track the migration of a particular index from the source cluster
      */
+    @RequiredArgsConstructor
     public static class IndexWorkItem extends Base {
         public final EntryType type = EntryType.INDEX_WORK_ITEM;
         public static final int ATTEMPTS_SOFT_LIMIT = 3; // will make at least this many attempts; arbitrarily chosen
@@ -177,14 +165,6 @@ public class CmsEntry {
         public final Integer numAttempts;
         public final Integer numShards;
 
-        public IndexWorkItem(String name, IndexWorkItemStatus status, int numAttempts, int numShards) {
-            super();
-            this.name = name;
-            this.status = status;
-            this.numAttempts = numAttempts;
-            this.numShards = numShards;
-        }
-
         @Override
         public String toString() {
             return "IndexWorkItem("
@@ -193,6 +173,66 @@ public class CmsEntry {
                 + "status=" + status.toString() + ","
                 + "numAttempts=" + numAttempts.toString() + ","
                 + "numShards=" + numShards.toString() +
+                ")";
+        }
+    }
+
+    public static enum DocumentsStatus {
+        SETUP,
+        IN_PROGRESS,
+        COMPLETED,
+        FAILED,
+    }
+
+    /*
+     * Used to track the progress of migrating all the documents from the soruce cluster
+     */
+    @RequiredArgsConstructor
+    public static class Documents extends Leasable {
+        public final EntryType type = EntryType.DOCUMENTS;
+        public final DocumentsStatus status;
+        public final String leaseExpiry;
+        public final Integer numAttempts;
+
+        @Override
+        public String toString() {
+            return "Documents("
+                + "type='" + type.toString() + ","
+                + "status=" + status.toString() + ","
+                + "leaseExpiry=" + leaseExpiry + ","
+                + "numAttempts=" + numAttempts.toString() +
+                ")";
+        }
+    }
+
+    public static enum DocumentsWorkItemStatus {
+        NOT_STARTED,
+        COMPLETED,
+        FAILED,
+    }
+
+    /*
+     * Used to track the migration of a particular index from the source cluster
+     */
+    @RequiredArgsConstructor
+    public static class DocumentsWorkItem extends Leasable {
+        public final EntryType type = EntryType.DOCUMENTS_WORK_ITEM;
+
+        public final String indexName;
+        public final Integer shardId;
+        public final DocumentsWorkItemStatus status;
+        public final String leaseExpiry;
+        public final Integer numAttempts;
+
+        @Override
+        public String toString() {
+            return "DocumentsWorkItem("
+                + "type='" + type.toString() + ","
+                + "indexName=" + indexName.toString() + ","
+                + "shardId=" + shardId.toString() + ","
+                + "status=" + status.toString() + ","
+                + "leaseExpiry=" + leaseExpiry.toString() + ","
+                + "numAttempts=" + numAttempts.toString() +
                 ")";
         }
     }

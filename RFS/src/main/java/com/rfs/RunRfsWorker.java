@@ -21,23 +21,30 @@ import com.rfs.cms.CmsEntry;
 import com.rfs.cms.OpenSearchCmsClient;
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
+import com.rfs.common.DocumentReindexer;
 import com.rfs.common.GlobalMetadata;
 import com.rfs.common.IndexMetadata;
 import com.rfs.common.Logging;
+import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Uri;
+import com.rfs.common.ShardMetadata;
 import com.rfs.common.S3Repo;
 import com.rfs.common.SnapshotCreator;
 import com.rfs.common.SourceRepo;
 import com.rfs.common.S3SnapshotCreator;
 import com.rfs.common.SnapshotRepo;
+import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.transformers.TransformFunctions;
 import com.rfs.transformers.Transformer;
+import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
 import com.rfs.version_es_7_10.GlobalMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.IndexMetadataFactory_ES_7_10;
+import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
 import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
+import com.rfs.worker.DocumentsRunner;
 import com.rfs.worker.GlobalState;
 import com.rfs.worker.IndexRunner;
 import com.rfs.worker.MetadataRunner;
@@ -60,6 +67,9 @@ public class RunRfsWorker {
 
         @Parameter(names = {"--s3-region"}, description = "The AWS Region the S3 bucket is in, like: us-east-2", required = true)
         public String s3Region;
+
+        @Parameter(names = {"--lucene-dir"}, description = "The absolute path to the directory where we'll put the Lucene docs", required = true)
+        public String luceneDirPath;
 
         @Parameter(names = {"--source-host"}, description = "The source host and port (e.g. http://localhost:9200)", required = true)
         public String sourceHost;
@@ -113,6 +123,7 @@ public class RunRfsWorker {
         Path s3LocalDirPath = Paths.get(arguments.s3LocalDirPath);
         String s3RepoUri = arguments.s3RepoUri;
         String s3Region = arguments.s3Region;
+        Path luceneDirPath = Paths.get(arguments.luceneDirPath);
         String sourceHost = arguments.sourceHost;
         String sourceUser = arguments.sourceUser;
         String sourcePass = arguments.sourcePass;
@@ -152,6 +163,13 @@ public class RunRfsWorker {
             IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
             IndexRunner indexWorker = new IndexRunner(globalState, cmsClient, snapshotName, indexMetadataFactory, indexCreator, transformer);
             indexWorker.run();
+
+            ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
+            SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(sourceRepo, luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
+            LuceneDocumentsReader reader = new LuceneDocumentsReader(luceneDirPath);
+            DocumentReindexer reindexer = new DocumentReindexer(targetClient);
+            DocumentsRunner documentsWorker = new DocumentsRunner(globalState, cmsClient, snapshotName, indexMetadataFactory, shardMetadataFactory, unpacker, reader, reindexer);
+            documentsWorker.run();
             
         } catch (Runner.PhaseFailed e) {
             logPhaseFailureRecord(e.phase, e.nextStep, e.cmsEntry, e.e);
