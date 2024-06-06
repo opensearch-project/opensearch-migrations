@@ -1,0 +1,21 @@
+version: '3.7'
+services:
+
+  jenkins:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ~/.aws:/root/.aws
+      - ..:/opensearch-migrations-src
+      - ./buildAll.xml:/var/jenkins_home/jobs/buildAll/config.xml
+      - ./buildFromLocal.xml:/var/jenkins_home/jobs/localWorkspace/config.xml
+      - /var/run/docker.sock:/var/run/docker.sock
+    environment:
+      - ADMIN_PASSWORD=admin
+      #- repoPath=/opensearch-migrations-src
+#      - CASC_JENKINS_CONFIG=/var/jenkins_home/casc_configs/configuration.yaml
+    #- repoPath=https://github.com/opensearch-project/opensearch-migrations
+    ports:
+      - "8080:8080"
+      - "50000:50000"

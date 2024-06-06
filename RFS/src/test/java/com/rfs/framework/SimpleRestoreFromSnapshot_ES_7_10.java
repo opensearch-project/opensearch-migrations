@@ -14,6 +14,7 @@ import com.rfs.common.FileSystemRepo;
 import com.rfs.common.IndexMetadata;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
+import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.version_es_7_10.IndexMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
@@ -30,12 +31,12 @@ public class SimpleRestoreFromSnapshot_ES_7_10 {
         IOUtils.rm(unpackedShardDataDir);
 
         final var repo = new FileSystemRepo(Path.of(localPath));
-        final var snapShotProvider = new SnapshotRepoProvider_ES_7_10(repo);
+        SnapshotRepo.Provider snapShotProvider = new SnapshotRepoProvider_ES_7_10(repo);
         final List<IndexMetadata.Data> indices = snapShotProvider.getIndicesInSnapshot(snapshotName)
             .stream()
             .map(index -> {
                 try {
-                    return new IndexMetadataFactory_ES_7_10().fromRepo(repo, snapShotProvider, snapshotName, index.getName());
+                    return new IndexMetadataFactory_ES_7_10(snapShotProvider).fromRepo(snapshotName, index.getName());
                 } catch (final Exception e) {
                     throw new RuntimeException(e);
                 }

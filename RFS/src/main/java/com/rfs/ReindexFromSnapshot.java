@@ -304,9 +304,9 @@ public class ReindexFromSnapshot {
                 logger.info("Reading Index Metadata for index: " + index.getName());
                 IndexMetadata.Data indexMetadata;
                 if (sourceVersion == ClusterVersion.ES_6_8) {
-                    indexMetadata = new IndexMetadataFactory_ES_6_8().fromRepo(repo, repoDataProvider, snapshotName, index.getName());
+                    indexMetadata = new IndexMetadataFactory_ES_6_8(repoDataProvider).fromRepo(snapshotName, index.getName());
                 } else {
-                    indexMetadata = new IndexMetadataFactory_ES_7_10().fromRepo(repo, repoDataProvider, snapshotName, index.getName());
+                    indexMetadata = new IndexMetadataFactory_ES_7_10(repoDataProvider).fromRepo(snapshotName, index.getName());
                 }
                 indexMetadatas.add(indexMetadata);
             }
@@ -319,14 +319,14 @@ public class ReindexFromSnapshot {
                 // ==========================================================================================================
                 logger.info("==================================================================");
                 logger.info("Attempting to recreate the indices...");
+                IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
                 for (IndexMetadata.Data indexMetadata : indexMetadatas) {
                     String reindexName = indexMetadata.getName() + indexSuffix;
                     logger.info("Recreating index " + indexMetadata.getName() + " as " + reindexName + " on target...");
 
                     ObjectNode root = indexMetadata.toObjectNode();
                     ObjectNode transformedRoot = transformer.transformIndexMetadata(root);
-                    IndexMetadataData_OS_2_11 indexMetadataOS211 = new IndexMetadataData_OS_2_11(transformedRoot, indexMetadata.getId(), reindexName);
-                    IndexCreator_OS_2_11.create(reindexName, indexMetadataOS211, targetClient, rootContext.createIndexContext());
+                    indexCreator.create(transformedRoot, reindexName, indexMetadata.getId(), rootContext.createIndexContext());
                 }
             }
 

@@ -8,6 +8,7 @@ import org.apache.logging.log4j.Logger;
 import com.rfs.cms.CmsClient;
 import com.rfs.cms.CmsEntry;
 import com.rfs.cms.CmsEntry.SnapshotStatus;
+import com.rfs.common.RfsException;
 import com.rfs.common.SnapshotCreator;
 import com.rfs.common.SnapshotCreator.SnapshotCreationFailed;
 
@@ -24,6 +25,14 @@ public class SnapshotStep {
             this.cmsClient = cmsClient;
             this.snapshotCreator = snapshotCreator;
             this.cmsEntry = Optional.empty();
+        }
+
+        // A convient way to check if the CMS entry is present before retrieving it.  In some places, it's fine/expected
+        // for the CMS entry to be missing, but in others, it's a problem.
+        public CmsEntry.Snapshot getCmsEntryNotMissing() {
+            return cmsEntry.orElseThrow(
+                () -> new MissingSnapshotEntry()
+            );
         }
     }
 
@@ -87,7 +96,7 @@ public class SnapshotStep {
         @Override
         public void run() {
             logger.info("Snapshot CMS Entry not found, attempting to create it...");
-            members.cmsClient.createSnapshotEntry(members.snapshotCreator.getSnapshotName());
+            members.cmsEntry = members.cmsClient.createSnapshotEntry(members.snapshotCreator.getSnapshotName());
             logger.info("Snapshot CMS Entry created");
         }
 
@@ -107,12 +116,16 @@ public class SnapshotStep {
 
         @Override
         public void run() {
+            // We only get here if we know we want to create a snapshot, so we know the CMS entry should not be null
+            CmsEntry.Snapshot lastCmsEntry = members.getCmsEntryNotMissing();
+
             logger.info("Attempting to initiate the snapshot...");
             members.snapshotCreator.registerRepo();
             members.snapshotCreator.createSnapshot();
 
             logger.info("Snapshot in progress...");
-            members.cmsClient.updateSnapshotEntry(members.snapshotCreator.getSnapshotName(), SnapshotStatus.IN_PROGRESS);
+            CmsEntry.Snapshot updatedEntry = new CmsEntry.Snapshot(members.snapshotCreator.getSnapshotName(), SnapshotStatus.IN_PROGRESS);
+            members.cmsEntry = members.cmsClient.updateSnapshotEntry(updatedEntry, lastCmsEntry);
         }
 
         @Override
@@ -170,7 +183,10 @@ public class SnapshotStep {
 
         @Override
         public void run() {
-            members.cmsClient.updateSnapshotEntry(members.snapshotCreator.getSnapshotName(), SnapshotStatus.COMPLETED);
+            CmsEntry.Snapshot lastCmsEntry = members.getCmsEntryNotMissing();
+            CmsEntry.Snapshot updatedEntry = new CmsEntry.Snapshot(members.snapshotCreator.getSnapshotName(), SnapshotStatus.COMPLETED);
+            members.cmsClient.updateSnapshotEntry(updatedEntry, lastCmsEntry);
+
             members.globalState.updatePhase(GlobalState.Phase.SNAPSHOT_COMPLETED);
             logger.info("Snapshot completed, exiting Snapshot Phase...");
         }
@@ -195,13 +211,26 @@ public class SnapshotStep {
         @Override
         public void run() {
             logger.error("Snapshot creation failed");
-            members.cmsClient.updateSnapshotEntry(members.snapshotCreator.getSnapshotName(), SnapshotStatus.FAILED);
+            CmsEntry.Snapshot lastCmsEntry = members.getCmsEntryNotMissing();
+            CmsEntry.Snapshot updatedEntry = new CmsEntry.Snapshot(members.snapshotCreator.getSnapshotName(), SnapshotStatus.FAILED);
+            members.cmsClient.updateSnapshotEntry(updatedEntry, lastCmsEntry);
+
             members.globalState.updatePhase(GlobalState.Phase.SNAPSHOT_FAILED);
         }
 
         @Override
         public WorkerStep nextStep() {
             throw e;
+        }
+    }
+
+
+
+    public static class MissingSnapshotEntry extends RfsException {
+        public MissingSnapshotEntry() {
+            super("The Snapshot CMS entry we expected to be stored in local memory was null."
+                + "  This should never happen."
+            );
         }
     }
 }

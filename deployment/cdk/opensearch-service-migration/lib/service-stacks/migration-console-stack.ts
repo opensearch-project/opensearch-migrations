@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup, Port, ISecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {CpuArchitecture, MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping, Protocol, MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -13,7 +13,7 @@ import {
 import {StreamingSourceType} from "../streaming-source-type";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {RemovalPolicy} from "aws-cdk-lib";
-
+import { ServicesYaml } from "../migration-services-yaml";
 
 export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationsSolutionVersion: string,
@@ -21,11 +21,13 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly streamingSourceType: StreamingSourceType,
     readonly fetchMigrationEnabled: boolean,
     readonly fargateCpuArch: CpuArchitecture,
-    readonly migrationConsoleEnableOSI: boolean
+    readonly migrationConsoleEnableOSI: boolean,
+    readonly migrationAPIEnabled?: boolean,
+    readonly servicesYaml: ServicesYaml,
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
-    
+
     createMSKAdminIAMPolicies(stage: string, deployId: string): PolicyStatement[] {
         const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${stage}/${deployId}/mskClusterARN`);
         const mskClusterName = StringParameter.valueForStringParameter(this, `/migration/${stage}/${deployId}/mskClusterName`);
@@ -113,6 +115,11 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             SecurityGroup.fromSecurityGroupId(this, "replayerOutputAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputAccessSecurityGroupId`))
         ]
 
+        let servicePortMappings: PortMapping[]|undefined
+        let serviceDiscoveryPort: number|undefined
+        let serviceDiscoveryEnabled = false
+        let imageCommand: string[]|undefined
+
         const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
         const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
 
@@ -147,7 +154,26 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             effect: Effect.ALLOW,
             resources: [allReplayerServiceArn, reindexFromSnapshotServiceArn],
             actions: [
-                "ecs:UpdateService"
+                "ecs:UpdateService",
+                "ecs:DescribeServices"
+            ]
+        })
+
+        const allClusterTasksArn = `arn:aws:ecs:${props.env?.region}:${props.env?.account}:task/migration-${props.stage}-ecs-cluster/*`
+        const clusterTasksPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [allClusterTasksArn],
+            actions: [
+                "ecs:StopTask",
+                "ecs:DescribeTasks"
+            ]
+        })
+
+        const listTasksPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: ["*"],
+            actions: [
+                "ecs:ListTasks",
             ]
         })
 
@@ -180,17 +206,42 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
+        // Allow Console to retrieve Cloudwatch Metrics
+        const getMetricsPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: ["*"],
+            actions: [
+                "cloudwatch:ListMetrics",
+                "cloudwatch:GetMetricData"
+            ]
+        })
+
+        // Upload the services.yaml file to Parameter Store
+        let servicesYaml = props.servicesYaml
+        servicesYaml.source_cluster = {
+            'endpoint': `https://capture-proxy-es.migration.${props.stage}.local:9200`,
+            'no_auth': ''
+        }
+        // Create a new parameter in Parameter Store
+        new StringParameter(this, 'SSMParameterServicesYamlFile', {
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/servicesYamlFile`,
+            stringValue: servicesYaml.stringify(),
+        });
+
+
         const environment: { [key: string]: string; } = {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
             // Temporary fix for source domain endpoint until we move to either alb or migration console yaml configuration
             "SOURCE_DOMAIN_ENDPOINT": `https://capture-proxy-es.migration.${props.stage}.local:9200`,
             "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints,
             "MIGRATION_STAGE": props.stage,
-            "MIGRATION_SOLUTION_VERSION": props.migrationsSolutionVersion
+            "MIGRATION_SOLUTION_VERSION": props.migrationsSolutionVersion,
+            "MIGRATION_SERVICES_YAML_PARAMETER": `/migration/${props.stage}/${props.defaultDeployId}/servicesYamlFile`,
         }
+
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
-        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy]
+        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy, listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
@@ -203,7 +254,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 effect: Effect.ALLOW,
                 resources: [fetchMigrationTaskDefArn],
                 actions: [
-                    "ecs:RunTask"
+                    "ecs:RunTask",
+                    "ecs:StopTask"
                 ]
             })
             const fetchMigrationTaskRoleArn = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskRoleArn`);
@@ -218,6 +270,18 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             })
             servicePolicies.push(fetchMigrationTaskRunPolicy)
             servicePolicies.push(fetchMigrationPassRolePolicy)
+        }
+
+        if (props.migrationAPIEnabled) {
+            servicePortMappings = [{
+                name: "migration-console-connect",
+                hostPort: 8000,
+                containerPort: 8000,
+                protocol: Protocol.TCP
+            }]
+            serviceDiscoveryPort = 8000
+            serviceDiscoveryEnabled = true
+            imageCommand = ['/bin/sh', '-c', 'python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000']
         }
 
         if (props.migrationConsoleEnableOSI) {
@@ -240,6 +304,10 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             serviceName: "migration-console",
             dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/migrationConsole"),
             securityGroups: securityGroups,
+            portMappings: servicePortMappings,
+            dockerImageCommand: imageCommand,
+            serviceDiscoveryEnabled: serviceDiscoveryEnabled,
+            serviceDiscoveryPort: serviceDiscoveryPort,
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
             environment: environment,
