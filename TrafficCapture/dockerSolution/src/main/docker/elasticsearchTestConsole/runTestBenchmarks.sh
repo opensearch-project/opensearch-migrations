@@ -1,7 +1,13 @@
 #!/bin/bash
 
 # Default values
-endpoint="https://capture-proxy-es:9200"
+
+# Check for the presence of SOURCE_DOMAIN_ENDPOINT environment variable
+if [ -n "$SOURCE_DOMAIN_ENDPOINT" ]; then
+    endpoint="${SOURCE_DOMAIN_ENDPOINT}"
+else
+    endpoint="https://capture-proxy-es:9200"
+fi
 auth_user="admin"
 auth_pass="admin"
 no_auth=false
