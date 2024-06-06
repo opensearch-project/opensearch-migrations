@@ -1,7 +1,7 @@
 package com.rfs.worker;
 
+import static org.junit.Assert.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.*;
 
 import java.util.Optional;
@@ -12,7 +12,6 @@ import org.mockito.Mockito;
 import com.rfs.cms.CmsClient;
 import com.rfs.common.GlobalMetadata;
 import com.rfs.common.RfsException;
-import com.rfs.common.SnapshotCreator;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
 
@@ -32,21 +31,15 @@ class MetadataRunnerTest {
         doThrow(testException).when(cmsClient).getMetadataEntry();
         when(globalState.getPhase()).thenReturn(GlobalState.Phase.METADATA_IN_PROGRESS);
 
-
-        MetadataRunner testRunner = new MetadataRunner(globalState, cmsClient, snapshotName, metadataFactory, metadataCreator, transformer);
-
         // Run the test
-        try {
-            testRunner.run();
-        } catch (MetadataRunner.MetadataMigrationPhaseFailed e) {
-            assertEquals(GlobalState.Phase.METADATA_IN_PROGRESS, e.phase);
-            assertEquals(null, e.nextStep);
-            assertEquals(Optional.empty(), e.cmsEntry);
-            assertEquals(testException, e.e);
+        MetadataRunner testRunner = new MetadataRunner(globalState, cmsClient, snapshotName, metadataFactory, metadataCreator, transformer);
+        final var e = assertThrows(MetadataRunner.MetadataMigrationPhaseFailed.class, () -> testRunner.run());
 
-        } catch (Exception e) {
-            fail("Unexpected exception thrown: " + e.getClass().getName());
-        }
+        // Verify the results
+        assertEquals(GlobalState.Phase.METADATA_IN_PROGRESS, e.phase);
+        assertEquals(null, e.nextStep);
+        assertEquals(Optional.empty(), e.cmsEntry);
+        assertEquals(testException, e.e);
     }
     
 }

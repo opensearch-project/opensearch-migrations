@@ -2,6 +2,8 @@ package com.rfs.common;
 
 import java.net.HttpURLConnection;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -9,7 +11,9 @@ import java.util.regex.Pattern;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import reactor.core.publisher.Mono;
@@ -81,23 +85,19 @@ public class OpenSearchClient {
         if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
             client.put(objectPath, settings.toString());
             return Optional.of(settings);
-        } else if (response.code == HttpURLConnection.HTTP_OK) {
-            logger.info(objectPath + " already exists. Skipping creation.");
-        } else {
-            logger.warn("Could not confirm that " + objectPath + " does not already exist. Skipping creation.");
-        }
+        } 
+        // The only response code that can end up here is HTTP_OK, which means the object already existed
         return Optional.empty();
     }
 
     /*
-     * Attempts to register a snapshot repository; no-op if the repo already exists.  Returns an Optional; if the repo
-     * was created, it will be the settings used and empty if it already existed.
+     * Attempts to register a snapshot repository; no-op if the repo already exists.  
      */
-    public Optional<ObjectNode> registerSnapshotRepo(String repoName, ObjectNode settings){
+    public void registerSnapshotRepo(String repoName, ObjectNode settings){
         String targetPath = "_snapshot/" + repoName;
-        RestClient.Response response = client.putAsync(targetPath, settings.toString())
+        client.putAsync(targetPath, settings.toString())
             .flatMap(resp -> {
-                if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_CREATED) {
+                if (resp.code == HttpURLConnection.HTTP_OK) {
                     return Mono.just(resp);
                 } else {
                     String errorMessage = ("Could not register snapshot repo: " + targetPath + ". Response Code: " + resp.code
@@ -108,24 +108,16 @@ public class OpenSearchClient {
             .doOnError(e -> logger.error(e.getMessage()))
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
-
-        if (response.code == HttpURLConnection.HTTP_CREATED) {
-            return Optional.of(settings);
-        } else {
-            logger.info("Snapshot repo already exists. Registration is a no-op.");
-            return Optional.empty();
-        }
     }
 
     /*
-     * Attempts to create a snapshot; no-op if the snapshot already exists.  Returns an Optional; if the snapshot
-     * was created, it will be the settings used and empty if it already existed.
+     * Attempts to create a snapshot; no-op if the snapshot already exists.
      */
-    public Optional<ObjectNode> createSnapshot(String repoName, String snapshotName, ObjectNode settings){
+    public void createSnapshot(String repoName, String snapshotName, ObjectNode settings){
         String targetPath = "_snapshot/" + repoName + "/" + snapshotName;
-        RestClient.Response response = client.putAsync(targetPath, settings.toString())
+        client.putAsync(targetPath, settings.toString())
             .flatMap(resp -> {
-                if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_CREATED) {
+                if (resp.code == HttpURLConnection.HTTP_OK) {
                     return Mono.just(resp);
                 } else {
                     String errorMessage = ("Could not create snapshot: " + targetPath + ". Response Code: " + resp.code
@@ -136,14 +128,6 @@ public class OpenSearchClient {
             .doOnError(e -> logger.error(e.getMessage()))
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
-
-
-        if (response.code == HttpURLConnection.HTTP_CREATED) {
-            return Optional.of(settings);
-        } else {
-            logger.info("Snapshot already exists. Creation is a no-op.");
-            return Optional.empty();
-        }
     }
 
     /*
@@ -243,27 +227,22 @@ public class OpenSearchClient {
     }
 
     /*
-     * Update a document using optimistic locking.  Returns an Optional; if the document was updated, it
-     * will be the new value and empty otherwise.
+     * Update a document using optimistic locking with the versioning info in an original copy of the doc that is passed in.
+     * Returns an Optional; if the document was updated, it will be the new value and empty otherwise.
      */
-    public Optional<ObjectNode> updateDocument(String indexName, String documentId, ObjectNode body) {
-        Optional<ObjectNode> document = getDocument(indexName, documentId);
-        if (document.isEmpty()) {
-            throw new UpdateFailed("Document not found: " + indexName + "/" + documentId);
-        }
-
+    public Optional<ObjectNode> updateDocument(String indexName, String documentId, ObjectNode newBody, ObjectNode originalCopy) {
         String currentSeqNum;
         String currentPrimaryTerm;
         try {
-            currentSeqNum = document.get().get("_seq_no").asText();
-            currentPrimaryTerm = document.get().get("_primary_term").asText();
+            currentSeqNum = originalCopy.get("_seq_no").asText();
+            currentPrimaryTerm = originalCopy.get("_primary_term").asText();
         } catch (Exception e) {
             String errorMessage = "Could not update document: " + indexName + "/" + documentId;
             throw new RfsException(errorMessage, e);
         }
 
         ObjectNode upsertBody = new ObjectMapper().createObjectNode();
-        upsertBody.set("doc", body);
+        upsertBody.set("doc", newBody);
 
         String targetPath = indexName + "/_update/" + documentId + "?if_seq_no=" + currentSeqNum + "&if_primary_term=" + currentPrimaryTerm;
         RestClient.Response response = client.postAsync(targetPath, upsertBody.toString())
@@ -281,12 +260,39 @@ public class OpenSearchClient {
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
         if (response.code == HttpURLConnection.HTTP_OK) {
-            return Optional.of(body);
+            return Optional.of(newBody);
         } else {
             // The only response code that can end up here is HTTP_CONFLICT, as everything is an error above
             // This indicates that we didn't acquire the optimistic lock
             return Optional.empty();
         }
+    }
+    
+    /*
+     * Update a document forcefully by skipping optimistic locking and overwriting the document regardless of versioning.
+     * Returns the new body used in the update.
+     */
+    public ObjectNode updateDocumentForceful(String indexName, String documentId, ObjectNode newBody) {
+        ObjectNode upsertBody = new ObjectMapper().createObjectNode();
+        upsertBody.set("doc", newBody);
+
+        String targetPath = indexName + "/_update/" + documentId;
+        client.postAsync(targetPath, upsertBody.toString())
+            .flatMap(resp -> {
+                if (resp.code == HttpURLConnection.HTTP_OK) {
+                    return Mono.just(resp);
+                } else {
+
+                    String errorMessage = ("Could not update document: " + indexName + "/" + documentId + ". Response Code: " + resp.code
+                        + ", Response Message: " + resp.message + ", Response Body: " + resp.body);
+                    return Mono.error(new OperationFailed(errorMessage, resp));
+                }
+            })
+            .doOnError(e -> logger.error(e.getMessage()))
+            .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
+            .block();
+
+        return newBody;
     }
 
     public Mono<BulkResponse> sendBulkRequest(String indexName, String body) {
@@ -308,6 +314,39 @@ public class OpenSearchClient {
         String targetPath = "_refresh";
 
         return client.get(targetPath);
+    }
+
+    /*
+     * Retrieves documents from the specified index with the specified query.  Returns a list of the hits.
+     */
+    public List<ObjectNode> searchDocuments(String indexName, String queryBody) {
+        String targetPath = indexName + "/_search";
+        RestClient.Response response = client.postAsync(targetPath, queryBody.toString())
+            .flatMap(resp -> {
+                if (resp.code == HttpURLConnection.HTTP_OK) { 
+                    return Mono.just(resp);
+                } else {
+                    String errorMessage = ("Could not retrieve documents from index " + indexName + ". Response Code: " + resp.code
+                        + ", Response Message: " + resp.message + ", Response Body: " + resp.body);
+                    return Mono.error(new OperationFailed(errorMessage, resp));
+                }
+            })
+            .doOnError(e -> logger.error(e.getMessage()))
+            .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
+            .block();
+
+        try {
+            // Pull the hits out of the surrounding response and return them
+            ObjectNode responseJson = objectMapper.readValue(response.body, ObjectNode.class);
+            ArrayNode hits = (ArrayNode) responseJson.get("hits").get("hits");
+
+            JavaType type = objectMapper.getTypeFactory().constructCollectionType(ArrayList.class, ObjectNode.class);
+            List<ObjectNode> docs = objectMapper.convertValue(hits, type);
+            return docs;
+        } catch (Exception e) {
+            String errorMessage = "Could not parse response for: " + indexName;
+            throw new OperationFailed(errorMessage, response);
+        }
     }
 
     public static class BulkResponse extends RestClient.Response {

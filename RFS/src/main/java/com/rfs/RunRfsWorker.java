@@ -22,6 +22,7 @@ import com.rfs.cms.OpenSearchCmsClient;
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
 import com.rfs.common.GlobalMetadata;
+import com.rfs.common.IndexMetadata;
 import com.rfs.common.Logging;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Uri;
@@ -33,9 +34,12 @@ import com.rfs.common.SnapshotRepo;
 import com.rfs.transformers.TransformFunctions;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_es_7_10.GlobalMetadataFactory_ES_7_10;
+import com.rfs.version_es_7_10.IndexMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
+import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 import com.rfs.worker.GlobalState;
+import com.rfs.worker.IndexRunner;
 import com.rfs.worker.MetadataRunner;
 import com.rfs.worker.Runner;
 import com.rfs.worker.SnapshotRunner;
@@ -75,7 +79,11 @@ public class RunRfsWorker {
         @Parameter(names = {"--target-password"}, description = "Optional.  The target password; if not provided, will assume no auth on target", required = false)
         public String targetPass = null;
 
-        @Parameter(names = {"--index-template-whitelist"}, description = ("Optional.  List of template names to migrate"
+        @Parameter(names = {"--index-whitelist"}, description = ("Optional.  List of index names to migrate"
+            + " (e.g. 'logs_2024_01, logs_2024_02').  Default: all indices"), required = false)
+        public List<String> indexWhitelist = List.of();
+
+        @Parameter(names = {"--index-template-whitelist"}, description = ("Optional.  List of index template names to migrate"
             + " (e.g. 'posts_index_template1, posts_index_template2').  Default: empty list"), required = false)
         public List<String> indexTemplateWhitelist = List.of();
 
@@ -139,6 +147,11 @@ public class RunRfsWorker {
             Transformer transformer = TransformFunctions.getTransformer(ClusterVersion.ES_7_10, ClusterVersion.OS_2_11, awarenessDimensionality);
             MetadataRunner metadataWorker = new MetadataRunner(globalState, cmsClient, snapshotName, metadataFactory, metadataCreator, transformer);
             metadataWorker.run();
+
+            IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
+            IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
+            IndexRunner indexWorker = new IndexRunner(globalState, cmsClient, snapshotName, indexMetadataFactory, indexCreator, transformer);
+            indexWorker.run();
             
         } catch (Runner.PhaseFailed e) {
             logPhaseFailureRecord(e.phase, e.nextStep, e.cmsEntry, e.e);

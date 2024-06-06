@@ -7,9 +7,14 @@ import com.rfs.common.IndexMetadata;
 import com.rfs.common.SnapshotRepo;
 
 public class IndexMetadataFactory_ES_6_8 implements com.rfs.common.IndexMetadata.Factory {
+    private final SnapshotRepo.Provider repoDataProvider;
+
+    public IndexMetadataFactory_ES_6_8(SnapshotRepo.Provider repoDataProvider) {
+        this.repoDataProvider = repoDataProvider;
+    }
     
     @Override
-    public IndexMetadata.Data fromJsonNode(JsonNode root, String indexId, String indexName) throws Exception {
+    public IndexMetadata.Data fromJsonNode(JsonNode root, String indexId, String indexName) {
         ObjectNode objectNodeRoot = (ObjectNode) root.get(indexName);
         return new IndexMetadataData_ES_6_8(objectNodeRoot, indexId, indexName);
     }
@@ -20,7 +25,12 @@ public class IndexMetadataFactory_ES_6_8 implements com.rfs.common.IndexMetadata
     }
 
     @Override
-    public String getIndexFileId(SnapshotRepo.Provider repoDataProvider, String snapshotName, String indexName) {
+    public String getIndexFileId(String snapshotName, String indexName) {
         return repoDataProvider.getSnapshotId(snapshotName);
+    }
+
+    @Override
+    public SnapshotRepo.Provider getRepoDataProvider() {
+        return repoDataProvider;
     }
 }

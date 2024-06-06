@@ -1,7 +1,7 @@
 package com.rfs.worker;
 
+import static org.junit.Assert.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.fail;
 import static org.mockito.Mockito.*;
 
 import java.util.Optional;
@@ -21,7 +21,6 @@ class SnapshotRunnerTest {
         GlobalState globalState = mock(GlobalState.class);
         CmsClient cmsClient = mock(CmsClient.class);
         SnapshotCreator snapshotCreator = mock(SnapshotCreator.class);
-        SnapshotRunner testRunner = new SnapshotRunner(globalState, cmsClient, snapshotCreator);
         RfsException testException = new RfsException("Unit test");
 
         doThrow(testException).when(cmsClient).getSnapshotEntry(snapshotName);
@@ -29,17 +28,14 @@ class SnapshotRunnerTest {
         when(snapshotCreator.getSnapshotName()).thenReturn(snapshotName);
 
         // Run the test
-        try {
-            testRunner.run();
-        } catch (SnapshotRunner.SnapshotPhaseFailed e) {
-            assertEquals(GlobalState.Phase.SNAPSHOT_IN_PROGRESS, e.phase);
-            assertEquals(null, e.nextStep);
-            assertEquals(Optional.empty(), e.cmsEntry);
-            assertEquals(testException, e.e);
+        SnapshotRunner testRunner = new SnapshotRunner(globalState, cmsClient, snapshotCreator);
+        final var e = assertThrows(SnapshotRunner.SnapshotPhaseFailed.class, () -> testRunner.run());
 
-        } catch (Exception e) {
-            fail("Unexpected exception thrown: " + e.getClass().getName());
-        }
+        // Verify the results
+        assertEquals(GlobalState.Phase.SNAPSHOT_IN_PROGRESS, e.phase);
+        assertEquals(null, e.nextStep);
+        assertEquals(Optional.empty(), e.cmsEntry);
+        assertEquals(testException, e.e);
     }
     
 }

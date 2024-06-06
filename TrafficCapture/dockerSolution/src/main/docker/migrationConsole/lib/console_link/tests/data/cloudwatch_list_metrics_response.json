@@ -1,0 +1,45 @@
+{
+    "Metrics": [
+        {
+            "Namespace": "TrafficCaptureReplay",
+            "MetricName": "kafkaCommitCount",
+            "Dimensions": [
+                {
+                    "Name": "OTelLib",
+                    "Value": "captureProxy"
+                }
+            ]
+        },
+        {
+            "Namespace": "TrafficCaptureReplay",
+            "MetricName": "captureConnectionDuration",
+            "Dimensions": [
+                {
+                    "Name": "OTelLib",
+                    "Value": "captureProxy"
+                }
+            ]
+        },
+        {
+            "Namespace": "TrafficCaptureReplay",
+            "MetricName": "kafkaCommitCount",
+            "Dimensions": [
+                {
+                    "Name": "OTelLib",
+                    "Value": "replayer"
+                }
+            ]
+        }
+    ],
+    "ResponseMetadata": {
+        "RequestId": "374d6da0-ed81-4b5d-a5de-d3c0a1c2f274",
+        "HTTPStatusCode": 200,
+        "HTTPHeaders": {
+            "x-amzn-requestid": "374d6da0-ed81-4b5d-a5de-d3c0a1c2f274",
+            "content-type": "text/xml",
+            "content-length": "2892",
+            "date": "Wed, 22 May 2024 15:49:13 GMT"
+        },
+        "RetryAttempts": 0
+    }
+}

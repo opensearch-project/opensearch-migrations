@@ -155,12 +155,12 @@ public class DemoPrintOutSnapshot {
             Map<String, IndexMetadata.Data> indexMetadatas = new HashMap<>();
             if (sourceVersion == ClusterVersion.ES_6_8) {
                 for (SnapshotRepo.Index index : repoDataProvider.getIndicesInSnapshot(snapshotName)) {
-                    IndexMetadata.Data indexMetadata = new IndexMetadataFactory_ES_6_8().fromRepo(repo, repoDataProvider, snapshotName, index.getName());
+                    IndexMetadata.Data indexMetadata = new IndexMetadataFactory_ES_6_8(repoDataProvider).fromRepo(snapshotName, index.getName());
                     indexMetadatas.put(index.getName(), indexMetadata);
                 }
             } else {
                 for (SnapshotRepo.Index index : repoDataProvider.getIndicesInSnapshot(snapshotName)) {
-                    IndexMetadata.Data indexMetadata = new IndexMetadataFactory_ES_7_10().fromRepo(repo, repoDataProvider, snapshotName, index.getName());
+                    IndexMetadata.Data indexMetadata = new IndexMetadataFactory_ES_7_10(repoDataProvider).fromRepo(snapshotName, index.getName());
                     indexMetadatas.put(index.getName(), indexMetadata);
                 }
             }

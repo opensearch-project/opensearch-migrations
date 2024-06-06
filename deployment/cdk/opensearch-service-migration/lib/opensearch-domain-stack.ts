@@ -15,6 +15,7 @@ import {ILogGroup, LogGroup} from "aws-cdk-lib/aws-logs";
 import {ISecret, Secret} from "aws-cdk-lib/aws-secretsmanager";
 import {StackPropsExt} from "./stack-composer";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import { ClusterYaml } from "./migration-services-yaml";
 
 
 export interface OpensearchDomainStackProps extends StackPropsExt {
@@ -57,6 +58,7 @@ export interface OpensearchDomainStackProps extends StackPropsExt {
 export const osClusterEndpointParameterName = "osClusterEndpoint";
 
 export class OpenSearchDomainStack extends Stack {
+  targetClusterYaml: ClusterYaml;
 
   getEbsVolumeType(ebsVolumeTypeName: string) : EbsDeviceVolumeType|undefined {
     const ebsVolumeType: EbsDeviceVolumeType|undefined = ebsVolumeTypeName ? EbsDeviceVolumeType[ebsVolumeTypeName as keyof typeof EbsDeviceVolumeType] : undefined
@@ -103,7 +105,7 @@ export class OpenSearchDomainStack extends Stack {
       stringValue: `https://${domain.domainEndpoint}:443`
     });
     endpointSSM.node.addDependency(domain)
-    
+
     if (domain.masterUserPassword && !adminUserSecret) {
       console.log(`An OpenSearch domain fine-grained access control user was configured without an existing Secrets Manager secret, will not create SSM Parameter: /migration/${stage}/${deployId}/osUserAndSecret`)
     }
@@ -115,6 +117,18 @@ export class OpenSearchDomainStack extends Stack {
       });
       secretSSM.node.addDependency(adminUserSecret)
     }
+  }
+
+  generateTargetClusterYaml(domain: Domain, adminUserName: string | undefined) {
+    let targetCluster = new ClusterYaml()
+    targetCluster.endpoint = `https://${domain.domainEndpoint}:443`;
+    if (adminUserName && domain.masterUserPassword) {
+      // TODO: need to actually deal with the password as a secret (pass the arn)
+      targetCluster.basic_auth = { user: adminUserName, passsword: domain.masterUserPassword }
+    } else {
+      targetCluster.no_auth = ''
+    }
+    this.targetClusterYaml = targetCluster;
   }
 
   constructor(scope: Construct, id: string, props: OpensearchDomainStackProps) {
@@ -218,5 +232,6 @@ export class OpenSearchDomainStack extends Stack {
     });
 
     this.createSSMParameters(domain, adminUserName, adminUserSecret, props.stage, deployId)
+    this.generateTargetClusterYaml(domain, adminUserName)
   }
 }

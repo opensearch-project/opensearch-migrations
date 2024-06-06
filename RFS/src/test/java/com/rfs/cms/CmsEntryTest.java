@@ -27,7 +27,7 @@ public class CmsEntryTest {
         String result = CmsEntry.Metadata.getLeaseExpiry(0, numAttempts);
 
         // Check the results
-        assertEquals(Long.toString(CmsEntry.Metadata.METADATA_LEASE_MS * numAttempts), result);
+        assertEquals(Long.toString(CmsEntry.Metadata.LEASE_MS * numAttempts), result);
     }
 
     static Stream<Arguments> provide_Metadata_getLeaseExpiry_UnhappyPath_args() {
