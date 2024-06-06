@@ -19,6 +19,7 @@ import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-st
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
 import {parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
+import { ServicesYaml } from "./migration-services-yaml";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -271,6 +272,7 @@ export class StackComposer {
             })
             this.stacks.push(networkStack)
         }
+        let servicesYaml = new ServicesYaml();
 
         // There is an assumption here that for any deployment we will always have a target cluster, whether that be a
         // created Domain like below or an imported one
@@ -317,6 +319,9 @@ export class StackComposer {
             });
             this.addDependentStacks(openSearchStack, [networkStack])
             this.stacks.push(openSearchStack)
+            servicesYaml.target_cluster = openSearchStack.targetClusterYaml;
+        } else {
+            servicesYaml.target_cluster = { endpoint: targetEndpoint, no_auth: '' }
         }
 
         // Currently, placing a requirement on a VPC for a migration stack but this can be revisited
@@ -511,6 +516,7 @@ export class StackComposer {
                 fetchMigrationEnabled: fetchMigrationEnabled,
                 migrationConsoleEnableOSI: migrationConsoleEnableOSI,
                 migrationAPIEnabled: migrationAPIEnabled,
+                servicesYaml: servicesYaml,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,
