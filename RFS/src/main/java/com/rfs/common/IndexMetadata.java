@@ -18,8 +18,8 @@ public class IndexMetadata {
     * Defines the behavior required to read a snapshot's index metadata as JSON and convert it into a Data object
     */
     public static interface Factory {
-        private JsonNode getJsonNode(SourceRepo repo, SnapshotRepo.Provider repoDataProvider, String indexId, String indexFileId, SmileFactory smileFactory) throws Exception {
-            Path filePath = repo.getIndexMetadataFilePath(indexId, indexFileId);
+        private JsonNode getJsonNode(String indexId, String indexFileId, SmileFactory smileFactory) {
+            Path filePath = getRepoDataProvider().getRepo().getIndexMetadataFilePath(indexId, indexFileId);
     
             try (InputStream fis = new FileInputStream(filePath.toFile())) {
                 // Don't fully understand what the value of this code is, but it progresses the stream so we need to do it
@@ -33,19 +33,30 @@ public class IndexMetadata {
 
                 ObjectMapper smileMapper = new ObjectMapper(smileFactory);
                 return smileMapper.readTree(bis);
+            } catch (Exception e) {
+                throw new RfsException("Could not load index metadata file: " + filePath.toString(), e);
             }
         }
 
-        default IndexMetadata.Data fromRepo(SourceRepo repo, SnapshotRepo.Provider repoDataProvider, String snapshotName, String indexName) throws Exception {
+        default IndexMetadata.Data fromRepo(String snapshotName, String indexName) {
             SmileFactory smileFactory = getSmileFactory();
-            String indexId = repoDataProvider.getIndexId(indexName);
-            String indexFileId = getIndexFileId(repoDataProvider, snapshotName, indexName);
-            JsonNode root = getJsonNode(repo, repoDataProvider, indexId, indexFileId, smileFactory);            
+            String indexId = getRepoDataProvider().getIndexId(indexName);
+            String indexFileId = getIndexFileId(snapshotName, indexName);
+            JsonNode root = getJsonNode(indexId, indexFileId, smileFactory);            
             return fromJsonNode(root, indexId, indexName);
         }
-        public IndexMetadata.Data fromJsonNode(JsonNode root, String indexId, String indexName) throws Exception;
+
+        // Version-specific implementation
+        public IndexMetadata.Data fromJsonNode(JsonNode root, String indexId, String indexName);
+
+        // Version-specific implementation
         public SmileFactory getSmileFactory();
-        public String getIndexFileId(SnapshotRepo.Provider repoDataProvider, String snapshotName, String indexName);
+
+        // Version-specific implementation
+        public String getIndexFileId(String snapshotName, String indexName);
+
+        // Get the underlying SnapshotRepo Provider
+        public SnapshotRepo.Provider getRepoDataProvider();
     }
 
     /**

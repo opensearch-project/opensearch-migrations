@@ -15,7 +15,10 @@ public class GlobalState {
         SNAPSHOT_FAILED,
         METADATA_IN_PROGRESS,
         METADATA_COMPLETED,
-        METADATA_FAILED
+        METADATA_FAILED,
+        INDEX_IN_PROGRESS,
+        INDEX_COMPLETED,
+        INDEX_FAILED
     }    
 
     private AtomicReference<Phase> phase = new AtomicReference<>(Phase.UNSET);
