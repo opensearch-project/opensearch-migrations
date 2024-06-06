@@ -65,6 +65,8 @@ dependencies {
     api group: 'software.amazon.awssdk', name: 's3', version: awssdk
     api group: 'software.amazon.awssdk', name: 's3-transfer-manager', version: awssdk
 
+    def awscrt = '0.29.18'
+    api group: 'software.amazon.awssdk.crt', name: 'aws-crt', version: awscrt
 
     api group: 'com.bazaarvoice.jolt', name: 'jolt-core', version: '0.1.7'
 

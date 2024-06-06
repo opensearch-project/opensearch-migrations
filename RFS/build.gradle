@@ -55,6 +55,7 @@ dependencies {
 
     implementation group: 'software.amazon.awssdk', name: 's3'
     implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
+    implementation group: 'software.amazon.awssdk.crt', name: 'aws-crt'
 
     testImplementation group: 'io.projectreactor', name: 'reactor-test'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
