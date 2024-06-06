@@ -22,11 +22,11 @@ import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 /**
  * Simplified version of RFS for use in testing - ES 7.10 version.
  */
-public class SimpleRestoreFromSnapshot_ES_7_10 {
+public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnapshot {
 
     private static final Logger logger = LogManager.getLogger(SimpleRestoreFromSnapshot_ES_7_10.class);
 
-    public List<IndexMetadata.Data> extraSnapshotIndexData(final String localPath, final String snapshotName, final Path unpackedShardDataDir) throws Exception {
+    public List<IndexMetadata.Data> extractSnapshotIndexData(final String localPath, final String snapshotName, final Path unpackedShardDataDir) throws Exception {
         IOUtils.rm(unpackedShardDataDir);
 
         final var repo = new FileSystemRepo(Path.of(localPath));

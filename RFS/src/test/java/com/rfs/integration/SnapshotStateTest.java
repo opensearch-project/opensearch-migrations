@@ -72,7 +72,7 @@ public class SnapshotStateTest {
         cluster.copySnapshotData(snapshotCopy.getAbsolutePath());
 
         final var unpackedShardDataDir = Path.of(localDirectory.getAbsolutePath() + "/unpacked-shard-data");
-        final var indices = srfs.extraSnapshotIndexData(snapshotCopy.getAbsolutePath(), snapshotName, unpackedShardDataDir);
+        final var indices = srfs.extractSnapshotIndexData(snapshotCopy.getAbsolutePath(), snapshotName, unpackedShardDataDir);
 
         final var client = mock(OpenSearchClient.class);
         when(client.sendBulkRequest(any(), any())).thenReturn(Mono.empty());
@@ -105,7 +105,7 @@ public class SnapshotStateTest {
         cluster.copySnapshotData(snapshotCopy.getAbsolutePath());
 
         final var unpackedShardDataDir = Path.of(localDirectory.getAbsolutePath() + "/unpacked-shard-data");
-        final var indices = srfs.extraSnapshotIndexData(snapshotCopy.getAbsolutePath(), snapshotName, unpackedShardDataDir);
+        final var indices = srfs.extractSnapshotIndexData(snapshotCopy.getAbsolutePath(), snapshotName, unpackedShardDataDir);
 
         final var client = mock(OpenSearchClient.class);
         when(client.sendBulkRequest(any(), any())).thenReturn(Mono.empty());
@@ -140,7 +140,7 @@ public class SnapshotStateTest {
         cluster.copySnapshotData(snapshotCopy.getAbsolutePath());
 
         final var unpackedShardDataDir = Path.of(localDirectory.getAbsolutePath() + "/unpacked-shard-data");
-        final var indices = srfs.extraSnapshotIndexData(snapshotCopy.getAbsolutePath(), snapshotName, unpackedShardDataDir);
+        final var indices = srfs.extractSnapshotIndexData(snapshotCopy.getAbsolutePath(), snapshotName, unpackedShardDataDir);
 
         final var client = mock(OpenSearchClient.class);
         when(client.sendBulkRequest(any(), any())).thenReturn(Mono.empty());
