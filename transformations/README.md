@@ -83,6 +83,7 @@ class Doc implements Entity {
 Example rule for handling the nested objects limit that was added in OpenSearch 1.0 that would prevent a cluster from starting if the limit was too high.  Additional the limit could be lowered manually which would cause the same problem and errors.
 
 ```java
+// Handle https://opensearch.org/docs/latest/breaking-changes/#migrating-to-opensearch-and-limits-on-the-number-of-nested-json-objects
 public class NestedObjectsLimitRule implements TransformationRule<Index> {
     @Override
     public Version minSupportedSourceVersion() {
