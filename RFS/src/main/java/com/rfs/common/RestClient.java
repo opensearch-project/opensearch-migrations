@@ -46,7 +46,7 @@ public class RestClient {
 
     public Mono<Response> getAsync(String path, IRfsContexts.IRequestContext context) {
         return client
-                .doOnRequest(sizeMetricsHandler(context))
+                .doOnRequest(addSizeMetricsHandlers(context))
                 .get()
                 .uri("/" + path)
                 .responseSingle((response, bytes) -> bytes.asString()
@@ -61,7 +61,7 @@ public class RestClient {
 
     public Mono<Response> postAsync(String path, String body, IRfsContexts.IRequestContext context) {
         return client
-                .doOnRequest(sizeMetricsHandler(context))
+                .doOnRequest(addSizeMetricsHandlers(context))
                 .post()
                 .uri("/" + path)
                 .send(ByteBufMono.fromString(Mono.just(body)))
@@ -73,7 +73,7 @@ public class RestClient {
 
     public Mono<Response> putAsync(String path, String body, IRfsContexts.IRequestContext context) {
         return client
-                .doOnRequest(sizeMetricsHandler(context))
+                .doOnRequest(addSizeMetricsHandlers(context))
                 .put()
                 .uri("/" + path)
                 .send(ByteBufMono.fromString(Mono.just(body)))
@@ -87,10 +87,10 @@ public class RestClient {
         return putAsync(path, body, context).block();
     }
 
-    private BiConsumer<HttpClientRequest, Connection> sizeMetricsHandler(final IRfsContexts.IRequestContext context) {
+    private BiConsumer<HttpClientRequest, Connection> addSizeMetricsHandlers(final IRfsContexts.IRequestContext ctx) {
         return (r, conn) -> {
-            conn.channel().pipeline().addFirst(new WriteMeteringHandler(context::addBytesSent));
-            conn.channel().pipeline().addFirst(new ReadMeteringHandler(context::addBytesRead));
+            conn.channel().pipeline().addFirst(new WriteMeteringHandler(ctx::addBytesSent));
+            conn.channel().pipeline().addFirst(new ReadMeteringHandler(ctx::addBytesRead));
         };
     }
 }

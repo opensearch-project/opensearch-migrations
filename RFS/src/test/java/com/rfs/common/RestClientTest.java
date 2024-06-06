@@ -3,27 +3,19 @@ package com.rfs.common;
 import com.rfs.tracing.RfsContexts;
 import com.rfs.tracing.TestContext;
 
-import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.sdk.trace.data.SpanData;
-import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.Assertions;
+import org.hamcrest.MatcherAssert;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.testutils.HttpRequestFirstLine;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 
 import java.nio.charset.StandardCharsets;
-import java.time.Instant;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 import java.util.stream.Collectors;
-
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.containsInAnyOrder;
-import static org.hamcrest.Matchers.equalTo;
-import static java.util.stream.Collectors.toList;
 
 class RestClientTest {
     @Test
@@ -57,16 +49,18 @@ class RestClientTest {
                     .filter(pd -> pd.getAttributes().asMap().values().stream().map(o -> (String) o).collect(Collectors.joining())
                             .equals(kvp.getKey()))
                     .reduce((a, b) -> b).get().getValue();
-            assertThat("Checking bytes {send, read} for context '" + kvp.getKey() + "'", new long[]{bytesSent, bytesRead}, equalTo(kvp.getValue()));
+            MatcherAssert.assertThat("Checking bytes {send, read} for context '" + kvp.getKey() + "'",
+                    new long[]{bytesSent, bytesRead}, Matchers.equalTo(kvp.getValue()));
         }
 
         final var finishedSpans = rootContext.instrumentationBundle.getFinishedSpans();
-        final var finishedSpanNames = finishedSpans.stream().map(SpanData::getName).collect(toList());
-        assertThat(finishedSpanNames, containsInAnyOrder("httpRequest", "httpRequest", "createSnapshot"));
+        final var finishedSpanNames = finishedSpans.stream().map(SpanData::getName).collect(Collectors.toList());
+        MatcherAssert.assertThat(finishedSpanNames,
+                Matchers.containsInAnyOrder("httpRequest", "httpRequest", "createSnapshot"));
 
         final var httpRequestSpansByTime = finishedSpans.stream()
                 .filter(sd -> sd.getName().equals("httpRequest"))
-                .sorted(Comparator.comparing(SpanData::getEndEpochNanos)).collect(toList());
+                .sorted(Comparator.comparing(SpanData::getEndEpochNanos)).collect(Collectors.toList());
         int i = 0;
         for (var expectedBytes : List.of(
                 new long[]{139,66},
@@ -74,7 +68,8 @@ class RestClientTest {
             var span = httpRequestSpansByTime.get(i++);
             long bytesSent = span.getAttributes().get(RfsContexts.GenericRequestContext.BYTES_SENT_ATTR);
             long bytesRead = span.getAttributes().get(RfsContexts.GenericRequestContext.BYTES_READ_ATTR);
-            assertThat("Checking bytes {send, read} for httpRequest " + i, new long[]{bytesSent, bytesRead}, equalTo(expectedBytes));
+            MatcherAssert.assertThat("Checking bytes {send, read} for httpRequest " + i,
+                    new long[]{bytesSent, bytesRead}, Matchers.equalTo(expectedBytes));
         }
     }
 
