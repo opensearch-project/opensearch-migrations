@@ -23,7 +23,7 @@ import {CfnService as DiscoveryCfnService, PrivateDnsNamespace} from "aws-cdk-li
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {createDefaultECSTaskRole} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
-import { ApplicationListener, ApplicationProtocol, ApplicationProtocolVersion, ApplicationTargetGroup, IApplicationListener, IApplicationLoadBalancer, IApplicationTargetGroup, IListenerCertificate, SslPolicy } from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import { ApplicationListener, ApplicationProtocol, ApplicationProtocolVersion, ApplicationTargetGroup, IApplicationLoadBalancer, IApplicationTargetGroup, IListenerCertificate, SslPolicy } from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 
 
@@ -238,7 +238,7 @@ export class MigrationServiceCore extends Stack {
         }
     }
 
-    createSecureListener(serviceName: string, listeningPort: number, alb: IApplicationLoadBalancer, cert: ICertificate, albTargetGroup: IApplicationTargetGroup) {
+    createSecureListener(serviceName: string, listeningPort: number = 443, alb: IApplicationLoadBalancer, cert: ICertificate, albTargetGroup: IApplicationTargetGroup) {
         return new ApplicationListener(this, `${serviceName}ALBListener`, {
             loadBalancer: alb,
             port: listeningPort,
