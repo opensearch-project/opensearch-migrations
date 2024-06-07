@@ -539,6 +539,7 @@ export class StackComposer {
                     albListenerCert: networkStack.albListenerCert!,
                     albListenerPort: 29200,
                 },
+                addTargetClusterSG: true,
                 env: props.env,
             })
             this.addDependentStacks(targetClusterProxyStack, [migrationStack])
