@@ -1,5 +1,5 @@
 import {StackPropsExt} from "../stack-composer";
-import {IVpc, Port, SecurityGroup} from "aws-cdk-lib/aws-ec2";
+import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
@@ -8,9 +8,8 @@ import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {StreamingSourceType} from "../streaming-source-type";
 import {createMSKProducerIAMPolicies} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
-import { IApplicationListener, IApplicationLoadBalancer, IApplicationTargetGroup } from "aws-cdk-lib/aws-elasticloadbalancingv2";
-import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
-
+import { IApplicationListener, IApplicationTargetGroup } from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import { ALBConfig, isNewALBListenerConfig } from "../common-utilities";
 
 export interface CaptureProxyProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -19,9 +18,7 @@ export interface CaptureProxyProps extends StackPropsExt {
     readonly customSourceClusterEndpoint?: string,
     readonly customSourceClusterEndpointSSMParam?: string,
     readonly otelCollectorEnabled?: boolean,
-    readonly alb?: IApplicationLoadBalancer,
-    readonly albListenerCert?: ICertificate,
-    readonly albListenerPort?: number,
+    readonly albConfig?: ALBConfig,
     readonly serviceName?: string,
     readonly extraArgs?: string,
 }
@@ -34,6 +31,7 @@ export interface CaptureProxyProps extends StackPropsExt {
 export class CaptureProxyStack extends MigrationServiceCore {
     private readonly albListener?: IApplicationListener;
     private readonly albTargetGroup?: IApplicationTargetGroup;
+    public static readonly DEFAULT_PROXY_PORT = 9200;
 
     constructor(scope: Construct, id: string, props: CaptureProxyProps) {
         super(scope, id, props)
@@ -45,17 +43,18 @@ export class CaptureProxyStack extends MigrationServiceCore {
 
         const servicePort: PortMapping = {
             name: `${serviceName}-connect`,
-            hostPort: 9200,
-            containerPort: 9200,
+            hostPort: CaptureProxyStack.DEFAULT_PROXY_PORT,
+            containerPort: CaptureProxyStack.DEFAULT_PROXY_PORT,
             protocol: Protocol.TCP
         }
 
-        if(props.alb) {
-            if (!props.albListenerCert) {
-                throw new Error("Must have alb cert defined if specifying alb");
+        if (props.albConfig) {
+            this.albTargetGroup = this.createSecureTargetGroup(serviceName, CaptureProxyStack.DEFAULT_PROXY_PORT, props.vpc);
+            if (isNewALBListenerConfig(props.albConfig)) {
+                this.albListener = this.createSecureListener(serviceName, props.albConfig.albListenerPort, props.albConfig.alb, props.albConfig.albListenerCert, this.albTargetGroup);
+            } else {
+                throw new Error("Invalid ALB config");
             }
-            this.albTargetGroup = this.createSecureTargetGroup(serviceName, 9200, props.vpc);
-            this.albListener = this.createSecureListener(serviceName, props.albListenerPort || 9200, props.alb, props.albListenerCert, this.albTargetGroup);
         }
 
         const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId) : []

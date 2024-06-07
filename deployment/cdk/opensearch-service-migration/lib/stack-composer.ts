@@ -19,8 +19,7 @@ import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-st
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
 import {parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
-import { ServicesYaml } from "./migration-services-yaml";
-import { StringParameter } from "aws-cdk-lib/aws-ssm";
+import {ServicesYaml} from "./migration-services-yaml";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -448,8 +447,10 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                alb: networkStack.alb,
-                albListenerCert: networkStack.albListenerCert,
+                albConfig: {
+                    alb: networkStack.alb!,
+                    albListenerCert: networkStack.albListenerCert!,
+                },
                 env: props.env
             })
             this.addDependentStacks(captureProxyESStack, [migrationStack, mskUtilityStack, kafkaBrokerStack])
@@ -508,8 +509,10 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                alb: networkStack.alb,
-                albListenerCert: networkStack.albListenerCert,
+                albConfig: {
+                    alb: networkStack.alb!,
+                    albListenerCert: networkStack.albListenerCert!,
+                },
                 env: props.env
             })
             this.addDependentStacks(captureProxyStack, [elasticsearchStack, migrationStack,
@@ -531,9 +534,11 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                alb: networkStack.alb,
-                albListenerCert: networkStack.albListenerCert,
-                albListenerPort: 29200,
+                albConfig: {
+                    alb: networkStack.alb!,
+                    albListenerCert: networkStack.albListenerCert!,
+                    albListenerPort: 29200,
+                },
                 env: props.env,
             })
             this.addDependentStacks(targetClusterProxyStack, [migrationStack])
