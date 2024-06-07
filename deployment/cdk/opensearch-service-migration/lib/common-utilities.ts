@@ -163,5 +163,6 @@ export interface NewALBListenerConfig {
 }
 
 export function isNewALBListenerConfig(config: ALBConfig): config is NewALBListenerConfig {
-    return (config as NewALBListenerConfig).alb !== undefined && (config as NewALBListenerConfig).albListenerCert !== undefined;
+    const parsed = config as NewALBListenerConfig;
+    return parsed.alb !== undefined && parsed.albListenerCert !== undefined;
 }
