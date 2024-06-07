@@ -93,7 +93,6 @@ graph TD
 
 
 
-
 Example rule for handling the nested objects limit that was added in OpenSearch 1.0 that would prevent a cluster from starting if the limit was too high.  Additional the limit could be lowered manually which would cause the same problem and errors.
 
 ```java
