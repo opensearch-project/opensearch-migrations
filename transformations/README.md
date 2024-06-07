@@ -22,7 +22,7 @@ The version of the source and target clusters is a key requirement to determine 
 
 We have little prior experience around how these transformations are declared, organized, and tested, leading us to consider the following proposals.
 
-## Proposal 0 - No changes
+## Proposal 0 - [No changes] Raw transformation process
 There are versions of data transformation in the RFS codebase [1] and in Traffic Capture/Replay [2]. As disjointed systems, they can continue to iterate independently of one another without conflicts or redesigns.
 
 ### Details
@@ -31,9 +31,26 @@ For the RFS solution, transformers are version-specific, such as ES 6.8 -> OS 2.
 ```java
 public interface Transformer {
     public ObjectNode transformGlobalMetadata(ObjectNode root);
-    public ObjectNode transformIndexMetadata(ObjectNode root);    
+    public ObjectNode transformIndexMetadata(ObjectNode root);
+    public ObjectNode transformDoc(ObjectNode root);
 }
 ```
+
+```mermaid
+graph TD
+    G1[Global Data v1.0] --> |transformGlobalMetadata| T[Transformer_v1_0_to_v2_0]
+    T --> G1v2[Global Data v2.0]
+
+    I1[Index 1 v1.0] --> |transformIndexMetadata| T
+    T --> I1v2[Index 1 v2.0]
+
+    D1[Doc 1 v1.0] --> |transformDoc| T
+    T --> D1v2[Doc 1 v2.0]
+
+    D2[Doc 2 v1.0] --> |transformDoc| T
+    T --> D2v2[Doc 2 v2.0]
+```
+
 
 Within Traffic Capture/Replay, the request abstraction is at the network request layer with the entity being encoded as part of the incoming JSON. It only supports document-level transformation; other metadata transformation is done externally.
 
@@ -42,6 +59,24 @@ public interface IJsonTransformer {
     Map<String,Object> transformJson(Map<String,Object> incomingJson);
 }
 ```
+
+```mermaid
+graph TD
+    R1[Request 1 v1.0] --> T[TransformationProvider]
+
+    subgraph TransformationProvider
+        direction LR
+        T --> |Apply| JsonJMESPathScript
+        JsonJMESPathScript --> |Apply| JsonJoltCannedRequest
+        JsonJoltCannedRequest --> |Apply| JsonJoltScript
+    end
+
+    JsonJoltScript --> R1v2[Request 1 v2.0]
+
+    R2[Request 2 v1.0] --> T[TransformationProvider]
+    JsonJoltScript --> R2v2[Request 1 v2.0]
+```
+
 
 - [1] [ES_6_8_to_OS_2_11](../RFS/src/main/java/com/rfs/transformers/Transformer_ES_6_8_to_OS_2_11.java)
 - [2] [openSearch23PlusTargetTransformerProvider](../TrafficCapture/transformationPlugins/jsonMessageTransformers/openSearch23PlusTargetTransformerProvider/src/main/java/org/opensearch/migrations/transform/JsonTypeMappingTransformer.java)
@@ -55,6 +90,9 @@ public interface IJsonTransformer {
 - Supporting new migrations requires duplicating both variants
 
 ## [Recommendation] Proposal 1 - Data Transformation Rules
+
+
+
 
 Example rule for handling the nested objects limit that was added in OpenSearch 1.0 that would prevent a cluster from starting if the limit was too high.  Additional the limit could be lowered manually which would cause the same problem and errors.
 
