@@ -20,6 +20,7 @@ export interface CaptureProxyProps extends StackPropsExt {
     readonly otelCollectorEnabled?: boolean,
     readonly albConfig?: ALBConfig,
     readonly serviceName?: string,
+    readonly addTargetClusterSG?: boolean,
     readonly extraArgs?: string,
 }
 
@@ -38,8 +39,11 @@ export class CaptureProxyStack extends MigrationServiceCore {
         const serviceName = props.serviceName || "capture-proxy";
         let securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`))
+            SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`)),
         ]
+        if (props.addTargetClusterSG) {
+            securityGroups.push(SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`)));
+        }
 
         const servicePort: PortMapping = {
             name: `${serviceName}-connect`,
