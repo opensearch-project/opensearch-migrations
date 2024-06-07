@@ -447,10 +447,10 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                albConfig: {
+                albConfig:  (networkStack.alb) ? {
                     alb: networkStack.alb!,
                     albListenerCert: networkStack.albListenerCert!,
-                },
+                } : undefined,
                 env: props.env
             })
             this.addDependentStacks(captureProxyESStack, [migrationStack, mskUtilityStack, kafkaBrokerStack])
@@ -509,10 +509,10 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                albConfig: {
+                albConfig: (networkStack.alb) ? {
                     alb: networkStack.alb!,
                     albListenerCert: networkStack.albListenerCert!,
-                },
+                } : undefined,
                 env: props.env
             })
             this.addDependentStacks(captureProxyStack, [elasticsearchStack, migrationStack,
@@ -534,11 +534,11 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                albConfig: {
+                albConfig: (networkStack.alb) ? {
                     alb: networkStack.alb!,
                     albListenerCert: networkStack.albListenerCert!,
                     albListenerPort: 29200,
-                },
+                } : undefined,
                 addTargetClusterSG: true,
                 env: props.env,
             })
