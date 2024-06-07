@@ -56,30 +56,6 @@ public interface IJsonTransformer {
 
 ## [Recommendation] Proposal 1 - Data Transformation Rules
 
-
-
-```java
-interface TransformationRule<T extends Entity> {
-    /** If the version should be applied */
-    Version minSupportedSourceVersion();
-    Version minRequiredTargetVersion();
-    boolean canApply(T entity);
-    boolean applyTransformation(T entity);
-}
-```
-
-```java
-class Cluster implements Entity {
-    List<Index> getImmutableIndices();
-}
-class Index implements Entity {
-    Cluster getImmutableCluster();
-}
-class Doc implements Entity {
-    Index getImmutableIndex();
-}
-```
-
 Example rule for handling the nested objects limit that was added in OpenSearch 1.0 that would prevent a cluster from starting if the limit was too high.  Additional the limit could be lowered manually which would cause the same problem and errors.
 
 ```java
