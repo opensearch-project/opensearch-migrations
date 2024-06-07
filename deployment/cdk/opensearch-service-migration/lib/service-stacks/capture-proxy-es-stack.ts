@@ -18,6 +18,7 @@ export interface CaptureProxyESProps extends StackPropsExt {
     readonly fargateCpuArch: CpuArchitecture,
     readonly albConfig?: ALBConfig,
     readonly extraArgs?: string,
+    expectUnauthenticatedHealthcheck?: boolean,
 }
 
 /**
@@ -52,7 +53,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
         }
 
         if (props.albConfig) {
-            this.albTargetGroup = this.createSecureTargetGroup("CaptureProxy", CaptureProxyESStack.DEFAULT_PROXY_PORT, props.vpc);
+            this.albTargetGroup = this.createSecureTargetGroup("CaptureProxy", CaptureProxyESStack.DEFAULT_PROXY_PORT, props.vpc, props.expectUnauthenticatedHealthcheck);
             if (isNewALBListenerConfig(props.albConfig)) {
                 this.albListener = this.createSecureListener("CaptureProxy", props.albConfig.albListenerPort, props.albConfig.alb, props.albConfig.albListenerCert, this.albTargetGroup);
             } else {

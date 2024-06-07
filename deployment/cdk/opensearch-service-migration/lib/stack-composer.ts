@@ -451,6 +451,7 @@ export class StackComposer {
                     alb: networkStack.alb!,
                     albListenerCert: networkStack.albListenerCert!,
                 } : undefined,
+                expectUnauthenticatedHealthcheck: true,
                 env: props.env
             })
             this.addDependentStacks(captureProxyESStack, [migrationStack, mskUtilityStack, kafkaBrokerStack])
