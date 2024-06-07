@@ -6,10 +6,9 @@ import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {StreamingSourceType} from "../streaming-source-type";
-import {createMSKProducerIAMPolicies} from "../common-utilities";
+import {ALBConfig, createMSKProducerIAMPolicies, isNewALBListenerConfig} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
-import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
-import { IApplicationListener, IApplicationLoadBalancer, IApplicationTargetGroup} from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import { IApplicationListener, IApplicationTargetGroup} from "aws-cdk-lib/aws-elasticloadbalancingv2";
 
 
 export interface CaptureProxyESProps extends StackPropsExt {
@@ -17,9 +16,7 @@ export interface CaptureProxyESProps extends StackPropsExt {
     readonly streamingSourceType: StreamingSourceType,
     readonly otelCollectorEnabled: boolean,
     readonly fargateCpuArch: CpuArchitecture,
-    readonly alb?: IApplicationLoadBalancer,
-    readonly albListenerCert?: ICertificate,
-    readonly albListenerPort?: number,
+    readonly albConfig?: ALBConfig,
     readonly extraArgs?: string,
 }
 
@@ -31,6 +28,8 @@ export interface CaptureProxyESProps extends StackPropsExt {
 export class CaptureProxyESStack extends MigrationServiceCore {
     private readonly albListener?: IApplicationListener;
     private readonly albTargetGroup?: IApplicationTargetGroup;
+    public static readonly DEFAULT_PROXY_PORT = 9200;
+    public static readonly DEFAULT_ES_PASSTHROUGH_PORT = 19200;
 
     constructor(scope: Construct, id: string, props: CaptureProxyESProps) {
         super(scope, id, props)
@@ -41,24 +40,26 @@ export class CaptureProxyESStack extends MigrationServiceCore {
 
         const servicePort: PortMapping = {
             name: "capture-proxy-es-connect",
-            hostPort: 9200,
-            containerPort: 9200,
+            hostPort: CaptureProxyESStack.DEFAULT_PROXY_PORT,
+            containerPort: CaptureProxyESStack.DEFAULT_PROXY_PORT,
             protocol: Protocol.TCP
         }
         const esServicePort: PortMapping = {
             name: "es-connect",
-            hostPort: 19200,
-            containerPort: 19200,
+            hostPort: CaptureProxyESStack.DEFAULT_ES_PASSTHROUGH_PORT,
+            containerPort: CaptureProxyESStack.DEFAULT_ES_PASSTHROUGH_PORT,
             protocol: Protocol.TCP
         }
 
-        if(props.alb) {
-            if (!props.albListenerCert) {
-                throw new Error("Must have alb cert defined if specifying alb");
+        if (props.albConfig) {
+            this.albTargetGroup = this.createSecureTargetGroup("CaptureProxy", CaptureProxyESStack.DEFAULT_PROXY_PORT, props.vpc);
+            if (isNewALBListenerConfig(props.albConfig)) {
+                this.albListener = this.createSecureListener("CaptureProxy", props.albConfig.albListenerPort, props.albConfig.alb, props.albConfig.albListenerCert, this.albTargetGroup);
+            } else {
+                throw new Error("Invalid ALB config");
             }
-            this.albTargetGroup = this.createSecureTargetGroup("CaptureProxy", 9200, props.vpc);
-            this.albListener = this.createSecureListener("CaptureProxy", props.albListenerPort || 9200, props.alb, props.albListenerCert, this.albTargetGroup);
         }
+
         const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId) : []
 
         let brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);

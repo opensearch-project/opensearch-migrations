@@ -3,6 +3,8 @@ import {Construct} from "constructs";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 import {RemovalPolicy} from "aws-cdk-lib";
+import { IApplicationLoadBalancer } from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 
 export function createOpenSearchIAMAccessPolicy(partition: string, region: string, accountId: string): PolicyStatement {
     return new PolicyStatement({
@@ -149,4 +151,17 @@ export function parseRemovalPolicy(optionName: string, policyNameString?: string
         throw new Error(`Provided '${optionName}' with value '${policyNameString}' does not match a selectable option, for reference https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.RemovalPolicy.html`)
     }
     return policy
+}
+
+
+export type ALBConfig = NewALBListenerConfig;
+
+export interface NewALBListenerConfig {
+    alb: IApplicationLoadBalancer,
+    albListenerCert: ICertificate,
+    albListenerPort?: number,
+}
+
+export function isNewALBListenerConfig(config: ALBConfig): config is NewALBListenerConfig {
+    return (config as NewALBListenerConfig).alb !== undefined && (config as NewALBListenerConfig).albListenerCert !== undefined;
 }
