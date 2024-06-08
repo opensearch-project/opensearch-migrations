@@ -405,6 +405,16 @@ public class IndexStep {
 
         @Override
         public void run() {
+            logger.info("Marking the Index Migration as completed...");
+            CmsEntry.Index lastCmsEntry = members.getCmsEntryNotMissing();
+            CmsEntry.Index updatedEntry = new CmsEntry.Index(
+                CmsEntry.IndexStatus.COMPLETED,
+                lastCmsEntry.leaseExpiry,
+                lastCmsEntry.numAttempts
+            );
+            members.cmsClient.updateIndexEntry(updatedEntry, lastCmsEntry);
+            logger.info("Index Migration marked as completed");
+
             logger.info("Index Migration completed, exiting Index Phase...");
             members.globalState.updatePhase(GlobalState.Phase.INDEX_COMPLETED);
         }

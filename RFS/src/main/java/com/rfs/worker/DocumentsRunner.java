@@ -38,7 +38,7 @@ public class DocumentsRunner implements Runner {
             throw new DocumentsMigrationPhaseFailed(
                 members.globalState.getPhase(), 
                 nextStep, 
-                members.cmsEntry, 
+                members.cmsEntry.map(bar -> (CmsEntry.Base) bar), 
                 e
             );
         }

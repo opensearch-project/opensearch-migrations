@@ -32,10 +32,21 @@ public class DocumentsStep {
         protected final SnapshotShardUnpacker unpacker;
         protected final LuceneDocumentsReader reader;
         protected final DocumentReindexer reindexer;
+        protected Optional<CmsEntry.Documents> cmsEntry = Optional.empty();
+        protected Optional<CmsEntry.DocumentsWorkItem> cmsWorkEntry = Optional.empty();
 
-        // This is needed solely for reporting purposes in the event of an exception; it would be prefered
-        // not need this if/when we find a better way to structure things.
-        protected Optional<CmsEntry.Base> cmsEntry = Optional.empty();
+        // Convient ways to check if the CMS entries are present before retrieving them.  In some places, it's fine/expected
+        // for the CMS entry to be missing, but in others, it's a problem.
+        public CmsEntry.Documents getCmsEntryNotMissing() {
+            return cmsEntry.orElseThrow(
+                () -> new MissingDocumentsEntry()
+            );
+        }
+        public CmsEntry.DocumentsWorkItem getCmsWorkEntryNotMissing() {
+            return cmsWorkEntry.orElseThrow(
+                () -> new MissingDocumentsEntry()
+            );
+        }
     }
 
     public static abstract class Base implements WorkerStep {
@@ -71,27 +82,24 @@ public class DocumentsStep {
      * Gets the current Documents Migration entry from the CMS, if it exists
      */
     public static class GetEntry extends Base {
-        protected Optional<CmsEntry.Documents> cmsEntry;
 
         public GetEntry(SharedMembers members) {
             super(members);
-            cmsEntry = Optional.empty();
         }
 
         @Override
         public void run() {
             logger.info("Pulling the Documents Migration entry from the CMS, if it exists...");
-            cmsEntry = members.cmsClient.getDocumentsEntry();
-            members.cmsEntry = cmsEntry.map(bar -> (CmsEntry.Base) bar);
+            members.cmsEntry = members.cmsClient.getDocumentsEntry();
         }
 
         @Override
         public WorkerStep nextStep() {
-            if (cmsEntry.isEmpty()) {
+            if (members.cmsEntry.isEmpty()) {
                 return new CreateEntry(members);
             } 
             
-            CmsEntry.Documents currentEntry = cmsEntry.get();
+            CmsEntry.Documents currentEntry = members.cmsEntry.get();
             switch (currentEntry.status) {
                 case SETUP:
                     // TODO: This uses the client-side clock to evaluate the lease expiration, when we should
@@ -103,7 +111,7 @@ public class DocumentsStep {
 
                     // Don't try to acquire the lease if we're already at the max number of attempts
                     if (currentEntry.numAttempts >= CmsEntry.Documents.MAX_ATTEMPTS && leaseExpired) {
-                        return new ExitPhaseFailed(members, currentEntry, new MaxAttemptsExceeded());
+                        return new ExitPhaseFailed(members, new MaxAttemptsExceeded());
                     }
 
                     if (leaseExpired) {
@@ -118,7 +126,7 @@ public class DocumentsStep {
                 case COMPLETED:
                     return new ExitPhaseSuccess(members);
                 case FAILED:
-                    return new ExitPhaseFailed(members, currentEntry, new FoundFailedDocumentsMigration());
+                    return new ExitPhaseFailed(members, new FoundFailedDocumentsMigration());
                 default:
                     throw new IllegalStateException("Unexpected documents migration status: " + currentEntry.status);
             }
@@ -126,26 +134,23 @@ public class DocumentsStep {
     }
 
     public static class CreateEntry extends Base {
-        protected Optional<CmsEntry.Documents> cmsEntry;
 
         public CreateEntry(SharedMembers members) {
             super(members);
-            cmsEntry = Optional.empty();
         }
 
         @Override
         public void run() {
             logger.info("Documents Migration CMS Entry not found, attempting to create it...");
-            cmsEntry = members.cmsClient.createDocumentsEntry();
-            members.cmsEntry = cmsEntry.map(bar -> (CmsEntry.Base) bar);
+            members.cmsEntry = members.cmsClient.createDocumentsEntry();
             logger.info("Documents Migration CMS Entry created");
         }
 
         @Override
         public WorkerStep nextStep() {
             // Set up the documents work entries if we successfully created the CMS entry; otherwise, circle back to the beginning
-            if (cmsEntry.isPresent()) {
-                return new SetupDocumentsWorkEntries(members, cmsEntry.get());
+            if (members.cmsEntry.isPresent()) {
+                return new SetupDocumentsWorkEntries(members);
             } else {
                 return new GetEntry(members);
             }
@@ -154,12 +159,11 @@ public class DocumentsStep {
 
     public static class AcquireLease extends Base {
         protected final CmsEntry.Base entry;
-        protected Optional<CmsEntry.Base> leasedEntry;
+        protected Optional<CmsEntry.Base> leasedEntry = Optional.empty();
 
         public AcquireLease(SharedMembers members, CmsEntry.Base entry) {
             super(members);
             this.entry = entry;
-            leasedEntry = Optional.empty();
         }
 
         protected long getNowMs() {
@@ -179,8 +183,8 @@ public class DocumentsStep {
                     CmsEntry.Documents.getLeaseExpiry(getNowMs(), currentCmsEntry.numAttempts + 1),
                     currentCmsEntry.numAttempts + 1
                 );
-                leasedEntry = members.cmsClient.updateDocumentsEntry(updatedEntry, currentCmsEntry).map(bar -> (CmsEntry.Base) bar);
-                members.cmsEntry = leasedEntry;
+                members.cmsEntry = members.cmsClient.updateDocumentsEntry(updatedEntry, currentCmsEntry);
+                leasedEntry = members.cmsEntry.map(bar -> (CmsEntry.Base) bar);
             } else if (entry instanceof CmsEntry.DocumentsWorkItem) {
                 CmsEntry.DocumentsWorkItem currentCmsEntry = (CmsEntry.DocumentsWorkItem) entry;
                 logger.info("Attempting to acquire lease on Documents Work Item entry...");            
@@ -193,8 +197,8 @@ public class DocumentsStep {
                     CmsEntry.DocumentsWorkItem.getLeaseExpiry(getNowMs(), currentCmsEntry.numAttempts + 1),
                     currentCmsEntry.numAttempts + 1
                 );
-                leasedEntry = members.cmsClient.updateDocumentsWorkItem(updatedEntry, currentCmsEntry).map(bar -> (CmsEntry.Base) bar);
-                members.cmsEntry = leasedEntry;
+                members.cmsWorkEntry = members.cmsClient.updateDocumentsWorkItem(updatedEntry, currentCmsEntry);
+                leasedEntry = members.cmsWorkEntry.map(bar -> (CmsEntry.Base) bar);
             } else {
                 throw new IllegalStateException("Unexpected CMS entry type: " + entry.getClass().getName());
             }
@@ -211,9 +215,9 @@ public class DocumentsStep {
             // Do work if we acquired the lease; otherwise, circle back to the beginning after a backoff
             if (leasedEntry.isPresent()) {
                 if (leasedEntry.get() instanceof CmsEntry.Documents) {
-                    return new SetupDocumentsWorkEntries(members, (CmsEntry.Documents) leasedEntry.get());
+                    return new SetupDocumentsWorkEntries(members);
                 } else if (entry instanceof CmsEntry.DocumentsWorkItem) {
-                    return new MigrateDocuments(members, (CmsEntry.DocumentsWorkItem) leasedEntry.get());
+                    return new MigrateDocuments(members);
                 } else {
                     throw new IllegalStateException("Unexpected CMS entry type: " + entry.getClass().getName());
                 }                
@@ -224,17 +228,15 @@ public class DocumentsStep {
     }
 
     public static class SetupDocumentsWorkEntries extends Base {
-        protected final CmsEntry.Documents leasedCmsEntry;
-        protected Optional<CmsEntry.Documents> updatedCmsEntry;
 
-        public SetupDocumentsWorkEntries(SharedMembers members, CmsEntry.Documents leasedCmsEntry) {
+        public SetupDocumentsWorkEntries(SharedMembers members) {
             super(members);
-            this.leasedCmsEntry = leasedCmsEntry;
-            updatedCmsEntry = Optional.empty();
         }
 
         @Override
         public void run() {
+            CmsEntry.Documents leasedCmsEntry = members.getCmsEntryNotMissing();
+
             logger.info("Setting the worker's current work item to be creating the documents work entries...");
             members.globalState.updateWorkItem(new OpenSearchWorkItem(OpenSearchCmsClient.CMS_INDEX_NAME, OpenSearchCmsClient.CMS_DOCUMENTS_DOC_ID));
             logger.info("Work item set");
@@ -258,8 +260,7 @@ public class DocumentsStep {
                 leasedCmsEntry.numAttempts
             );
 
-            updatedCmsEntry = members.cmsClient.updateDocumentsEntry(updatedEntry, leasedCmsEntry);
-            members.cmsEntry = updatedCmsEntry.map(bar -> (CmsEntry.Base) bar);
+            members.cmsEntry = members.cmsClient.updateDocumentsEntry(updatedEntry, leasedCmsEntry);
             logger.info("Documents Migration entry updated");
 
             logger.info("Clearing the worker's current work item...");
@@ -269,7 +270,7 @@ public class DocumentsStep {
 
         @Override
         public WorkerStep nextStep() {
-            if (updatedCmsEntry.isEmpty()) {
+            if (members.cmsEntry.isEmpty()) {
                 // In this scenario, we've done all the work, but failed to update the CMS entry so that we know we've
                 // done the work.  We circle back around to try again, which is made more reasonable by the fact we
                 // don't re-migrate templates that already exist on the target cluster.  If we didn't circle back
@@ -285,19 +286,16 @@ public class DocumentsStep {
     }
 
     public static class GetDocumentsToMigrate extends Base {
-        protected Optional<CmsEntry.DocumentsWorkItem> workItem;
 
         public GetDocumentsToMigrate(SharedMembers members) {
             super(members);
-            workItem = Optional.empty();
         }
 
         @Override
         public void run() {
             logger.info("Seeing if there are any docs left to migration according to the CMS...");
-            workItem = members.cmsClient.getAvailableDocumentsWorkItem();
-            members.cmsEntry = workItem.map(bar -> (CmsEntry.Base) bar);
-            workItem.ifPresentOrElse(
+            members.cmsWorkEntry = members.cmsClient.getAvailableDocumentsWorkItem();
+            members.cmsWorkEntry.ifPresentOrElse(
                 (item) -> logger.info("Found some docs to migrate"),
                 () -> logger.info("No docs found to migrate")
             );
@@ -306,23 +304,23 @@ public class DocumentsStep {
         @Override
         public WorkerStep nextStep() {
             // No work left to do
-            if (workItem.isEmpty()) {
+            if (members.cmsWorkEntry.isEmpty()) {
                 return new ExitPhaseSuccess(members);
             }
-            return new MigrateDocuments(members, workItem.get());
+            return new MigrateDocuments(members);
         }
     }
 
     public static class MigrateDocuments extends Base {
-        protected final CmsEntry.DocumentsWorkItem workItem;
 
-        public MigrateDocuments(SharedMembers members, CmsEntry.DocumentsWorkItem workItem) {
+        public MigrateDocuments(SharedMembers members) {
             super(members);
-            this.workItem = workItem;
         }
 
         @Override
         public void run() {
+            CmsEntry.DocumentsWorkItem workItem = members.getCmsWorkEntryNotMissing();
+
             /*
             * Try to migrate the documents.  We should have a unique lease on the entry that guarantees that we're the only
             * one working on it.  However, we apply some care to ensure that even if that's not the case, something fairly 
@@ -349,9 +347,10 @@ public class DocumentsStep {
                     workItem.numAttempts
                 );
 
-                Optional<CmsEntry.DocumentsWorkItem> postUpdateEntry = members.cmsClient.updateDocumentsWorkItem(updatedEntry, workItem);
-                members.cmsEntry = postUpdateEntry.map(bar -> (CmsEntry.Base) bar);
-                postUpdateEntry.ifPresentOrElse(
+                // We use optimistic locking here in the unlikely event someone else is working on this task despite the
+                // leasing system and managed to complete the task; in that case we want this update to bounce.
+                members.cmsWorkEntry = members.cmsClient.updateDocumentsWorkItem(updatedEntry, workItem);
+                members.cmsWorkEntry.ifPresentOrElse(
                     value -> logger.info("Documents Work Item (Index: " + workItem.indexName + ", Shard: " + workItem.shardId + ") marked as failed"),
                     () ->logger.info("Documents Work Item (Index: " + workItem.indexName + ", Shard: " + workItem.shardId + ") as failed")
                 );
@@ -371,12 +370,11 @@ public class DocumentsStep {
                 members.unpacker.unpack(shardMetadata);
                 
                 Flux<Document> documents = members.reader.readDocuments(shardMetadata.getIndexName(), shardMetadata.getShardId());
-                String targetIndex = shardMetadata.getIndexName();
 
                 final int finalShardId = shardMetadata.getShardId(); // Define in local context for the lambda
-                members.reindexer.reindex(targetIndex, documents)
+                members.reindexer.reindex(shardMetadata.getIndexName(), documents)
                     .doOnError(error -> logger.error("Error during reindexing: " + error))
-                    .doOnSuccess(done -> logger.info("Reindexing completed for Index " + targetIndex + ", Shard " + finalShardId))
+                    .doOnSuccess(done -> logger.info("Reindexing completed for Index " + shardMetadata.getIndexName() + ", Shard " + finalShardId))
                     // Wait for the reindexing to complete before proceeding
                     .block();
                 logger.info("Docs migrated");
@@ -390,12 +388,11 @@ public class DocumentsStep {
                     workItem.numAttempts
                 );
                 
-                members.cmsClient.updateDocumentsWorkItemForceful(updatedEntry);
-                members.cmsEntry = Optional.of(updatedEntry);
+                members.cmsWorkEntry = Optional.of(members.cmsClient.updateDocumentsWorkItemForceful(updatedEntry));
                 logger.info("Documents Work Item updated");
             } catch (Exception e) {
                 logger.info("Failed to documents: Index " + workItem.indexName + ", Shard " + workItem.shardId, e);
-                logger.info("Updating the Index Work Item with incremented attempt count...");
+                logger.info("Updating the Documents Work Item with incremented attempt count...");
                 CmsEntry.DocumentsWorkItem updatedEntry = new CmsEntry.DocumentsWorkItem(
                     workItem.indexName,
                     workItem.shardId,
@@ -404,9 +401,10 @@ public class DocumentsStep {
                     workItem.numAttempts + 1
                 );
 
-                Optional<CmsEntry.DocumentsWorkItem> postUpdateEntry = members.cmsClient.updateDocumentsWorkItem(updatedEntry, workItem);
-                members.cmsEntry = postUpdateEntry.map(bar -> (CmsEntry.Base) bar);
-                postUpdateEntry.ifPresentOrElse(
+                // We use optimistic locking here in the unlikely event someone else is working on this task despite the
+                // leasing system and managed to complete the task; in that case we want this update to bounce.
+                members.cmsWorkEntry = members.cmsClient.updateDocumentsWorkItem(updatedEntry, workItem);
+                members.cmsWorkEntry.ifPresentOrElse(
                     value -> logger.info("Documents Work Item (Index: " + workItem.indexName + ", Shard: " + workItem.shardId + ") attempt count was incremented"),
                     () ->logger.info("Unable to increment attempt count of Documents Work Item (Index: " + workItem.indexName + ", Shard: " + workItem.shardId + ")")
                 );
@@ -458,8 +456,18 @@ public class DocumentsStep {
 
         @Override
         public void run() {
+            logger.info("Marking the Documents Migration as completed...");
+            CmsEntry.Documents lastCmsEntry = members.getCmsEntryNotMissing();
+            CmsEntry.Documents updatedEntry = new CmsEntry.Documents(
+                CmsEntry.DocumentsStatus.COMPLETED,
+                lastCmsEntry.leaseExpiry,
+                lastCmsEntry.numAttempts
+            );
+            members.cmsClient.updateDocumentsEntry(updatedEntry, lastCmsEntry);
+            logger.info("Documents Migration marked as completed");
+
             logger.info("Documents Migration completed, exiting Documents Phase...");
-            members.globalState.updatePhase(GlobalState.Phase.INDEX_COMPLETED);
+            members.globalState.updatePhase(GlobalState.Phase.DOCUMENTS_COMPLETED);
         }
 
         @Override
@@ -469,18 +477,20 @@ public class DocumentsStep {
     }
 
     public static class ExitPhaseFailed extends Base {
-        protected final CmsEntry.Documents lastCmsEntry;
         protected final DocumentsMigrationFailed e;
 
-        public ExitPhaseFailed(SharedMembers members, CmsEntry.Documents lastCmsEntry,  DocumentsMigrationFailed e) {
+        public ExitPhaseFailed(SharedMembers members,  DocumentsMigrationFailed e) {
             super(members);
-            this.lastCmsEntry = lastCmsEntry;
             this.e = e;
         }
 
         @Override
         public void run() {
-            logger.error("Metadata Migration failed");
+            // We either failed the Documents Migration or found it had already been failed; either way this
+            // should not be missing
+            CmsEntry.Documents lastCmsEntry = members.getCmsEntryNotMissing();
+
+            logger.error("Documents Migration failed");
             CmsEntry.Documents updatedEntry = new CmsEntry.Documents(
                 CmsEntry.DocumentsStatus.FAILED,
                 lastCmsEntry.leaseExpiry,
