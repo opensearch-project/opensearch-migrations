@@ -53,9 +53,7 @@
             stage('Build') {
             steps {
             timeout(time: 1, unit: 'HOURS') {
-            dir('TrafficCapture') {
             sh './gradlew build -x test'
-            }
             }
             }
             }
