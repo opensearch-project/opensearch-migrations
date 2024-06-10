@@ -85,9 +85,8 @@ export class CaptureProxyESStack extends MigrationServiceCore {
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,
-            albTargetGroups: [this.albTargetGroup],
+            albTargetGroups: this.albTargetGroup ? [this.albTargetGroup] : [],
             ...props
         });
     }
-
 }
