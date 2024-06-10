@@ -172,7 +172,7 @@ public class RunRfsWorker {
             documentsWorker.run();
             
         } catch (Runner.PhaseFailed e) {
-            logPhaseFailureRecord(e.phase, e.nextStep, e.cmsEntry, e.e);
+            logPhaseFailureRecord(e.phase, e.nextStep, e.cmsEntry, e.getCause());
             throw e;
         } catch (Exception e) {
             logger.error("Unexpected error running RfsWorker", e);
@@ -180,7 +180,7 @@ public class RunRfsWorker {
         }
     }
 
-    public static void logPhaseFailureRecord(GlobalState.Phase phase, WorkerStep nextStep, Optional<CmsEntry.Base> cmsEntry, Exception e) {
+    public static void logPhaseFailureRecord(GlobalState.Phase phase, WorkerStep nextStep, Optional<CmsEntry.Base> cmsEntry, Throwable e) {
         ObjectNode errorBlob = new ObjectMapper().createObjectNode();
         errorBlob.put("exceptionMessage", e.getMessage());
         errorBlob.put("exceptionClass", e.getClass().getSimpleName());
