@@ -14,7 +14,7 @@ from requests import Session
 from requests.adapters import HTTPAdapter
 from requests.exceptions import ConnectionError, SSLError
 from requests_aws4auth import AWS4Auth
-from typing import Tuple, Callable, List
+from typing import Tuple, Callable, List, Dict
 
 from operations import create_index, check_index, create_document, \
     delete_document, delete_index, get_document, run_migration_console_command
@@ -164,11 +164,12 @@ class E2ETests(unittest.TestCase):
     # the lookback time. Soon, we should implement a way to add a specific ID to metrics from a given run
     # and check for the presence of that ID.
     def assert_metric_has_data(self, component: str, metric: str, lookback_minutes: int):
+        command = f"console --json metrics get-data {component} {metric} --lookback {lookback_minutes}"
         returncode, stdout, stderr = run_migration_console_command(
             self.deployment_type,
-            f"console --json metrics get-data {component} {metric} --lookback {lookback_minutes}"
+            command
         )
-        self.assertEqual(returncode, 0)
+        self.assertEqual(returncode, 0, f"Return code from `{command}` was non-zero. Stderr output: {stderr}")
         data = json.loads(stdout)
         self.assertNotEqual(
             len(data), 0,
@@ -176,7 +177,7 @@ class E2ETests(unittest.TestCase):
             f"not have data within the last {lookback_minutes} minutes"
         )
 
-    def assert_metrics(self, expected_metrics: dict[string, List[string]], lookback_minutes=2):
+    def assert_metrics(self, expected_metrics: Dict[str, List[str]], lookback_minutes=2):
         for component, expected_comp_metrics in expected_metrics.items():
             for expected_metric in expected_comp_metrics:
                 if self.deployment_type == 'cloud':
@@ -319,7 +320,6 @@ class E2ETests(unittest.TestCase):
 
     def test_0006_OSB(self):
         # TODO: rewrite this with `call_migration_console_command`
-        returncode, stdout, stderr = run_migration_console_command()
         if self.deployment_type == "cloud":
             if self.source_auth_type == "none":
                 auth_string = " --no-auth"
@@ -334,7 +334,8 @@ class E2ETests(unittest.TestCase):
             cmd = "./runTestBenchmarks"
             sleep_time = 5
 
-        run_migration_console_command(self.deployment_type, cmd)
+        returncode, _, _ = run_migration_console_command(self.deployment_type, cmd)
+        self.assertEqual(returncode, 0)
         time.sleep(sleep_time)
 
         source_indices = get_indices(self.source_endpoint, self.source_auth, self.source_verify_ssl)

@@ -3,6 +3,7 @@ import random
 import string
 import json
 from requests import Session
+import shlex
 import subprocess
 import logging
 
@@ -74,25 +75,41 @@ def get_document(endpoint: str, index_name: str, doc_id: str, auth,
 
 
 class ContainerNotFoundError(Exception):
-    def __init__(self, container_name_filter):
-        super().__init__("No containers matching the name filter '{container_name_filter}' were found.")
+    def __init__(self, container_filter):
+        super().__init__(f"No containers matching the filter '{container_filter}' were found.")
 
 
 def run_migration_console_command(deployment_type: str, command: str):
     if deployment_type == "local":
-        cmd = ['docker', 'ps', '--format="{{.ID}}"', '--filter', 'name="migration-console"']
-        container_id = subprocess.run(cmd, stdout=subprocess.PIPE, text=True).stdout.strip().replace('"', '')
+        filter_criteria = 'name=\"migration-console\"'
+        cmd = f'docker ps --format=\"{{{{.ID}}}}\" --filter {filter_criteria}'
+
+        get_container_process = subprocess.run(shlex.split(cmd), stdout=subprocess.PIPE, text=True)
+        container_id = get_container_process.stdout.strip().replace('"', '')
+
+        debug_command = subprocess.run(shlex.split(cmd)[0:2], stdout=subprocess.PIPE, text=True)
+        print(debug_command)
+        print(debug_command.stdout)
 
         if container_id:
-            cmd_exec = f"docker exec {container_id} {command}"
-            logger.warning(f"Running command: {cmd_exec}")
-            process = subprocess.run(cmd_exec, shell=True, capture_output=True)
+            print("ls docker directory")
+            debug_command = subprocess.run(f"docker exec {container_id} bash -c 'ls -lAh'",
+                                           shell=True, capture_output=True, text=True)
+            print(debug_command)
+            print(debug_command.stdout)
+
+            print(debug_command.stderr)
+            print("done with ls ")
+
+            cmd_exec = f"docker exec {container_id} bash -c '{command}'"
+            logger.warning(f"Running command: {cmd_exec} on container {container_id}")
+            process = subprocess.run(cmd_exec, shell=True, capture_output=True, text=True)
             return process.returncode, process.stdout, process.stderr
         else:
-            raise ContainerNotFoundError("migration-console")
+            raise ContainerNotFoundError(filter_criteria)
 
     else:
         # In a cloud deployment case, we run the e2e tests directly on the migration console, so it's just a local call
-        logger.warning(f"Running command: {command}")
+        logger.warning(f"Running command: {command} locally")
         process = subprocess.run(cmd_exec, shell=True, capture_output=True)
         return process.returncode, process.stdout, process.stderr
