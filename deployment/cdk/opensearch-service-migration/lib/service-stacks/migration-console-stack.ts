@@ -160,7 +160,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
-        const allClusterTasksArn = `arn:aws:ecs:${props.env?.region}:${props.env?.account}:task/migration-${props.stage}-ecs-cluster/*`
+        const allClusterTasksArn = `arn:${this.partition}:ecs:${this.region}:${this.account}:task/migration-${props.stage}-ecs-cluster/*`
         const clusterTasksPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: [allClusterTasksArn],
