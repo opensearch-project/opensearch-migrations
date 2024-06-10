@@ -16,7 +16,7 @@ RUN apt -y install vim less
 RUN apt -y install python3 python3-pip
 RUN apt -y install awscli
 
-ENV PATH=/usr/lib/jvm/java-11-openjdk-amd64/bin:$PATH
+ENV PATH=/usr/lib/jvm/java-11-openjdk-arm64/bin:/usr/lib/jvm/java-11-openjdk-armd64/bin:$PATH
 ENV JAVA_OPTS="-Djenkins.install.runSetupWizard=false"
 
 COPY plugins.txt /usr/share/jenkins/ref/plugins.txt
@@ -25,4 +25,3 @@ RUN jenkins-plugin-cli -f /usr/share/jenkins/ref/plugins.txt
 COPY copyGitTrackedFiles.sh .
 RUN chmod ugo+x copyGitTrackedFiles.sh
 RUN mkdir -p /var/jenkins_home/jobs/buildAll/builds; mkdir -p /var/jenkins_home/jobs/localWorkspace/builds
-#COPY configuration.yaml /var/jenkins_home/casc_configs/configuration.yaml

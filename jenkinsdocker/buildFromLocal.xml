@@ -29,38 +29,35 @@
     <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@3894.3896.vca_2c931e7935">
         <script>pipeline {
             environment {
-            STAGE = 'gcs1'
-            }
+                    STAGE = 'local-test'
+                }
 
-            agent any
+                agent any
 
-            stages {
-            stage('Checkout') {
-            steps {
-            script {
-            // Copy code from mounted directory to workspace
-            sh "/copyGitTrackedFiles.sh /opensearch-migrations-src ."
-            }
-            }
-            }
+                stages {
+                    stage('Checkout') {
+                        steps {
+                            script {
+                                // Copy code from mounted directory to workspace
+                                sh "/copyGitTrackedFiles.sh /opensearch-migrations-src ."
+                            }
+                        }
+                    }
 
-            stage('Test Caller Identity') {
-            steps {
-            sh 'aws sts get-caller-identity'
-            }
-            }
+                    stage('Test Caller Identity') {
+                        steps {
+                            sh 'aws sts get-caller-identity'
+                        }
+                    }
 
-            stage('Build') {
-            steps {
-            timeout(time: 1, unit: 'HOURS') {
-            dir('TrafficCapture') {
-            sh './gradlew build -x test'
-            }
-            }
-            }
-            }
-
-            }
+                    stage('Build') {
+                        steps {
+                            timeout(time: 1, unit: 'HOURS') {
+                                sh './gradlew build -x test'
+                            }
+                        }
+                    }
+                }
             }</script>
         <sandbox>true</sandbox>
     </definition>
