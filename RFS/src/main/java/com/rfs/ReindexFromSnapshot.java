@@ -323,6 +323,14 @@ public class ReindexFromSnapshot {
                 logger.info("==================================================================");
                 logger.info("Unpacking blob files to disk...");
 
+                int bufferSize;
+                if (sourceVersion == ClusterVersion.ES_6_8) {
+                    bufferSize = ElasticsearchConstants_ES_6_8.BUFFER_SIZE_IN_BYTES;
+                } else {
+                    bufferSize = ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES;
+                }
+                SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(repo, luceneDirPath, bufferSize);
+
                 for (IndexMetadata.Data indexMetadata : indexMetadatas) {
                     logger.info("Processing index: " + indexMetadata.getName());
                     for (int shardId = 0; shardId < indexMetadata.getNumberOfShards(); shardId++) {
@@ -331,20 +339,13 @@ public class ReindexFromSnapshot {
                         // Get the shard metadata
                         ShardMetadata.Data shardMetadata;
                         if (sourceVersion == ClusterVersion.ES_6_8) {
-                            shardMetadata = new ShardMetadataFactory_ES_6_8().fromRepo(repo, repoDataProvider, snapshotName, indexMetadata.getName(), shardId);
+                            shardMetadata = new ShardMetadataFactory_ES_6_8(repoDataProvider).fromRepo(snapshotName, indexMetadata.getName(), shardId);
                         } else {
-                            shardMetadata = new ShardMetadataFactory_ES_7_10().fromRepo(repo, repoDataProvider, snapshotName, indexMetadata.getName(), shardId);
+                            shardMetadata = new ShardMetadataFactory_ES_7_10(repoDataProvider).fromRepo(snapshotName, indexMetadata.getName(), shardId);
                         }
 
                         // Unpack the shard
-                        int bufferSize;
-                        if (sourceVersion == ClusterVersion.ES_6_8) {
-                            bufferSize = ElasticsearchConstants_ES_6_8.BUFFER_SIZE_IN_BYTES;
-                        } else {
-                            bufferSize = ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES;
-                        }
-
-                        SnapshotShardUnpacker.unpack(repo, shardMetadata, luceneDirPath, bufferSize);
+                        unpacker.unpack(shardMetadata);
                     }
                 }
 
@@ -356,15 +357,18 @@ public class ReindexFromSnapshot {
                 logger.info("==================================================================");
                 logger.info("Reindexing the documents...");
 
+                LuceneDocumentsReader reader = new LuceneDocumentsReader(luceneDirPath);
+                DocumentReindexer reindexer = new DocumentReindexer(targetClient);
+
                 for (IndexMetadata.Data indexMetadata : indexMetadatas) {
                     for (int shardId = 0; shardId < indexMetadata.getNumberOfShards(); shardId++) {
                         logger.info("=== Index Id: " + indexMetadata.getName() + ", Shard ID: " + shardId + " ===");
 
-                        Flux<Document> documents = new LuceneDocumentsReader().readDocuments(luceneDirPath, indexMetadata.getName(), shardId);
+                        Flux<Document> documents = reader.readDocuments(indexMetadata.getName(), shardId);
                         String targetIndex = indexMetadata.getName() + indexSuffix;
 
                         final int finalShardId = shardId; // Define in local context for the lambda
-                        DocumentReindexer.reindex(targetIndex, documents, targetClient)
+                        reindexer.reindex(targetIndex, documents)
                             .doOnError(error -> logger.error("Error during reindexing: " + error))
                             .doOnSuccess(done -> logger.info("Reindexing completed for index " + targetIndex + ", shard " + finalShardId))
                             // Wait for the shard reindexing to complete before proceeding; fine in this demo script, but
@@ -373,7 +377,7 @@ public class ReindexFromSnapshot {
                     }
                 }
                 logger.info("Refreshing target cluster to reflect newly added documents");
-                DocumentReindexer.refreshAllDocuments(targetConnection);
+                reindexer.refreshAllDocuments(targetConnection);
                 logger.info("Refresh complete");
             }
             

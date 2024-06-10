@@ -260,7 +260,7 @@ ID: metadata_status
 FIELDS:
     * status (string): IN_PROGRESS, COMPLETED, FAILED
     * leaseExpiry (timestamp): When the current work lease expires
-    * num_attempts (integer): Times the task has been attempted
+    * numAttempts (integer): Times the task has been attempted
 
 INDEX MIGRATION STATUS RECORD
 ID: index_status
@@ -287,9 +287,10 @@ FIELDS:
 SHARD WORK ENTRY RECORD
 ID: <name of the index to be migrated>_<shard number>
 FIELDS:
-    * index (string): The index name
-    * shard (integer): The shard number
+    * indexName (string): The index name
+    * shardId (integer): The shard number
     * status (string): NOT_STARTED, COMPLETED, FAILED
+    * leaseExpiry (timestamp): When the current work lease expires
     * numAttempts (integer): Times the task has been attempted
 ```
 

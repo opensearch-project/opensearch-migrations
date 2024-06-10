@@ -84,4 +84,45 @@ public interface CmsClient {
      * Retrieves a set of Index Work Items from the CMS that appear ready to be worked on, up to the specified limit.
      */
     public List<CmsEntry.IndexWorkItem> getAvailableIndexWorkItems(int maxItems);
+
+    /*
+     * Creates a new entry in the CMS for the Documents Migration's progress.  Returns an Optional; if the document was
+     * created, it will be the created entry and empty otherwise.
+     */
+    public Optional<CmsEntry.Documents> createDocumentsEntry();
+
+    /*
+     * Attempt to retrieve the Documents Migration entry from the CMS, if it exists.  Returns an Optional; if the document
+     * exists, it will be the retrieved entry and empty otherwise.
+     */
+    public Optional<CmsEntry.Documents> getDocumentsEntry();
+
+    /*
+     * Updates the Documents Migration entry in the CMS.  Returns an Optional; if the document was updated,
+     * it will be the updated entry and empty otherwise.
+     */
+    public Optional<CmsEntry.Documents> updateDocumentsEntry(CmsEntry.Documents newEntry, CmsEntry.Documents lastEntry);
+
+    /*
+     * Creates a new entry in the CMS for an Documents Work Item.  Returns an Optional; if the document was
+     * created, it will be the created entry and empty otherwise.
+     */
+    public Optional<CmsEntry.DocumentsWorkItem> createDocumentsWorkItem(String indexName, int shardId);
+
+    /*
+     * Updates the Documents Work Item in the CMS.  Returns an Optional; if the document was updated,
+     * it will be the updated entry and empty otherwise.
+     */
+    public Optional<CmsEntry.DocumentsWorkItem> updateDocumentsWorkItem(CmsEntry.DocumentsWorkItem newEntry, CmsEntry.DocumentsWorkItem lastEntry);
+
+    /*
+     * Forcefully updates the Documents Work Item in the CMS.  This method should be used when you don't care about collisions
+     * and just want to overwrite the existing entry no matter what.  Returns the updated entry.
+     */
+    public CmsEntry.DocumentsWorkItem updateDocumentsWorkItemForceful(CmsEntry.DocumentsWorkItem newEntry);
+
+    /* 
+     * Retrieves a Documents Work Items from the CMS that appears ready to be worked on.
+     */
+    public Optional<CmsEntry.DocumentsWorkItem> getAvailableDocumentsWorkItem();
 }
