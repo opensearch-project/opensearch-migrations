@@ -67,10 +67,9 @@ dependencies {
 
 
     // Integration tests
+    testImplementation group: 'org.opensearch', name: 'opensearch-testcontainers'
     testImplementation group: 'org.testcontainers', name: 'testcontainers'
     testImplementation group: 'org.hamcrest', name: 'hamcrest'
-    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
-    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
     implementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
