@@ -21,7 +21,6 @@ export interface CaptureProxyProps extends StackPropsExt {
     readonly albConfig?: ALBConfig,
     readonly serviceName?: string,
     readonly addTargetClusterSG?: boolean,
-    readonly expectUnauthenticatedHealthcheck?: boolean,
     readonly extraArgs?: string,
 }
 
@@ -54,7 +53,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
         }
 
         if (props.albConfig) {
-            this.albTargetGroup = this.createSecureTargetGroup(serviceName, CaptureProxyStack.DEFAULT_PROXY_PORT, props.vpc, props.expectUnauthenticatedHealthcheck);
+            this.albTargetGroup = this.createSecureTargetGroup(serviceName, CaptureProxyStack.DEFAULT_PROXY_PORT, props.vpc);
             if (isNewALBListenerConfig(props.albConfig)) {
                 this.albListener = this.createSecureListener(serviceName, props.albConfig.albListenerPort, props.albConfig.alb, props.albConfig.albListenerCert, this.albTargetGroup);
             } else {
