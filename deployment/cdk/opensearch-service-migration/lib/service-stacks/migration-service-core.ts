@@ -54,7 +54,7 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly ulimits?: Ulimit[],
     readonly maxUptime?: Duration,
     readonly otelCollectorEnabled?: boolean,
-    readonly albTargetGroups?: (IApplicationTargetGroup | undefined)[],
+    readonly albTargetGroups?: (IApplicationTargetGroup)[],
 }
 
 export class MigrationServiceCore extends Stack {
@@ -230,7 +230,7 @@ export class MigrationServiceCore extends Stack {
         });
         
         if (props.albTargetGroups) {
-            props.albTargetGroups.forEach(tg => tg?.addTarget(fargateService));
+            props.albTargetGroups.forEach(tg => tg.addTarget(fargateService));
         }
 
         if (props.serviceDiscoveryEnabled) {
