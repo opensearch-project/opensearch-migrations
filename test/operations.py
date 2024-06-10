@@ -3,6 +3,10 @@ import random
 import string
 import json
 from requests import Session
+import subprocess
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def create_index(endpoint: str, index_name: str, auth, verify_ssl: bool = False, session: Session = Session()):
@@ -67,3 +71,28 @@ def get_document(endpoint: str, index_name: str, doc_id: str, auth,
     response = session.get(url, headers=headers, auth=auth, verify=verify_ssl)
 
     return response
+
+
+class ContainerNotFoundError(Exception):
+    def __init__(self, container_name_filter):
+        super().__init__("No containers matching the name filter '{container_name_filter}' were found.")
+
+
+def run_migration_console_command(deployment_type: str, command: str):
+    if deployment_type == "local":
+        cmd = ['docker', 'ps', '--format="{{.ID}}"', '--filter', 'name="migration-console"']
+        container_id = subprocess.run(cmd, stdout=subprocess.PIPE, text=True).stdout.strip().replace('"', '')
+
+        if container_id:
+            cmd_exec = f"docker exec {container_id} {command}"
+            logger.warning(f"Running command: {cmd_exec}")
+            process = subprocess.run(cmd_exec, shell=True, capture_output=True)
+            return process.returncode, process.stdout, process.stderr
+        else:
+            raise ContainerNotFoundError("migration-console")
+
+    else:
+        # In a cloud deployment case, we run the e2e tests directly on the migration console, so it's just a local call
+        logger.warning(f"Running command: {command}")
+        process = subprocess.run(cmd_exec, shell=True, capture_output=True)
+        return process.returncode, process.stdout, process.stderr
