@@ -35,7 +35,7 @@ class SnapshotRunnerTest {
         assertEquals(GlobalState.Phase.SNAPSHOT_IN_PROGRESS, e.phase);
         assertEquals(null, e.nextStep);
         assertEquals(Optional.empty(), e.cmsEntry);
-        assertEquals(testException, e.e);
+        assertEquals(testException, e.getCause());
     }
     
 }

@@ -44,6 +44,6 @@ public class DocumentsRunnerTest {
         assertEquals(GlobalState.Phase.DOCUMENTS_IN_PROGRESS, e.phase);
         assertEquals(DocumentsStep.GetEntry.class, e.nextStep.getClass());
         assertEquals(Optional.empty(), e.cmsEntry);
-        assertEquals(testException, e.e);
+        assertEquals(testException, e.getCause());
     }    
 }
