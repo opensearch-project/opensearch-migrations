@@ -46,7 +46,7 @@ public class OpenSearchCmsEntry {
         }
 
         @Override
-        public String toString() {
+        public String toRepresentationString() {
             return this.toJson().toString();
         }
     }
@@ -97,7 +97,7 @@ public class OpenSearchCmsEntry {
         }
 
         @Override
-        public String toString() {
+        public String toRepresentationString() {
             return this.toJson().toString();
         }
     }
@@ -148,7 +148,7 @@ public class OpenSearchCmsEntry {
         }
 
         @Override
-        public String toString() {
+        public String toRepresentationString() {
             return this.toJson().toString();
         }
     }
@@ -201,7 +201,7 @@ public class OpenSearchCmsEntry {
         }
 
         @Override
-        public String toString() {
+        public String toRepresentationString() {
             return this.toJson().toString();
         }
     }
@@ -252,7 +252,7 @@ public class OpenSearchCmsEntry {
         }
 
         @Override
-        public String toString() {
+        public String toRepresentationString() {
             return this.toJson().toString();
         }
     }
@@ -311,7 +311,7 @@ public class OpenSearchCmsEntry {
         }
 
         @Override
-        public String toString() {
+        public String toRepresentationString() {
             return this.toJson().toString();
         }
     }

@@ -18,8 +18,8 @@ public class CmsEntry {
     public abstract static class Base {
         protected Base() {}
         
-        @Override
-        public abstract String toString();
+        // Implementations of this method should provide a string version of the object that fully represents its contents
+        public abstract String toRepresentationString();
     
         @Override
         public boolean equals(Object obj) {
@@ -30,12 +30,12 @@ public class CmsEntry {
                 return false;
             }
             Base other = (Base) obj;
-            return this.toString().equals(other.toString());
+            return this.toRepresentationString().equals(other.toRepresentationString());
         }
     
         @Override
         public int hashCode() {
-            return this.toString().hashCode();
+            return this.toRepresentationString().hashCode();
         }
     }
 
@@ -51,9 +51,9 @@ public class CmsEntry {
 
         public static int getLeaseDurationMs(int numAttempts) {
             if (numAttempts > MAX_ATTEMPTS) {
-                throw new CouldNotFindNextLeaseDuration("numAttempts=" + numAttempts + " is greater than MAX_ATTEMPTS=" + MAX_ATTEMPTS);
+                throw new CouldNotGenerateNextLeaseDuration("numAttempts=" + numAttempts + " is greater than MAX_ATTEMPTS=" + MAX_ATTEMPTS);
             } else if (numAttempts < 1) {
-                throw new CouldNotFindNextLeaseDuration("numAttempts=" + numAttempts + " is less than 1");
+                throw new CouldNotGenerateNextLeaseDuration("numAttempts=" + numAttempts + " is less than 1");
             }
             return LEASE_MS * numAttempts; // Arbitratily chosen algorithm
         }
@@ -82,7 +82,7 @@ public class CmsEntry {
         public final SnapshotStatus status;
 
         @Override
-        public String toString() {
+        public String toRepresentationString() {
             return "Snapshot("
                 + "type='" + type.toString() + ","
                 + "name='" + name + ","
@@ -108,7 +108,7 @@ public class CmsEntry {
         public final Integer numAttempts;
 
         @Override
-        public String toString() {
+        public String toRepresentationString() {
             return "Metadata("
                 + "type='" + type.toString() + ","
                 + "status=" + status.toString() + ","
@@ -136,7 +136,7 @@ public class CmsEntry {
         public final Integer numAttempts;
 
         @Override
-        public String toString() {
+        public String toRepresentationString() {
             return "Index("
                 + "type='" + type.toString() + ","
                 + "status=" + status.toString() + ","
@@ -166,7 +166,7 @@ public class CmsEntry {
         public final Integer numShards;
 
         @Override
-        public String toString() {
+        public String toRepresentationString() {
             return "IndexWorkItem("
                 + "type='" + type.toString() + ","
                 + "name=" + name.toString() + ","
@@ -195,7 +195,7 @@ public class CmsEntry {
         public final Integer numAttempts;
 
         @Override
-        public String toString() {
+        public String toRepresentationString() {
             return "Documents("
                 + "type='" + type.toString() + ","
                 + "status=" + status.toString() + ","
@@ -225,7 +225,7 @@ public class CmsEntry {
         public final Integer numAttempts;
 
         @Override
-        public String toString() {
+        public String toRepresentationString() {
             return "DocumentsWorkItem("
                 + "type='" + type.toString() + ","
                 + "indexName=" + indexName.toString() + ","
@@ -237,8 +237,8 @@ public class CmsEntry {
         }
     }
 
-    public static class CouldNotFindNextLeaseDuration extends RfsException {
-        public CouldNotFindNextLeaseDuration(String message) {
+    public static class CouldNotGenerateNextLeaseDuration extends RfsException {
+        public CouldNotGenerateNextLeaseDuration(String message) {
             super("Could not find next lease duration.  Reason: " + message);
         }
     }

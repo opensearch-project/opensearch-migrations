@@ -89,17 +89,17 @@ public class RunRfsWorker {
         @Parameter(names = {"--target-password"}, description = "Optional.  The target password; if not provided, will assume no auth on target", required = false)
         public String targetPass = null;
 
-        @Parameter(names = {"--index-whitelist"}, description = ("Optional.  List of index names to migrate"
+        @Parameter(names = {"--index-allowlist"}, description = ("Optional.  List of index names to migrate"
             + " (e.g. 'logs_2024_01, logs_2024_02').  Default: all indices"), required = false)
-        public List<String> indexWhitelist = List.of();
+        public List<String> indexAllowlist = List.of();
 
-        @Parameter(names = {"--index-template-whitelist"}, description = ("Optional.  List of index template names to migrate"
+        @Parameter(names = {"--index-template-allowlist"}, description = ("Optional.  List of index template names to migrate"
             + " (e.g. 'posts_index_template1, posts_index_template2').  Default: empty list"), required = false)
-        public List<String> indexTemplateWhitelist = List.of();
+        public List<String> indexTemplateAllowlist = List.of();
 
-        @Parameter(names = {"--component-template-whitelist"}, description = ("Optional. List of component template names to migrate"
+        @Parameter(names = {"--component-template-allowlist"}, description = ("Optional. List of component template names to migrate"
             + " (e.g. 'posts_template1, posts_template2').  Default: empty list"), required = false)
-        public List<String> componentTemplateWhitelist = List.of();
+        public List<String> componentTemplateAllowlist = List.of();
         
         //https://opensearch.org/docs/2.11/api-reference/cluster-api/cluster-awareness/
         @Parameter(names = {"--min-replicas"}, description = ("Optional.  The minimum number of replicas configured for migrated indices on the target."
@@ -130,8 +130,8 @@ public class RunRfsWorker {
         String targetHost = arguments.targetHost;
         String targetUser = arguments.targetUser;
         String targetPass = arguments.targetPass;
-        List<String> indexTemplateWhitelist = arguments.indexTemplateWhitelist;
-        List<String> componentTemplateWhitelist = arguments.componentTemplateWhitelist;
+        List<String> indexTemplateAllowlist = arguments.indexTemplateAllowlist;
+        List<String> componentTemplateAllowlist = arguments.componentTemplateAllowlist;
         int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
         Level logLevel = arguments.logLevel;
 
@@ -154,7 +154,7 @@ public class RunRfsWorker {
             SourceRepo sourceRepo = S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
             SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
             GlobalMetadata.Factory metadataFactory = new GlobalMetadataFactory_ES_7_10(repoDataProvider);
-            GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateWhitelist, indexTemplateWhitelist);
+            GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateAllowlist, indexTemplateAllowlist);
             Transformer transformer = TransformFunctions.getTransformer(ClusterVersion.ES_7_10, ClusterVersion.OS_2_11, awarenessDimensionality);
             MetadataRunner metadataWorker = new MetadataRunner(globalState, cmsClient, snapshotName, metadataFactory, metadataCreator, transformer);
             metadataWorker.run();
@@ -191,7 +191,7 @@ public class RunRfsWorker {
         String currentStep = (nextStep != null) ? nextStep.getClass().getSimpleName() : "null";
         errorBlob.put("currentStep", currentStep);
 
-        String currentEntry = (cmsEntry.isPresent()) ? cmsEntry.toString() : "null";
+        String currentEntry = (cmsEntry.isPresent()) ? cmsEntry.get().toRepresentationString() : "null";
         errorBlob.put("cmsEntry", currentEntry);
 
         

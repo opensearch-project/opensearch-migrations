@@ -2,7 +2,6 @@ package com.rfs.worker;
 
 import java.time.Duration;
 import java.time.Instant;
-import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -21,7 +20,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.cms.CmsClient;
 import com.rfs.cms.CmsEntry;
 import com.rfs.cms.OpenSearchCmsClient;
@@ -31,16 +29,12 @@ import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.ShardMetadata;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
-import com.rfs.transformers.Transformer;
-import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 import com.rfs.worker.DocumentsStep.SharedMembers;
 
-import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import com.rfs.worker.DocumentsStep.MaxAttemptsExceeded;
-import com.rfs.worker.DocumentsStep.MigrateDocuments;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.argThat;
@@ -251,32 +245,6 @@ public class DocumentsStepTest {
                 )),
                 DocumentsStep.SetupDocumentsWorkEntries.class
             ),
-
-            // // We were able to acquire the lease, and it's on a Document Work Item setup
-            // Arguments.of(
-            //     Optional.of(new CmsEntry.DocumentsWorkItem(
-            //         "index-name",
-            //         1,
-            //         CmsEntry.DocumentsWorkItemStatus.NOT_STARTED,
-            //         String.valueOf(0L),
-            //         1
-            //     )),
-            //     Optional.of(new CmsEntry.DocumentsWorkItem(
-            //         "index-name",
-            //         1,
-            //         CmsEntry.DocumentsWorkItemStatus.NOT_STARTED,
-            //         CmsEntry.DocumentsWorkItem.getLeaseExpiry(TestAcquireLease.MILLI_SINCE_EPOCH, 2),
-            //         2
-            //     )),
-            //     Optional.of(new CmsEntry.DocumentsWorkItem(
-            //         "index-name",
-            //         1,
-            //         CmsEntry.DocumentsWorkItemStatus.NOT_STARTED,
-            //         CmsEntry.DocumentsWorkItem.getLeaseExpiry(TestAcquireLease.MILLI_SINCE_EPOCH, 2),
-            //         2
-            //     )),
-            //     DocumentsStep.SetupDocumentsWorkEntries.class
-            // ),
 
             // We were unable to acquire the lease
             Arguments.of(                               

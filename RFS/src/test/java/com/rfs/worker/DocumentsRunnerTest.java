@@ -16,8 +16,6 @@ import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.RfsException;
 import com.rfs.common.ShardMetadata;
 import com.rfs.common.SnapshotShardUnpacker;
-import com.rfs.transformers.Transformer;
-import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 
 public class DocumentsRunnerTest {
 

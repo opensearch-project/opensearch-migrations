@@ -352,7 +352,7 @@ public class DocumentsStep {
                 members.cmsWorkEntry = members.cmsClient.updateDocumentsWorkItem(updatedEntry, workItem);
                 members.cmsWorkEntry.ifPresentOrElse(
                     value -> logger.info("Documents Work Item (Index: " + workItem.indexName + ", Shard: " + workItem.shardId + ") marked as failed"),
-                    () ->logger.info("Documents Work Item (Index: " + workItem.indexName + ", Shard: " + workItem.shardId + ") as failed")
+                    () ->logger.warn("Unable to mark Documents Work Item (Index: " + workItem.indexName + ", Shard: " + workItem.shardId + ") as failed")
                 );
                 return;
             }

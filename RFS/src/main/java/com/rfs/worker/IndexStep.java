@@ -17,8 +17,11 @@ import com.rfs.common.SnapshotRepo;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 
+import lombok.RequiredArgsConstructor;
+
 public class IndexStep {
 
+    @RequiredArgsConstructor
     public static class SharedMembers {
         protected final GlobalState globalState;
         protected final CmsClient cmsClient;
@@ -26,18 +29,7 @@ public class IndexStep {
         protected final IndexMetadata.Factory metadataFactory;
         protected final IndexCreator_OS_2_11 indexCreator;
         protected final Transformer transformer;
-        protected Optional<CmsEntry.Index> cmsEntry;
-
-        public SharedMembers(GlobalState globalState, CmsClient cmsClient, String snapshotName, IndexMetadata.Factory metadataFactory,
-                IndexCreator_OS_2_11 indexCreator, Transformer transformer) {
-            this.globalState = globalState;
-            this.cmsClient = cmsClient;
-            this.snapshotName = snapshotName;
-            this.metadataFactory = metadataFactory;
-            this.indexCreator = indexCreator;
-            this.transformer = transformer;
-            this.cmsEntry = Optional.empty();
-        }
+        protected Optional<CmsEntry.Index> cmsEntry = Optional.empty();
 
         // A convient way to check if the CMS entry is present before retrieving it.  In some places, it's fine/expected
         // for the CMS entry to be missing, but in others, it's a problem.
