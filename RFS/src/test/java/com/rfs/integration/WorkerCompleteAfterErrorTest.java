@@ -38,20 +38,20 @@ public class WorkerCompleteAfterErrorTest {
 
     @ParameterizedTest(name = "Injected failure on {0} step")
     @EnumSource(InjectedFailure.class)
-    public void ConcurrentAllWorkerFailure(){
+    public void ResumeAfterWorkerFailure(){
         // Setup
         setupCms();
         setupMockSource();
         setupMockTarget();
 
-        // PSUEDO: Create a 5 workers
-        // PSUEDO: Wrap all workers with failure injector
-        // PSUEDO: Register all workers to fault on 'failure' parameter
+        // PSUEDO: Create a worker
+        // PSUEDO: Wrap the workers with failure injector
+        // PSUEDO: Register the workers to fault on 'failure' parameter
 
         // Action
-        // PSUEDO: Start all workers
-        // PSUEDO: Wait until all stop
-        // PSUEDO: Start 5 fresh workers
+        // PSUEDO: Start the worker
+        // PSUEDO: Wait until it stops with a fault
+        // PSUEDO: Start a fresh workers
 
         // Verification
         // PSUEDO: Verify failure injector was called on all workers
@@ -98,6 +98,13 @@ public class WorkerCompleteAfterErrorTest {
         //   - Mock OpenSearch client
     }
 
+    public void createWorker() {
+        // PSUEDO: Creates a worker
+        //   - Worker behavior tweaked for shorter leases / faster retries so tests can run quickly
+        //   - Workers themselve runs in a thread and are return CompletableFuture<Void>
+        //      Future will include exception if thrown from the worker
+    }
+
     private void verifyTargetMigrated() {
         // PSUEDO: Verify migration target
         //   - Verify all index templates attempted at least once
@@ -107,8 +114,9 @@ public class WorkerCompleteAfterErrorTest {
     }
 
     private static enum InjectedFailure {
-        SNAPSHOT_INITATE,
-        SNAPSHOT_WAIT,
+        SNAPSHOT_INITATE_REPOSITORY,
+        SNAPSHOT_INITATE_SNAPSHOT,
+        SNAPSHOT_WAIT_COMPLETION,
         TEMPLATES_MIGRATE,
         INDEX_RETRIEVE,
         INDEX_MIGRATE,
