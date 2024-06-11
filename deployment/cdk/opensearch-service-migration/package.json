@@ -40,7 +40,7 @@
     "clean": "rm -rf dist",
     "release": "npm run build",
     "cdk": "cdk",
-    "create-acm-cert": "ts-node create-acm-cert.ts"
+    "create-acm-cert": "ts-node -e \"require('./lib/lambda/acm-cert-importer-handler').handler({ RequestType: 'Create', ResponseURL: 'Local' }, {})\""
   },
   "devDependencies": {
     "@aws-cdk/aws-servicecatalogappregistry-alpha": "2.117.0-alpha.0",
