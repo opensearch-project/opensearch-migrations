@@ -238,6 +238,10 @@ export class MigrationServiceCore extends Stack {
         }
     }
 
+    getSecureListenerSslPolicy() {
+        return (this.partition === "aws-us-gov") ? SslPolicy.FIPS_TLS13_12_EXT2 : SslPolicy.RECOMMENDED_TLS
+    }
+
     createSecureListener(serviceName: string, listeningPort: number = 443, alb: IApplicationLoadBalancer, cert: ICertificate, albTargetGroup: IApplicationTargetGroup) {
         return new ApplicationListener(this, `${serviceName}ALBListener`, {
             loadBalancer: alb,
@@ -245,7 +249,7 @@ export class MigrationServiceCore extends Stack {
             protocol: ApplicationProtocol.HTTPS,
             certificates: [cert],
             defaultTargetGroups: [albTargetGroup],
-            sslPolicy: (this.partition === "aws-us-gov") ? SslPolicy.FIPS_TLS13_12_EXT2 : SslPolicy.RECOMMENDED_TLS
+            sslPolicy: this.getSecureListenerSslPolicy()
         });
     }
 

@@ -26,8 +26,8 @@ export interface CaptureProxyESProps extends StackPropsExt {
  * items split into their own services to give more flexibility in setup.
  */
 export class CaptureProxyESStack extends MigrationServiceCore {
-    private readonly albListener?: IApplicationListener;
-    private readonly albTargetGroup?: IApplicationTargetGroup;
+    public readonly albListener?: IApplicationListener;
+    public readonly albTargetGroup?: IApplicationTargetGroup;
     public static readonly DEFAULT_PROXY_PORT = 9200;
     public static readonly DEFAULT_ES_PASSTHROUGH_PORT = 19200;
 
