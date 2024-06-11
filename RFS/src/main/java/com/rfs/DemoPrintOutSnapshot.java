@@ -27,6 +27,7 @@ import com.rfs.common.SnapshotMetadata;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.ClusterVersion;
+import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.FileSystemRepo;
 import com.rfs.version_es_7_10.*;
 
@@ -219,7 +220,8 @@ public class DemoPrintOutSnapshot {
                     } else {
                         bufferSize = ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES;
                     }
-                    SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(repo, Paths.get(luceneBasePathString), bufferSize);
+                    DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
+                    SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(repoAccessor, Paths.get(luceneBasePathString), bufferSize);
                     unpacker.unpack(shardMetadata);
 
                     // Now, read the documents back out

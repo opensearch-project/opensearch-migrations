@@ -329,7 +329,8 @@ public class ReindexFromSnapshot {
                 } else {
                     bufferSize = ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES;
                 }
-                SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(repo, luceneDirPath, bufferSize);
+                DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
+                SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(repoAccessor, luceneDirPath, bufferSize);
 
                 for (IndexMetadata.Data indexMetadata : indexMetadatas) {
                     logger.info("Processing index: " + indexMetadata.getName());

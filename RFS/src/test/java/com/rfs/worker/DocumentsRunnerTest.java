@@ -25,6 +25,7 @@ public class DocumentsRunnerTest {
         GlobalState globalState = Mockito.mock(GlobalState.class);
         CmsClient cmsClient = Mockito.mock(CmsClient.class);
         String snapshotName = "testSnapshot";
+        long maxShardSizeBytes = 50 * 1024 * 1024 * 1024L;
         
         IndexMetadata.Factory metadataFactory = Mockito.mock(IndexMetadata.Factory.class);
         ShardMetadata.Factory shardMetadataFactory = Mockito.mock(ShardMetadata.Factory.class);
@@ -37,7 +38,7 @@ public class DocumentsRunnerTest {
         when(globalState.getPhase()).thenReturn(GlobalState.Phase.DOCUMENTS_IN_PROGRESS);        
 
         // Run the test
-        DocumentsRunner testRunner = new DocumentsRunner(globalState, cmsClient, snapshotName, metadataFactory, shardMetadataFactory, unpacker, reader, reindexer);
+        DocumentsRunner testRunner = new DocumentsRunner(globalState, cmsClient, snapshotName, maxShardSizeBytes, metadataFactory, shardMetadataFactory, unpacker, reader, reindexer);
         final var e = assertThrows(DocumentsRunner.DocumentsMigrationPhaseFailed.class, () -> testRunner.run());
 
         // Verify the results

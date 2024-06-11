@@ -8,6 +8,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.util.IOUtils;
 
+import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.IndexMetadata;
@@ -45,7 +46,8 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
         for (final IndexMetadata.Data index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
                 var shardMetadata = new ShardMetadataFactory_ES_7_10(snapShotProvider).fromRepo(snapshotName, index.getName(), shardId);
-                SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(repo, unpackedShardDataDir, Integer.MAX_VALUE);
+                DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
+                SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(repoAccessor, unpackedShardDataDir, Integer.MAX_VALUE);
                 unpacker.unpack(shardMetadata);
             }
         }

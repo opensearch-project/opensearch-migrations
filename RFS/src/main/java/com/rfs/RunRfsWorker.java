@@ -21,6 +21,7 @@ import com.rfs.cms.CmsEntry;
 import com.rfs.cms.OpenSearchCmsClient;
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
+import com.rfs.common.DeletingSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.GlobalMetadata;
 import com.rfs.common.IndexMetadata;
@@ -100,6 +101,10 @@ public class RunRfsWorker {
         @Parameter(names = {"--component-template-allowlist"}, description = ("Optional. List of component template names to migrate"
             + " (e.g. 'posts_template1, posts_template2').  Default: empty list"), required = false)
         public List<String> componentTemplateAllowlist = List.of();
+
+        @Parameter(names = {"--max-shard-size-bytes"}, description = ("Optional. The maximum shard size, in bytes, to allow when"
+            + " performing the document migration.  Useful for preventing disk overflow.  Default: 50 * 1024 * 1024 * 1024 (50 GB)"), required = false)
+        public long maxShardSizeBytes = 50 * 1024 * 1024 * 1024L;
         
         //https://opensearch.org/docs/2.11/api-reference/cluster-api/cluster-awareness/
         @Parameter(names = {"--min-replicas"}, description = ("Optional.  The minimum number of replicas configured for migrated indices on the target."
@@ -132,6 +137,7 @@ public class RunRfsWorker {
         String targetPass = arguments.targetPass;
         List<String> indexTemplateAllowlist = arguments.indexTemplateAllowlist;
         List<String> componentTemplateAllowlist = arguments.componentTemplateAllowlist;
+        long maxShardSizeBytes = arguments.maxShardSizeBytes;
         int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
         Level logLevel = arguments.logLevel;
 
@@ -165,10 +171,11 @@ public class RunRfsWorker {
             indexWorker.run();
 
             ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
-            SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(sourceRepo, luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
+            DeletingSourceRepoAccessor repoAccessor = new DeletingSourceRepoAccessor(sourceRepo);
+            SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(repoAccessor, luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
             LuceneDocumentsReader reader = new LuceneDocumentsReader(luceneDirPath);
             DocumentReindexer reindexer = new DocumentReindexer(targetClient);
-            DocumentsRunner documentsWorker = new DocumentsRunner(globalState, cmsClient, snapshotName, indexMetadataFactory, shardMetadataFactory, unpacker, reader, reindexer);
+            DocumentsRunner documentsWorker = new DocumentsRunner(globalState, cmsClient, snapshotName, maxShardSizeBytes, indexMetadataFactory, shardMetadataFactory, unpacker, reader, reindexer);
             documentsWorker.run();
             
         } catch (Runner.PhaseFailed e) {

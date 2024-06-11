@@ -100,7 +100,7 @@ public class ShardMetadataData_ES_7_10 implements ShardMetadata.Data {
     }
 
     @Override
-    public long getTotalSize() {
+    public long getTotalSizeBytes() {
         return totalSize;
     }
 
