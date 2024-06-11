@@ -91,7 +91,8 @@ public class TransactionalOpenSearchDataStoreTest {
             "      }" +
             "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);" +
             "      if (params.expirationWindow > 0 && " +                   // don't obtain a lease lock
-            "          ctx._source.completedAt == null && " +               // not completed
+            "          ctx._source.completedAt == null && " +              // not completed
+            "          ctx._source.expiration < serverTimeSeconds && " +       // is expired
             "          ctx._source.expiration < newExpiration) {" +        // sanity check
             "        ctx._source.expiration = newExpiration;" +
             "        ctx._source.workerId = params.workerId;" +
@@ -199,10 +200,11 @@ public class TransactionalOpenSearchDataStoreTest {
                         Assertions.assertEquals(HttpStatus.SC_OK, r.getCode());
                         return objMapper.readTree(r.getEntity().getContent());
                     });
-            Assertions.assertEquals("noop", response2.get("result").textValue());
             var doc2 = client.execute(makeGetDocument("A"), r -> {
                 return objMapper.readTree(r.getEntity().getContent());
             });
+            Assertions.assertEquals("noop", response2.get("result").textValue(),
+                    "response that came back was unexpected - document == " + objMapper.writeValueAsString(doc2));
             Assertions.assertEquals(1, doc2.get("_source").get("numAttempts").longValue());
 
             Thread.sleep(2500);
