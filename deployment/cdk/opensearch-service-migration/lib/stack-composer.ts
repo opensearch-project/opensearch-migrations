@@ -407,7 +407,7 @@ export class StackComposer {
             fetchMigrationStack = new FetchMigrationStack(scope, "fetchMigrationStack", {
                 vpc: networkStack.vpc,
                 dpPipelineTemplatePath: dpPipelineTemplatePath,
-                sourceEndpoint: sourceClusterEndpoint,
+                sourceEndpoint: sourceClusterEndpoint ?? networkStack.albSourceClusterEndpoint,
                 stackName: `OSMigrations-${stage}-${region}-FetchMigration`,
                 description: "This stack contains resources to assist migrating historical data to an OpenSearch Service domain",
                 stage: stage,
@@ -423,7 +423,7 @@ export class StackComposer {
         if (reindexFromSnapshotServiceEnabled && networkStack && migrationStack) {
             reindexFromSnapshotStack = new ReindexFromSnapshotStack(scope, "reindexFromSnapshotStack", {
                 vpc: networkStack.vpc,
-                sourceEndpoint: sourceClusterEndpoint,
+                sourceEndpoint: sourceClusterEndpoint ?? networkStack.albSourceClusterEndpoint,
                 extraArgs: reindexFromSnapshotExtraArgs,
                 stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
                 description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
@@ -499,7 +499,7 @@ export class StackComposer {
         if (captureProxyServiceEnabled && networkStack && migrationStack) {
             captureProxyStack = new CaptureProxyStack(scope, "capture-proxy", {
                 vpc: networkStack.vpc,
-                customSourceClusterEndpoint: captureProxySourceEndpoint ?? networkStack.albSourceClusterEndpoint,
+                customSourceClusterEndpoint: sourceClusterEndpoint ?? networkStack.albSourceClusterEndpoint,
                 otelCollectorEnabled: otelCollectorEnabled,
                 streamingSourceType: streamingSourceType,
                 extraArgs: captureProxyExtraArgs,
@@ -548,9 +548,7 @@ export class StackComposer {
                 migrationConsoleEnableOSI: migrationConsoleEnableOSI,
                 migrationAPIEnabled: migrationAPIEnabled,
                 servicesYaml: servicesYaml,
-                // The default value is correct if we deploy the capture proxy (e.g. captureProxyServiceEnabled or captureProxyESServiceEnabled),
-                // but not if the user does it on their own (in which case we use captureProxySourceEndpoint)
-                sourceClusterEndpoint: !(captureProxyServiceEnabled || captureProxyESServiceEnabled) ? captureProxySourceEndpoint : undefined,
+                sourceClusterEndpoint: sourceClusterEndpoint ?? networkStack.albSourceClusterEndpoint,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,

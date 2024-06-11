@@ -244,7 +244,7 @@ export class MigrationServiceCore extends Stack {
         return (this.partition === "aws-us-gov") ? SslPolicy.FIPS_TLS13_12_EXT2 : SslPolicy.RECOMMENDED_TLS
     }
 
-    createSecureListener(serviceName: string, listeningPort: number = 443, alb: IApplicationLoadBalancer, cert: ICertificate, albTargetGroup?: IApplicationTargetGroup) {
+    createSecureListener(serviceName: string, listeningPort: number, alb: IApplicationLoadBalancer, cert: ICertificate, albTargetGroup?: IApplicationTargetGroup) {
         return new ApplicationListener(this, `${serviceName}ALBListener`, {
             loadBalancer: alb,
             port: listeningPort,
@@ -263,7 +263,6 @@ export class MigrationServiceCore extends Stack {
             port: containerPort,
             vpc: vpc,
             healthCheck: {
-                port: containerPort.toString(),
                 path: "/",
                 healthyHttpCodes: "200,401"
             }
