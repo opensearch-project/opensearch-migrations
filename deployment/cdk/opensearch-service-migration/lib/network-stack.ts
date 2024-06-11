@@ -7,8 +7,11 @@ import {
 import {Construct} from "constructs";
 import {StackPropsExt} from "./stack-composer";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
-import { ApplicationLoadBalancer, ApplicationProtocol, ApplicationTargetGroup, IApplicationLoadBalancer, ListenerAction, SslPolicy, TargetType } from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import { ApplicationLoadBalancer, IApplicationLoadBalancer } from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import { Certificate, ICertificate } from "aws-cdk-lib/aws-certificatemanager";
+import { ARecord, HostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
+import { LoadBalancerTarget } from "aws-cdk-lib/aws-route53-targets";
+import { AcmCertificateImporter } from "./service-stacks/acm-cert-importer";
 
 export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string;
@@ -122,7 +125,27 @@ export class NetworkStack extends Stack {
             if (props.albAcmCertArn) {
                 const cert = Certificate.fromCertificateArn(this, 'ALBListenerCert', props.albAcmCertArn);
                 this.albListenerCert = cert;
+            } else {
+                const cert = new AcmCertificateImporter(this, 'ALBListenerCertImport').acmCert;
+                this.albListenerCert = cert;
             }
+            // this.exportValue(this.albListenerCert);
+
+            const route53 = new HostedZone(this, 'ALBHostedZone', {
+                zoneName: `alb.migration.${props.stage}.local`,
+                vpcs: [this.vpc]
+            });
+
+            const albDnsRecord = new ARecord(this, 'albDnsRecord', {
+                zone: route53,
+                target: RecordTarget.fromAlias(new LoadBalancerTarget(this.alb)),
+            });
+
+            new StringParameter(this, 'SSMParameterAlbUrl', {
+                description: 'OpenSearch migration parameter for ALB to migration services',
+                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/albMigrationUrl`,
+                stringValue: `https://${albDnsRecord.domainName}`
+            });
         }
 
         if (!props.addOnMigrationDeployId) {
