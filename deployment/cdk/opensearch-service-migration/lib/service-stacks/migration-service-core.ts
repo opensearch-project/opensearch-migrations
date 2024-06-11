@@ -25,6 +25,7 @@ import {createDefaultECSTaskRole} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { ApplicationListener, ApplicationProtocol, ApplicationProtocolVersion, ApplicationTargetGroup, IApplicationLoadBalancer, IApplicationTargetGroup, IListenerCertificate, INetworkTargetGroup, ITargetGroup, SslPolicy } from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
+import { Construct } from "constructs";
 
 
 export interface MigrationServiceCoreProps extends StackPropsExt {
@@ -268,4 +269,32 @@ export class MigrationServiceCore extends Stack {
             }
         });
     }
+
+    createStringParameter(parameterName: SSMParameter, stringValue: string, props: {stage: string, defaultDeployId: string}) {
+        return new StringParameter(this, `SSMParameter${parameterName.charAt(0).toUpperCase() + parameterName.slice(1)}`, {
+            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/${parameterName}`,
+            stringValue: stringValue,
+            description: `Opensearch migration SSM parameter for ${parameterName} with stage ${props.stage} and deploy id ${props.defaultDeployId}`,
+        });
+    }
+
+    getStringParameter(parameterName: SSMParameter, props: {stage: string, defaultDeployId: string}): string {
+        return StringParameter.valueForTypedStringParameterV2(this, `/migration/${props.stage}/${props.defaultDeployId}/${parameterName}`);
+    }
+}
+
+export enum SSMParameter {
+    VPC_ID = 'vpcId',
+    ALB_MIGRATION_URL = 'albMigrationUrl',
+    SERVICE_SECURITY_GROUP_ID = 'serviceSecurityGroupId',
+    TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID = 'trafficStreamSourceAccessSecurityGroupId',
+    REPLAYER_OUTPUT_ACCESS_SECURITY_GROUP_ID = 'replayerOutputAccessSecurityGroupId',
+    OS_ACCESS_SECURITY_GROUP_ID = 'osAccessSecurityGroupId',
+    KAFKA_BROKERS = 'kafkaBrokers',
+    OS_CLUSTER_ENDPOINT = 'osClusterEndpoint',
+    MSK_CLUSTER_NAME = 'mskClusterName',
+    MSK_CLUSTER_ARN = 'mskClusterARN',
+    ARTIFACT_S3_ARN = 'artifactS3Arn',
+    CLOUD_MAP_NAMESPACE_ID = 'cloudMapNamespaceId',
+    REPLAYER_OUTPUT_EFS_ID = 'replayerOutputEfsId',
 }
