@@ -28,6 +28,7 @@ export class NetworkStack extends MigrationServiceCore {
     public readonly albSourceProxyTG: IApplicationTargetGroup;
     public readonly albTargetProxyTG: IApplicationTargetGroup;
     public readonly albSourceClusterTG: IApplicationTargetGroup;
+    public readonly albSourceClusterEndpoint: string;
 
     // Validate a proper url string is provided and return an url string which contains a protocol, host name, and port.
     // If a port is not provided, the default protocol port (e.g. 443, 80) will be explicitly added
@@ -123,6 +124,23 @@ export class NetworkStack extends MigrationServiceCore {
                 internetFacing: false,
                 http2Enabled: false,      
             });
+
+            const route53 = new HostedZone(this, 'ALBHostedZone', {
+                zoneName: `alb.migration.${props.stage}.local`,
+                vpcs: [this.vpc]
+            });
+
+            const albDnsRecord = new ARecord(this, 'albDnsRecord', {
+                zone: route53,
+                target: RecordTarget.fromAlias(new LoadBalancerTarget(alb)),
+            });
+
+            const albUrl = new StringParameter(this, 'SSMParameterAlbUrl', {
+                description: 'OpenSearch migration parameter for ALB to migration services',
+                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/albMigrationUrl`,
+                stringValue: `https://${albDnsRecord.domainName}`
+            });
+
             let cert: ICertificate;
             if (props.albAcmCertArn) {
                 cert = Certificate.fromCertificateArn(this, 'ALBListenerCert', props.albAcmCertArn);
@@ -137,6 +155,7 @@ export class NetworkStack extends MigrationServiceCore {
                 this.albSourceClusterTG = this.createSecureTargetGroup('ALBSourceCluster', props.stage, 9200, this.vpc);
                 this.createSecureListener('ALBSourceClusterListener', 19200,
                     alb, cert, this.albSourceClusterTG);
+                this.albSourceClusterEndpoint = albUrl.stringValue.concat(`:19200`);
             }
 
             const albMigrationListener = this.createSecureListener('ALBMigrationListener', 9200,
@@ -146,22 +165,6 @@ export class NetworkStack extends MigrationServiceCore {
                     {targetGroup: this.albSourceProxyTG, weight: 1},
                     {targetGroup: this.albTargetProxyTG, weight: 0}
                 ]) 
-            });
-
-            const route53 = new HostedZone(this, 'ALBHostedZone', {
-                zoneName: `alb.migration.${props.stage}.local`,
-                vpcs: [this.vpc]
-            });
-
-            const albDnsRecord = new ARecord(this, 'albDnsRecord', {
-                zone: route53,
-                target: RecordTarget.fromAlias(new LoadBalancerTarget(alb)),
-            });
-
-            new StringParameter(this, 'SSMParameterAlbUrl', {
-                description: 'OpenSearch migration parameter for ALB to migration services',
-                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/albMigrationUrl`,
-                stringValue: `https://${albDnsRecord.domainName}`
             });
         }
 

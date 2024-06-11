@@ -499,7 +499,7 @@ export class StackComposer {
         if (captureProxyServiceEnabled && networkStack && migrationStack) {
             captureProxyStack = new CaptureProxyStack(scope, "capture-proxy", {
                 vpc: networkStack.vpc,
-                customSourceClusterEndpoint: captureProxySourceEndpoint,
+                customSourceClusterEndpoint: captureProxySourceEndpoint ?? networkStack.albSourceClusterEndpoint,
                 otelCollectorEnabled: otelCollectorEnabled,
                 streamingSourceType: streamingSourceType,
                 extraArgs: captureProxyExtraArgs,
