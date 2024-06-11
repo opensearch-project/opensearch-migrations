@@ -129,7 +129,6 @@ export class NetworkStack extends Stack {
                 const cert = new AcmCertificateImporter(this, 'ALBListenerCertImport').acmCert;
                 this.albListenerCert = cert;
             }
-            // this.exportValue(this.albListenerCert);
 
             const route53 = new HostedZone(this, 'ALBHostedZone', {
                 zoneName: `alb.migration.${props.stage}.local`,
