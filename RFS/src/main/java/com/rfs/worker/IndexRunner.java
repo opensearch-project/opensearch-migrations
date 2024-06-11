@@ -33,8 +33,7 @@ public class IndexRunner implements Runner {
             }
         } catch (Exception e) {
             throw new IndexMigrationPhaseFailed(
-                members.globalState.getPhase(), 
-                nextStep, 
+                members.globalState.getPhase(),
                 members.cmsEntry.map(bar -> (CmsEntry.Base) bar), 
                 e
             );
@@ -52,8 +51,8 @@ public class IndexRunner implements Runner {
     }
 
     public static class IndexMigrationPhaseFailed extends Runner.PhaseFailed {
-        public IndexMigrationPhaseFailed(GlobalState.Phase phase, WorkerStep nextStep, Optional<CmsEntry.Base> cmsEntry, Exception e) {
-            super("Index Migration Phase failed", phase, nextStep, cmsEntry, e);
+        public IndexMigrationPhaseFailed(GlobalState.Phase phase, Optional<CmsEntry.Base> cmsEntry, Exception e) {
+            super("Index Migration Phase failed", phase, cmsEntry, e);
         }
     }    
 }

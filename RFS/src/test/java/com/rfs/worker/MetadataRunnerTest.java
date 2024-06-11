@@ -37,7 +37,6 @@ class MetadataRunnerTest {
 
         // Verify the results
         assertEquals(GlobalState.Phase.METADATA_IN_PROGRESS, e.phase);
-        assertEquals(null, e.nextStep);
         assertEquals(Optional.empty(), e.cmsEntry);
         assertEquals(testException, e.e);
     }

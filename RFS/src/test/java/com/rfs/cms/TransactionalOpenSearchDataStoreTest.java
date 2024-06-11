@@ -90,10 +90,9 @@ public class TransactionalOpenSearchDataStoreTest {
             "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");" +
             "      }" +
             "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);" +
-            "      if (ctx._source.completedAt == null && " +               // not completed
-            "          (ctx._source.expiration == 0 ||" +                   // first time
-            "            ctx._source.expiration < serverTimeSeconds) && " + // expired lease
-            "           ctx._source.expiration < newExpiration) {" +        // sanity check
+            "      if (params.expirationWindow > 0 && " +                   // don't obtain a lease lock
+            "          ctx._source.completedAt == null && " +               // not completed
+            "          ctx._source.expiration < newExpiration) {" +        // sanity check
             "        ctx._source.expiration = newExpiration;" +
             "        ctx._source.workerId = params.workerId;" +
             "        ctx._source.numAttempts += 1;" +

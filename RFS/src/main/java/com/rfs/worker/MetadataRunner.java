@@ -39,8 +39,7 @@ public class MetadataRunner implements Runner {
             }
         } catch (Exception e) {
             throw new MetadataMigrationPhaseFailed(
-                members.globalState.getPhase(), 
-                nextStep, 
+                members.globalState.getPhase(),
                 members.cmsEntry.map(bar -> (CmsEntry.Base) bar), 
                 e
             );
@@ -58,8 +57,8 @@ public class MetadataRunner implements Runner {
     }
 
     public static class MetadataMigrationPhaseFailed extends Runner.PhaseFailed {
-        public MetadataMigrationPhaseFailed(GlobalState.Phase phase, WorkerStep nextStep, Optional<CmsEntry.Base> cmsEntry, Exception e) {
-            super("Metadata Migration Phase failed", phase, nextStep, cmsEntry, e);
+        public MetadataMigrationPhaseFailed(GlobalState.Phase phase, Optional<CmsEntry.Base> cmsEntry, Exception e) {
+            super("Metadata Migration Phase failed", phase, cmsEntry, e);
         }
     }
 }

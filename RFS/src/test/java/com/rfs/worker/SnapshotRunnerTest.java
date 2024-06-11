@@ -4,8 +4,6 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
 
-import java.util.Optional;
-
 import org.junit.jupiter.api.Test;
 
 import com.rfs.cms.CmsClient;
@@ -28,14 +26,6 @@ class SnapshotRunnerTest {
         when(snapshotCreator.getSnapshotName()).thenReturn(snapshotName);
 
         // Run the test
-        SnapshotRunner testRunner = new SnapshotRunner(globalState, cmsClient, snapshotCreator);
-        final var e = assertThrows(SnapshotRunner.SnapshotPhaseFailed.class, () -> testRunner.run());
-
-        // Verify the results
-        assertEquals(GlobalState.Phase.SNAPSHOT_IN_PROGRESS, e.phase);
-        assertEquals(null, e.nextStep);
-        assertEquals(Optional.empty(), e.cmsEntry);
-        assertEquals(testException, e.e);
+        final var e = assertThrows(Exception.class, () -> SnapshotRunner.runAndWaitForCompletion(snapshotCreator));
     }
-    
 }

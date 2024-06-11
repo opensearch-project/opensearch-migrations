@@ -37,7 +37,6 @@ public class IndexRunnerTest {
 
         // Verify the results
         assertEquals(GlobalState.Phase.INDEX_IN_PROGRESS, e.phase);
-        assertEquals(IndexStep.GetEntry.class, e.nextStep.getClass());
         assertEquals(Optional.empty(), e.cmsEntry);
         assertEquals(testException, e.e);
     }    

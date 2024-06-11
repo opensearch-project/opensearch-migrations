@@ -26,14 +26,12 @@ public abstract interface Runner {
 
     public static class PhaseFailed extends RfsException {
         public final GlobalState.Phase phase;
-        public final WorkerStep nextStep;
         public final Optional<CmsEntry.Base> cmsEntry;
         public final Exception e;
 
-        public PhaseFailed(String message, GlobalState.Phase phase, WorkerStep nextStep, Optional<CmsEntry.Base> cmsEntry, Exception e) {
+        public PhaseFailed(String message, GlobalState.Phase phase, Optional<CmsEntry.Base> cmsEntry, Exception e) {
             super(message);
             this.phase = phase;
-            this.nextStep = nextStep;
             this.cmsEntry = cmsEntry;
             this.e = e;
         }

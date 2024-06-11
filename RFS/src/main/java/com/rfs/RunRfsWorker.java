@@ -43,7 +43,6 @@ import com.rfs.worker.IndexRunner;
 import com.rfs.worker.MetadataRunner;
 import com.rfs.worker.Runner;
 import com.rfs.worker.SnapshotRunner;
-import com.rfs.worker.WorkerStep;
 
 public class RunRfsWorker {
     private static final Logger logger = LogManager.getLogger(RunRfsWorker.class);
@@ -137,8 +136,7 @@ public class RunRfsWorker {
             CmsClient cmsClient = new OpenSearchCmsClient(targetClient);
 
             SnapshotCreator snapshotCreator = new S3SnapshotCreator(snapshotName, sourceClient, s3RepoUri, s3Region);
-            SnapshotRunner snapshotWorker = new SnapshotRunner(globalState, cmsClient, snapshotCreator);
-            snapshotWorker.run();
+            SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
 
             SourceRepo sourceRepo = S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
             SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
@@ -154,7 +152,7 @@ public class RunRfsWorker {
             indexWorker.run();
             
         } catch (Runner.PhaseFailed e) {
-            logPhaseFailureRecord(e.phase, e.nextStep, e.cmsEntry, e.e);
+            logPhaseFailureRecord(e.phase, e.cmsEntry, e.e);
             throw e;
         } catch (Exception e) {
             logger.error("Unexpected error running RfsWorker", e);
@@ -162,16 +160,13 @@ public class RunRfsWorker {
         }
     }
 
-    public static void logPhaseFailureRecord(GlobalState.Phase phase, WorkerStep nextStep, Optional<CmsEntry.Base> cmsEntry, Exception e) {
+    public static void logPhaseFailureRecord(GlobalState.Phase phase, Optional<CmsEntry.Base> cmsEntry, Exception e) {
         ObjectNode errorBlob = new ObjectMapper().createObjectNode();
         errorBlob.put("exceptionMessage", e.getMessage());
         errorBlob.put("exceptionClass", e.getClass().getSimpleName());
         errorBlob.put("exceptionTrace", Arrays.toString(e.getStackTrace()));
 
         errorBlob.put("phase", phase.toString());
-
-        String currentStep = (nextStep != null) ? nextStep.getClass().getSimpleName() : "null";
-        errorBlob.put("currentStep", currentStep);
 
         String currentEntry = (cmsEntry.isPresent()) ? cmsEntry.toString() : "null";
         errorBlob.put("cmsEntry", currentEntry);
