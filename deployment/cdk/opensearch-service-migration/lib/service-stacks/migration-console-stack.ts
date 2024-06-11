@@ -1,5 +1,5 @@
 import {StackPropsExt} from "../stack-composer";
-import {IVpc, SecurityGroup, Port, ISecurityGroup} from "aws-cdk-lib/aws-ec2";
+import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol, MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
@@ -14,8 +14,6 @@ import {StreamingSourceType} from "../streaming-source-type";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {RemovalPolicy} from "aws-cdk-lib";
 import { ServicesYaml } from "../migration-services-yaml";
-import { ApplicationProtocol, IApplicationLoadBalancer, IApplicationTargetGroup, ListenerAction } from "aws-cdk-lib/aws-elasticloadbalancingv2";
-import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 
 export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationsSolutionVersion: string,
@@ -27,15 +25,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationAPIEnabled?: boolean,
     readonly servicesYaml: ServicesYaml,
     readonly sourceClusterEndpoint?: string,
-    readonly migrationAlbConfig?: MigrationAlbConfig;
 }
-
-type MigrationAlbConfig = {
-    alb?: IApplicationLoadBalancer;
-    cert?: ICertificate;
-    primary?: IApplicationTargetGroup;
-    secondary?: IApplicationTargetGroup;
-};
 
 export class MigrationConsoleStack extends MigrationServiceCore {
 
@@ -313,29 +303,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 parameterName: `/migration/${props.stage}/${props.defaultDeployId}/osiPipelineLogGroupName`,
                 stringValue: osiLogGroup.logGroupName
             });
-        }
-        
-        if (props.migrationAlbConfig?.alb && props.migrationAlbConfig.cert &&
-            props.migrationAlbConfig.primary) {
-            const targetGroups = [{
-                targetGroup: props.migrationAlbConfig.primary,
-                weight: 1
-            }];
-            if (props.migrationAlbConfig.secondary) {
-                targetGroups.push({
-                    targetGroup: props.migrationAlbConfig.secondary,
-                    weight: 0
-                });
-            }
-            props.migrationAlbConfig.alb.addListener('migration-console-listener', {
-                port: 443,
-                protocol: ApplicationProtocol.HTTPS,
-                defaultAction: ListenerAction.weightedForward(targetGroups),
-                certificates: [props.migrationAlbConfig.cert],
-                sslPolicy: this.getSecureListenerSslPolicy()
-            })
-        }
-        
+        }        
 
         this.createService({
             serviceName: "migration-console",

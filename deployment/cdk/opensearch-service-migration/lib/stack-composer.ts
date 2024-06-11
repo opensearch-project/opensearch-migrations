@@ -273,6 +273,7 @@ export class StackComposer {
                 addOnMigrationDeployId: addOnMigrationDeployId,
                 albEnabled: albEnabled,
                 albAcmCertArn: albAcmCertArn,
+                elasticsearchServiceEnabled,
                 env: props.env
             })
             this.stacks.push(networkStack)
@@ -447,11 +448,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                albConfig:  (networkStack.alb) ? {
-                    alb: networkStack.alb!,
-                    albListenerCert: networkStack.albListenerCert!,
-                    albListenerPort: 9200
-                } : undefined,
+                targetGroups: [networkStack.albSourceProxyTG, networkStack.albSourceClusterTG],
                 env: props.env
             })
             this.addDependentStacks(captureProxyESStack, [migrationStack, mskUtilityStack, kafkaBrokerStack])
@@ -491,6 +488,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
+                targetGroups: [networkStack.albSourceClusterTG],
                 env: props.env
             })
             this.addDependentStacks(elasticsearchStack, [migrationStack])
@@ -510,11 +508,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                albConfig: (networkStack.alb) ? {
-                    alb: networkStack.alb!,
-                    albListenerCert: networkStack.albListenerCert!,
-                    albListenerPort: 9200
-                } : undefined,
+                targetGroups: [networkStack.albSourceProxyTG],
                 env: props.env
             })
             this.addDependentStacks(captureProxyStack, [elasticsearchStack, migrationStack,
@@ -536,11 +530,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                albConfig: (networkStack.alb) ? {
-                    alb: networkStack.alb!,
-                    albListenerCert: networkStack.albListenerCert!,
-                    albListenerPort: 29200,
-                } : undefined,
+                targetGroups: [networkStack.albTargetProxyTG],
                 addTargetClusterSG: true,
                 env: props.env,
             })
@@ -558,12 +548,6 @@ export class StackComposer {
                 migrationConsoleEnableOSI: migrationConsoleEnableOSI,
                 migrationAPIEnabled: migrationAPIEnabled,
                 servicesYaml: servicesYaml,
-                migrationAlbConfig: {
-                    alb: networkStack.alb,
-                    cert: networkStack.albListenerCert,
-                    primary: captureProxyESStack?.albTargetGroup ?? captureProxyStack?.albTargetGroup,
-                    secondary: targetClusterProxyStack?.albTargetGroup
-                },
                 // The default value is correct if we deploy the capture proxy (e.g. captureProxyServiceEnabled or captureProxyESServiceEnabled),
                 // but not if the user does it on their own (in which case we use captureProxySourceEndpoint)
                 sourceClusterEndpoint: !(captureProxyServiceEnabled || captureProxyESServiceEnabled) ? captureProxySourceEndpoint : undefined,

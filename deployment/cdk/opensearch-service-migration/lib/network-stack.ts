@@ -1,4 +1,3 @@
-import {Stack} from "aws-cdk-lib";
 import {
     IpAddresses, IVpc, Port, SecurityGroup,
     SubnetType,
@@ -7,25 +6,28 @@ import {
 import {Construct} from "constructs";
 import {StackPropsExt} from "./stack-composer";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
-import { ApplicationLoadBalancer, IApplicationLoadBalancer } from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import { ApplicationLoadBalancer, IApplicationTargetGroup, ListenerAction } from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import { Certificate, ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 import { ARecord, HostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
 import { LoadBalancerTarget } from "aws-cdk-lib/aws-route53-targets";
 import { AcmCertificateImporter } from "./service-stacks/acm-cert-importer";
+import { MigrationServiceCore } from "./service-stacks";
 
 export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string;
     readonly vpcAZCount?: number;
+    readonly elasticsearchServiceEnabled?: boolean;
     readonly targetClusterEndpoint?: string;
     readonly albEnabled?: boolean;
     readonly albAcmCertArn?: string;
     readonly env?: { [key: string]: any };
 }
 
-export class NetworkStack extends Stack {
+export class NetworkStack extends MigrationServiceCore {
     public readonly vpc: IVpc;
-    public readonly alb?: IApplicationLoadBalancer;
-    public readonly albListenerCert?: ICertificate
+    public readonly albSourceProxyTG: IApplicationTargetGroup;
+    public readonly albTargetProxyTG: IApplicationTargetGroup;
+    public readonly albSourceClusterTG: IApplicationTargetGroup;
 
     // Validate a proper url string is provided and return an url string which contains a protocol, host name, and port.
     // If a port is not provided, the default protocol port (e.g. 443, 80) will be explicitly added
@@ -116,20 +118,35 @@ export class NetworkStack extends Stack {
 
         if (props.albEnabled) {
             // Create the ALB with the strongest TLS 1.3 security policy
-            this.alb = new ApplicationLoadBalancer(this, 'ALB', {
+            const alb = new ApplicationLoadBalancer(this, 'ALB', {
                 vpc: this.vpc,
                 internetFacing: false,
                 http2Enabled: false,      
             });
-            this.exportValue(this.alb.loadBalancerArn);
+            let cert: ICertificate;
             if (props.albAcmCertArn) {
-                const cert = Certificate.fromCertificateArn(this, 'ALBListenerCert', props.albAcmCertArn);
-                this.albListenerCert = cert;
+                cert = Certificate.fromCertificateArn(this, 'ALBListenerCert', props.albAcmCertArn);
             } else {
-                const cert = new AcmCertificateImporter(this, 'ALBListenerCertImport').acmCert;
-                this.albListenerCert = cert;
+                cert = new AcmCertificateImporter(this, 'ALBListenerCertImport').acmCert;
             }
-            // this.exportValue(this.albListenerCert);
+
+            this.albSourceProxyTG = this.createSecureTargetGroup('ALBSourceProxy', props.stage, 9200, this.vpc);
+            this.albTargetProxyTG = this.createSecureTargetGroup('ALBTargetProxy', props.stage, 9200, this.vpc);
+
+            if (props.elasticsearchServiceEnabled) {
+                this.albSourceClusterTG = this.createSecureTargetGroup('ALBSourceCluster', props.stage, 9200, this.vpc);
+                this.createSecureListener('ALBSourceClusterListener', 19200,
+                    alb, cert, this.albSourceClusterTG);
+            }
+
+            const albMigrationListener = this.createSecureListener('ALBMigrationListener', 9200,
+                alb, cert);
+            albMigrationListener.addAction("default", {
+                action: ListenerAction.weightedForward([
+                    {targetGroup: this.albSourceProxyTG, weight: 1},
+                    {targetGroup: this.albTargetProxyTG, weight: 0}
+                ]) 
+            });
 
             const route53 = new HostedZone(this, 'ALBHostedZone', {
                 zoneName: `alb.migration.${props.stage}.local`,
@@ -138,7 +155,7 @@ export class NetworkStack extends Stack {
 
             const albDnsRecord = new ARecord(this, 'albDnsRecord', {
                 zone: route53,
-                target: RecordTarget.fromAlias(new LoadBalancerTarget(this.alb)),
+                target: RecordTarget.fromAlias(new LoadBalancerTarget(alb)),
             });
 
             new StringParameter(this, 'SSMParameterAlbUrl', {
