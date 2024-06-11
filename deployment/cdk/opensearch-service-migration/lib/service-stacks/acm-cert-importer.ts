@@ -2,7 +2,7 @@ import { Construct } from 'constructs';
 import { Certificate, ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 import { Provider } from 'aws-cdk-lib/custom-resources';
 import { NodejsFunction } from 'aws-cdk-lib/aws-lambda-nodejs';
-import { CustomResource, Duration, Stack } from 'aws-cdk-lib/core';
+import { CustomResource, Duration, RemovalPolicy, Stack } from 'aws-cdk-lib/core';
 import * as path from 'path';
 import { Runtime } from 'aws-cdk-lib/aws-lambda';
 import { PolicyStatement, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
@@ -41,6 +41,7 @@ export class AcmCertificateImporter extends Construct {
             role: lambdaRole,
             logGroup: new LogGroup(this, 'AcmCertificateImporterLogGroup', {
                 logGroupName: `/aws/lambda/AcmCertificateImporterHandler-${id}`,
+                removalPolicy: RemovalPolicy.DESTROY,
                 retention: RetentionDays.ONE_DAY
             })
         });
