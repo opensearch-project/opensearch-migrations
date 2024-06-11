@@ -23,7 +23,7 @@ import {CfnService as DiscoveryCfnService, PrivateDnsNamespace} from "aws-cdk-li
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {createDefaultECSTaskRole} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
-import { ApplicationListener, ApplicationProtocol, ApplicationProtocolVersion, ApplicationTargetGroup, IApplicationLoadBalancer, IApplicationTargetGroup, IListenerCertificate, SslPolicy } from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import { ApplicationListener, ApplicationProtocol, ApplicationProtocolVersion, ApplicationTargetGroup, IApplicationLoadBalancer, IApplicationTargetGroup, IListenerCertificate, INetworkTargetGroup, ITargetGroup, SslPolicy } from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 
 
@@ -54,8 +54,10 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly ulimits?: Ulimit[],
     readonly maxUptime?: Duration,
     readonly otelCollectorEnabled?: boolean,
-    readonly albTargetGroups?: (IApplicationTargetGroup)[],
+    readonly targetGroups?: (ELBTargetGroup)[],
 }
+
+export type ELBTargetGroup = IApplicationTargetGroup | INetworkTargetGroup;
 
 export class MigrationServiceCore extends Stack {
 
@@ -229,8 +231,8 @@ export class MigrationServiceCore extends Stack {
             cloudMapOptions: cloudMapOptions,
         });
         
-        if (props.albTargetGroups) {
-            props.albTargetGroups.forEach(tg => tg.addTarget(fargateService));
+        if (props.targetGroups) {
+            props.targetGroups.forEach(tg => tg.addTarget(fargateService));
         }
 
         if (props.serviceDiscoveryEnabled) {
@@ -242,19 +244,20 @@ export class MigrationServiceCore extends Stack {
         return (this.partition === "aws-us-gov") ? SslPolicy.FIPS_TLS13_12_EXT2 : SslPolicy.RECOMMENDED_TLS
     }
 
-    createSecureListener(serviceName: string, listeningPort: number = 443, alb: IApplicationLoadBalancer, cert: ICertificate, albTargetGroup: IApplicationTargetGroup) {
+    createSecureListener(serviceName: string, listeningPort: number = 443, alb: IApplicationLoadBalancer, cert: ICertificate, albTargetGroup?: IApplicationTargetGroup) {
         return new ApplicationListener(this, `${serviceName}ALBListener`, {
             loadBalancer: alb,
             port: listeningPort,
             protocol: ApplicationProtocol.HTTPS,
             certificates: [cert],
-            defaultTargetGroups: [albTargetGroup],
+            defaultTargetGroups: albTargetGroup ? [albTargetGroup] : undefined,
             sslPolicy: this.getSecureListenerSslPolicy()
         });
     }
 
-    createSecureTargetGroup(serviceName: string, containerPort: number, vpc: IVpc) {
+    createSecureTargetGroup(serviceName: string, stage: string, containerPort: number, vpc: IVpc) {
         return new ApplicationTargetGroup(this, `${serviceName}TG`, {
+            targetGroupName: `${serviceName}-${stage}-TG`,
             protocol: ApplicationProtocol.HTTPS,
             protocolVersion: ApplicationProtocolVersion.HTTP1,
             port: containerPort,

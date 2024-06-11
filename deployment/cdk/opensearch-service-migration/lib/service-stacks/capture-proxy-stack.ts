@@ -3,13 +3,11 @@ import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
-import {MigrationServiceCore} from "./migration-service-core";
+import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {StreamingSourceType} from "../streaming-source-type";
 import {createMSKProducerIAMPolicies} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
-import { IApplicationListener, IApplicationTargetGroup } from "aws-cdk-lib/aws-elasticloadbalancingv2";
-import { ALBConfig, isNewALBListenerConfig } from "../common-utilities";
 
 export interface CaptureProxyProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -18,9 +16,9 @@ export interface CaptureProxyProps extends StackPropsExt {
     readonly customSourceClusterEndpoint?: string,
     readonly customSourceClusterEndpointSSMParam?: string,
     readonly otelCollectorEnabled?: boolean,
-    readonly albConfig?: ALBConfig,
     readonly serviceName?: string,
     readonly addTargetClusterSG?: boolean,
+    readonly targetGroups: ELBTargetGroup[],
     readonly extraArgs?: string,
 }
 
@@ -30,8 +28,6 @@ export interface CaptureProxyProps extends StackPropsExt {
  * Search Guard instance.
  */
 export class CaptureProxyStack extends MigrationServiceCore {
-    public readonly albListener?: IApplicationListener;
-    public readonly albTargetGroup?: IApplicationTargetGroup;
     public static readonly DEFAULT_PROXY_PORT = 9200;
 
     constructor(scope: Construct, id: string, props: CaptureProxyProps) {
@@ -50,15 +46,6 @@ export class CaptureProxyStack extends MigrationServiceCore {
             hostPort: CaptureProxyStack.DEFAULT_PROXY_PORT,
             containerPort: CaptureProxyStack.DEFAULT_PROXY_PORT,
             protocol: Protocol.TCP
-        }
-
-        if (props.albConfig) {
-            this.albTargetGroup = this.createSecureTargetGroup(serviceName, CaptureProxyStack.DEFAULT_PROXY_PORT, props.vpc);
-            if (isNewALBListenerConfig(props.albConfig)) {
-                this.albListener = this.createSecureListener(serviceName, props.albConfig.albListenerPort, props.albConfig.alb, props.albConfig.albListenerCert, this.albTargetGroup);
-            } else {
-                throw new Error("Invalid ALB config");
-            }
         }
 
         const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId) : []
@@ -83,7 +70,6 @@ export class CaptureProxyStack extends MigrationServiceCore {
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 2048,
-            albTargetGroups: this.albTargetGroup ? [this.albTargetGroup] : [],
             ...props
         });
     }
