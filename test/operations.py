@@ -87,20 +87,7 @@ def run_migration_console_command(deployment_type: str, command: str):
         get_container_process = subprocess.run(shlex.split(cmd), stdout=subprocess.PIPE, text=True)
         container_id = get_container_process.stdout.strip().replace('"', '')
 
-        debug_command = subprocess.run(shlex.split(cmd)[0:2], stdout=subprocess.PIPE, text=True)
-        print(debug_command)
-        print(debug_command.stdout)
-
         if container_id:
-            print("ls docker directory")
-            debug_command = subprocess.run(f"docker exec {container_id} bash -c 'ls -lAh'",
-                                           shell=True, capture_output=True, text=True)
-            print(debug_command)
-            print(debug_command.stdout)
-
-            print(debug_command.stderr)
-            print("done with ls ")
-
             cmd_exec = f"docker exec {container_id} bash -c '{command}'"
             logger.warning(f"Running command: {cmd_exec} on container {container_id}")
             process = subprocess.run(cmd_exec, shell=True, capture_output=True, text=True)

@@ -39,7 +39,7 @@ def get_doc_count(endpoint, index, auth, verify):
     return count
 
 
-def assert_metrics_present(metrics):
+def assert_metrics_present(*wrapper_args, **wrapper_kwargs):
     def decorator(test_func):
         @functools.wraps(test_func)
         def wrapper(self, *args, **kwargs):
@@ -52,8 +52,8 @@ def assert_metrics_present(metrics):
                 raise e
             finally:
                 if test_passed:
-                    # Only assert metrics if the test passed
-                    self.assert_metrics(metrics)
+                    # Only look for metrics if the test passed
+                    self.assert_metrics(*wrapper_args, **wrapper_kwargs)
         return wrapper
     return decorator
 
@@ -177,14 +177,26 @@ class E2ETests(unittest.TestCase):
             f"not have data within the last {lookback_minutes} minutes"
         )
 
-    def assert_metrics(self, expected_metrics: Dict[str, List[str]], lookback_minutes=2):
+    def assert_metrics(self, expected_metrics: Dict[str, List[str]], lookback_minutes=2, wait_before_check_seconds=60):
+        """
+        This is the method invoked by the `@assert_metrics_present` decorator.
+        params:
+            expected_metrics: a dictionary of component->[metrics], for each metric that should be verified.
+            lookback_minutes: the number of minutes into the past to query for metrics
+            wait_before_check_seconds: the time in seconds to delay before checking for the presence of metrics
+        """
+        logger.debug(f"Waiting {wait_before_check_seconds} before checking for metrics.")
+        time.sleep(wait_before_check_seconds)
         for component, expected_comp_metrics in expected_metrics.items():
             for expected_metric in expected_comp_metrics:
                 if self.deployment_type == 'cloud':
                     expected_metric = expected_metric.split('_', 1)[0]
                 self.assert_metric_has_data(component, expected_metric, lookback_minutes)
 
-    @assert_metrics_present({'captureProxy': ['kafkaCommitCount_total'], 'replayer': ['tupleComparison_total']})
+    @assert_metrics_present({
+        'captureProxy': ['kafkaCommitCount_total'],
+        'replayer': ['kafkaCommitCount_total']
+    })
     def test_0001_index(self):
         # This test will verify that an index will be created (then deleted) on the target cluster when one is created
         # on the source cluster by going through the proxy first. It will verify that the traffic is captured by the
@@ -319,7 +331,8 @@ class E2ETests(unittest.TestCase):
         self.assertEqual(response.status_code, HTTPStatus.METHOD_NOT_ALLOWED)
 
     def test_0006_OSB(self):
-        # TODO: rewrite this with `call_migration_console_command`
+        cmd = "/root/runTestBenchmarks.sh"
+
         if self.deployment_type == "cloud":
             if self.source_auth_type == "none":
                 auth_string = " --no-auth"
@@ -328,10 +341,9 @@ class E2ETests(unittest.TestCase):
             else:
                 auth_string = ""
 
-            cmd = f"/root/runTestBenchmarks.sh --endpoint {self.proxy_endpoint} {auth_string}"
+            cmd += f" --endpoint {self.proxy_endpoint} {auth_string}"
             sleep_time = 360
         else:
-            cmd = "./runTestBenchmarks"
             sleep_time = 5
 
         returncode, _, _ = run_migration_console_command(self.deployment_type, cmd)
