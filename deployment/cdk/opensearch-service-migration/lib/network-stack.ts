@@ -140,7 +140,7 @@ export class NetworkStack extends MigrationServiceCore {
                 parameterName: `/migration/${props.stage}/${props.defaultDeployId}/albMigrationUrl`,
                 stringValue: `https://${albDnsRecord.domainName}`
             });
-            this.exportValue(albUrl);
+            this.exportValue(albUrl.stringValue);
 
             let cert: ICertificate;
             if (props.albAcmCertArn) {
