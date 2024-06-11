@@ -450,6 +450,7 @@ export class StackComposer {
                 albConfig:  (networkStack.alb) ? {
                     alb: networkStack.alb!,
                     albListenerCert: networkStack.albListenerCert!,
+                    albListenerPort: 9200
                 } : undefined,
                 env: props.env
             })
@@ -512,6 +513,7 @@ export class StackComposer {
                 albConfig: (networkStack.alb) ? {
                     alb: networkStack.alb!,
                     albListenerCert: networkStack.albListenerCert!,
+                    albListenerPort: 9200
                 } : undefined,
                 env: props.env
             })
@@ -556,6 +558,12 @@ export class StackComposer {
                 migrationConsoleEnableOSI: migrationConsoleEnableOSI,
                 migrationAPIEnabled: migrationAPIEnabled,
                 servicesYaml: servicesYaml,
+                migrationAlbConfig: {
+                    alb: networkStack.alb,
+                    cert: networkStack.albListenerCert,
+                    primary: captureProxyESStack?.albTargetGroup ?? captureProxyStack?.albTargetGroup,
+                    secondary: targetClusterProxyStack?.albTargetGroup
+                },
                 // The default value is correct if we deploy the capture proxy (e.g. captureProxyServiceEnabled or captureProxyESServiceEnabled),
                 // but not if the user does it on their own (in which case we use captureProxySourceEndpoint)
                 sourceClusterEndpoint: !(captureProxyServiceEnabled || captureProxyESServiceEnabled) ? captureProxySourceEndpoint : undefined,

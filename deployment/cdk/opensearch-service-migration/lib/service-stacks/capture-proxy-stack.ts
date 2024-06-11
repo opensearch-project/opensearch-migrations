@@ -30,8 +30,8 @@ export interface CaptureProxyProps extends StackPropsExt {
  * Search Guard instance.
  */
 export class CaptureProxyStack extends MigrationServiceCore {
-    private readonly albListener?: IApplicationListener;
-    private readonly albTargetGroup?: IApplicationTargetGroup;
+    public readonly albListener?: IApplicationListener;
+    public readonly albTargetGroup?: IApplicationTargetGroup;
     public static readonly DEFAULT_PROXY_PORT = 9200;
 
     constructor(scope: Construct, id: string, props: CaptureProxyProps) {
