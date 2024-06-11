@@ -17,6 +17,19 @@ jobs:
           java-version: '11'
           distribution: 'corretto'
 
+      - name: Generate Cache Key from Dockerfiles
+        id: generate_cache_key
+        run: |
+          files=$(find . -type f \( -name 'docker-compose.yml' -o -name 'Dockerfile' \))
+          file_contents=$(cat $files)
+          key=$(echo "${file_contents}" | sha1sum | awk '{print $1}')
+          echo "key=${key}" >> "$GITHUB_OUTPUT"
+
+      - name: Cache Docker Images
+        uses: ScribeMD/docker-cache@0.5.0
+        with:
+          key: docker-${{ runner.os }}-${{ steps.generate_cache_key.outputs.key }}
+
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:

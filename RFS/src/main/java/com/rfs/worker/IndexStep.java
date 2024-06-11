@@ -17,8 +17,11 @@ import com.rfs.common.SnapshotRepo;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 
+import lombok.RequiredArgsConstructor;
+
 public class IndexStep {
 
+    @RequiredArgsConstructor
     public static class SharedMembers {
         protected final GlobalState globalState;
         protected final CmsClient cmsClient;
@@ -26,18 +29,7 @@ public class IndexStep {
         protected final IndexMetadata.Factory metadataFactory;
         protected final IndexCreator_OS_2_11 indexCreator;
         protected final Transformer transformer;
-        protected Optional<CmsEntry.Index> cmsEntry;
-
-        public SharedMembers(GlobalState globalState, CmsClient cmsClient, String snapshotName, IndexMetadata.Factory metadataFactory,
-                IndexCreator_OS_2_11 indexCreator, Transformer transformer) {
-            this.globalState = globalState;
-            this.cmsClient = cmsClient;
-            this.snapshotName = snapshotName;
-            this.metadataFactory = metadataFactory;
-            this.indexCreator = indexCreator;
-            this.transformer = transformer;
-            this.cmsEntry = Optional.empty();
-        }
+        protected Optional<CmsEntry.Index> cmsEntry = Optional.empty();
 
         // A convient way to check if the CMS entry is present before retrieving it.  In some places, it's fine/expected
         // for the CMS entry to be missing, but in others, it's a problem.
@@ -127,7 +119,7 @@ public class IndexStep {
                 case FAILED:
                     return new ExitPhaseFailed(members, new FoundFailedIndexMigration());
                 default:
-                    throw new IllegalStateException("Unexpected metadata migration status: " + currentEntry.status);
+                    throw new IllegalStateException("Unexpected index migration status: " + currentEntry.status);
             }
         }
     }
@@ -171,10 +163,10 @@ public class IndexStep {
             // We only get here if we know we want to acquire the lock, so we know the CMS entry should not be null
             CmsEntry.Index lastCmsEntry = members.getCmsEntryNotMissing();
 
-            logger.info("Current Metadata Migration work lease appears to have expired; attempting to acquire it...");
+            logger.info("Current Index Migration work lease appears to have expired; attempting to acquire it...");
             
             CmsEntry.Index updatedEntry = new CmsEntry.Index(
-                CmsEntry.IndexStatus.IN_PROGRESS,
+                lastCmsEntry.status,
                 // Set the next CMS entry based on the current one
                 // TODO: Should be using the server-side clock here
                 CmsEntry.Index.getLeaseExpiry(getNowMs(), lastCmsEntry.numAttempts + 1),
@@ -216,8 +208,8 @@ public class IndexStep {
             logger.info("Work item set");
 
             logger.info("Setting up the Index Work Items...");
-            SnapshotRepo.Provider repoDatProvider = members.metadataFactory.getRepoDataProvider();
-            for (SnapshotRepo.Index index : repoDatProvider.getIndicesInSnapshot(members.snapshotName)) {
+            SnapshotRepo.Provider repoDataProvider = members.metadataFactory.getRepoDataProvider();
+            for (SnapshotRepo.Index index : repoDataProvider.getIndicesInSnapshot(members.snapshotName)) {
                 IndexMetadata.Data indexMetadata = members.metadataFactory.fromRepo(members.snapshotName, index.getName());
                 logger.info("Creating Index Work Item for index: " + indexMetadata.getName());
                 members.cmsClient.createIndexWorkItem(indexMetadata.getName(), indexMetadata.getNumberOfShards());
@@ -226,7 +218,7 @@ public class IndexStep {
 
             logger.info("Updating the Index Migration entry to indicate setup has been completed...");
             CmsEntry.Index updatedEntry = new CmsEntry.Index(
-                CmsEntry.IndexStatus.COMPLETED,
+                CmsEntry.IndexStatus.IN_PROGRESS,
                 lastCmsEntry.leaseExpiry,
                 lastCmsEntry.numAttempts
             );
@@ -310,7 +302,7 @@ public class IndexStep {
                  * fails because we guarantee that we'll attempt the work at least N times, not exactly N times.
                  */
                 if (workItem.numAttempts > CmsEntry.IndexWorkItem.ATTEMPTS_SOFT_LIMIT) {
-                    logger.info("Index Work Item " + workItem.name + " has exceeded the maximum number of attempts; marking it as failed...");
+                    logger.warn("Index Work Item " + workItem.name + " has exceeded the maximum number of attempts; marking it as failed...");
                     CmsEntry.IndexWorkItem updatedEntry = new CmsEntry.IndexWorkItem(
                         workItem.name,
                         CmsEntry.IndexWorkItemStatus.FAILED,
@@ -405,6 +397,16 @@ public class IndexStep {
 
         @Override
         public void run() {
+            logger.info("Marking the Index Migration as completed...");
+            CmsEntry.Index lastCmsEntry = members.getCmsEntryNotMissing();
+            CmsEntry.Index updatedEntry = new CmsEntry.Index(
+                CmsEntry.IndexStatus.COMPLETED,
+                lastCmsEntry.leaseExpiry,
+                lastCmsEntry.numAttempts
+            );
+            members.cmsClient.updateIndexEntry(updatedEntry, lastCmsEntry);
+            logger.info("Index Migration marked as completed");
+
             logger.info("Index Migration completed, exiting Index Phase...");
             members.globalState.updatePhase(GlobalState.Phase.INDEX_COMPLETED);
         }
@@ -425,11 +427,11 @@ public class IndexStep {
 
         @Override
         public void run() {
-            // We either failed the Metadata Migration or found it had already been failed; either way this
+            // We either failed the Index Migration or found it had already been failed; either way this
             // should not be missing
             CmsEntry.Index lastCmsEntry = members.getCmsEntryNotMissing();
 
-            logger.error("Metadata Migration failed");
+            logger.error("Index Migration failed");
             CmsEntry.Index updatedEntry = new CmsEntry.Index(
                 CmsEntry.IndexStatus.FAILED,
                 lastCmsEntry.leaseExpiry,

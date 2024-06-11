@@ -38,6 +38,6 @@ public class IndexRunnerTest {
         // Verify the results
         assertEquals(GlobalState.Phase.INDEX_IN_PROGRESS, e.phase);
         assertEquals(Optional.empty(), e.cmsEntry);
-        assertEquals(testException, e.e);
+        assertEquals(testException, e.getCause());
     }    
 }

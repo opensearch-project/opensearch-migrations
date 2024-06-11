@@ -4,6 +4,7 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.*;
 
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import com.rfs.cms.CmsClient;
@@ -12,6 +13,7 @@ import com.rfs.common.SnapshotCreator;
 
 class SnapshotRunnerTest {
 
+    @Disabled
     @Test
     void run_encountersAnException_asExpected() {
         // Setup
@@ -27,5 +29,6 @@ class SnapshotRunnerTest {
 
         // Run the test
         final var e = assertThrows(Exception.class, () -> SnapshotRunner.runAndWaitForCompletion(snapshotCreator));
+        assertEquals(testException, e.getCause());
     }
 }

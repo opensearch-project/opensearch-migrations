@@ -46,7 +46,7 @@ public class OpenSearchCmsEntry {
         }
 
         @Override
-        public String toString() {
+        public String toRepresentationString() {
             return this.toJson().toString();
         }
     }
@@ -97,7 +97,7 @@ public class OpenSearchCmsEntry {
         }
 
         @Override
-        public String toString() {
+        public String toRepresentationString() {
             return this.toJson().toString();
         }
     }
@@ -110,7 +110,7 @@ public class OpenSearchCmsEntry {
 
         public static Index getInitial() {
             return new Index(
-                CmsEntry.IndexStatus.IN_PROGRESS,
+                CmsEntry.IndexStatus.SETUP,
                 // TODO: We should be ideally setting the lease using the server's clock, but it's unclear on the best way
                 // to do this.  For now, we'll just use the client's clock.
                 CmsEntry.Index.getLeaseExpiry(Instant.now().toEpochMilli(), 1),
@@ -148,7 +148,7 @@ public class OpenSearchCmsEntry {
         }
 
         @Override
-        public String toString() {
+        public String toRepresentationString() {
             return this.toJson().toString();
         }
     }
@@ -178,7 +178,7 @@ public class OpenSearchCmsEntry {
                     node.get(FIELD_NUM_SHARDS).asInt()
                 );
             } catch (Exception e) {
-                throw new CantParseCmsEntryFromJson(Index.class, node.toString(), e);
+                throw new CantParseCmsEntryFromJson(IndexWorkItem.class, node.toString(), e);
             }
         }
 
@@ -201,10 +201,132 @@ public class OpenSearchCmsEntry {
         }
 
         @Override
-        public String toString() {
+        public String toRepresentationString() {
             return this.toJson().toString();
         }
     }
+
+    public static class Documents extends CmsEntry.Documents {
+        public static final String FIELD_TYPE = "type";
+        public static final String FIELD_STATUS = "status";
+        public static final String FIELD_LEASE_EXPIRY = "leaseExpiry";
+        public static final String FIELD_NUM_ATTEMPTS = "numAttempts";
+
+        public static Documents getInitial() {
+            return new Documents(
+                CmsEntry.DocumentsStatus.SETUP,
+                // TODO: We should be ideally setting the lease using the server's clock, but it's unclear on the best way
+                // to do this.  For now, we'll just use the client's clock.
+                CmsEntry.Documents.getLeaseExpiry(Instant.now().toEpochMilli(), 1),
+                1
+            );
+        }
+
+        public static Documents fromJson(ObjectNode node) {
+            try {
+                return new Documents(
+                    CmsEntry.DocumentsStatus.valueOf(node.get(FIELD_STATUS).asText()),
+                    node.get(FIELD_LEASE_EXPIRY).asText(),
+                    node.get(FIELD_NUM_ATTEMPTS).asInt()
+                );
+            } catch (Exception e) {
+                throw new CantParseCmsEntryFromJson(Documents.class, node.toString(), e);
+            }
+        }
+
+        public Documents(CmsEntry.DocumentsStatus status, String leaseExpiry, Integer numAttempts) {
+            super(status, leaseExpiry, numAttempts);
+        }
+
+        public Documents(CmsEntry.Documents entry) {
+            this(entry.status, entry.leaseExpiry, entry.numAttempts);
+        }
+
+        public ObjectNode toJson() {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put(FIELD_TYPE, type.toString());
+            node.put(FIELD_STATUS, status.toString());
+            node.put(FIELD_LEASE_EXPIRY, leaseExpiry);
+            node.put(FIELD_NUM_ATTEMPTS, numAttempts);
+            return node;
+        }
+
+        @Override
+        public String toRepresentationString() {
+            return this.toJson().toString();
+        }
+    }
+
+    public static class DocumentsWorkItem extends CmsEntry.DocumentsWorkItem {
+        public static final String FIELD_TYPE = "type";
+        public static final String FIELD_INDEX_NAME = "indexName";
+        public static final String FIELD_SHARD_ID = "shardId";
+        public static final String FIELD_STATUS = "status";
+        public static final String FIELD_LEASE_EXPIRY = "leaseExpiry";
+        public static final String FIELD_NUM_ATTEMPTS = "numAttempts";
+
+        public static DocumentsWorkItem getInitial(String indexName, int shardId) {
+            return new DocumentsWorkItem(
+                indexName,
+                shardId,
+                CmsEntry.DocumentsWorkItemStatus.NOT_STARTED,
+                // TODO: We should be ideally setting the lease using the server's clock, but it's unclear on the best way
+                // to do this.  For now, we'll just use the client's clock.
+                CmsEntry.Documents.getLeaseExpiry(Instant.now().toEpochMilli(), 1),
+                1
+            );
+        }
+
+        public static DocumentsWorkItem fromJson(ObjectNode node) {
+            try {
+                return new DocumentsWorkItem(
+                    node.get(FIELD_INDEX_NAME).asText(),
+                    node.get(FIELD_SHARD_ID).asInt(),
+                    CmsEntry.DocumentsWorkItemStatus.valueOf(node.get(FIELD_STATUS).asText()),
+                    node.get(FIELD_LEASE_EXPIRY).asText(),
+                    node.get(FIELD_NUM_ATTEMPTS).asInt()
+                );
+            } catch (Exception e) {
+                throw new CantParseCmsEntryFromJson(DocumentsWorkItem.class, node.toString(), e);
+            }
+        }
+
+        public DocumentsWorkItem(String indexName, int shardId, CmsEntry.DocumentsWorkItemStatus status, String leaseExpiry, int numAttempts) {
+            super(indexName, shardId, status, leaseExpiry, numAttempts);
+        }
+
+        public DocumentsWorkItem(CmsEntry.DocumentsWorkItem entry) {
+            this(entry.indexName, entry.shardId, entry.status, entry.leaseExpiry, entry.numAttempts);
+        }
+
+        public ObjectNode toJson() {
+            ObjectNode node = objectMapper.createObjectNode();
+            node.put(FIELD_TYPE, type.toString());
+            node.put(FIELD_INDEX_NAME, indexName);
+            node.put(FIELD_SHARD_ID, shardId);
+            node.put(FIELD_STATUS, status.toString());
+            node.put(FIELD_LEASE_EXPIRY, leaseExpiry);
+            node.put(FIELD_NUM_ATTEMPTS, numAttempts);
+            return node;
+        }
+
+        @Override
+        public String toRepresentationString() {
+            return this.toJson().toString();
+        }
+    }
+
+
+
+
+
+
+
+
+
+
+
+
 
     public static class CantParseCmsEntryFromJson extends RfsException {
         public CantParseCmsEntryFromJson(Class<?> entryClass, String json, Exception e) {

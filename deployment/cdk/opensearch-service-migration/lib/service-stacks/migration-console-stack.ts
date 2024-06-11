@@ -24,6 +24,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationConsoleEnableOSI: boolean,
     readonly migrationAPIEnabled?: boolean,
     readonly servicesYaml: ServicesYaml,
+    readonly sourceClusterEndpoint?: string,
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
@@ -159,7 +160,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
-        const allClusterTasksArn = `arn:aws:ecs:${props.env?.region}:${props.env?.account}:task/migration-${props.stage}-ecs-cluster/*`
+        const allClusterTasksArn = `arn:${this.partition}:ecs:${this.region}:${this.account}:task/migration-${props.stage}-ecs-cluster/*`
         const clusterTasksPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: [allClusterTasksArn],
@@ -215,11 +216,13 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 "cloudwatch:GetMetricData"
             ]
         })
+        const sourceClusterEndpoint = props.sourceClusterEndpoint ?? `https://capture-proxy-es.migration.${props.stage}.local:9200`;
 
         // Upload the services.yaml file to Parameter Store
         let servicesYaml = props.servicesYaml
         servicesYaml.source_cluster = {
-            'endpoint': `https://capture-proxy-es.migration.${props.stage}.local:9200`,
+            'endpoint': sourceClusterEndpoint,
+            // TODO: We're not currently supporting auth here, this may need to be handled on the migration console
             'no_auth': ''
         }
         // Create a new parameter in Parameter Store
@@ -232,7 +235,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         const environment: { [key: string]: string; } = {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
             // Temporary fix for source domain endpoint until we move to either alb or migration console yaml configuration
-            "SOURCE_DOMAIN_ENDPOINT": `https://capture-proxy-es.migration.${props.stage}.local:9200`,
+            "SOURCE_DOMAIN_ENDPOINT": sourceClusterEndpoint,
             "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints,
             "MIGRATION_STAGE": props.stage,
             "MIGRATION_SOLUTION_VERSION": props.migrationsSolutionVersion,
@@ -281,7 +284,9 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             }]
             serviceDiscoveryPort = 8000
             serviceDiscoveryEnabled = true
-            imageCommand = ['/bin/sh', '-c', 'python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000']
+            imageCommand = ['/bin/sh', '-c',
+                '/root/loadServicesFromParameterStore.sh && python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000'
+            ]
         }
 
         if (props.migrationConsoleEnableOSI) {

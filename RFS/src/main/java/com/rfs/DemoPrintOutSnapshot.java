@@ -189,9 +189,9 @@ public class DemoPrintOutSnapshot {
                     // Get the file mapping for the shard
                     ShardMetadata.Data shardMetadata;
                     if (sourceVersion == ClusterVersion.ES_6_8) {
-                        shardMetadata = new ShardMetadataFactory_ES_6_8().fromRepo(repo, repoDataProvider, snapshotName, indexMetadata.getName(), shardId);
+                        shardMetadata = new ShardMetadataFactory_ES_6_8(repoDataProvider).fromRepo(snapshotName, indexMetadata.getName(), shardId);
                     } else {
-                        shardMetadata = new ShardMetadataFactory_ES_7_10().fromRepo(repo, repoDataProvider, snapshotName, indexMetadata.getName(), shardId);
+                        shardMetadata = new ShardMetadataFactory_ES_7_10(repoDataProvider).fromRepo(snapshotName, indexMetadata.getName(), shardId);
                     }
                     System.out.println("Shard Metadata: " + shardMetadata.toString());
                 }
@@ -207,9 +207,9 @@ public class DemoPrintOutSnapshot {
                 for (int shardId = 0; shardId < indexMetadata.getNumberOfShards(); shardId++) {
                     ShardMetadata.Data shardMetadata;
                     if (sourceVersion == ClusterVersion.ES_6_8) {
-                        shardMetadata = new ShardMetadataFactory_ES_6_8().fromRepo(repo, repoDataProvider, snapshotName, indexMetadata.getName(), shardId);
+                        shardMetadata = new ShardMetadataFactory_ES_6_8(repoDataProvider).fromRepo(snapshotName, indexMetadata.getName(), shardId);
                     } else {
-                        shardMetadata = new ShardMetadataFactory_ES_7_10().fromRepo(repo, repoDataProvider, snapshotName, indexMetadata.getName(), shardId);
+                        shardMetadata = new ShardMetadataFactory_ES_7_10(repoDataProvider).fromRepo(snapshotName, indexMetadata.getName(), shardId);
                     }
 
                     // Unpack the shard
@@ -219,7 +219,8 @@ public class DemoPrintOutSnapshot {
                     } else {
                         bufferSize = ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES;
                     }
-                    SnapshotShardUnpacker.unpack(repo, shardMetadata, Paths.get(luceneBasePathString), bufferSize);
+                    SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(repo, Paths.get(luceneBasePathString), bufferSize);
+                    unpacker.unpack(shardMetadata);
 
                     // Now, read the documents back out
                     System.out.println("--- Reading docs in the shard ---");

@@ -175,7 +175,7 @@ public class MetadataStep {
             logger.info("Current Metadata Migration work lease appears to have expired; attempting to acquire it...");
 
             CmsEntry.Metadata updatedEntry = new CmsEntry.Metadata(
-                CmsEntry.MetadataStatus.IN_PROGRESS,
+                lastCmsEntry.status,
                 // Set the next CMS entry based on the current one
                 // TODO: Should be using the server-side clock here
                 CmsEntry.Metadata.getLeaseExpiry(getNowMs(), lastCmsEntry.numAttempts + 1),

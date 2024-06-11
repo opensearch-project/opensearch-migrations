@@ -18,7 +18,7 @@ public abstract interface Runner {
             runInternal();
             getLogger().info(getPhaseName() + " Phase is complete");
         } catch (Exception e) {
-            getLogger().error(getPhaseName() + " Phase failed w/ an exception");
+            getLogger().error(getPhaseName() + " Phase failed w/ an exception ", e);
 
             throw e;
         }
@@ -27,13 +27,11 @@ public abstract interface Runner {
     public static class PhaseFailed extends RfsException {
         public final GlobalState.Phase phase;
         public final Optional<CmsEntry.Base> cmsEntry;
-        public final Exception e;
 
         public PhaseFailed(String message, GlobalState.Phase phase, Optional<CmsEntry.Base> cmsEntry, Exception e) {
-            super(message);
+            super(message, e);
             this.phase = phase;
             this.cmsEntry = cmsEntry;
-            this.e = e;
         }
     }
 }
