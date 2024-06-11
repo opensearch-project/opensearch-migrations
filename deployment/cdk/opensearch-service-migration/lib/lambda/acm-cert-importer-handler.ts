@@ -8,7 +8,7 @@ import * as https from 'https';
 import * as forge from 'node-forge';
 
 export const handler = async (event: CloudFormationCustomResourceEvent, context: Context): Promise<CloudFormationCustomResourceResponse> => {
-  console.log('Received event:', JSON.stringify(event, null, 2));
+  console.log('Received event type:', event.RequestType);
   console.log('Received context:', JSON.stringify(context, null, 2));
   let responseData: { [key: string]: any } = {};
   let physicalResourceId: string = '';
