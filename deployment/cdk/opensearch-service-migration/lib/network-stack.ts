@@ -140,6 +140,7 @@ export class NetworkStack extends MigrationServiceCore {
                 parameterName: `/migration/${props.stage}/${props.defaultDeployId}/albMigrationUrl`,
                 stringValue: `https://${albDnsRecord.domainName}`
             });
+            this.exportValue(albUrl);
 
             let cert: ICertificate;
             if (props.albAcmCertArn) {
@@ -182,7 +183,7 @@ export class NetworkStack extends MigrationServiceCore {
             });
             defaultSecurityGroup.addIngressRule(defaultSecurityGroup, Port.allTraffic());
 
-            new StringParameter(this, 'SSMParameterOpenSearchAccessGroupId', {
+            const osAccessSgIdSSM = new StringParameter(this, 'SSMParameterOpenSearchAccessGroupId', {
                 description: 'OpenSearch migration parameter for target OpenSearch access security group id',
                 parameterName: `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`,
                 stringValue: defaultSecurityGroup.securityGroupId
