@@ -51,21 +51,20 @@ public class SnapshotShardUnpacker implements AutoCloseable {
 
             for (ShardMetadata.FileInfo fileMetadata : shardMetadata.getFiles()) {
                 logger.info("Unpacking - Blob Name: " + fileMetadata.getName() + ", Lucene Name: " + fileMetadata.getPhysicalName());
-                IndexOutput indexOutput = primaryDirectory.createOutput(fileMetadata.getPhysicalName(), IOContext.DEFAULT);
-
-                if (fileMetadata.getName().startsWith("v__")) {
-                    final BytesRef hash = fileMetadata.getMetaHash();
-                    indexOutput.writeBytes(hash.bytes, hash.offset, hash.length);
-                } else {
-                    try (InputStream stream = new PartSliceStream(repoAccessor, fileMetadata, shardMetadata.getIndexId(), shardMetadata.getShardId())) {
-                        final byte[] buffer = new byte[Math.toIntExact(Math.min(bufferSize, fileMetadata.getLength()))];
-                        int length;
-                        while ((length = stream.read(buffer)) > 0) {
-                            indexOutput.writeBytes(buffer, 0, length);
+                try (IndexOutput indexOutput = primaryDirectory.createOutput(fileMetadata.getPhysicalName(), IOContext.DEFAULT);){
+                    if (fileMetadata.getName().startsWith("v__")) {
+                        final BytesRef hash = fileMetadata.getMetaHash();
+                        indexOutput.writeBytes(hash.bytes, hash.offset, hash.length);
+                    } else {
+                        try (InputStream stream = new PartSliceStream(repoAccessor, fileMetadata, shardMetadata.getIndexId(), shardMetadata.getShardId())) {
+                            final byte[] buffer = new byte[Math.toIntExact(Math.min(bufferSize, fileMetadata.getLength()))];
+                            int length;
+                            while ((length = stream.read(buffer)) > 0) {
+                                indexOutput.writeBytes(buffer, 0, length);
+                            }
                         }
                     }
                 }
-                indexOutput.close();
             }
         } catch (Exception e) {
             throw new CouldNotUnpackShard("Could not unpack shard: Index " + shardMetadata.getIndexId() + ", Shard " + shardMetadata.getShardId(), e);

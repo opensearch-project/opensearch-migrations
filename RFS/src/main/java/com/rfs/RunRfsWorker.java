@@ -21,7 +21,7 @@ import com.rfs.cms.CmsEntry;
 import com.rfs.cms.OpenSearchCmsClient;
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
-import com.rfs.common.EphemeralSourceRepoAccessor;
+import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.GlobalMetadata;
 import com.rfs.common.IndexMetadata;
@@ -171,7 +171,7 @@ public class RunRfsWorker {
             indexWorker.run();
 
             final ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
-            final EphemeralSourceRepoAccessor repoAccessor = new EphemeralSourceRepoAccessor(sourceRepo);
+            final DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
             final SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
             final LuceneDocumentsReader reader = new LuceneDocumentsReader(luceneDirPath);
             final DocumentReindexer reindexer = new DocumentReindexer(targetClient);

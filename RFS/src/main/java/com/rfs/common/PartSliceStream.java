@@ -2,8 +2,6 @@ package com.rfs.common;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 
 /**
  * Taken from Elasticsearch 6.8, combining the SlicedInputStream and PartSliceStream classes with our special sauce
