@@ -29,7 +29,7 @@ public class DocumentsRunnerTest {
         
         IndexMetadata.Factory metadataFactory = Mockito.mock(IndexMetadata.Factory.class);
         ShardMetadata.Factory shardMetadataFactory = Mockito.mock(ShardMetadata.Factory.class);
-        SnapshotShardUnpacker unpacker = Mockito.mock(SnapshotShardUnpacker.class);
+        SnapshotShardUnpacker.Factory unpackerFactory = Mockito.mock(SnapshotShardUnpacker.Factory.class);
         LuceneDocumentsReader reader = Mockito.mock(LuceneDocumentsReader.class);
         DocumentReindexer reindexer = Mockito.mock(DocumentReindexer.class);
         RfsException testException = new RfsException("Unit test");
@@ -38,7 +38,7 @@ public class DocumentsRunnerTest {
         when(globalState.getPhase()).thenReturn(GlobalState.Phase.DOCUMENTS_IN_PROGRESS);        
 
         // Run the test
-        DocumentsRunner testRunner = new DocumentsRunner(globalState, cmsClient, snapshotName, maxShardSizeBytes, metadataFactory, shardMetadataFactory, unpacker, reader, reindexer);
+        DocumentsRunner testRunner = new DocumentsRunner(globalState, cmsClient, snapshotName, maxShardSizeBytes, metadataFactory, shardMetadataFactory, unpackerFactory, reader, reindexer);
         final var e = assertThrows(DocumentsRunner.DocumentsMigrationPhaseFailed.class, () -> testRunner.run());
 
         // Verify the results

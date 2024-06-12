@@ -30,7 +30,7 @@ public class DocumentsStep {
         protected final long maxShardSizeBytes;
         protected final IndexMetadata.Factory metadataFactory;
         protected final ShardMetadata.Factory shardMetadataFactory;
-        protected final SnapshotShardUnpacker unpacker;
+        protected final SnapshotShardUnpacker.Factory unpackerFactory;
         protected final LuceneDocumentsReader reader;
         protected final DocumentReindexer reindexer;
         protected Optional<CmsEntry.Documents> cmsEntry = Optional.empty();
@@ -375,7 +375,9 @@ public class DocumentsStep {
                     throw new ShardTooLarge(shardMetadata.getTotalSizeBytes(), members.maxShardSizeBytes);
                 }
 
-                members.unpacker.unpack(shardMetadata);
+                try (SnapshotShardUnpacker unpacker = members.unpackerFactory.create(shardMetadata)) {
+                    unpacker.unpack();
+                }
                 
                 Flux<Document> documents = members.reader.readDocuments(shardMetadata.getIndexName(), shardMetadata.getShardId());
 
@@ -416,12 +418,6 @@ public class DocumentsStep {
                     value -> logger.info("Documents Work Item (Index: " + workItem.indexName + ", Shard: " + workItem.shardId + ") attempt count was incremented"),
                     () ->logger.info("Unable to increment attempt count of Documents Work Item (Index: " + workItem.indexName + ", Shard: " + workItem.shardId + ")")
                 );
-            } finally {
-                if (shardMetadata != null) {
-                    logger.info("Cleaning up the unpacked shard...");
-                    members.unpacker.cleanUp(shardMetadata);
-                    logger.info("Shard cleaned up");
-                }
             }
 
             logger.info("Clearing the worker's current work item...");

@@ -20,10 +20,4 @@ public class DefaultSourceRepoAccessor extends SourceRepoAccessor {
             throw new CouldNotLoadRepoFile("Could not load file: " + path, e);
         }
     }
-
-    public static class CouldNotLoadRepoFile extends RuntimeException {
-        public CouldNotLoadRepoFile(String message, Throwable cause) {
-            super(message, cause);
-        }
-    }
 }

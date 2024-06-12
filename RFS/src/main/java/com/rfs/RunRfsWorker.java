@@ -172,10 +172,10 @@ public class RunRfsWorker {
 
             ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
             DeletingSourceRepoAccessor repoAccessor = new DeletingSourceRepoAccessor(sourceRepo);
-            SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(repoAccessor, luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
+            SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
             LuceneDocumentsReader reader = new LuceneDocumentsReader(luceneDirPath);
             DocumentReindexer reindexer = new DocumentReindexer(targetClient);
-            DocumentsRunner documentsWorker = new DocumentsRunner(globalState, cmsClient, snapshotName, maxShardSizeBytes, indexMetadataFactory, shardMetadataFactory, unpacker, reader, reindexer);
+            DocumentsRunner documentsWorker = new DocumentsRunner(globalState, cmsClient, snapshotName, maxShardSizeBytes, indexMetadataFactory, shardMetadataFactory, unpackerFactory, reader, reindexer);
             documentsWorker.run();
             
         } catch (Runner.PhaseFailed e) {

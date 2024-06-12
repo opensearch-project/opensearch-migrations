@@ -18,13 +18,25 @@ import org.apache.lucene.store.NativeFSLockFactory;
 import org.apache.lucene.util.BytesRef;
 
 @RequiredArgsConstructor
-public class SnapshotShardUnpacker {
+public class SnapshotShardUnpacker implements AutoCloseable {
     private static final Logger logger = LogManager.getLogger(SnapshotShardUnpacker.class);
-    protected final SourceRepoAccessor repoAccessor;
-    protected final  Path luceneFilesBasePath;
-    protected final int bufferSize;
+    private final SourceRepoAccessor repoAccessor;
+    private final Path luceneFilesBasePath;
+    private final ShardMetadata.Data shardMetadata;
+    private final int bufferSize;
 
-    public void unpack(ShardMetadata.Data shardMetadata) {
+    @RequiredArgsConstructor
+    public static class Factory {
+        private final SourceRepoAccessor repoAccessor;
+        private final Path luceneFilesBasePath;
+        private final int bufferSize;
+
+        public SnapshotShardUnpacker create(ShardMetadata.Data shardMetadata) {
+            return new SnapshotShardUnpacker(repoAccessor, luceneFilesBasePath, shardMetadata, bufferSize);
+        }
+    }
+
+    public void unpack() {
         try {
             // Some constants
             NativeFSLockFactory lockFactory = NativeFSLockFactory.INSTANCE;
@@ -60,7 +72,8 @@ public class SnapshotShardUnpacker {
         }
     }
 
-    public void cleanUp(ShardMetadata.Data shardMetadata) {
+    @Override
+    public void close() {
         try {
             Path luceneIndexDir = Paths.get(luceneFilesBasePath + "/" + shardMetadata.getIndexName() + "/" + shardMetadata.getShardId());
             if (Files.exists(luceneIndexDir)) {

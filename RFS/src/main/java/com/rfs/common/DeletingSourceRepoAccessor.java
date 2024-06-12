@@ -8,7 +8,7 @@ import java.nio.file.Path;
 
 
 /*
- * Provides access to the underlying files in the source repo, but deletes the files after they are read.  This
+ * Provides access to the underlying files in the source repo and deletes the files after the Stream is closed.  This
  * is useful/interesting in the case where the files are large/numerous and you can easily re-acquire them - such as
  * if they are being loaded from S3.
  */
@@ -41,12 +41,6 @@ public class DeletingSourceRepoAccessor extends SourceRepoAccessor {
             } finally {
                 Files.deleteIfExists(filePath);
             }
-        }
-    }
-
-    public static class CouldNotLoadRepoFile extends RuntimeException {
-        public CouldNotLoadRepoFile(String message, Throwable cause) {
-            super(message, cause);
         }
     }
 }

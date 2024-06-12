@@ -19,9 +19,9 @@ public class DocumentsRunner implements Runner {
     private final DocumentsStep.SharedMembers members;
 
     public DocumentsRunner(GlobalState globalState, CmsClient cmsClient, String snapshotName, long maxShardSizeBytes,
-                IndexMetadata.Factory metadataFactory, ShardMetadata.Factory shardMetadataFactory, SnapshotShardUnpacker unpacker,
+                IndexMetadata.Factory metadataFactory, ShardMetadata.Factory shardMetadataFactory, SnapshotShardUnpacker.Factory unpackerFactory,
                 LuceneDocumentsReader reader, DocumentReindexer reindexer) {
-        this.members = new DocumentsStep.SharedMembers(globalState, cmsClient, snapshotName, maxShardSizeBytes, metadataFactory, shardMetadataFactory, unpacker, reader, reindexer);
+        this.members = new DocumentsStep.SharedMembers(globalState, cmsClient, snapshotName, maxShardSizeBytes, metadataFactory, shardMetadataFactory, unpackerFactory, reader, reindexer);
     }
 
     @Override

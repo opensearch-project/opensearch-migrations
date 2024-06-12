@@ -221,8 +221,11 @@ public class DemoPrintOutSnapshot {
                         bufferSize = ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES;
                     }
                     DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
-                    SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(repoAccessor, Paths.get(luceneBasePathString), bufferSize);
-                    unpacker.unpack(shardMetadata);
+
+                    SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, Paths.get(luceneBasePathString), bufferSize);
+                    try (SnapshotShardUnpacker unpacker = unpackerFactory.create(shardMetadata)) {
+                        unpacker.unpack();
+                    }
 
                     // Now, read the documents back out
                     System.out.println("--- Reading docs in the shard ---");

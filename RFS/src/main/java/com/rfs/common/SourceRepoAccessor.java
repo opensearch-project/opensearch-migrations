@@ -33,15 +33,24 @@ public abstract class SourceRepoAccessor {
     public InputStream getShardDir(String indexId, int shardId){
         return load(repo.getShardDirPath(indexId, shardId));
     }
+
     public InputStream getShardMetadataFile(String snapshotId, String indexId, int shardId){
         return load(repo.getShardMetadataFilePath(snapshotId, indexId, shardId));
     }
+
     public InputStream getBlobFile(String indexId, int shardId, String blobName){
         return load(repo.getBlobFilePath(indexId, shardId, blobName));
     }
+    
     public void prepBlobFiles(ShardMetadata.Data shardMetadata){
         repo.prepBlobFiles(shardMetadata);
     }
 
     protected abstract InputStream load(Path path);
+
+    public static class CouldNotLoadRepoFile extends RuntimeException {
+        public CouldNotLoadRepoFile(String message, Throwable cause) {
+            super(message, cause);
+        }
+    }
 }
