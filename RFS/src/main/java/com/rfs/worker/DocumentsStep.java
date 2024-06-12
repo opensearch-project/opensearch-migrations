@@ -377,17 +377,16 @@ public class DocumentsStep {
 
                 try (SnapshotShardUnpacker unpacker = members.unpackerFactory.create(shardMetadata)) {
                     unpacker.unpack();
-                }
-                
-                Flux<Document> documents = members.reader.readDocuments(shardMetadata.getIndexName(), shardMetadata.getShardId());
 
-                final ShardMetadata.Data finalShardMetadata = shardMetadata; // Define in local context for the lambda
-                members.reindexer.reindex(shardMetadata.getIndexName(), documents)
-                    .doOnError(error -> logger.error("Error during reindexing: " + error))
-                    .doOnSuccess(done -> logger.info("Reindexing completed for Index " + finalShardMetadata.getIndexName() + ", Shard " + finalShardMetadata.getShardId()))
-                    // Wait for the reindexing to complete before proceeding
-                    .block();
-                logger.info("Docs migrated");
+                    Flux<Document> documents = members.reader.readDocuments(shardMetadata.getIndexName(), shardMetadata.getShardId());
+                    final ShardMetadata.Data finalShardMetadata = shardMetadata; // Define in local context for the lambda
+                    members.reindexer.reindex(shardMetadata.getIndexName(), documents)
+                        .doOnError(error -> logger.error("Error during reindexing: " + error))
+                        .doOnSuccess(done -> logger.info("Reindexing completed for Index " + finalShardMetadata.getIndexName() + ", Shard " + finalShardMetadata.getShardId()))
+                        // Wait for the reindexing to complete before proceeding
+                        .block();
+                    logger.info("Docs migrated");
+                }
 
                 logger.info("Updating the Documents Work Item to indicate it has been completed...");           
                 CmsEntry.DocumentsWorkItem updatedEntry = new CmsEntry.DocumentsWorkItem(
@@ -396,7 +395,7 @@ public class DocumentsStep {
                     CmsEntry.DocumentsWorkItemStatus.COMPLETED,
                     workItem.leaseExpiry,
                     workItem.numAttempts
-                );
+                );                
                 
                 members.cmsWorkEntry = Optional.of(members.cmsClient.updateDocumentsWorkItemForceful(updatedEntry));
                 logger.info("Documents Work Item updated");
