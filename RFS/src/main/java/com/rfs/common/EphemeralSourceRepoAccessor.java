@@ -12,8 +12,8 @@ import java.nio.file.Path;
  * is useful/interesting in the case where the files are large/numerous and you can easily re-acquire them - such as
  * if they are being loaded from S3.
  */
-public class DeletingSourceRepoAccessor extends SourceRepoAccessor {
-    public DeletingSourceRepoAccessor(SourceRepo repo) {
+public class EphemeralSourceRepoAccessor extends SourceRepoAccessor {
+    public EphemeralSourceRepoAccessor(SourceRepo repo) {
         super(repo);
     }
 

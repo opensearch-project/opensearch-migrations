@@ -108,11 +108,6 @@ jacocoTestReport {
     }
 }
 
-task demoPrintOutSnapshot (type: JavaExec) {
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.rfs.DemoPrintOutSnapshot'
-}
-
 task copyDockerRuntimeJars (type: Sync) {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     description = 'Copy runtime JARs and app jar to docker build directory'

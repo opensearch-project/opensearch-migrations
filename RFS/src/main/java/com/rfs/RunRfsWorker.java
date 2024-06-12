@@ -21,7 +21,7 @@ import com.rfs.cms.CmsEntry;
 import com.rfs.cms.OpenSearchCmsClient;
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
-import com.rfs.common.DeletingSourceRepoAccessor;
+import com.rfs.common.EphemeralSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.GlobalMetadata;
 import com.rfs.common.IndexMetadata;
@@ -124,57 +124,57 @@ public class RunRfsWorker {
             .build()
             .parse(args);
 
-        String snapshotName = arguments.snapshotName;
-        Path s3LocalDirPath = Paths.get(arguments.s3LocalDirPath);
-        String s3RepoUri = arguments.s3RepoUri;
-        String s3Region = arguments.s3Region;
-        Path luceneDirPath = Paths.get(arguments.luceneDirPath);
-        String sourceHost = arguments.sourceHost;
-        String sourceUser = arguments.sourceUser;
-        String sourcePass = arguments.sourcePass;
-        String targetHost = arguments.targetHost;
-        String targetUser = arguments.targetUser;
-        String targetPass = arguments.targetPass;
-        List<String> indexTemplateAllowlist = arguments.indexTemplateAllowlist;
-        List<String> componentTemplateAllowlist = arguments.componentTemplateAllowlist;
-        long maxShardSizeBytes = arguments.maxShardSizeBytes;
-        int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
-        Level logLevel = arguments.logLevel;
+        final String snapshotName = arguments.snapshotName;
+        final Path s3LocalDirPath = Paths.get(arguments.s3LocalDirPath);
+        final String s3RepoUri = arguments.s3RepoUri;
+        final String s3Region = arguments.s3Region;
+        final Path luceneDirPath = Paths.get(arguments.luceneDirPath);
+        final String sourceHost = arguments.sourceHost;
+        final String sourceUser = arguments.sourceUser;
+        final String sourcePass = arguments.sourcePass;
+        final String targetHost = arguments.targetHost;
+        final String targetUser = arguments.targetUser;
+        final String targetPass = arguments.targetPass;
+        final List<String> indexTemplateAllowlist = arguments.indexTemplateAllowlist;
+        final List<String> componentTemplateAllowlist = arguments.componentTemplateAllowlist;
+        final long maxShardSizeBytes = arguments.maxShardSizeBytes;
+        final int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
+        final Level logLevel = arguments.logLevel;
 
         Logging.setLevel(logLevel);
 
-        ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
-        ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
+        final ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
+        final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
         try {
             logger.info("Running RfsWorker");
             GlobalState globalState = GlobalState.getInstance();
             OpenSearchClient sourceClient = new OpenSearchClient(sourceConnection);
             OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
-            CmsClient cmsClient = new OpenSearchCmsClient(targetClient);
+            final CmsClient cmsClient = new OpenSearchCmsClient(targetClient);
 
-            SnapshotCreator snapshotCreator = new S3SnapshotCreator(snapshotName, sourceClient, s3RepoUri, s3Region);
-            SnapshotRunner snapshotWorker = new SnapshotRunner(globalState, cmsClient, snapshotCreator);
+            final SnapshotCreator snapshotCreator = new S3SnapshotCreator(snapshotName, sourceClient, s3RepoUri, s3Region);
+            final SnapshotRunner snapshotWorker = new SnapshotRunner(globalState, cmsClient, snapshotCreator);
             snapshotWorker.run();
 
-            SourceRepo sourceRepo = S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
-            SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
-            GlobalMetadata.Factory metadataFactory = new GlobalMetadataFactory_ES_7_10(repoDataProvider);
-            GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateAllowlist, indexTemplateAllowlist);
-            Transformer transformer = TransformFunctions.getTransformer(ClusterVersion.ES_7_10, ClusterVersion.OS_2_11, awarenessDimensionality);
+            final SourceRepo sourceRepo = S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
+            final SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
+            final GlobalMetadata.Factory metadataFactory = new GlobalMetadataFactory_ES_7_10(repoDataProvider);
+            final GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateAllowlist, indexTemplateAllowlist);
+            final Transformer transformer = TransformFunctions.getTransformer(ClusterVersion.ES_7_10, ClusterVersion.OS_2_11, awarenessDimensionality);
             MetadataRunner metadataWorker = new MetadataRunner(globalState, cmsClient, snapshotName, metadataFactory, metadataCreator, transformer);
             metadataWorker.run();
 
-            IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
-            IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
-            IndexRunner indexWorker = new IndexRunner(globalState, cmsClient, snapshotName, indexMetadataFactory, indexCreator, transformer);
+            final IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
+            final IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
+            final IndexRunner indexWorker = new IndexRunner(globalState, cmsClient, snapshotName, indexMetadataFactory, indexCreator, transformer);
             indexWorker.run();
 
-            ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
-            DeletingSourceRepoAccessor repoAccessor = new DeletingSourceRepoAccessor(sourceRepo);
-            SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
-            LuceneDocumentsReader reader = new LuceneDocumentsReader(luceneDirPath);
-            DocumentReindexer reindexer = new DocumentReindexer(targetClient);
+            final ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
+            final EphemeralSourceRepoAccessor repoAccessor = new EphemeralSourceRepoAccessor(sourceRepo);
+            final SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
+            final LuceneDocumentsReader reader = new LuceneDocumentsReader(luceneDirPath);
+            final DocumentReindexer reindexer = new DocumentReindexer(targetClient);
             DocumentsRunner documentsWorker = new DocumentsRunner(globalState, cmsClient, snapshotName, maxShardSizeBytes, indexMetadataFactory, shardMetadataFactory, unpackerFactory, reader, reindexer);
             documentsWorker.run();
             
