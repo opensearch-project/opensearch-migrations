@@ -1,10 +1,9 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {CpuArchitecture, PortMapping, Protocol, ServiceConnectService, Ulimit, UlimitName} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping, Protocol, Ulimit, UlimitName} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
-import {MigrationServiceCore} from "./migration-service-core";
+import {MigrationServiceCore, SSMParameter} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
-import {osClusterEndpointParameterName} from "../opensearch-domain-stack"
 import {ISecret, Secret} from "aws-cdk-lib/aws-secretsmanager";
 import {SecretValue} from "aws-cdk-lib";
 
@@ -30,11 +29,7 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
 
     private createSSMParameters(stage: string, deployId: string, adminUserName: string|undefined, adminUserSecret: ISecret|undefined) {
         if (adminUserSecret) {
-            new StringParameter(this, 'SSMParameterOpenSearchFGACUserAndSecretArn', {
-                description: 'OpenSearch migration parameter for OpenSearch configured fine-grained access control user and associated Secrets Manager secret ARN ',
-                parameterName: `/migration/${stage}/${deployId}/osUserAndSecretArn`,
-                stringValue: `${adminUserName} ${adminUserSecret.secretArn}`
-            });
+            this.createStringParameter(SSMParameter.OS_USER_AND_SECRET_ARN, `${adminUserName} ${adminUserSecret.secretArn}`, { stage, defaultDeployId: deployId });
         }
     }
 
@@ -44,7 +39,7 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
         const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
 
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
+            SecurityGroup.fromSecurityGroupId(this, "serviceSG", this.getStringParameter(SSMParameter.SERVICE_SECURITY_GROUP_ID, { stage: props.stage, defaultDeployId: props.defaultDeployId })),
         ]
 
         let adminUserSecret: ISecret|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?

@@ -2,7 +2,7 @@ import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
-import {MigrationServiceCore} from "./migration-service-core";
+import {MigrationServiceCore, SSMParameter} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 
 export interface KafkaBrokerProps extends StackPropsExt {
@@ -19,9 +19,9 @@ export class KafkaStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: KafkaBrokerProps) {
         super(scope, id, props)
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`))
-        ]
+            SecurityGroup.fromSecurityGroupId(this, "serviceSG", this.getStringParameter(SSMParameter.SERVICE_SECURITY_GROUP_ID, props)),
+            SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", this.getStringParameter(SSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID, props))
+        ];
 
         const servicePort: PortMapping = {
             name: "kafka-connect",
@@ -30,12 +30,7 @@ export class KafkaStack extends MigrationServiceCore {
             protocol: Protocol.TCP
         }
 
-        new StringParameter(this, 'SSMParameterKafkaBrokers', {
-            description: 'OpenSearch Migration Parameter for Kafka brokers',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`,
-            stringValue: 'kafka:9092'
-        });
-
+        this.createStringParameter(SSMParameter.KAFKA_BROKERS, 'kafka:9092', props);
         this.createService({
             serviceName: "kafka",
             dockerImageRegistryName: "docker.io/apache/kafka:3.7.0",

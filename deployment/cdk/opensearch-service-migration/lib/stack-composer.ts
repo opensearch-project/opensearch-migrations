@@ -20,6 +20,7 @@ import {determineStreamingSourceType, StreamingSourceType} from "./streaming-sou
 import {parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
 import {ServicesYaml} from "./migration-services-yaml";
+import { MigrationServiceCore, SSMParameter } from "./service-stacks";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -407,7 +408,7 @@ export class StackComposer {
             fetchMigrationStack = new FetchMigrationStack(scope, "fetchMigrationStack", {
                 vpc: networkStack.vpc,
                 dpPipelineTemplatePath: dpPipelineTemplatePath,
-                sourceEndpoint: sourceClusterEndpoint ?? networkStack.albSourceClusterEndpoint,
+                sourceEndpoint: sourceClusterEndpoint,
                 stackName: `OSMigrations-${stage}-${region}-FetchMigration`,
                 description: "This stack contains resources to assist migrating historical data to an OpenSearch Service domain",
                 stage: stage,
@@ -423,7 +424,7 @@ export class StackComposer {
         if (reindexFromSnapshotServiceEnabled && networkStack && migrationStack) {
             reindexFromSnapshotStack = new ReindexFromSnapshotStack(scope, "reindexFromSnapshotStack", {
                 vpc: networkStack.vpc,
-                sourceEndpoint: sourceClusterEndpoint ?? networkStack.albSourceClusterEndpoint,
+                sourceEndpoint: sourceClusterEndpoint,
                 extraArgs: reindexFromSnapshotExtraArgs,
                 stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
                 description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
@@ -499,7 +500,7 @@ export class StackComposer {
         if (captureProxyServiceEnabled && networkStack && migrationStack) {
             captureProxyStack = new CaptureProxyStack(scope, "capture-proxy", {
                 vpc: networkStack.vpc,
-                customSourceClusterEndpoint: sourceClusterEndpoint ?? networkStack.albSourceClusterEndpoint,
+                customSourceClusterEndpoint: sourceClusterEndpoint,
                 otelCollectorEnabled: otelCollectorEnabled,
                 streamingSourceType: streamingSourceType,
                 extraArgs: captureProxyExtraArgs,
@@ -521,7 +522,7 @@ export class StackComposer {
             targetClusterProxyStack = new CaptureProxyStack(scope, "target-cluster-proxy", {
                 serviceName: "target-cluster-proxy",
                 vpc: networkStack.vpc,
-                customSourceClusterEndpointSSMParam: `/migration/${stage}/${defaultDeployId}/osClusterEndpoint`,
+                customSourceClusterEndpointSSMParam: MigrationServiceCore.getStringParameterName(scope, SSMParameter.OS_CLUSTER_ENDPOINT, {stage, defaultDeployId}),
                 otelCollectorEnabled: false,
                 streamingSourceType: StreamingSourceType.DISABLED,
                 extraArgs: "--noCapture",
@@ -548,7 +549,7 @@ export class StackComposer {
                 migrationConsoleEnableOSI: migrationConsoleEnableOSI,
                 migrationAPIEnabled: migrationAPIEnabled,
                 servicesYaml: servicesYaml,
-                sourceClusterEndpoint: sourceClusterEndpoint ?? networkStack.albSourceClusterEndpoint,
+                sourceClusterEndpoint: sourceClusterEndpoint,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,

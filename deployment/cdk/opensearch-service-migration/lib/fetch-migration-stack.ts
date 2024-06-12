@@ -1,4 +1,4 @@
-import {Stack, SecretValue} from "aws-cdk-lib";
+import {SecretValue} from "aws-cdk-lib";
 import {IVpc} from "aws-cdk-lib/aws-ec2";
 import {Construct} from "constructs";
 import {
@@ -12,31 +12,33 @@ import {Secret as SMSecret} from "aws-cdk-lib/aws-secretsmanager";
 import {join} from "path";
 import {readFileSync} from "fs"
 import {StackPropsExt} from "./stack-composer";
-import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {
     createDefaultECSTaskRole,
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy
 } from "./common-utilities";
+import { MigrationServiceCore, SSMParameter } from "./service-stacks";
+import { StringParameter } from "aws-cdk-lib/aws-ssm";
 
 export interface FetchMigrationProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly dpPipelineTemplatePath: string,
-    readonly sourceEndpoint: string,
+    readonly sourceEndpoint?: string,
     readonly fargateCpuArch: CpuArchitecture
 }
 
-export class FetchMigrationStack extends Stack {
+export class FetchMigrationStack extends MigrationServiceCore {
 
     constructor(scope: Construct, id: string, props: FetchMigrationProps) {
         super(scope, id, props);
+        const sourceEndpoint = props.sourceEndpoint ?? this.getStringParameter(SSMParameter.SOURCE_CLUSTER_ENDPOINT, props);
 
         // Import required values
-        const targetClusterEndpoint = StringParameter.fromStringParameterName(this, "targetClusterEndpoint", `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
-        const domainAccessGroupId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`)
+        const targetClusterEndpoint = StringParameter.fromStringParameterName(this, SSMParameter.OS_CLUSTER_ENDPOINT,
+            MigrationServiceCore.getStringParameterName(this, SSMParameter.OS_CLUSTER_ENDPOINT, props));
+        const domainAccessGroupId = this.getStringParameter(SSMParameter.OS_ACCESS_SECURITY_GROUP_ID, props);
         // This SG allows outbound access for ECR access as well as communication with other services in the cluster
-        const serviceGroupId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)
-
+        const serviceGroupId = this.getStringParameter(SSMParameter.SERVICE_SECURITY_GROUP_ID, props);
         const ecsCluster = Cluster.fromClusterAttributes(this, 'ecsCluster', {
             clusterName: `migration-${props.stage}-ecs-cluster`,
             vpc: props.vpc
@@ -60,22 +62,9 @@ export class FetchMigrationStack extends Stack {
             taskRole: ecsTaskRole
         });
 
-        new StringParameter(this, 'SSMParameterFetchMigrationTaskDefArn', {
-            description: 'OpenSearch Migration Parameter for Fetch Migration task definition ARN',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskDefArn`,
-            stringValue: fetchMigrationFargateTask.taskDefinitionArn
-        });
-        new StringParameter(this, 'SSMParameterFetchMigrationTaskRoleArn', {
-            description: 'OpenSearch Migration Parameter for Fetch Migration task role ARN',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskRoleArn`,
-            stringValue: fetchMigrationFargateTask.taskRole.roleArn
-        });
-        new StringParameter(this, 'SSMParameterFetchMigrationTaskExecRoleArn', {
-            description: 'OpenSearch Migration Parameter for Fetch Migration task exec role ARN',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskExecRoleArn`,
-            stringValue: fetchMigrationFargateTask.obtainExecutionRole().roleArn
-        });
-
+        this.createStringParameter(SSMParameter.FETCH_MIGRATION_TASK_DEF_ARN, fetchMigrationFargateTask.taskDefinitionArn, props);
+        this.createStringParameter(SSMParameter.FETCH_MIGRATION_TASK_ROLE_ARN, fetchMigrationFargateTask.taskRole.roleArn, props);
+        this.createStringParameter(SSMParameter.FETCH_MIGRATION_TASK_EXEC_ROLE_ARN, fetchMigrationFargateTask.obtainExecutionRole().roleArn, props);
         // Create Fetch Migration Container
         const fetchMigrationContainer = fetchMigrationFargateTask.addContainer("fetchMigrationContainer", {
             image: ContainerImage.fromAsset(join(__dirname, "../../../..", "FetchMigration")),
@@ -86,7 +75,7 @@ export class FetchMigrationStack extends Stack {
         // Create DP pipeline config from template file
         let dpPipelineData: string = readFileSync(props.dpPipelineTemplatePath, 'utf8');
         // Replace only source cluster host - target host will be overridden by inline env var
-        dpPipelineData = dpPipelineData.replace("<SOURCE_CLUSTER_HOST>", props.sourceEndpoint);
+        dpPipelineData = dpPipelineData.replace("<SOURCE_CLUSTER_HOST>", sourceEndpoint);
         // Base64 encode
         let encodedPipeline = Buffer.from(dpPipelineData).toString("base64");
 
@@ -115,10 +104,6 @@ export class FetchMigrationStack extends Stack {
         executionCommand += ` --cluster ${ecsCluster.clusterName} --launch-type FARGATE`
         executionCommand += ` --network-configuration '${networkConfigString}'`
 
-        new StringParameter(this, 'SSMParameterFetchMigrationRunTaskCommand', {
-            description: 'OpenSearch Migration Parameter for CLI command to kick off the Fetch Migration ECS Task',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationCommand`,
-            stringValue: executionCommand
-        });
-    }
+        this.createStringParameter(SSMParameter.FETCH_MIGRATION_COMMAND, executionCommand, props);
+    }   
 }
