@@ -140,7 +140,7 @@ export class NetworkStack extends MigrationServiceCore {
             if (props.albAcmCertArn) {
                 cert = Certificate.fromCertificateArn(this, 'ALBListenerCert', props.albAcmCertArn);
             } else {
-                cert = new AcmCertificateImporter(this, 'ALBListenerCertImport').acmCert;
+                cert = new AcmCertificateImporter(this, 'ALBListenerCertImport', props.stage).acmCert;
             }
 
             this.albSourceProxyTG = this.createSecureTargetGroup('ALBSourceProxy', props.stage, 9200, this.vpc);

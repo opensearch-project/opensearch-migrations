@@ -11,7 +11,7 @@ import { LogGroup, RetentionDays } from 'aws-cdk-lib/aws-logs';
 export class AcmCertificateImporter extends Construct {
     public readonly acmCert: ICertificate;
 
-    constructor(scope: Construct, id: string) {
+    constructor(scope: Construct, id: string, stage: string) {
         super(scope, id);
 
         // Create a role for the Lambda function with the necessary permissions
@@ -40,7 +40,7 @@ export class AcmCertificateImporter extends Construct {
             timeout: Duration.seconds(30),
             role: lambdaRole,
             logGroup: new LogGroup(this, 'AcmCertificateImporterLogGroup', {
-                logGroupName: `/aws/lambda/AcmCertificateImporterHandler-${id}`,
+                logGroupName: `/aws/lambda/${stage}/AcmCertificateImporterHandler-${id}`,
                 removalPolicy: RemovalPolicy.DESTROY,
                 retention: RetentionDays.ONE_DAY
             })
