@@ -1,10 +1,10 @@
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {Construct} from "constructs";
-import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 import {RemovalPolicy} from "aws-cdk-lib";
 import { IApplicationLoadBalancer } from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
+import { MigrationServiceCore, SSMParameter } from "./service-stacks/migration-service-core";
 
 export function createOpenSearchIAMAccessPolicy(partition: string, region: string, accountId: string): PolicyStatement {
     return new PolicyStatement({
@@ -27,8 +27,8 @@ export function createOpenSearchServerlessIAMAccessPolicy(partition: string, reg
 }
 
 export function createMSKConsumerIAMPolicies(scope: Construct, partition: string, region: string, accountId: string, stage: string, deployId: string): PolicyStatement[] {
-    const mskClusterARN = StringParameter.valueForStringParameter(scope, `/migration/${stage}/${deployId}/mskClusterARN`);
-    const mskClusterName = StringParameter.valueForStringParameter(scope, `/migration/${stage}/${deployId}/mskClusterName`);
+    const mskClusterARN = MigrationServiceCore.getStringParameter(scope, SSMParameter.MSK_CLUSTER_ARN, { stage, defaultDeployId: deployId });
+    const mskClusterName = MigrationServiceCore.getStringParameter(scope, SSMParameter.MSK_CLUSTER_NAME, { stage, defaultDeployId: deployId });
     const mskClusterConnectPolicy = new PolicyStatement({
         effect: Effect.ALLOW,
         resources: [mskClusterARN],
@@ -59,8 +59,8 @@ export function createMSKConsumerIAMPolicies(scope: Construct, partition: string
 }
 
 export function createMSKProducerIAMPolicies(scope: Construct, partition: string, region: string, accountId: string, stage: string, deployId: string): PolicyStatement[] {
-    const mskClusterARN = StringParameter.valueForStringParameter(scope, `/migration/${stage}/${deployId}/mskClusterARN`);
-    const mskClusterName = StringParameter.valueForStringParameter(scope, `/migration/${stage}/${deployId}/mskClusterName`);
+    const mskClusterARN = MigrationServiceCore.getStringParameter(scope, SSMParameter.MSK_CLUSTER_ARN, { stage, defaultDeployId: deployId });
+    const mskClusterName = MigrationServiceCore.getStringParameter(scope, SSMParameter.MSK_CLUSTER_NAME, { stage, defaultDeployId: deployId });
     const mskClusterConnectPolicy = new PolicyStatement({
         effect: Effect.ALLOW,
         resources: [mskClusterARN],

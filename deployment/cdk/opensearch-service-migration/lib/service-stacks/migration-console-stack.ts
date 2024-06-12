@@ -3,7 +3,7 @@ import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol, MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
-import {MigrationServiceCore} from "./migration-service-core";
+import {MigrationServiceCore, SSMParameter} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {
@@ -30,8 +30,8 @@ export interface MigrationConsoleProps extends StackPropsExt {
 export class MigrationConsoleStack extends MigrationServiceCore {
 
     createMSKAdminIAMPolicies(stage: string, deployId: string): PolicyStatement[] {
-        const mskClusterARN = StringParameter.valueForStringParameter(this, `/migration/${stage}/${deployId}/mskClusterARN`);
-        const mskClusterName = StringParameter.valueForStringParameter(this, `/migration/${stage}/${deployId}/mskClusterName`);
+        const mskClusterARN = this.getStringParameter(SSMParameter.MSK_CLUSTER_ARN, { stage, defaultDeployId: deployId });
+        const mskClusterName = this.getStringParameter(SSMParameter.MSK_CLUSTER_NAME, { stage, defaultDeployId: deployId });
         const mskClusterAdminPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: [mskClusterARN],
@@ -70,12 +70,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             resources: [`arn:${this.partition}:es:${this.region}:${this.account}:domain/*`]
         }))
 
-        new StringParameter(this, 'SSMParameterOSIPipelineRoleArn', {
-            description: 'OpenSearch Migration Parameter for OpenSearch Ingestion Pipeline Role ARN',
-            parameterName: `/migration/${stage}/${deployId}/osiPipelineRoleArn`,
-            stringValue: osiPipelineRole.roleArn
-        });
-        return osiPipelineRole.roleArn
+        this.createStringParameter(SSMParameter.OSI_PIPELINE_ROLE_ARN, osiPipelineRole.roleArn, { stage, defaultDeployId: deployId });
+        return osiPipelineRole.roleArn;
     }
 
     createOpenSearchIngestionManagementPolicy(pipelineRoleArn: string): PolicyStatement[] {
@@ -110,10 +106,10 @@ export class MigrationConsoleStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: MigrationConsoleProps) {
         super(scope, id, props)
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "replayerOutputAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputAccessSecurityGroupId`))
+            SecurityGroup.fromSecurityGroupId(this, "serviceSG", this.getStringParameter(SSMParameter.SERVICE_SECURITY_GROUP_ID, props)),
+            SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", this.getStringParameter(SSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID, props)),
+            SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG", this.getStringParameter(SSMParameter.OS_ACCESS_SECURITY_GROUP_ID, props)),
+            SecurityGroup.fromSecurityGroupId(this, "replayerOutputAccessSG", this.getStringParameter(SSMParameter.REPLAYER_OUTPUT_ACCESS_SECURITY_GROUP_ID, props))
         ]
 
         let servicePortMappings: PortMapping[]|undefined
@@ -121,11 +117,13 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         let serviceDiscoveryEnabled = false
         let imageCommand: string[]|undefined
 
-        const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
-        const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
+        const osClusterEndpoint = this.getStringParameter(SSMParameter.OS_CLUSTER_ENDPOINT, props);
+        const sourceClusterEndpoint = props.sourceClusterEndpoint ?? this.getStringParameter(SSMParameter.SOURCE_CLUSTER_ENDPOINT, props);
+
+        const brokerEndpoints = this.getStringParameter(SSMParameter.KAFKA_BROKERS, props);
 
         const volumeName = "sharedReplayerOutputVolume"
-        const volumeId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputEFSId`)
+        const volumeId = this.getStringParameter(SSMParameter.REPLAYER_OUTPUT_EFS_ID, props);
         const replayerOutputEFSVolume: Volume = {
             name: volumeName,
             efsVolumeConfiguration: {
@@ -178,8 +176,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
-        const artifactS3Arn = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/artifactS3Arn`)
-        const artifactS3AnyObjectPath = `${artifactS3Arn}/*`
+        const artifactS3Arn = this.getStringParameter(SSMParameter.ARTIFACT_S3_ARN, props);
+        const artifactS3AnyObjectPath = `${artifactS3Arn}/*`;
         const artifactS3PublishPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: [artifactS3AnyObjectPath],
@@ -216,7 +214,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 "cloudwatch:GetMetricData"
             ]
         })
-        const sourceClusterEndpoint = props.sourceClusterEndpoint ?? `https://capture-proxy-es.migration.${props.stage}.local:9200`;
 
         // Upload the services.yaml file to Parameter Store
         let servicesYaml = props.servicesYaml
@@ -225,12 +222,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             // TODO: We're not currently supporting auth here, this may need to be handled on the migration console
             'no_auth': ''
         }
-        // Create a new parameter in Parameter Store
-        new StringParameter(this, 'SSMParameterServicesYamlFile', {
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/servicesYamlFile`,
-            stringValue: servicesYaml.stringify(),
-        });
-
+        this.createStringParameter(SSMParameter.SERVICES_YAML_FILE, servicesYaml.stringify(), props);
 
         const environment: { [key: string]: string; } = {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
@@ -251,9 +243,9 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
         }
         if (props.fetchMigrationEnabled) {
-            environment["FETCH_MIGRATION_COMMAND"] = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationCommand`)
+            environment["FETCH_MIGRATION_COMMAND"] = this.getStringParameter(SSMParameter.FETCH_MIGRATION_COMMAND, props);
 
-            const fetchMigrationTaskDefArn = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskDefArn`);
+            const fetchMigrationTaskDefArn = this.getStringParameter(SSMParameter.FETCH_MIGRATION_TASK_DEF_ARN, props);
             const fetchMigrationTaskRunPolicy = new PolicyStatement({
                 effect: Effect.ALLOW,
                 resources: [fetchMigrationTaskDefArn],
@@ -262,8 +254,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                     "ecs:StopTask"
                 ]
             })
-            const fetchMigrationTaskRoleArn = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskRoleArn`);
-            const fetchMigrationTaskExecRoleArn = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskExecRoleArn`);
+            const fetchMigrationTaskRoleArn = this.getStringParameter(SSMParameter.FETCH_MIGRATION_TASK_ROLE_ARN, props);
+            const fetchMigrationTaskExecRoleArn = this.getStringParameter(SSMParameter.FETCH_MIGRATION_TASK_EXEC_ROLE_ARN, props);
             // Required as per https://docs.aws.amazon.com/AmazonECS/latest/userguide/task-iam-roles.html
             const fetchMigrationPassRolePolicy = new PolicyStatement({
                 effect: Effect.ALLOW,
@@ -299,30 +291,26 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 // Naming requirement from OSI
                 logGroupName: `/aws/vendedlogs/osi-${props.stage}-${props.defaultDeployId}`
             });
-            new StringParameter(this, 'SSMParameterOSIPipelineLogGroupName', {
-                description: 'OpenSearch Migration Parameter for OpenSearch Ingestion Pipeline Log Group Name',
-                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/osiPipelineLogGroupName`,
-                stringValue: osiLogGroup.logGroupName
-            });
-        }        
+            this.createStringParameter(SSMParameter.OSI_PIPELINE_LOG_GROUP_NAME, osiLogGroup.logGroupName, props);
 
-        this.createService({
-            serviceName: "migration-console",
-            dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/migrationConsole"),
-            securityGroups: securityGroups,
-            portMappings: servicePortMappings,
-            dockerImageCommand: imageCommand,
-            serviceDiscoveryEnabled: serviceDiscoveryEnabled,
-            serviceDiscoveryPort: serviceDiscoveryPort,
-            volumes: [replayerOutputEFSVolume],
-            mountPoints: [replayerOutputMountPoint],
-            environment: environment,
-            taskRolePolicies: servicePolicies,
-            cpuArchitecture: props.fargateCpuArch,
-            taskCpuUnits: 1024,
-            taskMemoryLimitMiB: 2048,
-            ...props
-        });
+            this.createService({
+                serviceName: "migration-console",
+                dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/migrationConsole"),
+                securityGroups: securityGroups,
+                portMappings: servicePortMappings,
+                dockerImageCommand: imageCommand,
+                serviceDiscoveryEnabled: serviceDiscoveryEnabled,
+                serviceDiscoveryPort: serviceDiscoveryPort,
+                volumes: [replayerOutputEFSVolume],
+                mountPoints: [replayerOutputMountPoint],
+                environment: environment,
+                taskRolePolicies: servicePolicies,
+                cpuArchitecture: props.fargateCpuArch,
+                taskCpuUnits: 1024,
+                taskMemoryLimitMiB: 2048,
+                ...props
+            });
+        }
     }
 
 }

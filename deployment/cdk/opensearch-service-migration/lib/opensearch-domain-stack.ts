@@ -16,6 +16,7 @@ import {ISecret, Secret} from "aws-cdk-lib/aws-secretsmanager";
 import {StackPropsExt} from "./stack-composer";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import { ClusterYaml } from "./migration-services-yaml";
+import { MigrationConsoleStack, MigrationServiceCore, SSMParameter } from "./service-stacks";
 
 
 export interface OpensearchDomainStackProps extends StackPropsExt {
@@ -57,7 +58,7 @@ export interface OpensearchDomainStackProps extends StackPropsExt {
 
 export const osClusterEndpointParameterName = "osClusterEndpoint";
 
-export class OpenSearchDomainStack extends Stack {
+export class OpenSearchDomainStack extends MigrationServiceCore {
   targetClusterYaml: ClusterYaml;
 
   getEbsVolumeType(ebsVolumeTypeName: string) : EbsDeviceVolumeType|undefined {
@@ -99,23 +100,12 @@ export class OpenSearchDomainStack extends Stack {
 
   createSSMParameters(domain: Domain, adminUserName: string|undefined, adminUserSecret: ISecret|undefined, stage: string, deployId: string) {
     const endpointParameter = osClusterEndpointParameterName
-    const endpointSSM = new StringParameter(this, 'SSMParameterOpenSearchEndpoint', {
-      description: 'OpenSearch migration parameter for OpenSearch endpoint',
-      parameterName: `/migration/${stage}/${deployId}/${endpointParameter}`,
-      stringValue: `https://${domain.domainEndpoint}:443`
-    });
-    endpointSSM.node.addDependency(domain)
-
+    const endpointSSM = this.createStringParameter(SSMParameter.OS_CLUSTER_ENDPOINT, `https://${domain.domainEndpoint}:443`, { stage, defaultDeployId: deployId });
     if (domain.masterUserPassword && !adminUserSecret) {
       console.log(`An OpenSearch domain fine-grained access control user was configured without an existing Secrets Manager secret, will not create SSM Parameter: /migration/${stage}/${deployId}/osUserAndSecret`)
     }
     else if (domain.masterUserPassword && adminUserSecret) {
-      const secretSSM = new StringParameter(this, 'SSMParameterOpenSearchFGACUserAndSecretArn', {
-        description: 'OpenSearch migration parameter for OpenSearch configured fine-grained access control user and associated Secrets Manager secret ARN ',
-        parameterName: `/migration/${stage}/${deployId}/osUserAndSecretArn`,
-        stringValue: `${adminUserName} ${adminUserSecret.secretArn}`
-      });
-      secretSSM.node.addDependency(adminUserSecret)
+      const secretSSM = this.createStringParameter(SSMParameter.OS_USER_AND_SECRET_ARN, `${adminUserName} ${adminUserSecret.secretArn}`, { stage, defaultDeployId: deployId });
     }
   }
 
@@ -144,8 +134,7 @@ export class OpenSearchDomainStack extends Stack {
 
     const domainAccessSecurityGroupParameter = props.domainAccessSecurityGroupParameter ?? "osAccessSecurityGroupId"
     const defaultOSClusterAccessGroup = SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG",
-        StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/${domainAccessSecurityGroupParameter}`))
-
+        this.getStringParameter(SSMParameter.OS_ACCESS_SECURITY_GROUP_ID, { stage: props.stage, defaultDeployId: props.defaultDeployId }))
     let adminUserSecret: ISecret|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
         Secret.fromSecretCompleteArn(this, "managerSecret", props.fineGrainedManagerUserSecretManagerKeyARN) : undefined
     // Map objects from props

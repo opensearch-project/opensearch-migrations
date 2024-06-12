@@ -279,22 +279,39 @@ export class MigrationServiceCore extends Stack {
     }
 
     getStringParameter(parameterName: SSMParameter, props: {stage: string, defaultDeployId: string}): string {
-        return StringParameter.valueForTypedStringParameterV2(this, `/migration/${props.stage}/${props.defaultDeployId}/${parameterName}`);
+        return MigrationServiceCore.getStringParameter(this, parameterName, props);
+    }
+
+    static getStringParameter(scope: Construct, parameterName: SSMParameter, props: {stage: string, defaultDeployId: string}): string {
+        return StringParameter.valueForTypedStringParameterV2(scope, MigrationServiceCore.getStringParameterName(scope, parameterName, props));
+    }
+    
+    static getStringParameterName(scope: Construct, parameterName: SSMParameter, props: {stage: string, defaultDeployId: string}): string {
+        return `/migration/${props.stage}/${props.defaultDeployId}/${parameterName}`;
     }
 }
 
 export enum SSMParameter {
-    VPC_ID = 'vpcId',
     ALB_MIGRATION_URL = 'albMigrationUrl',
-    SERVICE_SECURITY_GROUP_ID = 'serviceSecurityGroupId',
-    TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID = 'trafficStreamSourceAccessSecurityGroupId',
-    REPLAYER_OUTPUT_ACCESS_SECURITY_GROUP_ID = 'replayerOutputAccessSecurityGroupId',
-    OS_ACCESS_SECURITY_GROUP_ID = 'osAccessSecurityGroupId',
-    KAFKA_BROKERS = 'kafkaBrokers',
-    OS_CLUSTER_ENDPOINT = 'osClusterEndpoint',
-    MSK_CLUSTER_NAME = 'mskClusterName',
-    MSK_CLUSTER_ARN = 'mskClusterARN',
     ARTIFACT_S3_ARN = 'artifactS3Arn',
     CLOUD_MAP_NAMESPACE_ID = 'cloudMapNamespaceId',
+    FETCH_MIGRATION_COMMAND = 'fetchMigrationCommand',
+    FETCH_MIGRATION_TASK_DEF_ARN = 'fetchMigrationTaskDefArn',
+    FETCH_MIGRATION_TASK_EXEC_ROLE_ARN = 'fetchMigrationTaskExecRoleArn',
+    FETCH_MIGRATION_TASK_ROLE_ARN = 'fetchMigrationTaskRoleArn',
+    KAFKA_BROKERS = 'kafkaBrokers',
+    MSK_CLUSTER_ARN = 'mskClusterARN',
+    MSK_CLUSTER_NAME = 'mskClusterName',
+    OS_ACCESS_SECURITY_GROUP_ID = 'osAccessSecurityGroupId',
+    OS_CLUSTER_ENDPOINT = 'osClusterEndpoint',
+    OS_USER_AND_SECRET_ARN = 'osUserAndSecretArn',
+    OSI_PIPELINE_LOG_GROUP_NAME = 'osiPipelineLogGroupName',
+    OSI_PIPELINE_ROLE_ARN = 'osiPipelineRoleArn',
+    REPLAYER_OUTPUT_ACCESS_SECURITY_GROUP_ID = 'replayerOutputAccessSecurityGroupId',
     REPLAYER_OUTPUT_EFS_ID = 'replayerOutputEfsId',
+    SOURCE_CLUSTER_ENDPOINT = 'sourceClusterEndpoint',
+    SERVICE_SECURITY_GROUP_ID = 'serviceSecurityGroupId',
+    SERVICES_YAML_FILE = 'servicesYamlFile',
+    TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID = 'trafficStreamSourceAccessSecurityGroupId',
+    VPC_ID = 'vpcId',
 }

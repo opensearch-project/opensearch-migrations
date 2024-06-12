@@ -11,7 +11,7 @@ import { Certificate, ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 import { ARecord, HostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
 import { LoadBalancerTarget } from "aws-cdk-lib/aws-route53-targets";
 import { AcmCertificateImporter } from "./service-stacks/acm-cert-importer";
-import { MigrationServiceCore } from "./service-stacks";
+import { MigrationServiceCore, SSMParameter } from "./service-stacks";
 
 export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string;
@@ -28,7 +28,6 @@ export class NetworkStack extends MigrationServiceCore {
     public readonly albSourceProxyTG: IApplicationTargetGroup;
     public readonly albTargetProxyTG: IApplicationTargetGroup;
     public readonly albSourceClusterTG: IApplicationTargetGroup;
-    public readonly albSourceClusterEndpoint: string;
 
     // Validate a proper url string is provided and return an url string which contains a protocol, host name, and port.
     // If a port is not provided, the default protocol port (e.g. 443, 80) will be explicitly added
@@ -76,7 +75,7 @@ export class NetworkStack extends MigrationServiceCore {
 
         // Retrieve original deployment VPC for addon deployments
         if (props.addOnMigrationDeployId) {
-            const vpcId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/vpcId`)
+            const vpcId = this.getStringParameter(SSMParameter.VPC_ID, props);
             this.vpc = Vpc.fromLookup(this, 'domainVPC', {
                 vpcId: vpcId,
             });
@@ -135,13 +134,8 @@ export class NetworkStack extends MigrationServiceCore {
                 target: RecordTarget.fromAlias(new LoadBalancerTarget(alb)),
             });
 
-            const albUrl = new StringParameter(this, 'SSMParameterAlbUrl', {
-                description: 'OpenSearch migration parameter for ALB to migration services',
-                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/albMigrationUrl`,
-                stringValue: `https://${albDnsRecord.domainName}`
-            });
-            this.exportValue(albUrl.stringValue);
-
+            const albUrl = this.createStringParameter(SSMParameter.ALB_MIGRATION_URL, `https://${albDnsRecord.domainName}`, props);
+            
             let cert: ICertificate;
             if (props.albAcmCertArn) {
                 cert = Certificate.fromCertificateArn(this, 'ALBListenerCert', props.albAcmCertArn);
@@ -156,7 +150,7 @@ export class NetworkStack extends MigrationServiceCore {
                 this.albSourceClusterTG = this.createSecureTargetGroup('ALBSourceCluster', props.stage, 9200, this.vpc);
                 this.createSecureListener('ALBSourceClusterListener', 19200,
                     alb, cert, this.albSourceClusterTG);
-                this.albSourceClusterEndpoint = albUrl.stringValue.concat(`:19200`);
+                this.createStringParameter(SSMParameter.SOURCE_CLUSTER_ENDPOINT, albUrl.stringValue.concat(`:19200`), props);
             }
 
             const albMigrationListener = this.createSecureListener('ALBMigrationListener', 9200,
@@ -170,12 +164,7 @@ export class NetworkStack extends MigrationServiceCore {
         }
 
         if (!props.addOnMigrationDeployId) {
-            new StringParameter(this, 'SSMParameterVpcId', {
-                description: 'OpenSearch migration parameter for VPC id',
-                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/vpcId`,
-                stringValue: this.vpc.vpcId
-            });
-
+            this.createStringParameter(SSMParameter.VPC_ID, this.vpc.vpcId, props);
             // Create a default SG which only allows members of this SG to access the Domain endpoints
             const defaultSecurityGroup = new SecurityGroup(this, 'osClusterAccessSG', {
                 vpc: this.vpc,
@@ -183,22 +172,13 @@ export class NetworkStack extends MigrationServiceCore {
             });
             defaultSecurityGroup.addIngressRule(defaultSecurityGroup, Port.allTraffic());
 
-            const osAccessSgIdSSM = new StringParameter(this, 'SSMParameterOpenSearchAccessGroupId', {
-                description: 'OpenSearch migration parameter for target OpenSearch access security group id',
-                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`,
-                stringValue: defaultSecurityGroup.securityGroupId
-            });
-        }
+            this.createStringParameter(SSMParameter.OS_ACCESS_SECURITY_GROUP_ID, defaultSecurityGroup.securityGroupId, props);
 
-        if (props.targetClusterEndpoint) {
-            const formattedClusterEndpoint = NetworkStack.validateAndReturnFormattedHttpURL(props.targetClusterEndpoint)
-            const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
-            new StringParameter(this, 'SSMParameterOpenSearchEndpoint', {
-                description: 'OpenSearch migration parameter for OpenSearch endpoint',
-                parameterName: `/migration/${props.stage}/${deployId}/osClusterEndpoint`,
-                stringValue: formattedClusterEndpoint
-            });
+            if (props.targetClusterEndpoint) {
+                const formattedClusterEndpoint = NetworkStack.validateAndReturnFormattedHttpURL(props.targetClusterEndpoint)
+                const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
+                this.createStringParameter(SSMParameter.OS_CLUSTER_ENDPOINT, formattedClusterEndpoint, {stage: props.stage, defaultDeployId: deployId});
+            }
         }
-
     }
 }

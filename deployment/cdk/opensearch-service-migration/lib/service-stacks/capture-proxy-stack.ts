@@ -3,7 +3,7 @@ import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
-import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
+import {ELBTargetGroup, MigrationServiceCore, SSMParameter} from "./migration-service-core";
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {StreamingSourceType} from "../streaming-source-type";
 import {createMSKProducerIAMPolicies} from "../common-utilities";
@@ -34,11 +34,12 @@ export class CaptureProxyStack extends MigrationServiceCore {
         super(scope, id, props)
         const serviceName = props.serviceName || "capture-proxy";
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`)),
-        ]
+            SecurityGroup.fromSecurityGroupId(this, "serviceSG", this.getStringParameter(SSMParameter.SERVICE_SECURITY_GROUP_ID, props)),
+            SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", this.getStringParameter(SSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID, props)),
+        ];
+        
         if (props.addTargetClusterSG) {
-            securityGroups.push(SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`)));
+            securityGroups.push(SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG", this.getStringParameter(SSMParameter.OS_ACCESS_SECURITY_GROUP_ID, props)));
         }
 
         const servicePort: PortMapping = {
@@ -50,11 +51,10 @@ export class CaptureProxyStack extends MigrationServiceCore {
 
         const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId) : []
 
-        const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
-
-        const sourceClusterEndpoint = props.customSourceClusterEndpoint ? props.customSourceClusterEndpoint :
-                                    props.customSourceClusterEndpointSSMParam ? StringParameter.valueForStringParameter(this, props.customSourceClusterEndpointSSMParam) :
-                                    "https://elasticsearch:9200";
+        const brokerEndpoints = this.getStringParameter(SSMParameter.KAFKA_BROKERS, { stage: props.stage, defaultDeployId: props.defaultDeployId });
+        const sourceClusterEndpoint = props.customSourceClusterEndpoint ?? 
+                (props.customSourceClusterEndpointSSMParam != null ? StringParameter.valueForStringParameter(this, props.customSourceClusterEndpointSSMParam) :
+                this.getStringParameter(SSMParameter.SOURCE_CLUSTER_ENDPOINT, props));
         let command = `/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy --destinationUri ${sourceClusterEndpoint} --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`
         command = props.streamingSourceType !== StreamingSourceType.DISABLED ? command.concat(`  --kafkaConnection ${brokerEndpoints}`) : command
         command = props.streamingSourceType === StreamingSourceType.AWS_MSK ? command.concat(" --enableMSKAuth") : command
