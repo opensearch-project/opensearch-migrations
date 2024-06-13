@@ -94,7 +94,7 @@ class Cluster:
                 self.auth_details.get("username", None),
                 self.auth_details.get("password", None)
             )
-        elif self.auth_type is None:
+        elif self.auth_type is AuthMethod.NO_AUTH:
             auth = None
         else:
             raise NotImplementedError(f"Auth type {self.auth_type} not implemented")

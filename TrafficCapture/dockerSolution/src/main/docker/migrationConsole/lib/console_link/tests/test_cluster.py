@@ -1,6 +1,6 @@
 import pytest  # type: ignore
 from tests.utils import create_valid_cluster
-from console_link.models.cluster import Cluster
+from console_link.models.cluster import AuthMethod, Cluster
 
 # Define a valid cluster configuration
 valid_cluster_config = {
@@ -67,3 +67,13 @@ def test_missing_endpoint_refused():
         Cluster(missing_endpoint)
     assert "Invalid config file for cluster" in excinfo.value.args[0]
     assert excinfo.value.args[1]['cluster'][0]["endpoint"] == ["required field"]
+
+
+def test_valid_cluster_api_call_with_no_auth(requests_mock):
+    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    assert isinstance(cluster, Cluster)
+
+    requests_mock.get(f"{cluster.endpoint}/test_api", json={'test': True})
+    response = cluster.call_api("/test_api")
+    assert response.status_code == 200
+    assert response.json() == {'test': True}
