@@ -6,3 +6,79 @@ task buildDockerImages() {
     dependsOn(':TrafficCapture:dockerSolution:buildDockerImages')
     dependsOn(':RFS:buildDockerImages')
 }
+
+subprojects {
+    apply plugin: 'java'
+    apply plugin: 'maven-publish'
+
+    task javadocJar(type: Jar, dependsOn: javadoc) {
+        archiveClassifier.set('javadoc')
+        from javadoc.destinationDir
+    }
+    task sourcesJar(type: Jar) {
+        archiveClassifier.set('sources')
+        from sourceSets.main.allSource
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+    }
+    def excludedProjectPaths = [
+            ':RFS',
+            ':TrafficCapture',
+            ':TrafficCapture:dockerSolution',
+    ]
+    if (!(project.path in excludedProjectPaths)) {
+        publishing {
+            publications {
+                mavenJava(MavenPublication) {
+                    from components.java
+                    artifact javadocJar
+                    artifact sourcesJar
+
+                    group = 'org.opensearch.migrations.trafficcapture'
+
+                    // support -Dbuild.version, but include default
+                    version = System.getProperty("build.version", "0.1.0")
+
+                    // support -Dbuild.snapshot=false, but default to true
+                    if (System.getProperty("build.snapshot", "true") == "true") {
+                        version += "-SNAPSHOT"
+                    }
+
+                    pom {
+                        name = project.name
+                        description = 'Everything opensearch migrations'
+                        url = 'http://github.com/opensearch-project/opensearch-migrations'
+
+                        licenses {
+                            license {
+                                name = 'The Apache License, Version 2.0'
+                                url = 'http://www.apache.org/licenses/LICENSE-2.0.txt'
+                            }
+                        }
+                        developers {
+                            developer {
+                                name = "OpenSearch"
+                                url = "https://github.com/opensearch-project/opensearch-migrations"
+                            }
+                        }
+                        scm {
+                            connection = "scm:git@github.com:opensearch-project/opensearch-migrations.git"
+                            developerConnection = "scm:git@github.com:opensearch-project/opensearch-migrations.git"
+                            url = "git@github.com:opensearch-project/opensearch-migrations.git"
+                        }
+                    }
+
+                    // Suppress POM metadata warnings for test fixtures
+                    suppressPomMetadataWarningsFor('testFixturesApiElements')
+                    suppressPomMetadataWarningsFor('testFixturesRuntimeElements')
+                }
+            }
+            repositories {
+                maven { url = "${rootProject.buildDir}/repository"}
+                maven {
+                    url "https://aws.oss.sonatype.org/content/repositories/snapshots"
+                    name = 'staging'
+                }
+            }
+        }
+    }
+}

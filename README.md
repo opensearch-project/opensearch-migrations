@@ -83,3 +83,51 @@ The release process is standard across repositories in this org and is run by a 
 2. The [release-drafter.yml](.github/workflows/release-drafter.yml) will be automatically kicked off and a draft release will be created.
 3. This draft release triggers the [jenkins release workflow](https://build.ci.opensearch.org/job/opensearch-migrations-release) as a result of which the opensearch-migrations toolset is released and published on artifacts.opensearch.org example as https://artifacts.opensearch.org/migrations/0.1.0/opensearch-migrations-0.1.0.tar.gz. 
 4. Once the above release workflow is successful, the drafted release on GitHub is published automatically.
+
+## Publishing
+
+This project can be published to a local maven repository with:
+```sh
+./gradlew publishToMavenLocal
+```
+
+And subsequently imported into a separate gradle project with (replacing name with any subProject name)
+```groovy
+repositories {
+    mavenCentral()
+    mavenLocal()
+}
+
+dependencies {
+    implementation group: "org.opensearch.migrations.trafficcapture", name: "captureKafkaOffloader", version: "0.1.0-SNAPSHOT"
+    //... other dependencies
+}
+```
+
+The entire list of published subprojects is
+```text
+captureKafkaOffloader
+captureOffloader
+captureProtobufs
+commonDependencyVersionConstraints
+coreUtilities
+jsonJMESPathMessageTransformer
+jsonJMESPathMessageTransformerProvider
+jsonJoltMessageTransformer
+jsonJoltMessageTransformerProvider
+jsonMessageTransformerInterface
+jsonMessageTransformers
+nettyWireLogging
+openSearch23PlusTargetTransformerProvider
+testHelperFixtures
+trafficCaptureProxyServer
+trafficCaptureProxyServerTest
+trafficReplayer
+transformationPlugins
+```
+
+To include a testFixture dependency, define the import like
+
+```groovy
+testImplementation testFixtures('org.opensearch.migrations.trafficcapture:trafficReplayer:0.1.0-SNAPSHOT')
+```
