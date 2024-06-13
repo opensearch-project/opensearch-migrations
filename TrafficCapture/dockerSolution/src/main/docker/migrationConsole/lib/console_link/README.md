@@ -51,19 +51,26 @@ backfill:
 
 Source and target clusters have the following options:
 - `endpoint`: required, the endpoint to reach the cluster.
-- `authorization`: required, the auth method to use, if no auth the no_auth type must be specified.
-    - `type`: required, the only currently implemented options are "no_auth" and "basic_auth", but "sigv4" should be available soon
-    - `details`: for basic auth, the details should be a `username` and `password`
+
+Exactly one of the following blocks must be present:
+- `no_auth`: may be empty, no authorization to use.
+- `basic_auth`:
+    - `username`
+    - `password`
+- `sigv4`: may be empty, not yet implemented
 
 Having a `source_cluster` and `target_cluster` is required.
 
 #### Metrics Source
 
 Currently, the two supported metrics source types are `prometheus` and `cloudwatch`.
+Exactly one of the following blocks must be present:
+- `prometheus`:
+    - `endpoint`: required
 
-- `type`: required, `prometheus` or `cloudwatch`
-- `endpoint`: required for `prometheus` (ignored for `cloudwatch`)
-- `aws_region`: optional for `cloudwatch` (ignored for `prometheus`). if not provided, the usual rules are followed for determining aws region (`AWS_DEFAULT_REGION`, `~/.aws/config`)
+- `cloudwatch`: may be empty if region is not specified
+    - `aws_region`:  optional. if not provided, the usual rules are followed for determining aws region. (`AWS_DEFAULT_REGION`, `~/.aws/config`, etc.)
+
 
 #### Backfill
 
