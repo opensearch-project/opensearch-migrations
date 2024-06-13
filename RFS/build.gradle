@@ -45,6 +45,7 @@ dependencies {
     implementation group: 'io.netty', name: 'netty-codec-http'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
     implementation group: 'org.apache.lucene', name: 'lucene-core'
     implementation group: 'org.apache.lucene', name: 'lucene-analyzers-common'
     implementation group: 'org.apache.lucene', name: 'lucene-backward-codecs'
@@ -59,6 +60,7 @@ dependencies {
 
     testImplementation group: 'io.projectreactor', name: 'reactor-test'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
     testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
     testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-params'
     testImplementation group: 'org.mockito', name: 'mockito-core'
