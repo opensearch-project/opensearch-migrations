@@ -98,5 +98,5 @@ def run_migration_console_command(deployment_type: str, command: str):
     else:
         # In a cloud deployment case, we run the e2e tests directly on the migration console, so it's just a local call
         logger.warning(f"Running command: {command} locally")
-        process = subprocess.run(cmd_exec, shell=True, capture_output=True)
+        process = subprocess.run(command, shell=True, capture_output=True)
         return process.returncode, process.stdout, process.stderr
