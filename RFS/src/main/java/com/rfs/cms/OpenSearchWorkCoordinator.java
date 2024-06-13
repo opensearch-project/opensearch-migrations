@@ -2,35 +2,18 @@ package com.rfs.cms;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Lombok;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.hc.client5.http.classic.methods.HttpDelete;
-import org.apache.hc.client5.http.classic.methods.HttpGet;
-import org.apache.hc.client5.http.classic.methods.HttpHead;
-import org.apache.hc.client5.http.classic.methods.HttpOptions;
-import org.apache.hc.client5.http.classic.methods.HttpPatch;
-import org.apache.hc.client5.http.classic.methods.HttpPost;
-import org.apache.hc.client5.http.classic.methods.HttpPut;
-import org.apache.hc.client5.http.classic.methods.HttpUriRequestBase;
-import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
-import org.apache.hc.client5.http.impl.classic.HttpClients;
-import org.apache.hc.core5.http.io.entity.StringEntity;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStream;
-import java.net.URI;
+import java.time.Duration;
 import java.time.Instant;
-import java.util.AbstractMap;
 import java.util.Arrays;
-import java.util.LinkedHashMap;
-import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
 @Slf4j
-public class WorkCoordinator implements IWorkCoordinator {
+public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     private static final String INDEX_NAME = ".migrations_working_state";
 
     public static final String SCRIPT_VERSION_TEMPLATE = "{SCRIPT_VERSION}";
@@ -42,15 +25,17 @@ public class WorkCoordinator implements IWorkCoordinator {
     public static final String PUT_METHOD = "PUT";
     public static final String POST_METHOD = "POST";
     public static final String RESULT_OPENSSEARCH_KEYWORD = "result";
+    public static final String GET_METHOD = "GET";
+    public static final String EXPIRATION_FIELD_NAME = "expiration";
 
     private final long tolerableClientServerClockDifference;
     private final AbstractedHttpClient httpClient;
     private final String workerId;
     private final ObjectMapper objectMapper;
 
-    public WorkCoordinator(URI openSearchUri, long tolerableClientServerClockDifference, String workerId) {
+    public OpenSearchWorkCoordinator(AbstractedHttpClient httpClient, long tolerableClientServerClockDifference, String workerId) {
         this.tolerableClientServerClockDifference = tolerableClientServerClockDifference;
-        this.httpClient = new ApacheHttpClient(openSearchUri);
+        this.httpClient = httpClient;
         this.workerId = workerId;
         this.objectMapper = new ObjectMapper();
     }
@@ -58,112 +43,6 @@ public class WorkCoordinator implements IWorkCoordinator {
     @Override
     public void close() throws Exception {
         httpClient.close();
-    }
-
-    public interface AbstractHttpResponse {
-        Stream<Map.Entry<String, String>> getHeaders();
-        default byte[] getPayloadBytes() throws IOException {
-            return getPayloadStream().readAllBytes();
-        }
-        default InputStream getPayloadStream() throws IOException {
-            return new ByteArrayInputStream(getPayloadBytes());
-        }
-        String getStatusText();
-        int getStatusCode();
-
-        default String toDiagnosticString() {
-            String payloadStr;
-            try {
-                payloadStr = Arrays.toString(getPayloadBytes());
-            } catch (IOException e) {
-                payloadStr = "[EXCEPTION EVALUATING PAYLOAD]: " + e;
-            }
-            return getStatusText() + "/" + getStatusCode() +
-                    getHeaders().map(kvp->kvp.getKey() + ": " + kvp.getValue())
-                            .collect(Collectors.joining(";", "[","]")) +
-                    payloadStr;
-        }
-    }
-
-    public interface AbstractedHttpClient extends AutoCloseable {
-        AbstractHttpResponse makeRequest(String method, String path,
-                                         Map<String, String> headers, String payload) throws IOException;
-
-        default AbstractHttpResponse makeJsonRequest(String method, String path,
-                                                     Map<String, String> extraHeaders, String body) throws IOException {
-            var combinedHeaders = new LinkedHashMap<String, String>();
-            combinedHeaders.put("Content-Type", "application/json");
-            combinedHeaders.put("Accept-Encoding", "identity");
-            if (extraHeaders != null) {
-                combinedHeaders.putAll(extraHeaders);
-            }
-            return makeRequest(method, path, combinedHeaders, body);
-        }
-    }
-
-    public static class ApacheHttpClient implements AbstractedHttpClient {
-        private final CloseableHttpClient client = HttpClients.createDefault();
-        private final URI baseUri;
-
-        public ApacheHttpClient(URI baseUri) {
-            this.baseUri = baseUri;
-        }
-
-        private static HttpUriRequestBase makeRequestBase(URI baseUri, String method, String path) {
-            switch (method.toUpperCase()) {
-                case "GET":
-                    return new HttpGet(baseUri + "/" + INDEX_NAME + path);
-                case POST_METHOD:
-                    return new HttpPost(baseUri + "/" + INDEX_NAME + path);
-                case PUT_METHOD:
-                    return new HttpPut(baseUri + "/" + INDEX_NAME + path);
-                case "PATCH":
-                    return new HttpPatch(baseUri + "/" + INDEX_NAME + path);
-                case "HEAD":
-                    return new HttpHead(baseUri + "/" + INDEX_NAME + path);
-                case "OPTIONS":
-                    return new HttpOptions(baseUri + "/" + INDEX_NAME + path);
-                case "DELETE":
-                    return new HttpDelete(baseUri + "/" + INDEX_NAME + path);
-                default:
-                    throw new IllegalArgumentException("Cannot map method to an Apache Http Client request: " + method);
-            }
-        }
-
-        @Override
-        public AbstractHttpResponse makeRequest(String method, String path,
-                                                Map<String, String> headers, String payload) throws IOException {
-            var request = makeRequestBase(baseUri, method, path);
-            request.setHeaders(request.getHeaders());
-            request.setEntity(new StringEntity(payload));
-            return client.execute(request, fr -> new AbstractHttpResponse() {
-                @Override
-                public InputStream getPayloadStream() throws IOException {
-                    return fr.getEntity().getContent();
-                }
-
-                @Override
-                public String getStatusText() {
-                    return fr.getReasonPhrase();
-                }
-
-                @Override
-                public int getStatusCode() {
-                    return fr.getCode();
-                }
-
-                @Override
-                public Stream<Map.Entry<String, String>> getHeaders() {
-                    return Arrays.stream(fr.getHeaders())
-                            .map(h -> new AbstractMap.SimpleEntry<>(h.getName(), h.getValue()));
-                }
-            });
-        }
-
-        @Override
-        public void close() throws Exception {
-            client.close();
-        }
     }
 
     public void setup() throws IOException {
@@ -176,7 +55,7 @@ public class WorkCoordinator implements IWorkCoordinator {
                 "  },\n" +
                 "  \"mappings\": {\n" +
                 "    \"properties\": {\n" +
-                "      \"expiration\": {\n" +
+                "      \"" + EXPIRATION_FIELD_NAME + "\": {\n" +
                 "        \"type\": \"long\"\n" +
                 "      },\n" +
                 "      \"completedAt\": {\n" +
@@ -202,21 +81,22 @@ public class WorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    enum DocumentResult {
+    enum DocumentModificationResult {
         IGNORED, CREATED, UPDATED;
-        static DocumentResult parse(String s) {
+        static DocumentModificationResult parse(String s) {
             switch (s) {
-                case "noop": return DocumentResult.IGNORED;
-                case "created": return DocumentResult.CREATED;
-                case "updated": return DocumentResult.UPDATED;
+                case "noop": return DocumentModificationResult.IGNORED;
+                case "created": return DocumentModificationResult.CREATED;
+                case "updated": return DocumentModificationResult.UPDATED;
                 default:
                     throw new IllegalArgumentException("Unknown result " + s);
             }
         }
     }
 
-    DocumentResult createOrUpdateLeaseForDocument(String workItemId, Instant currentTime, int expirationWindowSeconds,
-                                                  Predicate<DocumentResult> returnValueAdapter)
+    DocumentModificationResult createOrUpdateLeaseForDocument(String workItemId, Instant currentTime,
+                                                              int expirationWindowSeconds,
+                                                              Predicate<DocumentModificationResult> returnValueAdapter)
             throws IOException {
         // the notion of 'now' isn't supported with painless scripts
         // https://www.elastic.co/guide/en/elasticsearch/painless/current/painless-datetime.html#_datetime_now
@@ -224,7 +104,7 @@ public class WorkCoordinator implements IWorkCoordinator {
                 "  \"scripted_upsert\": true,\n" +
                 "  \"upsert\": {\n" +
                 "    \"scriptVersion\": \"" + SCRIPT_VERSION_TEMPLATE + "\",\n" +
-                "    \"expiration\": 0,\n" +
+                "    \"" + EXPIRATION_FIELD_NAME + "\": 0,\n" +
                 "    \"creatorId\": \"" + WORKER_ID_TEMPLATE + "\",\n" +
                 "    \"numAttempts\": 0\n" +
                 "  },\n" +
@@ -244,13 +124,19 @@ public class WorkCoordinator implements IWorkCoordinator {
                 "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");" +
                 "      }" +
                 "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);" +
-                "      if (params.expirationWindow > 0 && " +                 // don't obtain a lease lock
-                "          ctx._source.completedAt == null && " +             // not completed
-                "          ctx._source.expiration < serverTimeSeconds && " +  // is expired
-                "          ctx._source.expiration < newExpiration) {" +       // sanity check
-                "        ctx._source.expiration = newExpiration;" +
-                "        ctx._source.leaseHolderId = params.workerId;" +
-                "        ctx._source.numAttempts += 1;" +
+                "      if ((params.expirationWindow > 0 && " +                 // don't obtain a lease lock
+                "           ctx._source.completedAt == null) {" +              // already done
+                "        if (ctx._source.leaseHolderId == params.workerId && " +
+                "            ctx._source." + EXPIRATION_FIELD_NAME + " > serverTimeSeconds) {" + // count as an update to force the caller to lookup the expiration time, but no need to modify it
+                "          ctx.op = \\\"update\\\";" +
+                "        } else if (ctx._source." + EXPIRATION_FIELD_NAME + " < serverTimeSeconds && " + // is expired
+                "                   ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +      // sanity check
+                "          ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;" +
+                "          ctx._source.leaseHolderId = params.workerId;" +
+                "          ctx._source.numAttempts += 1;" +
+                "        } else {" +
+                "          ctx.op = \\\"noop\\\";" +
+                "        }" +
                 "      } else if (params.expirationWindow != 0) {" +
                 "        ctx.op = \\\"noop\\\";" +
                 "      }" +
@@ -269,7 +155,7 @@ public class WorkCoordinator implements IWorkCoordinator {
                 null, body);
         final var resultStr =
                 objectMapper.readTree(response.getPayloadStream()).get(RESULT_OPENSSEARCH_KEYWORD).textValue();
-        var rval = DocumentResult.parse(resultStr);
+        var rval = DocumentModificationResult.parse(resultStr);
         if (!returnValueAdapter.test(rval)) {
             throw Lombok.sneakyThrow(
                     new IllegalStateException("Unexpected response for workItemId: " + workItemId + ".  Response: " +
@@ -278,13 +164,42 @@ public class WorkCoordinator implements IWorkCoordinator {
         return rval;
     }
 
+    DocumentModificationResult createOrUpdateLeaseForDocument(String workItemId, Instant currentTime,
+                                                              int expirationWindowSeconds)
+        throws IOException {
+        return createOrUpdateLeaseForDocument(workItemId, currentTime, expirationWindowSeconds, r -> true);
+    }
+
     public void createUnassignedWorkItem(String workItemId) throws IOException {
         createOrUpdateLeaseForDocument(workItemId, Instant.now(), 0,
-                r -> r == DocumentResult.CREATED);
+                r -> r == DocumentModificationResult.CREATED);
+    }
+
+    Instant getExistingExpiration(String workItemId) throws IOException {
+        var response = httpClient.makeJsonRequest(GET_METHOD, "/" + INDEX_NAME + "/_doc/" + workItemId,
+                null, null);
+        return Instant.ofEpochMilli(1000 *
+                objectMapper.readTree(response.getPayloadStream()).get(EXPIRATION_FIELD_NAME).longValue());
+    }
+
+    @Override
+    @NonNull
+    public WorkItemAndDuration createOrUpdateLeaseForWorkItem(String workItemId, Duration leaseDuration)
+            throws IOException, LeaseNotAcquiredException {
+        var startTime = Instant.now();
+        var result = createOrUpdateLeaseForDocument(workItemId, Instant.now(), 0);
+        switch (result) {
+            case CREATED:
+                return new WorkItemAndDuration(workItemId, startTime.plus(leaseDuration));
+            case UPDATED:
+                return new WorkItemAndDuration(workItemId, getExistingExpiration(workItemId));
+            case IGNORED:
+                throw new LeaseNotAcquiredException();
+        }
     }
 
     <T> T markWorkItemAsComplete(String workItemId, Instant currentTime,
-                                 BiFunction<AbstractHttpResponse, DocumentResult, T> returnValueAdapter)
+                                 BiFunction<AbstractedHttpClient.AbstractHttpResponse, DocumentModificationResult, T> returnValueAdapter)
             throws IOException {
         final var markWorkAsCompleteBodyTemplate = "{\n" +
                 "  \"script\": {\n" +
@@ -314,11 +229,11 @@ public class WorkCoordinator implements IWorkCoordinator {
         var response = httpClient.makeJsonRequest(POST_METHOD, "/" + INDEX_NAME + "/_update/" + workItemId,
                 null, body);
         final var resultStr = objectMapper.readTree(response.getPayloadStream()).get(RESULT_OPENSSEARCH_KEYWORD).textValue();
-        return returnValueAdapter.apply(response, DocumentResult.parse(resultStr));
+        return returnValueAdapter.apply(response, DocumentModificationResult.parse(resultStr));
     }
 
     <T> T makeQueryUpdateDocument(String workerId, Instant currentTime, int expirationWindowSeconds,
-                                  BiFunction<AbstractHttpResponse, DocumentResult, T> returnValueAdapter)
+                                  BiFunction<AbstractedHttpClient.AbstractHttpResponse, DocumentModificationResult, T> returnValueAdapter)
             throws IOException {
         final var queryUpdateTemplate = "{\n" +
                 "\"query\": {" +
@@ -326,7 +241,7 @@ public class WorkCoordinator implements IWorkCoordinator {
                 "    \"must\": [" +
                 "      {" +
                 "        \"range\": {" +
-                "          \"expiration\": { \"lt\": 1718247000 }" +
+                "          \"" + EXPIRATION_FIELD_NAME + "\": { \"lt\": 1718247000 }" +
                 "        }" +
                 "      }" +
                 "    ]," +
@@ -352,9 +267,9 @@ public class WorkCoordinator implements IWorkCoordinator {
                 "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");" +
                 "      }" +
                 "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);" +
-                "      if (ctx._source.expiration < serverTimeSeconds && " + // is expired
-                "          ctx._source.expiration < newExpiration) {" +      // sanity check
-                "        ctx._source.expiration = newExpiration;" +
+                "      if (ctx._source." + EXPIRATION_FIELD_NAME + " < serverTimeSeconds && " + // is expired
+                "          ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +      // sanity check
+                "        ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;" +
                 "        ctx._source.leaseHolderId = params.workerId;" +
                 "        ctx._source.numAttempts += 1;" +
                 "      }" +
@@ -372,7 +287,7 @@ public class WorkCoordinator implements IWorkCoordinator {
         var response = httpClient.makeJsonRequest(POST_METHOD, "/" + INDEX_NAME + "/_update_by_query?refresh=true",
                 null, body);
         final var resultStr = objectMapper.readTree(response.getPayloadStream()).get(RESULT_OPENSSEARCH_KEYWORD).textValue();
-        return returnValueAdapter.apply(response, DocumentResult.parse(resultStr));
+        return returnValueAdapter.apply(response, DocumentModificationResult.parse(resultStr));
     }
 
     private String makeQueryAssignedWorkDocument(String workerId) throws IOException {
@@ -385,6 +300,6 @@ public class WorkCoordinator implements IWorkCoordinator {
         var response = httpClient.makeJsonRequest(POST_METHOD, "/" + INDEX_NAME + "/_search",
                 null, body);
         final var resultStr = objectMapper.readTree(response.getPayloadStream()).get(RESULT_OPENSSEARCH_KEYWORD).textValue();
-        return returnValueAdapter.apply(response, DocumentResult.CREATED.parse(resultStr));
+        return returnValueAdapter.apply(response, DocumentModificationResult.CREATED.parse(resultStr));
     }
 }
