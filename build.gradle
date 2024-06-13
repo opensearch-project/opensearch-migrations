@@ -11,10 +11,16 @@ subprojects {
     apply plugin: 'java'
     apply plugin: 'maven-publish'
 
+    tasks.withType(Test) {
+        // Getting javadoc to compile is part of the test suite to ensure we are able to publish our artifacts
+        dependsOn project.javadoc
+    }
+
     task javadocJar(type: Jar, dependsOn: javadoc) {
         archiveClassifier.set('javadoc')
         from javadoc.destinationDir
     }
+
     task sourcesJar(type: Jar) {
         archiveClassifier.set('sources')
         from sourceSets.main.allSource
