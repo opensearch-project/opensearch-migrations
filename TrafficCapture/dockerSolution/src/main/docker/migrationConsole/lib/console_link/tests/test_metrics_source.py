@@ -173,3 +173,11 @@ def test_prometheus_get_metrics_error(prometheus_ms):
                status_code=500)
         with pytest.raises(requests.exceptions.HTTPError):
             prometheus_ms.get_metrics()
+
+
+def test_prometheus_get_metric_for_nonexistent_component(prometheus_ms):
+    with pytest.raises(ValueError):
+        prometheus_ms.get_metric_data(
+            Component(3), "kafkaCommitCount",
+            MetricStatistic.Average, startTime=datetime.datetime.now()
+        )
