@@ -16,39 +16,28 @@ import com.rfs.cms.CmsClient;
 import com.rfs.cms.OpenSearchCmsClient;
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
-import com.rfs.common.DefaultSourceRepoAccessor;
-import com.rfs.common.DocumentReindexer;
 import com.rfs.common.GlobalMetadata;
 import com.rfs.common.IndexMetadata;
 import com.rfs.common.Logging;
-import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Uri;
-import com.rfs.common.ShardMetadata;
 import com.rfs.common.S3Repo;
-import com.rfs.common.SnapshotCreator;
 import com.rfs.common.SourceRepo;
 import com.rfs.common.TryHandlePhaseFailure;
-import com.rfs.common.S3SnapshotCreator;
 import com.rfs.common.SnapshotRepo;
-import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.transformers.TransformFunctions;
 import com.rfs.transformers.Transformer;
-import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
 import com.rfs.version_es_7_10.GlobalMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.IndexMetadataFactory_ES_7_10;
-import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
 import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
-import com.rfs.worker.DocumentsRunner;
 import com.rfs.worker.GlobalState;
 import com.rfs.worker.IndexRunner;
 import com.rfs.worker.MetadataRunner;
-import com.rfs.worker.SnapshotRunner;
 
-public class RunRfsWorker {
-    private static final Logger logger = LogManager.getLogger(RunRfsWorker.class);
+public class RfsMigrateMetadata {
+    private static final Logger logger = LogManager.getLogger(RfsMigrateMetadata.class);
 
     public static class Args {
         @Parameter(names = {"--snapshot-name"}, description = "The name of the snapshot to migrate", required = true)
@@ -62,18 +51,6 @@ public class RunRfsWorker {
 
         @Parameter(names = {"--s3-region"}, description = "The AWS Region the S3 bucket is in, like: us-east-2", required = true)
         public String s3Region;
-
-        @Parameter(names = {"--lucene-dir"}, description = "The absolute path to the directory where we'll put the Lucene docs", required = true)
-        public String luceneDirPath;
-
-        @Parameter(names = {"--source-host"}, description = "The source host and port (e.g. http://localhost:9200)", required = true)
-        public String sourceHost;
-
-        @Parameter(names = {"--source-username"}, description = "Optional.  The source username; if not provided, will assume no auth on source", required = false)
-        public String sourceUser = null;
-
-        @Parameter(names = {"--source-password"}, description = "Optional.  The source password; if not provided, will assume no auth on source", required = false)
-        public String sourcePass = null;
 
         @Parameter(names = {"--target-host"}, description = "The target host and port (e.g. http://localhost:9200)", required = true)
         public String targetHost;
@@ -95,10 +72,6 @@ public class RunRfsWorker {
         @Parameter(names = {"--component-template-allowlist"}, description = ("Optional. List of component template names to migrate"
             + " (e.g. 'posts_template1, posts_template2').  Default: empty list"), required = false)
         public List<String> componentTemplateAllowlist = List.of();
-
-        @Parameter(names = {"--max-shard-size-bytes"}, description = ("Optional. The maximum shard size, in bytes, to allow when"
-            + " performing the document migration.  Useful for preventing disk overflow.  Default: 50 * 1024 * 1024 * 1024 (50 GB)"), required = false)
-        public long maxShardSizeBytes = 50 * 1024 * 1024 * 1024L;
         
         //https://opensearch.org/docs/2.11/api-reference/cluster-api/cluster-awareness/
         @Parameter(names = {"--min-replicas"}, description = ("Optional.  The minimum number of replicas configured for migrated indices on the target."
@@ -122,34 +95,23 @@ public class RunRfsWorker {
         final Path s3LocalDirPath = Paths.get(arguments.s3LocalDirPath);
         final String s3RepoUri = arguments.s3RepoUri;
         final String s3Region = arguments.s3Region;
-        final Path luceneDirPath = Paths.get(arguments.luceneDirPath);
-        final String sourceHost = arguments.sourceHost;
-        final String sourceUser = arguments.sourceUser;
-        final String sourcePass = arguments.sourcePass;
         final String targetHost = arguments.targetHost;
         final String targetUser = arguments.targetUser;
         final String targetPass = arguments.targetPass;
         final List<String> indexTemplateAllowlist = arguments.indexTemplateAllowlist;
         final List<String> componentTemplateAllowlist = arguments.componentTemplateAllowlist;
-        final long maxShardSizeBytes = arguments.maxShardSizeBytes;
         final int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
         final Level logLevel = arguments.logLevel;
 
         Logging.setLevel(logLevel);
 
-        final ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
         final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
         TryHandlePhaseFailure.executeWithTryCatch(() -> {
             logger.info("Running RfsWorker");
             GlobalState globalState = GlobalState.getInstance();
-            OpenSearchClient sourceClient = new OpenSearchClient(sourceConnection);
             OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
             final CmsClient cmsClient = new OpenSearchCmsClient(targetClient);
-
-            final SnapshotCreator snapshotCreator = new S3SnapshotCreator(snapshotName, sourceClient, s3RepoUri, s3Region);
-            final SnapshotRunner snapshotWorker = new SnapshotRunner(globalState, cmsClient, snapshotCreator);
-            snapshotWorker.run();
 
             final SourceRepo sourceRepo = S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
             final SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
@@ -163,14 +125,6 @@ public class RunRfsWorker {
             final IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
             final IndexRunner indexWorker = new IndexRunner(globalState, cmsClient, snapshotName, indexMetadataFactory, indexCreator, transformer);
             indexWorker.run();
-
-            final ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
-            final DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
-            final SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
-            final LuceneDocumentsReader reader = new LuceneDocumentsReader(luceneDirPath);
-            final DocumentReindexer reindexer = new DocumentReindexer(targetClient);
-            DocumentsRunner documentsWorker = new DocumentsRunner(globalState, cmsClient, snapshotName, maxShardSizeBytes, indexMetadataFactory, shardMetadataFactory, unpackerFactory, reader, reindexer);
-            documentsWorker.run();
         });
     }
 }

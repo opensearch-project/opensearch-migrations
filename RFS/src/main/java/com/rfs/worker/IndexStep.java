@@ -3,6 +3,7 @@ package com.rfs.worker;
 import java.time.Instant;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -262,7 +263,10 @@ public class IndexStep {
             logger.info("Pulling a list of indices to migrate from the CMS...");
             workItems = members.cmsClient.getAvailableIndexWorkItems(MAX_WORK_ITEMS);
             logger.info("Pulled " + workItems.size() + " indices to migrate:");
-            logger.info(workItems.toString());
+            List<String> representationStrings = workItems.stream()
+                .map(CmsEntry.IndexWorkItem::toRepresentationString)
+                .collect(Collectors.toList());
+            logger.info(representationStrings);
         }
 
         @Override

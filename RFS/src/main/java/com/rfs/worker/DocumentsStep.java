@@ -370,7 +370,7 @@ public class DocumentsStep {
                 logger.info("Migrating docs: Index " + workItem.indexName + ", Shard " + workItem.shardId);
                 shardMetadata = members.shardMetadataFactory.fromRepo(members.snapshotName, workItem.indexName, workItem.shardId);
 
-                logger.info("Shard size: " + shardMetadata.getTotalSizeBytes());
+                logger.info("Shard size: " + shardMetadata.getTotalSizeBytes() + " bytes");
                 if (shardMetadata.getTotalSizeBytes() > members.maxShardSizeBytes) {
                     throw new ShardTooLarge(shardMetadata.getTotalSizeBytes(), members.maxShardSizeBytes);
                 }
