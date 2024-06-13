@@ -2,8 +2,6 @@ package com.rfs.common;
 
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.Files;
-import java.nio.file.Path;
 
 /**
  * Taken from Elasticsearch 6.8, combining the SlicedInputStream and PartSliceStream classes with our special sauce
@@ -12,7 +10,7 @@ import java.nio.file.Path;
  */
 
 public class PartSliceStream extends InputStream {
-    private final SourceRepo repo;
+    private final SourceRepoAccessor repoAccessor;
     private final ShardMetadata.FileInfo fileMetadata;
     private final String indexId;
     private final int shardId;
@@ -20,16 +18,15 @@ public class PartSliceStream extends InputStream {
     private InputStream currentStream;
     private boolean initialized = false;
 
-    public PartSliceStream(SourceRepo repo, ShardMetadata.FileInfo fileMetadata, String indexId, int shardId) {
-        this.repo = repo;
+    public PartSliceStream(SourceRepoAccessor repoAccessor, ShardMetadata.FileInfo fileMetadata, String indexId, int shardId) {
+        this.repoAccessor = repoAccessor;
         this.fileMetadata = fileMetadata;
         this.indexId = indexId;
         this.shardId = shardId;
     }
 
-    protected InputStream openSlice(long slice) throws IOException {
-        Path filePath = repo.getBlobFilePath(indexId, shardId, fileMetadata.partName(slice));
-        return Files.newInputStream(filePath);
+    protected InputStream openSlice(long slice) {
+        return repoAccessor.getBlobFile(indexId, shardId, fileMetadata.partName(slice));
     }
 
     private InputStream nextStream() throws IOException {

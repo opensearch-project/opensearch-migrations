@@ -27,9 +27,10 @@ public class DocumentsStep {
         protected final GlobalState globalState;
         protected final CmsClient cmsClient;
         protected final String snapshotName;
+        protected final long maxShardSizeBytes;
         protected final IndexMetadata.Factory metadataFactory;
         protected final ShardMetadata.Factory shardMetadataFactory;
-        protected final SnapshotShardUnpacker unpacker;
+        protected final SnapshotShardUnpacker.Factory unpackerFactory;
         protected final LuceneDocumentsReader reader;
         protected final DocumentReindexer reindexer;
         protected Optional<CmsEntry.Documents> cmsEntry = Optional.empty();
@@ -364,20 +365,28 @@ public class DocumentsStep {
             ));
             logger.info("Work item set");
 
+            ShardMetadata.Data shardMetadata = null;
             try {
                 logger.info("Migrating docs: Index " + workItem.indexName + ", Shard " + workItem.shardId);
-                ShardMetadata.Data shardMetadata = members.shardMetadataFactory.fromRepo(members.snapshotName, workItem.indexName, workItem.shardId);
-                members.unpacker.unpack(shardMetadata);
-                
-                Flux<Document> documents = members.reader.readDocuments(shardMetadata.getIndexName(), shardMetadata.getShardId());
+                shardMetadata = members.shardMetadataFactory.fromRepo(members.snapshotName, workItem.indexName, workItem.shardId);
 
-                final int finalShardId = shardMetadata.getShardId(); // Define in local context for the lambda
-                members.reindexer.reindex(shardMetadata.getIndexName(), documents)
-                    .doOnError(error -> logger.error("Error during reindexing: " + error))
-                    .doOnSuccess(done -> logger.info("Reindexing completed for Index " + shardMetadata.getIndexName() + ", Shard " + finalShardId))
-                    // Wait for the reindexing to complete before proceeding
-                    .block();
-                logger.info("Docs migrated");
+                logger.info("Shard size: " + shardMetadata.getTotalSizeBytes());
+                if (shardMetadata.getTotalSizeBytes() > members.maxShardSizeBytes) {
+                    throw new ShardTooLarge(shardMetadata.getTotalSizeBytes(), members.maxShardSizeBytes);
+                }
+
+                try (SnapshotShardUnpacker unpacker = members.unpackerFactory.create(shardMetadata)) {
+                    unpacker.unpack();
+
+                    Flux<Document> documents = members.reader.readDocuments(shardMetadata.getIndexName(), shardMetadata.getShardId());
+                    final ShardMetadata.Data finalShardMetadata = shardMetadata; // Define in local context for the lambda
+                    members.reindexer.reindex(shardMetadata.getIndexName(), documents)
+                        .doOnError(error -> logger.error("Error during reindexing: " + error))
+                        .doOnSuccess(done -> logger.info("Reindexing completed for Index " + finalShardMetadata.getIndexName() + ", Shard " + finalShardMetadata.getShardId()))
+                        // Wait for the reindexing to complete before proceeding
+                        .block();
+                    logger.info("Docs migrated");
+                }
 
                 logger.info("Updating the Documents Work Item to indicate it has been completed...");           
                 CmsEntry.DocumentsWorkItem updatedEntry = new CmsEntry.DocumentsWorkItem(
@@ -386,7 +395,7 @@ public class DocumentsStep {
                     CmsEntry.DocumentsWorkItemStatus.COMPLETED,
                     workItem.leaseExpiry,
                     workItem.numAttempts
-                );
+                );                
                 
                 members.cmsWorkEntry = Optional.of(members.cmsClient.updateDocumentsWorkItemForceful(updatedEntry));
                 logger.info("Documents Work Item updated");
@@ -503,6 +512,12 @@ public class DocumentsStep {
         @Override
         public WorkerStep nextStep() {
             throw e;
+        }
+    }
+
+    public static class ShardTooLarge extends RfsException {
+        public ShardTooLarge(long shardSizeBytes, long maxShardSize) {
+            super("The shard size of " + shardSizeBytes + " bytes exceeds the maximum shard size of " + maxShardSize + " bytes");
         }
     }
 

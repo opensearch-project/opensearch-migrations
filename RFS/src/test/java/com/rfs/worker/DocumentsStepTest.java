@@ -45,19 +45,25 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 public class DocumentsStepTest {
     private SharedMembers testMembers;
+    private SnapshotShardUnpacker unpacker;
 
     @BeforeEach
     void setUp() {
         GlobalState globalState = Mockito.mock(GlobalState.class);
         CmsClient cmsClient = Mockito.mock(CmsClient.class);
         String snapshotName = "test";
+        long maxShardSizeBytes = 50 * 1024 * 1024 * 1024L;
 
         IndexMetadata.Factory metadataFactory = Mockito.mock(IndexMetadata.Factory.class);
         ShardMetadata.Factory shardMetadataFactory = Mockito.mock(ShardMetadata.Factory.class);
-        SnapshotShardUnpacker unpacker = Mockito.mock(SnapshotShardUnpacker.class);
+
+        unpacker = Mockito.mock(SnapshotShardUnpacker.class);
+        SnapshotShardUnpacker.Factory unpackerFactory = Mockito.mock(SnapshotShardUnpacker.Factory.class);
+        lenient().when(unpackerFactory.create(any())).thenReturn(unpacker);
+
         LuceneDocumentsReader reader = Mockito.mock(LuceneDocumentsReader.class);
         DocumentReindexer reindexer = Mockito.mock(DocumentReindexer.class);
-        testMembers = new SharedMembers(globalState, cmsClient, snapshotName, metadataFactory, shardMetadataFactory, unpacker, reader, reindexer);
+        testMembers = new SharedMembers(globalState, cmsClient, snapshotName, maxShardSizeBytes, metadataFactory, shardMetadataFactory, unpackerFactory, reader, reindexer);
     }
 
     @Test
@@ -524,6 +530,8 @@ public class DocumentsStepTest {
 
         // Check the results
         Mockito.verify(testMembers.reindexer, times(1)).reindex(workItem.indexName, documents);
+        Mockito.verify(testMembers.unpackerFactory, times(1)).create(shardMetadata);
+        Mockito.verify(unpacker, times(1)).close();
         Mockito.verify(testMembers.cmsClient, times(1)).updateDocumentsWorkItemForceful(updatedItem);
         assertEquals(DocumentsStep.GetDocumentsToMigrate.class, nextStep.getClass());
     }
@@ -557,7 +565,37 @@ public class DocumentsStepTest {
 
         // Check the results
         Mockito.verify(testMembers.reindexer, times(1)).reindex(workItem.indexName, documents);
+        Mockito.verify(testMembers.unpackerFactory, times(1)).create(shardMetadata);
+        Mockito.verify(unpacker, times(1)).close();
         Mockito.verify(testMembers.cmsClient, times(1)).updateDocumentsWorkItem(updatedItem, workItem);
+        assertEquals(DocumentsStep.GetDocumentsToMigrate.class, nextStep.getClass());
+    }
+
+    @Test
+    void MigrateDocuments_largeShard_AsExpected() {
+        // Set up the test
+        CmsEntry.DocumentsWorkItem workItem = new CmsEntry.DocumentsWorkItem(
+            "index1", 0, CmsEntry.DocumentsWorkItemStatus.NOT_STARTED, "42", 1
+        );
+        testMembers.cmsWorkEntry = Optional.of(workItem);
+
+        CmsEntry.DocumentsWorkItem updatedItem = new CmsEntry.DocumentsWorkItem(
+            "index1", 0, CmsEntry.DocumentsWorkItemStatus.NOT_STARTED, "42", 2
+        );
+
+        ShardMetadata.Data shardMetadata = Mockito.mock(ShardMetadata.Data.class);
+        Mockito.when(shardMetadata.getTotalSizeBytes()).thenReturn(testMembers.maxShardSizeBytes + 1);
+        Mockito.when(testMembers.shardMetadataFactory.fromRepo(testMembers.snapshotName, workItem.indexName, workItem.shardId)).thenReturn(shardMetadata);
+
+        // Run the test
+        DocumentsStep.MigrateDocuments testStep = new DocumentsStep.MigrateDocuments(testMembers);
+        testStep.run();
+        WorkerStep nextStep = testStep.nextStep();
+
+        // Check the results
+        Mockito.verify(testMembers.cmsClient, times(1)).updateDocumentsWorkItem(updatedItem, workItem);
+        Mockito.verify(testMembers.unpackerFactory, times(0)).create(shardMetadata);
+        Mockito.verify(unpacker, times(0)).close();
         assertEquals(DocumentsStep.GetDocumentsToMigrate.class, nextStep.getClass());
     }
 

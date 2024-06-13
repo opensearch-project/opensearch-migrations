@@ -77,7 +77,7 @@ public class ShardMetadata {
         public long getStartTime();    
         public long getTime();    
         public int getNumberOfFiles();    
-        public long getTotalSize();
+        public long getTotalSizeBytes();
         public List<FileInfo> getFiles();
     }
 
