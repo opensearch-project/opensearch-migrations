@@ -3,14 +3,13 @@ package com.rfs.cms;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NonNull;
+import lombok.ToString;
 
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 
 public interface IWorkCoordinator extends AutoCloseable {
-    void setup() throws IOException;
-
     /**
      * This represents when the lease wasn't acquired because another process already owned the
      * lease or the workItem was already marked as completed.
@@ -21,11 +20,15 @@ public interface IWorkCoordinator extends AutoCloseable {
 
     @Getter
     @AllArgsConstructor
+    @ToString
     class WorkItemAndDuration {
         public final String workItemId;
         public final Instant leaseExpirationTime;
     }
-    WorkItemAndDuration acquireNextWorkItem() throws IOException;
+
+    void setup() throws IOException;
+
+    WorkItemAndDuration acquireNextWorkItem(Duration leaseDuration) throws IOException;
 
     /**
      * @param workItemId - the name of the document/resource to create.
@@ -47,5 +50,5 @@ public interface IWorkCoordinator extends AutoCloseable {
     @NonNull WorkItemAndDuration createOrUpdateLeaseForWorkItem(String workItemId, Duration leaseDuration)
             throws IOException, LeaseNotAcquiredException;
 
-    void completeWorkItem(String workItemId);
+    void completeWorkItem(String workItemId) throws IOException;
 }

@@ -1,5 +1,7 @@
 package com.rfs.cms;
 
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpHead;
@@ -20,6 +22,7 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.stream.Stream;
 
+@Slf4j
 public class ApacheHttpClient implements AbstractedHttpClient {
     private final CloseableHttpClient client = HttpClients.createDefault();
     private final URI baseUri;
@@ -31,19 +34,19 @@ public class ApacheHttpClient implements AbstractedHttpClient {
     private static HttpUriRequestBase makeRequestBase(URI baseUri, String method, String path) {
         switch (method.toUpperCase()) {
             case "GET":
-                return new HttpGet(baseUri + "/" + OpenSearchWorkCoordinator.INDEX_NAME + path);
+                return new HttpGet(baseUri + "/" + path);
             case OpenSearchWorkCoordinator.POST_METHOD:
-                return new HttpPost(baseUri + "/" + OpenSearchWorkCoordinator.INDEX_NAME + path);
+                return new HttpPost(baseUri + "/" + path);
             case OpenSearchWorkCoordinator.PUT_METHOD:
-                return new HttpPut(baseUri + "/" + OpenSearchWorkCoordinator.INDEX_NAME + path);
+                return new HttpPut(baseUri + "/" + path);
             case "PATCH":
-                return new HttpPatch(baseUri + "/" + OpenSearchWorkCoordinator.INDEX_NAME + path);
+                return new HttpPatch(baseUri + "/" + path);
             case "HEAD":
-                return new HttpHead(baseUri + "/" + OpenSearchWorkCoordinator.INDEX_NAME + path);
+                return new HttpHead(baseUri + "/" + path);
             case "OPTIONS":
-                return new HttpOptions(baseUri + "/" + OpenSearchWorkCoordinator.INDEX_NAME + path);
+                return new HttpOptions(baseUri + "/" + path);
             case "DELETE":
-                return new HttpDelete(baseUri + "/" + OpenSearchWorkCoordinator.INDEX_NAME + path);
+                return new HttpDelete(baseUri + "/" + path);
             default:
                 throw new IllegalArgumentException("Cannot map method to an Apache Http Client request: " + method);
         }
@@ -53,13 +56,13 @@ public class ApacheHttpClient implements AbstractedHttpClient {
     public AbstractHttpResponse makeRequest(String method, String path,
                                             Map<String, String> headers, String payload) throws IOException {
         var request = makeRequestBase(baseUri, method, path);
-        request.setHeaders(request.getHeaders());
-        request.setEntity(new StringEntity(payload));
+        headers.entrySet().forEach(kvp->request.setHeader(kvp.getKey(), kvp.getValue()));
+        if (payload != null) {
+            request.setEntity(new StringEntity(payload));
+        }
         return client.execute(request, fr -> new AbstractHttpResponse() {
-            @Override
-            public InputStream getPayloadStream() throws IOException {
-                return fr.getEntity().getContent();
-            }
+            @Getter
+            byte[] payloadBytes = fr.getEntity().getContent().readAllBytes();
 
             @Override
             public String getStatusText() {

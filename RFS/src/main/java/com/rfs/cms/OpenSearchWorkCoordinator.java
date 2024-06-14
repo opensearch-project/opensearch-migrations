@@ -6,15 +6,15 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Arrays;
-import java.util.function.BiFunction;
 import java.util.function.Predicate;
 
 @Slf4j
 public class OpenSearchWorkCoordinator implements IWorkCoordinator {
-    private static final String INDEX_NAME = ".migrations_working_state";
+    public static final String INDEX_NAME = ".migrations_working_state";
 
     public static final String SCRIPT_VERSION_TEMPLATE = "{SCRIPT_VERSION}";
     public static final String WORKER_ID_TEMPLATE = "{WORKER_ID}";
@@ -27,16 +27,27 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String RESULT_OPENSSEARCH_KEYWORD = "result";
     public static final String GET_METHOD = "GET";
     public static final String EXPIRATION_FIELD_NAME = "expiration";
+    public static final String UPDATED_COUNT_FIELD_NAME = "updated";
+    public static final String LEASE_HOLDER_ID_FIELD_NAME = "leaseHolderId";
+    public static final String OLD_EXPIRATION_THRESHOLD_TEMPLATE = "OLD_EXPIRATION_THRESHOLD";
 
     private final long tolerableClientServerClockDifference;
     private final AbstractedHttpClient httpClient;
     private final String workerId;
     private final ObjectMapper objectMapper;
+    private final Clock clock;
 
-    public OpenSearchWorkCoordinator(AbstractedHttpClient httpClient, long tolerableClientServerClockDifference, String workerId) {
+    public OpenSearchWorkCoordinator(AbstractedHttpClient httpClient, long tolerableClientServerClockDifference,
+                                     String workerId) {
+        this(httpClient, tolerableClientServerClockDifference, workerId, Clock.systemUTC());
+    }
+
+    public OpenSearchWorkCoordinator(AbstractedHttpClient httpClient, long tolerableClientServerClockDifference,
+                                     String workerId, Clock clock) {
         this.tolerableClientServerClockDifference = tolerableClientServerClockDifference;
         this.httpClient = httpClient;
         this.workerId = workerId;
+        this.clock = clock;
         this.objectMapper = new ObjectMapper();
     }
 
@@ -61,7 +72,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 "      \"completedAt\": {\n" +
                 "        \"type\": \"long\"\n" +
                 "      },\n" +
-                "      \"workerId\": {\n" +
+                "      \"leaseHolderId\": {\n" +
                 "        \"type\": \"keyword\",\n" +
                 "        \"norms\": false\n" +
                 "      },\n" +
@@ -73,7 +84,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 "  }\n" +
                 "}\n";
 
-        var response = httpClient.makeJsonRequest(PUT_METHOD, "/" + INDEX_NAME, null, body);
+        var response = httpClient.makeJsonRequest(PUT_METHOD, INDEX_NAME, null, body);
         if (response.getStatusCode() != 200) {
             throw new IOException("Could not setup " + INDEX_NAME + ".  " +
                     "Got error code " + response.getStatusCode() + " and response: " +
@@ -87,16 +98,16 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             switch (s) {
                 case "noop": return DocumentModificationResult.IGNORED;
                 case "created": return DocumentModificationResult.CREATED;
-                case "updated": return DocumentModificationResult.UPDATED;
+                case UPDATED_COUNT_FIELD_NAME: return DocumentModificationResult.UPDATED;
                 default:
                     throw new IllegalArgumentException("Unknown result " + s);
             }
         }
     }
 
-    DocumentModificationResult createOrUpdateLeaseForDocument(String workItemId, Instant currentTime,
-                                                              int expirationWindowSeconds,
-                                                              Predicate<DocumentModificationResult> returnValueAdapter)
+    DocumentModificationResult createOrUpdateLeaseForDocument(String workItemId,
+                                                              long expirationWindowSeconds,
+                                                              Predicate<DocumentModificationResult> expectedValueTester)
             throws IOException {
         // the notion of 'now' isn't supported with painless scripts
         // https://www.elastic.co/guide/en/elasticsearch/painless/current/painless-datetime.html#_datetime_now
@@ -124,15 +135,15 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");" +
                 "      }" +
                 "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);" +
-                "      if ((params.expirationWindow > 0 && " +                 // don't obtain a lease lock
-                "           ctx._source.completedAt == null) {" +              // already done
-                "        if (ctx._source.leaseHolderId == params.workerId && " +
+                "      if (params.expirationWindow > 0 && " +                 // don't obtain a lease lock
+                "          ctx._source.completedAt == null) {" +              // already done
+                "        if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " == params.workerId && " +
                 "            ctx._source." + EXPIRATION_FIELD_NAME + " > serverTimeSeconds) {" + // count as an update to force the caller to lookup the expiration time, but no need to modify it
                 "          ctx.op = \\\"update\\\";" +
                 "        } else if (ctx._source." + EXPIRATION_FIELD_NAME + " < serverTimeSeconds && " + // is expired
                 "                   ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +      // sanity check
                 "          ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;" +
-                "          ctx._source.leaseHolderId = params.workerId;" +
+                "          ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;" +
                 "          ctx._source.numAttempts += 1;" +
                 "        } else {" +
                 "          ctx.op = \\\"noop\\\";" +
@@ -147,16 +158,16 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         var body = upsertLeaseBodyTemplate
                 .replace(SCRIPT_VERSION_TEMPLATE, "poc")
                 .replace(WORKER_ID_TEMPLATE, workerId)
-                .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(currentTime.toEpochMilli()/1000))
-                .replace(EXPIRATION_WINDOW_TEMPLATE, Integer.toString(expirationWindowSeconds))
+                .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().toEpochMilli()/1000))
+                .replace(EXPIRATION_WINDOW_TEMPLATE, Long.toString(expirationWindowSeconds))
                 .replace(CLOCK_DEVIATION_SECONDS_THRESHOLD_TEMPLATE, Long.toString(tolerableClientServerClockDifference));
 
-        var response = httpClient.makeJsonRequest(POST_METHOD, "/" + INDEX_NAME + "/" + workItemId,
+        var response = httpClient.makeJsonRequest(POST_METHOD,  INDEX_NAME + "/_update/" + workItemId,
                 null, body);
         final var resultStr =
                 objectMapper.readTree(response.getPayloadStream()).get(RESULT_OPENSSEARCH_KEYWORD).textValue();
         var rval = DocumentModificationResult.parse(resultStr);
-        if (!returnValueAdapter.test(rval)) {
+        if (!expectedValueTester.test(rval)) {
             throw Lombok.sneakyThrow(
                     new IllegalStateException("Unexpected response for workItemId: " + workItemId + ".  Response: " +
                             response.toDiagnosticString()));
@@ -164,19 +175,18 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         return rval;
     }
 
-    DocumentModificationResult createOrUpdateLeaseForDocument(String workItemId, Instant currentTime,
-                                                              int expirationWindowSeconds)
+    DocumentModificationResult createOrUpdateLeaseForDocument(String workItemId, long expirationWindowSeconds)
         throws IOException {
-        return createOrUpdateLeaseForDocument(workItemId, currentTime, expirationWindowSeconds, r -> true);
+        return createOrUpdateLeaseForDocument(workItemId, expirationWindowSeconds, r -> true);
     }
 
     public void createUnassignedWorkItem(String workItemId) throws IOException {
-        createOrUpdateLeaseForDocument(workItemId, Instant.now(), 0,
+        createOrUpdateLeaseForDocument(workItemId, 0,
                 r -> r == DocumentModificationResult.CREATED);
     }
 
     Instant getExistingExpiration(String workItemId) throws IOException {
-        var response = httpClient.makeJsonRequest(GET_METHOD, "/" + INDEX_NAME + "/_doc/" + workItemId,
+        var response = httpClient.makeJsonRequest(GET_METHOD, INDEX_NAME + "/_doc/" + workItemId,
                 null, null);
         return Instant.ofEpochMilli(1000 *
                 objectMapper.readTree(response.getPayloadStream()).get(EXPIRATION_FIELD_NAME).longValue());
@@ -187,7 +197,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public WorkItemAndDuration createOrUpdateLeaseForWorkItem(String workItemId, Duration leaseDuration)
             throws IOException, LeaseNotAcquiredException {
         var startTime = Instant.now();
-        var result = createOrUpdateLeaseForDocument(workItemId, Instant.now(), 0);
+        var result = createOrUpdateLeaseForDocument(workItemId, leaseDuration.toSeconds());
         switch (result) {
             case CREATED:
                 return new WorkItemAndDuration(workItemId, startTime.plus(leaseDuration));
@@ -195,12 +205,12 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 return new WorkItemAndDuration(workItemId, getExistingExpiration(workItemId));
             case IGNORED:
                 throw new LeaseNotAcquiredException();
+            default:
+                throw new IllegalStateException("Unknown result: " + result);
         }
     }
 
-    <T> T markWorkItemAsComplete(String workItemId, Instant currentTime,
-                                 BiFunction<AbstractedHttpClient.AbstractHttpResponse, DocumentModificationResult, T> returnValueAdapter)
-            throws IOException {
+    public void completeWorkItem(String workItemId) throws IOException {
         final var markWorkAsCompleteBodyTemplate = "{\n" +
                 "  \"script\": {\n" +
                 "    \"lang\": \"painless\",\n" +
@@ -212,8 +222,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {" +
                 "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx.source.scriptVersion);" +
                 "      } " +
-                "      if (ctx._source.leaseHolderId != params.workerId) {" +
-                "        throw new IllegalArgumentException(\\\"work item was owned by \\\" + ctx._source.leaseHolderId + \\\" not \\\" + params.workerId);" +
+                "      if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " != params.workerId) {" +
+                "        throw new IllegalArgumentException(\\\"work item was owned by \\\" + ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " + \\\" not \\\" + params.workerId);" +
                 "      } else {" +
                 "        ctx._source.completedAt = System.currentTimeMillis() / 1000;" +
                 "     }" +
@@ -224,24 +234,30 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         var body = markWorkAsCompleteBodyTemplate
                 .replace(SCRIPT_VERSION_TEMPLATE, "poc")
                 .replace(WORKER_ID_TEMPLATE, workerId)
-                .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(currentTime.toEpochMilli()/1000));
+                .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().toEpochMilli()/1000));
 
-        var response = httpClient.makeJsonRequest(POST_METHOD, "/" + INDEX_NAME + "/_update/" + workItemId,
+        var response = httpClient.makeJsonRequest(POST_METHOD, INDEX_NAME + "/_update/" + workItemId,
                 null, body);
         final var resultStr = objectMapper.readTree(response.getPayloadStream()).get(RESULT_OPENSSEARCH_KEYWORD).textValue();
-        return returnValueAdapter.apply(response, DocumentModificationResult.parse(resultStr));
+        if (DocumentModificationResult.UPDATED != DocumentModificationResult.parse(resultStr)) {
+            throw new IllegalStateException("Unexpected response for workItemId: " + workItemId + ".  Response: " +
+                response.toDiagnosticString());
+        }
     }
 
-    <T> T makeQueryUpdateDocument(String workerId, Instant currentTime, int expirationWindowSeconds,
-                                  BiFunction<AbstractedHttpClient.AbstractHttpResponse, DocumentModificationResult, T> returnValueAdapter)
-            throws IOException {
+    /**
+     * @param expirationWindowSeconds
+     * @return true if a work item entry was assigned w/ a lease and false otherwise
+     * @throws IOException if the request couldn't be made
+     */
+    boolean assignOneWorkItem(long expirationWindowSeconds) throws IOException {
         final var queryUpdateTemplate = "{\n" +
                 "\"query\": {" +
                 "  \"bool\": {" +
                 "    \"must\": [" +
                 "      {" +
                 "        \"range\": {" +
-                "          \"" + EXPIRATION_FIELD_NAME + "\": { \"lt\": 1718247000 }" +
+                "          \"" + EXPIRATION_FIELD_NAME + "\": { \"lt\": " + OLD_EXPIRATION_THRESHOLD_TEMPLATE + " }" +
                 "        }" +
                 "      }" +
                 "    ]," +
@@ -252,11 +268,13 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 "    ]" +
                 "  }" +
                 "}," +
+                "\"size\": 1,\n" +
                 "\"script\": {" +
                 "  \"params\": { \n" +
                 "    \"clientTimestamp\": " + CLIENT_TIMESTAMP_TEMPLATE + ",\n" +
                 "    \"expirationWindow\": " + EXPIRATION_WINDOW_TEMPLATE + ",\n" +
-                "    \"workerId\": \"" + WORKER_ID_TEMPLATE + "\"\n" +
+                "    \"workerId\": \"" + WORKER_ID_TEMPLATE + "\",\n" +
+                "    \"counter\": 0\n" +
                 "  },\n" +
                 "  \"source\": \"" +
                 "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {" +
@@ -270,36 +288,60 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 "      if (ctx._source." + EXPIRATION_FIELD_NAME + " < serverTimeSeconds && " + // is expired
                 "          ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +      // sanity check
                 "        ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;" +
-                "        ctx._source.leaseHolderId = params.workerId;" +
+                "        ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;" +
                 "        ctx._source.numAttempts += 1;" +
                 "      }" +
                 "\" " +  // end of source script contents
                 "}" +    // end of script block
                 "}";
 
+        final var timestampEpochSeconds = clock.instant().toEpochMilli()/1000;
         final var body = queryUpdateTemplate
                 .replace(SCRIPT_VERSION_TEMPLATE, "poc")
                 .replace(WORKER_ID_TEMPLATE, workerId)
-                .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(currentTime.toEpochMilli()/1000))
-                .replace(EXPIRATION_WINDOW_TEMPLATE, Integer.toString(expirationWindowSeconds))
+                .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(timestampEpochSeconds))
+                .replace(OLD_EXPIRATION_THRESHOLD_TEMPLATE, Long.toString(timestampEpochSeconds+expirationWindowSeconds))
+                .replace(EXPIRATION_WINDOW_TEMPLATE, Long.toString(expirationWindowSeconds))
                 .replace(CLOCK_DEVIATION_SECONDS_THRESHOLD_TEMPLATE, Long.toString(tolerableClientServerClockDifference));
 
-        var response = httpClient.makeJsonRequest(POST_METHOD, "/" + INDEX_NAME + "/_update_by_query?refresh=true",
+        var response = httpClient.makeJsonRequest(POST_METHOD,  INDEX_NAME + "/_update_by_query?refresh=true&max_docs=1",
                 null, body);
-        final var resultStr = objectMapper.readTree(response.getPayloadStream()).get(RESULT_OPENSSEARCH_KEYWORD).textValue();
-        return returnValueAdapter.apply(response, DocumentModificationResult.parse(resultStr));
+        final var numUpdated = objectMapper.readTree(response.getPayloadStream()).get(UPDATED_COUNT_FIELD_NAME).longValue();
+        assert numUpdated <= 1;
+        return numUpdated > 0;
     }
 
-    private String makeQueryAssignedWorkDocument(String workerId) throws IOException {
+    private WorkItemAndDuration getAssignedWorkItem() throws IOException {
         final var queryWorkersAssignedItemsTemplate = "{\n" +
                 "  \"query\": {\n" +
-                "    \"term\": { \"leaseHolderId\": \"" + WORKER_ID_TEMPLATE + "\"}\n" +
+                "    \"term\": { \"" + LEASE_HOLDER_ID_FIELD_NAME + "\": \"" + WORKER_ID_TEMPLATE + "\"}\n" +
                 "  }\n" +
                 "}";
         final var body = queryWorkersAssignedItemsTemplate.replace(WORKER_ID_TEMPLATE, workerId);
-        var response = httpClient.makeJsonRequest(POST_METHOD, "/" + INDEX_NAME + "/_search",
+        var response = httpClient.makeJsonRequest(POST_METHOD,  INDEX_NAME + "/_search",
                 null, body);
-        final var resultStr = objectMapper.readTree(response.getPayloadStream()).get(RESULT_OPENSSEARCH_KEYWORD).textValue();
-        return returnValueAdapter.apply(response, DocumentModificationResult.CREATED.parse(resultStr));
+
+        final var resultHitsUpper = objectMapper.readTree(response.getPayloadStream()).path("hits");
+        if (resultHitsUpper.isMissingNode()) {
+            log.warn("Couldn't find the top level 'hits' field, returning null");
+            return null;
+        }
+        if (resultHitsUpper.path("total").path("value").longValue() != 1) {
+            log.warn("The query didn't return one item for the worker node, so returning null");
+            return null;
+        }
+        var resultHitInner = resultHitsUpper.path("hits").path(0);
+        var expiration = resultHitInner.path("_source").path(EXPIRATION_FIELD_NAME).longValue();
+        if (expiration == 0) {
+            log.warn("Expiration wasn't found or wasn't set to > 0.  Returning null.");
+            return null;
+        }
+        return new WorkItemAndDuration(resultHitInner.get("_id").asText(), Instant.ofEpochMilli(1000*expiration));
+    }
+
+    public WorkItemAndDuration acquireNextWorkItem(Duration leaseDuration) throws IOException {
+        httpClient.makeJsonRequest(GET_METHOD, INDEX_NAME + "/_refresh",null,null);
+        final var didAcquire = assignOneWorkItem(leaseDuration.toSeconds());
+        return didAcquire ? getAssignedWorkItem() : null;
     }
 }
