@@ -60,22 +60,6 @@ export class FetchMigrationStack extends Stack {
             taskRole: ecsTaskRole
         });
 
-        new StringParameter(this, 'SSMParameterFetchMigrationTaskDefArn', {
-            description: 'OpenSearch Migration Parameter for Fetch Migration task definition ARN',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskDefArn`,
-            stringValue: fetchMigrationFargateTask.taskDefinitionArn
-        });
-        new StringParameter(this, 'SSMParameterFetchMigrationTaskRoleArn', {
-            description: 'OpenSearch Migration Parameter for Fetch Migration task role ARN',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskRoleArn`,
-            stringValue: fetchMigrationFargateTask.taskRole.roleArn
-        });
-        new StringParameter(this, 'SSMParameterFetchMigrationTaskExecRoleArn', {
-            description: 'OpenSearch Migration Parameter for Fetch Migration task exec role ARN',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/fetchMigrationTaskExecRoleArn`,
-            stringValue: fetchMigrationFargateTask.obtainExecutionRole().roleArn
-        });
-
         // Create Fetch Migration Container
         const fetchMigrationContainer = fetchMigrationFargateTask.addContainer("fetchMigrationContainer", {
             image: ContainerImage.fromAsset(join(__dirname, "../../../..", "FetchMigration")),
