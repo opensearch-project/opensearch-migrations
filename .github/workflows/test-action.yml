@@ -1,15 +1,9 @@
-name: CDK Tests
+name: Test Action
 
-on:
-  push:
-    paths:
-      - 'deployment/cdk/**'
-  pull_request:
-    paths:
-      - 'deployment/cdk/**'
+on: [push, pull_request]
 
 jobs:
-  cdk-tests:
+  test-action:
     strategy:
       matrix:
         node-version: ['18.x']
@@ -28,6 +22,4 @@ jobs:
       - name: Install NPM dependencies
         run: npm ci
       - name: Run CDK Jest Tests
-        run: npm test
-      - name: Run CDK Jest Tests Number 2
         run: npm test
