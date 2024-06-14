@@ -1,12 +1,6 @@
 name: CDK Tests
 
-on:
-  push:
-    paths:
-      - 'deployment/cdk/**'
-  pull_request:
-    paths:
-      - 'deployment/cdk/**'
+on: [push, pull_request]
 
 jobs:
   cdk-tests:
