@@ -17,33 +17,32 @@ For example:
 
 ```yaml
 source_cluster:
-	endpoint: "https://capture-proxy-es:9200"
-	allow_insecure: true
+    endpoint: "https://capture-proxy-es:9200"
+    allow_insecure: true
+    no_auth:
 target_cluster:
-	endpoint: "https://opensearchtarget:9200"
-	allow_insecure: true
-	authorization:
-		type: "basic_auth"
-		details:
-			username: "admin"
-			password: "myStrongPassword123!"
+    endpoint: "https://opensearchtarget:9200"
+    allow_insecure: true
+    basic_auth:
+        username: "admin"
+        password: "myStrongPassword123!"
 metrics_source:
-	type: "prometheus"
-	endpoint: "http://prometheus:9090"
+    prometheus:
+        endpoint: "http://prometheus:9090"
 backfill:
-	opensearch_ingestion:
-		pipeline_role_arn: "arn:aws:iam::123456789012:role/OSMigrations-aws-integ-us--pipelineRole"
-		vpc_subnet_ids:
-			- "subnet-123456789"
-		security_group_ids:
-			- "sg-123456789"
-		aws_region: "us-west-2"
-		pipeline_name: "test-cli-pipeline"
-		index_regex_selection:
-			- "test-index*"
-		log_group_name: "/aws/vendedlogs/osi-aws-integ-default"
-		tags:
-			- "migration_deployment=1.0.6"
+    opensearch_ingestion:
+        pipeline_role_arn: "arn:aws:iam::123456789012:role/OSMigrations-aws-integ-us--pipelineRole"
+        vpc_subnet_ids:
+            - "subnet-123456789"
+        security_group_ids:
+            - "sg-123456789"
+        aws_region: "us-west-2"
+        pipeline_name: "test-cli-pipeline"
+        index_regex_selection:
+            - "test-index*"
+        log_group_name: "/aws/vendedlogs/osi-aws-integ-default"
+        tags:
+            - "migration_deployment=1.0.6"
 ```
 
 ### Services.yaml spec
@@ -52,19 +51,26 @@ backfill:
 
 Source and target clusters have the following options:
 - `endpoint`: required, the endpoint to reach the cluster.
-- `authorization`: required, the auth method to use, if no auth the no_auth type must be specified.
-	- `type`: required, the only currently implemented options are "no_auth" and "basic_auth", but "sigv4" should be available soon
-	- `details`: for basic auth, the details should be a `username` and `password`
+
+Exactly one of the following blocks must be present:
+- `no_auth`: may be empty, no authorization to use.
+- `basic_auth`:
+    - `username`
+    - `password`
+- `sigv4`: may be empty, not yet implemented
 
 Having a `source_cluster` and `target_cluster` is required.
 
 #### Metrics Source
 
 Currently, the two supported metrics source types are `prometheus` and `cloudwatch`.
+Exactly one of the following blocks must be present:
+- `prometheus`:
+    - `endpoint`: required
 
-- `type`: required, `prometheus` or `cloudwatch`
-- `endpoint`: required for `prometheus` (ignored for `cloudwatch`)
-- `aws_region`: optional for `cloudwatch` (ignored for `prometheus`). if not provided, the usual rules are followed for determining aws region (`AWS_DEFAULT_REGION`, `~/.aws/config`)
+- `cloudwatch`: may be empty if region is not specified
+    - `aws_region`:  optional. if not provided, the usual rules are followed for determining aws region. (`AWS_DEFAULT_REGION`, `~/.aws/config`, etc.)
+
 
 #### Backfill
 

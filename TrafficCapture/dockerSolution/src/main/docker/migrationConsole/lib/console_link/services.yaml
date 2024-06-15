@@ -1,21 +1,17 @@
 source_cluster:
   endpoint: "https://capture-proxy-es:9200"
   allow_insecure: true
-  authorization:
-    type: "basic_auth"
-    details:
+  basic_auth:
       username: "admin"
       password: "admin"
 target_cluster:
   endpoint: "https://opensearchtarget:9200"
   allow_insecure: true
-  authorization:
-    type: "basic_auth"
-    details:
+  basic_auth:
       username: "admin"
       password: "myStrongPassword123!"
 metrics_source:
-  type: "prometheus"
-  endpoint: "http://prometheus:9090"
+  prometheus:
+    endpoint: "http://prometheus:9090"
 replayer:
-  deployment_type: "docker"
+  docker:
