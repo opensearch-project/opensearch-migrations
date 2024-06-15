@@ -1,19 +1,23 @@
+from typing import Dict, Optional
 from console_link.models.cluster import Cluster, AuthMethod
 
 
-def create_valid_cluster(endpoint="https://opensearchtarget:9200",
-                         allow_insecure=True,
-                         auth_type=AuthMethod.BASIC_AUTH.name.lower(),
-                         details=None):
+def create_valid_cluster(endpoint: str = "https://opensearchtarget:9200",
+                         allow_insecure: bool = True,
+                         auth_type: AuthMethod = AuthMethod.BASIC_AUTH,
+                         details: Optional[Dict] = None):
     if details is None:
         details = {"username": "admin", "password": "myStrongPassword123!"}
+
+    auth_block = {
+        AuthMethod.NO_AUTH: {},
+        AuthMethod.BASIC_AUTH: details,
+        AuthMethod.SIGV4: {}
+    }
 
     custom_cluster_config = {
         "endpoint": endpoint,
         "allow_insecure": allow_insecure,
-        "authorization": {
-            "type": auth_type,
-            "details": details,
-        },
+        auth_type.name.lower(): auth_block[auth_type]
     }
     return Cluster(custom_cluster_config)

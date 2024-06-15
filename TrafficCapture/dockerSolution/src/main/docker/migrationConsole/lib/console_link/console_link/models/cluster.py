@@ -4,6 +4,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 from cerberus import Validator
 import logging
+from console_link.models.schema_tools import contains_one_of
 
 requests.packages.urllib3.disable_warnings()  # ignore: type
 
@@ -12,38 +13,47 @@ logger = logging.getLogger(__name__)
 AuthMethod = Enum("AuthMethod", ["NO_AUTH", "BASIC_AUTH", "SIGV4"])
 HttpMethod = Enum("HttpMethod", ["GET", "POST", "PUT", "DELETE"])
 
-SCHEMA = {
-    "endpoint": {"type": "string", "required": True},
-    "allow_insecure": {"type": "boolean", "required": False},
-    "authorization": {
-        "type": "dict",
-        "required": True,
-        "schema": {
-            "type": {
-                "type": "string",
-                "required": True,
-                "allowed": [e.name.lower() for e in AuthMethod]
-            },
-            "details": {
-                "type": "dict",
-                "required": False,
-                "schema": {
-                    "username": {
-                        "type": "string",
-                        "required": False
-                    },
-                    "password": {
-                        "type": "string",
-                        "required": False
-                    },
-                    "aws_secret_arn": {
-                        "type": "string",
-                        "required": False
-                    },
-                }
-            }
+
+NO_AUTH_SCHEMA = {
+    "nullable": True,
+}
+
+BASIC_AUTH_SCHEMA = {
+    "type": "dict",
+    "schema": {
+        "username": {
+            "type": "string",
+            "required": False,
+        },
+        "password": {
+            "type": "string",
+            "required": False,
+            "excludes": ["aws_secret_arn"]
+        },
+        "aws_secret_arn": {
+            "type": "string",
+            "required": False,
+            "excludes": ["password"]
         }
     },
+}
+
+SIGV4_SCHEMA = {
+    "nullable": True,
+}
+
+SCHEMA = {
+    "cluster": {
+        "type": "dict",
+        "schema": {
+            "endpoint": {"type": "string", "required": True},
+            "allow_insecure": {"type": "boolean", "required": False},
+            "no_auth": NO_AUTH_SCHEMA,
+            "basic_auth": BASIC_AUTH_SCHEMA,
+            "sigv4": SIGV4_SCHEMA
+        },
+        "check_with": contains_one_of({auth.name.lower() for auth in AuthMethod})
+    }
 }
 
 
@@ -60,15 +70,19 @@ class Cluster:
     def __init__(self, config: Dict) -> None:
         logger.info(f"Initializing cluster with config: {config}")
         v = Validator(SCHEMA)
-        if not v.validate(config):
+        if not v.validate({'cluster': config}):
             raise ValueError("Invalid config file for cluster", v.errors)
 
         self.endpoint = config["endpoint"]
         if self.endpoint.startswith("https"):
             self.allow_insecure = config.get("allow_insecure", False)
-        self.auth_type = AuthMethod[config["authorization"]["type"].upper()]
-        self.auth_details = config["authorization"].get("details", None)
-        self.aws_secret_arn = None if self.auth_details is None else self.auth_details.get("aws_secret_arn", None)
+        if 'no_auth' in config:
+            self.auth_type = AuthMethod.NO_AUTH
+        elif 'basic_auth' in config:
+            self.auth_type = AuthMethod.BASIC_AUTH
+            self.auth_details = config["basic_auth"]
+        elif 'sigv4' in config:
+            self.auth_type = AuthMethod.SIGV4
 
     def call_api(self, path, method: HttpMethod = HttpMethod.GET) -> requests.Response:
         """
@@ -80,7 +94,7 @@ class Cluster:
                 self.auth_details.get("username", None),
                 self.auth_details.get("password", None)
             )
-        elif self.auth_type is None:
+        elif self.auth_type is AuthMethod.NO_AUTH:
             auth = None
         else:
             raise NotImplementedError(f"Auth type {self.auth_type} not implemented")

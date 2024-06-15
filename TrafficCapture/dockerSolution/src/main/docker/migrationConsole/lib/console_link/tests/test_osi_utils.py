@@ -203,7 +203,7 @@ def test_valid_env_creates_pipeline(osi_client_stubber):
         ]
     }
     mock_cluster = create_valid_cluster(endpoint=SOURCE_ENDPOINT,
-                                        auth_type=AuthMethod.SIGV4.name.lower(),
+                                        auth_type=AuthMethod.SIGV4,
                                         details={"aws_secret_arn": SECRET_ARN})
     expected_osi_create_pipeline_body = {
         "MinUnits": ANY,
