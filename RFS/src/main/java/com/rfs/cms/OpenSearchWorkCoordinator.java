@@ -30,6 +30,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String UPDATED_COUNT_FIELD_NAME = "updated";
     public static final String LEASE_HOLDER_ID_FIELD_NAME = "leaseHolderId";
     public static final String OLD_EXPIRATION_THRESHOLD_TEMPLATE = "OLD_EXPIRATION_THRESHOLD";
+    public static final String VERSION_CONFLICTS_FIELD_NAME = "version_conflicts";
 
     private final long tolerableClientServerClockDifference;
     private final AbstractedHttpClient httpClient;
@@ -245,27 +246,41 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
+    enum UpdateResult {
+        SUCCESSFUL_ACQUISITION,
+        VERSION_CONFLICT,
+        NOTHING_TO_AQUIRE
+    }
+
     /**
      * @param expirationWindowSeconds
      * @return true if a work item entry was assigned w/ a lease and false otherwise
      * @throws IOException if the request couldn't be made
      */
-    boolean assignOneWorkItem(long expirationWindowSeconds) throws IOException {
+    UpdateResult assignOneWorkItem(long expirationWindowSeconds) throws IOException {
+        // the random_score reduces the number of version conflicts from ~1200 for 40 concurrent requests
+        // to acquire 40 units of work to around 800
         final var queryUpdateTemplate = "{\n" +
                 "\"query\": {" +
-                "  \"bool\": {" +
-                "    \"must\": [" +
-                "      {" +
-                "        \"range\": {" +
-                "          \"" + EXPIRATION_FIELD_NAME + "\": { \"lt\": " + OLD_EXPIRATION_THRESHOLD_TEMPLATE + " }" +
-                "        }" +
+                "  \"function_score\": {\n" +
+                "    \"query\": {\n" +
+                "      \"bool\": {" +
+                "        \"must\": [" +
+                "          {" +
+                "            \"range\": {" +
+                "              \"" + EXPIRATION_FIELD_NAME + "\": { \"lt\": " + OLD_EXPIRATION_THRESHOLD_TEMPLATE + " }" +
+                "            }" +
+                "          }" +
+                "        ]," +
+                "        \"must_not\": [" +
+                "          { \"exists\":" +
+                "            { \"field\": \"completedAt\"}" +
+                "          }" +
+                "        ]" +
                 "      }" +
-                "    ]," +
-                "    \"must_not\": [" +
-                "      { \"exists\":" +
-                "        { \"field\": \"completedAt\"}" +
-                "      }" +
-                "    ]" +
+                "    }," +
+                "    \"random_score\": {},\n" +
+                "    \"boost_mode\": \"replace\"\n" + // Try to avoid the workers fighting for the same work items
                 "  }" +
                 "}," +
                 "\"size\": 1,\n" +
@@ -306,9 +321,18 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         var response = httpClient.makeJsonRequest(POST_METHOD,  INDEX_NAME + "/_update_by_query?refresh=true&max_docs=1",
                 null, body);
-        final var numUpdated = objectMapper.readTree(response.getPayloadStream()).get(UPDATED_COUNT_FIELD_NAME).longValue();
+        var resultTree = objectMapper.readTree(response.getPayloadStream());
+        final var numUpdated = resultTree.path(UPDATED_COUNT_FIELD_NAME).longValue();
         assert numUpdated <= 1;
-        return numUpdated > 0;
+        if (numUpdated > 0) {
+            return UpdateResult.SUCCESSFUL_ACQUISITION;
+        } else if (resultTree.path(VERSION_CONFLICTS_FIELD_NAME).longValue() > 0) {
+            return UpdateResult.VERSION_CONFLICT;
+        } else if (resultTree.path("total").longValue() == 0) {
+            return UpdateResult.NOTHING_TO_AQUIRE;
+        } else {
+            throw new IllegalStateException("Unexpected response for update: " + resultTree);
+        }
     }
 
     private WorkItemAndDuration getAssignedWorkItem() throws IOException {
@@ -341,7 +365,18 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
     public WorkItemAndDuration acquireNextWorkItem(Duration leaseDuration) throws IOException {
         httpClient.makeJsonRequest(GET_METHOD, INDEX_NAME + "/_refresh",null,null);
-        final var didAcquire = assignOneWorkItem(leaseDuration.toSeconds());
-        return didAcquire ? getAssignedWorkItem() : null;
+        while (true) {
+            final var obtainResult = assignOneWorkItem(leaseDuration.toSeconds());
+            switch (obtainResult) {
+                case SUCCESSFUL_ACQUISITION:
+                    return getAssignedWorkItem();
+                case NOTHING_TO_AQUIRE:
+                    return null;
+                case VERSION_CONFLICT:
+                    continue;
+                default:
+                    throw new IllegalStateException("unknown result from the assignOneWorkItem: " + obtainResult);
+            }
+        }
     }
 }

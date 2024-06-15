@@ -2,6 +2,8 @@ package com.rfs.cms;
 
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.Lombok;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
@@ -11,7 +13,8 @@ import org.opensearch.testcontainers.OpensearchContainer;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.HashSet;
+import java.util.ArrayList;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Supplier;
 
 /**
@@ -30,7 +33,7 @@ import java.util.function.Supplier;
  * GET call to find out the new expiration value.
  */
 @Slf4j
-public class TransactionalOpenSearchDataStoreTest {
+public class WorkCoordinatorTest {
 
     final static OpensearchContainer<?> container =
             new OpensearchContainer<>("opensearchproject/opensearch:2.11.0");
@@ -117,7 +120,7 @@ public class TransactionalOpenSearchDataStoreTest {
     @Test
     public void testAcquireLeaseForQuery() throws Exception {
         var objMapper = new ObjectMapper();
-        final var NUM_DOCS = 4;
+        final var NUM_DOCS = 40;
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
                 3600, "docCreatorWorker")) {
             for (var i = 0; i < NUM_DOCS; ++i) {
@@ -126,24 +129,48 @@ public class TransactionalOpenSearchDataStoreTest {
             }
         }
 
-        final var seenWorkerItems = new HashSet<String>();
-        for (int i=0; i<NUM_DOCS; ++i) {
+        for (int runs=0; runs<2; ++runs) {
+            final var seenWorkerItems = new ConcurrentHashMap<String, String>();
+            var allThreads = new ArrayList<Thread>();
+            final var expiration = Duration.ofSeconds(5);
+            for (int i = 0; i < NUM_DOCS; ++i) {
+                int finalI = i;
+                int finalRuns = runs;
+                var t = new Thread(() -> getWorkItemAndVerity(finalRuns + "-" + finalI, seenWorkerItems, expiration));
+                allThreads.add(t);
+                t.start();
+            }
+            allThreads.forEach(t -> {
+                try {
+                    t.join();
+                } catch (InterruptedException e) {
+                    throw Lombok.sneakyThrow(e);
+                }
+            });
+            Assertions.assertEquals(NUM_DOCS, seenWorkerItems.size());
+
             try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
-                    3600, "firstPass_"+i)) {
+                    3600, "firstPass_NONE")) {
                 var nextWorkItem = workCoordinator.acquireNextWorkItem(Duration.ofSeconds(2));
                 log.error("Next work item picked=" + nextWorkItem);
-                Assertions.assertNotNull(nextWorkItem);
-                Assertions.assertNotNull(nextWorkItem.workItemId);
-                Assertions.assertTrue(nextWorkItem.leaseExpirationTime.isAfter(Instant.now()));
-                seenWorkerItems.add(nextWorkItem.workItemId);
-                Assertions.assertEquals(i+1, seenWorkerItems.size());
+                Assertions.assertNull(nextWorkItem);
             }
+
+            Thread.sleep(expiration.multipliedBy(2).toMillis());
         }
+    }
+
+    @SneakyThrows
+    private static void getWorkItemAndVerity(String workerSuffix, ConcurrentHashMap<String, String> seenWorkerItems,
+                                             Duration expirationWindow) {
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
-                3600, "firstPass_NONE")) {
-            var nextWorkItem = workCoordinator.acquireNextWorkItem(Duration.ofSeconds(2));
+                3600, "firstPass_"+ workerSuffix)) {
+            var nextWorkItem = workCoordinator.acquireNextWorkItem(expirationWindow);
             log.error("Next work item picked=" + nextWorkItem);
-            Assertions.assertNull(nextWorkItem);
+            Assertions.assertNotNull(nextWorkItem);
+            Assertions.assertNotNull(nextWorkItem.workItemId);
+            Assertions.assertTrue(nextWorkItem.leaseExpirationTime.isAfter(Instant.now()));
+            seenWorkerItems.put(nextWorkItem.workItemId, nextWorkItem.workItemId);
         }
     }
 }
