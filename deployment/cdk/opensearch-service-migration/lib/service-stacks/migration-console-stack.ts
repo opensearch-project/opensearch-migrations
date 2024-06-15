@@ -244,7 +244,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
-        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy, listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy]
+        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
+            listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
