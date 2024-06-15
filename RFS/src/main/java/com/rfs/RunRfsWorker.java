@@ -11,6 +11,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
 
+import com.rfs.worker.ShardWorkPreparer;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
@@ -166,6 +167,7 @@ public class RunRfsWorker {
             SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(sourceRepo, luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
             LuceneDocumentsReader reader = new LuceneDocumentsReader(luceneDirPath);
             DocumentReindexer reindexer = new DocumentReindexer(targetClient);
+            new ShardWorkPreparer().run();
             DocumentsRunner documentsWorker = new DocumentsRunner(globalState, cmsClient, snapshotName, indexMetadataFactory, shardMetadataFactory, unpacker, reader, reindexer);
             documentsWorker.run();
 

@@ -2,13 +2,14 @@ package com.rfs.worker;
 
 import org.apache.logging.log4j.Logger;
 
+import java.io.IOException;
 import java.util.Optional;
 
 import com.rfs.cms.CmsEntry;
 import com.rfs.common.RfsException;
 
 public abstract interface Runner {
-    abstract void runInternal();
+    abstract void runInternal() throws IOException;
     abstract String getPhaseName();
     abstract Logger getLogger();
 

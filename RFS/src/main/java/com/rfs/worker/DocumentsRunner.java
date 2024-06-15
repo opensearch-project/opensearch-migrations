@@ -1,7 +1,11 @@
 package com.rfs.worker;
 
+import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.Optional;
 
+import com.rfs.cms.IWorkCoordinator;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -15,32 +19,41 @@ import com.rfs.common.SnapshotShardUnpacker;
 
 public class DocumentsRunner implements Runner {
     private static final Logger logger = LogManager.getLogger(DocumentsRunner.class);
+    public static final String ALL_INDEX_MANIFEST = "all_index_manifest";
 
-    private final DocumentsStep.SharedMembers members;
+    IWorkCoordinator workCoordinator;
+    Instant expirationTime;
 
-    public DocumentsRunner(GlobalState globalState, CmsClient cmsClient, String snapshotName, IndexMetadata.Factory metadataFactory,
+    public DocumentsRunner(GlobalState globalState, IWorkCoordinator workCoordinator,
+                           CmsClient cmsClient, String snapshotName, IndexMetadata.Factory metadataFactory,
                 ShardMetadata.Factory shardMetadataFactory, SnapshotShardUnpacker unpacker, LuceneDocumentsReader reader,
                 DocumentReindexer reindexer) {
-        this.members = new DocumentsStep.SharedMembers(globalState, cmsClient, snapshotName, metadataFactory, shardMetadataFactory, unpacker, reader, reindexer);
+        this.workCoordinator = workCoordinator;
+        setupDocumentWorkItemsIfNecessary(metadataFactory);
+        //this.members = new DocumentsStep.SharedMembers(globalState, cmsClient, snapshotName, metadataFactory, shardMetadataFactory, unpacker, reader, reindexer);
     }
 
     @Override
-    public void runInternal() {
-        WorkerStep nextStep = null;
-        try {
-            nextStep = new DocumentsStep.EnterPhase(members);
+    public void runInternal() throws IOException {
+        var workItem = workCoordinator.acquireNextWorkItem(Duration.ofMinutes(10));
+        if (workItem == null) {
+            return;
+        }
+        this.expirationTime = workItem.getLeaseExpirationTime();
 
-            while (nextStep != null) {
-                nextStep.run();
-                nextStep = nextStep.nextStep();
-            }
-        } catch (Exception e) {
-            throw new DocumentsMigrationPhaseFailed(
-                members.globalState.getPhase(), 
-                nextStep, 
-                members.cmsEntry.map(bar -> (CmsEntry.Base) bar), 
-                e
-            );
+    }
+
+    private void setupKill(IWorkCoordinator.WorkItemAndDuration workItem) {
+
+    }
+
+    private void setupDocumentWorkItemsIfNecessary(IndexMetadata.Factory metadataFactory) {
+        try {
+            var workItem = workCoordinator.createOrUpdateLeaseForWorkItem(ALL_INDEX_MANIFEST, Duration.ofMinutes(5));
+            metadataFactory.fromRepo()
+            workCoordinator.completeWorkItem(ALL_INDEX_MANIFEST);
+        } catch (IWorkCoordinator.LeaseNotAcquiredException | IOException e) {
+
         }
     }
 
