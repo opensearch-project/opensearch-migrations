@@ -19,8 +19,8 @@ public class ShardMetadata {
     * Defines the behavior required to read a snapshot's shard metadata as JSON and convert it into a Data object
     */
     public static interface Factory {
-        private JsonNode getJsonNode(SourceRepo repo, SnapshotRepo.Provider repoDataProvider, String snapshotId, String indexId, int shardId, SmileFactory smileFactory) throws Exception {
-            Path filePath = repo.getShardMetadataFilePath(snapshotId, indexId, shardId);
+        private JsonNode getJsonNode(String snapshotId, String indexId, int shardId, SmileFactory smileFactory) {
+            Path filePath = getRepoDataProvider().getRepo().getShardMetadataFilePath(snapshotId, indexId, shardId);
 
             try (InputStream fis = new FileInputStream(filePath.toFile())) {
                 // Don't fully understand what the value of this code is, but it progresses the stream so we need to do it
@@ -34,18 +34,33 @@ public class ShardMetadata {
 
                 ObjectMapper smileMapper = new ObjectMapper(smileFactory);
                 return smileMapper.readTree(bis);
+            } catch (Exception e) {
+                throw new CouldNotParseShardMetadata("Could not parse shard metadata for Snapshot " + snapshotId + ", Index " + indexId + ", Shard " + shardId, e);
             }
         }
 
-        default ShardMetadata.Data fromRepo(SourceRepo repo, SnapshotRepo.Provider repoDataProvider, String snapshotName, String indexName, int shardId) throws Exception {
+        default ShardMetadata.Data fromRepo(String snapshotName, String indexName, int shardId) {
             SmileFactory smileFactory = getSmileFactory();
-            String snapshotId = repoDataProvider.getSnapshotId(snapshotName);
-            String indexId = repoDataProvider.getIndexId(indexName);
-            JsonNode root = getJsonNode(repo, repoDataProvider, snapshotId, indexId, shardId, smileFactory);            
+            String snapshotId = getRepoDataProvider().getSnapshotId(snapshotName);
+            String indexId = getRepoDataProvider().getIndexId(indexName);
+            JsonNode root = getJsonNode(snapshotId, indexId, shardId, smileFactory);            
             return fromJsonNode(root, indexId, indexName, shardId);
         }
-        public ShardMetadata.Data fromJsonNode(JsonNode root, String indexId, String indexName, int shardId) throws Exception;
+
+        // Version-specific implementation
+        public ShardMetadata.Data fromJsonNode(JsonNode root, String indexId, String indexName, int shardId);
+
+        // Version-specific implementation
         public SmileFactory getSmileFactory();
+
+        // Get the underlying SnapshotRepo Provider
+        public SnapshotRepo.Provider getRepoDataProvider();
+    }
+
+    public static class CouldNotParseShardMetadata extends RfsException {
+        public CouldNotParseShardMetadata(String message, Throwable cause) {
+            super(message, cause);
+        }
     }
 
     /**
@@ -62,7 +77,7 @@ public class ShardMetadata {
         public long getStartTime();    
         public long getTime();    
         public int getNumberOfFiles();    
-        public long getTotalSize();
+        public long getTotalSizeBytes();
         public List<FileInfo> getFiles();
     }
 

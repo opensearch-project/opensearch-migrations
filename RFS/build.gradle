@@ -86,6 +86,21 @@ task runRfsWorker (type: JavaExec) {
     mainClass = 'com.rfs.RunRfsWorker'
 }
 
+task createSnapshot (type: JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.rfs.RfsCreateSnapshot'
+}
+
+task migrateMetadata (type: JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.rfs.RfsMigrateMetadata'
+}
+
+task migrateDocuments (type: JavaExec) {
+    classpath = sourceSets.main.runtimeClasspath
+    mainClass = 'com.rfs.RfsMigrateDocuments'
+}
+
 // Cleanup additional docker build directory
 clean.doFirst {
     delete project.file("./docker/build")
@@ -108,11 +123,6 @@ jacocoTestReport {
     }
 }
 
-task demoPrintOutSnapshot (type: JavaExec) {
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.rfs.DemoPrintOutSnapshot'
-}
-
 task copyDockerRuntimeJars (type: Sync) {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
     description = 'Copy runtime JARs and app jar to docker build directory'
@@ -132,9 +142,12 @@ DockerServiceProps[] dockerServices = [
                                 dockerImageName:"reindex_from_snapshot",
                                 inputDir:"./docker",
                                 taskDependencies:["copyDockerRuntimeJars"]]),
-        new DockerServiceProps([projectName:"emptyElasticsearchSource",
-                                dockerImageName:"empty_elasticsearch_source",
+        new DockerServiceProps([projectName:"emptyElasticsearchSource_7_10",
+                                dockerImageName:"empty_elasticsearch_source_7_10",
                                 inputDir:"./docker/TestSource_ES_7_10"]),
+        new DockerServiceProps([projectName:"emptyElasticsearchSource_7_17",
+                                dockerImageName:"empty_elasticsearch_source_7_17",
+                                inputDir:"./docker/TestSource_ES_7_17"]),
         new DockerServiceProps([projectName:"trafficGenerator",
                                 dockerImageName:"osb_traffic_generator",
                                 inputDir:"./docker/TrafficGenerator",

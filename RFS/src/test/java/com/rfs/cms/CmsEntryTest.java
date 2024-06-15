@@ -41,7 +41,7 @@ public class CmsEntryTest {
     @MethodSource("provide_Metadata_getLeaseExpiry_UnhappyPath_args")
     void Metadata_getLeaseExpiry_UnhappyPath(int numAttempts) {
         // Run the test
-        assertThrows(CmsEntry.CouldNotFindNextLeaseDuration.class, () -> {
+        assertThrows(CmsEntry.CouldNotGenerateNextLeaseDuration.class, () -> {
             CmsEntry.Metadata.getLeaseExpiry(0, numAttempts);
         });
     }    

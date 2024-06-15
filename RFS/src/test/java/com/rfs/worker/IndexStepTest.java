@@ -219,9 +219,9 @@ public class IndexStepTest {
     static Stream<Arguments> provideAcquireLeaseArgs() {
         return Stream.of(
             // We were able to acquire the lease
-            Arguments.of(                
+            Arguments.of(
                 Optional.of(new CmsEntry.Index(
-                    CmsEntry.IndexStatus.IN_PROGRESS,
+                    CmsEntry.IndexStatus.SETUP,
                     String.valueOf(Instant.now().plus(Duration.ofDays(1)).toEpochMilli()),
                     1
                 )),
@@ -238,7 +238,7 @@ public class IndexStepTest {
     void AcquireLease_AsExpected(Optional<CmsEntry.Index> updatedEntry, Class<?> nextStepClass) {
         // Set up the test
         var existingEntry = Optional.of(new CmsEntry.Index(
-            CmsEntry.IndexStatus.IN_PROGRESS,
+            CmsEntry.IndexStatus.SETUP,
             CmsEntry.Index.getLeaseExpiry(0L, CmsEntry.Index.MAX_ATTEMPTS - 1),
             CmsEntry.Index.MAX_ATTEMPTS - 1
         ));
@@ -255,7 +255,7 @@ public class IndexStepTest {
 
         // Check the results
         var expectedEntry = new CmsEntry.Index(
-            CmsEntry.IndexStatus.IN_PROGRESS,
+            CmsEntry.IndexStatus.SETUP,
             CmsEntry.Index.getLeaseExpiry(TestAcquireLease.milliSinceEpoch, CmsEntry.Index.MAX_ATTEMPTS),
             CmsEntry.Index.MAX_ATTEMPTS
         );
@@ -267,17 +267,17 @@ public class IndexStepTest {
 
     static Stream<Arguments> provideSetupIndexWorkEntriesArgs() {
         return Stream.of(
-            // We were able to acquire the lease
+            // We were able to mark the setup as completed
             Arguments.of(                
                 Optional.of(new CmsEntry.Index(
-                    CmsEntry.IndexStatus.COMPLETED,
+                    CmsEntry.IndexStatus.IN_PROGRESS,
                     String.valueOf(42),
                     1
                 )),
                 IndexStep.GetIndicesToMigrate.class
             ),
 
-            // We were unable to acquire the lease
+            // We were unable to mark the setup as completed
             Arguments.of(Optional.empty(), IndexStep.GetEntry.class)
         );
     }
@@ -287,7 +287,7 @@ public class IndexStepTest {
     void SetupIndexWorkEntries_AsExpected(Optional<CmsEntry.Index> updatedEntry, Class<?> nextStepClass) {
         // Set up the test
         var existingEntry = Optional.of(new CmsEntry.Index(
-            CmsEntry.IndexStatus.IN_PROGRESS,
+            CmsEntry.IndexStatus.SETUP,
             String.valueOf(42),
             1
         ));
@@ -315,7 +315,7 @@ public class IndexStepTest {
         Mockito.when(testMembers.metadataFactory.fromRepo(testMembers.snapshotName, "index2")).thenReturn(indexMetadata2);
 
         CmsEntry.Index expectedEntry = new CmsEntry.Index(
-            CmsEntry.IndexStatus.COMPLETED,
+            CmsEntry.IndexStatus.IN_PROGRESS,
             existingEntry.get().leaseExpiry,
             existingEntry.get().numAttempts
         );
@@ -486,12 +486,29 @@ public class IndexStepTest {
 
     @Test
     void ExitPhaseSuccess_AsExpected() {
+        // Set up the test
+        var existingEntry = Optional.of(new CmsEntry.Index(
+            CmsEntry.IndexStatus.IN_PROGRESS,
+            String.valueOf(42),
+            1
+        ));
+        testMembers.cmsEntry = existingEntry;
+
         // Run the test
         IndexStep.ExitPhaseSuccess testStep = new IndexStep.ExitPhaseSuccess(testMembers);
         testStep.run();
         WorkerStep nextStep = testStep.nextStep();
 
         // Check the results
+        var expectedEntry = new CmsEntry.Index(
+            CmsEntry.IndexStatus.COMPLETED,
+            existingEntry.get().leaseExpiry,
+            existingEntry.get().numAttempts
+        );
+        Mockito.verify(testMembers.cmsClient, times(1)).updateIndexEntry(
+            expectedEntry, existingEntry.get()
+        );
+
         Mockito.verify(testMembers.globalState, times(1)).updatePhase(
             GlobalState.Phase.INDEX_COMPLETED
         );

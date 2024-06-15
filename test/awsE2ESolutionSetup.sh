@@ -59,8 +59,8 @@ prepare_source_nodes_for_capture () {
 
 validate_required_options () {
   suffix_required_value='ec2-source-<STAGE>'
-  source_infra_suffix=$(jq ".[\"$SOURCE_CONTEXT_ID\"].suffix" "$GEN_CONTEXT_FILE" -r)
-  source_network_suffix=$(jq ".[\"$SOURCE_CONTEXT_ID\"].networkStackSuffix" "$GEN_CONTEXT_FILE" -r)
+  source_infra_suffix=$(jq ".[\"$SOURCE_CONTEXT_ID\"].suffix" "$SOURCE_GEN_CONTEXT_FILE" -r)
+  source_network_suffix=$(jq ".[\"$SOURCE_CONTEXT_ID\"].networkStackSuffix" "$SOURCE_GEN_CONTEXT_FILE" -r)
   if [ "$source_infra_suffix" != "$suffix_required_value" ]; then
     echo "Error: source CDK context must include the 'suffix' option with a value of '$suffix_required_value', however found a value of '$source_infra_suffix', exiting."
     exit 1
@@ -106,15 +106,15 @@ clean_up_all () {
   done
 
   cd "$MIGRATION_CDK_PATH" || exit
-  cdk destroy "*" --force --c contextFile="$GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID"
+  cdk destroy "*" --force --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID"
   cd "$EC2_SOURCE_CDK_PATH" || exit
-  cdk destroy "*" --force --c contextFile="$GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID"
+  cdk destroy "*" --force --c contextFile="$SOURCE_GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID"
 }
 
 # One-time required CDK bootstrap setup for a given region. Only required if the 'CDKToolkit' CFN stack does not exist
 bootstrap_region () {
   # Picking arbitrary context values to satisfy required values for CDK synthesis. These should not need to be kept in sync with the actual deployment context values
-  cdk bootstrap --require-approval never --c contextFile="$GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID"
+  cdk bootstrap --require-approval never --c contextFile="$SOURCE_GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID"
 }
 
 usage() {
@@ -132,7 +132,8 @@ usage() {
   echo "  ./awsE2ESolutionSetup.sh <>"
   echo ""
   echo "Options:"
-  echo "  --context-file                                   A file path for a given context file from which source and target context options will be used, default is './defaultCDKContext.json'."
+  echo "  --source-context-file                            A file path for a given context file from which source context options will be used, default is './defaultSourceContext.json'."
+  echo "  --migration-context-file                         A file path for a given context file from which migration infrastructure and target context options will be used, default is './defaultMigrationContext.json'."
   echo "  --source-context-id                              The CDK context block identifier within the context-file to use, default is 'source-single-node-ec2'."
   echo "  --migration-context-id                           The CDK context block identifier within the context-file to use, default is 'migration-default'."
   echo "  --migrations-git-url                             The Github http url used for building the capture proxy on setups with a dedicated source cluster, default is 'https://github.com/opensearch-project/opensearch-migrations.git'."
@@ -156,7 +157,8 @@ BOOTSTRAP_REGION=false
 SKIP_CAPTURE_PROXY=false
 SKIP_SOURCE_DEPLOY=false
 SKIP_MIGRATION_DEPLOY=false
-CONTEXT_FILE='./defaultCDKContext.json'
+SOURCE_CONTEXT_FILE='./defaultSourceContext.json'
+MIGRATION_CONTEXT_FILE='./defaultMigrationContext.json'
 SOURCE_CONTEXT_ID='source-single-node-ec2'
 MIGRATION_CONTEXT_ID='migration-default'
 MIGRATIONS_GIT_URL='https://github.com/opensearch-project/opensearch-migrations.git'
@@ -189,8 +191,13 @@ while [[ $# -gt 0 ]]; do
       SKIP_MIGRATION_DEPLOY=true
       shift # past argument
       ;;
-    --context-file)
-      CONTEXT_FILE="$2"
+    --source-context-file)
+      SOURCE_CONTEXT_FILE="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --migration-context-file)
+      MIGRATION_CONTEXT_FILE="$2"
       shift # past argument
       shift # past value
       ;;
@@ -238,7 +245,8 @@ done
 
 SOURCE_NETWORK_STACK_NAME="opensearch-network-stack-ec2-source-$STAGE"
 SOURCE_INFRA_STACK_NAME="opensearch-infra-stack-ec2-source-$STAGE"
-GEN_CONTEXT_FILE="$TMP_DIR_PATH/generatedCDKContext.json"
+SOURCE_GEN_CONTEXT_FILE="$TMP_DIR_PATH/generatedSourceContext.json"
+MIGRATION_GEN_CONTEXT_FILE="$TMP_DIR_PATH/generatedMigrationContext.json"
 
 if [ "$RUN_POST_ACTIONS" = true ] ; then
   restore_and_record "$STAGE"
@@ -251,9 +259,11 @@ fi
 
 # Replace preliminary placeholders in CDK context into a generated context file
 mkdir -p "$TMP_DIR_PATH"
-cp $CONTEXT_FILE "$GEN_CONTEXT_FILE"
+cp $SOURCE_CONTEXT_FILE "$SOURCE_GEN_CONTEXT_FILE"
+cp $MIGRATION_CONTEXT_FILE "$MIGRATION_GEN_CONTEXT_FILE"
 validate_required_options
-sed -i -e "s/<STAGE>/$STAGE/g" "$GEN_CONTEXT_FILE"
+sed -i -e "s/<STAGE>/$STAGE/g" "$SOURCE_GEN_CONTEXT_FILE"
+sed -i -e "s/<STAGE>/$STAGE/g" "$MIGRATION_GEN_CONTEXT_FILE"
 
 if [ ! -d "opensearch-cluster-cdk" ]; then
   git clone https://github.com/lewijacn/opensearch-cluster-cdk.git
@@ -268,7 +278,7 @@ fi
 
 if [ "$SKIP_SOURCE_DEPLOY" = false ] && [ "$CLEAN_UP_ALL" = false ] ; then
   # Deploy source cluster on EC2 instances
-  cdk deploy "*" --c contextFile="$GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID" --require-approval never
+  cdk deploy "*" --c contextFile="$SOURCE_GEN_CONTEXT_FILE" --c contextId="$SOURCE_CONTEXT_ID" --require-approval never
   if [ $? -ne 0 ]; then
     echo "Error: deploy source cluster failed, exiting."
     exit 1
@@ -281,8 +291,8 @@ vpc_id=$(aws cloudformation describe-stacks --stack-name "$SOURCE_NETWORK_STACK_
 echo "VPC ID: $vpc_id"
 
 # Replace source dependent placeholders in CDK context
-sed -i -e "s/<VPC_ID>/$vpc_id/g" "$GEN_CONTEXT_FILE"
-sed -i -e "s/<SOURCE_CLUSTER_ENDPOINT>/http:\/\/${source_endpoint}:9200/g" "$GEN_CONTEXT_FILE"
+sed -i -e "s/<VPC_ID>/$vpc_id/g" "$MIGRATION_GEN_CONTEXT_FILE"
+sed -i -e "s/<SOURCE_CLUSTER_ENDPOINT>/http:\/\/${source_endpoint}:9200/g" "$MIGRATION_GEN_CONTEXT_FILE"
 
 if [ "$CLEAN_UP_ALL" = true ] ; then
   clean_up_all "$vpc_id"
@@ -297,7 +307,7 @@ if [ "$SKIP_MIGRATION_DEPLOY" = false ] ; then
     exit 1
   fi
   npm install
-  cdk deploy "*" --c contextFile="$GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID" --require-approval never --concurrency 3
+  cdk deploy "*" --c contextFile="$MIGRATION_GEN_CONTEXT_FILE" --c contextId="$MIGRATION_CONTEXT_ID" --require-approval never --concurrency 3
   if [ $? -ne 0 ]; then
     echo "Error: deploying migration stacks failed, exiting."
     exit 1

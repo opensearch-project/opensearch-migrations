@@ -12,13 +12,15 @@ import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
 
 import lombok.Lombok;
+import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
 
-
+@RequiredArgsConstructor
 public class LuceneDocumentsReader {
     private static final Logger logger = LogManager.getLogger(LuceneDocumentsReader.class);
+    protected final Path luceneFilesBasePath;
 
-    public Flux<Document> readDocuments(Path luceneFilesBasePath, String indexName, int shardId) {
+    public Flux<Document> readDocuments(String indexName, int shardId) {
         Path indexDirectoryPath = luceneFilesBasePath.resolve(indexName).resolve(String.valueOf(shardId));
 
         return Flux.using(
