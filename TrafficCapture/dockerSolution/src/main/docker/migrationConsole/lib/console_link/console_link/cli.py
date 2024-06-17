@@ -3,7 +3,7 @@ from pprint import pprint
 import click
 import console_link.logic.clusters as logic_clusters
 import console_link.logic.metrics as logic_metrics
-from console_link.logic.instantiation import Environment
+from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
 import logging
 

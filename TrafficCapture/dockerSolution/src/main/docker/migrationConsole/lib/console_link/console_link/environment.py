@@ -1,9 +1,12 @@
 import logging
 from console_link.models.cluster import Cluster
-from lib.console_link.console_link.models.backfill_osi import OpenSearchIngestionMigration
-from console_link.models.metrics_source import MetricsSource, get_metrics_source
+from console_link.models.metrics_source import MetricsSource
+from console_link.logic.metrics import get_metrics_source
+from console_link.logic.backfill import get_backfill
+from console_link.models.backfill_base import Backfill
 import yaml
 from cerberus import Validator
+
 
 logger = logging.getLogger(__name__)
 
@@ -39,15 +42,5 @@ class Environment:
         )
         logger.debug(f"Metrics source initialized: {self.metrics_source}")
 
-        backfill = self.config.get('backfill')
-        if backfill:
-            osi_backfill = backfill.get('opensearch_ingestion')
-            if osi_backfill:
-                self.backfill = OpenSearchIngestionMigration(config=osi_backfill,
-                                                             source_cluster=self.source_cluster,
-                                                             target_cluster=self.target_cluster)
-            else:
-                self.backfill = None
-        else:
-            self.backfill = None
+        self.backfill: Backfill = get_backfill(self.config.get('backfill'))
         logger.debug(f"Backfill migration initialized: {self.backfill}")

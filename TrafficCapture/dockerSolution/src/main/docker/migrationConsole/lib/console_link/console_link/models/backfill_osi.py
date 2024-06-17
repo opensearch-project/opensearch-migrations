@@ -1,7 +1,7 @@
 from console_link.models.osi_utils import (create_pipeline_from_env, start_pipeline, stop_pipeline,
                                            OpenSearchIngestionMigrationProps)
 from console_link.models.cluster import Cluster
-from console_link.models.backfill_base import Migration
+from console_link.models.backfill_base import Backfill
 from typing import Dict
 from cerberus import Validator
 import boto3
@@ -54,12 +54,15 @@ OSI_SCHEMA = {
 }
 
 
-class OpenSearchIngestionMigration(Migration):
+class OpenSearchIngestionBackfill(Backfill):
     """
     A migration manager for an OpenSearch Ingestion pipeline.
     """
 
     def __init__(self, config: Dict, source_cluster: Cluster, target_cluster: Cluster) -> None:
+        super().__init__(config)
+        config = config["opensearch_ingestion"]
+
         v = Validator(OSI_SCHEMA)
         if not v.validate(config):
             raise ValueError("Invalid config file for OpenSearchIngestion migration", v.errors)
