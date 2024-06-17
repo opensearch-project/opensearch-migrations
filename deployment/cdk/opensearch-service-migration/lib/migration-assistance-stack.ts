@@ -1,4 +1,4 @@
-import {RemovalPolicy} from "aws-cdk-lib";
+import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import {IPeer, IVpc, Peer, Port, SecurityGroup, SubnetFilter, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {FileSystem} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
@@ -9,8 +9,7 @@ import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {NamespaceType} from "aws-cdk-lib/aws-servicediscovery";
 import {StreamingSourceType} from "./streaming-source-type";
 import {Bucket, BucketEncryption} from "aws-cdk-lib/aws-s3";
-import {parseRemovalPolicy} from "./common-utilities";
-import { MigrationServiceCore, SSMParameter } from "./service-stacks";
+import {MigrationSSMParameter, createMigrationStringParameter, parseRemovalPolicy} from "./common-utilities";
 
 export interface MigrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -28,7 +27,7 @@ export interface MigrationStackProps extends StackPropsExt {
 }
 
 
-export class MigrationAssistanceStack extends MigrationServiceCore {
+export class MigrationAssistanceStack extends Stack {
 
     getPublicEndpointAccess(restrictPublicAccessTo: string, restrictPublicAccessType: string): IPeer {
         switch (restrictPublicAccessType) {
@@ -150,8 +149,14 @@ export class MigrationAssistanceStack extends MigrationServiceCore {
                 }
             }
         });
-        this.createStringParameter(SSMParameter.MSK_CLUSTER_ARN, mskCluster.attrArn, props);
-        this.createStringParameter(SSMParameter.MSK_CLUSTER_NAME, mskCluster.clusterName, props);
+        createMigrationStringParameter(this, mskCluster.attrArn, {
+            ...props,
+            parameter: MigrationSSMParameter.MSK_CLUSTER_ARN
+        });
+        createMigrationStringParameter(this, mskCluster.clusterName, {
+            ...props,
+            parameter: MigrationSSMParameter.MSK_CLUSTER_NAME
+        });
     }
 
     constructor(scope: Construct, id: string, props: MigrationStackProps) {
@@ -169,7 +174,10 @@ export class MigrationAssistanceStack extends MigrationServiceCore {
             allowAllOutbound: false
         });
         streamingSecurityGroup.addIngressRule(streamingSecurityGroup, Port.allTraffic())
-        this.createStringParameter(SSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID, streamingSecurityGroup.securityGroupId, props);
+        createMigrationStringParameter(this, streamingSecurityGroup.securityGroupId, {
+            ...props,
+            parameter: MigrationSSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID
+        });
 
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             this.createMSKResources(props, streamingSecurityGroup)
@@ -181,7 +189,10 @@ export class MigrationAssistanceStack extends MigrationServiceCore {
         });
         replayerOutputSG.addIngressRule(replayerOutputSG, Port.allTraffic());
 
-        this.createStringParameter(SSMParameter.REPLAYER_OUTPUT_ACCESS_SECURITY_GROUP_ID, replayerOutputSG.securityGroupId, props);
+        createMigrationStringParameter(this, replayerOutputSG.securityGroupId, {
+            ...props,
+            parameter: MigrationSSMParameter.REPLAYER_OUTPUT_ACCESS_SECURITY_GROUP_ID
+        });
 
         // Create an EFS file system for Traffic Replayer output
         const replayerOutputEFS = new FileSystem(this, 'replayerOutputEFS', {
@@ -189,7 +200,10 @@ export class MigrationAssistanceStack extends MigrationServiceCore {
             securityGroup: replayerOutputSG,
             removalPolicy: replayerEFSRemovalPolicy
         });
-        this.createStringParameter(SSMParameter.REPLAYER_OUTPUT_EFS_ID, replayerOutputEFS.fileSystemId, props);
+        createMigrationStringParameter(this, replayerOutputEFS.fileSystemId, {
+            ...props,
+            parameter: MigrationSSMParameter.REPLAYER_OUTPUT_EFS_ID
+        });
 
         const serviceSecurityGroup = new SecurityGroup(this, 'serviceSecurityGroup', {
             vpc: props.vpc,
@@ -198,7 +212,10 @@ export class MigrationAssistanceStack extends MigrationServiceCore {
         })
         serviceSecurityGroup.addIngressRule(serviceSecurityGroup, Port.allTraffic());
 
-        this.createStringParameter(SSMParameter.SERVICE_SECURITY_GROUP_ID, serviceSecurityGroup.securityGroupId, props);
+        createMigrationStringParameter(this, serviceSecurityGroup.securityGroupId, {
+            ...props,
+            parameter: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID
+        });
 
         const artifactBucket = new Bucket(this, 'migrationArtifactsS3', {
             bucketName: `migration-artifacts-${this.account}-${props.stage}-${this.region}`,
@@ -207,7 +224,10 @@ export class MigrationAssistanceStack extends MigrationServiceCore {
             removalPolicy: bucketRemovalPolicy,
             autoDeleteObjects: !!(props.artifactBucketRemovalPolicy && bucketRemovalPolicy === RemovalPolicy.DESTROY)
         });
-        this.createStringParameter(SSMParameter.ARTIFACT_S3_ARN, artifactBucket.bucketArn, props);
+        createMigrationStringParameter(this, artifactBucket.bucketArn, {
+            ...props,
+            parameter: MigrationSSMParameter.ARTIFACT_S3_ARN
+        });
 
         const ecsCluster = new Cluster(this, 'migrationECSCluster', {
             vpc: props.vpc,
@@ -219,6 +239,9 @@ export class MigrationAssistanceStack extends MigrationServiceCore {
             vpc: props.vpc
         })
         const cloudMapNamespaceId = ecsCluster.defaultCloudMapNamespace!.namespaceId
-        this.createStringParameter(SSMParameter.CLOUD_MAP_NAMESPACE_ID, cloudMapNamespaceId, props);
+        createMigrationStringParameter(this, cloudMapNamespaceId, {
+            ...props,
+            parameter: MigrationSSMParameter.CLOUD_MAP_NAMESPACE_ID
+        });
     }
 }

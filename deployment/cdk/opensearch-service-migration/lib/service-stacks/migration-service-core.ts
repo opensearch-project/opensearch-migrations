@@ -1,5 +1,5 @@
 import {StackPropsExt} from "../stack-composer";
-import {ISecurityGroup, IVpc, Port, SubnetType} from "aws-cdk-lib/aws-ec2";
+import {ISecurityGroup, IVpc, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {
     CfnService as FargateCfnService, CloudMapOptions,
     Cluster,
@@ -25,7 +25,6 @@ import {createDefaultECSTaskRole} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { ApplicationListener, ApplicationProtocol, ApplicationProtocolVersion, ApplicationTargetGroup, IApplicationLoadBalancer, IApplicationTargetGroup, IListenerCertificate, INetworkTargetGroup, ITargetGroup, SslPolicy } from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
-import { Construct } from "constructs";
 
 
 export interface MigrationServiceCoreProps extends StackPropsExt {
@@ -55,7 +54,7 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly ulimits?: Ulimit[],
     readonly maxUptime?: Duration,
     readonly otelCollectorEnabled?: boolean,
-    readonly targetGroups?: (ELBTargetGroup)[],
+    readonly targetGroups?: ELBTargetGroup[],
 }
 
 export type ELBTargetGroup = IApplicationTargetGroup | INetworkTargetGroup;
@@ -233,85 +232,11 @@ export class MigrationServiceCore extends Stack {
         });
         
         if (props.targetGroups) {
-            props.targetGroups.forEach(tg => tg.addTarget(fargateService));
+            props.targetGroups.filter(tg => tg !== undefined).forEach(tg => tg.addTarget(fargateService));
         }
 
         if (props.serviceDiscoveryEnabled) {
             this.addServiceDiscoveryRecords(fargateService, props.serviceDiscoveryPort)
         }
     }
-
-    getSecureListenerSslPolicy() {
-        return (this.partition === "aws-us-gov") ? SslPolicy.FIPS_TLS13_12_EXT2 : SslPolicy.RECOMMENDED_TLS
-    }
-
-    createSecureListener(serviceName: string, listeningPort: number, alb: IApplicationLoadBalancer, cert: ICertificate, albTargetGroup?: IApplicationTargetGroup) {
-        return new ApplicationListener(this, `${serviceName}ALBListener`, {
-            loadBalancer: alb,
-            port: listeningPort,
-            protocol: ApplicationProtocol.HTTPS,
-            certificates: [cert],
-            defaultTargetGroups: albTargetGroup ? [albTargetGroup] : undefined,
-            sslPolicy: this.getSecureListenerSslPolicy()
-        });
-    }
-
-    createSecureTargetGroup(serviceName: string, stage: string, containerPort: number, vpc: IVpc) {
-        return new ApplicationTargetGroup(this, `${serviceName}TG`, {
-            targetGroupName: `${serviceName}-${stage}-TG`,
-            protocol: ApplicationProtocol.HTTPS,
-            protocolVersion: ApplicationProtocolVersion.HTTP1,
-            port: containerPort,
-            vpc: vpc,
-            healthCheck: {
-                path: "/",
-                healthyHttpCodes: "200,401"
-            }
-        });
-    }
-
-    createStringParameter(parameterName: SSMParameter, stringValue: string, props: {stage: string, defaultDeployId: string}) {
-        return new StringParameter(this, `SSMParameter${parameterName.charAt(0).toUpperCase() + parameterName.slice(1)}`, {
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/${parameterName}`,
-            stringValue: stringValue,
-            description: `Opensearch migration SSM parameter for ${parameterName} with stage ${props.stage} and deploy id ${props.defaultDeployId}`,
-        });
-    }
-
-    getStringParameter(parameterName: SSMParameter, props: {stage: string, defaultDeployId: string}): string {
-        return MigrationServiceCore.getStringParameter(this, parameterName, props);
-    }
-
-    static getStringParameter(scope: Construct, parameterName: SSMParameter, props: {stage: string, defaultDeployId: string}): string {
-        return StringParameter.valueForTypedStringParameterV2(scope, MigrationServiceCore.getStringParameterName(scope, parameterName, props));
-    }
-    
-    static getStringParameterName(scope: Construct, parameterName: SSMParameter, props: {stage: string, defaultDeployId: string}): string {
-        return `/migration/${props.stage}/${props.defaultDeployId}/${parameterName}`;
-    }
-}
-
-export enum SSMParameter {
-    ALB_MIGRATION_URL = 'albMigrationUrl',
-    ARTIFACT_S3_ARN = 'artifactS3Arn',
-    CLOUD_MAP_NAMESPACE_ID = 'cloudMapNamespaceId',
-    FETCH_MIGRATION_COMMAND = 'fetchMigrationCommand',
-    FETCH_MIGRATION_TASK_DEF_ARN = 'fetchMigrationTaskDefArn',
-    FETCH_MIGRATION_TASK_EXEC_ROLE_ARN = 'fetchMigrationTaskExecRoleArn',
-    FETCH_MIGRATION_TASK_ROLE_ARN = 'fetchMigrationTaskRoleArn',
-    KAFKA_BROKERS = 'kafkaBrokers',
-    MSK_CLUSTER_ARN = 'mskClusterARN',
-    MSK_CLUSTER_NAME = 'mskClusterName',
-    OS_ACCESS_SECURITY_GROUP_ID = 'osAccessSecurityGroupId',
-    OS_CLUSTER_ENDPOINT = 'osClusterEndpoint',
-    OS_USER_AND_SECRET_ARN = 'osUserAndSecretArn',
-    OSI_PIPELINE_LOG_GROUP_NAME = 'osiPipelineLogGroupName',
-    OSI_PIPELINE_ROLE_ARN = 'osiPipelineRoleArn',
-    REPLAYER_OUTPUT_ACCESS_SECURITY_GROUP_ID = 'replayerOutputAccessSecurityGroupId',
-    REPLAYER_OUTPUT_EFS_ID = 'replayerOutputEfsId',
-    SOURCE_CLUSTER_ENDPOINT = 'sourceClusterEndpoint',
-    SERVICE_SECURITY_GROUP_ID = 'serviceSecurityGroupId',
-    SERVICES_YAML_FILE = 'servicesYamlFile',
-    TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID = 'trafficStreamSourceAccessSecurityGroupId',
-    VPC_ID = 'vpcId',
 }
