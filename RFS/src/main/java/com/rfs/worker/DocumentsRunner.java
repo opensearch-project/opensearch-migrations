@@ -25,10 +25,9 @@ public class DocumentsRunner {
     ScopedWorkCoordinatorHelper workCoordinator;
     private final String snapshotName;
     private final ShardMetadata.Factory shardMetadataFactory;
-    private final SnapshotShardUnpacker unpacker;
+    private final SnapshotShardUnpacker.Factory unpackerFactory;
     private final LuceneDocumentsReader reader;
     private final DocumentReindexer reindexer;
-
 
     public void migrateNextShard() throws IOException {
         workCoordinator.ensurePhaseCompletion(wc -> {
@@ -56,16 +55,19 @@ public class DocumentsRunner {
         log.info("Migrating docs for " + indexAndShard);
         ShardMetadata.Data shardMetadata =
                 shardMetadataFactory.fromRepo(snapshotName, indexAndShard.indexName, indexAndShard.shard);
-        unpacker.unpack(shardMetadata);
+        try (var unpacker = unpackerFactory.create(shardMetadata)) {
+            unpacker.unpack();
 
-        Flux<Document> documents = reader.readDocuments(shardMetadata.getIndexName(), shardMetadata.getShardId());
+            Flux<Document> documents = reader.readDocuments(shardMetadata.getIndexName(), shardMetadata.getShardId());
 
-        final int finalShardId = shardMetadata.getShardId(); // Define in local context for the lambda
-        reindexer.reindex(shardMetadata.getIndexName(), documents)
-                .doOnError(error -> log.error("Error during reindexing: " + error))
-                .doOnSuccess(done -> log.info("Reindexing completed for Index " + shardMetadata.getIndexName() + ", Shard " + finalShardId))
-                // Wait for the reindexing to complete before proceeding
-                .block();
-        log.info("Docs migrated");
+            final int finalShardId = shardMetadata.getShardId(); // Define in local context for the lambda
+            reindexer.reindex(shardMetadata.getIndexName(), documents)
+                    .doOnError(error -> log.error("Error during reindexing: " + error))
+                    .doOnSuccess(done -> log.info("Reindexing completed for Index " + shardMetadata.getIndexName() +
+                                    ", Shard " + finalShardId))
+                    // Wait for the reindexing to complete before proceeding
+                    .block();
+            log.info("Docs migrated");
+        }
     }
 }

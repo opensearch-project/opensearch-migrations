@@ -101,7 +101,7 @@ public class ShardMetadataData_ES_6_8 implements com.rfs.common.ShardMetadata.Da
     }
 
     @Override
-    public long getTotalSize() {
+    public long getTotalSizeBytes() {
         return totalSize;
     }
 
