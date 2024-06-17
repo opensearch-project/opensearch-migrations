@@ -7,3 +7,5 @@ tqdm==4.66.4
 # Specified [h5py==3.10.0] as 3.11.0 version was causing issues with ARM64 builds
 # Error: Building h5py requires pkg-config unless the HDF5 path is explicitly specified using the environment variable HDF5_DIR
 h5py==3.10.0
+# Numpy 2.0 was released on 2024-06-16 and h5py is not yet compatible with it. Locking to a sub-2.0 version for now.
+numpy>=1.26.4,<2.0
