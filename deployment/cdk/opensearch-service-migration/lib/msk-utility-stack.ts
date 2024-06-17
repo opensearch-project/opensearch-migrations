@@ -7,8 +7,7 @@ import {NodejsFunction} from "aws-cdk-lib/aws-lambda-nodejs";
 import {Runtime} from "aws-cdk-lib/aws-lambda";
 import {Provider} from "aws-cdk-lib/custom-resources";
 import * as path from "path";
-import {StringParameter} from "aws-cdk-lib/aws-ssm";
-import { MigrationServiceCore, SSMParameter } from "./service-stacks";
+import { createMigrationStringParameter, getMigrationStringParameterValue, MigrationSSMParameter } from "./common-utilities";
 
 export interface MskUtilityStackProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -20,12 +19,15 @@ export interface MskUtilityStackProps extends StackPropsExt {
  * enabling public endpoints on a created MSK cluster. As well as retrieving public and private broker endpoints in
  * a consistent ORDERED fashion.
  */
-export class MSKUtilityStack extends MigrationServiceCore {
+export class MSKUtilityStack extends Stack {
 
     constructor(scope: Construct, id: string, props: MskUtilityStackProps) {
         super(scope, id, props);
 
-        const mskARN = this.getStringParameter(SSMParameter.MSK_CLUSTER_ARN, props);
+        const mskARN = getMigrationStringParameterValue(this, {
+            ...props,
+            parameter: MigrationSSMParameter.MSK_CLUSTER_ARN,
+        });
         let brokerEndpoints;
         // If the public endpoints setting is enabled we will launch a Lambda custom resource to enable public endpoints and then wait for these
         // endpoints to become created before we return the endpoints and stop the process
@@ -146,6 +148,9 @@ export class MSKUtilityStack extends MigrationServiceCore {
             // Access BROKER_ENDPOINTS from the Lambda return value
             brokerEndpoints = customResource.getAttString("BROKER_ENDPOINTS")
         }
-        this.createStringParameter(SSMParameter.KAFKA_BROKERS, brokerEndpoints, props);
+        createMigrationStringParameter(this, brokerEndpoints, {
+            ...props,
+            parameter: MigrationSSMParameter.KAFKA_BROKERS
+        });
     }
 }

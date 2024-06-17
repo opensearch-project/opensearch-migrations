@@ -39,10 +39,15 @@ test('Test all migration services with MSK get created when enabled', () => {
 
     const services = [CaptureProxyESStack, CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
         TrafficReplayerStack, OpenSearchContainerStack, ReindexFromSnapshotStack]
-    services.forEach( (stackClass) => {
+    services.forEach((stackClass) => {
         const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
         const template = Template.fromStack(stack)
-        template.resourceCountIs("AWS::ECS::Service", 1)
+        try {
+            template.resourceCountIs("AWS::ECS::Service", 1)
+        } catch (error) {
+            console.error(`Validation failed for stack: ${stackClass.name}`, error)
+            throw error
+        }
     })
 })
 
@@ -72,10 +77,15 @@ test('Test all migration services with Kafka container get created when enabled'
 
     const services = [CaptureProxyESStack, CaptureProxyStack, ElasticsearchStack, MigrationConsoleStack,
         TrafficReplayerStack, KafkaStack, OpenSearchContainerStack, ReindexFromSnapshotStack]
-    services.forEach( (stackClass) => {
+    services.forEach((stackClass) => {
         const stack = stacks.stacks.filter((s) => s instanceof stackClass)[0]
         const template = Template.fromStack(stack)
-        template.resourceCountIs("AWS::ECS::Service", 1)
+        try {
+            template.resourceCountIs("AWS::ECS::Service", 1)
+        } catch (error) {
+            console.error(`Validation failed for stack: ${stackClass.name}`, error)
+            throw error
+        }
     })
 })
 

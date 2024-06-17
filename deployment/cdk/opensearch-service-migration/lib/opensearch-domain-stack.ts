@@ -14,9 +14,8 @@ import {AnyPrincipal, Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {ILogGroup, LogGroup} from "aws-cdk-lib/aws-logs";
 import {ISecret, Secret} from "aws-cdk-lib/aws-secretsmanager";
 import {StackPropsExt} from "./stack-composer";
-import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import { ClusterYaml } from "./migration-services-yaml";
-import { MigrationConsoleStack, MigrationServiceCore, SSMParameter } from "./service-stacks";
+import { MigrationSSMParameter, createMigrationStringParameter, getMigrationStringParameterValue } from "./common-utilities";
 
 
 export interface OpensearchDomainStackProps extends StackPropsExt {
@@ -58,7 +57,7 @@ export interface OpensearchDomainStackProps extends StackPropsExt {
 
 export const osClusterEndpointParameterName = "osClusterEndpoint";
 
-export class OpenSearchDomainStack extends MigrationServiceCore {
+export class OpenSearchDomainStack extends Stack {
   targetClusterYaml: ClusterYaml;
 
   getEbsVolumeType(ebsVolumeTypeName: string) : EbsDeviceVolumeType|undefined {
@@ -100,12 +99,19 @@ export class OpenSearchDomainStack extends MigrationServiceCore {
 
   createSSMParameters(domain: Domain, adminUserName: string|undefined, adminUserSecret: ISecret|undefined, stage: string, deployId: string) {
     const endpointParameter = osClusterEndpointParameterName
-    const endpointSSM = this.createStringParameter(SSMParameter.OS_CLUSTER_ENDPOINT, `https://${domain.domainEndpoint}:443`, { stage, defaultDeployId: deployId });
+    const endpointSSM = createMigrationStringParameter(this, `https://${domain.domainEndpoint}:443`, {
+      parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
+      defaultDeployId: deployId,
+      stage,
+    });
     if (domain.masterUserPassword && !adminUserSecret) {
       console.log(`An OpenSearch domain fine-grained access control user was configured without an existing Secrets Manager secret, will not create SSM Parameter: /migration/${stage}/${deployId}/osUserAndSecret`)
-    }
-    else if (domain.masterUserPassword && adminUserSecret) {
-      const secretSSM = this.createStringParameter(SSMParameter.OS_USER_AND_SECRET_ARN, `${adminUserName} ${adminUserSecret.secretArn}`, { stage, defaultDeployId: deployId });
+    } else if (domain.masterUserPassword && adminUserSecret) {
+      const secretSSM = createMigrationStringParameter(this, `${adminUserName} ${adminUserSecret.secretArn}`, {
+          parameter: MigrationSSMParameter.OS_USER_AND_SECRET_ARN,
+          defaultDeployId: deployId,
+          stage,    
+      });
     }
   }
 
@@ -133,8 +139,11 @@ export class OpenSearchDomainStack extends MigrationServiceCore {
         LogGroup.fromLogGroupArn(this, "appLogGroup", props.appLogGroup) : undefined
 
     const domainAccessSecurityGroupParameter = props.domainAccessSecurityGroupParameter ?? "osAccessSecurityGroupId"
-    const defaultOSClusterAccessGroup = SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG",
-        this.getStringParameter(SSMParameter.OS_ACCESS_SECURITY_GROUP_ID, { stage: props.stage, defaultDeployId: props.defaultDeployId }))
+    const defaultOSClusterAccessGroup = SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG", getMigrationStringParameterValue(this, {
+        ...props,
+        parameter: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID,
+    }));
+    
     let adminUserSecret: ISecret|undefined = props.fineGrainedManagerUserSecretManagerKeyARN ?
         Secret.fromSecretCompleteArn(this, "managerSecret", props.fineGrainedManagerUserSecretManagerKeyARN) : undefined
     // Map objects from props
