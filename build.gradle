@@ -88,3 +88,18 @@ subprojects {
         }
     }
 }
+
+task listPublishedArtifacts {
+    doLast {
+        subprojects.each { proj ->
+            def publishingExtension = proj.extensions.findByType(PublishingExtension)
+            if (publishingExtension) {
+                publishingExtension.publications.each { publication ->
+                    if (publication instanceof MavenPublication) {
+                        println "${publication.groupId}.${publication.artifactId}"
+                    }
+                }
+            }
+        }
+    }
+}

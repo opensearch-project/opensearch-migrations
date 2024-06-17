@@ -104,27 +104,11 @@ dependencies {
 }
 ```
 
-The entire list of published subprojects is
-```text
-captureKafkaOffloader
-captureOffloader
-captureProtobufs
-commonDependencyVersionConstraints
-coreUtilities
-jsonJMESPathMessageTransformer
-jsonJMESPathMessageTransformerProvider
-jsonJoltMessageTransformer
-jsonJoltMessageTransformerProvider
-jsonMessageTransformerInterface
-jsonMessageTransformers
-nettyWireLogging
-openSearch23PlusTargetTransformerProvider
-testHelperFixtures
-trafficCaptureProxyServer
-trafficCaptureProxyServerTest
-trafficReplayer
-transformationPlugins
+The entire list of published subprojects can be viewed with     
+```sh
+./gradlew listPublishedArtifacts
 ```
+
 
 To include a testFixture dependency, define the import like
 
