@@ -3,20 +3,14 @@ package com.rfs.worker;
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Optional;
 
 import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.ScopedWorkCoordinatorHelper;
+import lombok.AllArgsConstructor;
 import lombok.Lombok;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
-import com.rfs.cms.CmsClient;
-import com.rfs.cms.CmsEntry;
 import com.rfs.common.DocumentReindexer;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.ShardMetadata;
 import com.rfs.common.SnapshotShardUnpacker;
@@ -24,34 +18,19 @@ import org.apache.lucene.document.Document;
 import reactor.core.publisher.Flux;
 
 @Slf4j
-public class DocumentsRunner implements Runner {
+@AllArgsConstructor
+public class DocumentsRunner {
     public static final String ALL_INDEX_MANIFEST = "all_index_manifest";
 
     ScopedWorkCoordinatorHelper workCoordinator;
-    private final ShardMetadata.Factory shardMetadataFactory;
     private final String snapshotName;
+    private final ShardMetadata.Factory shardMetadataFactory;
     private final SnapshotShardUnpacker unpacker;
     private final LuceneDocumentsReader reader;
     private final DocumentReindexer reindexer;
-    Instant expirationTime;
 
-    public DocumentsRunner(ScopedWorkCoordinatorHelper scopedWorkCoordinator,
-                           String snapshotName,
-                           ShardMetadata.Factory shardMetadataFactory,
-                           SnapshotShardUnpacker unpacker,
-                           LuceneDocumentsReader reader,
-                           DocumentReindexer reindexer) {
-        this.workCoordinator = scopedWorkCoordinator;
-        //this.members = new DocumentsStep.SharedMembers(globalState, cmsClient, snapshotName, metadataFactory, shardMetadataFactory, unpacker, reader, reindexer);
-        this.shardMetadataFactory = shardMetadataFactory;
-        this.snapshotName = snapshotName;
-        this.unpacker = unpacker;
-        this.reader = reader;
-        this.reindexer = reindexer;
-    }
 
-    @Override
-    public void runInternal() throws IOException {
+    public void migrateNextShard() throws IOException {
         workCoordinator.ensurePhaseCompletion(wc -> {
                     try {
                         return wc.acquireNextWorkItem(Duration.ofMinutes(10));
@@ -88,12 +67,5 @@ public class DocumentsRunner implements Runner {
                 // Wait for the reindexing to complete before proceeding
                 .block();
         log.info("Docs migrated");
-    }
-
-    public static class DocumentsMigrationPhaseFailed extends Runner.PhaseFailed {
-        public DocumentsMigrationPhaseFailed(GlobalState.Phase phase, WorkerStep nextStep,
-                                             Optional<CmsEntry.Base> cmsEntry, Exception e) {
-            super("Documents Migration Phase failed", phase, cmsEntry, e);
-        }
     }
 }

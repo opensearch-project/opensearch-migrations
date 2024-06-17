@@ -9,6 +9,7 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
+import java.time.Instant;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
@@ -54,10 +55,8 @@ import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
 import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 import com.rfs.worker.DocumentsRunner;
-import com.rfs.worker.GlobalState;
 import com.rfs.worker.IndexRunner;
 import com.rfs.worker.MetadataRunner;
-import com.rfs.worker.Runner;
 import com.rfs.worker.SnapshotRunner;
 
 @Slf4j
@@ -151,10 +150,8 @@ public class RunRfsWorker {
 
         try {
             log.info("Running RfsWorker");
-            GlobalState globalState = GlobalState.getInstance();
             OpenSearchClient sourceClient = new OpenSearchClient(sourceConnection);
             OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
-            CmsClient cmsClient = new OpenSearchCmsClient(targetClient);
 
             SnapshotCreator snapshotCreator = new S3SnapshotCreator(snapshotName, sourceClient, s3RepoUri, s3Region);
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
@@ -164,13 +161,11 @@ public class RunRfsWorker {
             GlobalMetadata.Factory metadataFactory = new GlobalMetadataFactory_ES_7_10(repoDataProvider);
             GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateAllowlist, indexTemplateAllowlist);
             Transformer transformer = TransformFunctions.getTransformer(ClusterVersion.ES_7_10, ClusterVersion.OS_2_11, awarenessDimensionality);
-            MetadataRunner metadataWorker = new MetadataRunner(globalState, cmsClient, snapshotName, metadataFactory, metadataCreator, transformer);
-            metadataWorker.run();
+            new MetadataRunner(snapshotName, metadataFactory, metadataCreator, transformer).migrateMetadata();
 
             IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
             IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
-            IndexRunner indexWorker = new IndexRunner(globalState, cmsClient, snapshotName, indexMetadataFactory, indexCreator, transformer);
-            indexWorker.run();
+            new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer).migrateIndices();
 
             ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
             SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(sourceRepo, luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
@@ -185,27 +180,10 @@ public class RunRfsWorker {
             var scopedWorkCoordinator = new ScopedWorkCoordinatorHelper(workCoordinator, processManager);
             new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName);
             new DocumentsRunner(scopedWorkCoordinator, snapshotName,
-                    shardMetadataFactory, unpacker, reader, reindexer).run();
-        } catch (Runner.PhaseFailed e) {
-            logPhaseFailureRecord(e.phase, e.cmsEntry, e.getCause());
-            throw e;
+                    shardMetadataFactory, unpacker, reader, reindexer).migrateNextShard();
         } catch (Exception e) {
             log.error("Unexpected error running RfsWorker", e);
             throw e;
         }
-    }
-
-    public static void logPhaseFailureRecord(GlobalState.Phase phase, Optional<CmsEntry.Base> cmsEntry, Throwable e) {
-        ObjectNode errorBlob = new ObjectMapper().createObjectNode();
-        errorBlob.put("exceptionMessage", e.getMessage());
-        errorBlob.put("exceptionClass", e.getClass().getSimpleName());
-        errorBlob.put("exceptionTrace", Arrays.toString(e.getStackTrace()));
-
-        errorBlob.put("phase", phase.toString());
-
-        String currentEntry = cmsEntry.map(CmsEntry.Base::toRepresentationString).orElse("null");
-        errorBlob.put("cmsEntry", currentEntry);
-
-        log.atError().setMessage(errorBlob.toString()).log();
     }
 }
