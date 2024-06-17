@@ -346,8 +346,8 @@ class E2ETests(unittest.TestCase):
         else:
             sleep_time = 5
 
-        returncode, _, _ = run_migration_console_command(self.deployment_type, cmd)
-        self.assertEqual(returncode, 0)
+        returncode, _, stderr = run_migration_console_command(self.deployment_type, cmd)
+        self.assertEqual(returncode, 0, f"Running command {cmd} failed with stderr output:\n{stderr}")
         time.sleep(sleep_time)
 
         source_indices = get_indices(self.source_endpoint, self.source_auth, self.source_verify_ssl)
