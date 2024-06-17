@@ -5,13 +5,21 @@ import com.beust.jcommander.Parameter;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import java.net.URI;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Clock;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
+import com.rfs.cms.ApacheHttpClient;
+import com.rfs.cms.OpenSearchWorkCoordinator;
+import com.rfs.cms.ProcessManager;
+import com.rfs.cms.ScopedWorkCoordinatorHelper;
 import com.rfs.worker.ShardWorkPreparer;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
@@ -52,8 +60,9 @@ import com.rfs.worker.MetadataRunner;
 import com.rfs.worker.Runner;
 import com.rfs.worker.SnapshotRunner;
 
+@Slf4j
 public class RunRfsWorker {
-    private static final Logger logger = LogManager.getLogger(RunRfsWorker.class);
+    public static final int PROCESS_TIMED_OUT = 1;
 
     public static class Args {
         @Parameter(names = {"--snapshot-name"}, description = "The name of the snapshot to migrate", required = true)
@@ -132,7 +141,7 @@ public class RunRfsWorker {
         String targetPass = arguments.targetPass;
         List<String> indexTemplateAllowlist = arguments.indexAllowlist;
         List<String> componentTemplateAllowlist = arguments.componentTemplateAllowlist;
-        int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
+        int awarenessDimensionality = arguments.minNumberOfReplicas + PROCESS_TIMED_OUT;
         Level logLevel = arguments.logLevel;
 
         Logging.setLevel(logLevel);
@@ -141,7 +150,7 @@ public class RunRfsWorker {
         ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
         try {
-            logger.info("Running RfsWorker");
+            log.info("Running RfsWorker");
             GlobalState globalState = GlobalState.getInstance();
             OpenSearchClient sourceClient = new OpenSearchClient(sourceConnection);
             OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
@@ -167,15 +176,21 @@ public class RunRfsWorker {
             SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(sourceRepo, luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
             LuceneDocumentsReader reader = new LuceneDocumentsReader(luceneDirPath);
             DocumentReindexer reindexer = new DocumentReindexer(targetClient);
-            new ShardWorkPreparer().run();
-            DocumentsRunner documentsWorker = new DocumentsRunner(globalState, cmsClient, snapshotName, indexMetadataFactory, shardMetadataFactory, unpacker, reader, reindexer);
-            documentsWorker.run();
-
+            var processManager = new ProcessManager(workItemId->{
+                log.error("terminating RunRfsWorker because its lease has expired for "+workItemId);
+                System.exit(PROCESS_TIMED_OUT);
+            }, Clock.systemUTC());
+            var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(targetHost)),
+                    5, UUID.randomUUID().toString());
+            var scopedWorkCoordinator = new ScopedWorkCoordinatorHelper(workCoordinator, processManager);
+            new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName);
+            new DocumentsRunner(scopedWorkCoordinator, snapshotName,
+                    shardMetadataFactory, unpacker, reader, reindexer).run();
         } catch (Runner.PhaseFailed e) {
             logPhaseFailureRecord(e.phase, e.cmsEntry, e.getCause());
             throw e;
         } catch (Exception e) {
-            logger.error("Unexpected error running RfsWorker", e);
+            log.error("Unexpected error running RfsWorker", e);
             throw e;
         }
     }
@@ -191,6 +206,6 @@ public class RunRfsWorker {
         String currentEntry = cmsEntry.map(CmsEntry.Base::toRepresentationString).orElse("null");
         errorBlob.put("cmsEntry", currentEntry);
 
-        logger.error(errorBlob.toString());
+        log.atError().setMessage(errorBlob.toString()).log();
     }
 }

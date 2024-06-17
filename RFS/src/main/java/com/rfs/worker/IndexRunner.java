@@ -40,16 +40,6 @@ public class IndexRunner implements Runner {
         }
     }
 
-    @Override
-    public String getPhaseName() {
-        return "Index Migration";
-    }
-
-    @Override
-    public Logger getLogger() {
-        return logger;
-    }
-
     public static class IndexMigrationPhaseFailed extends Runner.PhaseFailed {
         public IndexMigrationPhaseFailed(GlobalState.Phase phase, Optional<CmsEntry.Base> cmsEntry, Exception e) {
             super("Index Migration Phase failed", phase, cmsEntry, e);

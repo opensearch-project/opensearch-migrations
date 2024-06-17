@@ -6,6 +6,10 @@ import java.time.Instant;
 import java.util.Optional;
 
 import com.rfs.cms.IWorkCoordinator;
+import com.rfs.cms.ScopedWorkCoordinatorHelper;
+import lombok.Lombok;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -16,61 +20,80 @@ import com.rfs.common.IndexMetadata;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.ShardMetadata;
 import com.rfs.common.SnapshotShardUnpacker;
+import org.apache.lucene.document.Document;
+import reactor.core.publisher.Flux;
 
+@Slf4j
 public class DocumentsRunner implements Runner {
-    private static final Logger logger = LogManager.getLogger(DocumentsRunner.class);
     public static final String ALL_INDEX_MANIFEST = "all_index_manifest";
 
-    IWorkCoordinator workCoordinator;
+    ScopedWorkCoordinatorHelper workCoordinator;
+    private final ShardMetadata.Factory shardMetadataFactory;
+    private final String snapshotName;
+    private final SnapshotShardUnpacker unpacker;
+    private final LuceneDocumentsReader reader;
+    private final DocumentReindexer reindexer;
     Instant expirationTime;
 
-    public DocumentsRunner(GlobalState globalState, IWorkCoordinator workCoordinator,
-                           CmsClient cmsClient, String snapshotName, IndexMetadata.Factory metadataFactory,
-                ShardMetadata.Factory shardMetadataFactory, SnapshotShardUnpacker unpacker, LuceneDocumentsReader reader,
-                DocumentReindexer reindexer) {
-        this.workCoordinator = workCoordinator;
-        setupDocumentWorkItemsIfNecessary(metadataFactory);
+    public DocumentsRunner(ScopedWorkCoordinatorHelper scopedWorkCoordinator,
+                           String snapshotName,
+                           ShardMetadata.Factory shardMetadataFactory,
+                           SnapshotShardUnpacker unpacker,
+                           LuceneDocumentsReader reader,
+                           DocumentReindexer reindexer) {
+        this.workCoordinator = scopedWorkCoordinator;
         //this.members = new DocumentsStep.SharedMembers(globalState, cmsClient, snapshotName, metadataFactory, shardMetadataFactory, unpacker, reader, reindexer);
+        this.shardMetadataFactory = shardMetadataFactory;
+        this.snapshotName = snapshotName;
+        this.unpacker = unpacker;
+        this.reader = reader;
+        this.reindexer = reindexer;
     }
 
     @Override
     public void runInternal() throws IOException {
-        var workItem = workCoordinator.acquireNextWorkItem(Duration.ofMinutes(10));
-        if (workItem == null) {
-            return;
-        }
-        this.expirationTime = workItem.getLeaseExpirationTime();
+        workCoordinator.ensurePhaseCompletion(wc -> {
+                    try {
+                        return wc.acquireNextWorkItem(Duration.ofMinutes(10));
+                    } catch (Exception e) {
+                        throw Lombok.sneakyThrow(e);
+                    }
+                },
+                new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<Void>() {
+                    @Override
+                    public Void onAlreadyCompleted() throws IOException {
+                        return null;
+                    }
 
+                    @Override
+                    public Void onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException {
+                        doDocumentsMigration(IndexAndShard.valueFromWorkItemString(workItem.getWorkItemId()));
+                        return null;
+                    }
+                });
     }
 
-    private void setupKill(IWorkCoordinator.WorkItemAndDuration workItem) {
+    private void doDocumentsMigration(IndexAndShard indexAndShard) throws IOException {
+        log.info("Migrating docs for " + indexAndShard);
+        ShardMetadata.Data shardMetadata =
+                shardMetadataFactory.fromRepo(snapshotName, indexAndShard.indexName, indexAndShard.shard);
+        unpacker.unpack(shardMetadata);
 
-    }
+        Flux<Document> documents = reader.readDocuments(shardMetadata.getIndexName(), shardMetadata.getShardId());
 
-    private void setupDocumentWorkItemsIfNecessary(IndexMetadata.Factory metadataFactory) {
-        try {
-            var workItem = workCoordinator.createOrUpdateLeaseForWorkItem(ALL_INDEX_MANIFEST, Duration.ofMinutes(5));
-            metadataFactory.fromRepo()
-            workCoordinator.completeWorkItem(ALL_INDEX_MANIFEST);
-        } catch (IWorkCoordinator.LeaseNotAcquiredException | IOException e) {
-
-        }
-    }
-
-    @Override
-    public String getPhaseName() {
-        return "Documents Migration";
-    }
-
-    @Override
-    public Logger getLogger() {
-        return logger;
+        final int finalShardId = shardMetadata.getShardId(); // Define in local context for the lambda
+        reindexer.reindex(shardMetadata.getIndexName(), documents)
+                .doOnError(error -> log.error("Error during reindexing: " + error))
+                .doOnSuccess(done -> log.info("Reindexing completed for Index " + shardMetadata.getIndexName() + ", Shard " + finalShardId))
+                // Wait for the reindexing to complete before proceeding
+                .block();
+        log.info("Docs migrated");
     }
 
     public static class DocumentsMigrationPhaseFailed extends Runner.PhaseFailed {
-        public DocumentsMigrationPhaseFailed(GlobalState.Phase phase, WorkerStep nextStep, Optional<CmsEntry.Base> cmsEntry, Exception e) {
+        public DocumentsMigrationPhaseFailed(GlobalState.Phase phase, WorkerStep nextStep,
+                                             Optional<CmsEntry.Base> cmsEntry, Exception e) {
             super("Documents Migration Phase failed", phase, cmsEntry, e);
         }
-    }  
-    
+    }
 }

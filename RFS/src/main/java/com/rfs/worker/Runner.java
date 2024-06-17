@@ -1,5 +1,7 @@
 package com.rfs.worker;
 
+import lombok.Lombok;
+import lombok.SneakyThrows;
 import org.apache.logging.log4j.Logger;
 
 import java.io.IOException;
@@ -10,19 +12,10 @@ import com.rfs.common.RfsException;
 
 public abstract interface Runner {
     abstract void runInternal() throws IOException;
-    abstract String getPhaseName();
-    abstract Logger getLogger();
 
+    @SneakyThrows
     default void run() {
-        try {
-            getLogger().info("Checking if work remains in the " + getPhaseName() +" Phase...");
-            runInternal();
-            getLogger().info(getPhaseName() + " Phase is complete");
-        } catch (Exception e) {
-            getLogger().error(getPhaseName() + " Phase failed w/ an exception ", e);
-
-            throw e;
-        }
+        runInternal();
     }
 
     public static class PhaseFailed extends RfsException {

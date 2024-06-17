@@ -46,16 +46,6 @@ public class MetadataRunner implements Runner {
         }        
     }
 
-    @Override
-    public String getPhaseName() {
-        return "Metadata Migration";
-    }
-
-    @Override
-    public Logger getLogger() {
-        return logger;
-    }
-
     public static class MetadataMigrationPhaseFailed extends Runner.PhaseFailed {
         public MetadataMigrationPhaseFailed(GlobalState.Phase phase, Optional<CmsEntry.Base> cmsEntry, Exception e) {
             super("Metadata Migration Phase failed", phase, cmsEntry, e);
