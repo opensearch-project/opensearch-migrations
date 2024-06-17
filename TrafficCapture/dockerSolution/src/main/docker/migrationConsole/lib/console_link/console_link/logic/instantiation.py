@@ -1,6 +1,6 @@
 import logging
 from console_link.models.cluster import Cluster
-from console_link.models.migration import OpenSearchIngestionMigration
+from lib.console_link.console_link.models.backfill_osi import OpenSearchIngestionMigration
 from console_link.models.metrics_source import MetricsSource, get_metrics_source
 import yaml
 from cerberus import Validator

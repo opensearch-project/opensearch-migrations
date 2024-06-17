@@ -1,7 +1,7 @@
 import pytest  # type: ignore
 import os
 from tests.utils import create_valid_cluster
-from console_link.models.migration import OpenSearchIngestionMigration
+from lib.console_link.console_link.models.backfill_osi import OpenSearchIngestionMigration
 
 # Define a valid cluster configuration
 valid_osi_migration_config = {

@@ -1,8 +1,8 @@
 from console_link.models.osi_utils import (create_pipeline_from_env, start_pipeline, stop_pipeline,
                                            OpenSearchIngestionMigrationProps)
 from console_link.models.cluster import Cluster
+from console_link.models.backfill_base import Migration
 from typing import Dict
-from enum import Enum
 from cerberus import Validator
 import boto3
 
@@ -52,28 +52,6 @@ OSI_SCHEMA = {
         }
     }
 }
-
-
-class MigrationType(str, Enum):
-    OSI_HISTORICAL_MIGRATION = "OSI_HISTORICAL_MIGRATION"
-
-
-class Migration:
-    """
-    A base migration manager.
-    """
-
-    def create(self):
-        raise NotImplementedError
-
-    def start(self):
-        raise NotImplementedError
-
-    def stop(self):
-        raise NotImplementedError
-
-    def get_status(self):
-        raise NotImplementedError
 
 
 class OpenSearchIngestionMigration(Migration):
