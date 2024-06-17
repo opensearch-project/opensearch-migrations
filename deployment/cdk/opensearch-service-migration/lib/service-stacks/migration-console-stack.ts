@@ -26,7 +26,6 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationConsoleEnableOSI: boolean,
     readonly migrationAPIEnabled?: boolean,
     readonly servicesYaml: ServicesYaml,
-    readonly sourceClusterEndpoint?: string,
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
@@ -140,7 +139,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ...props,
             parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
         });
-        const sourceClusterEndpoint = props.sourceClusterEndpoint ?? getMigrationStringParameterValue(this, {
+        const sourceClusterEndpoint = getMigrationStringParameterValue(this, {
             ...props,
             parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
         });

@@ -15,7 +15,6 @@ import {
 
 export interface ReindexFromSnapshotProps extends StackPropsExt {
     readonly vpc: IVpc,
-    readonly sourceEndpoint?: string,
     readonly fargateCpuArch: CpuArchitecture,
     readonly extraArgs?: string,
     readonly otelCollectorEnabled?: boolean
@@ -25,7 +24,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
 
     constructor(scope: Construct, id: string, props: ReindexFromSnapshotProps) {
         super(scope, id, props)
-        const sourceEndpoint = props.sourceEndpoint ?? getMigrationStringParameterValue(this, {
+        const sourceEndpoint = getMigrationStringParameterValue(this, {
             ...props,
             parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
         });

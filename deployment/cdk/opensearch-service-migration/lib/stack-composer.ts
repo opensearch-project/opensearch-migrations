@@ -202,7 +202,6 @@ export class StackComposer {
         const trafficReplayerUserAgentSuffix = this.getContextForType('trafficReplayerUserAgentSuffix', 'string', defaultValues, contextJSON)
         const trafficReplayerExtraArgs = this.getContextForType('trafficReplayerExtraArgs', 'string', defaultValues, contextJSON)
         const captureProxyServiceEnabled = this.getContextForType('captureProxyServiceEnabled', 'boolean', defaultValues, contextJSON)
-        const captureProxySourceEndpoint = this.getContextForType('captureProxySourceEndpoint', 'string', defaultValues, contextJSON)
         const targetClusterProxyServiceEnabled = this.getContextForType('targetClusterProxyServiceEnabled', 'boolean', defaultValues, contextJSON)
         const captureProxyExtraArgs = this.getContextForType('captureProxyExtraArgs', 'string', defaultValues, contextJSON)
         const elasticsearchServiceEnabled = this.getContextForType('elasticsearchServiceEnabled', 'boolean', defaultValues, contextJSON)
@@ -274,6 +273,8 @@ export class StackComposer {
                 albEnabled: albEnabled,
                 albAcmCertArn: albAcmCertArn,
                 elasticsearchServiceEnabled,
+                captureProxyESServiceEnabled,
+                sourceClusterEndpoint: sourceClusterEndpoint,
                 env: props.env
             })
             this.stacks.push(networkStack)
@@ -407,7 +408,6 @@ export class StackComposer {
             fetchMigrationStack = new FetchMigrationStack(scope, "fetchMigrationStack", {
                 vpc: networkStack.vpc,
                 dpPipelineTemplatePath: dpPipelineTemplatePath,
-                sourceEndpoint: sourceClusterEndpoint,
                 stackName: `OSMigrations-${stage}-${region}-FetchMigration`,
                 description: "This stack contains resources to assist migrating historical data to an OpenSearch Service domain",
                 stage: stage,
@@ -423,7 +423,6 @@ export class StackComposer {
         if (reindexFromSnapshotServiceEnabled && networkStack && migrationStack) {
             reindexFromSnapshotStack = new ReindexFromSnapshotStack(scope, "reindexFromSnapshotStack", {
                 vpc: networkStack.vpc,
-                sourceEndpoint: sourceClusterEndpoint,
                 extraArgs: reindexFromSnapshotExtraArgs,
                 stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
                 description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
@@ -499,9 +498,7 @@ export class StackComposer {
         if (captureProxyServiceEnabled && networkStack && migrationStack) {
             captureProxyStack = new CaptureProxyStack(scope, "capture-proxy", {
                 vpc: networkStack.vpc,
-                destinationConfig: (sourceClusterEndpoint) ? {
-                    endpoint: sourceClusterEndpoint,
-                } : {
+                destinationConfig: {
                     endpointMigrationSSMParameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
                 },
                 otelCollectorEnabled: otelCollectorEnabled,
@@ -554,7 +551,6 @@ export class StackComposer {
                 migrationConsoleEnableOSI: migrationConsoleEnableOSI,
                 migrationAPIEnabled: migrationAPIEnabled,
                 servicesYaml: servicesYaml,
-                sourceClusterEndpoint: sourceClusterEndpoint,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,
