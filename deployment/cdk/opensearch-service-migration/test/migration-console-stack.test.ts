@@ -81,7 +81,7 @@ test('Test that services yaml parameter is created', () => {
     const yamlFileContents = value['Fn::Join'][1].join('')
     expect(yamlFileContents).toContain('source_cluster')
     expect(yamlFileContents).toContain('target_cluster')
-    expect(yamlFileContents).toContain('metrics_source:\n  type: cloudwatch')
+    expect(yamlFileContents).toContain('metrics_source:\n  cloudwatch: null')
 
     // Validates that the file can be parsed as valid yaml and has the expected fields
     const parsedFromYaml = yaml.parse(yamlFileContents);
