@@ -1,11 +1,14 @@
 from typing import Any, Dict, Optional
 from enum import Enum
-import requests
-from requests.auth import HTTPBasicAuth
-from cerberus import Validator
 import logging
 import subprocess
 from console_link.models.schema_tools import contains_one_of
+
+import boto3
+from cerberus import Validator
+import requests
+import requests.auth
+from requests.auth import HTTPBasicAuth
 
 requests.packages.urllib3.disable_warnings()  # ignore: type
 
@@ -24,19 +27,18 @@ BASIC_AUTH_SCHEMA = {
     "schema": {
         "username": {
             "type": "string",
-            "required": False,
+            "required": True,
         },
         "password": {
             "type": "string",
             "required": False,
-            "excludes": ["aws_secret_arn"]
         },
-        "aws_secret_arn": {
+        "password_from_secret_arn": {
             "type": "string",
             "required": False,
-            "excludes": ["password"]
         }
     },
+    "check_with": contains_one_of({"password", "password_from_secret_arn"})
 }
 
 SIGV4_SCHEMA = {
@@ -86,6 +88,29 @@ class Cluster:
         elif 'sigv4' in config:
             self.auth_type = AuthMethod.SIGV4
 
+    def _get_basic_auth_password(self) -> str:
+        assert self.auth_type == AuthMethod.BASIC_AUTH
+        assert self.auth_details is not None  # for mypy's sake
+        if "password" in self.auth_details:
+            return self.auth_details["password"]
+        # Pull password from AWS Secrets Manager
+        assert "password_from_secret_arn" in self.auth_details
+        client = boto3.client('secretsmanager')
+        password = client.get_secret_value(self.auth_details["password_from_secret_arn"])
+        return password["SecretString"]
+
+    def _generate_auth_object(self) -> requests.auth.AuthBase | None:
+        if self.auth_type == AuthMethod.BASIC_AUTH:
+            assert self.auth_details is not None  # for mypy's sake
+            password = self._get_basic_auth_password()
+            return HTTPBasicAuth(
+                self.auth_details.get("username", None),
+                password
+            )
+        elif self.auth_type is AuthMethod.NO_AUTH:
+            return None
+        raise NotImplementedError(f"Auth type {self.auth_type} not implemented")
+
     def call_api(self, path, method: HttpMethod = HttpMethod.GET, data=None, headers=None,
                  timeout=None, session=None, raise_error=True, **kwargs) -> requests.Response:
         """
@@ -93,16 +118,8 @@ class Cluster:
         """
         if session is None:
             session = requests.Session()
-        if self.auth_type == AuthMethod.BASIC_AUTH:
-            assert self.auth_details is not None  # for mypy's sake
-            auth = HTTPBasicAuth(
-                self.auth_details.get("username", None),
-                self.auth_details.get("password", None)
-            )
-        elif self.auth_type is AuthMethod.NO_AUTH:
-            auth = None
-        else:
-            raise NotImplementedError(f"Auth type {self.auth_type} not implemented")
+        
+        auth = self._generate_auth_object()
 
         # Extract query parameters from kwargs
         params = kwargs.get('params', {})
