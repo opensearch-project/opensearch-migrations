@@ -10,9 +10,12 @@ RUN wget -O kafka/libs/msk-iam-auth.jar https://github.com/aws/aws-msk-iam-auth/
 WORKDIR /root
 
 # Add Traffic Replayer jars for running KafkaPrinter from this container
-COPY build/jars /root/kafka-tools/replayer-jars
+COPY staging/trafficReplayer/lib /root/kafka-tools/replayer-jars
 RUN printf "#!/bin/sh\njava -cp `echo /root/kafka-tools/replayer-jars/*.jar | tr \   :` \"\$@\" " > /root/kafka-tools/runJavaWithClasspath.sh
 RUN chmod +x /root/kafka-tools/runJavaWithClasspath.sh
+
+COPY staging/CreateSnapshot /root/createSnapshot
+COPY staging/MetadataMigration /root/metadataMigration
 
 COPY osiPipelineTemplate.yaml /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws

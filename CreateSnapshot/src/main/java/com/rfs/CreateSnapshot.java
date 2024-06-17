@@ -3,6 +3,7 @@ package com.rfs;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 
+import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
@@ -18,9 +19,8 @@ import com.rfs.common.S3SnapshotCreator;
 import com.rfs.worker.GlobalState;
 import com.rfs.worker.SnapshotRunner;
 
-public class RfsCreateSnapshot {
-    private static final Logger logger = LogManager.getLogger(RfsCreateSnapshot.class);
-
+@Slf4j
+public class CreateSnapshot {
     public static class Args {
         @Parameter(names = {"--snapshot-name"}, description = "The name of the snapshot to migrate", required = true)
         public String snapshotName;
@@ -48,9 +48,6 @@ public class RfsCreateSnapshot {
 
         @Parameter(names = {"--target-password"}, description = "Optional.  The target password; if not provided, will assume no auth on target", required = false)
         public String targetPass = null;
-
-        @Parameter(names = {"--log-level"}, description = "What log level you want.  Default: 'info'", required = false, converter = Logging.ArgsConverter.class)
-        public Level logLevel = Level.INFO;
     }
 
     public static void main(String[] args) throws Exception {
@@ -70,15 +67,12 @@ public class RfsCreateSnapshot {
         final String targetHost = arguments.targetHost;
         final String targetUser = arguments.targetUser;
         final String targetPass = arguments.targetPass;
-        final Level logLevel = arguments.logLevel;
-
-        Logging.setLevel(logLevel);
 
         final ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
         final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
         TryHandlePhaseFailure.executeWithTryCatch(() -> {
-            logger.info("Running RfsWorker");
+            log.info("Running RfsWorker");
             GlobalState globalState = GlobalState.getInstance();
             OpenSearchClient sourceClient = new OpenSearchClient(sourceConnection);
             OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
