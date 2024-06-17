@@ -1,2 +1,16 @@
-def defaultStructure = load 'defaultStructure.groovy'
-defaultStructure.call()
+
+pipeline {
+    agent any
+
+    stages {
+        stage('Load Pipeline') {
+            steps {
+                script {
+                    // Load and execute the pipeline from the helper script
+                    def defaultStructure = load 'defaultStructure.groovy'
+                    defaultStructure.call()
+                }
+            }
+        }
+    }
+}
