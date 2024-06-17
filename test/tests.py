@@ -192,6 +192,7 @@ class E2ETests(unittest.TestCase):
                 # We currently do not emit captureProxy metrics from a non-standalone proxy, which is the scenario
                 # tested in our e2e tests. Therefore, we don't want to assert metrics exist in this situation. We
                 # should remove this clause as soon as we start testing the standalone proxy scenario.
+                logger.warning("Skipping metric verification for captureProxy metrics in a cloud deployment.")
                 continue
             for expected_metric in expected_comp_metrics:
                 if self.deployment_type == 'cloud':

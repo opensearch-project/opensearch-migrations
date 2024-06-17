@@ -20,6 +20,9 @@ export class ServicesYaml {
             source_cluster: this.source_cluster,
             target_cluster: this.target_cluster,
             metrics_source: this.metrics_source
+        },
+        {
+            'nullStr': ''
         })
     }
 }

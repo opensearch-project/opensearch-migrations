@@ -5,7 +5,7 @@ test('Test default servicesYaml can be stringified', () => {
     expect(servicesYaml.metrics_source).toBeDefined();
     expect(Object.keys(servicesYaml.metrics_source)).toContain("cloudwatch");
     const yaml = servicesYaml.stringify();
-    expect(yaml).toBe("metrics_source:\n  cloudwatch: null\n");
+    expect(yaml).toBe("metrics_source:\n  cloudwatch:\n");
 })
 
 test('Test servicesYaml with cluster can be stringified', () => {
@@ -15,7 +15,7 @@ test('Test servicesYaml with cluster can be stringified', () => {
 
     expect(servicesYaml.target_cluster).toBeDefined();
     const yaml = servicesYaml.stringify();
-    expect(yaml).toBe(`target_cluster:\n  endpoint: ${cluster.endpoint}\n  no_auth: ""\nmetrics_source:\n  cloudwatch: null\n`);
+    expect(yaml).toBe(`target_cluster:\n  endpoint: ${cluster.endpoint}\n  no_auth: ""\nmetrics_source:\n  cloudwatch:\n`);
 })
 
 test('Test servicesYaml with cluster can be stringified', () => {
@@ -31,5 +31,5 @@ test('Test servicesYaml with cluster can be stringified', () => {
     expect(servicesYaml.source_cluster).toBeDefined();
     const yaml = servicesYaml.stringify();
     const sourceClusterYaml = `source_cluster:\n  endpoint: ${sourceCluster.endpoint}\n  basic_auth:\n    user: ${sourceClusterUser}\n    password: ${sourceClusterPassword}\n`
-    expect(yaml).toBe(`${sourceClusterYaml}target_cluster:\n  endpoint: ${targetCluster.endpoint}\n  no_auth: ""\nmetrics_source:\n  cloudwatch: null\n`);
+    expect(yaml).toBe(`${sourceClusterYaml}target_cluster:\n  endpoint: ${targetCluster.endpoint}\n  no_auth: ""\nmetrics_source:\n  cloudwatch:\n`);
 })
