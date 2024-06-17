@@ -188,6 +188,11 @@ class E2ETests(unittest.TestCase):
         logger.debug(f"Waiting {wait_before_check_seconds} before checking for metrics.")
         time.sleep(wait_before_check_seconds)
         for component, expected_comp_metrics in expected_metrics.items():
+            if component == "captureProxy" and self.deployment_type == "cloud":
+                # We currently do not emit captureProxy metrics from a non-standalone proxy, which is the scenario
+                # tested in our e2e tests. Therefore, we don't want to assert metrics exist in this situation. We
+                # should remove this clause as soon as we start testing the standalone proxy scenario.
+                continue
             for expected_metric in expected_comp_metrics:
                 if self.deployment_type == 'cloud':
                     expected_metric = expected_metric.split('_', 1)[0]
