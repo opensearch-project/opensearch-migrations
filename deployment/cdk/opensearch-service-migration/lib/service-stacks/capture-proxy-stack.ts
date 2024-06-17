@@ -29,12 +29,7 @@ type CustomSSMDestinationConfig = {
     readonly securityGroupCustomSSMParameter?: string,
 }
 
-type DirectStringDestinationConfig = {
-    readonly endpoint: string,
-    readonly securityGroupId?: string,
-}
-
-type DestinationConfig = MigrationSSMDestinationConfig | CustomSSMDestinationConfig | DirectStringDestinationConfig;
+type DestinationConfig = MigrationSSMDestinationConfig | CustomSSMDestinationConfig;
 
 function isMigrationDestinationConfig(config: DestinationConfig): config is MigrationSSMDestinationConfig {
     return (config as MigrationSSMDestinationConfig).endpointMigrationSSMParameter !== undefined;
@@ -42,10 +37,6 @@ function isMigrationDestinationConfig(config: DestinationConfig): config is Migr
 
 function isCustomDestinationConfig(config: DestinationConfig): config is CustomSSMDestinationConfig {
     return (config as CustomSSMDestinationConfig).endpointCustomSSMParameter !== undefined;
-}
-
-function isDirectStringDestinationConfig(config: DestinationConfig): config is DirectStringDestinationConfig {
-    return (config as DirectStringDestinationConfig).endpoint !== undefined;
 }
 
 function getDestinationSecurityGroup(scope: Construct, config: DestinationConfig, props: CaptureProxyProps): ISecurityGroup | null {
@@ -62,8 +53,6 @@ function getDestinationSecurityGroup(scope: Construct, config: DestinationConfig
         securityGroupId = config.securityGroupCustomSSMParameter 
             ? getCustomStringParameterValue(scope, config.securityGroupCustomSSMParameter) 
             : null;
-    } else if (isDirectStringDestinationConfig(config)) {
-        securityGroupId = config.securityGroupId || null;
     } else {
         throw new Error('Invalid DestinationConfig provided.');
     }
@@ -79,8 +68,6 @@ function getDestinationEndpoint(scope: Construct, config: DestinationConfig, pro
         });
     } else if (isCustomDestinationConfig(config)) {
         return getCustomStringParameterValue(scope, config.endpointCustomSSMParameter);
-    } else if (isDirectStringDestinationConfig(config)) {
-        return config.endpoint;
     } else {
         throw new Error('Invalid DestinationConfig provided.');
     }

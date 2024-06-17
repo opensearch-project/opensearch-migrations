@@ -25,7 +25,6 @@ import {
 export interface FetchMigrationProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly dpPipelineTemplatePath: string,
-    readonly sourceEndpoint?: string,
     readonly fargateCpuArch: CpuArchitecture
 }
 
@@ -33,7 +32,7 @@ export class FetchMigrationStack extends Stack {
 
     constructor(scope: Construct, id: string, props: FetchMigrationProps) {
         super(scope, id, props);
-        const sourceEndpoint = props.sourceEndpoint ?? getMigrationStringParameterValue(this, {
+        const sourceEndpoint = getMigrationStringParameterValue(this, {
             ...props,
             parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
         });

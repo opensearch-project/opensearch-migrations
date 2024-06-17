@@ -11,12 +11,14 @@ import { ARecord, HostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
 import { LoadBalancerTarget } from "aws-cdk-lib/aws-route53-targets";
 import { AcmCertificateImporter } from "./service-stacks/acm-cert-importer";
 import { Stack } from "aws-cdk-lib";
-import { createMigrationStringParameter, getMigrationStringParameterValue, MigrationSSMParameter } from "./common-utilities";
+import { createMigrationStringParameter, MigrationSSMParameter } from "./common-utilities";
 
 export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string;
     readonly vpcAZCount?: number;
     readonly elasticsearchServiceEnabled?: boolean;
+    readonly captureProxyESServiceEnabled?: boolean;
+    readonly sourceClusterEndpoint?: string;
     readonly targetClusterEndpoint?: string;
     readonly albEnabled?: boolean;
     readonly albAcmCertArn?: string;
@@ -151,14 +153,10 @@ export class NetworkStack extends Stack {
             this.albSourceProxyTG = this.createSecureTargetGroup('ALBSourceProxy', props.stage, 9200, this.vpc);
             this.albTargetProxyTG = this.createSecureTargetGroup('ALBTargetProxy', props.stage, 9200, this.vpc);
 
-            if (props.elasticsearchServiceEnabled) {
+            if (props.elasticsearchServiceEnabled || props.captureProxyESServiceEnabled) {
                 this.albSourceClusterTG = this.createSecureTargetGroup('ALBSourceCluster', props.stage, 9200, this.vpc);
                 this.createSecureListener('ALBSourceClusterListener', 19200,
                     alb, cert, this.albSourceClusterTG);
-                createMigrationStringParameter(this, alb.loadBalancerDnsName.concat(`:19200`), {
-                    ...props,
-                    parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
-                });
             }
 
             const albMigrationListener = this.createSecureListener('ALBMigrationListener', 9200,
@@ -171,6 +169,32 @@ export class NetworkStack extends Stack {
             });
         }
 
+        // Create Source SSM Parameter
+        if (props.sourceClusterEndpoint) {
+            createMigrationStringParameter(this, props.sourceClusterEndpoint, {
+                ...props,
+                parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
+            });
+        } else if (props.captureProxyESServiceEnabled || props.elasticsearchServiceEnabled) {
+            if (props.albEnabled) {
+                const albSourceClusterEndpoint = `https://alb.migration.${props.stage}.local:19200`;
+                createMigrationStringParameter(this, albSourceClusterEndpoint, {
+                    ...props,
+                    parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
+                });
+            } else {
+                const serviceDiscoveryServiceClusterEndpoint = props.captureProxyESServiceEnabled
+                    ? `https://capture-proxy-es.migration.${props.stage}.local:19200`
+                    : `https://elasticsearch.migration.${props.stage}.local:9200`;
+                createMigrationStringParameter(this, serviceDiscoveryServiceClusterEndpoint, {
+                    ...props,
+                    parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
+                });
+            }
+        } else {
+            throw new Error(`Capture Proxy ESService, Elasticsearch Service, or SourceClusterEndpoint must be enabled`);
+        }
+        
         if (!props.addOnMigrationDeployId) {
 
 

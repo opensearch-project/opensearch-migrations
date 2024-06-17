@@ -41,7 +41,8 @@ test('Test primary context options are mapped with standard data type', () => {
         vpcSubnetIds: ["subnet-123456789abcdefgh", "subnet-223456789abcdefgh"],
         vpcSecurityGroupIds: ["sg-123456789abcdefgh", "sg-223456789abcdefgh"],
         domainAZCount: 3,
-        domainRemovalPolicy: "DESTROY"
+        domainRemovalPolicy: "DESTROY",
+        sourceClusterEndpoint: "https://test-cluster",
     }
 
     const openSearchStacks = createStackComposer(contextOptions)
@@ -85,7 +86,8 @@ test('Test primary context options are mapped with only string data type', () =>
         vpcSubnetIds: "[\"subnet-123456789abcdefgh\", \"subnet-223456789abcdefgh\"]",
         vpcSecurityGroupIds: "[\"sg-123456789abcdefgh\", \"sg-223456789abcdefgh\"]",
         domainAZCount: "3",
-        domainRemovalPolicy: "DESTROY"
+        domainRemovalPolicy: "DESTROY",
+        sourceClusterEndpoint: "https://test-cluster",
     }
 
     const openSearchStacks = createStackComposer(contextOptions)
@@ -110,6 +112,7 @@ test('Test alternate context options are mapped with standard data type', () => 
         enforceHTTPS: true,
         encryptionAtRestEnabled: true,
         nodeToNodeEncryptionEnabled: true,
+        sourceClusterEndpoint: "https://test-cluster",
     }
 
     const openSearchStacks = createStackComposer(contextOptions)
@@ -129,6 +132,7 @@ test('Test alternate context options are mapped with only string data type', () 
         enforceHTTPS: "true",
         encryptionAtRestEnabled: "true",
         nodeToNodeEncryptionEnabled: "true",
+        sourceClusterEndpoint: "https://test-cluster",
     }
 
     const openSearchStacks = createStackComposer(contextOptions)

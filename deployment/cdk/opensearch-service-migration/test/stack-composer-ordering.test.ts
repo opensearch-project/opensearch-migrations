@@ -108,7 +108,8 @@ test('Test no migration services get deployed when disabled', () => {
         "kafkaBrokerServiceEnabled": false,
         "otelCollectorEnabled": false,
         "osContainerServiceEnabled": false,
-        "reindexFromSnapshotServiceEnabled": false
+        "reindexFromSnapshotServiceEnabled": false,
+        "sourceClusterEndpoint": "https://test-cluster",
     }
 
     const stacks = createStackComposer(contextOptions)
