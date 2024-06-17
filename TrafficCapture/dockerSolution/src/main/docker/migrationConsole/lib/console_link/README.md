@@ -76,6 +76,22 @@ Exactly one of the following blocks must be present:
 
 Currently, the only supported backfill migration type is `opensearch_ingestion`.
 
+```yaml
+backfill:
+    reindex_from_snapshot:
+        docker:
+```
+
+```yaml
+backfill:
+    reindex_from_snapshot:
+        ecs:
+          service_name: migration-aws-integ-reindex-from-snapshot
+          region: us-east-1
+        snapshot_repo: "abc"
+        snapshot_name: "def"
+```
+
 #### OpenSearch Ingestion
 - `pipeline_role_arn`: required, IAM pipeline role containing permissions to read from source and read/write to target, more details [here](https://docs.aws.amazon.com/opensearch-service/latest/developerguide/pipeline-security-overview.html#pipeline-security-sink)
 - `vpc_subnet_ids`: required, VPC subnets to place the OSI pipeline in

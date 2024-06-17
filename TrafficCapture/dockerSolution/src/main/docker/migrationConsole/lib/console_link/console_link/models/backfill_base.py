@@ -18,12 +18,13 @@ SCHEMA = {
 
 class Backfill:
     """
-    A base migration manager.
+    Interface for backfilling data from a source to target cluster.
     """
     def __init__(self, config: Dict) -> None:
         v = Validator(SCHEMA)
-        if not v.validate({"backfill": config}):
-            raise ValueError("Invalid config file for Backfill", v.errors)
+        self.config = config
+        if not v.validate({"backfill": self.config}):
+            raise ValueError("Invalid config file for backfill", v.errors)
 
     def create(self):
         raise NotImplementedError
@@ -36,3 +37,9 @@ class Backfill:
 
     def get_status(self):
         raise NotImplementedError
+
+    def scale(self, units: int):
+        raise NotImplementedError
+
+    def describe(self):
+        return self.config

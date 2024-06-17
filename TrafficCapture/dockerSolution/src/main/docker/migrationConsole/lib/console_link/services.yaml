@@ -13,5 +13,6 @@ target_cluster:
 metrics_source:
   prometheus:
     endpoint: "http://prometheus:9090"
-replayer:
-  docker:
+backfill:
+    reindex_from_snapshot:
+        docker:

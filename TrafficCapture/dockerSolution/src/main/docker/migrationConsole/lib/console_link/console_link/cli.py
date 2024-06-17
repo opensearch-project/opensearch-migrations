@@ -3,6 +3,7 @@ from pprint import pprint
 import click
 import console_link.logic.clusters as logic_clusters
 import console_link.logic.metrics as logic_metrics
+import console_link.logic.backfill as logic_backfill
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
 import logging
@@ -96,28 +97,35 @@ def backfill_group(ctx):
         raise ValueError("Backfill migration is not set")
 
 
-@backfill_group.command(name="create-migration")
+@backfill_group.command(name="describe")
+@click.pass_obj
+def describe_backfill_cmd(ctx):
+    click.echo(logic_backfill.describe(ctx.env.backfill, as_json=ctx.json))
+
+
+@backfill_group.command(name="create")
 @click.option('--pipeline-template-file', default='/root/osiPipelineTemplate.yaml', help='Path to config file')
 @click.option("--print-config-only", is_flag=True, show_default=True, default=False,
               help="Flag to only print populated pipeline config when executed")
 @click.pass_obj
-def create_migration_backfill_cmd(ctx, pipeline_template_file, print_config_only):
+def create_backfill_cmd(ctx, pipeline_template_file, print_config_only):
     """Create migration action"""
-    ctx.env.backfill.create(pipeline_template_path=pipeline_template_file, print_config_only=print_config_only)
+    click.echo(logic_backfill.create(ctx.env.backfill, pipeline_template_path=pipeline_template_file,
+                                     print_config_only=print_config_only))
 
 
-@backfill_group.command(name="start-migration")
+@backfill_group.command(name="start")
 @click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
 @click.pass_obj
-def start_migration_backfill_cmd(ctx, pipeline_name):
+def start_backfill_cmd(ctx, pipeline_name):
     """Start migration action"""
     ctx.env.backfill.start(pipeline_name=pipeline_name)
 
 
-@backfill_group.command(name="stop-migration")
+@backfill_group.command(name="stop")
 @click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
 @click.pass_obj
-def stop_migration_backfill_cmd(ctx, pipeline_name):
+def stop_backfill_cmd(ctx, pipeline_name):
     """Stop migration action"""
     ctx.env.backfill.stop(pipeline_name=pipeline_name)
 
