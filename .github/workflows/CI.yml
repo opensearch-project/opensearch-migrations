@@ -148,10 +148,6 @@ jobs:
           pytest tests.py --unique_id="testindex"
 
   cdk-tests:
-    strategy:
-      matrix:
-        node-version: []
-        os: []
     runs-on: ubuntu-latest
     defaults:
       run:
