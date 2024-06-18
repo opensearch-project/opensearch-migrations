@@ -1,0 +1,18 @@
+source_cluster:
+  endpoint: "https://capture-proxy-es:9200"
+  allow_insecure: true
+  basic_auth:
+      username: "admin"
+      password: "admin"
+target_cluster:
+  endpoint: "https://opensearchtarget:9200"
+  allow_insecure: true
+  basic_auth:
+      username: "admin"
+      password: "myStrongPassword123!"
+metrics_source:
+  prometheus:
+    endpoint: "http://prometheus:9090"
+backfill:
+    reindex_from_snapshot:
+        docker:
