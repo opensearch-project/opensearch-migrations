@@ -269,13 +269,11 @@ public class ReindexFromSnapshot {
                 OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
                 if (sourceVersion == ClusterVersion.ES_6_8) {
                     GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, templateWhitelist, componentTemplateWhitelist, List.of());
-                    ObjectNode root = globalMetadata.toObjectNode();
-                    ObjectNode transformedRoot = transformer.transformGlobalMetadata(root);
+                    ObjectNode transformedRoot = transformer.transformGlobalMetadata(globalMetadata);
                     metadataCreator.create(transformedRoot);
                 } else if (sourceVersion == ClusterVersion.ES_7_10) {
                     GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateWhitelist, templateWhitelist);
-                    ObjectNode root = globalMetadata.toObjectNode();
-                    ObjectNode transformedRoot = transformer.transformGlobalMetadata(root);
+                    ObjectNode transformedRoot = transformer.transformGlobalMetadata(globalMetadata);
                     metadataCreator.create(transformedRoot);
                 }
             }
@@ -310,8 +308,7 @@ public class ReindexFromSnapshot {
                     String reindexName = indexMetadata.getName() + indexSuffix;
                     logger.info("Recreating index " + indexMetadata.getName() + " as " + reindexName + " on target...");
 
-                    ObjectNode root = indexMetadata.toObjectNode();
-                    ObjectNode transformedRoot = transformer.transformIndexMetadata(root);
+                    ObjectNode transformedRoot = transformer.transformIndexMetadata(indexMetadata);
                     indexCreator.create(transformedRoot, reindexName, indexMetadata.getId());
                 }
             }

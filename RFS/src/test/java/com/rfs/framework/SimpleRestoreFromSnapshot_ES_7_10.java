@@ -45,6 +45,7 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
         
         for (final IndexMetadata.Data index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
+                System.out.println(">> " + index.toObjectNode().toPrettyString());
                 var shardMetadata = new ShardMetadataFactory_ES_7_10(snapShotProvider).fromRepo(snapshotName, index.getName(), shardId);
                 DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
                 SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(repoAccessor, unpackedShardDataDir, shardMetadata, Integer.MAX_VALUE);

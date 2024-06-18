@@ -325,8 +325,7 @@ public class IndexStep {
                     logger.info("Migrating index: " + workItem.name);
                     IndexMetadata.Data indexMetadata = members.metadataFactory.fromRepo(members.snapshotName, workItem.name);
 
-                    ObjectNode root = indexMetadata.toObjectNode();
-                    ObjectNode transformedRoot = members.transformer.transformIndexMetadata(root);
+                    ObjectNode transformedRoot = members.transformer.transformIndexMetadata(indexMetadata);
 
                     members.indexCreator.create(transformedRoot, workItem.name, indexMetadata.getId()).ifPresentOrElse(
                         value -> logger.info("Index " + workItem.name + " created successfully"),

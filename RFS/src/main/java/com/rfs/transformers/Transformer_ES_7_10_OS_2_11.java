@@ -5,6 +5,8 @@ import org.apache.logging.log4j.Logger;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.rfs.common.GlobalMetadata;
+import com.rfs.common.IndexMetadata;
 
 public class Transformer_ES_7_10_OS_2_11 implements Transformer {
     private static final Logger logger = LogManager.getLogger(Transformer_ES_7_10_OS_2_11.class);
@@ -16,8 +18,8 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
     }
 
     @Override
-    public ObjectNode transformGlobalMetadata(ObjectNode root){
-        ObjectNode newRoot = mapper.createObjectNode();
+    public ObjectNode transformGlobalMetadata(GlobalMetadata.Data metaData){
+        ObjectNode root = metaData.toObjectNode();
 
         // Transform the legacy templates
         if (root.get("templates") != null) {
@@ -31,7 +33,7 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
                 logger.debug("Transformed template: " + template.toString());
                 templatesRoot.set(templateName, template);
             });
-            newRoot.set("templates", templatesRoot);
+            root.set("templates", templatesRoot);
         }
 
         // Transform the index templates
@@ -53,7 +55,7 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
                 logger.debug("Transformed template: " + template.toString());
                 indexTemplateValuesRoot.set(templateName, template);
             });
-            newRoot.set("index_template", indexTemplatesRoot);
+            root.set("index_template", indexTemplatesRoot);
         }
 
         // Transform the component templates
@@ -74,15 +76,16 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
                 logger.debug("Transformed template: " + template.toString());
                 componentTemplateValuesRoot.set(templateName, template);
             });
-            newRoot.set("component_template", componentTemplatesRoot);
+            root.set("component_template", componentTemplatesRoot);
         }
 
-        return newRoot;
+        return root;
     }
 
     @Override
-    public ObjectNode transformIndexMetadata(ObjectNode root){
-        ObjectNode newRoot = root.deepCopy();
+    public ObjectNode transformIndexMetadata(IndexMetadata.Data indexData){
+        
+        ObjectNode newRoot = indexData.toObjectNode().deepCopy();
 
         TransformFunctions.removeIntermediateMappingsLevels(newRoot);
 
@@ -90,7 +93,7 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
         TransformFunctions.removeIntermediateIndexSettingsLevel(newRoot); // run before fixNumberOfReplicas
         TransformFunctions.fixReplicasForDimensionality(newRoot, awarenessAttributeDimensionality);
 
-        logger.debug("Original Object: " + root.toString());
+        logger.debug("Original Object: " + indexData.toObjectNode().toString());
         logger.debug("Transformed Object: " + newRoot.toString());
         return newRoot;
     }

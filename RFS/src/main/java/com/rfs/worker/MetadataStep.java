@@ -218,8 +218,7 @@ public class MetadataStep {
 
             logger.info("Migrating the Templates...");
             GlobalMetadata.Data globalMetadata = members.metadataFactory.fromRepo(members.snapshotName);
-            ObjectNode root = globalMetadata.toObjectNode();
-            ObjectNode transformedRoot = members.transformer.transformGlobalMetadata(root);
+            ObjectNode transformedRoot = members.transformer.transformGlobalMetadata(globalMetadata);
             members.metadataCreator.create(transformedRoot);
             logger.info("Templates migration complete");
 
