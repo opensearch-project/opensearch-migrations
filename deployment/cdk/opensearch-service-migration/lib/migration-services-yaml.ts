@@ -2,13 +2,12 @@ import * as yaml from 'yaml';
 
 export class ClusterYaml {
     endpoint: string = '';
-    no_auth?: string;
-    basic_auth?: object;
+    no_auth?: string | null;
+    basic_auth?: object | null;
 }
 
 export class MetricsSourceYaml {
-    type: string = 'cloudwatch';
-    region?: string;
+    cloudwatch? : object | null = null;
 }
 
 export class ServicesYaml {
@@ -21,6 +20,9 @@ export class ServicesYaml {
             source_cluster: this.source_cluster,
             target_cluster: this.target_cluster,
             metrics_source: this.metrics_source
+        },
+        {
+            'nullStr': ''
         })
     }
 }

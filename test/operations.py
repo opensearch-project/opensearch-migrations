@@ -3,6 +3,11 @@ import random
 import string
 import json
 from requests import Session
+import shlex
+import subprocess
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def create_index(endpoint: str, index_name: str, auth, verify_ssl: bool = False, session: Session = Session()):
@@ -67,3 +72,31 @@ def get_document(endpoint: str, index_name: str, doc_id: str, auth,
     response = session.get(url, headers=headers, auth=auth, verify=verify_ssl)
 
     return response
+
+
+class ContainerNotFoundError(Exception):
+    def __init__(self, container_filter):
+        super().__init__(f"No containers matching the filter '{container_filter}' were found.")
+
+
+def run_migration_console_command(deployment_type: str, command: str):
+    if deployment_type == "local":
+        filter_criteria = 'name=\"migration-console\"'
+        cmd = f'docker ps --format=\"{{{{.ID}}}}\" --filter {filter_criteria}'
+
+        get_container_process = subprocess.run(shlex.split(cmd), stdout=subprocess.PIPE, text=True)
+        container_id = get_container_process.stdout.strip().replace('"', '')
+
+        if container_id:
+            cmd_exec = f"docker exec {container_id} bash -c '{command}'"
+            logger.warning(f"Running command: {cmd_exec} on container {container_id}")
+            process = subprocess.run(cmd_exec, shell=True, capture_output=True, text=True)
+            return process.returncode, process.stdout, process.stderr
+        else:
+            raise ContainerNotFoundError(filter_criteria)
+
+    else:
+        # In a cloud deployment case, we run the e2e tests directly on the migration console, so it's just a local call
+        logger.warning(f"Running command: {command} locally")
+        process = subprocess.run(command, shell=True, capture_output=True)
+        return process.returncode, process.stdout, process.stderr

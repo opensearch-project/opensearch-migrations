@@ -130,7 +130,7 @@ class CloudwatchMetricsSource(MetricsSource):
     def __init__(self, config: Dict) -> None:
         super().__init__(config)
         logger.info(f"Initializing CloudwatchMetricsSource from config {config}")
-        if "aws_region" in config["cloudwatch"]:
+        if type(config["cloudwatch"]) is dict and "aws_region" in config["cloudwatch"]:
             self.aws_region = config["cloudwatch"]["aws_region"]
             self.boto_config = botocore.config.Config(region_name=self.aws_region)
         else:
