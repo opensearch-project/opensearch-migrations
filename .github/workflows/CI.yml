@@ -30,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link
+        working-directory: ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
