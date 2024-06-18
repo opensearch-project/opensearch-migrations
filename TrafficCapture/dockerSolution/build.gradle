@@ -37,9 +37,12 @@ dockerFilesForExternalServices.each { projectName, dockerImageName ->
     def escapedProjectName = projectName;
     task("buildDockerImage_${escapedProjectName}", type: DockerBuildImage) {
         if (escapedProjectName == "migrationConsole") {
-            def destDir = "src/main/docker/${escapedProjectName}/build/jars"
-            CommonUtils.copyArtifactFromProjectToProjectsDockerStaging(project as Project,
-                    project(":TrafficCapture:trafficReplayer"), projectName, destDir)
+            copyMigrationConsoleArtifactsFromProjectsToProjectsDockerStaging(project as Project,
+                    List.of(project(":TrafficCapture:trafficReplayer"),
+                            project(":CreateSnapshot"),
+                            project(":MetadataMigration"),
+                    ), projectName, "src/main/docker/${escapedProjectName}")
+
             dependsOn "copyArtifact_${escapedProjectName}"
             dependsOn "buildDockerImage_elasticsearchTestConsole"
         }
@@ -47,6 +50,33 @@ dockerFilesForExternalServices.each { projectName, dockerImageName ->
         images.add("migrations/${dockerImageName}:$hash")
         images.add("migrations/${dockerImageName}:latest")
         inputDir = project.file("src/main/docker/${projectName}")
+    }
+}
+
+
+static def copyMigrationConsoleArtifactsFromProjectsToProjectsDockerStaging(Project dockerBuildProject,
+                                                                            List<Project> sourceArtifactProjects,
+                                                                            String destProjectName, String destDir) {
+    // Create the overarching task
+    def parentCopyTask = dockerBuildProject.tasks.create("copyArtifact_${destProjectName}")
+
+    sourceArtifactProjects.each { sourceArtifactProject ->
+        def applicationDestDir = "${destDir}/staging/${sourceArtifactProject.name}/";
+        def libCopyTask = dockerBuildProject.tasks.create("copyLibArtifacts_${destProjectName}_${sourceArtifactProject.name}", Sync) {
+            from { sourceArtifactProject.configurations.findByName("runtimeClasspath").files }
+            from { sourceArtifactProject.tasks.getByName('jar') }
+            into "${applicationDestDir}/lib"
+        }
+        def binCopyTask = dockerBuildProject.tasks.create("copyBinArtifacts_${destProjectName}_${sourceArtifactProject.name}", Sync) {
+            from { sourceArtifactProject.tasks.getByName('startScripts').outputs.files }
+            into "${applicationDestDir}/bin"
+        }
+        libCopyTask.dependsOn(sourceArtifactProject.tasks.named("assemble"))
+        binCopyTask.dependsOn(sourceArtifactProject.tasks.named("assemble"))
+
+        // Make the parent task depend on this individual task
+        parentCopyTask.dependsOn(libCopyTask)
+        parentCopyTask.dependsOn(binCopyTask)
     }
 }
 
