@@ -1,0 +1,64 @@
+flowchart TD
+    subgraph Original
+        direction LR
+        A1[User Traffic] --> B1[Source Cluster]
+        A1 -.-> MA1
+        MA1 -.-> B1
+        MA1 -.-> F1[Target Cluster]
+
+        subgraph MA1[Migration Assistant]
+        end
+    end
+
+    subgraph CaptureReplay
+        direction LR
+        A2[User Traffic] -.-> B2
+        A2[User Traffic] --> MA2
+        MA2 -->|Live Traffic| B2[Source Cluster]
+        
+        subgraph MA2[Migration Assistant]
+        end
+        MA2 -->|Saved Traffic| F2
+    end
+
+    subgraph Cutover
+        direction LR
+        A3[User Traffic] -.-> B3
+        A3[User Traffic] --> MA3
+        MA3 -.-> B3[Source Cluster]
+        
+        subgraph MA3[Migration Assistant]
+        end
+        MA3 --> F3
+    end
+
+    Original ~~~ CaptureReplay ~~~ Cutover
+
+    subgraph Legend
+        direction TB
+        START[" "]:::hidden -->|Active| END1[" "]:::hidden
+        START2[" "]:::hidden -.->|Inactive| END2[" "]:::hidden
+    end
+
+    linkStyle default stroke-width:2px,fill:none,stroke:black;
+
+    linkStyle 0 stroke:green;
+    linkStyle 1 stroke:red;
+    linkStyle 2 stroke:red;
+    linkStyle 3 stroke:red;
+
+    linkStyle 4 stroke:red;
+    linkStyle 5 stroke:green;
+    linkStyle 6 stroke:green;
+    linkStyle 7 stroke:green;
+
+    linkStyle 8 stroke:red;
+    linkStyle 9 stroke:green;
+    linkStyle 10 stroke:red;
+    linkStyle 11 stroke:green;
+
+    linkStyle 12 stroke:hidden;
+    linkStyle 13 stroke:hidden;
+
+    linkStyle 14 stroke:green;
+    linkStyle 15 stroke:red;
