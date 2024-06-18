@@ -38,6 +38,8 @@ jobs:
       run:
         working-directory: ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link
     steps:
+      - run: pwd
+      - run: ls -al
       - name: Install Dependencies for Console Library and Tests
         run: |
           python -m pip install . -r ./tests/requirements.txt
@@ -66,6 +68,13 @@ jobs:
         with:
           java-version: '11'
           distribution: 'corretto'
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.0.2
+          gradle-home-cache-cleanup: true
+          cache-read-only: false
 
       - name: Generate Cache Key from Dockerfiles
         id: generate_cache_key
@@ -122,8 +131,7 @@ jobs:
           key: docker-${{ runner.os }}-${{ needs.setup-gradle.outputs.docker-cache-key }}
 
       - name: Start Docker Solution
-        run: ../gradlew dockerSolution:ComposeUp -x test --scan --info --stacktrace
-        working-directory: TrafficCapture
+        run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test --scan --info --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
