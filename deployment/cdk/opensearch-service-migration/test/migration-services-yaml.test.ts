@@ -39,13 +39,16 @@ test('Test servicesYaml with rfs backfill can be stringified', () => {
     const serviceName = "rfs-service-name";
     const region = "us-east-1"
     let servicesYaml = new ServicesYaml();
-    servicesYaml.backfill = new RFSBackfillYaml();
-    servicesYaml.backfill.ecs.cluster_name = clusterName;
-    servicesYaml.backfill.ecs.service_name = serviceName;
-    servicesYaml.backfill.ecs.aws_region = region;
+    let rfsBackfillYaml = new RFSBackfillYaml();
+    rfsBackfillYaml.ecs.cluster_name = clusterName;
+    rfsBackfillYaml.ecs.service_name = serviceName;
+    rfsBackfillYaml.ecs.aws_region = region;
+    servicesYaml.backfill = rfsBackfillYaml;
+
 
     expect(servicesYaml.backfill).toBeDefined();
-    expect(servicesYaml.backfill.ecs).toBeDefined();
+    expect(servicesYaml.backfill).toBeDefined();
+    expect(servicesYaml.backfill instanceof RFSBackfillYaml).toBeTruthy();
     const yaml = servicesYaml.stringify();
     expect(yaml).toBe(`metrics_source:\n  cloudwatch:\nbackfill:\n  reindex_from_snapshot:\n    ecs:\n      cluster_name: ${clusterName}\n      service_name: ${serviceName}\n      aws_region: ${region}\n`);
 })
