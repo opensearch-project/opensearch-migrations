@@ -26,10 +26,20 @@ export class RFSBackfillYaml {
     constructor() {
         this.ecs = new ECSService();
     }
+
+    toDict() {
+        return {
+            reindex_from_snapshot: {ecs: this.ecs}
+        };
+    }
 }
 
 export class OSIBackfillYaml {
-
+    toDict() {
+        return {
+            opensearch_ingestion: null
+        };
+    }
 }
 
 export class ServicesYaml {
@@ -43,11 +53,7 @@ export class ServicesYaml {
             source_cluster: this.source_cluster,
             target_cluster: this.target_cluster,
             metrics_source: this.metrics_source,
-            backfill: this.backfill
-            ? (this.backfill instanceof RFSBackfillYaml
-                ? { reindex_from_snapshot: this.backfill }
-                : { opensearch_ingestion: this.backfill })
-            : undefined
+            backfill: this.backfill?.toDict()
         },
         {
             'nullStr': ''
