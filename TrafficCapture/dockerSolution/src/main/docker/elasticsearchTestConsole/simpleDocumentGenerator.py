@@ -13,6 +13,7 @@ import json
 # Disable InsecureRequestWarning
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
+
 # Configure logging
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -21,9 +22,11 @@ logger = logging.getLogger(__name__)
 logging.getLogger("requests").setLevel(logging.WARNING)
 logging.getLogger("urllib3").setLevel(logging.WARNING)
 
+
 def get_current_date_index():
     """Get current date in a specific format for indexing."""
     return datetime.now().strftime("%Y-%m-%d")
+
 
 def send_request(session, index_suffix, url_base, auth, headers, no_refresh):
     """Send a request to the specified URL with the given payload."""
@@ -40,15 +43,19 @@ def send_request(session, index_suffix, url_base, auth, headers, no_refresh):
     except requests.RequestException as e:
         return None, str(e), None
 
+
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--endpoint", help="Source cluster endpoint e.g. http://test.elb.us-west-2.amazonaws.com:9200.")
     parser.add_argument("--no-auth", action='store_true', help="Flag to provide no auth in requests.")
-    parser.add_argument("--no-clear-output", action='store_true', help="Flag to not clear the output before each run. Helpful for piping to a file or other utility.")
+    parser.add_argument("--no-clear-output", action='store_true',
+                        help="Flag to not clear the output before each run. " +
+                        "Helpful for piping to a file or other utility.")
     parser.add_argument("--requests-per-sec", type=float, default=100.0, help="Target requests per second to be sent.")
     parser.add_argument("--no-refresh", action='store_true', help="Flag to disable refresh after each request.")
     return parser.parse_args()
+
 
 def update_counts(response_code, total_counts):
     """Update the total counts based on the response code."""
@@ -63,11 +70,13 @@ def update_counts(response_code, total_counts):
     else:
         total_counts['error'] += 1
 
+
 def calculate_throughput(request_timestamps):
     """Calculate throughput over the last 5 seconds."""
     if len(request_timestamps) < 2:
         return 1
     return len(request_timestamps) / (request_timestamps[-1] - request_timestamps[0]).total_seconds()
+
 
 def calculate_sleep_time(request_timestamps, target_requests_per_sec):
     """
@@ -113,7 +122,9 @@ def main():
         request_timestamps.append(datetime.now())
         current_index = get_current_date_index()
 
-        response_code, response_message, response_json = send_request(session, current_index, url_base, auth, keep_alive_headers, args.no_refresh)
+        response_code, response_message, response_json = send_request(
+            session, current_index, url_base, auth, keep_alive_headers, args.no_refresh
+        )
         update_counts(response_code, total_counts)
 
         if response_code is not None:
@@ -125,13 +136,19 @@ def main():
 
         throughput = calculate_throughput(request_timestamps)
      
-        summary_message = (f"Summary: 2xx responses = {total_counts['2xx']}, 4xx responses = {total_counts['4xx']}, "
-                           f"5xx responses = {total_counts['5xx']}, Error requests = {total_counts['error']}")
+        summary_message = (
+            f"Summary: 2xx responses = {total_counts['2xx']}, 4xx responses = {total_counts['4xx']}, "
+            f"5xx responses = {total_counts['5xx']}, Error requests = {total_counts['error']}"
+        )
         throughput_message = f"Request throughput over the last 5 seconds: {throughput:.2f} req/sec"
 
         clear_output_message = "\033c" if not args.no_clear_output else ""
 
-        logger.info(f"{clear_output_message}{request_message}\n{response_pretty}\n{summary_message}\n{throughput_message}")
+        logger.info(f"{clear_output_message}" +
+                    f"{request_message}\n" +
+                    f"{response_pretty}\n" +
+                    f"{summary_message}\n" +
+                    f"{throughput_message}")
         
         sleep_time = calculate_sleep_time(request_timestamps, args.requests_per_sec)
 
@@ -149,5 +166,7 @@ def main():
         # Remove timestamps older than 5 seconds
         while request_timestamps and (datetime.now() - request_timestamps[0]).total_seconds() > 5:
             request_timestamps.popleft()
+
+
 if __name__ == "__main__":
     main()
