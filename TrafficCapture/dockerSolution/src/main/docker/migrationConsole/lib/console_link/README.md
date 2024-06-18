@@ -114,6 +114,7 @@ There is also a block that specifies the deployment type. Exactly one of the fol
     - `socket`: optional, path to mounted docker socket, defaults to `/var/run/docker.sock`
 
 - `ecs`:
+    - `cluster_name`: required, name of the ECS cluster containing the RFS service
     - `service_name`: required, name of the ECS service for RFS
     - `aws_region`:  optional. if not provided, the usual rules are followed for determining aws region. (`AWS_DEFAULT_REGION`, `~/.aws/config`, etc.)
 
@@ -132,6 +133,7 @@ backfill:
         snapshot_name: "def"
         scale: 3
         ecs:
+            cluster_name: migration-aws-integ-ecs-cluster
             service_name: migration-aws-integ-reindex-from-snapshot
             aws-region: us-east-1
 ```

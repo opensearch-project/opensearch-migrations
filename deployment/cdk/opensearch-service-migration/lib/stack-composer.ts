@@ -428,6 +428,8 @@ export class StackComposer {
             })
             this.addDependentStacks(reindexFromSnapshotStack, [migrationStack, openSearchStack, osContainerStack])
             this.stacks.push(reindexFromSnapshotStack)
+            servicesYaml.backfill = reindexFromSnapshotStack.rfsBackfillYaml;
+
         }
 
         let captureProxyESStack

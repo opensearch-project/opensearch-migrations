@@ -10,6 +10,7 @@ import {
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy
 } from "../common-utilities";
+import { RFSBackfillYaml } from "../migration-services-yaml";
 
 
 export interface ReindexFromSnapshotProps extends StackPropsExt {
@@ -21,6 +22,7 @@ export interface ReindexFromSnapshotProps extends StackPropsExt {
 }
 
 export class ReindexFromSnapshotStack extends MigrationServiceCore {
+    rfsBackfillYaml: RFSBackfillYaml;
 
     constructor(scope: Construct, id: string, props: ReindexFromSnapshotProps) {
         super(scope, id, props)
@@ -60,6 +62,11 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             taskMemoryLimitMiB: 4096,
             ...props
         });
+
+        this.rfsBackfillYaml = new RFSBackfillYaml();
+        this.rfsBackfillYaml.ecs.cluster_name = `migration-${props.stage}-ecs-cluster`;
+        this.rfsBackfillYaml.ecs.service_name = `migration-${props.stage}-reindex-from-snapshot`;
+
     }
 
 }

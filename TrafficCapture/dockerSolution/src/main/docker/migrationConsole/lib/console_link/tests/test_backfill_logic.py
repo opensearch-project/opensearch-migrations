@@ -27,6 +27,7 @@ def ecs_rfs_backfill() -> ECSRFSBackfill:
     ecs_rfs_config = {
         "reindex_from_snapshot": {
             "ecs": {
+                "cluster_name": "migration-aws-integ-ecs-cluster",
                 "service_name": "migration-aws-integ-reindex-from-snapshot"
             }
         }
