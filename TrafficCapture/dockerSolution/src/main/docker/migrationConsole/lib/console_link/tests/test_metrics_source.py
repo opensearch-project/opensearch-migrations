@@ -3,7 +3,8 @@ import pathlib
 
 import requests
 from console_link.models.metrics_source import MetricsSource, CloudwatchMetricsSource, PrometheusMetricsSource, \
-    MetricStatistic, get_metrics_source, Component, UnsupportedMetricsSourceError
+    MetricStatistic, Component
+from console_link.logic.metrics import get_metrics_source, UnsupportedMetricsSourceError
 import pytest
 import requests_mock
 

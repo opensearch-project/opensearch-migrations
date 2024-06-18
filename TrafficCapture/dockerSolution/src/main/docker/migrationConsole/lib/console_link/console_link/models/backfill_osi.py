@@ -1,10 +1,12 @@
 from console_link.models.osi_utils import (create_pipeline_from_env, start_pipeline, stop_pipeline,
                                            OpenSearchIngestionMigrationProps)
 from console_link.models.cluster import Cluster
+from console_link.models.backfill_base import Backfill, BackfillStatus
+from console_link.models.command_result import CommandResult
 from typing import Dict
-from enum import Enum
 from cerberus import Validator
 import boto3
+
 
 OSI_SCHEMA = {
     'pipeline_role_arn': {
@@ -54,34 +56,15 @@ OSI_SCHEMA = {
 }
 
 
-class MigrationType(str, Enum):
-    OSI_HISTORICAL_MIGRATION = "OSI_HISTORICAL_MIGRATION"
-
-
-class Migration:
-    """
-    A base migration manager.
-    """
-
-    def create(self):
-        raise NotImplementedError
-
-    def start(self):
-        raise NotImplementedError
-
-    def stop(self):
-        raise NotImplementedError
-
-    def get_status(self):
-        raise NotImplementedError
-
-
-class OpenSearchIngestionMigration(Migration):
+class OpenSearchIngestionBackfill(Backfill):
     """
     A migration manager for an OpenSearch Ingestion pipeline.
     """
 
     def __init__(self, config: Dict, source_cluster: Cluster, target_cluster: Cluster) -> None:
+        super().__init__(config)
+        config = config["opensearch_ingestion"]
+
         v = Validator(OSI_SCHEMA)
         if not v.validate(config):
             raise ValueError("Invalid config file for OpenSearchIngestion migration", v.errors)
@@ -108,3 +91,9 @@ class OpenSearchIngestionMigration(Migration):
         if pipeline_name is None:
             pipeline_name = self.osi_props.pipeline_name
         stop_pipeline(osi_client=self.osi_client, pipeline_name=pipeline_name)
+
+    def get_status(self, *args, **kwargs) -> BackfillStatus:
+        raise NotImplementedError()
+
+    def scale(self, units: int, *args, **kwargs) -> CommandResult:
+        raise NotImplementedError()
