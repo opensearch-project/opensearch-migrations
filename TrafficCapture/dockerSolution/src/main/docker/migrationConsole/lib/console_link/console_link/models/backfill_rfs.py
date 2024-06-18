@@ -3,20 +3,24 @@ from console_link.models.backfill_base import Backfill
 from console_link.models.cluster import Cluster
 from console_link.models.schema_tools import contains_one_of
 
+from cerberus import Validator
+import boto3
+
 
 DOCKER_RFS_SCHEMA = {
     "type": "dict",
-    "nullable": True
+    "nullable": True,
+    "schema": {
+        "socket": {"type": "string", "required": False}
+    }
 }
 
 
 ECS_RFS_SCHEMA = {
     "type": "dict",
     "schema": {
-        "service_name": {
-            "type": "string",
-            "required": True,
-        }
+        "service_name": {"type": "string", "required": True},
+        "aws_region": {"type": "string", "required": False}
     }
 }
 
@@ -26,14 +30,9 @@ RFS_BACKFILL_SCHEMA = {
         "schema": {
             "docker": DOCKER_RFS_SCHEMA,
             "ecs": ECS_RFS_SCHEMA,
-            "snapshot_name": {
-                "type": "string",
-                "required": False,
-            },
-            "snapshot_repo": {
-                "type": "string",
-                "required": False,
-            }
+            "snapshot_name": {"type": "string", "required": False},
+            "snapshot_repo": {"type": "string", "required": False},
+            "scale": {"type": "integer", "required": False, "min": 1}
         },
         "check_with": contains_one_of({'docker', 'ecs'}),
     }
@@ -41,13 +40,24 @@ RFS_BACKFILL_SCHEMA = {
 
 
 class RFSBackfill(Backfill):
-    def __init__(self, config: Dict, target_cluster: Cluster) -> None:
+    def __init__(self, config: Dict) -> None:
         super().__init__(config)
+
+        v = Validator(RFS_BACKFILL_SCHEMA)
+        if not v.validate(self.config):
+            raise ValueError("Invalid config file for RFS backfill", v.errors)
 
 
 class DockerRFSBackfill(RFSBackfill):
-    pass
+    def __init__(self, config: Dict, target_cluster: Cluster) -> None:
+        super().__init__(config)
+        self.target_cluster = target_cluster
+        self.docker_config = self.config["reindex_from_snapshot"]["docker"]
 
 
 class ECSRFSBackfill(RFSBackfill):
-    pass
+    def __init__(self, config: Dict, target_cluster: Cluster) -> None:
+        super().__init__(config)
+        self.target_cluster = target_cluster
+        self.ecs_config = self.config["reindex_from_snapshot"]["ecs"]
+        self.client = boto3.client("ecs", region_name=self.ecs_config.get("aws_region", None))

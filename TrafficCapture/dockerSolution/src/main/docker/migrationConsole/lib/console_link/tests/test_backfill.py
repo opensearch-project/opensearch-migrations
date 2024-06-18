@@ -112,3 +112,31 @@ def test_get_backfill_unsupported_type():
         get_backfill(unknown_config, None, None)
     assert "Unsupported backfill type" in str(excinfo.value.args[0])
     assert "fetch" in str(excinfo.value.args[1])
+
+
+def test_cant_instantiate_with_multiple_types():
+    config = {
+        "opensearch_ingestion": {
+            "pipeline_role_arn": "arn:aws:iam::123456789012:role/OSMigrations-pipelineRole",
+        },
+        "reindex_from_snapshot": {
+            "docker": None
+        }
+    }
+    with pytest.raises(ValueError) as excinfo:
+        get_backfill(config, create_valid_cluster(), create_valid_cluster())
+    assert "Invalid config file for backfill" in str(excinfo.value.args[0])
+    assert "More than one value is present" in str(excinfo.value.args[1]['backfill'][0])
+
+
+def test_cant_instantiate_with_multiple_rfs_deployment_types():
+    config = {
+        "reindex_from_snapshot": {
+            "docker": None,
+            "ecs": {"aws_region": "us-east-1"}
+        }
+    }
+    with pytest.raises(ValueError) as excinfo:
+        get_backfill(config, create_valid_cluster(), create_valid_cluster())
+    assert "Invalid config file for RFS backfill" in str(excinfo.value.args[0])
+    assert "More than one value is present" in str(excinfo.value.args[1]['reindex_from_snapshot'][0])
