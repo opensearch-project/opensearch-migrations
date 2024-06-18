@@ -11,7 +11,6 @@
     "trafficReplayerEnableClusterFGACAuth": true,
     "captureProxyESServiceEnabled": true,
     "fetchMigrationEnabled": true,
-    "otelCollectorEnabled": true,
-    "sourceClusterEndpoint": "https://capture-proxy-es.migration.dev.local:19200"
+    "otelCollectorEnabled": true
   }
 }

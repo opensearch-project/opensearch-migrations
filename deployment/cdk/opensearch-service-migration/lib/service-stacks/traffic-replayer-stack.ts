@@ -5,14 +5,15 @@ import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
-import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {
+    MigrationSSMParameter,
     createMSKConsumerIAMPolicies,
     createOpenSearchIAMAccessPolicy,
-    createOpenSearchServerlessIAMAccessPolicy
+    createOpenSearchServerlessIAMAccessPolicy,
+    getMigrationStringParameterValue
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
-import { Duration, Stack } from "aws-cdk-lib";
+import { Duration } from "aws-cdk-lib";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 
 
@@ -33,15 +34,24 @@ export class TrafficReplayerStack extends MigrationServiceCore {
 
     constructor(scope: Construct, id: string, props: TrafficReplayerProps) {
         super(scope, id, props)
+
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "defaultDomainAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "replayerOutputAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputAccessSecurityGroupId`))
-        ]
+            { id: "serviceSG", param: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID },
+            { id: "trafficStreamSourceAccessSG", param: MigrationSSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID },
+            { id: "defaultDomainAccessSG", param: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID },
+            { id: "replayerOutputAccessSG", param: MigrationSSMParameter.REPLAYER_OUTPUT_ACCESS_SECURITY_GROUP_ID }
+        ].map(({ id, param }) =>
+            SecurityGroup.fromSecurityGroupId(this, id, getMigrationStringParameterValue(this, {
+                ...props,
+                parameter: param,
+            }))
+        );
 
         const volumeName = "sharedReplayerOutputVolume"
-        const volumeId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputEFSId`)
+        const volumeId = getMigrationStringParameterValue(this, {
+            ...props,
+            parameter: MigrationSSMParameter.REPLAYER_OUTPUT_EFS_ID,
+        })
         const replayerOutputEFSVolume: Volume = {
             name: volumeName,
             efsVolumeConfiguration: {
@@ -81,13 +91,22 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         }
 
         const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
-        const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osClusterEndpoint`)
-        const brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
+        const osClusterEndpoint = getMigrationStringParameterValue(this, {
+            ...props,
+            parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
+        });
+        const brokerEndpoints = getMigrationStringParameterValue(this, {
+            ...props,
+            parameter: MigrationSSMParameter.KAFKA_BROKERS,
+        });
         const groupId = props.customKafkaGroupId ? props.customKafkaGroupId : `logging-group-${deployId}`
 
         let replayerCommand = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint} --insecure --kafka-traffic-brokers ${brokerEndpoints} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id ${groupId}`
         if (props.enableClusterFGACAuth) {
-            const osUserAndSecret = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${deployId}/osUserAndSecretArn`);
+            const osUserAndSecret = getMigrationStringParameterValue(this, {
+                ...props,
+                parameter: MigrationSSMParameter.OS_USER_AND_SECRET_ARN,
+            });
             replayerCommand = replayerCommand.concat(` --auth-header-user-and-secret ${osUserAndSecret}`)
         }
         replayerCommand = props.streamingSourceType === StreamingSourceType.AWS_MSK ? replayerCommand.concat(" --kafka-traffic-enable-msk-auth") : replayerCommand

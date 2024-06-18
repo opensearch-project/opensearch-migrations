@@ -7,10 +7,9 @@ import {Cluster} from "aws-cdk-lib/aws-ecs";
 import {StackPropsExt} from "./stack-composer";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {NamespaceType} from "aws-cdk-lib/aws-servicediscovery";
-import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {StreamingSourceType} from "./streaming-source-type";
 import {Bucket, BucketEncryption} from "aws-cdk-lib/aws-s3";
-import {parseRemovalPolicy} from "./common-utilities";
+import {MigrationSSMParameter, createMigrationStringParameter, parseRemovalPolicy} from "./common-utilities";
 
 export interface MigrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -150,15 +149,13 @@ export class MigrationAssistanceStack extends Stack {
                 }
             }
         });
-        new StringParameter(this, 'SSMParameterMSKARN', {
-            description: 'OpenSearch Migration Parameter for MSK ARN',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/mskClusterARN`,
-            stringValue: mskCluster.attrArn
+        createMigrationStringParameter(this, mskCluster.attrArn, {
+            ...props,
+            parameter: MigrationSSMParameter.MSK_CLUSTER_ARN
         });
-        new StringParameter(this, 'SSMParameterMSKClusterName', {
-            description: 'OpenSearch Migration Parameter for MSK cluster name',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/mskClusterName`,
-            stringValue: mskCluster.clusterName
+        createMigrationStringParameter(this, mskCluster.clusterName, {
+            ...props,
+            parameter: MigrationSSMParameter.MSK_CLUSTER_NAME
         });
     }
 
@@ -177,10 +174,9 @@ export class MigrationAssistanceStack extends Stack {
             allowAllOutbound: false
         });
         streamingSecurityGroup.addIngressRule(streamingSecurityGroup, Port.allTraffic())
-        new StringParameter(this, 'SSMParameterTrafficStreamSourceGroupId', {
-            description: 'OpenSearch migration parameter for traffic stream source access security group id',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`,
-            stringValue: streamingSecurityGroup.securityGroupId
+        createMigrationStringParameter(this, streamingSecurityGroup.securityGroupId, {
+            ...props,
+            parameter: MigrationSSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID
         });
 
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
@@ -193,10 +189,9 @@ export class MigrationAssistanceStack extends Stack {
         });
         replayerOutputSG.addIngressRule(replayerOutputSG, Port.allTraffic());
 
-        new StringParameter(this, 'SSMParameterReplayerOutputAccessGroupId', {
-            description: 'OpenSearch migration parameter for Replayer output access security group id',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputAccessSecurityGroupId`,
-            stringValue: replayerOutputSG.securityGroupId
+        createMigrationStringParameter(this, replayerOutputSG.securityGroupId, {
+            ...props,
+            parameter: MigrationSSMParameter.REPLAYER_OUTPUT_ACCESS_SECURITY_GROUP_ID
         });
 
         // Create an EFS file system for Traffic Replayer output
@@ -205,10 +200,9 @@ export class MigrationAssistanceStack extends Stack {
             securityGroup: replayerOutputSG,
             removalPolicy: replayerEFSRemovalPolicy
         });
-        new StringParameter(this, 'SSMParameterReplayerOutputEFSId', {
-            description: 'OpenSearch migration parameter for Replayer output EFS filesystem id',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/replayerOutputEFSId`,
-            stringValue: replayerOutputEFS.fileSystemId
+        createMigrationStringParameter(this, replayerOutputEFS.fileSystemId, {
+            ...props,
+            parameter: MigrationSSMParameter.REPLAYER_OUTPUT_EFS_ID
         });
 
         const serviceSecurityGroup = new SecurityGroup(this, 'serviceSecurityGroup', {
@@ -218,10 +212,9 @@ export class MigrationAssistanceStack extends Stack {
         })
         serviceSecurityGroup.addIngressRule(serviceSecurityGroup, Port.allTraffic());
 
-        new StringParameter(this, 'SSMParameterServiceGroupId', {
-            description: 'OpenSearch migration parameter for service security group id',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`,
-            stringValue: serviceSecurityGroup.securityGroupId
+        createMigrationStringParameter(this, serviceSecurityGroup.securityGroupId, {
+            ...props,
+            parameter: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID
         });
 
         const artifactBucket = new Bucket(this, 'migrationArtifactsS3', {
@@ -231,10 +224,9 @@ export class MigrationAssistanceStack extends Stack {
             removalPolicy: bucketRemovalPolicy,
             autoDeleteObjects: !!(props.artifactBucketRemovalPolicy && bucketRemovalPolicy === RemovalPolicy.DESTROY)
         });
-        new StringParameter(this, 'SSMParameterArtifactS3Arn', {
-            description: 'OpenSearch migration parameter for Artifact S3 bucket ARN',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/artifactS3Arn`,
-            stringValue: artifactBucket.bucketArn
+        createMigrationStringParameter(this, artifactBucket.bucketArn, {
+            ...props,
+            parameter: MigrationSSMParameter.ARTIFACT_S3_ARN
         });
 
         const ecsCluster = new Cluster(this, 'migrationECSCluster', {
@@ -247,12 +239,9 @@ export class MigrationAssistanceStack extends Stack {
             vpc: props.vpc
         })
         const cloudMapNamespaceId = ecsCluster.defaultCloudMapNamespace!.namespaceId
-        new StringParameter(this, 'SSMParameterCloudMapNamespaceId', {
-            description: 'OpenSearch migration parameter for Service Discovery CloudMap Namespace Id',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/cloudMapNamespaceId`,
-            stringValue: cloudMapNamespaceId
+        createMigrationStringParameter(this, cloudMapNamespaceId, {
+            ...props,
+            parameter: MigrationSSMParameter.CLOUD_MAP_NAMESPACE_ID
         });
-
-
     }
 }
