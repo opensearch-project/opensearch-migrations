@@ -355,8 +355,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             environment: environment,
             taskRolePolicies: servicePolicies,
             cpuArchitecture: props.fargateCpuArch,
-            taskCpuUnits: 512,
-            taskMemoryLimitMiB: 1024,
+            taskCpuUnits: 1024,
+            taskMemoryLimitMiB: 2048,
             ...props
         });
     }

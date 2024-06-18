@@ -11,7 +11,8 @@ import { ARecord, HostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
 import { LoadBalancerTarget } from "aws-cdk-lib/aws-route53-targets";
 import { AcmCertificateImporter } from "./service-stacks/acm-cert-importer";
 import { Stack } from "aws-cdk-lib";
-import { createMigrationStringParameter, MigrationSSMParameter } from "./common-utilities";
+import { createMigrationStringParameter, getCustomStringParameterValue, getMigrationStringParameterName, MigrationSSMParameter } from "./common-utilities";
+import { StringParameter } from "aws-cdk-lib/aws-ssm";
 
 export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string;
@@ -77,8 +78,15 @@ export class NetworkStack extends Stack {
 
         // Retrieve original deployment VPC for addon deployments
         if (props.addOnMigrationDeployId) {
+            const vpcId = StringParameter.valueFromLookup(this,
+                getMigrationStringParameterName({
+                    stage: props.stage,
+                    defaultDeployId: props.addOnMigrationDeployId,
+                    parameter: MigrationSSMParameter.VPC_ID
+                })
+            )
             this.vpc = Vpc.fromLookup(this, 'domainVPC', {
-                vpcId: props.vpcId,
+                vpcId
             });
         }
         // Retrieve existing VPC
