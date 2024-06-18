@@ -18,7 +18,7 @@ logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # Set the base URLs from the environment variables or use default values
-source_url_base = os.getenv('SOURCE_DOMAIN_ENDPOINT', 'https://capture-proxy-es:19200')
+source_url_base = os.getenv('SOURCE_DOMAIN_ENDPOINT', 'https://elasticsearch:9200')
 target_url_base = os.getenv('MIGRATION_DOMAIN_ENDPOINT', 'https://opensearchtarget:9200')
 source_username = 'admin'
 source_password = 'admin'
