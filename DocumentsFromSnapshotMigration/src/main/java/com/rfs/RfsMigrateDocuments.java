@@ -3,11 +3,13 @@ package com.rfs;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 
+import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
 import java.util.UUID;
+import java.util.function.Function;
 
 import lombok.extern.slf4j.Slf4j;
 import com.rfs.cms.ApacheHttpClient;
@@ -41,30 +43,45 @@ import com.rfs.worker.DocumentsRunner;
 @Slf4j
 public class RfsMigrateDocuments {
     public static final int PROCESS_TIMED_OUT = 1;
+    public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
 
     public static class Args {
-        @Parameter(names = {"--snapshot-name"}, description = "The name of the snapshot to migrate", required = true)
+        @Parameter(names = {"--snapshot-name"},
+                required = true,
+                description = "The name of the snapshot to migrate")
         public String snapshotName;
 
-        @Parameter(names = {"--s3-local-dir"}, description = "The absolute path to the directory on local disk to download S3 files to", required = true)
+        @Parameter(names = {"--s3-local-dir"},
+                required = true,
+                description = "The absolute path to the directory on local disk to download S3 files to")
         public String s3LocalDirPath;
 
-        @Parameter(names = {"--s3-repo-uri"}, description = "The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2", required = true)
+        @Parameter(names = {"--s3-repo-uri"},
+                required = true,
+                description = "The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2")
         public String s3RepoUri;
 
-        @Parameter(names = {"--s3-region"}, description = "The AWS Region the S3 bucket is in, like: us-east-2", required = true)
+        @Parameter(names = {"--s3-region"},
+                required = true,
+                description = "The AWS Region the S3 bucket is in, like: us-east-2")
         public String s3Region;
 
-        @Parameter(names = {"--lucene-dir"}, description = "The absolute path to the directory where we'll put the Lucene docs", required = true)
+        @Parameter(names = {"--lucene-dir"},
+                required = true,
+                description = "The absolute path to the directory where we'll put the Lucene docs")
         public String luceneDirPath;
 
-        @Parameter(names = {"--target-host"}, description = "The target host and port (e.g. http://localhost:9200)", required = true)
+        @Parameter(names = {"--target-host"},
+                required = true,
+                description = "The target host and port (e.g. http://localhost:9200)")
         public String targetHost;
 
-        @Parameter(names = {"--target-username"}, description = "Optional.  The target username; if not provided, will assume no auth on target", required = false)
+        @Parameter(names = {"--target-username"},
+                description = "Optional.  The target username; if not provided, will assume no auth on target")
         public String targetUser = null;
 
-        @Parameter(names = {"--target-password"}, description = "Optional.  The target password; if not provided, will assume no auth on target", required = false)
+        @Parameter(names = {"--target-password"},
+                description = "Optional.  The target password; if not provided, will assume no auth on target")
         public String targetPass = null;
 
         @Parameter(names = {"--max-shard-size-bytes"}, description = ("Optional. The maximum shard size, in bytes, to allow when"
@@ -76,48 +93,61 @@ public class RfsMigrateDocuments {
         // Grab out args
         Args arguments = new Args();
         JCommander.newBuilder()
-            .addObject(arguments)
-            .build()
-            .parse(args);
+                .addObject(arguments)
+                .build()
+                .parse(args);
 
-        final String snapshotName = arguments.snapshotName;
-        final Path s3LocalDirPath = Paths.get(arguments.s3LocalDirPath);
-        final String s3RepoUri = arguments.s3RepoUri;
-        final String s3Region = arguments.s3Region;
-        final Path luceneDirPath = Paths.get(arguments.luceneDirPath);
-        final String targetHost = arguments.targetHost;
-        final String targetUser = arguments.targetUser;
-        final String targetPass = arguments.targetPass;
-        final long maxShardSizeBytes = arguments.maxShardSizeBytes;
-
-        final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
+        var luceneDirPath = Paths.get(arguments.luceneDirPath);
+        var processManager = new ProcessManager(workItemId->{
+            log.error("terminating RunRfsWorker because its lease has expired for " + workItemId);
+            System.exit(PROCESS_TIMED_OUT);
+        }, Clock.systemUTC());
+        var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(arguments.targetHost)),
+                TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS, UUID.randomUUID().toString());
 
         TryHandlePhaseFailure.executeWithTryCatch(() -> {
             log.info("Running RfsWorker");
 
-            OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
+            OpenSearchClient targetClient =
+                    new OpenSearchClient(arguments.targetHost, arguments.targetUser, arguments.targetPass);
+            DocumentReindexer reindexer = new DocumentReindexer(targetClient);
 
-            final SourceRepo sourceRepo = S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
-            final SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
-            
-            final IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
-            final ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
-            final DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
-            final SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
-            final LuceneDocumentsReader reader = new LuceneDocumentsReader(luceneDirPath);
-            final DocumentReindexer reindexer = new DocumentReindexer(targetClient);
+            SourceRepo sourceRepo = S3Repo.create(Paths.get(arguments.s3LocalDirPath),
+                    new S3Uri(arguments.s3RepoUri), arguments.s3Region);
+            SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
 
-            var processManager = new ProcessManager(workItemId->{
-                log.error("terminating RunRfsWorker because its lease has expired for "+workItemId);
-                System.exit(PROCESS_TIMED_OUT);
-            }, Clock.systemUTC());
-            var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(targetHost)),
-                    5, UUID.randomUUID().toString());
+            IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
+            ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
+            DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
+            SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,
+                    luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
 
-            var scopedWorkCoordinator = new ScopedWorkCoordinatorHelper(workCoordinator, processManager);
-            new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName);
-            new DocumentsRunner(scopedWorkCoordinator, snapshotName,
-                    shardMetadataFactory, unpackerFactory, reader, reindexer).migrateNextShard();
+            run(LuceneDocumentsReader::new, reindexer, workCoordinator, processManager, indexMetadataFactory,
+                    arguments.snapshotName, shardMetadataFactory, unpackerFactory, arguments.maxShardSizeBytes);
         });
+    }
+
+    public static void run(Function<Path,LuceneDocumentsReader> readerFactory,
+                           DocumentReindexer reindexer,
+                           OpenSearchWorkCoordinator workCoordinator,
+                           ProcessManager processManager,
+                           IndexMetadata.Factory indexMetadataFactory,
+                           String snapshotName,
+                           ShardMetadata.Factory shardMetadataFactory,
+                           SnapshotShardUnpacker.Factory unpackerFactory,
+                           long maxShardSizeBytes)
+            throws IOException {
+        var scopedWorkCoordinator = new ScopedWorkCoordinatorHelper(workCoordinator, processManager);
+        new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName);
+        new DocumentsRunner(scopedWorkCoordinator,
+                (name, shard) -> {
+                    var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, name, shard);
+                    log.info("Shard size: " + shardMetadata.getTotalSizeBytes());
+                    if (shardMetadata.getTotalSizeBytes() > maxShardSizeBytes) {
+                        throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), maxShardSizeBytes);
+                    }
+                    return shardMetadata;
+                },
+                unpackerFactory, readerFactory, reindexer).migrateNextShard();
     }
 }

@@ -76,9 +76,9 @@ public class MetadataMigration {
         // Grab out args
         Args arguments = new Args();
         JCommander.newBuilder()
-            .addObject(arguments)
-            .build()
-            .parse(args);
+                .addObject(arguments)
+                .build()
+                .parse(args);
 
         final String snapshotName = arguments.snapshotName;
         final Path s3LocalDirPath = Paths.get(arguments.s3LocalDirPath);

@@ -5,6 +5,8 @@ plugins {
     id "com.avast.gradle.docker-compose" version "0.17.4"
     id 'com.bmuschko.docker-remote-api'
     id 'io.freefair.lombok' version '8.6'
+    id 'java-test-fixtures'
+    id 'com.dorongold.task-tree' version '4.0.0'
 }
 
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
@@ -39,25 +41,26 @@ dependencies {
 
     implementation group: 'com.beust', name: 'jcommander'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
-    implementation group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-smile'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
+    implementation group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-smile'
     implementation group: 'io.netty', name: 'netty-codec-http'
+    implementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
     implementation group: 'org.apache.lucene', name: 'lucene-core'
     implementation group: 'org.apache.lucene', name: 'lucene-analyzers-common'
     implementation group: 'org.apache.lucene', name: 'lucene-backward-codecs'
+    implementation group: 'software.amazon.awssdk', name: 's3'
+    implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
+    implementation group: 'software.amazon.awssdk.crt', name: 'aws-crt'
 
     implementation platform('io.projectreactor:reactor-bom:2023.0.5') 
     implementation 'io.projectreactor.netty:reactor-netty-core' 
     implementation 'io.projectreactor.netty:reactor-netty-http'
 
-    implementation group: 'software.amazon.awssdk', name: 's3'
-    implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
-    implementation group: 'software.amazon.awssdk.crt', name: 'aws-crt'
-
+    testImplementation testFixtures(project(path: ':RFS'))
     testImplementation group: 'io.projectreactor', name: 'reactor-test'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
@@ -65,17 +68,16 @@ dependencies {
     testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-params'
     testImplementation group: 'org.mockito', name: 'mockito-core'
     testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter'
-    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
 
+    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
 
     // Integration tests
     testImplementation group: 'org.opensearch', name: 'opensearch-testcontainers'
     testImplementation group: 'org.testcontainers', name: 'testcontainers'
     testImplementation group: 'org.hamcrest', name: 'hamcrest'
-    implementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
+
+    testFixturesImplementation project(":commonDependencyVersionConstraints")
+    testFixturesImplementation group: 'org.testcontainers', name: 'testcontainers'
 }
 
 application {
@@ -190,7 +192,9 @@ tasks.getByName('composeUp')
         .dependsOn(tasks.getByName('buildDockerImages'))
 
 test {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags 'longTest'
+    }
 
     testLogging {
         exceptionFormat = 'full'
@@ -199,5 +203,12 @@ test {
         showCauses true
         showStackTraces true
         showStandardStreams = true
+    }
+}
+
+task slowTest(type: Test) {
+    // include longTest
+    jacoco {
+        enabled = true
     }
 }

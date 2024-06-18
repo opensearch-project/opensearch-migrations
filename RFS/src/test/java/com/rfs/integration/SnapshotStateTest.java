@@ -31,6 +31,7 @@ import java.nio.file.Path;
 
 /**
  * Tests focused on setting up different snapshot states and then verifying the behavior of RFS towards the target cluster
+ * This should move to the CreateSnapshot project
  */
 public class SnapshotStateTest {
 
@@ -43,7 +44,7 @@ public class SnapshotStateTest {
     @BeforeEach
     public void setUp() throws Exception {
         // Start the cluster for testing
-        cluster = new ElasticsearchContainer(ElasticsearchContainer.Version.V7_10_2);
+        cluster = new ElasticsearchContainer(ElasticsearchContainer.V7_10_2);
         cluster.start();
 
         // Configure operations and rfs implementation

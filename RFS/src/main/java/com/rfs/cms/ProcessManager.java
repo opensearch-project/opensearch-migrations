@@ -22,6 +22,11 @@ public class ProcessManager {
     final ConcurrentHashMap<String, Instant> workItemToLeaseMap;
     final Consumer<String> onLeaseExpired;
     final Clock currentTimeSupplier;
+
+    public ProcessManager(Consumer<String> onLeaseExpired) {
+        this(onLeaseExpired, Clock.systemUTC());
+    }
+
     public ProcessManager(Consumer<String> onLeaseExpired, Clock currentTimeSupplier) {
         scheduledExecutorService = Executors.newScheduledThreadPool(1,
                 new DefaultThreadFactory("leaseWatchingProcessKillerThread"));

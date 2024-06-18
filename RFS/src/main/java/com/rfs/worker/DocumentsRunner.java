@@ -1,11 +1,15 @@
 package com.rfs.worker;
 
 import java.io.IOException;
+import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 
 import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.ScopedWorkCoordinatorHelper;
+import com.rfs.common.RfsException;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
@@ -23,10 +27,9 @@ public class DocumentsRunner {
     public static final String ALL_INDEX_MANIFEST = "all_index_manifest";
 
     ScopedWorkCoordinatorHelper workCoordinator;
-    private final String snapshotName;
-    private final ShardMetadata.Factory shardMetadataFactory;
+    private final BiFunction<String,Integer,ShardMetadata.Data> shardMetadataFactory;
     private final SnapshotShardUnpacker.Factory unpackerFactory;
-    private final LuceneDocumentsReader reader;
+    private final Function<Path,LuceneDocumentsReader> readerFactory;
     private final DocumentReindexer reindexer;
 
     public void migrateNextShard() throws IOException {
@@ -51,13 +54,18 @@ public class DocumentsRunner {
                 });
     }
 
-    private void doDocumentsMigration(IndexAndShard indexAndShard) throws IOException {
-        log.info("Migrating docs for " + indexAndShard);
-        ShardMetadata.Data shardMetadata =
-                shardMetadataFactory.fromRepo(snapshotName, indexAndShard.indexName, indexAndShard.shard);
-        try (var unpacker = unpackerFactory.create(shardMetadata)) {
-            unpacker.unpack();
+    public static class ShardTooLargeException extends RfsException {
+        public ShardTooLargeException(long shardSizeBytes, long maxShardSize) {
+            super("The shard size of " + shardSizeBytes + " bytes exceeds the maximum shard size of " + maxShardSize + " bytes");
+        }
+    }
 
+    private void doDocumentsMigration(IndexAndShard indexAndShard) {
+        log.info("Migrating docs for " + indexAndShard);
+        ShardMetadata.Data shardMetadata = shardMetadataFactory.apply(indexAndShard.indexName, indexAndShard.shard);
+
+        try (var unpacker = unpackerFactory.create(shardMetadata)) {
+            var reader = readerFactory.apply(unpacker.unpack());
             Flux<Document> documents = reader.readDocuments(shardMetadata.getIndexName(), shardMetadata.getShardId());
 
             final int finalShardId = shardMetadata.getShardId(); // Define in local context for the lambda
