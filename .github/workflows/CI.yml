@@ -4,27 +4,20 @@ on:
   push:
   pull_request:
 
+env:
+  python-version: 3.10
+  java-version: 11
+  gradle-version: 8.0.2
+  node-version: 18.x
+
 jobs:
-  setup-python:
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10"]
-    steps:
-     - name: Checkout Repository
-       uses: actions/checkout@v4
-
-     - name: Set up Python ${{ matrix.python-version }}
-       uses: actions/setup-python@v5
-       with:
-         python-version: ${{ matrix.python-version }}
-     - run: pwd
-     - run: ls -al
-
   python-lint:
-    needs: setup-python
     runs-on: ubuntu-latest
     steps:
+     - uses: actions/checkout@v4
+     - uses: actions/setup-python@v5
+       with:
+         python-version: ${{ env.python-version }}
      - name: Install dependencies
        run: |
         python -m pip install --upgrade pip
@@ -34,14 +27,15 @@ jobs:
         flake8 $(git ls-files '*.py')
 
   console-library-tests:
-    needs: setup-python
     runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link
     steps:
-      - run: pwd
-      - run: ls -al
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+         python-version: ${{ env.python-version }}
       - name: Install Dependencies for Console Library and Tests
         run: |
           python -m pip install . -r ./tests/requirements.txt
@@ -57,49 +51,31 @@ jobs:
           files: ./coverage.xml
           flags: python-test
 
-  setup-gradle:
+  setup-gradle1:
     runs-on: ubuntu-latest
     outputs:
       docker-cache-key: ${{ steps.generate_cache_key.outputs.key }}
     steps:
-      - name: Check out code
-        uses: actions/checkout@v4
-      - run: pwd
-      - run: ls -al
-  
-      - name: Set up JDK
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
         with:
-          java-version: '11'
+          java-version: ${{ env.java-version }}
           distribution: 'corretto'
-      - run: pwd
-      - run: ls -al
-    
-      - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: 8.0.2
-          gradle-home-cache-cleanup: true
-          cache-read-only: false
-      - run: pwd
-      - run: ls -al
-    
-      - name: Generate Cache Key from Dockerfiles
-        id: generate_cache_key
-        run: |
-          files=$(find . -type f \( -name 'docker-compose.yml' -o -name 'Dockerfile' \))
-          file_contents=$(cat $files)
-          key=$(echo "${file_contents}" | sha1sum | awk '{print $1}')
-          echo "key=${key}" >> "$GITHUB_OUTPUT"
-      - run: pwd
-      - run: ls -al
+          gradle-version: ${{ env.gradle-version }}
 
   gradle-tests:
-    needs: setup-gradle
     runs-on: ubuntu-latest
     steps:
-      - run: pwd
-      - run: ls -al
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.java-version }}
+          distribution: 'corretto'
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: ${{ env.gradle-version }}
       - name: Run Gradle Build
         run: ./gradlew build -x test -x TrafficCapture:dockerSolution:build --scan --stacktrace
         env:
@@ -132,27 +108,39 @@ jobs:
           fail_ci_if_error: false
 
   python-e2e-tests:
-    needs:
-      - setup-python
-      - setup-gradle
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.java-version }}
+          distribution: 'corretto'
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: ${{ env.gradle-version }}
+      - uses: actions/setup-python@v5
+        with:
+         python-version: ${{ env.python-version }}
+      - name: Generate Cache Key from Dockerfiles
+        id: generate_cache_key
+        run: |
+          files=$(find . -type f \( -name 'docker-compose.yml' -o -name 'Dockerfile' \))
+          file_contents=$(cat $files)
+          key=$(echo "${file_contents}" | sha1sum | awk '{print $1}')
+          echo "key=${key}" >> "$GITHUB_OUTPUT"
       - name: Cache Docker Images
         uses: ScribeMD/docker-cache@0.5.0
         with:
-          key: docker-${{ runner.os }}-${{ needs.setup-gradle.outputs.docker-cache-key }}
-
+          key: docker-${{ runner.os }}-${{ steps.generate_cache_key.outputs.key }}
       - name: Start Docker Solution
         run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test --scan --info --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
-
-      - name: Install dependencies
+      - name: Install python dependencies
         run: |
           cd test
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-
       - name: Run E2E test script
         run: |
           cd test
@@ -162,19 +150,17 @@ jobs:
   cdk-tests:
     strategy:
       matrix:
-        node-version: ['18.x']
-        os: [ubuntu-latest]
-    runs-on: ${{ matrix.os }}
+        node-version: []
+        os: []
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: ./deployment/cdk/opensearch-service-migration
     steps:
-      - name: Checkout Repository
-        uses: actions/checkout@v4
-      - name: Use Node.js ${{ matrix.node-version }}
-        uses: actions/setup-node@v4
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: ${{ env.node-version }}
       - name: Install NPM dependencies
         run: npm ci
       - name: Run CDK Jest Tests
