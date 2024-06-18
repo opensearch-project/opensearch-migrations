@@ -1,5 +1,0 @@
-cluster.name: "docker-cluster"
-network.host: 0.0.0.0
-http.type: logging_netty
-cluster:
-  initial_master_nodes: 1
