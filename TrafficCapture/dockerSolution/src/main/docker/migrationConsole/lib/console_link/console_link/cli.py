@@ -16,7 +16,10 @@ logger = logging.getLogger(__name__)
 class Context(object):
     def __init__(self, config_file) -> None:
         self.config_file = config_file
-        self.env = Environment(config_file)
+        try:
+            self.env = Environment(config_file)
+        except Exception as e:
+            raise click.ClickException(str(e))
         self.json = False
 
 
@@ -41,9 +44,9 @@ def cli(ctx, config_file, json, verbose):
 @click.pass_obj
 def cluster_group(ctx):
     if ctx.env.source_cluster is None:
-        raise ValueError("Source cluster is not set")
+        raise click.UsageError("Source cluster is not set")
     if ctx.env.target_cluster is None:
-        raise ValueError("Target cluster is not set")
+        raise click.UsageError("Target cluster is not set")
 
 
 @cluster_group.command(name="cat-indices")
@@ -76,7 +79,7 @@ def cat_indices_cmd(ctx):
 @click.pass_obj
 def replayer_group(ctx):
     if ctx.env.replayer is None:
-        raise ValueError("Replayer is not set")
+        raise click.UsageError("Replayer is not set")
 
 
 @replayer_group.command(name="start")
@@ -95,7 +98,7 @@ def start_replayer_cmd(ctx):
 def backfill_group(ctx):
     """All actions related to historical/backfill data migrations"""
     if ctx.env.backfill is None:
-        raise ValueError("Backfill migration is not set")
+        raise click.UsageError("Backfill migration is not set")
 
 
 @backfill_group.command(name="describe")
@@ -110,44 +113,60 @@ def describe_backfill_cmd(ctx):
               help="Flag to only print populated pipeline config when executed")
 @click.pass_obj
 def create_backfill_cmd(ctx, pipeline_template_file, print_config_only):
-    click.echo(logic_backfill.create(ctx.env.backfill, pipeline_template_path=pipeline_template_file,
-                                     print_config_only=print_config_only))
+    exitcode, message = logic_backfill.create(ctx.env.backfill,
+                                              pipeline_template_path=pipeline_template_file,
+                                              print_config_only=print_config_only)
+    if exitcode != 0:
+        raise click.ClickException(message)
+    click.echo(message)
 
 
 @backfill_group.command(name="start")
 @click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
 @click.pass_obj
 def start_backfill_cmd(ctx, pipeline_name):
-    click.echo(logic_backfill.start(ctx.env.backfill, pipeline_name=pipeline_name))
+    exitcode, message = logic_backfill.start(ctx.env.backfill, pipeline_name=pipeline_name)
+    if exitcode != 0:
+        raise click.ClickException(message)
+    click.echo(message)
 
 
 @backfill_group.command(name="stop")
 @click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
 @click.pass_obj
 def stop_backfill_cmd(ctx, pipeline_name):
-    click.echo(logic_backfill.stop(ctx.env.backfill, pipeline_name=pipeline_name))
+    exitcode, message = logic_backfill.stop(ctx.env.backfill, pipeline_name=pipeline_name)
+    if exitcode != 0:
+        raise click.ClickException(message)
+    click.echo(message)
 
 
 @backfill_group.command(name="scale")
 @click.argument("units", type=int, required=True)
 @click.pass_obj
 def scale_backfill_cmd(ctx, units: int):
-    click.echo(logic_backfill.scale(ctx.env.backfill, units))
+    exitcode, message = logic_backfill.scale(ctx.env.backfill, units)
+    if exitcode != 0:
+        raise click.ClickException(message)
+    click.echo(message)
 
 
 @backfill_group.command(name="status")
 @click.pass_obj
 def status_backfill_cmd(ctx):
-    click.echo(logic_backfill.status(ctx.env.backfill))
-
+    exitcode, message = logic_backfill.status(ctx.env.backfill)
+    if exitcode != 0:
+        raise click.ClickException(message)
+    click.echo(message)
 
 # ##################### METRICS ###################
+
 
 @cli.group(name="metrics")
 @click.pass_obj
 def metrics_group(ctx):
     if ctx.env.metrics_source is None:
-        raise ValueError("Metrics source is not set")
+        raise click.UsageError("Metrics source is not set")
 
 
 @metrics_group.command(name="list")

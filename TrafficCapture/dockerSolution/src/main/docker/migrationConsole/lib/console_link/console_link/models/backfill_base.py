@@ -1,6 +1,9 @@
+from enum import Enum
 from typing import Dict
+from abc import ABC, abstractmethod
 
 from console_link.models.schema_tools import contains_one_of
+from console_link.models.command_result import CommandResult
 
 from cerberus import Validator
 
@@ -16,7 +19,10 @@ SCHEMA = {
 }
 
 
-class Backfill:
+BackfillStatus = Enum("BackfillStatus", ["NOT_STARTED", "RUNNING", "STOPPED", "FAILED"])
+
+
+class Backfill(ABC):
     """
     Interface for backfilling data from a source to target cluster.
     """
@@ -26,20 +32,31 @@ class Backfill:
         if not v.validate({"backfill": self.config}):
             raise ValueError("Invalid config file for backfill", v.errors)
 
-    def create(self):
-        raise NotImplementedError
+    @abstractmethod
+    def create(self, *args, **kwargs) -> CommandResult:
+        """If necessary, create/deploy the backfill mechanism iteslf. After create succesfully completes,
+        the backfill should be ready to start."""
+        pass
 
-    def start(self):
-        raise NotImplementedError
+    @abstractmethod
+    def start(self, *args, **kwargs) -> CommandResult:
+        """Begin running the backfill. After running start, the user should be able to assume that--barring exceptions
+        or failures--their data will begin moving to the target cluster."""
+        pass
 
-    def stop(self):
-        raise NotImplementedError
+    @abstractmethod
+    def stop(self, *args, **kwargs) -> CommandResult:
+        """Stop or pause the backfill. This does not make guarantees about resumeability."""
+        pass
 
-    def get_status(self):
-        raise NotImplementedError
+    @abstractmethod
+    def get_status(self, *args, **kwargs) -> BackfillStatus:
+        """Return a status"""
+        pass
 
-    def scale(self, units: int):
-        raise NotImplementedError
+    @abstractmethod
+    def scale(self, units: int, *args, **kwargs) -> CommandResult:
+        pass
 
-    def describe(self):
+    def describe(self) -> Dict:
         return self.config

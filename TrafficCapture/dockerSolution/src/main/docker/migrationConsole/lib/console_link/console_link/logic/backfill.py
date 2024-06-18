@@ -1,16 +1,22 @@
 from enum import Enum
 import json
 import logging
-from typing import Dict, Optional
+from typing import Dict, Optional, Tuple
 
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
-from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill, RFSBackfill
+from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill
 from console_link.models.cluster import Cluster
 from console_link.models.backfill_base import Backfill
 import yaml
 
 
 logger = logging.getLogger(__name__)
+
+
+class ExitCode(Enum):
+    SUCCESS = 0
+    FAILURE = 1
+
 
 BackfillType = Enum("BackfillType",
                     ["opensearch_ingestion", "reindex_from_snapshot"])
@@ -57,70 +63,77 @@ def describe(backfill: Backfill, as_json=False) -> str:
     return yaml.safe_dump(response)
 
 
-def create(backfill: Backfill, *args, **kwargs) -> str:
-    if isinstance(backfill, RFSBackfill):
-        # Create is a no-op for an RFS Backfill backend.
-        logger.info("RFS Backfill does not support create")
-        return "No-op"  # TODO: figure out what (if anything) this should actually be.
+def create(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
     logger.info(f"Creating backfill with {args=} and {kwargs=}")
     try:
-        return backfill.create(*args, **kwargs)
+        result = backfill.create(*args, **kwargs)
     except NotImplementedError:
         logger.error(f"Create is not implemented for backfill {type(backfill).__name__}")
-        return f"Create is not implemented for backfill {type(backfill).__name__}"
+        return ExitCode.FAILURE, f"Create is not implemented for backfill {type(backfill).__name__}"
     except Exception as e:
         logger.error(f"Failed to create backfill: {e}")
-        return f"Failure when creating backfill: {type(e).__name__} {e}"
+        return ExitCode.FAILURE, f"Failure when creating backfill: {type(e).__name__} {e}"
+    
+    if result.success:
+        return ExitCode.SUCCESS, "Backfill created successfully." + "\n" + result.value
+    return ExitCode.FAILURE, "Backfill creation failed." + "\n" + result.value
 
 
-def start(backfill: Backfill, *args, **kwargs) -> str:
-    # This logic will have to get a lot more sophisticated as we have more arguments for each command.
-    # For the time-being, this is enough to meet our requirements.
-    if isinstance(backfill, OpenSearchIngestionBackfill):
-        logger.info(f"Starting OpenSearch Ingestion backfill with {args=} and {kwargs=}")
-        return backfill.resume(*args, **kwargs)
-    logger.info("Starting backfill with no args.")
+def start(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
     try:
-        return backfill.start()
+        result = backfill.start(*args, **kwargs)
     except NotImplementedError:
         logger.error(f"Start is not implemented for backfill {type(backfill).__name__}")
-        return f"Start is not implemented for backfill {type(backfill).__name__}"
+        return ExitCode.FAILURE, f"Start is not implemented for backfill {type(backfill).__name__}"
     except Exception as e:
         logger.error(f"Failed to start backfill: {e}")
-        return f"Failure when starting backfill: {type(e).__name__} {e}"
+        return ExitCode.FAILURE, f"Failure when starting backfill: {type(e).__name__} {e}"
+    
+    if result.success:
+        return ExitCode.SUCCESS, "Backfill started successfully." + "\n" + result.value
+    return ExitCode.FAILURE, "Backfill start failed." + "\n" + result.value
 
 
-def stop(backfill: Backfill, *args, **kwargs) -> str:
+def stop(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
     logger.info("Stopping backfill")
     try:
-        return backfill.stop(*args, **kwargs)
+        result = backfill.stop(*args, **kwargs)
     except NotImplementedError:
         logger.error(f"Stop is not implemented for backfill {type(backfill).__name__}")
-        return f"Stop is not implemented for backfill {type(backfill).__name__}"
+        return ExitCode.FAILURE, f"Stop is not implemented for backfill {type(backfill).__name__}"
     except Exception as e:
         logger.error(f"Failed to stop backfill: {e}")
-        return f"Failure when stopping backfill: {type(e).__name__} {e}"
+        return ExitCode.FAILURE, f"Failure when stopping backfill: {type(e).__name__} {e}"
+    if result.success:
+        return ExitCode.SUCCESS, "Backfill stopped successfully." + "\n" + result.value
+    return ExitCode.FAILURE, "Backfill stop failed." + "\n" + result.value
 
 
-def scale(backfill: Backfill, units: int, *args, **kwargs) -> str:
+def scale(backfill: Backfill, units: int, *args, **kwargs) -> Tuple[ExitCode, str]:
     logger.info(f"Scaling backfill to {units} units")
     try:
-        return backfill.scale(units, *args, **kwargs)
+        result = backfill.scale(units, *args, **kwargs)
     except NotImplementedError:
         logger.error(f"Scale is not implemented for backfill {type(backfill).__name__}")
-        return f"Scale is not implemented for backfill {type(backfill).__name__}"
+        return ExitCode.FAILURE, f"Scale is not implemented for backfill {type(backfill).__name__}"
     except Exception as e:
         logger.error(f"Failed to scale backfill: {e}")
-        return f"Failure when scaling backfill: {type(e).__name__} {e}"
+        return ExitCode.FAILURE, f"Failure when scaling backfill: {type(e).__name__} {e}"
+    if result.success:
+        return ExitCode.SUCCESS, "Backfill scaled successfully." + "\n" + result.value
+    return ExitCode.FAILURE, "Backfill scale failed." + "\n" + result.value
 
 
-def status(backfill: Backfill, *args, **kwargs) -> str:
+def status(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
     logger.info("Getting backfill status")
     try:
-        return backfill.get_status(*args, **kwargs)
+        result = backfill.get_status(*args, **kwargs)
     except NotImplementedError:
         logger.error(f"Status is not implemented for backfill {type(backfill).__name__}")
-        return f"Status is not implemented for backfill: {type(backfill).__name__}"
+        return ExitCode.FAILURE, f"Status is not implemented for backfill: {type(backfill).__name__}"
     except Exception as e:
         logger.error(f"Failed to get status of backfill: {e}")
-        return f"Failure when getting status of backfill: {type(e).__name__} {e}"
+        return ExitCode.FAILURE, f"Failure when getting status of backfill: {type(e).__name__} {e}"
+    if result.success:
+        return ExitCode.SUCCESS, result.value
+    return ExitCode.FAILURE, "Backfill status retrieval failed." + "\n" + result.value

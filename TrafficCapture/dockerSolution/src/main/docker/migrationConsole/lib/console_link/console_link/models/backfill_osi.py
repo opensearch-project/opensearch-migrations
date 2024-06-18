@@ -1,10 +1,12 @@
 from console_link.models.osi_utils import (create_pipeline_from_env, start_pipeline, stop_pipeline,
                                            OpenSearchIngestionMigrationProps)
 from console_link.models.cluster import Cluster
-from console_link.models.backfill_base import Backfill
+from console_link.models.backfill_base import Backfill, BackfillStatus
+from console_link.models.command_result import CommandResult
 from typing import Dict
 from cerberus import Validator
 import boto3
+
 
 OSI_SCHEMA = {
     'pipeline_role_arn': {
@@ -89,3 +91,9 @@ class OpenSearchIngestionBackfill(Backfill):
         if pipeline_name is None:
             pipeline_name = self.osi_props.pipeline_name
         stop_pipeline(osi_client=self.osi_client, pipeline_name=pipeline_name)
+
+    def get_status(self, *args, **kwargs) -> BackfillStatus:
+        raise NotImplementedError()
+
+    def scale(self, units: int, *args, **kwargs) -> CommandResult:
+        raise NotImplementedError()

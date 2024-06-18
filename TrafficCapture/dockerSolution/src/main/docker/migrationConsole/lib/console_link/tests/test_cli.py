@@ -27,10 +27,10 @@ def env():
 
 
 def test_cli_without_valid_services_file_raises_error(runner):
-    result = runner.invoke(cli, ['--config-file', '~/non-existent/file/services.yaml', 'clusters', 'cat-indices'],
-                           catch_exceptions=True)
-    assert isinstance(result.exception, FileNotFoundError)
+    result = runner.invoke(cli, ['--config-file', '~/non-existent/file/services.yaml', 'clusters', 'cat-indices'])
     assert result.exit_code == 1
+    assert " No such file or directory: '~/non-existent/file/services.yaml'" in result.stdout
+    assert isinstance(result.exception, SystemExit)
 
 
 def test_cli_with_valid_services_file_does_not_raise_error(runner):

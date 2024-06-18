@@ -1,7 +1,8 @@
 from typing import Dict
-from console_link.models.backfill_base import Backfill
+from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.cluster import Cluster
 from console_link.models.schema_tools import contains_one_of
+from console_link.models.command_result import CommandResult
 
 from cerberus import Validator
 import boto3
@@ -46,6 +47,21 @@ class RFSBackfill(Backfill):
         v = Validator(RFS_BACKFILL_SCHEMA)
         if not v.validate(self.config):
             raise ValueError("Invalid config file for RFS backfill", v.errors)
+
+    def create(self, *args, **kwargs) -> CommandResult:
+        return CommandResult(1, "no-op")
+
+    def start(self, *args, **kwargs) -> CommandResult:
+        raise NotImplementedError()
+
+    def stop(self, *args, **kwargs) -> CommandResult:
+        raise NotImplementedError()
+
+    def get_status(self, *args, **kwargs) -> BackfillStatus:
+        raise NotImplementedError()
+
+    def scale(self, units: int, *args, **kwargs) -> CommandResult:
+        raise NotImplementedError()
 
 
 class DockerRFSBackfill(RFSBackfill):
