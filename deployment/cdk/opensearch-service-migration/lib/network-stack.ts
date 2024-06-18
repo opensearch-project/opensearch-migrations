@@ -81,7 +81,7 @@ export class NetworkStack extends Stack {
             const vpcId = StringParameter.valueFromLookup(this,
                 getMigrationStringParameterName({
                     stage: props.stage,
-                    defaultDeployId: props.addOnMigrationDeployId,
+                    defaultDeployId: props.defaultDeployId,
                     parameter: MigrationSSMParameter.VPC_ID
                 })
             )
@@ -124,10 +124,12 @@ export class NetworkStack extends Stack {
             });
         }
         this.validateVPC(this.vpc)
-        createMigrationStringParameter(this, this.vpc.vpcId, {
-            ...props,
-            parameter: MigrationSSMParameter.VPC_ID
-        });
+        if(!props.addOnMigrationDeployId) {
+            createMigrationStringParameter(this, this.vpc.vpcId, {
+                ...props,
+                parameter: MigrationSSMParameter.VPC_ID
+            });
+        }
 
         if (props.albEnabled) {
             // Create the ALB with the strongest TLS 1.3 security policy
