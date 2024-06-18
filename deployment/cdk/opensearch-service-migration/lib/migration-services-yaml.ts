@@ -29,9 +29,6 @@ export class RFSBackfillYaml {
 }
 
 export class OSIBackfillYaml {
-    opensearch_ingestion = {
-        aws_region: null,
-    }
 
 }
 
@@ -46,7 +43,11 @@ export class ServicesYaml {
             source_cluster: this.source_cluster,
             target_cluster: this.target_cluster,
             metrics_source: this.metrics_source,
-            backfill: this.backfill,
+            backfill: this.backfill
+            ? (this.backfill instanceof RFSBackfillYaml
+                ? { reindex_from_snapshot: this.backfill }
+                : { opensearch_ingestion: this.backfill })
+            : undefined
         },
         {
             'nullStr': ''
