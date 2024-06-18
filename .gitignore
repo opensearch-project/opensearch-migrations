@@ -24,3 +24,4 @@ TrafficCapture/**/out/
 # CDK files from end-to-end testing
 opensearch-cluster-cdk/
 test/opensearch-cluster-cdk/
+TrafficCapture/dockerSolution/src/main/docker/migrationConsole/staging

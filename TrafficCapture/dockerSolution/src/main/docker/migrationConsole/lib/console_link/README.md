@@ -1,4 +1,21 @@
 # Console_link Library
+- [Services.yaml spec](#servicesyaml-spec)
+    - [Cluster](#cluster)
+    - [Metrics Source](#metrics-source)
+    - [Backfill](#backfill)
+        - [Reindex From Snapshot](#reindex-from-snapshot)
+        - [OpenSearch Ingestion](#opensearch-ingestion)
+- [Usage](#usage)
+    - [Library](#library)
+    - [CLI](#cli)
+        - [Global Options](#global-options)
+        - [Objects](#objects)
+        - [Commands \& options](#commands--options)
+- [Development](#development)
+    - [Unit Tests](#unit-tests)
+    - [Coverage](#coverage)
+
+
 
 The console link library is designed to provide a unified interface for the many possible backend services involved in a migration. The interface can be used by multiple frontends--a CLI app and a web API, for instance.
 
@@ -44,6 +61,7 @@ backfill:
         tags:
             - "migration_deployment=1.0.6"
 ```
+
 
 ## Services.yaml spec
 

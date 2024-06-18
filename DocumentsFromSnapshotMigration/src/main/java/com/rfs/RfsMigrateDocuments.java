@@ -6,6 +6,7 @@ import com.beust.jcommander.Parameter;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
+import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.Logger;
 import org.apache.logging.log4j.LogManager;
@@ -34,9 +35,8 @@ import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.worker.DocumentsRunner;
 import com.rfs.worker.GlobalState;
 
+@Slf4j
 public class RfsMigrateDocuments {
-    private static final Logger logger = LogManager.getLogger(RfsMigrateDocuments.class);
-
     public static class Args {
         @Parameter(names = {"--snapshot-name"}, description = "The name of the snapshot to migrate", required = true)
         public String snapshotName;
@@ -65,9 +65,6 @@ public class RfsMigrateDocuments {
         @Parameter(names = {"--max-shard-size-bytes"}, description = ("Optional. The maximum shard size, in bytes, to allow when"
             + " performing the document migration.  Useful for preventing disk overflow.  Default: 50 * 1024 * 1024 * 1024 (50 GB)"), required = false)
         public long maxShardSizeBytes = 50 * 1024 * 1024 * 1024L;
-
-        @Parameter(names = {"--log-level"}, description = "What log level you want.  Default: 'info'", required = false, converter = Logging.ArgsConverter.class)
-        public Level logLevel = Level.INFO;
     }
 
     public static void main(String[] args) throws Exception {
@@ -87,14 +84,11 @@ public class RfsMigrateDocuments {
         final String targetUser = arguments.targetUser;
         final String targetPass = arguments.targetPass;
         final long maxShardSizeBytes = arguments.maxShardSizeBytes;
-        final Level logLevel = arguments.logLevel;
-
-        Logging.setLevel(logLevel);
 
         final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
         TryHandlePhaseFailure.executeWithTryCatch(() -> {
-            logger.info("Running RfsWorker");
+            log.info("Running RfsWorker");
 
             GlobalState globalState = GlobalState.getInstance();
             OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
