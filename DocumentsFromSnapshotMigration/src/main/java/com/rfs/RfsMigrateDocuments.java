@@ -9,6 +9,7 @@ import java.nio.file.Paths;
 import java.time.Clock;
 import java.util.UUID;
 
+import lombok.extern.slf4j.Slf4j;
 import com.rfs.cms.ApacheHttpClient;
 import com.rfs.cms.OpenSearchWorkCoordinator;
 import com.rfs.cms.ProcessManager;
@@ -69,9 +70,6 @@ public class RfsMigrateDocuments {
         @Parameter(names = {"--max-shard-size-bytes"}, description = ("Optional. The maximum shard size, in bytes, to allow when"
             + " performing the document migration.  Useful for preventing disk overflow.  Default: 50 * 1024 * 1024 * 1024 (50 GB)"), required = false)
         public long maxShardSizeBytes = 50 * 1024 * 1024 * 1024L;
-
-        @Parameter(names = {"--log-level"}, description = "What log level you want.  Default: 'info'", required = false, converter = Logging.ArgsConverter.class)
-        public Level logLevel = Level.INFO;
     }
 
     public static void main(String[] args) throws Exception {
@@ -91,9 +89,6 @@ public class RfsMigrateDocuments {
         final String targetUser = arguments.targetUser;
         final String targetPass = arguments.targetPass;
         final long maxShardSizeBytes = arguments.maxShardSizeBytes;
-        final Level logLevel = arguments.logLevel;
-
-        Logging.setLevel(logLevel);
 
         final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 

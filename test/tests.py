@@ -1,4 +1,5 @@
 import boto3
+import functools
 import json
 import logging
 import pytest
@@ -6,7 +7,6 @@ import requests
 import secrets
 import string
 from operations import generate_large_doc
-import subprocess
 import time
 import unittest
 from http import HTTPStatus
@@ -14,10 +14,10 @@ from requests import Session
 from requests.adapters import HTTPAdapter
 from requests.exceptions import ConnectionError, SSLError
 from requests_aws4auth import AWS4Auth
-from typing import Tuple, Callable
+from typing import Tuple, Callable, List, Dict
 
 from operations import create_index, check_index, create_document, \
-    delete_document, delete_index, get_document
+    delete_document, delete_index, get_document, run_migration_console_command
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +37,25 @@ def get_doc_count(endpoint, index, auth, verify):
     response = requests.get(f'{endpoint}/{index}/_count', auth=auth, verify=verify)
     count = json.loads(response.text)['count']
     return count
+
+
+def assert_metrics_present(*wrapper_args, **wrapper_kwargs):
+    def decorator(test_func):
+        @functools.wraps(test_func)
+        def wrapper(self, *args, **kwargs):
+            # Run the original test function
+            try:
+                test_func(self, *args, **kwargs)
+                test_passed = True
+            except AssertionError as e:
+                test_passed = False
+                raise e
+            finally:
+                if test_passed:
+                    # Only look for metrics if the test passed
+                    self.assert_metrics(*wrapper_args, **wrapper_kwargs)
+        return wrapper
+    return decorator
 
 
 # The following "retry_request" function's purpose is to retry a certain request for "max_attempts"
@@ -137,6 +156,53 @@ class E2ETests(unittest.TestCase):
     def setUp(self):
         self.set_common_values()
 
+    # Note that the names of metrics are a bit different in a local vs cloud deployment.
+    # The transformation is somewhat hardcoded here--the user should put in the local name, and if its
+    # a cloud deployment, everything after the first `_` will be discarded. This should generally cause
+    # things to match, but it's possible there are edge cases that it doesn't account for
+    # Note as well, that currently the only way of assuming data is correlated with a given test is via
+    # the lookback time. Soon, we should implement a way to add a specific ID to metrics from a given run
+    # and check for the presence of that ID.
+    def assert_metric_has_data(self, component: str, metric: str, lookback_minutes: int):
+        command = f"console --json metrics get-data {component} {metric} --lookback {lookback_minutes}"
+        returncode, stdout, stderr = run_migration_console_command(
+            self.deployment_type,
+            command
+        )
+        self.assertEqual(returncode, 0, f"Return code from `{command}` was non-zero. Stderr output: {stderr}")
+        data = json.loads(stdout)
+        self.assertNotEqual(
+            len(data), 0,
+            f"Metric {metric} for component {component} does not exist or does "
+            f"not have data within the last {lookback_minutes} minutes"
+        )
+
+    def assert_metrics(self, expected_metrics: Dict[str, List[str]], lookback_minutes=2, wait_before_check_seconds=60):
+        """
+        This is the method invoked by the `@assert_metrics_present` decorator.
+        params:
+            expected_metrics: a dictionary of component->[metrics], for each metric that should be verified.
+            lookback_minutes: the number of minutes into the past to query for metrics
+            wait_before_check_seconds: the time in seconds to delay before checking for the presence of metrics
+        """
+        logger.debug(f"Waiting {wait_before_check_seconds} before checking for metrics.")
+        time.sleep(wait_before_check_seconds)
+        for component, expected_comp_metrics in expected_metrics.items():
+            if component == "captureProxy" and self.deployment_type == "cloud":
+                # We currently do not emit captureProxy metrics from a non-standalone proxy, which is the scenario
+                # tested in our e2e tests. Therefore, we don't want to assert metrics exist in this situation. We
+                # should remove this clause as soon as we start testing the standalone proxy scenario.
+                logger.warning("Skipping metric verification for captureProxy metrics in a cloud deployment.")
+                continue
+            for expected_metric in expected_comp_metrics:
+                if self.deployment_type == 'cloud':
+                    expected_metric = expected_metric.split('_', 1)[0]
+                self.assert_metric_has_data(component, expected_metric, lookback_minutes)
+
+    @assert_metrics_present({
+        'captureProxy': ['kafkaCommitCount_total'],
+        'replayer': ['kafkaCommitCount_total']
+    })
     def test_0001_index(self):
         # This test will verify that an index will be created (then deleted) on the target cluster when one is created
         # on the source cluster by going through the proxy first. It will verify that the traffic is captured by the
@@ -271,29 +337,24 @@ class E2ETests(unittest.TestCase):
         self.assertEqual(response.status_code, HTTPStatus.METHOD_NOT_ALLOWED)
 
     def test_0006_OSB(self):
-        if self.deployment_type == "cloud":
-            cmd_exec = f"/root/runTestBenchmarks.sh --endpoint {self.proxy_endpoint}"
-            if self.source_auth_type == "none":
-                cmd_exec = cmd_exec + " --no-auth"
-            elif self.source_auth_type == "basic":
-                cmd_exec = cmd_exec + f" --auth-user {self.source_username} --auth-pass {self.source_password}"
-            logger.warning(f"Running local command: {cmd_exec}")
-            subprocess.run(cmd_exec, shell=True)
-            # TODO: Enhance our waiting logic for determining when all OSB records have been processed by Replayer
-            time.sleep(360)
-        else:
-            cmd = ['docker', 'ps', '--format="{{.ID}}"', '--filter', 'name=migration']
-            container_id = subprocess.run(cmd, stdout=subprocess.PIPE, text=True).stdout.strip().replace('"', '')
+        cmd = "/root/runTestBenchmarks.sh"
 
-            if container_id:
-                cmd_exec = f"docker exec {container_id} ./runTestBenchmarks.sh"
-                logger.warning(f"Running command: {cmd_exec}")
-                subprocess.run(cmd_exec, shell=True)
-                time.sleep(5)
+        if self.deployment_type == "cloud":
+            if self.source_auth_type == "none":
+                auth_string = " --no-auth"
+            elif self.source_auth_type == "basic":
+                auth_string = f" --auth-user {self.source_username} --auth-pass {self.source_password}"
             else:
-                logger.error("Migration-console container was not found,"
-                             " please double check that deployment was a success")
-                self.assert_(False)
+                auth_string = ""
+
+            cmd += f" --endpoint {self.proxy_endpoint} {auth_string}"
+            sleep_time = 360
+        else:
+            sleep_time = 5
+
+        returncode, _, stderr = run_migration_console_command(self.deployment_type, cmd)
+        self.assertEqual(returncode, 0, f"Running command {cmd} failed with stderr output:\n{stderr}")
+        time.sleep(sleep_time)
 
         source_indices = get_indices(self.source_endpoint, self.source_auth, self.source_verify_ssl)
         valid_source_indices = set([index for index in source_indices

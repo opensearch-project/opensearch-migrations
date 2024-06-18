@@ -7,15 +7,10 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.Logger;
-import org.apache.logging.log4j.LogManager;
-
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
 import com.rfs.common.GlobalMetadata;
 import com.rfs.common.IndexMetadata;
-import com.rfs.common.Logging;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Uri;
 import com.rfs.common.S3Repo;
@@ -31,9 +26,10 @@ import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
 import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 import com.rfs.worker.IndexRunner;
 import com.rfs.worker.MetadataRunner;
+import lombok.extern.slf4j.Slf4j;
 
-public class RfsMigrateMetadata {
-    private static final Logger logger = LogManager.getLogger(RfsMigrateMetadata.class);
+@Slf4j
+public class MetadataMigration {
 
     public static class Args {
         @Parameter(names = {"--snapshot-name"}, description = "The name of the snapshot to migrate", required = true)
@@ -74,9 +70,6 @@ public class RfsMigrateMetadata {
             + " This can be useful for migrating to targets which use zonal deployments and require additional replicas to meet zone requirements.  Default: 0")
             , required = false)
         public int minNumberOfReplicas = 0;
-
-        @Parameter(names = {"--log-level"}, description = "What log level you want.  Default: 'info'", required = false, converter = Logging.ArgsConverter.class)
-        public Level logLevel = Level.INFO;
     }
 
     public static void main(String[] args) throws Exception {
@@ -97,14 +90,11 @@ public class RfsMigrateMetadata {
         final List<String> indexTemplateAllowlist = arguments.indexTemplateAllowlist;
         final List<String> componentTemplateAllowlist = arguments.componentTemplateAllowlist;
         final int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
-        final Level logLevel = arguments.logLevel;
-
-        Logging.setLevel(logLevel);
 
         final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
         TryHandlePhaseFailure.executeWithTryCatch(() -> {
-            logger.info("Running RfsWorker");
+            log.info("Running RfsWorker");
             OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
 
             final SourceRepo sourceRepo = S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
