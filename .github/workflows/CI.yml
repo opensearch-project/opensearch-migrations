@@ -2,14 +2,10 @@ name: CI
 
 on:
   push:
-    paths:
-      - '**.py'
   pull_request:
-    paths:
-      - '**.py'
 
 jobs:
-  lint:
+  setup-python:
     runs-on: ubuntu-latest
     strategy:
       matrix:
@@ -22,6 +18,11 @@ jobs:
        uses: actions/setup-python@v5
        with:
          python-version: ${{ matrix.python-version }}
+
+  python-lint:
+    needs: setup-python
+    runs-on: ubuntu-latest
+    steps:
      - name: Install dependencies
        run: |
         python -m pip install --upgrade pip
@@ -29,3 +30,152 @@ jobs:
      - name: Analysing the code with flake8
        run: |
         flake8 $(git ls-files '*.py')
+
+  console-library-tests:
+    needs: setup-python
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link
+    steps:
+      - name: Install Dependencies for Console Library and Tests
+        run: |
+          python -m pip install . -r ./tests/requirements.txt
+      - name: Run Tests
+        run: |
+          python -m coverage run -m pytest
+      - name: Generate XML Coverage Report
+        run: |
+          python -m coverage xml
+      - name: Upload Coverage Report
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+
+  setup-gradle:
+    runs-on: ubuntu-latest
+    outputs:
+      docker-cache-key: ${{ steps.generate_cache_key.outputs.key }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v4
+
+      - name: Set up JDK
+        uses: actions/setup-java@v4
+        with:
+          java-version: '11'
+          distribution: 'corretto'
+
+      - name: Generate Cache Key from Dockerfiles
+        id: generate_cache_key
+        run: |
+          files=$(find . -type f \( -name 'docker-compose.yml' -o -name 'Dockerfile' \))
+          file_contents=$(cat $files)
+          key=$(echo "${file_contents}" | sha1sum | awk '{print $1}')
+          echo "key=${key}" >> "$GITHUB_OUTPUT"
+
+  gradle-tests:
+    needs: setup-gradle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run Gradle Build
+        run: ./gradlew build -x test -x TrafficCapture:dockerSolution:build --scan --stacktrace
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+
+      - name: Run Tests with Coverage
+        run: ./gradlew test -x TrafficCapture:dockerSolution:build jacocoTestReport --scan --stacktrace
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: traffic-capture-test-reports
+          path: |
+            ./TrafficCapture*/*/build/reports/
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: RFS-test-reports
+          path: |
+            ./RFS*/*/build/reports/
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: "**/jacocoTestReport.xml"
+          flags: unittests
+          fail_ci_if_error: false
+
+  python-e2e-tests:
+    needs:
+      - setup-python
+      - setup-gradle
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cache Docker Images
+        uses: ScribeMD/docker-cache@0.5.0
+        with:
+          key: docker-${{ runner.os }}-${{ needs.setup-gradle.outputs.docker-cache-key }}
+
+      - name: Start Docker Solution
+        run: ../gradlew dockerSolution:ComposeUp -x test --scan --info --stacktrace
+        working-directory: TrafficCapture
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+
+      - name: Install dependencies
+        run: |
+          cd test
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run E2E test script
+        run: |
+          cd test
+          chmod +x ./tests.py
+          pytest tests.py --unique_id="testindex"
+
+  cdk-tests:
+    strategy:
+      matrix:
+        node-version: ['18.x']
+        os: [ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        working-directory: ./deployment/cdk/opensearch-service-migration
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+      - name: Install NPM dependencies
+        run: npm ci
+      - name: Run CDK Jest Tests
+        run: npm test
+
+  link-checker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: lychee Link Checker
+        id: lychee
+        uses: lycheeverse/lychee-action@v1
+        with:
+          args: --verbose --accept=200,403,429  "**/*.html" "**/*.md" "**/*.txt" "**/*.json"
+            --offline
+            --exclude "file:///github/workspace/*"
+            --exclude "http://localhost*"
+            --exclude "https://localhost*"
+            --exclude "http://capture-proxy*"
+            --exclude "https://capture-proxy*"
+            --exclude-mail
+          fail: true
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
