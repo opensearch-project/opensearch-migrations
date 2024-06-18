@@ -95,6 +95,7 @@ def test_get_backfill_valid_ecs_rfs():
     ecs_rfs_config = {
         "reindex_from_snapshot": {
             "ecs": {
+                "cluster_name": "migration-aws-integ-ecs-cluster",
                 "service_name": "migration-aws-integ-reindex-from-snapshot"
             }
         }

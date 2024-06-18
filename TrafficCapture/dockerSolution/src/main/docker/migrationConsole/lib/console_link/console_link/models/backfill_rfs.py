@@ -20,6 +20,7 @@ DOCKER_RFS_SCHEMA = {
 ECS_RFS_SCHEMA = {
     "type": "dict",
     "schema": {
+        "cluster_name": {"type": "string", "required": True},
         "service_name": {"type": "string", "required": True},
         "aws_region": {"type": "string", "required": False}
     }
