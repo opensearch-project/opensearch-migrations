@@ -18,6 +18,8 @@ jobs:
        uses: actions/setup-python@v5
        with:
          python-version: ${{ matrix.python-version }}
+     - run: pwd
+     - run: ls -al
 
   python-lint:
     needs: setup-python
@@ -62,20 +64,26 @@ jobs:
     steps:
       - name: Check out code
         uses: actions/checkout@v4
-
+      - run: pwd
+      - run: ls -al
+  
       - name: Set up JDK
         uses: actions/setup-java@v4
         with:
           java-version: '11'
           distribution: 'corretto'
-
+      - run: pwd
+      - run: ls -al
+    
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: 8.0.2
           gradle-home-cache-cleanup: true
           cache-read-only: false
-
+      - run: pwd
+      - run: ls -al
+    
       - name: Generate Cache Key from Dockerfiles
         id: generate_cache_key
         run: |
