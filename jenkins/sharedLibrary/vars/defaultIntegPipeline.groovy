@@ -51,14 +51,17 @@ def call(Map config = [:]) {
     """
     def source_context_file_name = 'sourceJenkinsContext.json'
     def migration_context_file_name = 'migrationJenkinsContext.json'
+    def gitUrl = config.gitUrl ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
+    def gitBranch = config.gitBranch ?: 'main'
+    def stage = config.stage ?: 'aws-integ'
     pipeline {
         agent { label config.overrideAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
-        parameters {
-            string(name: 'GIT_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git URL')
-            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch')
-            string(name: 'STAGE', defaultValue: 'aws-integ', description: 'Deployment stage')
-        }
+//        parameters {
+//            string(name: 'GIT_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git URL')
+//            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch')
+//            string(name: 'STAGE', defaultValue: 'aws-integ', description: 'Deployment stage')
+//        }
 //        environment {
 //            GIT_URL = config.overrideGitUrl ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
 //            GIT_BRANCH = config.overrideGitBranch ?: 'main'
@@ -71,9 +74,9 @@ def call(Map config = [:]) {
 //                    if (config.checkout) {
 //                        config.checkout()
 //                    } else {
-//                        git branch: "${params.GIT_BRANCH}", url: "${params.GIT_URL}"
+//                        git branch: "${gitBranch}", url: "${gitUrl}"
 //                    }
-                    git branch: "${params.GIT_BRANCH}", url: "${params.GIT_URL}"
+                    git branch: "${gitBranch}", url: "${gitUrl}"
                 }
             }
 
@@ -105,7 +108,7 @@ def call(Map config = [:]) {
                     dir('test') {
                         sh 'sudo usermod -aG docker $USER'
                         sh 'sudo newgrp docker'
-                        sh "sudo ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' --migration-context-file './$migration_context_file_name' --source-context-id source-single-node-ec2 --migration-context-id migration-default --stage ${params.STAGE} --migrations-git-url ${params.GIT_URL} --migrations-git-branch ${params.GIT_BRANCH}"
+                        sh "sudo ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' --migration-context-file './$migration_context_file_name' --source-context-id source-single-node-ec2 --migration-context-id migration-default --stage ${stage} --migrations-git-url ${gitUrl} --migrations-git-branch ${gitBranch}"
                     }
                 }
             }
@@ -116,7 +119,7 @@ def call(Map config = [:]) {
                         script {
                             def time = new Date().getTime()
                             def uniqueId = "integ_min_${time}_${currentBuild.number}"
-                            sh "sudo ./awsRunIntegTests.sh --stage ${params.STAGE} --migrations-git-url ${params.GIT_URL} --migrations-git-branch ${params.GIT_BRANCH} --unique-id ${uniqueId}"
+                            sh "sudo ./awsRunIntegTests.sh --stage ${stage} --migrations-git-url ${gitUrl} --migrations-git-branch ${gitBranch} --unique-id ${uniqueId}"
                         }
                     }
 
@@ -126,7 +129,7 @@ def call(Map config = [:]) {
         post {
             always {
                 dir('test') {
-                    sh "sudo ./awsE2ESolutionSetup.sh --stage ${params.STAGE} --run-post-actions"
+                    sh "sudo ./awsE2ESolutionSetup.sh --stage ${stage} --run-post-actions"
                 }
             }
         }
