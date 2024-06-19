@@ -21,13 +21,13 @@ def source_cdk_context = """
         "securityDisabled": true,
         "minDistribution": false,
         "cpuArch": "x64",
-        "isInternal": true,
+        "isInternal": false,
         "singleNodeCluster": true,
         "networkAvailabilityZones": 2,
         "dataNodeCount": 1,
         "managerNodeCount": 0,
-        "serverAccessType": "ipv4",
-        "restrictServerAccessTo": "0.0.0.0/0"
+        "serverAccessType": "securityGroupId",
+        "restrictServerAccessTo": "sg-07ff03367fb0c372f"
       }
     }
 """
