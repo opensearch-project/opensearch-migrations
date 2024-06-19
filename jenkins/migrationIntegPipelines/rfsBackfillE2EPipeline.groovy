@@ -6,8 +6,8 @@
 
 def sourceContextId = 'source-single-node-ec2'
 def migrationContextId = 'migration-rfs'
-def gitUrl = 'https://github.com/lewijacn/opensearch-migrations.git'
-def gitBranch = 'checkin-jenkinsfile'
+def gitUrl = 'https://github.com/opensearch-project/opensearch-migrations.git'
+def gitBranch = 'main'
 def stageId = 'rfs-integ'
 def source_cdk_context = """
     {

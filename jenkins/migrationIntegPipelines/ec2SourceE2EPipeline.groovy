@@ -6,8 +6,8 @@
 
 def sourceContextId = 'source-single-node-ec2'
 def migrationContextId = 'migration-default'
-def gitUrl = 'https://github.com/lewijacn/opensearch-migrations.git'
-def gitBranch = 'checkin-jenkinsfile'
+def gitUrl = 'https://github.com/opensearch-project/opensearch-migrations.git'
+def gitBranch = 'main'
 def stageId = 'aws-integ'
 def source_cdk_context = """
     {
