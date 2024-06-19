@@ -47,7 +47,9 @@ def send_request(session, index_suffix, url_base, auth, headers, no_refresh):
 def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser()
-    parser.add_argument("--endpoint", help="Source cluster endpoint e.g. http://test.elb.us-west-2.amazonaws.com:9200.")
+    parser.add_argument("--endpoint", help="Cluster endpoint e.g. http://test.elb.us-west-2.amazonaws.com:9200.")
+    parser.add_argument("--username", help="Cluster username.", default='admin')
+    parser.add_argument("--password", help="Cluster password.", default='admin')
     parser.add_argument("--no-auth", action='store_true', help="Flag to provide no auth in requests.")
     parser.add_argument("--no-clear-output", action='store_true',
                         help="Flag to not clear the output before each run. " +
@@ -109,7 +111,7 @@ def main():
     args = parse_args()
 
     url_base = args.endpoint or os.environ.get('SOURCE_DOMAIN_ENDPOINT', 'https://capture-proxy:9200')
-    auth = None if args.no_auth else ('admin', 'admin')
+    auth = None if args.no_auth else (args.username, args.password)
 
     session = requests.Session()
     keep_alive_headers = {'Connection': 'keep-alive'}
@@ -122,16 +124,16 @@ def main():
         request_timestamps.append(datetime.now())
         current_index = get_current_date_index()
 
-        response_code, response_message, response_json = send_request(
+        response_code, request_timestamp_or_error, response_json = send_request(
             session, current_index, url_base, auth, keep_alive_headers, args.no_refresh
         )
         update_counts(response_code, total_counts)
 
         if response_code is not None:
-            request_message = f"Request sent at {response_message}: {response_code}"
+            request_message = f"Request sent at {request_timestamp_or_error}: {response_code}"
             response_pretty = f"Response: {json.dumps(response_json, indent=2)}"
         else:
-            request_message = f"Error sending request: {response_message}"
+            request_message = f"Error sending request: {request_timestamp_or_error}"
             response_pretty = "Response: N/A"
 
         throughput = calculate_throughput(request_timestamps)
