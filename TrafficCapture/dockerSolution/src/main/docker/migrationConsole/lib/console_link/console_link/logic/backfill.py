@@ -127,13 +127,13 @@ def scale(backfill: Backfill, units: int, *args, **kwargs) -> Tuple[ExitCode, st
 def status(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
     logger.info("Getting backfill status")
     try:
-        result = backfill.get_status(*args, **kwargs)
+        status = backfill.get_status(*args, **kwargs)
     except NotImplementedError:
         logger.error(f"Status is not implemented for backfill {type(backfill).__name__}")
         return ExitCode.FAILURE, f"Status is not implemented for backfill: {type(backfill).__name__}"
     except Exception as e:
         logger.error(f"Failed to get status of backfill: {e}")
         return ExitCode.FAILURE, f"Failure when getting status of backfill: {type(e).__name__} {e}"
-    if result.success:
-        return ExitCode.SUCCESS, result.value
-    return ExitCode.FAILURE, "Backfill status retrieval failed." + "\n" + result
+    if status:
+        return ExitCode.SUCCESS, status.value
+    return ExitCode.FAILURE, "Backfill status retrieval failed." + "\n" + status
