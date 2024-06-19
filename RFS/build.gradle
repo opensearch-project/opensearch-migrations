@@ -2,28 +2,14 @@ plugins {
     id 'application'
     id 'java'
     id 'jacoco'
-    id "com.avast.gradle.docker-compose" version "0.17.4"
-    id 'com.bmuschko.docker-remote-api'
     id 'io.freefair.lombok' version '8.6'
     id 'java-test-fixtures'
     id 'com.dorongold.task-tree' version '4.0.0'
 }
 
-import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
-import groovy.transform.Canonical
-import org.opensearch.migrations.common.CommonUtils
-
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
 
-@Canonical
-class DockerServiceProps {
-    String projectName = ""
-    String dockerImageName = ""
-    String inputDir = ""
-    Map<String, String> buildArgs = [:]
-    List<String> taskDependencies = []
-}
 
 repositories {
     mavenCentral()
@@ -104,11 +90,6 @@ task migrateDocuments (type: JavaExec) {
     mainClass = 'com.rfs.RfsMigrateDocuments'
 }
 
-// Cleanup additional docker build directory
-clean.doFirst {
-    delete project.file("./docker/build")
-}
-
 // Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
 tasks.register('copyDependencies', Sync) {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
@@ -125,71 +106,6 @@ jacocoTestReport {
         html.destination file("${buildDir}/reports/jacoco/test/html")
     }
 }
-
-task copyDockerRuntimeJars (type: Sync) {
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    description = 'Copy runtime JARs and app jar to docker build directory'
-
-    // Define the destination directory
-    def buildDir = project.file("./docker/build/runtimeJars")
-    into buildDir
-
-    // Add all the required runtime JARs to be copied
-    from configurations.runtimeClasspath
-    from tasks.named('jar')
-    include '*.jar'
-}
-
-DockerServiceProps[] dockerServices = [
-        new DockerServiceProps([projectName:"reindexFromSnapshot",
-                                dockerImageName:"reindex_from_snapshot",
-                                inputDir:"./docker",
-                                taskDependencies:["copyDockerRuntimeJars"]]),
-        new DockerServiceProps([projectName:"emptyElasticsearchSource_7_10",
-                                dockerImageName:"empty_elasticsearch_source_7_10",
-                                inputDir:"./docker/TestSource_ES_7_10"]),
-        new DockerServiceProps([projectName:"emptyElasticsearchSource_7_17",
-                                dockerImageName:"empty_elasticsearch_source_7_17",
-                                inputDir:"./docker/TestSource_ES_7_17"]),
-        new DockerServiceProps([projectName:"trafficGenerator",
-                                dockerImageName:"osb_traffic_generator",
-                                inputDir:"./docker/TrafficGenerator",
-                                taskDependencies:[":TrafficCapture:dockerSolution:buildDockerImage_elasticsearchTestConsole"]]),
-] as DockerServiceProps[]
-
-for (dockerService in dockerServices) {
-    task "buildDockerImage_${dockerService.projectName}" (type: DockerBuildImage) {
-        def hash = CommonUtils.calculateDockerHash(project.fileTree("docker/${dockerService.projectName}"))
-        for (dep in dockerService.taskDependencies) {
-            dependsOn dep
-        }
-        inputDir = project.file(dockerService.inputDir)
-        buildArgs = dockerService.buildArgs
-        images.add("migrations/${dockerService.dockerImageName}:${hash}")
-        images.add("migrations/${dockerService.dockerImageName}:${version}")
-        images.add("migrations/${dockerService.dockerImageName}:latest")
-    }
-}
-
-apply from: 'build-preloaded-source-image.gradle'
-
-dockerCompose {
-    useComposeFiles = ['docker/docker-compose.yml']
-    projectName = 'rfs-compose'
-}
-
-// ../gradlew buildDockerImages
-task buildDockerImages {
-    for (dockerService in dockerServices) {
-        dependsOn "buildDockerImage_${dockerService.projectName}"
-    }
-}
-
-tasks.named("buildDockerImage_elasticsearchRFSSource") {
-    dependsOn(':TrafficCapture:dockerSolution:buildDockerImage_elasticsearchTestConsole')
-}
-tasks.getByName('composeUp')
-        .dependsOn(tasks.getByName('buildDockerImages'))
 
 test {
     useJUnitPlatform {
