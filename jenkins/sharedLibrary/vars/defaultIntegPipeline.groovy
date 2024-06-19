@@ -57,25 +57,9 @@ def call(Map config = [:]) {
     pipeline {
         agent { label config.overrideAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
-//        parameters {
-//            string(name: 'GIT_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git URL')
-//            string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch')
-//            string(name: 'STAGE', defaultValue: 'aws-integ', description: 'Deployment stage')
-//        }
-//        environment {
-//            GIT_URL = config.overrideGitUrl ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
-//            GIT_BRANCH = config.overrideGitBranch ?: 'main'
-//            STAGE = config.overrideStage ?: 'aws-integ'
-//        }
-
         stages {
             stage('Checkout') {
                 steps {
-//                    if (config.checkout) {
-//                        config.checkout()
-//                    } else {
-//                        git branch: "${gitBranch}", url: "${gitUrl}"
-//                    }
                     git branch: "${gitBranch}", url: "${gitUrl}"
                 }
             }
