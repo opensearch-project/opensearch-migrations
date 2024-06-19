@@ -78,7 +78,7 @@ dependencies {
 }
 
 application {
-    mainClassName = 'com.rfs.ReindexFromSnapshot'
+    mainClassName = 'com.rfs.RfsMigrateDocuments'
 }
 
 task runRfsWorker (type: JavaExec) {
@@ -180,6 +180,7 @@ task buildDockerImages {
     for (dockerService in dockerServices) {
         dependsOn "buildDockerImage_${dockerService.projectName}"
     }
+    dependsOn buildDockerImage_elasticsearchRFSSource
 }
 
 tasks.named("buildDockerImage_elasticsearchRFSSource") {
