@@ -1,6 +1,6 @@
 def call(Map config = [:]) {
     pipeline {
-        agent any
+        agent { label 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
         stages {
             stage('Build') {
