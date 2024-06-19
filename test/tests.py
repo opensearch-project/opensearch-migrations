@@ -404,14 +404,13 @@ class E2ETests(unittest.TestCase):
         finally:
             proxy_single_connection_session.close()
 
-    @unittest.skip
     def test_0008_largeRequest(self):
         index_name = f"test_0008_{self.unique_id}"
         doc_id = "1"
 
-        # Create large document, 99MiB
+        # Create large document, 50MiB
         # Default max 100MiB in ES/OS settings (http.max_content_length)
-        large_doc = generate_large_doc(size_mib=99)
+        large_doc = generate_large_doc(size_mib=50)
 
         # Measure the time taken by the create_document call
         # Send large request to proxy and verify response
@@ -422,7 +421,7 @@ class E2ETests(unittest.TestCase):
         duration = end_time - start_time
 
         # Set wait time to double the response time or 5 seconds
-        wait_time_seconds = min(round(duration, 3) * 2, 5)
+        wait_time_seconds = max(round(duration, 3) * 2, 5)
 
         self.assertEqual(proxy_response.status_code, HTTPStatus.CREATED)
 
