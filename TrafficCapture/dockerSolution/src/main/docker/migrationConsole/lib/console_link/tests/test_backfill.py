@@ -6,11 +6,25 @@ from console_link.logic.backfill import get_backfill, UnsupportedBackfillTypeErr
 from console_link.models.backfill_base import Backfill
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
 from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill
+from console_link.models.ecs_service import ECSService
 
 from tests.utils import create_valid_cluster
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 AWS_REGION = "us-east-1"
+
+
+@pytest.fixture
+def ecs_rfs_backfill():
+    ecs_rfs_config = {
+        "reindex_from_snapshot": {
+            "ecs": {
+                "cluster_name": "migration-aws-integ-ecs-cluster",
+                "service_name": "migration-aws-integ-reindex-from-snapshot"
+            }
+        }
+    }
+    return get_backfill(ecs_rfs_config, None, target_cluster=create_valid_cluster())
 
 
 def test_get_backfill_valid_osi():
@@ -141,3 +155,21 @@ def test_cant_instantiate_with_multiple_rfs_deployment_types():
         get_backfill(config, create_valid_cluster(), create_valid_cluster())
     assert "Invalid config file for RFS backfill" in str(excinfo.value.args[0])
     assert "More than one value is present" in str(excinfo.value.args[1]['reindex_from_snapshot'][0])
+
+
+def test_ecs_rfs_backfill_start_sets_ecs_desired_count(ecs_rfs_backfill, mocker):
+    assert ecs_rfs_backfill.default_scale == 1
+    mock = mocker.patch.object(ECSService, 'set_desired_count', autospec=True)
+    ecs_rfs_backfill.start()
+
+    assert isinstance(ecs_rfs_backfill, ECSRFSBackfill)
+    mock.assert_called_once_with(ecs_rfs_backfill.ecs_client, 1)
+
+
+def test_ecs_rfs_backfill_stop_sets_ecs_desired_count(ecs_rfs_backfill, mocker):
+    assert ecs_rfs_backfill.default_scale == 1
+    mock = mocker.patch.object(ECSService, 'set_desired_count', autospec=True)
+    ecs_rfs_backfill.stop()
+
+    assert isinstance(ecs_rfs_backfill, ECSRFSBackfill)
+    mock.assert_called_once_with(ecs_rfs_backfill.ecs_client, 0)
