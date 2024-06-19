@@ -7,9 +7,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 
 import lombok.extern.slf4j.Slf4j;
-import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.Logger;
-import org.apache.logging.log4j.LogManager;
 
 
 import com.rfs.cms.CmsClient;
@@ -18,7 +15,6 @@ import com.rfs.common.ConnectionDetails;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.IndexMetadata;
-import com.rfs.common.Logging;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Uri;

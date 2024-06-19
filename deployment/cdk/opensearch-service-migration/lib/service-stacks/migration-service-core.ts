@@ -54,11 +54,8 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly ulimits?: Ulimit[],
     readonly maxUptime?: Duration,
     readonly otelCollectorEnabled?: boolean,
-<<<<<<< Updated upstream
     readonly targetGroups?: ELBTargetGroup[],
-=======
     readonly ephemeralStorageGiB?: number
->>>>>>> Stashed changes
 }
 
 export type ELBTargetGroup = IApplicationTargetGroup | INetworkTargetGroup;
