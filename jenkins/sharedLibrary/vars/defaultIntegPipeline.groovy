@@ -51,9 +51,9 @@ def call(Map config = [:]) {
     """
     def source_context_file_name = 'sourceJenkinsContext.json'
     def migration_context_file_name = 'migrationJenkinsContext.json'
-    def gitUrl = 'https://github.com/opensearch-project/opensearch-migrations.git'
-    def gitBranch = 'main'
-    def stageId = 'aws-integ'
+    def gitUrl = config.gitUrl ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
+    def gitBranch = config.gitBranch ?: 'main'
+    def stageId = config.stageId ?: 'aws-integ'
     pipeline {
         agent { label config.overrideAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
