@@ -2,6 +2,12 @@
 def call(Map config = [:]) {
     def source_cdk_context = config.sourceContext
     def migration_cdk_context = config.migrationContext
+    if(source_cdk_context == null || source_cdk_context.isEmpty()){
+        throw new RuntimeException("The sourceContext argument must be provided");
+    }
+    if(migration_cdk_context == null || migration_cdk_context.isEmpty()){
+        throw new RuntimeException("The migrationContext argument must be provided");
+    }
     def source_context_id = config.sourceContextId ?: 'source-single-node-ec2'
     def migration_context_id = config.migrationContextId ?: 'migration-default'
     def gitUrl = config.gitUrl ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
@@ -10,7 +16,7 @@ def call(Map config = [:]) {
     def source_context_file_name = 'sourceJenkinsContext.json'
     def migration_context_file_name = 'migrationJenkinsContext.json'
     pipeline {
-        agent { label config.overrideAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
+        agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
         stages {
             stage('Checkout') {
@@ -45,9 +51,16 @@ def call(Map config = [:]) {
             stage('Deploy') {
                 steps {
                     dir('test') {
-                        sh 'sudo usermod -aG docker $USER'
-                        sh 'sudo newgrp docker'
-                        sh "sudo ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' --migration-context-file './$migration_context_file_name' --source-context-id $source_context_id --migration-context-id $migration_context_id --stage ${stageId} --migrations-git-url ${gitUrl} --migrations-git-branch ${gitBranch}"
+                        script {
+                            // Allow overwriting this step
+                            if (config.deployStep) {
+                                config.deployStep()
+                            } else {
+                                sh 'sudo usermod -aG docker $USER'
+                                sh 'sudo newgrp docker'
+                                sh "sudo ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' --migration-context-file './$migration_context_file_name' --source-context-id $source_context_id --migration-context-id $migration_context_id --stage ${stageId} --migrations-git-url ${gitUrl} --migrations-git-branch ${gitBranch}"
+                            }
+                        }
                     }
                 }
             }
@@ -56,9 +69,14 @@ def call(Map config = [:]) {
                 steps {
                     dir('test') {
                         script {
-                            def time = new Date().getTime()
-                            def uniqueId = "integ_min_${time}_${currentBuild.number}"
-                            sh "sudo ./awsRunIntegTests.sh --stage ${stageId} --migrations-git-url ${gitUrl} --migrations-git-branch ${gitBranch} --unique-id ${uniqueId}"
+                            // Allow overwriting this step
+                            if (config.integTestStep) {
+                                config.integTestStep()
+                            } else {
+                                def time = new Date().getTime()
+                                def uniqueId = "integ_min_${time}_${currentBuild.number}"
+                                sh "sudo ./awsRunIntegTests.sh --stage ${stageId} --migrations-git-url ${gitUrl} --migrations-git-branch ${gitBranch} --unique-id ${uniqueId}"
+                            }
                         }
                     }
 
