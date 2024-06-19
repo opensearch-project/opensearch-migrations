@@ -404,7 +404,6 @@ class E2ETests(unittest.TestCase):
         finally:
             proxy_single_connection_session.close()
 
-    @unittest.skip
     def test_0008_largeRequest(self):
         index_name = f"test_0008_{self.unique_id}"
         doc_id = "1"
