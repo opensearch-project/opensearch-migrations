@@ -180,7 +180,7 @@ public class RunRfsWorker {
             new DocumentsRunner(scopedWorkCoordinator,
                     (name,shard) -> shardMetadataFactory.fromRepo(snapshotName,name,shard),
                     unpackerFactory,
-                    path -> new LuceneDocumentsReader(luceneDirPath),
+                    path -> new LuceneDocumentsReader(path),
                     reindexer)
                     .migrateNextShard();
         } catch (Exception e) {

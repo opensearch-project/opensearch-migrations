@@ -57,7 +57,9 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
     public void updateTargetCluster(final List<IndexMetadata.Data> indices, final Path unpackedShardDataDir, final OpenSearchClient client) throws Exception {
         for (final IndexMetadata.Data index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
-                final var documents = new LuceneDocumentsReader(unpackedShardDataDir).readDocuments(index.getName(), shardId);
+                final var documents =
+                        new LuceneDocumentsReader(unpackedShardDataDir.resolve(index.getName()).resolve(""+shardId))
+                                .readDocuments();
 
                 final var finalShardId = shardId;
                 new DocumentReindexer(client).reindex(index.getName(), documents)

@@ -367,7 +367,7 @@ public class ReindexFromSnapshot {
                     for (int shardId = 0; shardId < indexMetadata.getNumberOfShards(); shardId++) {
                         logger.info("=== Index Id: " + indexMetadata.getName() + ", Shard ID: " + shardId + " ===");
 
-                        Flux<Document> documents = reader.readDocuments(indexMetadata.getName(), shardId);
+                        Flux<Document> documents = reader.readDocuments();
                         String targetIndex = indexMetadata.getName() + indexSuffix;
 
                         final int finalShardId = shardId; // Define in local context for the lambda
