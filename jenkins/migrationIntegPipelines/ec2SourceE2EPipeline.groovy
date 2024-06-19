@@ -4,8 +4,11 @@
 // 2. There is a still a manual step needed on the EC2 source load balancer to replace its security group rule which allows all traffic (0.0.0.0/0) to
 //    allow traffic for the relevant service security group. This needs a better story around accepting user security groups in our Migration CDK.
 
-@Library('migrations-shared-lib@checkin-jenkinsfile')_
-
+def sourceContextId = 'source-single-node-ec2'
+def migrationContextId = 'migration-default'
+def gitUrl = 'https://github.com/lewijacn/opensearch-migrations.git'
+def gitBranch = 'checkin-jenkinsfile'
+def stageId = 'test'
 def source_cdk_context = """
     {
       "source-single-node-ec2": {
@@ -28,7 +31,7 @@ def source_cdk_context = """
         "restrictServerAccessTo": "0.0.0.0/0"
       }
     }
-    """
+"""
 def migration_cdk_context = """
     {
       "migration-default": {
@@ -50,17 +53,19 @@ def migration_cdk_context = """
       }
     }
 """
+// This library declaration likely needs to change in the near future to be more dynamic in picking up library
+// changes that may have happened on the given branch being tested
+@Library("migrations-shared-lib@checkin-jenkinsfile")_
 
 defaultIntegPipeline(
         sourceContext: source_cdk_context,
         migrationContext: migration_cdk_context,
-        sourceContextId: 'source-single-node-ec2',
-        migrationContextId: 'migration-default',
-        gitUrl: 'https://github.com/lewijacn/opensearch-migrations.git',
-        gitBranch: 'checkin-jenkinsfile',
-        stageId: 'test'
-//        checkout: {
-//            echo 'Custom Test Step'
-//            git branch: "${env.GIT_BRANCH}", url: "${env.GIT_URL}"
-//        }
+        sourceContextId: sourceContextId,
+        migrationContextId: migrationContextId,
+        gitUrl: gitUrl,
+        gitBranch: gitBranch,
+        stageId: stageId
+        //deployStep: {
+        //    echo 'Custom Test Step'
+        //}
 )
