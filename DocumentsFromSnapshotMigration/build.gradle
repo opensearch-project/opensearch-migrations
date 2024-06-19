@@ -24,7 +24,7 @@ dependencies {
 }
 
 application {
-    mainClassName = 'com.rfs.RfsMigrateDocuments'
+    mainClassName = 'com.rfs.MigrateDocuments'
 }
 
 // Utility task to allow copying required libraries into a 'dependencies' folder for security scanning

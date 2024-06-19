@@ -60,16 +60,22 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
         let servicePolicies = [artifactS3PublishPolicy, openSearchPolicy, openSearchServerlessPolicy]
 
+<<<<<<< Updated upstream
         const osClusterEndpoint = getMigrationStringParameterValue(this, {
             ...props,
             parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
         });
         const s3Uri = `s3://migration-artifacts-${this.account}-${props.stage}-${this.region}/rfs-snapshot-repo`;
         let rfsCommand = `/rfs-app/runJavaWithClasspath.sh com.rfs.ReindexFromSnapshot --s3-local-dir /tmp/s3_files --s3-repo-uri ${s3Uri} --s3-region ${this.region} --snapshot-name rfs-snapshot --min-replicas 1 --enable-persistent-run --lucene-dir '/lucene' --source-host ${sourceEndpoint} --target-host ${osClusterEndpoint} --source-version es_7_10 --target-version os_2_11`
+=======
+        const osClusterEndpoint = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/osClusterEndpoint`)
+        const s3Uri = `s3://migration-artifacts-${this.account}-${props.stage}-${this.region}/rfs-snapshot-repo`
+        let rfsCommand = `/rfs-app/runJavaWithClasspath.sh com.rfs.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri ${s3Uri} --s3-region ${this.region} --snapshot-name rfs-snapshot --min-replicas 1 --lucene-dir '/lucene' --target-host ${osClusterEndpoint}`
+>>>>>>> Stashed changes
         rfsCommand = props.extraArgs ? rfsCommand.concat(` ${props.extraArgs}`) : rfsCommand
 
         this.createService({
-            serviceName: 'reindex-from-snapshot',
+            serviceName: 'rfs-migrate-documents',
             taskInstanceCount: 0,
             dockerDirectoryPath: join(__dirname, "../../../../../", "RFS/docker"),
             dockerImageCommand: ['/bin/sh', '-c', rfsCommand],
@@ -78,6 +84,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,
+            ephemeralStorageGiB: 200,
             ...props
         });
 

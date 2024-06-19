@@ -11,6 +11,55 @@
     "trafficReplayerEnableClusterFGACAuth": true,
     "captureProxyESServiceEnabled": true,
     "fetchMigrationEnabled": true,
+<<<<<<< Updated upstream
     "otelCollectorEnabled": true
+=======
+    "otelCollectorEnabled": true,
+    "sourceClusterEndpoint": "https://capture-proxy-es.migration.dev.local:19200"
+  },
+  "vpc-provider:account=672500112149:filter.vpc-id=vpc-0d0e4fb2f06bbc032:region=us-east-2:returnAsymmetricSubnets=true": {
+    "vpcId": "vpc-0d0e4fb2f06bbc032",
+    "vpcCidrBlock": "12.0.0.0/16",
+    "ownerAccountId": "672500112149",
+    "availabilityZones": [],
+    "subnetGroups": [
+      {
+        "name": "public-subnet",
+        "type": "Public",
+        "subnets": [
+          {
+            "subnetId": "subnet-0291e3cad886eb561",
+            "cidr": "12.0.0.0/24",
+            "availabilityZone": "us-east-2a",
+            "routeTableId": "rtb-068b8f839e699826e"
+          },
+          {
+            "subnetId": "subnet-0422915c2836b1b01",
+            "cidr": "12.0.1.0/24",
+            "availabilityZone": "us-east-2b",
+            "routeTableId": "rtb-0321be470f9629454"
+          }
+        ]
+      },
+      {
+        "name": "private-subnet",
+        "type": "Private",
+        "subnets": [
+          {
+            "subnetId": "subnet-01c97f4af188346b4",
+            "cidr": "12.0.2.0/24",
+            "availabilityZone": "us-east-2a",
+            "routeTableId": "rtb-094c486c74c6145a9"
+          },
+          {
+            "subnetId": "subnet-0f25bf87a50e6ca1a",
+            "cidr": "12.0.3.0/24",
+            "availabilityZone": "us-east-2b",
+            "routeTableId": "rtb-05b8e721c7345e6d6"
+          }
+        ]
+      }
+    ]
+>>>>>>> Stashed changes
   }
 }

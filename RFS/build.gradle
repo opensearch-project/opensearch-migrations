@@ -86,21 +86,6 @@ task runRfsWorker (type: JavaExec) {
     mainClass = 'com.rfs.RunRfsWorker'
 }
 
-task createSnapshot (type: JavaExec) {
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.rfs.RfsCreateSnapshot'
-}
-
-task migrateMetadata (type: JavaExec) {
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.rfs.RfsMigrateMetadata'
-}
-
-task migrateDocuments (type: JavaExec) {
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.rfs.RfsMigrateDocuments'
-}
-
 // Cleanup additional docker build directory
 clean.doFirst {
     delete project.file("./docker/build")
@@ -180,7 +165,6 @@ task buildDockerImages {
     for (dockerService in dockerServices) {
         dependsOn "buildDockerImage_${dockerService.projectName}"
     }
-    dependsOn buildDockerImage_elasticsearchRFSSource
 }
 
 tasks.named("buildDockerImage_elasticsearchRFSSource") {
