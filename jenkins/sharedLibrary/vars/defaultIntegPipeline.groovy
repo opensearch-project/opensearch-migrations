@@ -53,7 +53,7 @@ def call(Map config = [:]) {
     def migration_context_file_name = 'migrationJenkinsContext.json'
     def gitUrl = 'https://github.com/opensearch-project/opensearch-migrations.git'
     def gitBranch = 'main'
-    def stage = 'aws-integ'
+    def stageId = 'aws-integ'
     pipeline {
         agent { label config.overrideAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
@@ -92,7 +92,7 @@ def call(Map config = [:]) {
                     dir('test') {
                         sh 'sudo usermod -aG docker $USER'
                         sh 'sudo newgrp docker'
-                        sh "sudo ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' --migration-context-file './$migration_context_file_name' --source-context-id source-single-node-ec2 --migration-context-id migration-default --stage ${stage} --migrations-git-url ${gitUrl} --migrations-git-branch ${gitBranch}"
+                        sh "sudo ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' --migration-context-file './$migration_context_file_name' --source-context-id source-single-node-ec2 --migration-context-id migration-default --stage ${stageId} --migrations-git-url ${gitUrl} --migrations-git-branch ${gitBranch}"
                     }
                 }
             }
@@ -103,7 +103,7 @@ def call(Map config = [:]) {
                         script {
                             def time = new Date().getTime()
                             def uniqueId = "integ_min_${time}_${currentBuild.number}"
-                            sh "sudo ./awsRunIntegTests.sh --stage ${stage} --migrations-git-url ${gitUrl} --migrations-git-branch ${gitBranch} --unique-id ${uniqueId}"
+                            sh "sudo ./awsRunIntegTests.sh --stage ${stageId} --migrations-git-url ${gitUrl} --migrations-git-branch ${gitBranch} --unique-id ${uniqueId}"
                         }
                     }
 
@@ -113,7 +113,7 @@ def call(Map config = [:]) {
         post {
             always {
                 dir('test') {
-                    sh "sudo ./awsE2ESolutionSetup.sh --stage ${stage} --run-post-actions"
+                    sh "sudo ./awsE2ESolutionSetup.sh --stage ${stageId} --run-post-actions"
                 }
             }
         }
