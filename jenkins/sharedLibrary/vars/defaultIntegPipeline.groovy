@@ -52,12 +52,12 @@ def migration_context_file_name = 'migrationJenkinsContext.json'
 
 def call(Map config = [:]) {
     pipeline {
-        agent { label arguments.overrideAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
+        agent { label config.overrideAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
         environment {
-            GIT_URL = arguments.overrideGitUrl ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
-            GIT_BRANCH = arguments.overrideGitBranch ?: 'main'
-            STAGE = arguments.overrideStage ?: 'aws-integ'
+            GIT_URL = config.overrideGitUrl ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
+            GIT_BRANCH = config.overrideGitBranch ?: 'main'
+            STAGE = config.overrideStage ?: 'aws-integ'
         }
 
         stages {
