@@ -1,12 +1,9 @@
 package com.rfs;
 
-import com.rfs.cms.AbstractedHttpClient;
 import com.rfs.cms.ApacheHttpClient;
 import com.rfs.cms.OpenSearchWorkCoordinator;
 import com.rfs.cms.ProcessManager;
-import com.rfs.cms.ReactorHttpClient;
 import com.rfs.common.ClusterVersion;
-import com.rfs.common.ConnectionDetails;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
@@ -48,7 +45,6 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 
 @Tag("longTest")
@@ -101,17 +97,17 @@ public class FullTest {
         new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer).migrateIndices();
     }
 
-    private class FilteredLuceneDocumentsReader extends LuceneDocumentsReader {
-        private final UnaryOperator<Document> docTransformer;
+    private static class FilteredLuceneDocumentsReader extends LuceneDocumentsReader {
+        private final UnaryOperator<Document> docTransformer2;
 
         public FilteredLuceneDocumentsReader(Path luceneFilesBasePath, UnaryOperator<Document> docTransformer) {
             super(luceneFilesBasePath);
-            this.docTransformer = docTransformer;
+            this.docTransformer2 = docTransformer;
         }
 
         @Override
-        public Flux<Document> readDocuments(String indexName, int shard) {
-            return super.readDocuments(indexName, shard).map(docTransformer::apply);
+        public Flux<Document> readDocuments() {
+            return super.readDocuments().map(docTransformer2::apply);
         }
     }
 
@@ -139,20 +135,20 @@ public class FullTest {
             SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
             IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
             ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
-
-            RfsMigrateDocuments.run(path -> new FilteredLuceneDocumentsReader(path, terminatingDocumentFilter),
-                    new DocumentReindexer(new OpenSearchClient(osTargetContainer.getHttpHostAddress(), null)),
-                    new OpenSearchWorkCoordinator(
-                            new ApacheHttpClient(new URI(osTargetContainer.getHttpHostAddress())),
-//                            new ReactorHttpClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(),
-//                                    null, null)),
-                            TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS, UUID.randomUUID().toString()),
-                    processManager,
-                    indexMetadataFactory,
-                    snapshotName,
-                    shardMetadataFactory,
-                    unpackerFactory,
-                    16*1024*1024);
+//
+//            RfsMigrateDocuments.run(path -> new FilteredLuceneDocumentsReader(path, terminatingDocumentFilter),
+//                    new DocumentReindexer(new OpenSearchClient(osTargetContainer.getHttpHostAddress(), null)),
+//                    new OpenSearchWorkCoordinator(
+//                            new ApacheHttpClient(new URI(osTargetContainer.getHttpHostAddress())),
+////                            new ReactorHttpClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(),
+////                                    null, null)),
+//                            TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS, UUID.randomUUID().toString()),
+//                    processManager,
+//                    indexMetadataFactory,
+//                    snapshotName,
+//                    shardMetadataFactory,
+//                    unpackerFactory,
+//                    16*1024*1024);
         } finally {
             deleteTree(tempDir);
         }

@@ -66,7 +66,7 @@ public class DocumentsRunner {
 
         try (var unpacker = unpackerFactory.create(shardMetadata)) {
             var reader = readerFactory.apply(unpacker.unpack());
-            Flux<Document> documents = reader.readDocuments(shardMetadata.getIndexName(), shardMetadata.getShardId());
+            Flux<Document> documents = reader.readDocuments();
 
             final int finalShardId = shardMetadata.getShardId(); // Define in local context for the lambda
             reindexer.reindex(shardMetadata.getIndexName(), documents)

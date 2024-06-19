@@ -23,7 +23,7 @@ import reactor.core.publisher.Flux;
 @Slf4j
 public class LuceneDocumentsReader {
     public static final int NUM_DOCUMENTS_BUFFERED = 1024;
-    protected final Path luceneFilesBasePath;
+    protected final Path indexDirectoryPath;
 
     public class DocumentOrDone {}
     @Getter
@@ -33,8 +33,7 @@ public class LuceneDocumentsReader {
     }
     public class Done extends DocumentOrDone {}
 
-    public BlockingQueue<DocumentOrDone> packageDocumentsIntoQueue(String indexName, int shardId) {
-        Path indexDirectoryPath = luceneFilesBasePath.resolve(indexName).resolve(String.valueOf(shardId));
+    public BlockingQueue<DocumentOrDone> packageDocumentsIntoQueue() {
         var docQueue = new ArrayBlockingQueue<DocumentOrDone>(NUM_DOCUMENTS_BUFFERED, true);
         new Thread(() -> {
             try (var reader = openIndexReader(indexDirectoryPath)) {
@@ -53,8 +52,8 @@ public class LuceneDocumentsReader {
         return docQueue;
     }
 
-    public Flux<Document> readDocuments(String indexName, int shard) {
-        var queue = packageDocumentsIntoQueue(indexName, shard);
+    public Flux<Document> readDocuments() {
+        var queue = packageDocumentsIntoQueue();
         return Flux.create(sink -> {
             while (true) {
                 try {

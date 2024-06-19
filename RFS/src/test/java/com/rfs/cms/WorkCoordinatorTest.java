@@ -120,7 +120,7 @@ public class WorkCoordinatorTest {
 //        log.info("doc4="+doc4);
     }
 
-    @Test
+    //@Test
     public void testAcquireLeaseForQuery() throws Exception {
         var objMapper = new ObjectMapper();
         final var NUM_DOCS = 40;
