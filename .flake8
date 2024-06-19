@@ -12,4 +12,3 @@ exclude = .tox,.git,*/migrations/*,*/static/CACHE/*,docs,node_modules,.venv,*/cd
 
 # F401 - Unused imports -- this is the only way to have a file-wide rule exception
 per-file-ignores =
-    experimental/upgrades/upgrade_testing_framework/steps/__init__.py:F401
