@@ -6,7 +6,7 @@ if [ -n "$SOURCE_DOMAIN_ENDPOINT" ]; then
     source_endpoint="${SOURCE_DOMAIN_ENDPOINT}"
     source_auth_user_and_pass="admin:admin"
 else
-    source_endpoint="https://capture-proxy-es:9200"
+    source_endpoint="https://capture-proxy:9200"
     source_auth_user_and_pass="admin:admin"
 fi
 
