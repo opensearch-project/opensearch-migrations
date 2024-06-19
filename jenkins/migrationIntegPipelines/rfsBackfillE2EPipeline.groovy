@@ -60,8 +60,8 @@ defaultIntegPipeline(
         migrationContextId: migrationContextId,
         gitUrl: gitUrl,
         gitBranch: gitBranch,
-        stageId: stageId
-        //deployStep: {
-        //    echo 'Custom Test Step'
-        //}
+        stageId: stageId,
+        finishStep: {
+            echo 'Skipping step for RFS'
+        }
 )
