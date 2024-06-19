@@ -168,3 +168,16 @@ jobs:
           fail: true
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+
+  all-ci-checks-pass:
+    needs:
+      - cdk-tests
+      - console-library-tests
+      - gradle-tests
+      - link-checker
+      - python-e2e-tests
+      - python-lint
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo '## :heavy_check_mark: All continous integration checks pass' >> $GITHUB_STEP_SUMMARY
