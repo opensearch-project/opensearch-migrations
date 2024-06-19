@@ -75,8 +75,8 @@ def create(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
         return ExitCode.FAILURE, f"Failure when creating backfill: {type(e).__name__} {e}"
     
     if result.success:
-        return ExitCode.SUCCESS, "Backfill created successfully." + "\n" + result.value
-    return ExitCode.FAILURE, "Backfill creation failed." + "\n" + result.value
+        return ExitCode.SUCCESS, "Backfill created successfully." + "\n" + result.display()
+    return ExitCode.FAILURE, "Backfill creation failed." + "\n" + result.display()
 
 
 def start(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
@@ -90,8 +90,8 @@ def start(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
         return ExitCode.FAILURE, f"Failure when starting backfill: {type(e).__name__} {e}"
     
     if result.success:
-        return ExitCode.SUCCESS, "Backfill started successfully." + "\n" + result.value
-    return ExitCode.FAILURE, "Backfill start failed." + "\n" + result.value
+        return ExitCode.SUCCESS, "Backfill started successfully." + "\n" + result.display()
+    return ExitCode.FAILURE, "Backfill start failed." + "\n" + result.display()
 
 
 def stop(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
@@ -105,8 +105,8 @@ def stop(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
         logger.error(f"Failed to stop backfill: {e}")
         return ExitCode.FAILURE, f"Failure when stopping backfill: {type(e).__name__} {e}"
     if result.success:
-        return ExitCode.SUCCESS, "Backfill stopped successfully." + "\n" + result.value
-    return ExitCode.FAILURE, "Backfill stop failed." + "\n" + result.value
+        return ExitCode.SUCCESS, "Backfill stopped successfully." + "\n" + result.display()
+    return ExitCode.FAILURE, "Backfill stop failed." + "\n" + result.display()
 
 
 def scale(backfill: Backfill, units: int, *args, **kwargs) -> Tuple[ExitCode, str]:
@@ -120,20 +120,20 @@ def scale(backfill: Backfill, units: int, *args, **kwargs) -> Tuple[ExitCode, st
         logger.error(f"Failed to scale backfill: {e}")
         return ExitCode.FAILURE, f"Failure when scaling backfill: {type(e).__name__} {e}"
     if result.success:
-        return ExitCode.SUCCESS, "Backfill scaled successfully." + "\n" + result.value
-    return ExitCode.FAILURE, "Backfill scale failed." + "\n" + result.value
+        return ExitCode.SUCCESS, "Backfill scaled successfully." + "\n" + result.display()
+    return ExitCode.FAILURE, "Backfill scale failed." + "\n" + result.display()
 
 
 def status(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
     logger.info("Getting backfill status")
     try:
-        result = backfill.get_status(*args, **kwargs)
+        status = backfill.get_status(*args, **kwargs)
     except NotImplementedError:
         logger.error(f"Status is not implemented for backfill {type(backfill).__name__}")
         return ExitCode.FAILURE, f"Status is not implemented for backfill: {type(backfill).__name__}"
     except Exception as e:
         logger.error(f"Failed to get status of backfill: {e}")
         return ExitCode.FAILURE, f"Failure when getting status of backfill: {type(e).__name__} {e}"
-    if result.success:
-        return ExitCode.SUCCESS, result.value
-    return ExitCode.FAILURE, "Backfill status retrieval failed." + "\n" + result.value
+    if status:
+        return ExitCode.SUCCESS, status.value
+    return ExitCode.FAILURE, "Backfill status retrieval failed." + "\n" + status

@@ -4,6 +4,7 @@ import click
 import console_link.logic.clusters as logic_clusters
 import console_link.logic.metrics as logic_metrics
 import console_link.logic.backfill as logic_backfill
+from console_link.logic.backfill import ExitCode
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
 import logging
@@ -116,7 +117,7 @@ def create_backfill_cmd(ctx, pipeline_template_file, print_config_only):
     exitcode, message = logic_backfill.create(ctx.env.backfill,
                                               pipeline_template_path=pipeline_template_file,
                                               print_config_only=print_config_only)
-    if exitcode != 0:
+    if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
 
@@ -126,7 +127,7 @@ def create_backfill_cmd(ctx, pipeline_template_file, print_config_only):
 @click.pass_obj
 def start_backfill_cmd(ctx, pipeline_name):
     exitcode, message = logic_backfill.start(ctx.env.backfill, pipeline_name=pipeline_name)
-    if exitcode != 0:
+    if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
 
@@ -136,7 +137,7 @@ def start_backfill_cmd(ctx, pipeline_name):
 @click.pass_obj
 def stop_backfill_cmd(ctx, pipeline_name):
     exitcode, message = logic_backfill.stop(ctx.env.backfill, pipeline_name=pipeline_name)
-    if exitcode != 0:
+    if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
 
@@ -146,7 +147,7 @@ def stop_backfill_cmd(ctx, pipeline_name):
 @click.pass_obj
 def scale_backfill_cmd(ctx, units: int):
     exitcode, message = logic_backfill.scale(ctx.env.backfill, units)
-    if exitcode != 0:
+    if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
 
@@ -155,7 +156,7 @@ def scale_backfill_cmd(ctx, units: int):
 @click.pass_obj
 def status_backfill_cmd(ctx):
     exitcode, message = logic_backfill.status(ctx.env.backfill)
-    if exitcode != 0:
+    if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
 

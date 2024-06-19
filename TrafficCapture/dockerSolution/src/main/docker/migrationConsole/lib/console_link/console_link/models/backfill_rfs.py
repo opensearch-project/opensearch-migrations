@@ -3,10 +3,13 @@ from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.cluster import Cluster
 from console_link.models.schema_tools import contains_one_of
 from console_link.models.command_result import CommandResult
+from console_link.models.ecs_service import ECSService
 
 from cerberus import Validator
-import boto3
 
+import logging
+
+logger = logging.getLogger(__name__)
 
 DOCKER_RFS_SCHEMA = {
     "type": "dict",
@@ -76,5 +79,16 @@ class ECSRFSBackfill(RFSBackfill):
     def __init__(self, config: Dict, target_cluster: Cluster) -> None:
         super().__init__(config)
         self.target_cluster = target_cluster
+        self.default_scale = self.config["reindex_from_snapshot"].get("scale", 1)
+
         self.ecs_config = self.config["reindex_from_snapshot"]["ecs"]
-        self.client = boto3.client("ecs", region_name=self.ecs_config.get("aws_region", None))
+        self.ecs_client = ECSService(self.ecs_config["cluster_name"], self.ecs_config["service_name"],
+                                     self.ecs_config.get("aws_region", None))
+
+    def start(self, *args, **kwargs) -> CommandResult:
+        logger.info(f"Starting RFS backfill by setting desired count to {self.default_scale} instances")
+        return self.ecs_client.set_desired_count(self.default_scale)
+
+    def stop(self, *args, **kwargs) -> CommandResult:
+        logger.info("Stopping RFS backfill by setting desired count to 0 instances")
+        return self.ecs_client.set_desired_count(0)
