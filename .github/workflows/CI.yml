@@ -132,6 +132,11 @@ jobs:
           cd test
           chmod +x ./tests.py
           pytest tests.py --unique_id="testindex"
+      - name: Clean up migrations docker images before caching
+        run: |
+          docker stop $(docker ps -q) && docker rm $(docker ps -aq)
+          docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^migrations/' | grep -v '<none>' | xargs -I {} docker image rm {}
+
 
   cdk-tests:
     runs-on: ubuntu-latest
