@@ -1,4 +1,0 @@
-{
-    "id": "consistent-document-count",
-    "description": "There should be the same number of documents in the each index before and after a migration or upgrade."
-}

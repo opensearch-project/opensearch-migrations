@@ -1,4 +1,3 @@
-import {Stack} from "aws-cdk-lib";
 import {
     IpAddresses, IVpc, Port, SecurityGroup,
     SubnetType,
@@ -6,16 +5,32 @@ import {
 } from "aws-cdk-lib/aws-ec2";
 import {Construct} from "constructs";
 import {StackPropsExt} from "./stack-composer";
-import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import { ApplicationListener, ApplicationLoadBalancer, ApplicationProtocol, ApplicationProtocolVersion, ApplicationTargetGroup, IApplicationLoadBalancer, IApplicationTargetGroup, ListenerAction, SslPolicy } from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import { Certificate, ICertificate } from "aws-cdk-lib/aws-certificatemanager";
+import { ARecord, HostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
+import { LoadBalancerTarget } from "aws-cdk-lib/aws-route53-targets";
+import { AcmCertificateImporter } from "./service-stacks/acm-cert-importer";
+import { Stack } from "aws-cdk-lib";
+import { createMigrationStringParameter, getCustomStringParameterValue, getMigrationStringParameterName, MigrationSSMParameter } from "./common-utilities";
+import { StringParameter } from "aws-cdk-lib/aws-ssm";
 
 export interface NetworkStackProps extends StackPropsExt {
-    readonly vpcId?: string
-    readonly vpcAZCount?: number
-    readonly targetClusterEndpoint?: string
+    readonly vpcId?: string;
+    readonly vpcAZCount?: number;
+    readonly elasticsearchServiceEnabled?: boolean;
+    readonly captureProxyESServiceEnabled?: boolean;
+    readonly sourceClusterEndpoint?: string;
+    readonly targetClusterEndpoint?: string;
+    readonly albEnabled?: boolean;
+    readonly albAcmCertArn?: string;
+    readonly env?: { [key: string]: any };
 }
 
 export class NetworkStack extends Stack {
     public readonly vpc: IVpc;
+    public readonly albSourceProxyTG: IApplicationTargetGroup;
+    public readonly albTargetProxyTG: IApplicationTargetGroup;
+    public readonly albSourceClusterTG: IApplicationTargetGroup;
 
     // Validate a proper url string is provided and return an url string which contains a protocol, host name, and port.
     // If a port is not provided, the default protocol port (e.g. 443, 80) will be explicitly added
@@ -63,9 +78,15 @@ export class NetworkStack extends Stack {
 
         // Retrieve original deployment VPC for addon deployments
         if (props.addOnMigrationDeployId) {
-            const vpcId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/vpcId`)
+            const vpcId = StringParameter.valueFromLookup(this,
+                getMigrationStringParameterName({
+                    stage: props.stage,
+                    defaultDeployId: props.defaultDeployId,
+                    parameter: MigrationSSMParameter.VPC_ID
+                })
+            )
             this.vpc = Vpc.fromLookup(this, 'domainVPC', {
-                vpcId: vpcId,
+                vpcId
             });
         }
         // Retrieve existing VPC
@@ -103,13 +124,89 @@ export class NetworkStack extends Stack {
             });
         }
         this.validateVPC(this.vpc)
-
-        if (!props.addOnMigrationDeployId) {
-            new StringParameter(this, 'SSMParameterVpcId', {
-                description: 'OpenSearch migration parameter for VPC id',
-                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/vpcId`,
-                stringValue: this.vpc.vpcId
+        if(!props.addOnMigrationDeployId) {
+            createMigrationStringParameter(this, this.vpc.vpcId, {
+                ...props,
+                parameter: MigrationSSMParameter.VPC_ID
             });
+        }
+
+        if (props.albEnabled) {
+            // Create the ALB with the strongest TLS 1.3 security policy
+            const alb = new ApplicationLoadBalancer(this, 'ALB', {
+                vpc: this.vpc,
+                internetFacing: false,
+                http2Enabled: false,      
+            });
+
+            const route53 = new HostedZone(this, 'ALBHostedZone', {
+                zoneName: `alb.migration.${props.stage}.local`,
+                vpcs: [this.vpc]
+            });
+
+            const albDnsRecord = new ARecord(this, 'albDnsRecord', {
+                zone: route53,
+                target: RecordTarget.fromAlias(new LoadBalancerTarget(alb)),
+            });
+
+            createMigrationStringParameter(this, `https://${albDnsRecord.domainName}`, {
+                ...props,
+                parameter: MigrationSSMParameter.ALB_MIGRATION_URL
+            });
+            let cert: ICertificate;
+            if (props.albAcmCertArn) {
+                cert = Certificate.fromCertificateArn(this, 'ALBListenerCert', props.albAcmCertArn);
+            } else {
+                cert = new AcmCertificateImporter(this, 'ALBListenerCertImport', props.stage).acmCert;
+            }
+
+            this.albSourceProxyTG = this.createSecureTargetGroup('ALBSourceProxy', props.stage, 9200, this.vpc);
+            this.albTargetProxyTG = this.createSecureTargetGroup('ALBTargetProxy', props.stage, 9200, this.vpc);
+
+            if (props.elasticsearchServiceEnabled || props.captureProxyESServiceEnabled) {
+                this.albSourceClusterTG = this.createSecureTargetGroup('ALBSourceCluster', props.stage, 9200, this.vpc);
+                this.createSecureListener('ALBSourceClusterListener', 19200,
+                    alb, cert, this.albSourceClusterTG);
+            }
+
+            const albMigrationListener = this.createSecureListener('ALBMigrationListener', 9200,
+                alb, cert);
+            albMigrationListener.addAction("default", {
+                action: ListenerAction.weightedForward([
+                    {targetGroup: this.albSourceProxyTG, weight: 1},
+                    {targetGroup: this.albTargetProxyTG, weight: 0}
+                ]) 
+            });
+        }
+
+        // Create Source SSM Parameter
+        if (props.sourceClusterEndpoint) {
+            createMigrationStringParameter(this, props.sourceClusterEndpoint, {
+                ...props,
+                parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
+            });
+        } else if (props.captureProxyESServiceEnabled || props.elasticsearchServiceEnabled) {
+            if (props.albEnabled) {
+                const albSourceClusterEndpoint = `https://alb.migration.${props.stage}.local:19200`;
+                createMigrationStringParameter(this, albSourceClusterEndpoint, {
+                    ...props,
+                    parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
+                });
+            } else {
+                const serviceDiscoveryServiceClusterEndpoint = props.captureProxyESServiceEnabled
+                    ? `https://capture-proxy-es.migration.${props.stage}.local:19200`
+                    : `https://elasticsearch.migration.${props.stage}.local:9200`;
+                createMigrationStringParameter(this, serviceDiscoveryServiceClusterEndpoint, {
+                    ...props,
+                    parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
+                });
+            }
+        } else {
+            throw new Error(`Capture Proxy ESService, Elasticsearch Service, or SourceClusterEndpoint must be enabled`);
+        }
+        
+        if (!props.addOnMigrationDeployId) {
+
 
             // Create a default SG which only allows members of this SG to access the Domain endpoints
             const defaultSecurityGroup = new SecurityGroup(this, 'osClusterAccessSG', {
@@ -118,22 +215,49 @@ export class NetworkStack extends Stack {
             });
             defaultSecurityGroup.addIngressRule(defaultSecurityGroup, Port.allTraffic());
 
-            new StringParameter(this, 'SSMParameterOpenSearchAccessGroupId', {
-                description: 'OpenSearch migration parameter for target OpenSearch access security group id',
-                parameterName: `/migration/${props.stage}/${props.defaultDeployId}/osAccessSecurityGroupId`,
-                stringValue: defaultSecurityGroup.securityGroupId
+            createMigrationStringParameter(this, defaultSecurityGroup.securityGroupId, {
+                ...props,
+                parameter: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID
             });
-        }
 
-        if (props.targetClusterEndpoint) {
-            const formattedClusterEndpoint = NetworkStack.validateAndReturnFormattedHttpURL(props.targetClusterEndpoint)
-            const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
-            new StringParameter(this, 'SSMParameterOpenSearchEndpoint', {
-                description: 'OpenSearch migration parameter for OpenSearch endpoint',
-                parameterName: `/migration/${props.stage}/${deployId}/osClusterEndpoint`,
-                stringValue: formattedClusterEndpoint
-            });
+            if (props.targetClusterEndpoint) {
+                const formattedClusterEndpoint = NetworkStack.validateAndReturnFormattedHttpURL(props.targetClusterEndpoint);
+                const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId;
+                createMigrationStringParameter(this, formattedClusterEndpoint, {
+                    stage: props.stage,
+                    defaultDeployId: deployId,
+                    parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT
+                });
+            }
         }
+    }
 
+    getSecureListenerSslPolicy() {
+        return (this.partition === "aws-us-gov") ? SslPolicy.FIPS_TLS13_12_EXT2 : SslPolicy.RECOMMENDED_TLS
+    }
+
+    createSecureListener(serviceName: string, listeningPort: number, alb: IApplicationLoadBalancer, cert: ICertificate, albTargetGroup?: IApplicationTargetGroup) {
+        return new ApplicationListener(this, `${serviceName}ALBListener`, {
+            loadBalancer: alb,
+            port: listeningPort,
+            protocol: ApplicationProtocol.HTTPS,
+            certificates: [cert],
+            defaultTargetGroups: albTargetGroup ? [albTargetGroup] : undefined,
+            sslPolicy: this.getSecureListenerSslPolicy()
+        });
+    }
+
+    createSecureTargetGroup(serviceName: string, stage: string, containerPort: number, vpc: IVpc) {
+        return new ApplicationTargetGroup(this, `${serviceName}TG`, {
+            targetGroupName: `${serviceName}-${stage}-TG`,
+            protocol: ApplicationProtocol.HTTPS,
+            protocolVersion: ApplicationProtocolVersion.HTTP1,
+            port: containerPort,
+            vpc: vpc,
+            healthCheck: {
+                path: "/",
+                healthyHttpCodes: "200,401"
+            }
+        });
     }
 }

@@ -9,7 +9,8 @@ test('Test that IAM policy contains fetch migration IAM statements when fetch mi
         vpcEnabled: true,
         migrationAssistanceEnabled: true,
         migrationConsoleServiceEnabled: true,
-        fetchMigrationEnabled: true
+        fetchMigrationEnabled: true,
+        sourceClusterEndpoint: "https://test-cluster",
     }
 
     const stacks = createStackComposer(contextOptions)
@@ -34,7 +35,8 @@ test('Test that IAM policy does not contain fetch migration IAM statements when 
     const contextOptions = {
         vpcEnabled: true,
         migrationAssistanceEnabled: true,
-        migrationConsoleServiceEnabled: true
+        migrationConsoleServiceEnabled: true,
+        sourceClusterEndpoint: "https://test-cluster",
     }
 
     const stacks = createStackComposer(contextOptions)
@@ -59,7 +61,8 @@ test('Test that services yaml parameter is created', () => {
     const contextOptions = {
         vpcEnabled: true,
         migrationAssistanceEnabled: true,
-        migrationConsoleServiceEnabled: true
+        migrationConsoleServiceEnabled: true,
+        sourceClusterEndpoint: "https://test-cluster",
     }
 
     const stacks = createStackComposer(contextOptions)
@@ -81,7 +84,7 @@ test('Test that services yaml parameter is created', () => {
     const yamlFileContents = value['Fn::Join'][1].join('')
     expect(yamlFileContents).toContain('source_cluster')
     expect(yamlFileContents).toContain('target_cluster')
-    expect(yamlFileContents).toContain('metrics_source:\n  type: cloudwatch')
+    expect(yamlFileContents).toContain('metrics_source:\n  cloudwatch:')
 
     // Validates that the file can be parsed as valid yaml and has the expected fields
     const parsedFromYaml = yaml.parse(yamlFileContents);

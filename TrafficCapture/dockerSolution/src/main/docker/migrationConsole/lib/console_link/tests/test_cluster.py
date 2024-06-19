@@ -1,4 +1,4 @@
-import pytest  # type: ignore
+import pytest
 from tests.utils import create_valid_cluster
 from console_link.models.cluster import AuthMethod, Cluster
 

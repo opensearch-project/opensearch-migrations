@@ -1,0 +1,49 @@
+plugins {
+    id 'application'
+    id 'java'
+    id 'jacoco'
+    id 'io.freefair.lombok' version '8.6'
+}
+
+import org.opensearch.migrations.common.CommonUtils
+
+java.sourceCompatibility = JavaVersion.VERSION_11
+java.targetCompatibility = JavaVersion.VERSION_11
+
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    implementation project(":commonDependencyVersionConstraints")
+
+    implementation project(":RFS")
+    implementation group: 'com.beust', name: 'jcommander'
+    implementation group: 'org.slf4j', name: 'slf4j-api'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+}
+
+application {
+    mainClassName = 'com.rfs.MetadataMigration'
+}
+
+// Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
+tasks.register('copyDependencies', Sync) {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+    from configurations.runtimeClasspath
+    into "${buildDir}/dependencies"
+}
+
+jacocoTestReport {
+    reports {
+        xml.required = true
+        xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
+        html.required = true
+        html.destination file("${buildDir}/reports/jacoco/test/html")
+    }
+}
+
+test {
+    useJUnitPlatform()
+}

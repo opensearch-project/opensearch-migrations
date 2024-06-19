@@ -3,10 +3,9 @@ import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
-import {MigrationServiceCore} from "./migration-service-core";
-import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
 import {StreamingSourceType} from "../streaming-source-type";
-import {createMSKProducerIAMPolicies} from "../common-utilities";
+import {MigrationSSMParameter, createMSKProducerIAMPolicies, getMigrationStringParameterValue} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 
 
@@ -15,6 +14,7 @@ export interface CaptureProxyESProps extends StackPropsExt {
     readonly streamingSourceType: StreamingSourceType,
     readonly otelCollectorEnabled: boolean,
     readonly fargateCpuArch: CpuArchitecture,
+    readonly targetGroups: ELBTargetGroup[],
     readonly extraArgs?: string,
 }
 
@@ -24,31 +24,42 @@ export interface CaptureProxyESProps extends StackPropsExt {
  * items split into their own services to give more flexibility in setup.
  */
 export class CaptureProxyESStack extends MigrationServiceCore {
+    public static readonly DEFAULT_PROXY_PORT = 9200;
+    public static readonly DEFAULT_ES_PASSTHROUGH_PORT = 19200;
 
     constructor(scope: Construct, id: string, props: CaptureProxyESProps) {
         super(scope, id, props)
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`))
-        ]
+            { id: "serviceSG", param: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID },
+            { id: "trafficStreamSourceAccessSG", param: MigrationSSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID }
+        ].map(({ id, param }) =>
+            SecurityGroup.fromSecurityGroupId(this, id, getMigrationStringParameterValue(this, {
+                ...props,
+                parameter: param,
+            }))
+        );
 
         const servicePort: PortMapping = {
             name: "capture-proxy-es-connect",
-            hostPort: 9200,
-            containerPort: 9200,
+            hostPort: CaptureProxyESStack.DEFAULT_PROXY_PORT,
+            containerPort: CaptureProxyESStack.DEFAULT_PROXY_PORT,
             protocol: Protocol.TCP
         }
         const esServicePort: PortMapping = {
             name: "es-connect",
-            hostPort: 19200,
-            containerPort: 19200,
+            hostPort: CaptureProxyESStack.DEFAULT_ES_PASSTHROUGH_PORT,
+            containerPort: CaptureProxyESStack.DEFAULT_ES_PASSTHROUGH_PORT,
             protocol: Protocol.TCP
         }
 
         const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId) : []
 
-        let brokerEndpoints = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`);
-        let command = `/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy --kafkaConnection ${brokerEndpoints} --destinationUri https://localhost:19200 --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`
+        const brokerEndpoints = getMigrationStringParameterValue(this, {
+            ...props,
+            parameter: MigrationSSMParameter.KAFKA_BROKERS,
+        });
+        let command = `/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy --destinationUri https://localhost:19200 --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`
+        command = props.streamingSourceType !== StreamingSourceType.DISABLED ? command.concat(`  --kafkaConnection ${brokerEndpoints}`) : command
         command = props.streamingSourceType === StreamingSourceType.AWS_MSK ? command.concat(" --enableMSKAuth") : command
         command = props.otelCollectorEnabled ? command.concat(` --otelCollectorEndpoint http://localhost:${OtelCollectorSidecar.OTEL_CONTAINER_PORT}`) : command
         command = props.extraArgs ? command.concat(` ${props.extraArgs}`) : command
@@ -71,5 +82,4 @@ export class CaptureProxyESStack extends MigrationServiceCore {
             ...props
         });
     }
-
 }

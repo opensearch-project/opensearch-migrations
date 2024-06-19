@@ -14,12 +14,6 @@ from console_link.models.schema_tools import contains_one_of
 logger = logging.getLogger(__name__)
 
 
-class UnsupportedMetricsSourceError(Exception):
-    def __init__(self, supplied_metrics_source: str):
-        super().__init__("Unsupported metrics source type", supplied_metrics_source)
-
-
-MetricsSourceType = Enum("MetricsSourceType", ["CLOUDWATCH", "PROMETHEUS"])
 MetricStatistic = Enum(
     "MetricStatistic", ["SampleCount", "Average", "Sum", "Minimum", "Maximum"]
 )
@@ -28,6 +22,9 @@ MetricStatistic = Enum(
 class Component(Enum):
     CAPTUREPROXY = "captureProxy"
     REPLAYER = "replayer"
+
+
+MetricsSourceType = Enum("MetricsSourceType", ["CLOUDWATCH", "PROMETHEUS"])
 
 
 CLOUDWATCH_SCHEMA = {
@@ -61,18 +58,6 @@ SCHEMA = {
         },
     }
 }
-
-
-def get_metrics_source(config):
-    if 'prometheus' in config:
-        return PrometheusMetricsSource(config)
-    elif 'cloudwatch' in config:
-        return CloudwatchMetricsSource(config)
-    else:
-        logger.error(f"An unsupported metrics source type was provided: {config.keys()}")
-        if len(config.keys()) > 1:
-            raise UnsupportedMetricsSourceError(', '.join(config.keys()))
-        raise UnsupportedMetricsSourceError(next(iter(config.keys())))
 
 
 class MetricsSource:
@@ -130,7 +115,7 @@ class CloudwatchMetricsSource(MetricsSource):
     def __init__(self, config: Dict) -> None:
         super().__init__(config)
         logger.info(f"Initializing CloudwatchMetricsSource from config {config}")
-        if "aws_region" in config["cloudwatch"]:
+        if type(config["cloudwatch"]) is dict and "aws_region" in config["cloudwatch"]:
             self.aws_region = config["cloudwatch"]["aws_region"]
             self.boto_config = botocore.config.Config(region_name=self.aws_region)
         else:

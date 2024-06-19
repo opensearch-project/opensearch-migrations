@@ -218,6 +218,7 @@ test('Test that with analytics and assistance stacks enabled, creates one opense
         migrationAssistanceEnabled: true,
         vpcEnabled: true,
         migrationConsoleServiceEnabled: true,
+        sourceClusterEndpoint: "https://test-cluster",
     }
 
     const openSearchStacks =  createStackComposer(contextOptions)
