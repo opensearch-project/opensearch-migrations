@@ -5,10 +5,10 @@
 //    allow traffic for the relevant service security group. This needs a better story around accepting user security groups in our Migration CDK.
 
 def sourceContextId = 'source-single-node-ec2'
-def migrationContextId = 'migration-default'
+def migrationContextId = 'migration-rfs'
 def gitUrl = 'https://github.com/lewijacn/opensearch-migrations.git'
 def gitBranch = 'checkin-jenkinsfile'
-def stageId = 'aws-integ'
+def stageId = 'rfs-integ'
 def source_cdk_context = """
     {
       "source-single-node-ec2": {
@@ -16,9 +16,8 @@ def source_cdk_context = """
         "networkStackSuffix": "ec2-source-<STAGE>",
         "vpcId": "$vpcId",
         "distVersion": "7.10.2",
-        "cidr": "12.0.0.0/16",
         "distributionUrl": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz",
-        "captureProxyEnabled": true,
+        "captureProxyEnabled": false,
         "securityDisabled": true,
         "minDistribution": false,
         "cpuArch": "x64",
@@ -34,7 +33,7 @@ def source_cdk_context = """
 """
 def migration_cdk_context = """
     {
-      "migration-default": {
+      "migration-rfs": {
         "stage": "<STAGE>",
         "vpcId": "$vpcId",
         "engineVersion": "OS_2.11",
@@ -43,13 +42,10 @@ def migration_cdk_context = """
         "openAccessPolicyEnabled": true,
         "domainRemovalPolicy": "DESTROY",
         "artifactBucketRemovalPolicy": "DESTROY",
-        "trafficReplayerExtraArgs": "--speedup-factor 10.0",
-        "fetchMigrationEnabled": true,
+        "kafkaBrokerServiceEnabled": true,
+        "trafficReplayerServiceEnabled": false,
         "reindexFromSnapshotServiceEnabled": true,
-        "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
-        "dpPipelineTemplatePath": "../../../test/dp_pipeline_aws_integ.yaml",
-        "migrationConsoleEnableOSI": true,
-        "migrationAPIEnabled": true
+        "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>"
       }
     }
 """

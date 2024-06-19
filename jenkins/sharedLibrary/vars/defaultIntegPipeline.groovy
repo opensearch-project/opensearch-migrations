@@ -86,7 +86,14 @@ def call(Map config = [:]) {
         post {
             always {
                 dir('test') {
-                    sh "sudo ./awsE2ESolutionSetup.sh --stage ${stageId} --run-post-actions"
+                    script {
+                        // Allow overwriting this step
+                        if (config.finishStep) {
+                            config.finishStep()
+                        } else {
+                            sh "sudo ./awsE2ESolutionSetup.sh --stage ${stageId} --run-post-actions"
+                        }
+                    }
                 }
             }
         }
