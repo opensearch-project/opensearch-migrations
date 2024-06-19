@@ -24,6 +24,10 @@ public class ShardWorkPreparer {
     public void run(ScopedWorkCoordinatorHelper scopedWorkCoordinator, IndexMetadata.Factory metadataFactory,
                     String snapshotName)
             throws IOException {
+
+        // ensure that there IS an index to house the shared state that we're going to be manipulating
+        scopedWorkCoordinator.workCoordinator.setup();
+
         scopedWorkCoordinator.ensurePhaseCompletion(
                 wc -> {
                     try {

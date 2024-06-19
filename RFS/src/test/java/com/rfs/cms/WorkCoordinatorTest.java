@@ -14,7 +14,9 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
 /**
@@ -36,7 +38,8 @@ import java.util.function.Supplier;
 public class WorkCoordinatorTest {
 
     final static OpensearchContainer<?> container =
-            new OpensearchContainer<>("opensearchproject/opensearch:2.11.0");
+            new OpensearchContainer<>("opensearchproject/opensearch:1.3.0");
+    public static final String DUMMY_FINISHED_DOC_ID = "dummy_finished_doc";
     private static Supplier<ApacheHttpClient> httpClientSupplier;
 
 
@@ -131,22 +134,16 @@ public class WorkCoordinatorTest {
 
         for (int runs=0; runs<2; ++runs) {
             final var seenWorkerItems = new ConcurrentHashMap<String, String>();
-            var allThreads = new ArrayList<Thread>();
+            var allFutures = new ArrayList<CompletableFuture<Void>>();
             final var expiration = Duration.ofSeconds(5);
             for (int i = 0; i < NUM_DOCS; ++i) {
                 int finalI = i;
                 int finalRuns = runs;
-                var t = new Thread(() -> getWorkItemAndVerity(finalRuns + "-" + finalI, seenWorkerItems, expiration));
-                allThreads.add(t);
-                t.start();
+                var cf = CompletableFuture.supplyAsync(() ->
+                        getWorkItemAndVerity(finalRuns + "-" + finalI, seenWorkerItems, expiration));
+                allFutures.add(cf);
             }
-            allThreads.forEach(t -> {
-                try {
-                    t.join();
-                } catch (InterruptedException e) {
-                    throw Lombok.sneakyThrow(e);
-                }
-            });
+            CompletableFuture.allOf(allFutures.toArray(CompletableFuture[]::new)).join();
             Assertions.assertEquals(NUM_DOCS, seenWorkerItems.size());
 
             try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
@@ -160,17 +157,23 @@ public class WorkCoordinatorTest {
         }
     }
 
+    static AtomicInteger nonce = new AtomicInteger();
     @SneakyThrows
-    private static void getWorkItemAndVerity(String workerSuffix, ConcurrentHashMap<String, String> seenWorkerItems,
+    private static Void getWorkItemAndVerity(String workerSuffix, ConcurrentHashMap<String, String> seenWorkerItems,
                                              Duration expirationWindow) {
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
                 3600, "firstPass_"+ workerSuffix)) {
+            var doneId = DUMMY_FINISHED_DOC_ID + "_" + nonce.incrementAndGet();
+            workCoordinator.createOrUpdateLeaseForDocument(doneId, 1);
+            workCoordinator.completeWorkItem(doneId);
+
             var nextWorkItem = workCoordinator.acquireNextWorkItem(expirationWindow);
             log.error("Next work item picked=" + nextWorkItem);
             Assertions.assertNotNull(nextWorkItem);
             Assertions.assertNotNull(nextWorkItem.workItemId);
             Assertions.assertTrue(nextWorkItem.leaseExpirationTime.isAfter(Instant.now()));
             seenWorkerItems.put(nextWorkItem.workItemId, nextWorkItem.workItemId);
+            return null;
         }
     }
 }

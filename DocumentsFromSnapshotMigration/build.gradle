@@ -18,9 +18,18 @@ dependencies {
     implementation project(":commonDependencyVersionConstraints")
 
     implementation project(":RFS")
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     implementation group: 'com.beust', name: 'jcommander'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
+    implementation group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-smile'
+    implementation group: 'io.projectreactor.netty', name: 'reactor-netty-core'
+    implementation group: 'io.projectreactor.netty', name:'reactor-netty-http'
     implementation group: 'org.slf4j', name: 'slf4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+
 
     testImplementation testFixtures(project(":RFS"))
     testImplementation project(":CreateSnapshot")
@@ -32,7 +41,6 @@ dependencies {
     testImplementation group: 'org.testcontainers', name: 'testcontainers'
 
     testImplementation platform('io.projectreactor:reactor-bom:2023.0.5')
-    testImplementation group: 'io.projectreactor.netty', name: 'reactor-netty-core'
 }
 
 application {

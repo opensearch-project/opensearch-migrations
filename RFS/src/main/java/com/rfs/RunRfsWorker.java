@@ -168,7 +168,6 @@ public class RunRfsWorker {
             DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
             var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,
                     luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
-            LuceneDocumentsReader reader = new LuceneDocumentsReader(luceneDirPath);
             DocumentReindexer reindexer = new DocumentReindexer(targetClient);
             var processManager = new ProcessManager(workItemId->{
                 log.error("terminating RunRfsWorker because its lease has expired for "+workItemId);
@@ -178,8 +177,12 @@ public class RunRfsWorker {
                     5, UUID.randomUUID().toString());
             var scopedWorkCoordinator = new ScopedWorkCoordinatorHelper(workCoordinator, processManager);
             new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName);
-            new DocumentsRunner(scopedWorkCoordinator, snapshotName,
-                    shardMetadataFactory, unpackerFactory, reader, reindexer).migrateNextShard();
+            new DocumentsRunner(scopedWorkCoordinator,
+                    (name,shard) -> shardMetadataFactory.fromRepo(snapshotName,name,shard),
+                    unpackerFactory,
+                    path -> new LuceneDocumentsReader(luceneDirPath),
+                    reindexer)
+                    .migrateNextShard();
         } catch (Exception e) {
             log.error("Unexpected error running RfsWorker", e);
             throw e;

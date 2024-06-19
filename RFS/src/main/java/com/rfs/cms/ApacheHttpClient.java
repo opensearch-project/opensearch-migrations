@@ -1,6 +1,7 @@
 package com.rfs.cms;
 
 import lombok.Getter;
+import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
@@ -20,6 +21,7 @@ import java.net.URI;
 import java.util.AbstractMap;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 @Slf4j
@@ -62,7 +64,14 @@ public class ApacheHttpClient implements AbstractedHttpClient {
         }
         return client.execute(request, fr -> new AbstractHttpResponse() {
             @Getter
-            byte[] payloadBytes = fr.getEntity().getContent().readAllBytes();
+            final byte[] payloadBytes = Optional.ofNullable(fr.getEntity())
+                    .map(e-> {
+                        try {
+                            return e.getContent().readAllBytes();
+                        } catch (IOException ex) {
+                            throw Lombok.sneakyThrow(ex);
+                        }
+                    }).orElse(null);
 
             @Override
             public String getStatusText() {

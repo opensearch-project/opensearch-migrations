@@ -5,6 +5,7 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -30,6 +31,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String OLD_EXPIRATION_THRESHOLD_TEMPLATE = "OLD_EXPIRATION_THRESHOLD";
     public static final String VERSION_CONFLICTS_FIELD_NAME = "version_conflicts";
     public static final String COMPLETED_AT_FIELD_NAME = "completedAt";
+    public static final String HEAD_METHOD = "HEAD";
 
     private final long tolerableClientServerClockDifferenceSeconds;
     private final AbstractedHttpClient httpClient;
@@ -57,6 +59,13 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     }
 
     public void setup() throws IOException {
+        var indexCheckResponse = httpClient.makeJsonRequest(HEAD_METHOD, INDEX_NAME,null, null);
+        if (indexCheckResponse.getStatusCode() == 200) {
+            log.info("Not creating " + INDEX_NAME + " because it already exists");
+            return;
+        }
+        log.atInfo().setMessage("Creating " + INDEX_NAME + " because it's HEAD check returned " +
+                indexCheckResponse.getStatusCode()).log();
         var body = "{\n" +
                 "  \"settings\": {\n" +
                 "   \"index\": {" +
@@ -88,7 +97,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         if ((response.getStatusCode() / 100) != 2) {
             throw new IOException("Could not setup " + INDEX_NAME + ".  " +
                     "Got error code " + response.getStatusCode() + " and response: " +
-                    Arrays.toString(response.getPayloadBytes()));
+                    new String(response.getPayloadBytes(), StandardCharsets.UTF_8));
         }
     }
 
@@ -336,8 +345,19 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     private WorkItemAndDuration getAssignedWorkItem() throws IOException {
         final var queryWorkersAssignedItemsTemplate = "{\n" +
                 "  \"query\": {\n" +
-                "    \"term\": { \"" + LEASE_HOLDER_ID_FIELD_NAME + "\": \"" + WORKER_ID_TEMPLATE + "\"}\n" +
-                "  }\n" +
+                "    \"bool\": {" +
+                "      \"must\": [" +
+                "        {" +
+                "          \"term\": { \"" + LEASE_HOLDER_ID_FIELD_NAME + "\": \"" + WORKER_ID_TEMPLATE + "\"}\n" +
+                "        }" +
+                "      ]," +
+                "      \"must_not\": [" +
+                "        {" +
+                "          \"exists\": { \"field\": \"" + COMPLETED_AT_FIELD_NAME + "\"}\n" +
+                "        }" +
+                "      ]" +
+                "    }" +
+                "  }" +
                 "}";
         final var body = queryWorkersAssignedItemsTemplate.replace(WORKER_ID_TEMPLATE, workerId);
         var response = httpClient.makeJsonRequest(POST_METHOD,  INDEX_NAME + "/_search",
@@ -348,9 +368,10 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             log.warn("Couldn't find the top level 'hits' field, returning null");
             return null;
         }
-        if (resultHitsUpper.path("total").path("value").longValue() != 1) {
-            log.warn("The query didn't return one item for the worker node, so returning null");
-            return null;
+        final var numDocs = resultHitsUpper.path("total").path("value").longValue();
+        if (numDocs != 1) {
+            throw new IllegalStateException("The query for the assigned work document returned " + numDocs +
+                    " instead of one item");
         }
         var resultHitInner = resultHitsUpper.path("hits").path(0);
         var expiration = resultHitInner.path("_source").path(EXPIRATION_FIELD_NAME).longValue();

@@ -79,7 +79,7 @@ public class LuceneDocumentsReader {
     }
 
     @SneakyThrows
-    protected IndexReader openIndexReader(Path indexDirectoryPath) {
+    protected IndexReader openIndexReader(Path indexDirectoryPath) throws IOException {
         return DirectoryReader.open(FSDirectory.open(indexDirectoryPath));
     }
 
