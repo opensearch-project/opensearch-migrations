@@ -54,7 +54,7 @@ def migration_cdk_context = """
     }
 """
 
-@Library("migrations-shared-lib@checkin-jenkinsfile")_
+@Library("migrations-shared-lib@main")_
 
 defaultIntegPipeline(
         sourceContext: source_cdk_context,

@@ -21,13 +21,13 @@ def source_cdk_context = """
         "securityDisabled": true,
         "minDistribution": false,
         "cpuArch": "x64",
-        "isInternal": false,
+        "isInternal": true,
         "singleNodeCluster": true,
         "networkAvailabilityZones": 2,
         "dataNodeCount": 1,
         "managerNodeCount": 0,
-        "serverAccessType": "securityGroupId",
-        "restrictServerAccessTo": "sg-07ff03367fb0c372f"
+        "serverAccessType": "ipv4",
+        "restrictServerAccessTo": "0.0.0.0/0"
       }
     }
 """
@@ -50,7 +50,7 @@ def migration_cdk_context = """
     }
 """
 
-@Library("migrations-shared-lib@checkin-jenkinsfile")_
+@Library("migrations-shared-lib@main")_
 
 defaultIntegPipeline(
         sourceContext: source_cdk_context,

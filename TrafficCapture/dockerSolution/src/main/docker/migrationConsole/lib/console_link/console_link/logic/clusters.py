@@ -39,6 +39,7 @@ def run_test_benchmarks(cluster: Cluster):
     cluster.execute_benchmark_workload(workload="nyc_taxis")
 
 
+# As a default we exclude system indices and searchguard indices
 def clear_indices(cluster: Cluster):
     clear_indices_path = "/*,-.*,-searchguard*,-sg7*"
     r = cluster.call_api(clear_indices_path, method=HttpMethod.DELETE)
