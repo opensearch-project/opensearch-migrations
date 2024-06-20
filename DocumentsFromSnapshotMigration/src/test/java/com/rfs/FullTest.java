@@ -26,14 +26,22 @@ import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
 import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
+import com.rfs.worker.DocumentsRunner;
 import com.rfs.worker.IndexRunner;
 import com.rfs.worker.MetadataRunner;
 import lombok.Lombok;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.lucene.document.Document;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.ArgumentsSource;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.testcontainers.OpensearchContainer;
 import reactor.core.publisher.Flux;
 
@@ -41,30 +49,42 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.UnaryOperator;
+import java.util.stream.Stream;
 
 @Tag("longTest")
 @Slf4j
 public class FullTest {
     final static long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
-    final static ElasticsearchContainer esSourceContainer =
-            new ElasticsearchContainer(new ElasticsearchContainer.Version("elasticsearch_rfs_source",
-                    "preloaded-ES_7_10"));
-    final static OpensearchContainer<?> osTargetContainer =
-            new OpensearchContainer<>("opensearchproject/opensearch:2.13.0");
 
-    @BeforeAll
-    static void setupSourceContainer() {
-        esSourceContainer.start();
-        osTargetContainer.start();
+    public static Stream<Arguments> makeArgs() {
+        var imageNames = List.of("elasticsearch_rfs_source");
+        var numWorkers = List.of(1, 3, 100);
+        return imageNames.stream()
+                .flatMap(a->
+                        numWorkers.stream().map(b->Arguments.of(a, b)));
     }
 
-    @Test
-    public void test() throws Exception {
+    @ParameterizedTest
+    @MethodSource("makeArgs")
+    public void test(String sourceImageName, int numWorkers) throws Exception {
+        ElasticsearchContainer esSourceContainer =
+                new ElasticsearchContainer(new ElasticsearchContainer.Version(sourceImageName,
+                        "preloaded-ES_7_10"));
+        OpensearchContainer<?> osTargetContainer =
+                new OpensearchContainer<>("opensearchproject/opensearch:2.13.0");
+
+        esSourceContainer.start();
+        osTargetContainer.start();
+
+
         final var SNAPSHOT_NAME = "test_snapshot";
         CreateSnapshot.run(
                 c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, ElasticsearchContainer.CLUSTER_SNAPSHOT_DIR),
@@ -77,9 +97,52 @@ public class FullTest {
             var sourceRepo = new FileSystemRepo(tempDir);
             migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME);
 
-            migrateDocumentsWithOneWorker(sourceRepo, SNAPSHOT_NAME);
+            var workerFutures = new ArrayList<CompletableFuture<Integer>>();
+            for (int i=0; i<numWorkers; ++i) {
+                workerFutures.add(CompletableFuture.supplyAsync(()->
+                        migrateDocumentsSequentially(sourceRepo, SNAPSHOT_NAME,
+                                osTargetContainer.getHttpHostAddress())));
+            }
+            var thrownException = Assertions.assertThrows(ExecutionException.class, () ->
+                CompletableFuture.allOf(workerFutures.toArray(CompletableFuture[]::new)).get());
+            Assertions.assertInstanceOf(RfsMigrateDocuments.NoWorkLeftException.class, thrownException.getCause(),
+                    "expected at least one worker to notice that all work was completed.");
+            checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer);
+            var totalCompletedWorkRuns = workerFutures.stream().mapToInt(cf-> {
+                try {
+                    return cf.handle((v,t)->t==null?v:0).get();
+                } catch (InterruptedException | ExecutionException e) {
+                    throw Lombok.sneakyThrow(e);
+                }
+            }).sum();
+            Assertions.assertTrue(totalCompletedWorkRuns >= numWorkers,
+                    "Expected to make more runs than the number of workers.  " +
+                            "This test case needs more shards so that more work can be done in parallel");
         } finally {
             deleteTree(tempDir);
+        }
+    }
+
+    private void checkClusterMigrationOnFinished(ElasticsearchContainer esSourceContainer,
+                                                 OpensearchContainer<?> osTargetContainer) {
+
+    }
+
+    @SneakyThrows
+    private int migrateDocumentsSequentially(FileSystemRepo sourceRepo,
+                                                 String snapshotName,
+                                                 String targetAddress) {
+        for (int run=0; ; ++run) {
+            try {
+                var workResult = migrateDocumentsWithOneWorker(sourceRepo, snapshotName, targetAddress);
+                if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
+                    return run;
+                }
+            } catch (RfsMigrateDocuments.NoWorkLeftException e) {
+                log.info("No work at all was found.  " +
+                        "Presuming that work was complete and that all worker processes should terminate");
+                throw e;
+            }
         }
     }
 
@@ -98,22 +161,27 @@ public class FullTest {
     }
 
     private static class FilteredLuceneDocumentsReader extends LuceneDocumentsReader {
-        private final UnaryOperator<Document> docTransformer2;
+        private final UnaryOperator<Document> docTransformer;
 
         public FilteredLuceneDocumentsReader(Path luceneFilesBasePath, UnaryOperator<Document> docTransformer) {
             super(luceneFilesBasePath);
-            this.docTransformer2 = docTransformer;
+            this.docTransformer = docTransformer;
         }
 
         @Override
         public Flux<Document> readDocuments() {
-            return super.readDocuments().map(docTransformer2::apply);
+            return super.readDocuments().map(docTransformer::apply);
         }
     }
 
     static class LeasePastError extends Error { }
 
-    private void migrateDocumentsWithOneWorker(SourceRepo sourceRepo, String snapshotName) throws Exception {
+    @SneakyThrows
+    private DocumentsRunner.CompletionStatus migrateDocumentsWithOneWorker(SourceRepo sourceRepo,
+                                                                           String snapshotName,
+                                                                           String targetAddress)
+        throws RfsMigrateDocuments.NoWorkLeftException
+    {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
         try {
             var shouldThrow = new AtomicBoolean();
@@ -135,20 +203,20 @@ public class FullTest {
             SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
             IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
             ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
-//
-//            RfsMigrateDocuments.run(path -> new FilteredLuceneDocumentsReader(path, terminatingDocumentFilter),
-//                    new DocumentReindexer(new OpenSearchClient(osTargetContainer.getHttpHostAddress(), null)),
-//                    new OpenSearchWorkCoordinator(
-//                            new ApacheHttpClient(new URI(osTargetContainer.getHttpHostAddress())),
-////                            new ReactorHttpClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(),
-////                                    null, null)),
-//                            TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS, UUID.randomUUID().toString()),
-//                    processManager,
-//                    indexMetadataFactory,
-//                    snapshotName,
-//                    shardMetadataFactory,
-//                    unpackerFactory,
-//                    16*1024*1024);
+
+            return RfsMigrateDocuments.run(path -> new FilteredLuceneDocumentsReader(path, terminatingDocumentFilter),
+                    new DocumentReindexer(new OpenSearchClient(targetAddress, null)),
+                    new OpenSearchWorkCoordinator(
+                            new ApacheHttpClient(new URI(targetAddress)),
+//                            new ReactorHttpClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(),
+//                                    null, null)),
+                            TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS, UUID.randomUUID().toString()),
+                    processManager,
+                    indexMetadataFactory,
+                    snapshotName,
+                    shardMetadataFactory,
+                    unpackerFactory,
+                    16*1024*1024);
         } finally {
             deleteTree(tempDir);
         }

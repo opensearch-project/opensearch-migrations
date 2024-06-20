@@ -9,7 +9,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Arrays;
 
 @Slf4j
 public class OpenSearchWorkCoordinator implements IWorkCoordinator {
@@ -253,6 +252,49 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
+    private int numWorkItemsArePending(int maxItemsToCheckFor) throws IOException, InterruptedException {
+        refresh();
+        // TODO: Switch this to use _count
+        log.warn("Switch this to use _count");
+        final var queryBody = "{\n" +
+                "\"query\": {" +
+                "  \"bool\": {" +
+                "    \"must\": [" +
+                "      { \"exists\":" +
+                "        { \"field\": \"" + EXPIRATION_FIELD_NAME + "\"}" +
+                "      }" +
+                "    ]," +
+                "    \"must_not\": [" +
+                "      { \"exists\":" +
+                "        { \"field\": \"" + COMPLETED_AT_FIELD_NAME + "\"}" +
+                "      }" +
+                "    ]" +
+                "  }" +
+                "}" +
+                "}";
+
+        var path = INDEX_NAME + "/_search" + (maxItemsToCheckFor <= 0 ? "" : "?size=" + maxItemsToCheckFor);
+        var response = httpClient.makeJsonRequest(POST_METHOD,  path, null, queryBody);
+
+        final var resultHitsUpper = objectMapper.readTree(response.getPayloadStream()).path("hits");
+        var statusCode = response.getStatusCode();
+        if (statusCode != 200) {
+            throw new IllegalStateException("Querying for pending (expired or not) work, " +
+                    "returned an unexpected status code " + statusCode + " instead of 200");
+        }
+        return resultHitsUpper.path("hits").size();
+    }
+
+    @Override
+    public int numWorkItemsArePending() throws IOException, InterruptedException {
+        return numWorkItemsArePending(-1);
+    }
+
+    @Override
+    public boolean workItemsArePending() throws IOException, InterruptedException {
+        return numWorkItemsArePending(1) >= 1;
+    }
+
     enum UpdateResult {
         SUCCESSFUL_ACQUISITION,
         VERSION_CONFLICT,
@@ -382,8 +424,23 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         return new WorkItemAndDuration(resultHitInner.get("_id").asText(), Instant.ofEpochMilli(1000*expiration));
     }
 
-    public WorkItemAndDuration acquireNextWorkItem(Duration leaseDuration) throws IOException {
-        httpClient.makeJsonRequest(GET_METHOD, INDEX_NAME + "/_refresh",null,null);
+    private void refresh() throws IOException, InterruptedException {
+        var sleepMillis = 100;
+        while (true) {
+            var response = httpClient.makeJsonRequest(GET_METHOD, INDEX_NAME + "/_refresh",null,null);
+            var statusCode = response.getStatusCode();
+            if (statusCode == 200) {
+                break;
+            } else {
+                log.warn("Retrying refresh because it returned an expected status code: " + statusCode);
+                Thread.sleep(sleepMillis);
+                sleepMillis *= 2;
+            }
+        }
+    }
+
+    public WorkItemAndDuration acquireNextWorkItem(Duration leaseDuration) throws IOException, InterruptedException {
+        refresh();
         while (true) {
             final var obtainResult = assignOneWorkItem(leaseDuration.toSeconds());
             switch (obtainResult) {
@@ -398,4 +455,5 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             }
         }
     }
+
 }

@@ -120,28 +120,30 @@ public class WorkCoordinatorTest {
 //        log.info("doc4="+doc4);
     }
 
-    //@Test
+    @Test
     public void testAcquireLeaseForQuery() throws Exception {
         var objMapper = new ObjectMapper();
         final var NUM_DOCS = 40;
+        final var MAX_RUNS = 2;
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
                 3600, "docCreatorWorker")) {
+            Assertions.assertFalse(workCoordinator.workItemsArePending());
             for (var i = 0; i < NUM_DOCS; ++i) {
                 final var docId = "R" + i;
                 workCoordinator.createUnassignedWorkItem(docId);
             }
+            Assertions.assertTrue(workCoordinator.workItemsArePending());
         }
 
-        for (int runs=0; runs<2; ++runs) {
+        for (int run = 0; run < MAX_RUNS; ++run) {
             final var seenWorkerItems = new ConcurrentHashMap<String, String>();
-            var allFutures = new ArrayList<CompletableFuture<Void>>();
+            var allFutures = new ArrayList<CompletableFuture<String>>();
             final var expiration = Duration.ofSeconds(5);
+            var markAsComplete = run + 1 == MAX_RUNS;
             for (int i = 0; i < NUM_DOCS; ++i) {
-                int finalI = i;
-                int finalRuns = runs;
-                var cf = CompletableFuture.supplyAsync(() ->
-                        getWorkItemAndVerity(finalRuns + "-" + finalI, seenWorkerItems, expiration));
-                allFutures.add(cf);
+                var label = run + "-" + i;
+                allFutures.add(CompletableFuture.supplyAsync(() ->
+                        getWorkItemAndVerity(label, seenWorkerItems, expiration, markAsComplete)));
             }
             CompletableFuture.allOf(allFutures.toArray(CompletableFuture[]::new)).join();
             Assertions.assertEquals(NUM_DOCS, seenWorkerItems.size());
@@ -155,12 +157,16 @@ public class WorkCoordinatorTest {
 
             Thread.sleep(expiration.multipliedBy(2).toMillis());
         }
+        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
+                3600, "docCreatorWorker")) {
+            Assertions.assertFalse(workCoordinator.workItemsArePending());
+        }
     }
 
     static AtomicInteger nonce = new AtomicInteger();
     @SneakyThrows
-    private static Void getWorkItemAndVerity(String workerSuffix, ConcurrentHashMap<String, String> seenWorkerItems,
-                                             Duration expirationWindow) {
+    private static String getWorkItemAndVerity(String workerSuffix, ConcurrentHashMap<String, String> seenWorkerItems,
+                                             Duration expirationWindow, boolean markCompleted) {
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
                 3600, "firstPass_"+ workerSuffix)) {
             var doneId = DUMMY_FINISHED_DOC_ID + "_" + nonce.incrementAndGet();
@@ -173,7 +179,11 @@ public class WorkCoordinatorTest {
             Assertions.assertNotNull(nextWorkItem.workItemId);
             Assertions.assertTrue(nextWorkItem.leaseExpirationTime.isAfter(Instant.now()));
             seenWorkerItems.put(nextWorkItem.workItemId, nextWorkItem.workItemId);
-            return null;
+
+            if (markCompleted) {
+                workCoordinator.completeWorkItem(nextWorkItem.workItemId);
+            }
+            return nextWorkItem.workItemId;
         }
     }
 }

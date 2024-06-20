@@ -37,7 +37,7 @@ public class ProcessManager {
 
     public void registerExpiration(String workItemId, Instant killTime) {
         workItemToLeaseMap.put(workItemId, killTime);
-        final var killDuration = Duration.between(killTime, currentTimeSupplier.instant());
+        final var killDuration = Duration.between(currentTimeSupplier.instant(), killTime);
         scheduledExecutorService.schedule(()->{
             if (workItemToLeaseMap.containsKey(workItemId)) {
                 onLeaseExpired.accept(workItemId);

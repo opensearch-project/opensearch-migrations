@@ -32,24 +32,33 @@ public class DocumentsRunner {
     private final Function<Path,LuceneDocumentsReader> readerFactory;
     private final DocumentReindexer reindexer;
 
-    public void migrateNextShard() throws IOException {
-        workCoordinator.ensurePhaseCompletion(wc -> {
+    public enum CompletionStatus {
+        NOTHING_DONE,
+        WORK_COMPLETED
+    }
+
+    /**
+     * @return true if it did work, false if there was no available work at this time.
+     * @throws IOException
+     */
+    public CompletionStatus migrateNextShard() throws IOException {
+        return workCoordinator.ensurePhaseCompletion(wc -> {
                     try {
                         return wc.acquireNextWorkItem(Duration.ofMinutes(10));
                     } catch (Exception e) {
                         throw Lombok.sneakyThrow(e);
                     }
                 },
-                new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<Void>() {
+                new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<>() {
                     @Override
-                    public Void onAlreadyCompleted() throws IOException {
-                        return null;
+                    public CompletionStatus onAlreadyCompleted() throws IOException {
+                        return CompletionStatus.NOTHING_DONE;
                     }
 
                     @Override
-                    public Void onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException {
+                    public CompletionStatus onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException {
                         doDocumentsMigration(IndexAndShard.valueFromWorkItemString(workItem.getWorkItemId()));
-                        return null;
+                        return CompletionStatus.WORK_COMPLETED;
                     }
                 });
     }

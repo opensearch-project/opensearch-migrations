@@ -53,7 +53,11 @@ public interface IWorkCoordinator extends AutoCloseable {
 
     void setup() throws IOException;
 
-    WorkItemAndDuration acquireNextWorkItem(Duration leaseDuration) throws IOException;
+    int numWorkItemsArePending() throws IOException, InterruptedException;
+
+    boolean workItemsArePending() throws IOException, InterruptedException;
+
+    WorkItemAndDuration acquireNextWorkItem(Duration leaseDuration) throws IOException, InterruptedException;
 
     /**
      * @param workItemId - the name of the document/resource to create.

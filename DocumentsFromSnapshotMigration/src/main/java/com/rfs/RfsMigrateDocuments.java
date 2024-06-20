@@ -11,6 +11,7 @@ import java.time.Clock;
 import java.util.UUID;
 import java.util.function.Function;
 
+import com.rfs.cms.IWorkCoordinator;
 import lombok.extern.slf4j.Slf4j;
 import com.rfs.cms.ApacheHttpClient;
 import com.rfs.cms.OpenSearchWorkCoordinator;
@@ -89,6 +90,12 @@ public class RfsMigrateDocuments {
         public long maxShardSizeBytes = 50 * 1024 * 1024 * 1024L;
     }
 
+    public static class NoWorkLeftException extends Exception {
+        public NoWorkLeftException(String message) {
+            super(message);
+        }
+    }
+
     public static void main(String[] args) throws Exception {
         // Grab out args
         Args arguments = new Args();
@@ -127,19 +134,22 @@ public class RfsMigrateDocuments {
         });
     }
 
-    public static void run(Function<Path,LuceneDocumentsReader> readerFactory,
-                           DocumentReindexer reindexer,
-                           OpenSearchWorkCoordinator workCoordinator,
-                           ProcessManager processManager,
-                           IndexMetadata.Factory indexMetadataFactory,
-                           String snapshotName,
-                           ShardMetadata.Factory shardMetadataFactory,
-                           SnapshotShardUnpacker.Factory unpackerFactory,
-                           long maxShardSizeBytes)
-            throws IOException {
+    public static DocumentsRunner.CompletionStatus run(Function<Path,LuceneDocumentsReader> readerFactory,
+                                                       DocumentReindexer reindexer,
+                                                       IWorkCoordinator workCoordinator,
+                                                       ProcessManager processManager,
+                                                       IndexMetadata.Factory indexMetadataFactory,
+                                                       String snapshotName,
+                                                       ShardMetadata.Factory shardMetadataFactory,
+                                                       SnapshotShardUnpacker.Factory unpackerFactory,
+                                                       long maxShardSizeBytes)
+            throws IOException, InterruptedException, NoWorkLeftException {
         var scopedWorkCoordinator = new ScopedWorkCoordinatorHelper(workCoordinator, processManager);
         new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName);
-        new DocumentsRunner(scopedWorkCoordinator,
+        if (!workCoordinator.workItemsArePending()) {
+            throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
+        }
+        return new DocumentsRunner(scopedWorkCoordinator,
                 (name, shard) -> {
                     var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, name, shard);
                     log.info("Shard size: " + shardMetadata.getTotalSizeBytes());

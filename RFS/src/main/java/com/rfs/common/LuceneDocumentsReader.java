@@ -22,7 +22,7 @@ import reactor.core.publisher.Flux;
 @RequiredArgsConstructor
 @Slf4j
 public class LuceneDocumentsReader {
-    public static final int NUM_DOCUMENTS_BUFFERED = 1024;
+    public static final int NUM_DOCUMENTS_BUFFERED = 1;
     protected final Path indexDirectoryPath;
 
     public class DocumentOrDone {}
@@ -41,40 +41,64 @@ public class LuceneDocumentsReader {
                 for (var i=0; i<reader.maxDoc(); ++i) {
                     var doc = getDocument(reader, i);
                     if (doc != null) { // Skip malformed docs
-                        docQueue.add(new DocumentHolder(doc));
+                        docQueue.put(new DocumentHolder(doc));
                     }
                 }
                 docQueue.add(new Done());
-            } catch (IOException e) {
+            } catch (IOException | InterruptedException e) {
                 throw Lombok.sneakyThrow(e);
             }
         }).start();
         return docQueue;
     }
+//
+//    public Flux<Document> readDocuments() {
+//        var queue = packageDocumentsIntoQueue();
+//        return Flux.create(sink -> {
+//            while (true) {
+//                try {
+//                    var item = queue.take(); // TODO - this is still a blocking call!
+//                    if (item instanceof Done) {
+//                        sink.complete();
+//                        break;
+//                    }
+//                    sink.next(((DocumentHolder)item).value);
+//                } catch (InterruptedException e) {
+//                    sink.error(e);
+//                    Thread.currentThread().interrupt();
+//                    break;
+//                }
+//
+//                if (Thread.currentThread().isInterrupted()) {
+//                    break;
+//                }
+//            }
+//        });
+//    }
 
     public Flux<Document> readDocuments() {
-        var queue = packageDocumentsIntoQueue();
-        return Flux.create(sink -> {
-            while (true) {
-                try {
-                    var item = queue.take(); // TODO - this is still a blocking call!
-                    if (item instanceof Done) {
-                        sink.complete();
-                        break;
+        return Flux.using(
+                () -> openIndexReader(indexDirectoryPath),
+                reader -> {
+                    log.info(reader.maxDoc() + " documents found in the current Lucene index");
+
+                    return Flux.range(0, reader.maxDoc()) // Extract all the Documents in the IndexReader
+                            .handle((i, sink) -> {
+                                Document doc = getDocument(reader, i);
+                                if (doc != null) { // Skip malformed docs
+                                    sink.next(doc);
+                                }
+                            }).cast(Document.class);
+                },
+                reader -> { // Close the IndexReader when done
+                    try {
+                        reader.close();
+                    } catch (IOException e) {
+                        log.error("Failed to close IndexReader", e);
+                        throw Lombok.sneakyThrow(e);
                     }
-                    sink.next(((DocumentHolder)item).value);
-                } catch (InterruptedException e) {
-                    sink.error(e);
-                    Thread.currentThread().interrupt();
-                    break;
                 }
-
-                if (queue.isEmpty() && Thread.currentThread().isInterrupted()) {
-
-                    break;
-                }
-            }
-        });
+        );
     }
 
     @SneakyThrows
