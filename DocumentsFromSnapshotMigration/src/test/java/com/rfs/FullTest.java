@@ -1,6 +1,7 @@
 package com.rfs;
 
 import com.rfs.cms.ApacheHttpClient;
+import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.OpenSearchWorkCoordinator;
 import com.rfs.cms.ProcessManager;
 import com.rfs.common.ClusterVersion;
@@ -43,6 +44,7 @@ import org.junit.jupiter.params.provider.ArgumentsSource;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.testcontainers.OpensearchContainer;
+import org.slf4j.event.Level;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
@@ -56,6 +58,7 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.UnaryOperator;
 import java.util.stream.Stream;
 
@@ -65,21 +68,23 @@ public class FullTest {
     final static long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
 
     public static Stream<Arguments> makeArgs() {
-        var imageNames = List.of("elasticsearch_rfs_source");
-        var numWorkers = List.of(1, 3, 100);
-        return imageNames.stream()
+        var sourceImageNames = List.of("elasticsearch_rfs_source");
+        var targetImageNames = List.of("opensearchproject/opensearch:2.13.0", "opensearchproject/opensearch:1.3.0");
+        var numWorkers = List.of(1, 3, 40);
+        return sourceImageNames.stream()
                 .flatMap(a->
-                        numWorkers.stream().map(b->Arguments.of(a, b)));
+                        targetImageNames.stream().flatMap(b->
+                                numWorkers.stream().map(c->Arguments.of(a, b, c))));
     }
 
     @ParameterizedTest
     @MethodSource("makeArgs")
-    public void test(String sourceImageName, int numWorkers) throws Exception {
+    public void test(String sourceImageName, String targetImageName, int numWorkers) throws Exception {
         ElasticsearchContainer esSourceContainer =
                 new ElasticsearchContainer(new ElasticsearchContainer.Version(sourceImageName,
                         "preloaded-ES_7_10"));
         OpensearchContainer<?> osTargetContainer =
-                new OpensearchContainer<>("opensearchproject/opensearch:2.13.0");
+                new OpensearchContainer<>(targetImageName);
 
         esSourceContainer.start();
         osTargetContainer.start();
@@ -97,27 +102,25 @@ public class FullTest {
             var sourceRepo = new FileSystemRepo(tempDir);
             migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME);
 
-            var workerFutures = new ArrayList<CompletableFuture<Integer>>();
+            var workerFutures = new ArrayList<CompletableFuture<Void>>();
+            var runCounter = new AtomicInteger();
             for (int i=0; i<numWorkers; ++i) {
                 workerFutures.add(CompletableFuture.supplyAsync(()->
                         migrateDocumentsSequentially(sourceRepo, SNAPSHOT_NAME,
-                                osTargetContainer.getHttpHostAddress())));
+                                osTargetContainer.getHttpHostAddress(), runCounter)));
             }
             var thrownException = Assertions.assertThrows(ExecutionException.class, () ->
                 CompletableFuture.allOf(workerFutures.toArray(CompletableFuture[]::new)).get());
+            log.atLevel(thrownException.getCause() instanceof RfsMigrateDocuments.NoWorkLeftException ?
+                            Level.INFO : Level.ERROR)
+                    .setMessage(()->"First found exception from runs.").setCause(thrownException.getCause()).log();
             Assertions.assertInstanceOf(RfsMigrateDocuments.NoWorkLeftException.class, thrownException.getCause(),
                     "expected at least one worker to notice that all work was completed.");
             checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer);
-            var totalCompletedWorkRuns = workerFutures.stream().mapToInt(cf-> {
-                try {
-                    return cf.handle((v,t)->t==null?v:0).get();
-                } catch (InterruptedException | ExecutionException e) {
-                    throw Lombok.sneakyThrow(e);
-                }
-            }).sum();
+            var totalCompletedWorkRuns = runCounter.get();
             Assertions.assertTrue(totalCompletedWorkRuns >= numWorkers,
-                    "Expected to make more runs than the number of workers.  " +
-                            "This test case needs more shards so that more work can be done in parallel");
+                    "Expected to make more runs (" + totalCompletedWorkRuns + ") than the number of workers " +
+                            "(" + numWorkers + ").  Increase the number of shards so that there is more work to do.");
         } finally {
             deleteTree(tempDir);
         }
@@ -129,14 +132,17 @@ public class FullTest {
     }
 
     @SneakyThrows
-    private int migrateDocumentsSequentially(FileSystemRepo sourceRepo,
-                                                 String snapshotName,
-                                                 String targetAddress) {
-        for (int run=0; ; ++run) {
+    private Void migrateDocumentsSequentially(FileSystemRepo sourceRepo,
+                                              String snapshotName,
+                                              String targetAddress,
+                                              AtomicInteger runCounter) {
+        for (int runNumber=0; ; ++runNumber) {
             try {
                 var workResult = migrateDocumentsWithOneWorker(sourceRepo, snapshotName, targetAddress);
                 if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
-                    return run;
+                    return null;
+                } else {
+                    runCounter.incrementAndGet();
                 }
             } catch (RfsMigrateDocuments.NoWorkLeftException e) {
                 log.info("No work at all was found.  " +

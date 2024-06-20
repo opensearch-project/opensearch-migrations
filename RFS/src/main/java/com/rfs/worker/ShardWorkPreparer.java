@@ -23,7 +23,7 @@ public class ShardWorkPreparer {
 
     public void run(ScopedWorkCoordinatorHelper scopedWorkCoordinator, IndexMetadata.Factory metadataFactory,
                     String snapshotName)
-            throws IOException {
+            throws IOException, InterruptedException {
 
         // ensure that there IS an index to house the shared state that we're going to be manipulating
         scopedWorkCoordinator.workCoordinator.setup();
@@ -45,6 +45,11 @@ public class ShardWorkPreparer {
                     @Override
                     public Void onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException {
                         prepareShardWorkItems(scopedWorkCoordinator.workCoordinator, metadataFactory, snapshotName);
+                        return null;
+                    }
+
+                    @Override
+                    public Void onNoAvailableWorkToBeDone() throws IOException {
                         return null;
                     }
                 });

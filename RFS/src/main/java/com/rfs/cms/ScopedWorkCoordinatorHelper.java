@@ -30,6 +30,11 @@ public class ScopedWorkCoordinatorHelper {
             }
 
             @Override
+            public T onNoAvailableWorkToBeDone() throws IOException {
+                return visitor.onNoAvailableWorkToBeDone();
+            }
+
+            @Override
             public T onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException {
                 var workItemId = workItem.getWorkItemId();
                 processManager.registerExpiration(workItem.workItemId, workItem.leaseExpirationTime);

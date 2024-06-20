@@ -60,6 +60,11 @@ public class DocumentsRunner {
                         doDocumentsMigration(IndexAndShard.valueFromWorkItemString(workItem.getWorkItemId()));
                         return CompletionStatus.WORK_COMPLETED;
                     }
+
+                    @Override
+                    public CompletionStatus onNoAvailableWorkToBeDone() throws IOException {
+                        return CompletionStatus.NOTHING_DONE;
+                    }
                 });
     }
 

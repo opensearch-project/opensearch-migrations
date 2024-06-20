@@ -145,7 +145,7 @@ public class RfsMigrateDocuments {
                                                        long maxShardSizeBytes)
             throws IOException, InterruptedException, NoWorkLeftException {
         var scopedWorkCoordinator = new ScopedWorkCoordinatorHelper(workCoordinator, processManager);
-        new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName);
+        confirmShardPrepIsComplete(indexMetadataFactory, snapshotName, scopedWorkCoordinator);
         if (!workCoordinator.workItemsArePending()) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
         }
@@ -159,5 +159,32 @@ public class RfsMigrateDocuments {
                     return shardMetadata;
                 },
                 unpackerFactory, readerFactory, reindexer).migrateNextShard();
+    }
+
+    private static void confirmShardPrepIsComplete(IndexMetadata.Factory indexMetadataFactory,
+                                                   String snapshotName,
+                                                   ScopedWorkCoordinatorHelper scopedWorkCoordinator)
+            throws IOException, InterruptedException
+    {
+        // assume that the shard setup work will be done quickly, much faster than its lease in most cases.
+        // in cases where that isn't true, doing random backoff across the fleet should guarantee that eventually,
+        // these workers will attenuate enough that it won't cause an impact on the coordination server
+        long lockRenegotiationMillis = 1000;
+        for (int shardSetupAttemptNumber=0; ; ++shardSetupAttemptNumber) {
+            try {
+                new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName);
+                return;
+            } catch (IWorkCoordinator.LeaseLockHeldElsewhereException e) {
+                long finalLockRenegotiationMillis = lockRenegotiationMillis;
+                int finalShardSetupAttemptNumber = shardSetupAttemptNumber;
+                log.atInfo().setMessage(() ->
+                        "After " + finalShardSetupAttemptNumber + "another process holds the lock" +
+                                " for setting up the shard work items.  " +
+                                "Waiting " + finalLockRenegotiationMillis + "ms before trying again.").log();
+                Thread.sleep(lockRenegotiationMillis);
+                lockRenegotiationMillis *= 2;
+                continue;
+            }
+        }
     }
 }

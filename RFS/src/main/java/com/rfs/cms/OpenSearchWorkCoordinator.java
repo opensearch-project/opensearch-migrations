@@ -1,7 +1,10 @@
 package com.rfs.cms;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.AllArgsConstructor;
+import lombok.Lombok;
 import lombok.NonNull;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
@@ -9,28 +12,36 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Optional;
+import java.util.function.BiPredicate;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
 @Slf4j
 public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String INDEX_NAME = ".migrations_working_state";
+    public static final int MAX_RETRIES = 6; // at 100ms, the total delay will be 105s
+
+    public static final String PUT_METHOD = "PUT";
+    public static final String POST_METHOD = "POST";
+    public static final String GET_METHOD = "GET";
+    public static final String HEAD_METHOD = "HEAD";
 
     public static final String SCRIPT_VERSION_TEMPLATE = "{SCRIPT_VERSION}";
     public static final String WORKER_ID_TEMPLATE = "{WORKER_ID}";
     public static final String CLIENT_TIMESTAMP_TEMPLATE = "{CLIENT_TIMESTAMP}";
     public static final String EXPIRATION_WINDOW_TEMPLATE = "{EXPIRATION_WINDOW}";
     public static final String CLOCK_DEVIATION_SECONDS_THRESHOLD_TEMPLATE = "{CLOCK_DEVIATION_SECONDS_THRESHOLD}";
+    public static final String OLD_EXPIRATION_THRESHOLD_TEMPLATE = "OLD_EXPIRATION_THRESHOLD";
 
-    public static final String PUT_METHOD = "PUT";
-    public static final String POST_METHOD = "POST";
-    public static final String RESULT_OPENSSEARCH_KEYWORD = "result";
-    public static final String GET_METHOD = "GET";
+    public static final String RESULT_OPENSSEARCH_FIELD_NAME = "result";
     public static final String EXPIRATION_FIELD_NAME = "expiration";
     public static final String UPDATED_COUNT_FIELD_NAME = "updated";
     public static final String LEASE_HOLDER_ID_FIELD_NAME = "leaseHolderId";
-    public static final String OLD_EXPIRATION_THRESHOLD_TEMPLATE = "OLD_EXPIRATION_THRESHOLD";
     public static final String VERSION_CONFLICTS_FIELD_NAME = "version_conflicts";
     public static final String COMPLETED_AT_FIELD_NAME = "completedAt";
-    public static final String HEAD_METHOD = "HEAD";
+    public static final String SOURCE_FIELD_NAME = "_source";
+    public static final String ERROR_OPENSEARCH_FIELD_NAME = "error";
 
     private final long tolerableClientServerClockDifferenceSeconds;
     private final AbstractedHttpClient httpClient;
@@ -57,8 +68,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         httpClient.close();
     }
 
-    public void setup() throws IOException {
-        var indexCheckResponse = httpClient.makeJsonRequest(HEAD_METHOD, INDEX_NAME,null, null);
+    public void setup() throws IOException, InterruptedException {
+        var indexCheckResponse = httpClient.makeJsonRequest(HEAD_METHOD, INDEX_NAME, null, null);
         if (indexCheckResponse.getStatusCode() == 200) {
             log.info("Not creating " + INDEX_NAME + " because it already exists");
             return;
@@ -92,18 +103,34 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 "  }\n" +
                 "}\n";
 
-        var response = httpClient.makeJsonRequest(PUT_METHOD, INDEX_NAME, null, body);
-        if ((response.getStatusCode() / 100) != 2) {
-            throw new IOException("Could not setup " + INDEX_NAME + ".  " +
-                    "Got error code " + response.getStatusCode() + " and response: " +
-                    new String(response.getPayloadBytes(), StandardCharsets.UTF_8));
+        try {
+            doUntil("setup-" + INDEX_NAME, 100, MAX_RETRIES,
+                    () -> {
+                        try {
+                            return httpClient.makeJsonRequest(PUT_METHOD, INDEX_NAME, null, body);
+                        } catch (Exception e) {
+                            throw Lombok.sneakyThrow(e);
+                        }
+                    },
+                    r -> new Object() {
+                        @Override
+                        @SneakyThrows
+                        public String toString() {
+                            var payloadStr = Optional.ofNullable(r.getPayloadBytes())
+                                    .map(bytes -> (new String(bytes, StandardCharsets.UTF_8))).orElse("[NULL]");
+                            return "[ statusCode: " + r.getStatusCode() + ", payload: " + payloadStr + "]";
+                        }
+                    },
+                    (response, ignored) -> (response.getStatusCode() / 100) != 2);
+        } catch (MaxTriesExceededException e) {
+            throw new IOException(e);
         }
     }
 
     enum DocumentModificationResult {
         IGNORED, CREATED, UPDATED;
         static DocumentModificationResult parse(String s) {
-            switch (s) {
+            switch (Optional.ofNullable(s).orElse("")/*let default handle this*/) {
                 case "noop": return DocumentModificationResult.IGNORED;
                 case "created": return DocumentModificationResult.CREATED;
                 case UPDATED_COUNT_FIELD_NAME: return DocumentModificationResult.UPDATED;
@@ -174,8 +201,11 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     }
 
     DocumentModificationResult getResult(AbstractedHttpClient.AbstractHttpResponse response) throws IOException {
-        final var resultStr =
-                objectMapper.readTree(response.getPayloadStream()).get(RESULT_OPENSSEARCH_KEYWORD).textValue();
+        if (response.getStatusCode() == 409) {
+            return DocumentModificationResult.IGNORED;
+        }
+        final var resultDoc = objectMapper.readTree(response.getPayloadStream());
+        var resultStr = resultDoc.path(RESULT_OPENSSEARCH_FIELD_NAME).textValue();
         return DocumentModificationResult.parse(resultStr);
     }
 
@@ -203,11 +233,11 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         } else {
             final var httpResponse = httpClient.makeJsonRequest(GET_METHOD, INDEX_NAME + "/_doc/" + workItemId,
                     null, null);
-            final var response = objectMapper.readTree(httpResponse.getPayloadStream());
+            final var responseDoc = objectMapper.readTree(httpResponse.getPayloadStream()).path(SOURCE_FIELD_NAME);
             if (resultFromUpdate == DocumentModificationResult.UPDATED) {
                 return new WorkItemAndDuration(workItemId, Instant.ofEpochMilli(1000 *
-                        response.path(EXPIRATION_FIELD_NAME).longValue()));
-            } else if (!response.path(COMPLETED_AT_FIELD_NAME).isMissingNode()) {
+                        responseDoc.path(EXPIRATION_FIELD_NAME).longValue()));
+            } else if (!responseDoc.path(COMPLETED_AT_FIELD_NAME).isMissingNode()) {
                 return new AlreadyCompleted();
             } else if (resultFromUpdate == DocumentModificationResult.IGNORED) {
                 throw new LeaseLockHeldElsewhereException();
@@ -245,7 +275,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         var response = httpClient.makeJsonRequest(POST_METHOD, INDEX_NAME + "/_update/" + workItemId,
                 null, body);
-        final var resultStr = objectMapper.readTree(response.getPayloadStream()).get(RESULT_OPENSSEARCH_KEYWORD).textValue();
+        final var resultStr = objectMapper.readTree(response.getPayloadStream()).get(RESULT_OPENSSEARCH_FIELD_NAME).textValue();
         if (DocumentModificationResult.UPDATED != DocumentModificationResult.parse(resultStr)) {
             throw new IllegalStateException("Unexpected response for workItemId: " + workItemId + ".  Response: " +
                 response.toDiagnosticString());
@@ -416,7 +446,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     " instead of one item");
         }
         var resultHitInner = resultHitsUpper.path("hits").path(0);
-        var expiration = resultHitInner.path("_source").path(EXPIRATION_FIELD_NAME).longValue();
+        var expiration = resultHitInner.path(SOURCE_FIELD_NAME).path(EXPIRATION_FIELD_NAME).longValue();
         if (expiration == 0) {
             log.warn("Expiration wasn't found or wasn't set to > 0.  Returning null.");
             return null;
@@ -424,22 +454,50 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         return new WorkItemAndDuration(resultHitInner.get("_id").asText(), Instant.ofEpochMilli(1000*expiration));
     }
 
-    private void refresh() throws IOException, InterruptedException {
-        var sleepMillis = 100;
-        while (true) {
-            var response = httpClient.makeJsonRequest(GET_METHOD, INDEX_NAME + "/_refresh",null,null);
-            var statusCode = response.getStatusCode();
-            if (statusCode == 200) {
-                break;
+    @AllArgsConstructor
+    private static class MaxTriesExceededException extends Exception {
+        Object suppliedValue;
+        Object transformedValue;
+    }
+
+    private <T,U> U doUntil(String labelThatShouldBeAContext, long initialRetryDelayMs, int maxTries,
+                            Supplier<T> supplier, Function<T,U> transformer, BiPredicate<T,U> test)
+            throws InterruptedException, MaxTriesExceededException
+    {
+        var sleepMillis = initialRetryDelayMs;
+        for (var attempt = 1; ; ++attempt) {
+            var suppliedVal = supplier.get();
+            var transformedVal = transformer.apply(suppliedVal);
+            if (test.test(suppliedVal, transformedVal)) {
+                return transformedVal;
             } else {
-                log.warn("Retrying refresh because it returned an expected status code: " + statusCode);
+                log.atWarn().setMessage(() -> "Retrying " + labelThatShouldBeAContext +
+                        " because the predicate failed for: (" + suppliedVal + "," + transformedVal + ")").log();
+                if (attempt >= maxTries) {
+                    throw new MaxTriesExceededException(suppliedVal, transformedVal);
+                }
                 Thread.sleep(sleepMillis);
                 sleepMillis *= 2;
             }
         }
     }
 
-    public WorkItemAndDuration acquireNextWorkItem(Duration leaseDuration) throws IOException, InterruptedException {
+    private void refresh() throws IOException, InterruptedException {
+        try {
+            doUntil("refresh", 100, MAX_RETRIES, () -> {
+                        try {
+                            return httpClient.makeJsonRequest(GET_METHOD, INDEX_NAME + "/_refresh",null,null);
+                        } catch (IOException e) {
+                            throw Lombok.sneakyThrow(e);
+                        }
+                    },
+                    AbstractedHttpClient.AbstractHttpResponse::getStatusCode, (r, statusCode) -> statusCode == 200);
+        } catch (MaxTriesExceededException e) {
+            throw new IOException(e);
+        }
+    }
+
+    public WorkAcquisitionOutcome acquireNextWorkItem(Duration leaseDuration) throws IOException, InterruptedException {
         refresh();
         while (true) {
             final var obtainResult = assignOneWorkItem(leaseDuration.toSeconds());
@@ -447,7 +505,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 case SUCCESSFUL_ACQUISITION:
                     return getAssignedWorkItem();
                 case NOTHING_TO_AQUIRE:
-                    return null;
+                    return new NoAvailableWorkToBeDone();
                 case VERSION_CONFLICT:
                     continue;
                 default:

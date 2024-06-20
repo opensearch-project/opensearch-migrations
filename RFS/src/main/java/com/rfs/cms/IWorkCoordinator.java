@@ -22,14 +22,9 @@ public interface IWorkCoordinator extends AutoCloseable {
 
     interface WorkAcquisitionOutcomeVisitor<T> {
         T onAlreadyCompleted() throws IOException;
+        T onNoAvailableWorkToBeDone() throws IOException;
         T onAcquiredWork(WorkItemAndDuration workItem) throws IOException;
     }
-
-    /**
-     * This represents when the lease wasn't acquired because another process already owned the
-     * lease.
-     */
-    class LeaseLockHeldElsewhereException extends RuntimeException { }
 
     /**
      * This represents that a work item was already completed.
@@ -39,6 +34,22 @@ public interface IWorkCoordinator extends AutoCloseable {
             return v.onAlreadyCompleted();
         }
     }
+
+    /**
+     *
+     */
+    class NoAvailableWorkToBeDone implements WorkAcquisitionOutcome {
+        @Override
+        public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException {
+            return null;
+        }
+    }
+    /**
+     * This represents when the lease wasn't acquired because another process already owned the
+     * lease.
+     */
+    class LeaseLockHeldElsewhereException extends RuntimeException { }
+
 
     @Getter
     @AllArgsConstructor
@@ -51,13 +62,13 @@ public interface IWorkCoordinator extends AutoCloseable {
         }
     }
 
-    void setup() throws IOException;
+    void setup() throws IOException, InterruptedException;
 
     int numWorkItemsArePending() throws IOException, InterruptedException;
 
     boolean workItemsArePending() throws IOException, InterruptedException;
 
-    WorkItemAndDuration acquireNextWorkItem(Duration leaseDuration) throws IOException, InterruptedException;
+    WorkAcquisitionOutcome acquireNextWorkItem(Duration leaseDuration) throws IOException, InterruptedException;
 
     /**
      * @param workItemId - the name of the document/resource to create.

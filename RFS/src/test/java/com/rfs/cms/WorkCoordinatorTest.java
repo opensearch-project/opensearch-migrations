@@ -10,6 +10,7 @@ import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.opensearch.testcontainers.OpensearchContainer;
 
+import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
@@ -173,17 +174,32 @@ public class WorkCoordinatorTest {
             workCoordinator.createOrUpdateLeaseForDocument(doneId, 1);
             workCoordinator.completeWorkItem(doneId);
 
-            var nextWorkItem = workCoordinator.acquireNextWorkItem(expirationWindow);
-            log.error("Next work item picked=" + nextWorkItem);
-            Assertions.assertNotNull(nextWorkItem);
-            Assertions.assertNotNull(nextWorkItem.workItemId);
-            Assertions.assertTrue(nextWorkItem.leaseExpirationTime.isAfter(Instant.now()));
-            seenWorkerItems.put(nextWorkItem.workItemId, nextWorkItem.workItemId);
+            return workCoordinator.acquireNextWorkItem(expirationWindow).visit(
+                    new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<>() {
+                        @Override
+                        public String onAlreadyCompleted() throws IOException {
+                            throw new IllegalStateException();
+                        }
 
-            if (markCompleted) {
-                workCoordinator.completeWorkItem(nextWorkItem.workItemId);
-            }
-            return nextWorkItem.workItemId;
+                        @Override
+                        public String onNoAvailableWorkToBeDone() throws IOException {
+                            throw new IllegalStateException();
+                        }
+
+                        @Override
+                        public String onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException {
+                            log.error("Next work item picked=" + workItem);
+                            Assertions.assertNotNull(workItem);
+                            Assertions.assertNotNull(workItem.workItemId);
+                            Assertions.assertTrue(workItem.leaseExpirationTime.isAfter(Instant.now()));
+                            seenWorkerItems.put(workItem.workItemId, workItem.workItemId);
+
+                            if (markCompleted) {
+                                workCoordinator.completeWorkItem(workItem.workItemId);
+                            }
+                            return workItem.workItemId;
+                        }
+                    });
         }
     }
 }
