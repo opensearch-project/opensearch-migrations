@@ -2,14 +2,21 @@ import pathlib
 
 import pytest
 
-from console_link.middleware.backfill import get_backfill, describe
+from console_link.middleware.factories import get_backfill
+from console_link.middleware.backfill import describe
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
 from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill
+from console_link.environment import Environment
 
 from tests.utils import create_valid_cluster
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 AWS_REGION = "us-east-1"
+
+
+@pytest.fixture
+def env() -> Environment:
+    return Environment(TEST_DATA_DIRECTORY / "services.yaml")
 
 
 @pytest.fixture
@@ -60,10 +67,12 @@ def osi_backfill() -> OpenSearchIngestionBackfill:
     return get_backfill(osi_config, create_valid_cluster(), create_valid_cluster())
 
 
-def test_backfill_describe_includes_salient_details_docker_rfs(docker_rfs_backfill: DockerRFSBackfill):
+def test_backfill_describe_includes_salient_details_docker_rfs(env: Environment,
+                                                               docker_rfs_backfill: DockerRFSBackfill):
     # I'm trying to be quite non-prescriptive about what should be included in describe
     # but at a minimum, the backfill strategy and deployment type need to be present.
-    description = describe(docker_rfs_backfill)
+    env.backfill = docker_rfs_backfill
+    description = describe(env)
     assert "reindex_from_snapshot" in description
     assert "docker" in description
 
@@ -71,10 +80,11 @@ def test_backfill_describe_includes_salient_details_docker_rfs(docker_rfs_backfi
     assert "opensearch_ingestion" not in description
 
 
-def test_backfill_describe_includes_salient_details_ecs_rfs(ecs_rfs_backfill: ECSRFSBackfill):
+def test_backfill_describe_includes_salient_details_ecs_rfs(env: Environment, ecs_rfs_backfill: ECSRFSBackfill):
     # I'm trying to be quite non-prescriptive about what should be included in describe
     # but at a minimum, the backfill strategy and deployment type need to be present.
-    description = describe(ecs_rfs_backfill)
+    env.backfill = ecs_rfs_backfill
+    description = describe(env)
     assert "reindex_from_snapshot" in description
     assert "ecs" in description
     assert ecs_rfs_backfill.ecs_config.get("service_name") in description
@@ -83,10 +93,11 @@ def test_backfill_describe_includes_salient_details_ecs_rfs(ecs_rfs_backfill: EC
     assert "opensearch_ingestion" not in description
 
 
-def test_backfill_describe_includes_salient_details_osi(osi_backfill: OpenSearchIngestionBackfill):
+def test_backfill_describe_includes_salient_details_osi(env: Environment, osi_backfill: OpenSearchIngestionBackfill):
     # I'm trying to be quite non-prescriptive about what should be included in describe
     # but at a minimum, the backfill strategy and deployment type need to be present.
-    description = describe(osi_backfill)
+    env.backfill = osi_backfill
+    description = describe(env)
     assert "opensearch_ingestion" in description
     assert "unit-test-pipeline" in description
     assert "us-west-2" in description

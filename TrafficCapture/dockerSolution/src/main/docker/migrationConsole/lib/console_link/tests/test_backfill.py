@@ -2,7 +2,7 @@ import pathlib
 
 import pytest
 
-from console_link.middleware.backfill import get_backfill, UnsupportedBackfillTypeError
+from console_link.middleware.factories import get_backfill, UnsupportedBackfillTypeError
 from console_link.models.backfill_base import Backfill
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
 from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill

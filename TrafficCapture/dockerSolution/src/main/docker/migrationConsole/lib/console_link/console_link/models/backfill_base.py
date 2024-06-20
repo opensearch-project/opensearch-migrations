@@ -7,6 +7,12 @@ from console_link.models.command_result import CommandResult
 
 from cerberus import Validator
 
+BackfillType = Enum("BackfillType",
+                    ["opensearch_ingestion", "reindex_from_snapshot"])
+
+BackfillStatus = Enum("BackfillStatus", ["NOT_STARTED", "RUNNING", "STOPPED", "FAILED"])
+
+
 SCHEMA = {
     "backfill": {
         "type": "dict",
@@ -17,9 +23,6 @@ SCHEMA = {
         "check_with": contains_one_of({"opensearch_ingestion", "reindex_from_snapshot"})
     }
 }
-
-
-BackfillStatus = Enum("BackfillStatus", ["NOT_STARTED", "RUNNING", "STOPPED", "FAILED"])
 
 
 class Backfill(ABC):

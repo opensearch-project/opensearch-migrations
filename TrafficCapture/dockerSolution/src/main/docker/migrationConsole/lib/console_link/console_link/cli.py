@@ -105,7 +105,7 @@ def backfill_group(ctx):
 @backfill_group.command(name="describe")
 @click.pass_obj
 def describe_backfill_cmd(ctx):
-    click.echo(backfill_.describe(ctx.env.backfill, as_json=ctx.json))
+    click.echo(backfill_.describe(ctx.env, as_json=ctx.json))
 
 
 @backfill_group.command(name="create")
@@ -114,7 +114,7 @@ def describe_backfill_cmd(ctx):
               help="Flag to only print populated pipeline config when executed")
 @click.pass_obj
 def create_backfill_cmd(ctx, pipeline_template_file, print_config_only):
-    exitcode, message = backfill_.create(ctx.env.backfill,
+    exitcode, message = backfill_.create(ctx.env,
                                          pipeline_template_path=pipeline_template_file,
                                          print_config_only=print_config_only)
     if exitcode != ExitCode.SUCCESS:
@@ -126,7 +126,7 @@ def create_backfill_cmd(ctx, pipeline_template_file, print_config_only):
 @click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
 @click.pass_obj
 def start_backfill_cmd(ctx, pipeline_name):
-    exitcode, message = backfill_.start(ctx.env.backfill, pipeline_name=pipeline_name)
+    exitcode, message = backfill_.start(ctx.env, pipeline_name=pipeline_name)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -136,7 +136,7 @@ def start_backfill_cmd(ctx, pipeline_name):
 @click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
 @click.pass_obj
 def stop_backfill_cmd(ctx, pipeline_name):
-    exitcode, message = backfill_.stop(ctx.env.backfill, pipeline_name=pipeline_name)
+    exitcode, message = backfill_.stop(ctx.env, pipeline_name=pipeline_name)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -146,7 +146,7 @@ def stop_backfill_cmd(ctx, pipeline_name):
 @click.argument("units", type=int, required=True)
 @click.pass_obj
 def scale_backfill_cmd(ctx, units: int):
-    exitcode, message = backfill_.scale(ctx.env.backfill, units)
+    exitcode, message = backfill_.scale(ctx.env, units)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -155,7 +155,7 @@ def scale_backfill_cmd(ctx, units: int):
 @backfill_group.command(name="status")
 @click.pass_obj
 def status_backfill_cmd(ctx):
-    exitcode, message = backfill_.status(ctx.env.backfill)
+    exitcode, message = backfill_.status(ctx.env)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -191,7 +191,7 @@ def list_metrics_cmd(ctx):
 @click.pass_obj
 def get_metrics_data_cmd(ctx, component, metric_name, statistic, lookback):
     metric_data = metrics_.get_metric_data(
-        ctx.env.metrics_source,
+        ctx.env,
         component,
         metric_name,
         statistic,
