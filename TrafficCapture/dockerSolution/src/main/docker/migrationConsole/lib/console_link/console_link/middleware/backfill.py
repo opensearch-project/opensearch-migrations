@@ -1,69 +1,25 @@
-from enum import Enum
 import json
 import logging
-from typing import Dict, Optional, Tuple
-
-from console_link.models.backfill_osi import OpenSearchIngestionBackfill
-from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill
-from console_link.models.cluster import Cluster
-from console_link.models.backfill_base import Backfill
+from typing import Tuple
 import yaml
+
+from console_link.middleware.exit_code import ExitCode
+from console_link.environment import Environment
 
 
 logger = logging.getLogger(__name__)
 
 
-class ExitCode(Enum):
-    SUCCESS = 0
-    FAILURE = 1
-
-
-BackfillType = Enum("BackfillType",
-                    ["opensearch_ingestion", "reindex_from_snapshot"])
-
-
-class UnsupportedBackfillTypeError(Exception):
-    def __init__(self, supplied_backfill: str):
-        super().__init__("Unsupported backfill type", supplied_backfill)
-
-
-def get_backfill(config: Dict, source_cluster: Optional[Cluster], target_cluster: Optional[Cluster]) -> Backfill:
-    if BackfillType.opensearch_ingestion.name in config:
-        if source_cluster is None:
-            raise ValueError("source_cluster must be provided for OpenSearch Ingestion backfill")
-        if target_cluster is None:
-            raise ValueError("target_cluster must be provided for OpenSearch Ingestion backfill")
-        logger.debug("Creating OpenSearch Ingestion backfill instance")
-        return OpenSearchIngestionBackfill(config=config,
-                                           source_cluster=source_cluster,
-                                           target_cluster=target_cluster)
-    elif BackfillType.reindex_from_snapshot.name in config:
-        if target_cluster is None:
-            raise ValueError("target_cluster must be provided for RFS backfill")
-
-        if 'docker' in config[BackfillType.reindex_from_snapshot.name]:
-            logger.debug("Creating Docker RFS backfill instance")
-            return DockerRFSBackfill(config=config,
-                                     target_cluster=target_cluster)
-        elif 'ecs' in config[BackfillType.reindex_from_snapshot.name]:
-            logger.debug("Creating ECS RFS backfill instance")
-            return ECSRFSBackfill(config=config,
-                                  target_cluster=target_cluster)
-
-    logger.error(f"An unsupported metrics source type was provided: {config.keys()}")
-    if len(config.keys()) > 1:
-        raise UnsupportedBackfillTypeError(', '.join(config.keys()))
-    raise UnsupportedBackfillTypeError(next(iter(config.keys())))
-
-
-def describe(backfill: Backfill, as_json=False) -> str:
+def describe(env: Environment, as_json=False) -> str:
+    backfill = env.backfill
     response = backfill.describe()
     if as_json:
         return json.dumps(response)
     return yaml.safe_dump(response)
 
 
-def create(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
+def create(env: Environment, *args, **kwargs) -> Tuple[ExitCode, str]:
+    backfill = env.backfill
     logger.info(f"Creating backfill with {args=} and {kwargs=}")
     try:
         result = backfill.create(*args, **kwargs)
@@ -79,7 +35,8 @@ def create(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
     return ExitCode.FAILURE, "Backfill creation failed." + "\n" + result.display()
 
 
-def start(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
+def start(env: Environment, *args, **kwargs) -> Tuple[ExitCode, str]:
+    backfill = env.backfill
     try:
         result = backfill.start(*args, **kwargs)
     except NotImplementedError:
@@ -94,7 +51,8 @@ def start(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
     return ExitCode.FAILURE, "Backfill start failed." + "\n" + result.display()
 
 
-def stop(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
+def stop(env: Environment, *args, **kwargs) -> Tuple[ExitCode, str]:
+    backfill = env.backfill
     logger.info("Stopping backfill")
     try:
         result = backfill.stop(*args, **kwargs)
@@ -109,7 +67,8 @@ def stop(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
     return ExitCode.FAILURE, "Backfill stop failed." + "\n" + result.display()
 
 
-def scale(backfill: Backfill, units: int, *args, **kwargs) -> Tuple[ExitCode, str]:
+def scale(env: Environment, units: int, *args, **kwargs) -> Tuple[ExitCode, str]:
+    backfill = env.backfill
     logger.info(f"Scaling backfill to {units} units")
     try:
         result = backfill.scale(units, *args, **kwargs)
@@ -124,7 +83,8 @@ def scale(backfill: Backfill, units: int, *args, **kwargs) -> Tuple[ExitCode, st
     return ExitCode.FAILURE, "Backfill scale failed." + "\n" + result.display()
 
 
-def status(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
+def status(env: Environment, *args, **kwargs) -> Tuple[ExitCode, str]:
+    backfill = env.backfill
     logger.info("Getting backfill status")
     try:
         status = backfill.get_status(*args, **kwargs)
