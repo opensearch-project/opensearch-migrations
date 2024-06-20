@@ -49,8 +49,7 @@ def migration_cdk_context = """
       }
     }
 """
-// This library declaration likely needs to change in the near future to be more dynamic in picking up library
-// changes that may have happened on the given branch being tested
+
 @Library("migrations-shared-lib@checkin-jenkinsfile")_
 
 defaultIntegPipeline(

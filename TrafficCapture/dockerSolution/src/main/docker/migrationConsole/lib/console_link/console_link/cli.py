@@ -73,6 +73,22 @@ def cat_indices_cmd(ctx):
     click.echo(logic_clusters.cat_indices(ctx.env.target_cluster))
 
 
+@cluster_group.command(name="connection-check")
+@click.pass_obj
+def connection_check_cmd(ctx):
+    """Checks if a connection can be established to source and target clusters"""
+    click.echo("SOURCE CLUSTER")
+    click.echo(logic_clusters.connection_check(ctx.env.source_cluster))
+    click.echo("TARGET CLUSTER")
+    click.echo(logic_clusters.connection_check(ctx.env.target_cluster))
+
+
+@cluster_group.command(name="run-test-benchmarks")
+@click.pass_obj
+def run_test_benchmarks_cmd(ctx):
+    """Run a series of OpenSearch Benchmark workloads against the source cluster"""
+    click.echo(logic_clusters.run_test_benchmarks(ctx.env.source_cluster))
+
 # ##################### REPLAYER ###################
 
 @cli.group(name="replayer")
