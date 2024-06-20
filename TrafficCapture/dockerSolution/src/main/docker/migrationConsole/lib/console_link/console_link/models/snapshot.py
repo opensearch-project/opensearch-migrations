@@ -71,15 +71,21 @@ class S3Snapshot(Snapshot):
             "--source-host", self.source_cluster.endpoint,
             "--target-host", self.target_cluster.endpoint,
         ]
-        if self.source_cluster.allow_insecure or self.target_cluster.allow_insecure:
-            command.append("--insecure")
+
+        if self.source_cluster.allow_insecure:
+            command.append("--source-insecure")
+        if self.target_cluster.allow_insecure:
+            command.append("--target-insecure")
+
         logger.info(f"Creating snapshot with command: {' '.join(command)}")
         try:
-            subprocess.run(command, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+            # Pass None to stdout and stderr to not capture output and show in terminal
+            subprocess.run(command, stdout=None, stderr=None, text=True, check=True)
             logger.info(f"Snapshot {self.config['snapshot_name']} created successfully")
             return CommandResult(success=True, value=f"Snapshot {self.config['snapshot_name']} created successfully")
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to create snapshot: {str(e)}")
-            return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)} {e.output} {e.stderr}")
+            return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
+
     def status(self, *args, **kwargs) -> CommandResult:
         return CommandResult(success=False, value=f"Command not implemented")
