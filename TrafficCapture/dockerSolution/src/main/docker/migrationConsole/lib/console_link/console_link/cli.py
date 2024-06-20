@@ -145,25 +145,24 @@ def snapshot_group(ctx):
 
 
 @snapshot_group.command(name="create")
+@click.option('--wait', is_flag=True, default=False, help='Wait for snapshot completion')
 @click.pass_obj
-def create_snapshot_cmd(ctx):
+def create_snapshot_cmd(ctx, wait):
     """Create a snapshot of the source cluster"""
     snapshot = ctx.env.snapshot
-    status, message = logic_snapshot.create(snapshot)
-    if status != SnapshotStatus.COMPLETED:
+    status, message = logic_snapshot.create(snapshot, wait=wait)
+    if status != SnapshotStatus.COMPLETED and wait:
         raise click.ClickException(message)
     click.echo(message)
 
 
 @snapshot_group.command(name="status")
+@click.option('--deep-check', is_flag=True, default=False, help='Perform a deep status check of the snapshot')
 @click.pass_obj
-def status_snapshot_cmd(ctx):
+def status_snapshot_cmd(ctx, deep_check):
     """Check the status of the snapshot"""
-    snapshot = ctx.env.snapshot
-    _, message = logic_snapshot.status(snapshot, source_cluster=ctx.env.source_cluster,
-                                       target_cluster=ctx.env.target_cluster)
-    click.echo(message)
-
+    status, message = logic_snapshot.status(ctx.env.snapshot, deep_check=deep_check)
+    click.echo(f"Status: {status}\n{message}")
 # ##################### BACKFILL ###################
 
 # As we add other forms of backfill migrations, we should incorporate a way to dynamically allow different sets of

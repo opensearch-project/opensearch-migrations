@@ -100,7 +100,8 @@ public class FullTest {
             final List<String> INDEX_ALLOWLIST = List.of();
             CreateSnapshot.run(
                     c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, ElasticsearchContainer.CLUSTER_SNAPSHOT_DIR),
-                    new OpenSearchClient(esSourceContainer.getUrl(), null));
+                    new OpenSearchClient(esSourceContainer.getUrl(), null),
+                    false);
             var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
             try {
                 esSourceContainer.copySnapshotData(tempDir.toString());

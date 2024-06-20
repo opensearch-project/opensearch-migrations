@@ -1,5 +1,6 @@
 package com.rfs.version_es_7_10;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.module.SimpleModule;
@@ -18,6 +19,7 @@ public class ShardMetadataFactory_ES_7_10 implements ShardMetadata.Factory {
     @Override
     public ShardMetadata.Data fromJsonNode(JsonNode root, String indexId, String indexName, int shardId) {
         ObjectMapper objectMapper = new ObjectMapper();
+        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         SimpleModule module = new SimpleModule();
         module.addDeserializer(ShardMetadataData_ES_7_10.FileInfoRaw.class, new ShardMetadataData_ES_7_10.FileInfoRawDeserializer());
         objectMapper.registerModule(module);

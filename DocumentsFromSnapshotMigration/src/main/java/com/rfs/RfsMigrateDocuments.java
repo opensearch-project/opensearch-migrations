@@ -131,7 +131,8 @@ public class RfsMigrateDocuments {
                     luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
 
             run(LuceneDocumentsReader::new, reindexer, workCoordinator, processManager, indexMetadataFactory,
-                    arguments.snapshotName, arguments.indexAllowlist, shardMetadataFactory, unpackerFactory, arguments.maxShardSizeBytes);
+                    arguments.snapshotName, arguments.indexAllowlist, shardMetadataFactory, unpackerFactory,
+                    arguments.maxShardSizeBytes);
         });
     }
 
