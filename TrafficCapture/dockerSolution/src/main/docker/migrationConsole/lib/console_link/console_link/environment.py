@@ -5,6 +5,7 @@ from console_link.models.metrics_source import MetricsSource
 from console_link.logic.metrics import get_metrics_source
 from console_link.logic.backfill import get_backfill
 from console_link.models.backfill_base import Backfill
+from console_link.models.snapshot import Snapshot, S3Snapshot
 import yaml
 from cerberus import Validator
 
@@ -17,6 +18,7 @@ SCHEMA = {
     "replayer": {"type": "dict", "required": False},
     "backfill": {"type": "dict", "required": False},
     "metrics_source": {"type": "dict", "required": False},
+    "snapshot": {"type": "dict", "required": False},
 }
 
 
@@ -25,6 +27,7 @@ class Environment:
     target_cluster: Optional[Cluster] = None
     backfill: Optional[Backfill] = None
     metrics_source: Optional[MetricsSource] = None
+    snapshot: Optional[Snapshot] = None
 
     def __init__(self, config_file: str):
         self.config_file = config_file
@@ -61,3 +64,11 @@ class Environment:
             logger.info(f"Backfill migration initialized: {self.backfill}")
         else:
             logger.info("No backfill provided")
+
+        if 'snapshot' in self.config:
+            self.snapshot: Snapshot = S3Snapshot(self.config["snapshot"],
+                                                  source_cluster=self.source_cluster,
+                                                  target_cluster=self.target_cluster)
+            logger.info(f"Snapshot initialized: {self.snapshot}")
+        else:
+            logger.info("No snapshot provided")

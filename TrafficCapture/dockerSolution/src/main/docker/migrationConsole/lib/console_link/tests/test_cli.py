@@ -1,4 +1,5 @@
 import pathlib
+from console_link.models.command_result import CommandResult
 
 import requests_mock
 
@@ -66,6 +67,35 @@ def test_cli_with_backfill_describe(runner, env, mocker):
     assert result.exit_code == 0
 
 
+def test_cli_snapshot_create(runner, env, mocker):
+    mock_create = mocker.patch('console_link.models.snapshot.Snapshot.create')
+    
+    # Set the mock return values
+    mock_create.return_value = CommandResult(success=True, value="Snapshot created successfully")
+    
+    # Test snapshot creation
+    result_create = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'create'], catch_exceptions=True)
+    assert result_create.exit_code == 0
+    assert "Snapshot created successfully" in result_create.output
+
+    # Ensure the mocks were called
+    mock_create.assert_called_once()
+
+@pytest.mark.skip(reason="Not implemented yet")
+def test_cli_snapshot_status(runner, env, mocker):
+    mock_status = mocker.patch('console_link.models.snapshot.Snapshot.status')
+    
+    mock_status.return_value = CommandResult(success=True, value="Snapshot status: COMPLETED")
+  
+    # Test snapshot status
+    result_status = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'status'], catch_exceptions=True)
+    assert result_status.exit_code == 0
+    assert "Snapshot status: COMPLETED" in result_status.output
+    
+    # Ensure the mocks were called
+    mock_status.assert_called_once()
+
+
 source_cat_indices = """
 green  open logs-221998             pKNVNlhcRuuUXlwPJag9Kg 5 0 1000 0 167.4kb 167.4kb
 green  open geonames                DlT1Qp-7SqaARuECxTaYvw 5 0 1000 0 343.2kb 343.2kb
@@ -95,3 +125,4 @@ def test_cli_cat_indices_e2e(runner, env):
     assert 'TARGET CLUSTER' in result.output
     assert source_cat_indices in result.output
     assert target_cat_indices in result.output
+

@@ -4,9 +4,13 @@ import click
 import console_link.logic.clusters as logic_clusters
 import console_link.logic.metrics as logic_metrics
 import console_link.logic.backfill as logic_backfill
-from console_link.logic.backfill import ExitCode
+import console_link.logic.snapshot as logic_snapshot
+
+from console_link.models.utils import ExitCode
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
+from console_link.models.snapshot import SnapshotStatus
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -88,6 +92,34 @@ def replayer_group(ctx):
 def start_replayer_cmd(ctx):
     ctx.env.replayer.start()
 
+# ##################### SNAPSHOT ###################
+
+@cli.group(name="snapshot")
+@click.pass_obj
+def snapshot_group(ctx):
+    """All actions related to snapshot creation"""
+    if ctx.env.snapshot is None:
+        raise click.UsageError("Snapshot is not set")
+
+
+@snapshot_group.command(name="create")
+@click.pass_obj
+def create_snapshot_cmd(ctx):
+    """Create a snapshot of the source cluster"""
+    snapshot = ctx.env.snapshot
+    status, message = logic_snapshot.create(snapshot)
+    if status != SnapshotStatus.COMPLETED:
+        raise click.ClickException(message)
+    click.echo(message)
+
+
+@snapshot_group.command(name="status")
+@click.pass_obj
+def status_snapshot_cmd(ctx):
+    """Check the status of the snapshot"""
+    snapshot = ctx.env.snapshot
+    _, message = logic_snapshot.status(snapshot, source_cluster=ctx.env.source_cluster, target_cluster=ctx.env.target_cluster)
+    click.echo(message)
 
 # ##################### BACKFILL ###################
 

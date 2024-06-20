@@ -1,4 +1,5 @@
 # define a custom exception for aws api errors
+from enum import Enum
 from typing import Dict
 
 
@@ -20,3 +21,7 @@ def raise_for_aws_api_error(response: Dict) -> None:
             "Non-2XX status code received",
             status_code=status_code
         )
+
+class ExitCode(Enum):
+    SUCCESS = 0
+    FAILURE = 1

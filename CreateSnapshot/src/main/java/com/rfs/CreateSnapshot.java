@@ -48,6 +48,9 @@ public class CreateSnapshot {
 
         @Parameter(names = {"--target-password"}, description = "Optional.  The target password; if not provided, will assume no auth on target", required = false)
         public String targetPass = null;
+
+        @Parameter(names = {"--insecure"}, description = "Allow untrusted SSL certificates", required = false)
+        public boolean insecure = false;
     }
 
     public static void main(String[] args) throws Exception {
@@ -67,9 +70,10 @@ public class CreateSnapshot {
         final String targetHost = arguments.targetHost;
         final String targetUser = arguments.targetUser;
         final String targetPass = arguments.targetPass;
+        final boolean insecure = arguments.insecure;
 
-        final ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
-        final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
+        final ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass, insecure);
+        final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass, insecure);
 
         TryHandlePhaseFailure.executeWithTryCatch(() -> {
             log.info("Running RfsWorker");
