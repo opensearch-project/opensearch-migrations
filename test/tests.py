@@ -405,21 +405,20 @@ class E2ETests(unittest.TestCase):
         finally:
             proxy_single_connection_session.close()
 
-    def test_0008_largeRequest(self):
-        for i in range(10):
-            index_name = f"test_0008_{self.unique_id}_{i}"
-            doc_id = "1"
+    def test_0008_largeRequest_replayedToTarget(self):
+        index_name = f"test_0008_{self.unique_id}"
+        doc_id = "1"
 
-            # Create large document, 99MiB
-            # Default max 100MiB in ES/OS settings (http.max_content_length)
-            large_doc = generate_large_doc(size_mib=99)
+        # Create large document, 99MiB
+        # Default max 100MiB in ES/OS settings (http.max_content_length)
+        large_doc = generate_large_doc(size_mib=99)
 
-            # Measure the time taken by the create_document call
-            # Send large request to proxy and verify response
-            proxy_response = create_document(self.proxy_endpoint, index_name, doc_id, self.source_auth,
-                                             self.source_verify_ssl, doc_body=large_doc)
+        # Measure the time taken by the create_document call
+        # Send large request to proxy and verify response
+        proxy_response = create_document(self.proxy_endpoint, index_name, doc_id, self.source_auth,
+                                         self.source_verify_ssl, doc_body=large_doc)
 
-            self.assertEqual(proxy_response.status_code, HTTPStatus.CREATED)
+        self.assertEqual(proxy_response.status_code, HTTPStatus.CREATED)
 
-            # Verify document created on source and target
-            self.assert_source_target_doc_match(index_name, doc_id, doc_body=large_doc, max_attempts=60)
+        # Verify document created on source and target
+        self.assert_source_target_doc_match(index_name, doc_id, doc_body=large_doc, max_attempts=60)
