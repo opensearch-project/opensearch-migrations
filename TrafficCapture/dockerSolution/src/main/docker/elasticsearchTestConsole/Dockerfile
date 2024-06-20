@@ -6,7 +6,8 @@ COPY requirements.txt /requirements-test-console.txt
 
 RUN apt-get update && \
     apt-get install -y --no-install-recommends python3.9 python3-pip python3-dev openjdk-11-jre-headless wget gcc libc-dev git curl vim jq unzip less && \
-    pip3 install -r /requirements-test-console.txt
+    pip install pipenv && \
+    pipenv install --system --deploy --ignore-pipfile
 
 COPY *.sh /root/
 COPY *.py /root/
