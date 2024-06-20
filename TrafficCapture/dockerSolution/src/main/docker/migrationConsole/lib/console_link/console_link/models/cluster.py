@@ -66,6 +66,7 @@ class Cluster:
     aws_secret_arn: Optional[str] = None
     auth_type: Optional[AuthMethod] = None
     auth_details: Optional[Dict[str, Any]] = None
+    allow_insecure: bool = None
 
     def __init__(self, config: Dict) -> None:
         logger.info(f"Initializing cluster with config: {config}")
@@ -74,8 +75,7 @@ class Cluster:
             raise ValueError("Invalid config file for cluster", v.errors)
 
         self.endpoint = config["endpoint"]
-        if self.endpoint.startswith("https"):
-            self.allow_insecure = config.get("allow_insecure", False)
+        self.allow_insecure = config.get("allow_insecure", False)
         if 'no_auth' in config:
             self.auth_type = AuthMethod.NO_AUTH
         elif 'basic_auth' in config:

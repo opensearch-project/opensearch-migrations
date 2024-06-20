@@ -40,6 +40,9 @@ public class CreateSnapshot {
         @Parameter(names = {"--source-password"}, description = "Optional.  The source password; if not provided, will assume no auth on source", required = false)
         public String sourcePass = null;
 
+        @Parameter(names = {"--source-insecure"}, description = "Allow untrusted SSL certificates for source", required = false)
+        public boolean sourceInsecure = false;
+
         @Parameter(names = {"--target-host"}, description = "The target host and port (e.g. http://localhost:9200)", required = true)
         public String targetHost;
 
@@ -48,6 +51,9 @@ public class CreateSnapshot {
 
         @Parameter(names = {"--target-password"}, description = "Optional.  The target password; if not provided, will assume no auth on target", required = false)
         public String targetPass = null;
+
+        @Parameter(names = {"--target-insecure"}, description = "Allow untrusted SSL certificates for target", required = false)
+        public boolean targetInsecure = false;
     }
 
     public static void main(String[] args) throws Exception {
@@ -67,9 +73,11 @@ public class CreateSnapshot {
         final String targetHost = arguments.targetHost;
         final String targetUser = arguments.targetUser;
         final String targetPass = arguments.targetPass;
+        final boolean sourceInsecure = arguments.sourceInsecure;
+        final boolean targetInsecure = arguments.targetInsecure;
 
-        final ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
-        final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
+        final ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass, sourceInsecure);
+        final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass, targetInsecure);
 
         TryHandlePhaseFailure.executeWithTryCatch(() -> {
             log.info("Running RfsWorker");
