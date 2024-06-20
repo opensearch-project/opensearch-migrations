@@ -405,31 +405,32 @@ class E2ETests(unittest.TestCase):
             proxy_single_connection_session.close()
 
     def test_0008_largeRequest(self):
-        index_name = f"test_0008_{self.unique_id}"
-        doc_id = "1"
+        for i in range(10):
+            index_name = f"test_0008_{self.unique_id}_{i}"
+            doc_id = "1"
 
-        # Create large document, 50MiB
-        # Default max 100MiB in ES/OS settings (http.max_content_length)
-        large_doc = generate_large_doc(size_mib=50)
+            # Create large document, 50MiB
+            # Default max 100MiB in ES/OS settings (http.max_content_length)
+            large_doc = generate_large_doc(size_mib=50)
 
-        # Measure the time taken by the create_document call
-        # Send large request to proxy and verify response
-        start_time = time.time()
-        proxy_response = create_document(self.proxy_endpoint, index_name, doc_id, self.source_auth,
-                                         self.source_verify_ssl, doc_body=large_doc)
-        end_time = time.time()
-        duration = end_time - start_time
+            # Measure the time taken by the create_document call 
+            # Send large request to proxy and verify response
+            start_time = time.time()
+            proxy_response = create_document(self.proxy_endpoint, index_name, doc_id, self.source_auth,
+                                             self.source_verify_ssl, doc_body=large_doc)
+            end_time = time.time()
+            duration = end_time - start_time
 
-        # Set wait time to double the response time or 5 seconds
-        wait_time_seconds = max(round(duration, 3) * 2, 5)
+            # Set wait time to double the response time or 5 seconds
+            wait_time_seconds = max(round(duration, 3) * 2, 5)
 
-        self.assertEqual(proxy_response.status_code, HTTPStatus.CREATED)
+            self.assertEqual(proxy_response.status_code, HTTPStatus.CREATED)
 
-        # Wait for the measured duration
-        logger.debug(f"Waiting {wait_time_seconds} seconds for"
-                     f" replay of large doc creation")
+            # Wait for the measured duration
+            logger.debug(f"Waiting {wait_time_seconds} seconds for"
+                         f" replay of large doc creation")
 
-        time.sleep(wait_time_seconds)
+            time.sleep(wait_time_seconds)
 
-        # Verify document created on source and target
-        self.assert_source_target_doc_match(index_name, doc_id, doc_body=large_doc)
+            # Verify document created on source and target
+            self.assert_source_target_doc_match(index_name, doc_id, doc_body=large_doc)
