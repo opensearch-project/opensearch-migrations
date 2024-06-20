@@ -94,6 +94,7 @@ def start_replayer_cmd(ctx):
 
 # ##################### SNAPSHOT ###################
 
+
 @cli.group(name="snapshot")
 @click.pass_obj
 def snapshot_group(ctx):
@@ -118,13 +119,15 @@ def create_snapshot_cmd(ctx):
 def status_snapshot_cmd(ctx):
     """Check the status of the snapshot"""
     snapshot = ctx.env.snapshot
-    _, message = logic_snapshot.status(snapshot, source_cluster=ctx.env.source_cluster, target_cluster=ctx.env.target_cluster)
+    _, message = logic_snapshot.status(snapshot, source_cluster=ctx.env.source_cluster,
+                                       target_cluster=ctx.env.target_cluster)
     click.echo(message)
 
 # ##################### BACKFILL ###################
 
 # As we add other forms of backfill migrations, we should incorporate a way to dynamically allow different sets of
 # arguments depending on the type of backfill migration
+
 
 @cli.group(name="backfill")
 @click.pass_obj

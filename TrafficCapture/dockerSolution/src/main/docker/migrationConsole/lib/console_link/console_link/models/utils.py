@@ -22,6 +22,7 @@ def raise_for_aws_api_error(response: Dict) -> None:
             status_code=status_code
         )
 
+
 class ExitCode(Enum):
     SUCCESS = 0
     FAILURE = 1

@@ -67,8 +67,8 @@ class Environment:
 
         if 'snapshot' in self.config:
             self.snapshot: Snapshot = S3Snapshot(self.config["snapshot"],
-                                                  source_cluster=self.source_cluster,
-                                                  target_cluster=self.target_cluster)
+                                                 source_cluster=self.source_cluster,
+                                                 target_cluster=self.target_cluster)
             logger.info(f"Snapshot initialized: {self.snapshot}")
         else:
             logger.info("No snapshot provided")

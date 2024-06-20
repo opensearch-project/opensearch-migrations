@@ -4,6 +4,7 @@ from console_link.models.snapshot import Snapshot, SnapshotStatus
 
 logger = logging.getLogger(__name__)
 
+
 def create(snapshot: Snapshot, *args, **kwargs) -> Tuple[SnapshotStatus, str]:
     logger.info(f"Creating snapshot with {args=} and {kwargs=}")
     try:
@@ -15,6 +16,7 @@ def create(snapshot: Snapshot, *args, **kwargs) -> Tuple[SnapshotStatus, str]:
     if result.success:
         return SnapshotStatus.COMPLETED, "Snapshot created successfully." + "\n" + result.value
     return SnapshotStatus.FAILED, "Snapshot creation failed." + "\n" + result.value
+
 
 def status(snapshot: Snapshot, *args, **kwargs) -> Tuple[SnapshotStatus, str]:
     logger.info("Getting snapshot status")

@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 from enum import Enum
 import logging
 import subprocess
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 from console_link.models.cluster import Cluster
 from console_link.models.command_result import CommandResult
 from cerberus import Validator
@@ -14,8 +14,8 @@ SnapshotStatus = Enum(
         "NOT_STARTED",
         "RUNNING",
         "COMPLETED",
-        "FAILED"
-        ])
+        "FAILED"])
+
 
 class Snapshot(ABC):
     """
@@ -51,6 +51,7 @@ S3_SNAPSHOT_SCHEMA = {
         'required': True
     }
 }
+
 
 class S3Snapshot(Snapshot):
     def __init__(self, config: Dict, source_cluster: Cluster, target_cluster: Optional[Cluster] = None) -> None:
@@ -88,4 +89,4 @@ class S3Snapshot(Snapshot):
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
     def status(self, *args, **kwargs) -> CommandResult:
-        return CommandResult(success=False, value=f"Command not implemented")
+        return CommandResult(success=False, value="Command not implemented")
