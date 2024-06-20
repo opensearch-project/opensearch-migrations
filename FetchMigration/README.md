@@ -42,13 +42,13 @@ via Python. Help text for each module can be printed by supplying the `-h / --he
 Navigate to the cloned GitHub repo. Then, install the required Python dependencies by running:
 
 ```shell
-python -m pip install -r python/requirements.txt
+pipenv install
 ```
 
 The Fetch Migration workflow can then be kicked off via the orchestrator module:
 
 ```shell
-python python/fetch_orchestrator.py --help
+pipenv run python python/fetch_orchestrator.py --help
 ```
 
 ### Docker
