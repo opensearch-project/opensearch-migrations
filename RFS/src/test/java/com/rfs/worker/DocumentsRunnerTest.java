@@ -11,11 +11,11 @@ import org.mockito.Mockito;
 
 import com.rfs.cms.CmsClient;
 import com.rfs.common.DocumentReindexer;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.RfsException;
-import com.rfs.common.ShardMetadata;
 import com.rfs.common.SnapshotShardUnpacker;
+import com.rfs.models.IndexMetadata;
+import com.rfs.models.ShardMetadata;
 
 public class DocumentsRunnerTest {
 

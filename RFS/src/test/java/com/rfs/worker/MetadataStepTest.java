@@ -22,7 +22,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.cms.CmsClient;
 import com.rfs.cms.CmsEntry;
 import com.rfs.cms.OpenSearchCmsClient;
-import com.rfs.common.GlobalMetadata;
+import com.rfs.models.GlobalMetadata;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
 import com.rfs.worker.MetadataStep.MaxAttemptsExceeded;
@@ -279,7 +279,7 @@ public class MetadataStepTest {
         ));
         testMembers.cmsEntry = existingEntry;
         
-        GlobalMetadata.Data testGlobalMetadata = Mockito.mock(GlobalMetadata.Data.class);
+        GlobalMetadata testGlobalMetadata = Mockito.mock(GlobalMetadata.class);
         ObjectNode testNode = Mockito.mock(ObjectNode.class);
         ObjectNode testTransformedNode = Mockito.mock(ObjectNode.class);
         Mockito.when(testMembers.metadataFactory.fromRepo(testMembers.snapshotName)).thenReturn(testGlobalMetadata);

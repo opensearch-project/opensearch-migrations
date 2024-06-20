@@ -24,11 +24,11 @@ import com.rfs.cms.CmsClient;
 import com.rfs.cms.CmsEntry;
 import com.rfs.cms.OpenSearchCmsClient;
 import com.rfs.common.DocumentReindexer;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.LuceneDocumentsReader;
-import com.rfs.common.ShardMetadata;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
+import com.rfs.models.IndexMetadata;
+import com.rfs.models.ShardMetadata;
 import com.rfs.worker.DocumentsStep.SharedMembers;
 
 import reactor.core.publisher.Flux;
@@ -511,7 +511,7 @@ public class DocumentsStepTest {
         // Set up the test
         testMembers.cmsWorkEntry = Optional.of(workItem);
 
-        ShardMetadata.Data shardMetadata = Mockito.mock(ShardMetadata.Data.class);
+        ShardFileInfo shardMetadata = Mockito.mock(ShardFileInfo.class);
         Mockito.when(shardMetadata.getIndexName()).thenReturn(workItem.indexName);
         Mockito.when(shardMetadata.getShardId()).thenReturn(workItem.shardId);
         Mockito.when(testMembers.shardMetadataFactory.fromRepo(testMembers.snapshotName, workItem.indexName, workItem.shardId)).thenReturn(shardMetadata);
@@ -548,7 +548,7 @@ public class DocumentsStepTest {
             "index1", 0, CmsEntry.DocumentsWorkItemStatus.NOT_STARTED, "42", 2
         );
 
-        ShardMetadata.Data shardMetadata = Mockito.mock(ShardMetadata.Data.class);
+        ShardFileInfo shardMetadata = Mockito.mock(ShardFileInfo.class);
         Mockito.when(shardMetadata.getIndexName()).thenReturn(workItem.indexName);
         Mockito.when(shardMetadata.getShardId()).thenReturn(workItem.shardId);
         Mockito.when(testMembers.shardMetadataFactory.fromRepo(testMembers.snapshotName, workItem.indexName, workItem.shardId)).thenReturn(shardMetadata);
@@ -583,7 +583,7 @@ public class DocumentsStepTest {
             "index1", 0, CmsEntry.DocumentsWorkItemStatus.NOT_STARTED, "42", 2
         );
 
-        ShardMetadata.Data shardMetadata = Mockito.mock(ShardMetadata.Data.class);
+        ShardFileInfo shardMetadata = Mockito.mock(ShardFileInfo.class);
         Mockito.when(shardMetadata.getTotalSizeBytes()).thenReturn(testMembers.maxShardSizeBytes + 1);
         Mockito.when(testMembers.shardMetadataFactory.fromRepo(testMembers.snapshotName, workItem.indexName, workItem.shardId)).thenReturn(shardMetadata);
 

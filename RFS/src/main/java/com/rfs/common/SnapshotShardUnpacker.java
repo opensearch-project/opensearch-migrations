@@ -17,12 +17,15 @@ import org.apache.lucene.store.IndexOutput;
 import org.apache.lucene.store.NativeFSLockFactory;
 import org.apache.lucene.util.BytesRef;
 
+import com.rfs.models.ShardFileInfo;
+import com.rfs.models.ShardMetadata;
+
 @RequiredArgsConstructor
 public class SnapshotShardUnpacker implements AutoCloseable {
     private static final Logger logger = LogManager.getLogger(SnapshotShardUnpacker.class);
     private final SourceRepoAccessor repoAccessor;
     private final Path luceneFilesBasePath;
-    private final ShardMetadata.Data shardMetadata;
+    private final ShardMetadata shardMetadata;
     private final int bufferSize;
 
     @RequiredArgsConstructor
@@ -31,7 +34,7 @@ public class SnapshotShardUnpacker implements AutoCloseable {
         private final Path luceneFilesBasePath;
         private final int bufferSize;
 
-        public SnapshotShardUnpacker create(ShardMetadata.Data shardMetadata) {
+        public SnapshotShardUnpacker create(ShardMetadata shardMetadata) {
             return new SnapshotShardUnpacker(repoAccessor, luceneFilesBasePath, shardMetadata, bufferSize);
         }
     }
@@ -49,7 +52,7 @@ public class SnapshotShardUnpacker implements AutoCloseable {
             Files.createDirectories(luceneIndexDir);
             final FSDirectory primaryDirectory = FSDirectory.open(luceneIndexDir, lockFactory);
 
-            for (ShardMetadata.FileInfo fileMetadata : shardMetadata.getFiles()) {
+            for (ShardFileInfo fileMetadata : shardMetadata.getFiles()) {
                 logger.info("Unpacking - Blob Name: " + fileMetadata.getName() + ", Lucene Name: " + fileMetadata.getPhysicalName());
                 try (IndexOutput indexOutput = primaryDirectory.createOutput(fileMetadata.getPhysicalName(), IOContext.DEFAULT);){
                     if (fileMetadata.getName().startsWith("v__")) {

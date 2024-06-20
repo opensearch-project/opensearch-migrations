@@ -10,7 +10,7 @@ import com.rfs.cms.CmsClient;
 import com.rfs.cms.CmsEntry;
 import com.rfs.cms.CmsEntry.Metadata;
 import com.rfs.cms.CmsEntry.MetadataStatus;
-import com.rfs.common.GlobalMetadata;
+import com.rfs.models.GlobalMetadata;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
 

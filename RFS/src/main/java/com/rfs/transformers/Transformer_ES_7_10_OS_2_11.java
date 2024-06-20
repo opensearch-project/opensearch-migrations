@@ -5,8 +5,8 @@ import org.apache.logging.log4j.Logger;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.rfs.common.GlobalMetadata;
-import com.rfs.common.IndexMetadata;
+import com.rfs.models.GlobalMetadata;
+import com.rfs.models.IndexMetadata;
 
 public class Transformer_ES_7_10_OS_2_11 implements Transformer {
     private static final Logger logger = LogManager.getLogger(Transformer_ES_7_10_OS_2_11.class);
@@ -18,7 +18,7 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
     }
 
     @Override
-    public ObjectNode transformGlobalMetadata(GlobalMetadata.Data metaData){
+    public ObjectNode transformGlobalMetadata(GlobalMetadata metaData){
         ObjectNode root = metaData.toObjectNode();
 
         // Transform the legacy templates

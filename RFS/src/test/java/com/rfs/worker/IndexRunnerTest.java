@@ -10,8 +10,8 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import com.rfs.cms.CmsClient;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.RfsException;
+import com.rfs.models.IndexMetadata;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 

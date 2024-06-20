@@ -4,8 +4,8 @@ import java.nio.file.Path;
 import java.util.List;
 
 import com.rfs.common.ConnectionDetails;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.OpenSearchClient;
+import com.rfs.models.IndexMetadata;
 
 public interface SimpleRestoreFromSnapshot {
 

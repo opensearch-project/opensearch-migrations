@@ -11,12 +11,12 @@ import com.rfs.cms.CmsClient;
 import com.rfs.cms.CmsEntry;
 import com.rfs.cms.OpenSearchCmsClient;
 import com.rfs.common.DocumentReindexer;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.RfsException;
-import com.rfs.common.ShardMetadata;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
+import com.rfs.models.IndexMetadata;
+import com.rfs.models.ShardMetadata;
 
 import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
@@ -365,7 +365,7 @@ public class DocumentsStep {
             ));
             logger.info("Work item set");
 
-            ShardMetadata.Data shardMetadata = null;
+            ShardMetadata shardMetadata = null;
             try {
                 logger.info("Migrating docs: Index " + workItem.indexName + ", Shard " + workItem.shardId);
                 shardMetadata = members.shardMetadataFactory.fromRepo(members.snapshotName, workItem.indexName, workItem.shardId);
@@ -379,7 +379,7 @@ public class DocumentsStep {
                     unpacker.unpack();
 
                     Flux<Document> documents = members.reader.readDocuments(shardMetadata.getIndexName(), shardMetadata.getShardId());
-                    final ShardMetadata.Data finalShardMetadata = shardMetadata; // Define in local context for the lambda
+                    final ShardMetadata finalShardMetadata = shardMetadata; // Define in local context for the lambda
                     members.reindexer.reindex(shardMetadata.getIndexName(), documents)
                         .doOnError(error -> logger.error("Error during reindexing: " + error))
                         .doOnSuccess(done -> logger.info("Reindexing completed for Index " + finalShardMetadata.getIndexName() + ", Shard " + finalShardMetadata.getShardId()))

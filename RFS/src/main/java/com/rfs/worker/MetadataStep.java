@@ -10,8 +10,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.cms.CmsClient;
 import com.rfs.cms.CmsEntry;
 import com.rfs.cms.OpenSearchCmsClient;
-import com.rfs.common.GlobalMetadata;
 import com.rfs.common.RfsException;
+import com.rfs.models.GlobalMetadata;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
 
@@ -217,7 +217,7 @@ public class MetadataStep {
             logger.info("Work item set");
 
             logger.info("Migrating the Templates...");
-            GlobalMetadata.Data globalMetadata = members.metadataFactory.fromRepo(members.snapshotName);
+            GlobalMetadata globalMetadata = members.metadataFactory.fromRepo(members.snapshotName);
             ObjectNode transformedRoot = members.transformer.transformGlobalMetadata(globalMetadata);
             members.metadataCreator.create(transformedRoot);
             logger.info("Templates migration complete");

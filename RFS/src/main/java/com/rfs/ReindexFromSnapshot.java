@@ -16,6 +16,10 @@ import org.apache.logging.log4j.LogManager;
 import reactor.core.publisher.Flux;
 
 import com.rfs.common.*;
+import com.rfs.models.GlobalMetadata;
+import com.rfs.models.IndexMetadata;
+import com.rfs.models.ShardMetadata;
+import com.rfs.models.SnapshotMetadata;
 import com.rfs.transformers.*;
 import com.rfs.version_es_6_8.*;
 import com.rfs.version_es_7_10.*;
@@ -224,7 +228,7 @@ public class ReindexFromSnapshot {
                 logger.error("Snapshot not found");
                 return;
             }
-            SnapshotMetadata.Data snapshotMetadata;
+            SnapshotMetadata snapshotMetadata;
             if (sourceVersion == ClusterVersion.ES_6_8) {
                 snapshotMetadata = new SnapshotMetadataFactory_ES_6_8().fromRepo(repo, repoDataProvider, snapshotName);
             } else {
@@ -252,7 +256,7 @@ public class ReindexFromSnapshot {
                 // ==========================================================================================================
                 logger.info("==================================================================");
                 logger.info("Attempting to read Global Metadata details...");
-                GlobalMetadata.Data globalMetadata;
+                GlobalMetadata globalMetadata;
                 if (sourceVersion == ClusterVersion.ES_6_8) {
                     globalMetadata = new GlobalMetadataFactory_ES_6_8(repoDataProvider).fromRepo(snapshotName);
                 } else {
@@ -335,7 +339,7 @@ public class ReindexFromSnapshot {
                         logger.info("=== Shard ID: " + shardId + " ===");
 
                         // Get the shard metadata
-                        ShardMetadata.Data shardMetadata;
+                        ShardMetadata shardMetadata;
                         if (sourceVersion == ClusterVersion.ES_6_8) {
                             shardMetadata = new ShardMetadataFactory_ES_6_8(repoDataProvider).fromRepo(snapshotName, indexMetadata.getName(), shardId);
                         } else {
