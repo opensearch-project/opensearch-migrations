@@ -78,7 +78,7 @@ Please refer to the [Setup](#setup) section to ensure that the necessary depende
 Additionally, you'll also need to install development dependencies by running:
 
 ```shell
-python -m pip install -r python/dev-requirements.txt
+pipenv install
 ```
 
 ### Unit Tests
@@ -86,7 +86,7 @@ python -m pip install -r python/dev-requirements.txt
 Unit tests can be run from the `python/` directory using:
 
 ```shell
-python -m coverage run -m unittest
+pipenv run python -m coverage run -m unittest
 ```
 
 ### Coverage
@@ -94,14 +94,14 @@ python -m coverage run -m unittest
 _Code coverage_ metrics can be generated after a unit-test run. A report can either be printed on the command line:
 
 ```shell
-python -m coverage report --omit "*/tests/*"
+pipenv run python -m coverage report --omit "*/tests/*"
 ```
 
 or generated as HTML:
 
 ```shell
-python -m coverage report --omit "*/tests/*"
-python -m coverage html --omit "*/tests/*"
+pipenv run python -m coverage report --omit "*/tests/*"
+pipenv run python -m coverage html --omit "*/tests/*"
 ```
 
 Note that the `--omit` parameter must be specified to avoid tracking code coverage on unit test code itself.
