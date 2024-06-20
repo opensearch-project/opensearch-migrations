@@ -174,11 +174,11 @@ jobs:
   all-ci-checks-pass:
     needs:
       - cdk-tests
-      - console-library-tests
       - gradle-tests
       - link-checker
       - python-e2e-tests
       - python-lint
+      - python-tests
     runs-on: ubuntu-latest
     steps:
       - run: |
