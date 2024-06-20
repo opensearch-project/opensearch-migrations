@@ -2,21 +2,39 @@ source_cluster:
   endpoint: "https://capture-proxy:9200"
   allow_insecure: true
   basic_auth:
-      username: "admin"
-      password: "admin"
+    username: "admin"
+    password: "admin"
 target_cluster:
   endpoint: "https://opensearchtarget:9200"
   allow_insecure: true
   basic_auth:
-      username: "admin"
-      password: "myStrongPassword123!"
+    username: "admin"
+    password: "myStrongPassword123!"
 metrics_source:
   prometheus:
     endpoint: "http://prometheus:9090"
 backfill:
-    reindex_from_snapshot:
-        docker:
+  reindex_from_snapshot:
+    docker:
 snapshot:
   snapshot_name: "snapshot_2023_01_01"
   s3_repo_uri: "s3://my-snapshot-bucket"
   s3_region: "us-east-2"
+  reindex_from_snapshot:
+    docker:
+metadata_migration:
+  from_snapshot: # If not provided, these are assumed from the snapshot object
+    local_dir: "/tmp/s3"
+    # snapshot_name: "reindex_from_snapshot"
+    # s3:
+    #   repo_uri: "s3://my-bucket"
+    #   local_dir: "/tmp/s3"
+    #   aws_region: "us-east-1"
+    # lucene_dir: "/tmp/lucene"
+  min_replicas: 0
+  index_allowlist:
+    - "my_index"
+  index_template_allowlist:
+    - "my_index_template"
+  component-template-allowlist:
+    - "my_component_template"
