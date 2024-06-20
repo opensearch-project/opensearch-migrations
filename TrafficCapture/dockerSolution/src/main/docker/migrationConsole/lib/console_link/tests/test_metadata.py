@@ -29,7 +29,6 @@ def test_metadata_init_with_fully_specified_config_succeeds():
     }
     metadata = Metadata(config, create_valid_cluster(), None)
     assert metadata._config == config
-    assert metadata._snapshot is None
     assert isinstance(metadata, Metadata)
 
 
@@ -45,7 +44,6 @@ def test_metadata_init_with_minimal_config_no_external_snapshot_succeeds():
     }
     metadata = Metadata(config, create_valid_cluster(), None)
     assert metadata._config == config
-    assert metadata._snapshot is None
     assert isinstance(metadata, Metadata)
 
 
@@ -88,5 +86,50 @@ def test_metadata_init_with_minimal_config_and_external_snapshot_succeeds():
     }
     metadata = Metadata(config, create_valid_cluster(), snapshot)
     assert metadata._config == config
-    assert metadata._snapshot == snapshot
+    assert metadata._snapshot_name == snapshot_config["snapshot_name"]
     assert isinstance(metadata, Metadata)
+
+
+def test_metadata_init_with_partial_config_and_external_snapshot_fails():
+    snapshot_config = {
+        "snapshot_name": "test_snapshot",
+        "s3_repo_uri": "s3://test-bucket",
+        "s3_region": "us-east-2"
+    }
+    snapshot = S3Snapshot(snapshot_config, create_valid_cluster)
+    config = {
+        "from_snapshot": {
+            "local_dir": "/tmp/s3",
+            "snapshot_name": "reindex_from_snapshot",
+        }
+    }
+    with pytest.raises(ValueError) as excinfo:
+        Metadata(config, create_valid_cluster(), snapshot)
+    print(excinfo)
+    assert 's3' in excinfo.value.args[0]['from_snapshot'][0]
+    assert 'required field' == excinfo.value.args[0]['from_snapshot'][0]['s3'][0]
+
+
+def test_full_config_and_snapshot_gives_priority_to_config():
+    snapshot_config = {
+        "snapshot_name": "test_snapshot",
+        "s3_repo_uri": "s3://test-bucket",
+        "s3_region": "us-east-2"
+    }
+    snapshot = S3Snapshot(snapshot_config, create_valid_cluster)
+    config = {
+        "from_snapshot": {
+            "local_dir": "/tmp/s3",
+            "snapshot_name": "reindex_from_snapshot",
+            "s3": {
+                "repo_uri": "s3://my-bucket",
+                "aws_region": "us-east-1"
+            },
+        }
+    }
+    metadata = Metadata(config, create_valid_cluster(), snapshot)
+    assert isinstance(metadata, Metadata)
+    assert metadata._snapshot_name == config["from_snapshot"]["snapshot_name"]
+    assert metadata._s3_uri == config["from_snapshot"]["s3"]["repo_uri"]
+    assert metadata._aws_region == config["from_snapshot"]["s3"]["aws_region"]
+    assert metadata._local_dir == config["from_snapshot"]["local_dir"]

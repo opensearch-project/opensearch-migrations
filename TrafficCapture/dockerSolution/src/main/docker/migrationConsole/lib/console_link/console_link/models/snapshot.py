@@ -64,6 +64,7 @@ class S3Snapshot(Snapshot):
         self.s3_region = config['s3_region']
 
     def create(self, *args, **kwargs) -> CommandResult:
+        assert isinstance(self.target_cluster, Cluster)
         command = [
             "/root/createSnapshot/bin/CreateSnapshot",
             "--snapshot-name", self.snapshot_name,
