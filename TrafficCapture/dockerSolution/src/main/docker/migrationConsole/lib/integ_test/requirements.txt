@@ -1,3 +1,4 @@
+-e ../console_link
 certifi==2023.7.22
 charset-normalizer==3.1.0
 idna==3.4

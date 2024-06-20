@@ -87,7 +87,8 @@ class Cluster:
         elif 'sigv4' in config:
             self.auth_type = AuthMethod.SIGV4
 
-    def call_api(self, path, method: HttpMethod = HttpMethod.GET, timeout=None) -> requests.Response:
+    def call_api(self, path, method: HttpMethod = HttpMethod.GET, data=None, headers=None,
+                 timeout=None) -> requests.Response:
         """
         Calls an API on the cluster.
         """
@@ -108,6 +109,8 @@ class Cluster:
             f"{self.endpoint}{path}",
             verify=(not self.allow_insecure),
             auth=auth,
+            data=data,
+            headers=headers,
             timeout=timeout
         )
         logger.debug(f"Cluster API call request: {r.request}")

@@ -4,6 +4,11 @@ import logging
 logger = logging.getLogger(__name__)
 
 
+def call_api(cluster: Cluster, path: str, method=HttpMethod.GET, data=None, headers=None, timeout=None):
+    r = cluster.call_api(path=path, method=method, data=data, headers=headers, timeout=timeout)
+    return r
+
+
 def cat_indices(cluster: Cluster, as_json=False):
     as_json_suffix = "?format=json" if as_json else "?v"
     cat_indices_path = f"/_cat/indices{as_json_suffix}"

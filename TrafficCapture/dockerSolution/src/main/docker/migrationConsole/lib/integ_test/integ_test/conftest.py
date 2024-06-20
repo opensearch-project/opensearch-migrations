@@ -14,6 +14,7 @@ def pytest_configure(config):
     logging.getLogger().setLevel(logging.DEBUG)
 
 
+
 def pytest_addoption(parser):
     parser.addoption("--proxy_endpoint", action="store", default="https://localhost:9200")
     parser.addoption("--source_endpoint", action="store", default="https://localhost:19200")
@@ -28,6 +29,8 @@ def pytest_addoption(parser):
     parser.addoption("--target_username", action="store", default="admin")
     parser.addoption("--target_password", action="store", default="myStrongPassword123!")
     parser.addoption("--unique_id", action="store", default=uuid.uuid4().hex)
+    parser.addoption("--config_file_path", action="store", default="/etc/migration_services.yaml",
+                     help="Path to config file for console library")
 
 
 @pytest.fixture
