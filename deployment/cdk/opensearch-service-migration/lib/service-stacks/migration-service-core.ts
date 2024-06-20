@@ -55,6 +55,7 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly maxUptime?: Duration,
     readonly otelCollectorEnabled?: boolean,
     readonly targetGroups?: ELBTargetGroup[],
+    readonly ephemeralStorageGiB?: number
 }
 
 export type ELBTargetGroup = IApplicationTargetGroup | INetworkTargetGroup;
@@ -100,7 +101,7 @@ export class MigrationServiceCore extends Stack {
         props.taskRolePolicies?.forEach(policy => serviceTaskRole.addToPolicy(policy))
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {
-            ephemeralStorageGiB: 75,
+            ephemeralStorageGiB: props.ephemeralStorageGiB ? props.ephemeralStorageGiB : 75,
             runtimePlatform: {
                 operatingSystemFamily: OperatingSystemFamily.LINUX,
                 cpuArchitecture: props.cpuArchitecture

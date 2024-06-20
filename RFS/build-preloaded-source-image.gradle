@@ -61,10 +61,13 @@ def sourceContainerCommitTask = task commitSourceContainer() {
     doLast {
         def client = createDockerClient()
         def containerId = createInitialElasticsearchContainer.getContainerId().get()
+        def repoName = "migrations/elasticsearch_rfs_source"
+        def tagName = "latest"
+        println "Committing container ${containerId} to ${repoName}:${tagName}"
 
         client.commitCmd(containerId)
-                .withRepository("migrations/elasticsearch_rfs_source")
-                .withTag("latest")
+                .withRepository(repoName)
+                .withTag(tagName)
                 .exec()
     }
 }

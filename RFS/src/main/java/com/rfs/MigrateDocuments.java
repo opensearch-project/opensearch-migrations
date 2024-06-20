@@ -32,7 +32,7 @@ import com.rfs.worker.DocumentsRunner;
 import com.rfs.worker.GlobalState;
 
 @Slf4j
-public class RfsMigrateDocuments {
+public class MigrateDocuments {
     public static class Args {
         @Parameter(names = {"--snapshot-name"}, description = "The name of the snapshot to migrate", required = true)
         public String snapshotName;
