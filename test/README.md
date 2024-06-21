@@ -94,8 +94,8 @@ install the required packages and then run the script:
 
 ```
 cd test
-pip install -r requirements.txt
-pytest tests.py
+pipenv install
+pipenv run pytest tests.py
 ```
 
 #### Notes
