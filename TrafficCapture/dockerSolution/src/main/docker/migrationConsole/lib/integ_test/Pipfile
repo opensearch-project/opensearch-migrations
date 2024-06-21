@@ -4,6 +4,7 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+console-link = {file = "../console_link", editable = true}
 certifi = "==2023.7.22"
 charset-normalizer = "==3.1.0"
 idna = "==3.7"
