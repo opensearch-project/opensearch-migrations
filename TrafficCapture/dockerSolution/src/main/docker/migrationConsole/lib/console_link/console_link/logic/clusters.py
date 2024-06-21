@@ -1,7 +1,14 @@
 from console_link.models.cluster import Cluster, HttpMethod
+from dataclasses import dataclass
 import logging
 
 logger = logging.getLogger(__name__)
+
+@dataclass
+class ConnectionResult:
+    connection_message: str
+    connection_established: bool
+    cluster_version: str
 
 
 def cat_indices(cluster: Cluster, as_json=False):
@@ -11,7 +18,7 @@ def cat_indices(cluster: Cluster, as_json=False):
     return r.json() if as_json else r.content
 
 
-def connection_check(cluster: Cluster):
+def connection_check(cluster: Cluster) -> ConnectionResult:
     cluster_details_path = "/"
     caught_exception = None
     r = None
@@ -23,13 +30,13 @@ def connection_check(cluster: Cluster):
     access_result = {}
     if caught_exception is None:
         response_json = r.json()
-        access_result['connection_message'] = "Successfully connected!"
-        access_result['cluster_version'] = response_json['version']['number']
-        access_result['connection_established'] = True
+        return ConnectionResult(connection_message="Successfully connected!",
+                                connection_established=True,
+                                cluster_version=response_json['version']['number'])
     else:
-        access_result['connection_message'] = f"Unable to connect to cluster with error: {caught_exception}"
-        access_result['connection_established'] = False
-    return access_result
+        return ConnectionResult(connection_message=f"Unable to connect to cluster with error: {caught_exception}",
+                                connection_established=False,
+                                cluster_version=None)
 
 
 def run_test_benchmarks(cluster: Cluster):

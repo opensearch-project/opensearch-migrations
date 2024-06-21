@@ -89,6 +89,17 @@ def run_test_benchmarks_cmd(ctx):
     """Run a series of OpenSearch Benchmark workloads against the source cluster"""
     click.echo(logic_clusters.run_test_benchmarks(ctx.env.source_cluster))
 
+
+@cluster_group.command(name="clear-indices")
+@click.option('--cluster',type=click.Choice(['source', 'target'], case_sensitive=False))
+@click.pass_obj
+def clear_indices_cmd(ctx, cluster):
+    """[Caution] Clear indices on a source or target cluster"""
+    if click.confirm('Do you want to continue?'):
+        click.echo('Well done!')
+    cluster_focus =  ctx.env.source_cluster if cluster.lower() == 'source' else ctx.env.target_cluster
+    click.echo(logic_clusters.clear_indices(cluster_focus))
+
 # ##################### REPLAYER ###################
 
 
