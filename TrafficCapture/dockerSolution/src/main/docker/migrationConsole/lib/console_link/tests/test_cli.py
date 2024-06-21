@@ -1,4 +1,5 @@
 import pathlib
+from console_link.models.snapshot import SnapshotStatus
 
 import requests_mock
 
@@ -64,6 +65,40 @@ def test_cli_with_backfill_describe(runner, env, mocker):
                            catch_exceptions=True)
     mock.assert_called_once()
     assert result.exit_code == 0
+
+
+def test_cli_snapshot_create(runner, env, mocker):
+    mock = mocker.patch('console_link.logic.snapshot.create')
+    
+    # Set the mock return value
+    mock.return_value = SnapshotStatus.COMPLETED, "Snapshot created successfully."
+    
+    # Test snapshot creation
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'create'],
+                           catch_exceptions=True)
+
+    assert result.exit_code == 0
+    assert "Snapshot created successfully" in result.output
+
+    # Ensure the mocks were called
+    mock.assert_called_once()
+
+
+@pytest.mark.skip(reason="Not implemented yet")
+def test_cli_snapshot_status(runner, env, mocker):
+    mock = mocker.patch('console_link.logic.snapshot.status')
+    
+    # Set the mock return value
+    mock.return_value = SnapshotStatus.COMPLETED, "Snapshot status: COMPLETED"
+    
+    # Test snapshot status
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'status'],
+                           catch_exceptions=True)
+    assert result.exit_code == 0
+    assert "Snapshot status: COMPLETED" in result.output
+    
+    # Ensure the mocks were called
+    mock.assert_called_once()
 
 
 source_cat_indices = """
