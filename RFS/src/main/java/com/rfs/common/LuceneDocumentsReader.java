@@ -22,7 +22,7 @@ import reactor.core.publisher.Flux;
 @RequiredArgsConstructor
 @Slf4j
 public class LuceneDocumentsReader {
-    public static final int NUM_DOCUMENTS_BUFFERED = 1;
+    public static final int NUM_DOCUMENTS_BUFFERED = 1024;
     protected final Path indexDirectoryPath;
 
     public class DocumentOrDone {}
