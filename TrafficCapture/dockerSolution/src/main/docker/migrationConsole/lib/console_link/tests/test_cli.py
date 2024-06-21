@@ -80,6 +80,15 @@ def test_cli_cluster_clear_indices(runner, env, mocker):
     assert result.exit_code == 0
 
 
+def test_cli_cluster_clear_indices_no_acknowledge(runner, env, mocker):
+    mock = mocker.patch('console_link.logic.clusters.clear_indices')
+    runner.invoke(cli,
+                  ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'clear-indices',
+                   '--cluster', 'source'],
+                  catch_exceptions=True)
+    assert not mock.called
+
+
 def test_cli_with_metrics_get_data(runner, env, mocker):
     mock = mocker.patch('console_link.models.metrics_source.PrometheusMetricsSource.get_metrics')
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'metrics', 'list'],

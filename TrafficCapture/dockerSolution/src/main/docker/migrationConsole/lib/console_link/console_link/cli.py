@@ -110,8 +110,9 @@ def clear_indices_cmd(ctx, acknowledge_risk, cluster):
         click.echo("Performing clear indices operation...")
         click.echo(logic_clusters.clear_indices(cluster_focus))
     else:
-        if click.confirm('Clearing indices can result in data loss, are you sure you want to continue?'):
-            click.echo("Performing clear indices operation...")
+        if click.confirm(f'Clearing indices WILL result in the loss of all data on the {cluster.lower()} cluster. '
+                         f'Are you sure you want to continue?'):
+            click.echo(f"Performing clear indices operation on {cluster.lower()} cluster...")
             click.echo(logic_clusters.clear_indices(cluster_focus))
         else:
             click.echo("Aborting command.")
