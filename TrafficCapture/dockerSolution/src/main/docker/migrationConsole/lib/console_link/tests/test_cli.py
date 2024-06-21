@@ -50,6 +50,7 @@ def test_cli_cluster_cat_indices(runner, env, mocker):
     assert 'TARGET CLUSTER' in result.output
     mock.assert_called()
 
+
 def test_cli_cluster_connection_check(runner, env, mocker):
     mock = mocker.patch('console_link.logic.clusters.connection_check')
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'connection-check'],
@@ -60,12 +61,14 @@ def test_cli_cluster_connection_check(runner, env, mocker):
     assert 'TARGET CLUSTER' in result.output
     mock.assert_called()
 
+
 def test_cli_cluster_run_test_benchmarks(runner, env, mocker):
     mock = mocker.patch('console_link.logic.clusters.run_test_benchmarks')
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'run-test-benchmarks'],
                            catch_exceptions=True)
     mock.assert_called_once()
     assert result.exit_code == 0
+
 
 def test_cli_cluster_clear_indices(runner, env, mocker):
     mock = mocker.patch('console_link.logic.clusters.clear_indices')
@@ -75,6 +78,7 @@ def test_cli_cluster_clear_indices(runner, env, mocker):
                            catch_exceptions=True)
     mock.assert_called_once()
     assert result.exit_code == 0
+
 
 def test_cli_with_metrics_get_data(runner, env, mocker):
     mock = mocker.patch('console_link.models.metrics_source.PrometheusMetricsSource.get_metrics')
