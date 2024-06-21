@@ -79,7 +79,47 @@ def cat_indices_cmd(ctx):
     click.echo(logic_clusters.cat_indices(ctx.env.target_cluster))
 
 
+@cluster_group.command(name="connection-check")
+@click.pass_obj
+def connection_check_cmd(ctx):
+    """Checks if a connection can be established to source and target clusters"""
+    click.echo("SOURCE CLUSTER")
+    click.echo(logic_clusters.connection_check(ctx.env.source_cluster))
+    click.echo("TARGET CLUSTER")
+    click.echo(logic_clusters.connection_check(ctx.env.target_cluster))
+
+
+@cluster_group.command(name="run-test-benchmarks")
+@click.pass_obj
+def run_test_benchmarks_cmd(ctx):
+    """Run a series of OpenSearch Benchmark workloads against the source cluster"""
+    click.echo(logic_clusters.run_test_benchmarks(ctx.env.source_cluster))
+
+
+@cluster_group.command(name="clear-indices")
+@click.option("--acknowledge-risk", is_flag=True, show_default=True, default=False,
+              help="Flag to acknowledge risk and skip confirmation")
+@click.option('--cluster',
+              type=click.Choice(['source', 'target'], case_sensitive=False),
+              help="Cluster to perform clear indices action on",
+              required=True)
+@click.pass_obj
+def clear_indices_cmd(ctx, acknowledge_risk, cluster):
+    """[Caution] Clear indices on a source or target cluster"""
+    cluster_focus = ctx.env.source_cluster if cluster.lower() == 'source' else ctx.env.target_cluster
+    if acknowledge_risk:
+        click.echo("Performing clear indices operation...")
+        click.echo(logic_clusters.clear_indices(cluster_focus))
+    else:
+        if click.confirm(f'Clearing indices WILL result in the loss of all data on the {cluster.lower()} cluster. '
+                         f'Are you sure you want to continue?'):
+            click.echo(f"Performing clear indices operation on {cluster.lower()} cluster...")
+            click.echo(logic_clusters.clear_indices(cluster_focus))
+        else:
+            click.echo("Aborting command.")
+
 # ##################### REPLAYER ###################
+
 
 @cli.group(name="replayer")
 @click.pass_obj

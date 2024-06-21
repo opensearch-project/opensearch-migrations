@@ -2,26 +2,13 @@ plugins {
     id 'application'
     id 'java'
     id 'jacoco'
-    id "com.avast.gradle.docker-compose" version "0.17.4"
-    id 'com.bmuschko.docker-remote-api'
     id 'io.freefair.lombok' version '8.6'
+    id 'java-test-fixtures'
 }
-
-import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
-import groovy.transform.Canonical
-import org.opensearch.migrations.common.CommonUtils
 
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
 
-@Canonical
-class DockerServiceProps {
-    String projectName = ""
-    String dockerImageName = ""
-    String inputDir = ""
-    Map<String, String> buildArgs = [:]
-    List<String> taskDependencies = []
-}
 
 repositories {
     mavenCentral()
@@ -39,46 +26,47 @@ dependencies {
 
     implementation group: 'com.beust', name: 'jcommander'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
-    implementation group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-smile'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
+    implementation group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-smile'
     implementation group: 'io.netty', name: 'netty-codec-http'
+    implementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
     implementation group: 'org.apache.lucene', name: 'lucene-core'
     implementation group: 'org.apache.lucene', name: 'lucene-analyzers-common'
     implementation group: 'org.apache.lucene', name: 'lucene-backward-codecs'
+    implementation group: 'software.amazon.awssdk', name: 's3'
+    implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
+    implementation group: 'software.amazon.awssdk.crt', name: 'aws-crt'
 
     implementation platform('io.projectreactor:reactor-bom:2023.0.5') 
     implementation 'io.projectreactor.netty:reactor-netty-core' 
     implementation 'io.projectreactor.netty:reactor-netty-http'
 
-    implementation group: 'software.amazon.awssdk', name: 's3'
-    implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
-    implementation group: 'software.amazon.awssdk.crt', name: 'aws-crt'
-
+    testImplementation testFixtures(project(path: ':RFS'))
     testImplementation group: 'io.projectreactor', name: 'reactor-test'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
     testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
     testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-params'
     testImplementation group: 'org.mockito', name: 'mockito-core'
     testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter'
-    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
 
+    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
 
     // Integration tests
+    testImplementation group: 'org.opensearch', name: 'opensearch-testcontainers'
     testImplementation group: 'org.testcontainers', name: 'testcontainers'
     testImplementation group: 'org.hamcrest', name: 'hamcrest'
-    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
-    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
-    implementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
-    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
+
+    testFixturesImplementation project(":commonDependencyVersionConstraints")
+    testFixturesImplementation group: 'org.testcontainers', name: 'testcontainers'
 }
 
 application {
-    mainClassName = 'com.rfs.RfsMigrateDocuments'
+    mainClassName = 'com.rfs.ReindexFromSnapshot'
 }
 
 task runRfsWorker (type: JavaExec) {
@@ -101,11 +89,6 @@ task migrateDocuments (type: JavaExec) {
     mainClass = 'com.rfs.RfsMigrateDocuments'
 }
 
-// Cleanup additional docker build directory
-clean.doFirst {
-    delete project.file("./docker/build")
-}
-
 // Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
 tasks.register('copyDependencies', Sync) {
     duplicatesStrategy = DuplicatesStrategy.EXCLUDE
@@ -123,74 +106,10 @@ jacocoTestReport {
     }
 }
 
-task copyDockerRuntimeJars (type: Sync) {
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-    description = 'Copy runtime JARs and app jar to docker build directory'
-
-    // Define the destination directory
-    def buildDir = project.file("./docker/build/runtimeJars")
-    into buildDir
-
-    // Add all the required runtime JARs to be copied
-    from configurations.runtimeClasspath
-    from tasks.named('jar')
-    include '*.jar'
-}
-
-DockerServiceProps[] dockerServices = [
-        new DockerServiceProps([projectName:"reindexFromSnapshot",
-                                dockerImageName:"reindex_from_snapshot",
-                                inputDir:"./docker",
-                                taskDependencies:["copyDockerRuntimeJars"]]),
-        new DockerServiceProps([projectName:"emptyElasticsearchSource_7_10",
-                                dockerImageName:"empty_elasticsearch_source_7_10",
-                                inputDir:"./docker/TestSource_ES_7_10"]),
-        new DockerServiceProps([projectName:"emptyElasticsearchSource_7_17",
-                                dockerImageName:"empty_elasticsearch_source_7_17",
-                                inputDir:"./docker/TestSource_ES_7_17"]),
-        new DockerServiceProps([projectName:"trafficGenerator",
-                                dockerImageName:"osb_traffic_generator",
-                                inputDir:"./docker/TrafficGenerator",
-                                taskDependencies:[":TrafficCapture:dockerSolution:buildDockerImage_elasticsearchTestConsole"]]),
-] as DockerServiceProps[]
-
-for (dockerService in dockerServices) {
-    task "buildDockerImage_${dockerService.projectName}" (type: DockerBuildImage) {
-        def hash = CommonUtils.calculateDockerHash(project.fileTree("docker/${dockerService.projectName}"))
-        for (dep in dockerService.taskDependencies) {
-            dependsOn dep
-        }
-        inputDir = project.file(dockerService.inputDir)
-        buildArgs = dockerService.buildArgs
-        images.add("migrations/${dockerService.dockerImageName}:${hash}")
-        images.add("migrations/${dockerService.dockerImageName}:${version}")
-        images.add("migrations/${dockerService.dockerImageName}:latest")
-    }
-}
-
-apply from: 'build-preloaded-source-image.gradle'
-
-dockerCompose {
-    useComposeFiles = ['docker/docker-compose.yml']
-    projectName = 'rfs-compose'
-}
-
-// ../gradlew buildDockerImages
-task buildDockerImages {
-    for (dockerService in dockerServices) {
-        dependsOn "buildDockerImage_${dockerService.projectName}"
-    }
-    dependsOn buildDockerImage_elasticsearchRFSSource
-}
-
-tasks.named("buildDockerImage_elasticsearchRFSSource") {
-    dependsOn(':TrafficCapture:dockerSolution:buildDockerImage_elasticsearchTestConsole')
-}
-tasks.getByName('composeUp')
-        .dependsOn(tasks.getByName('buildDockerImages'))
-
 test {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags 'longTest'
+    }
 
     testLogging {
         exceptionFormat = 'full'
@@ -199,5 +118,12 @@ test {
         showCauses true
         showStackTraces true
         showStandardStreams = true
+    }
+}
+
+task slowTest(type: Test) {
+    // include longTest
+    jacoco {
+        enabled = true
     }
 }

@@ -133,7 +133,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         let servicePortMappings: PortMapping[]|undefined
         let serviceDiscoveryPort: number|undefined
         let serviceDiscoveryEnabled = false
-        let imageCommand: string[]|undefined
+        let imageCommand = ['/bin/sh', '-c', '/root/loadServicesFromParameterStore.sh']
 
         const osClusterEndpoint = getMigrationStringParameterValue(this, {
             ...props,

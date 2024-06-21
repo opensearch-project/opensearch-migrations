@@ -36,7 +36,7 @@ public class SnapshotShardUnpacker implements AutoCloseable {
         }
     }
 
-    public void unpack() {
+    public Path unpack() {
         try {
             // Some constants
             NativeFSLockFactory lockFactory = NativeFSLockFactory.INSTANCE;
@@ -66,6 +66,7 @@ public class SnapshotShardUnpacker implements AutoCloseable {
                     }
                 }
             }
+            return luceneIndexDir;
         } catch (Exception e) {
             throw new CouldNotUnpackShard("Could not unpack shard: Index " + shardMetadata.getIndexId() + ", Shard " + shardMetadata.getShardId(), e);
         }

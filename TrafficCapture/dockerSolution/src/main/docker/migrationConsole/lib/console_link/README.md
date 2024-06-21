@@ -1,17 +1,18 @@
 # Console_link Library
-- [Services.yaml spec](#servicesyaml-spec)
+- [Console\_link Library](#console_link-library)
+  - [Services.yaml spec](#servicesyaml-spec)
     - [Cluster](#cluster)
     - [Metrics Source](#metrics-source)
     - [Backfill](#backfill)
-        - [Reindex From Snapshot](#reindex-from-snapshot)
-        - [OpenSearch Ingestion](#opensearch-ingestion)
-- [Usage](#usage)
+      - [Reindex From Snapshot](#reindex-from-snapshot)
+      - [OpenSearch Ingestion](#opensearch-ingestion)
+  - [Usage](#usage)
     - [Library](#library)
     - [CLI](#cli)
-        - [Global Options](#global-options)
-        - [Objects](#objects)
-        - [Commands \& options](#commands--options)
-- [Development](#development)
+      - [Global Options](#global-options)
+      - [Objects](#objects)
+      - [Commands \& options](#commands--options)
+  - [Development](#development)
     - [Unit Tests](#unit-tests)
     - [Coverage](#coverage)
 
@@ -190,10 +191,7 @@ console OBJECT --help
 To install the library for development purposes, create a virtual env and install the library. It will automatically install its dependencies as well.
 
 ```shell
-python3 -m venv .venv
-source .venv/bin/activate
-python3 -m pip install --upgrade pip
-pip install -e . # or the path to the console_link directory
+pipenv install
 ```
 
 ### Unit Tests
@@ -201,8 +199,8 @@ pip install -e . # or the path to the console_link directory
 Unit tests can be run from this current `console_link/` by first installing dependencies then running pytest:
 
 ```shell
-pip install -r tests/requirements.txt
-python -m coverage run -m pytest
+pipenv install --dev
+pipenv run python -m coverage run -m pytest
 ```
 
 ### Coverage
@@ -210,11 +208,11 @@ python -m coverage run -m pytest
 _Code coverage_ metrics can be generated after a unit-test run. A report can either be printed on the command line:
 
 ```shell
-python -m coverage report
+pipenv run python -m coverage report
 ```
 
 or generated as HTML:
 
 ```shell
-python -m coverage html
+pipenv run python -m coverage html
 ```

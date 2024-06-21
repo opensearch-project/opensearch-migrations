@@ -72,7 +72,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         this.createService({
             serviceName: 'reindex-from-snapshot',
             taskInstanceCount: 0,
-            dockerDirectoryPath: join(__dirname, "../../../../../", "RFS/docker"),
+            dockerDirectoryPath: join(__dirname, "../../../../../", "DocumentsFromSnapshotMigration/docker"),
             dockerImageCommand: ['/bin/sh', '-c', rfsCommand],
             securityGroups: securityGroups,
             taskRolePolicies: servicePolicies,
