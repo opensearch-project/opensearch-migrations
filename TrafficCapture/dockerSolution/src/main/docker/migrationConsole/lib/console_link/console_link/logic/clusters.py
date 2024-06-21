@@ -4,6 +4,7 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
 @dataclass
 class ConnectionResult:
     connection_message: str
@@ -27,7 +28,6 @@ def connection_check(cluster: Cluster) -> ConnectionResult:
     except Exception as e:
         caught_exception = e
         logging.debug(f"Unable to access cluster: {cluster} with exception: {e}")
-    access_result = {}
     if caught_exception is None:
         response_json = r.json()
         return ConnectionResult(connection_message="Successfully connected!",

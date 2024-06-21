@@ -105,7 +105,7 @@ def run_test_benchmarks_cmd(ctx):
 @click.pass_obj
 def clear_indices_cmd(ctx, acknowledge_risk, cluster):
     """[Caution] Clear indices on a source or target cluster"""
-    cluster_focus =  ctx.env.source_cluster if cluster.lower() == 'source' else ctx.env.target_cluster
+    cluster_focus = ctx.env.source_cluster if cluster.lower() == 'source' else ctx.env.target_cluster
     if acknowledge_risk:
         click.echo("Performing clear indices operation...")
         click.echo(logic_clusters.clear_indices(cluster_focus))
