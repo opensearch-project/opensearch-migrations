@@ -132,6 +132,10 @@ jobs:
           cd test
           chmod +x ./tests.py
           pytest tests.py --unique_id="testindex"
+      - name: Clean up migrations docker images before caching
+        run: |
+          docker stop $(docker ps -q) && docker rm $(docker ps -aq)
+          docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^migrations/' | grep -v '<none>' | xargs -I {} docker image rm {}
 
   cdk-tests:
     runs-on: ubuntu-latest
@@ -168,3 +172,16 @@ jobs:
           fail: true
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+
+  all-ci-checks-pass:
+    needs:
+      - cdk-tests
+      - console-library-tests
+      - gradle-tests
+      - link-checker
+      - python-e2e-tests
+      - python-lint
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo '## :heavy_check_mark: All continous integration checks pass' >> $GITHUB_STEP_SUMMARY

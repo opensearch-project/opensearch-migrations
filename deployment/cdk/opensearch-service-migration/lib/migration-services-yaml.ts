@@ -42,18 +42,34 @@ export class OSIBackfillYaml {
     }
 }
 
+export class S3SnapshotYaml {
+    snapshot_name: string = '';
+    s3_repo_uri: string = '';
+    s3_region: string = '';
+
+    toDict() {
+        return {
+            snapshot_name: this.snapshot_name,
+            s3_repo_uri: this.s3_repo_uri,
+            s3_region: this.s3_region
+        };
+    }
+}
+
 export class ServicesYaml {
     source_cluster: ClusterYaml;
     target_cluster: ClusterYaml;
     metrics_source: MetricsSourceYaml = new MetricsSourceYaml();
     backfill: RFSBackfillYaml | OSIBackfillYaml;
+    snapshot?: S3SnapshotYaml;
 
     stringify(): string {
         return yaml.stringify({
             source_cluster: this.source_cluster,
             target_cluster: this.target_cluster,
             metrics_source: this.metrics_source,
-            backfill: this.backfill?.toDict()
+            backfill: this.backfill?.toDict(),
+            snapshot: this.snapshot?.toDict()
         },
         {
             'nullStr': ''

@@ -11,7 +11,7 @@ import requests_mock
 import botocore.session
 from botocore.stub import Stubber
 
-from console_link.logic.utils import AWSAPIError
+from console_link.models.utils import AWSAPIError
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 AWS_REGION = "us-east-1"
