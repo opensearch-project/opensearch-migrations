@@ -78,7 +78,7 @@ DocumentsFromSnaphotMigration has support for packaging its java application as 
 ```
 Also built into this Docker/Gradle support is the ability to spin up a testing RFS environment using Docker compose. This compose file can be seen [here](../DocumentsFromSnapshotMigration/docker/docker-compose.yml) and includes the RFS container, a source cluster container, and a target cluster container.
 
-This environment can be spun up with the Gradle command, and use the optional `-Pdataset` flag to preload a dataset from the `generateDatasetStage` in the multi-stage Docker [here](../DocumentsFromSnapshot/docker/TestSource_ES_7_10/Dockerfile). This stage will take a few minutes to run on its first attempt if it is generating data, as it will be making requests with OSB. This will be cached for future runs.
+This environment can be spun up with the Gradle command, and use the optional `-Pdataset` flag to preload a dataset from the `generateDatasetStage` in the multi-stage Docker [here](../DocumentsFromSnapshotMigration/docker/TestSource_ES_7_10/Dockerfile). This stage will take a few minutes to run on its first attempt if it is generating data, as it will be making requests with OSB. This will be cached for future runs.
 ```shell
 ../gradlew composeUp -Pdataset=default_osb_test_workloads
 ```
