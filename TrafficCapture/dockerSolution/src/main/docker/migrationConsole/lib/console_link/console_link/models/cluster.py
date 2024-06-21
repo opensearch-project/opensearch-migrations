@@ -4,6 +4,7 @@ import requests
 from requests.auth import HTTPBasicAuth
 from cerberus import Validator
 import logging
+import subprocess
 from console_link.models.schema_tools import contains_one_of
 
 requests.packages.urllib3.disable_warnings()  # ignore: type
@@ -84,7 +85,7 @@ class Cluster:
         elif 'sigv4' in config:
             self.auth_type = AuthMethod.SIGV4
 
-    def call_api(self, path, method: HttpMethod = HttpMethod.GET) -> requests.Response:
+    def call_api(self, path, method: HttpMethod = HttpMethod.GET, timeout=None) -> requests.Response:
         """
         Calls an API on the cluster.
         """
@@ -105,7 +106,30 @@ class Cluster:
             f"{self.endpoint}{path}",
             verify=(not self.allow_insecure),
             auth=auth,
+            timeout=timeout
         )
         logger.debug(f"Cluster API call request: {r.request}")
         r.raise_for_status()
         return r
+
+    def execute_benchmark_workload(self, workload: str,
+                                   workload_params='target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,'
+                                                   'search_clients:1'):
+        client_options = ""
+        if not self.allow_insecure:
+            client_options += "use_ssl:true,verify_certs:false"
+        if self.auth_type == AuthMethod.BASIC_AUTH:
+            if self.auth_details['password'] is not None:
+                client_options += (f"basic_auth_user:{self.auth_details['username']},"
+                                   f"basic_auth_password:{self.auth_details['password']}")
+            else:
+                raise NotImplementedError(f"Auth type {self.auth_type} with AWS Secret ARN is not currently support "
+                                          f"for executing benchmark workloads")
+        elif self.auth_type == AuthMethod.SIGV4:
+            raise NotImplementedError(f"Auth type {self.auth_type} is not currently support for executing "
+                                      f"benchmark workloads")
+        logger.info(f"Running opensearch-benchmark with '{workload}' workload")
+        subprocess.run(f"opensearch-benchmark execute-test --distribution-version=1.0.0 "
+                       f"--target-host={self.endpoint} --workload={workload} --pipeline=benchmark-only --test-mode "
+                       f"--kill-running-processes --workload-params={workload_params} "
+                       f"--client-options={client_options}", shell=True)
