@@ -328,7 +328,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     enum UpdateResult {
         SUCCESSFUL_ACQUISITION,
         VERSION_CONFLICT,
-        NOTHING_TO_AQUIRE
+        NOTHING_TO_ACQUIRE
     }
 
     /**
@@ -408,7 +408,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         } else if (resultTree.path(VERSION_CONFLICTS_FIELD_NAME).longValue() > 0) {
             return UpdateResult.VERSION_CONFLICT;
         } else if (resultTree.path("total").longValue() == 0) {
-            return UpdateResult.NOTHING_TO_AQUIRE;
+            return UpdateResult.NOTHING_TO_ACQUIRE;
         } else {
             throw new IllegalStateException("Unexpected response for update: " + resultTree);
         }
@@ -504,7 +504,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             switch (obtainResult) {
                 case SUCCESSFUL_ACQUISITION:
                     return getAssignedWorkItem();
-                case NOTHING_TO_AQUIRE:
+                case NOTHING_TO_ACQUIRE:
                     return new NoAvailableWorkToBeDone();
                 case VERSION_CONFLICT:
                     continue;

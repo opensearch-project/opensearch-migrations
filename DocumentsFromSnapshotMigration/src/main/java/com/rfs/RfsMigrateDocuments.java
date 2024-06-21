@@ -15,17 +15,13 @@ import com.rfs.cms.IWorkCoordinator;
 import lombok.extern.slf4j.Slf4j;
 import com.rfs.cms.ApacheHttpClient;
 import com.rfs.cms.OpenSearchWorkCoordinator;
-import com.rfs.cms.ProcessManager;
-import com.rfs.cms.ScopedWorkCoordinatorHelper;
+import com.rfs.cms.LeaseExpireTrigger;
+import com.rfs.cms.ScopedWorkCoordinator;
 import com.rfs.worker.ShardWorkPreparer;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.logging.log4j.Level;
 
-import com.rfs.common.ConnectionDetails;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.IndexMetadata;
-import com.rfs.common.Logging;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Uri;
@@ -105,7 +101,7 @@ public class RfsMigrateDocuments {
                 .parse(args);
 
         var luceneDirPath = Paths.get(arguments.luceneDirPath);
-        var processManager = new ProcessManager(workItemId->{
+        var processManager = new LeaseExpireTrigger(workItemId->{
             log.error("terminating RunRfsWorker because its lease has expired for " + workItemId);
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC());
@@ -137,14 +133,14 @@ public class RfsMigrateDocuments {
     public static DocumentsRunner.CompletionStatus run(Function<Path,LuceneDocumentsReader> readerFactory,
                                                        DocumentReindexer reindexer,
                                                        IWorkCoordinator workCoordinator,
-                                                       ProcessManager processManager,
+                                                       LeaseExpireTrigger leaseExpireTrigger,
                                                        IndexMetadata.Factory indexMetadataFactory,
                                                        String snapshotName,
                                                        ShardMetadata.Factory shardMetadataFactory,
                                                        SnapshotShardUnpacker.Factory unpackerFactory,
                                                        long maxShardSizeBytes)
             throws IOException, InterruptedException, NoWorkLeftException {
-        var scopedWorkCoordinator = new ScopedWorkCoordinatorHelper(workCoordinator, processManager);
+        var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
         confirmShardPrepIsComplete(indexMetadataFactory, snapshotName, scopedWorkCoordinator);
         if (!workCoordinator.workItemsArePending()) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
@@ -163,7 +159,7 @@ public class RfsMigrateDocuments {
 
     private static void confirmShardPrepIsComplete(IndexMetadata.Factory indexMetadataFactory,
                                                    String snapshotName,
-                                                   ScopedWorkCoordinatorHelper scopedWorkCoordinator)
+                                                   ScopedWorkCoordinator scopedWorkCoordinator)
             throws IOException, InterruptedException
     {
         // assume that the shard setup work will be done quickly, much faster than its lease in most cases.

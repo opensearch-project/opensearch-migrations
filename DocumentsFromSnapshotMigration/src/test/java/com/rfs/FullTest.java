@@ -2,7 +2,7 @@ package com.rfs;
 
 import com.rfs.cms.ApacheHttpClient;
 import com.rfs.cms.OpenSearchWorkCoordinator;
-import com.rfs.cms.ProcessManager;
+import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
 import com.rfs.common.DefaultSourceRepoAccessor;
@@ -240,7 +240,7 @@ public class FullTest {
                 }
                 return d;
             };
-            var processManager = new ProcessManager(workItemId->{
+            var processManager = new LeaseExpireTrigger(workItemId->{
                 log.atDebug().setMessage("Lease expired for " + workItemId + " making next document get throw").log();
                 shouldThrow.set(true);
             });

@@ -12,14 +12,12 @@ import java.util.UUID;
 
 import com.rfs.cms.ApacheHttpClient;
 import com.rfs.cms.OpenSearchWorkCoordinator;
-import com.rfs.cms.ProcessManager;
-import com.rfs.cms.ScopedWorkCoordinatorHelper;
+import com.rfs.cms.LeaseExpireTrigger;
+import com.rfs.cms.ScopedWorkCoordinator;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.worker.ShardWorkPreparer;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.Logger;
-import org.apache.logging.log4j.LogManager;
 
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
@@ -169,13 +167,13 @@ public class RunRfsWorker {
             var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,
                     luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
             DocumentReindexer reindexer = new DocumentReindexer(targetClient);
-            var processManager = new ProcessManager(workItemId->{
+            var processManager = new LeaseExpireTrigger(workItemId->{
                 log.error("terminating RunRfsWorker because its lease has expired for "+workItemId);
                 System.exit(PROCESS_TIMED_OUT);
             }, Clock.systemUTC());
             var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(targetHost)),
                     5, UUID.randomUUID().toString());
-            var scopedWorkCoordinator = new ScopedWorkCoordinatorHelper(workCoordinator, processManager);
+            var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, processManager);
             new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName);
             new DocumentsRunner(scopedWorkCoordinator,
                     (name,shard) -> shardMetadataFactory.fromRepo(snapshotName,name,shard),

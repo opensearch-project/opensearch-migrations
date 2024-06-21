@@ -10,8 +10,9 @@ public class SnapshotRunner {
 
     protected static void waitForSnapshotToFinish(SnapshotCreator snapshotCreator) throws InterruptedException {
         while (!snapshotCreator.isSnapshotFinished()) {
-            log.info("Snapshot not finished yet; sleeping for 1 seconds...");
-            Thread.sleep(1000);
+            var waitPeriodMs = 1000;
+            log.info("Snapshot not finished yet; sleeping for " + waitPeriodMs + "ms...");
+            Thread.sleep(waitPeriodMs);
         }
     }
 

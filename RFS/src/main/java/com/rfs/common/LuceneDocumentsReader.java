@@ -25,57 +25,6 @@ public class LuceneDocumentsReader {
     public static final int NUM_DOCUMENTS_BUFFERED = 1024;
     protected final Path indexDirectoryPath;
 
-    public class DocumentOrDone {}
-    @Getter
-    @AllArgsConstructor
-    public class DocumentHolder extends DocumentOrDone {
-        Document value;
-    }
-    public class Done extends DocumentOrDone {}
-
-    public BlockingQueue<DocumentOrDone> packageDocumentsIntoQueue() {
-        var docQueue = new ArrayBlockingQueue<DocumentOrDone>(NUM_DOCUMENTS_BUFFERED, true);
-        new Thread(() -> {
-            try (var reader = openIndexReader(indexDirectoryPath)) {
-                log.info(reader.maxDoc() + " documents found in the current Lucene index");
-                for (var i=0; i<reader.maxDoc(); ++i) {
-                    var doc = getDocument(reader, i);
-                    if (doc != null) { // Skip malformed docs
-                        docQueue.put(new DocumentHolder(doc));
-                    }
-                }
-                docQueue.add(new Done());
-            } catch (IOException | InterruptedException e) {
-                throw Lombok.sneakyThrow(e);
-            }
-        }).start();
-        return docQueue;
-    }
-//
-//    public Flux<Document> readDocuments() {
-//        var queue = packageDocumentsIntoQueue();
-//        return Flux.create(sink -> {
-//            while (true) {
-//                try {
-//                    var item = queue.take(); // TODO - this is still a blocking call!
-//                    if (item instanceof Done) {
-//                        sink.complete();
-//                        break;
-//                    }
-//                    sink.next(((DocumentHolder)item).value);
-//                } catch (InterruptedException e) {
-//                    sink.error(e);
-//                    Thread.currentThread().interrupt();
-//                    break;
-//                }
-//
-//                if (Thread.currentThread().isInterrupted()) {
-//                    break;
-//                }
-//            }
-//        });
-//    }
-
     public Flux<Document> readDocuments() {
         return Flux.using(
                 () -> openIndexReader(indexDirectoryPath),
@@ -101,7 +50,6 @@ public class LuceneDocumentsReader {
         );
     }
 
-    @SneakyThrows
     protected IndexReader openIndexReader(Path indexDirectoryPath) throws IOException {
         return DirectoryReader.open(FSDirectory.open(indexDirectoryPath));
     }

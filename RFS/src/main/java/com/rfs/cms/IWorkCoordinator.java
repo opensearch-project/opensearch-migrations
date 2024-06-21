@@ -9,7 +9,91 @@ import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
 
+/**
+ * Multiple workers can create an instance of this class to coordinate what work each of them
+ * should be handling.  Implementations of this class must be thread-safe, even when the threads
+ * are run in a distributed environment on different hosts.
+ *
+ * This class allows for the creation of work items that can be claimed by a single worker.
+ * Workers will complete the work or let their leases lapse by default with the passage of time.
+ * The class guarantees that only one worker may own a lease on a work item at a given time.
+ *
+ * Work items being acquired may be specific, or from a pool of unassigned items.  The latter is
+ * used to distribute large quantities of work, with one phase adding many work items that are
+ * unassigned, followed by workers grabbing (leasing) items from that pool and completing them.
+ */
 public interface IWorkCoordinator extends AutoCloseable {
+
+    /**
+     * Initialize any external and internal state so that the subsequent calls will work appropriately.
+     * This method must be resilient if there are multiple callers and act as if there were only one.
+     * After this method returns, all of the other methods in this class are valid.  There is no way
+     * to reverse any stateful actions that were performed by setup.  This is a one-way function.
+     * @throws IOException
+     * @throws InterruptedException
+     */
+    void setup() throws IOException, InterruptedException;
+
+    /**
+     * @param workItemId - the name of the document/resource to create.
+     *                   This value will be used as a key to other methods that update leases and to close work out.
+     * @return true if the document was created and false if it was already present
+     * @throws IOException if the document was not successfully create for any other reason
+     */
+    boolean createUnassignedWorkItem(String workItemId) throws IOException;
+
+    /**
+     * @param workItemId the item that the caller is trying to take ownership of
+     * @param leaseDuration the initial amount of time that the caller would like to own the lease for.
+     *                      Notice if other attempts have been made on this workItem, the lease will be
+     *                      greater than the requested amount.
+     * @return a tuple that contains the expiration time of the lease, at which point,
+     * this process must completely yield all work on the item
+     * @throws IOException if there was an error resolving the lease ownership
+     * @throws LeaseLockHeldElsewhereException if the lease is owned by another process
+     */
+    @NonNull WorkAcquisitionOutcome createOrUpdateLeaseForWorkItem(String workItemId, Duration leaseDuration)
+            throws IOException;
+
+    /**
+     * Scan the created work items that have not yet had leases acquired and have not yet finished.
+     * One of those work items will be returned along with a lease for how long this process may continue
+     * to work on it.  There is no way to extend a lease.  After the caller has completed the work,
+     * completeWorkItem should be called.  If completeWorkItem isn't called and the lease expires, the
+     * caller must ensure that no more work will be undertaken for this work item and the work item
+     * itself will be leased out to a future caller of acquireNextWorkItem.  Each subsequent time that
+     * a lease is acquired for a work item, the lease period will be doubled.
+     * @param leaseDuration
+     * @return
+     * @throws IOException
+     * @throws InterruptedException
+     */
+    WorkAcquisitionOutcome acquireNextWorkItem(Duration leaseDuration) throws IOException, InterruptedException;
+
+    /**
+     * Mark the work item as completed.  After this succeeds, the work item will never be leased out
+     * to any callers.
+     * @param workItemId
+     * @throws IOException
+     */
+    void completeWorkItem(String workItemId) throws IOException;
+
+    /**
+     * @return the number of items that are not yet complete.  This will include items with and without claimed leases.
+     * @throws IOException
+     * @throws InterruptedException
+     */
+    int numWorkItemsArePending() throws IOException, InterruptedException;
+
+    /**
+     * @return true if there are any work items that are not yet complete.
+     * @throws IOException
+     * @throws InterruptedException
+     */
+    boolean workItemsArePending() throws IOException, InterruptedException;
+
+
+
 
     /**
      * Used as a discriminated union of different outputs that can be returned from acquiring a lease.
@@ -36,12 +120,13 @@ public interface IWorkCoordinator extends AutoCloseable {
     }
 
     /**
-     *
+     * This will occur when some other process is holding a lease and there's no other work item(s)
+     * available for this proocess to take on given the request.
      */
     class NoAvailableWorkToBeDone implements WorkAcquisitionOutcome {
         @Override
         public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException {
-            return null;
+            return v.onNoAvailableWorkToBeDone();
         }
     }
     /**
@@ -50,7 +135,12 @@ public interface IWorkCoordinator extends AutoCloseable {
      */
     class LeaseLockHeldElsewhereException extends RuntimeException { }
 
-
+    /**
+     * What's the id of the work item (which is determined by calls to createUnassignedWorkItem or
+     * createOrUpdateLeaseForWorkItem) and at what time should this worker that has obtained the
+     * lease need to relinquish control?  After the leaseExpirationTime, other processes may be
+     * able to acquire their own lease on this work item.
+     */
     @Getter
     @AllArgsConstructor
     @ToString
@@ -62,34 +152,4 @@ public interface IWorkCoordinator extends AutoCloseable {
         }
     }
 
-    void setup() throws IOException, InterruptedException;
-
-    int numWorkItemsArePending() throws IOException, InterruptedException;
-
-    boolean workItemsArePending() throws IOException, InterruptedException;
-
-    WorkAcquisitionOutcome acquireNextWorkItem(Duration leaseDuration) throws IOException, InterruptedException;
-
-    /**
-     * @param workItemId - the name of the document/resource to create.
-     *                   This value will be used as a key to other methods that update leases and to close work out.
-     * @return true if the document was created and false if it was already present
-     * @throws IOException if the document was not successfully create for any other reason
-     */
-    boolean createUnassignedWorkItem(String workItemId) throws IOException;
-
-    /**
-     * @param workItemId the item that the caller is trying to take ownership of
-     * @param leaseDuration the initial amount of time that the caller would like to own the lease for.
-     *                      Notice if other attempts have been made on this workItem, the lease will be
-     *                      greater than the requested amount.
-     * @return a tuple that contains the expiration time of the lease, at which point,
-     * this process must completely yield all work on the item
-     * @throws IOException if there was an error resolving the lease ownership
-     * @throws LeaseLockHeldElsewhereException if the lease is owned by another process
-     */
-    @NonNull WorkAcquisitionOutcome createOrUpdateLeaseForWorkItem(String workItemId, Duration leaseDuration)
-            throws IOException;
-
-    void completeWorkItem(String workItemId) throws IOException;
 }

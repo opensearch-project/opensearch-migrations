@@ -1,7 +1,7 @@
 package com.rfs.worker;
 
 import com.rfs.cms.IWorkCoordinator;
-import com.rfs.cms.ScopedWorkCoordinatorHelper;
+import com.rfs.cms.ScopedWorkCoordinator;
 import com.rfs.common.IndexMetadata;
 import com.rfs.common.SnapshotRepo;
 import lombok.Lombok;
@@ -21,7 +21,7 @@ public class ShardWorkPreparer {
 
     public static final String SHARD_SETUP_WORK_ITEM_ID = "shard_setup";
 
-    public void run(ScopedWorkCoordinatorHelper scopedWorkCoordinator, IndexMetadata.Factory metadataFactory,
+    public void run(ScopedWorkCoordinator scopedWorkCoordinator, IndexMetadata.Factory metadataFactory,
                     String snapshotName)
             throws IOException, InterruptedException {
 

@@ -2,7 +2,6 @@ package com.rfs.cms;
 
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -144,7 +143,7 @@ public class WorkCoordinatorTest {
             for (int i = 0; i < NUM_DOCS; ++i) {
                 var label = run + "-" + i;
                 allFutures.add(CompletableFuture.supplyAsync(() ->
-                        getWorkItemAndVerity(label, seenWorkerItems, expiration, markAsComplete)));
+                        getWorkItemAndVerify(label, seenWorkerItems, expiration, markAsComplete)));
             }
             CompletableFuture.allOf(allFutures.toArray(CompletableFuture[]::new)).join();
             Assertions.assertEquals(NUM_DOCS, seenWorkerItems.size());
@@ -166,8 +165,8 @@ public class WorkCoordinatorTest {
 
     static AtomicInteger nonce = new AtomicInteger();
     @SneakyThrows
-    private static String getWorkItemAndVerity(String workerSuffix, ConcurrentHashMap<String, String> seenWorkerItems,
-                                             Duration expirationWindow, boolean markCompleted) {
+    private static String getWorkItemAndVerify(String workerSuffix, ConcurrentHashMap<String, String> seenWorkerItems,
+                                               Duration expirationWindow, boolean markCompleted) {
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
                 3600, "firstPass_"+ workerSuffix)) {
             var doneId = DUMMY_FINISHED_DOC_ID + "_" + nonce.incrementAndGet();

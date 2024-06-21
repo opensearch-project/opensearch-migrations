@@ -5,7 +5,6 @@ import io.netty.util.concurrent.DefaultThreadFactory;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
@@ -17,17 +16,17 @@ import java.util.function.Consumer;
  * time unless the work is marked as complete before that expiration.  This class may, but does not need to,
  * synchronize its clock with an external source of truth for better accuracy.
  */
-public class ProcessManager {
+public class LeaseExpireTrigger {
     private final ScheduledExecutorService scheduledExecutorService;
     final ConcurrentHashMap<String, Instant> workItemToLeaseMap;
     final Consumer<String> onLeaseExpired;
     final Clock currentTimeSupplier;
 
-    public ProcessManager(Consumer<String> onLeaseExpired) {
+    public LeaseExpireTrigger(Consumer<String> onLeaseExpired) {
         this(onLeaseExpired, Clock.systemUTC());
     }
 
-    public ProcessManager(Consumer<String> onLeaseExpired, Clock currentTimeSupplier) {
+    public LeaseExpireTrigger(Consumer<String> onLeaseExpired, Clock currentTimeSupplier) {
         scheduledExecutorService = Executors.newScheduledThreadPool(1,
                 new DefaultThreadFactory("leaseWatchingProcessKillerThread"));
         this.workItemToLeaseMap = new ConcurrentHashMap<>();

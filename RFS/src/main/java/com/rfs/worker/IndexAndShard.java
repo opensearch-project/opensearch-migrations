@@ -8,15 +8,20 @@ import lombok.ToString;
 @Getter
 @ToString
 public class IndexAndShard {
+    public static final String SEPARATOR = "__";
     String indexName;
     int shard;
 
     public static String formatAsWorkItemString(String name, int shardId) {
-        return name + "__" + shardId;
+        if (name.contains(SEPARATOR)) {
+            throw new IllegalArgumentException("Illegal work item name: '" + name +"'.  " +
+                    "Work item names cannot contain '" + SEPARATOR + "'");
+        }
+        return name + SEPARATOR + shardId;
     }
 
     public static IndexAndShard valueFromWorkItemString(String input) {
-        int lastIndex = input.lastIndexOf("__");
+        int lastIndex = input.lastIndexOf(SEPARATOR);
         return new IndexAndShard(input.substring(0, lastIndex),
                 Integer.parseInt(input.substring(lastIndex + 2)));
     }
