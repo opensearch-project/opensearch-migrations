@@ -5,7 +5,7 @@ plugins {
 
 task buildDockerImages() {
     dependsOn(':TrafficCapture:dockerSolution:buildDockerImages')
-    dependsOn(':RFS:buildDockerImages')
+    dependsOn(':DocumentsFromSnapshotMigration:buildDockerImages')
 }
 
 subprojects {

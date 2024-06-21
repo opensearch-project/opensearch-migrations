@@ -4,8 +4,13 @@ import click
 import console_link.logic.clusters as logic_clusters
 import console_link.logic.metrics as logic_metrics
 import console_link.logic.backfill as logic_backfill
+import console_link.logic.snapshot as logic_snapshot
+
+from console_link.models.utils import ExitCode
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
+from console_link.models.snapshot import SnapshotStatus
+
 import logging
 
 logger = logging.getLogger(__name__)
@@ -89,6 +94,29 @@ def run_test_benchmarks_cmd(ctx):
     """Run a series of OpenSearch Benchmark workloads against the source cluster"""
     click.echo(logic_clusters.run_test_benchmarks(ctx.env.source_cluster))
 
+
+@cluster_group.command(name="clear-indices")
+@click.option("--acknowledge-risk", is_flag=True, show_default=True, default=False,
+              help="Flag to acknowledge risk and skip confirmation")
+@click.option('--cluster',
+              type=click.Choice(['source', 'target'], case_sensitive=False),
+              help="Cluster to perform clear indices action on",
+              required=True)
+@click.pass_obj
+def clear_indices_cmd(ctx, acknowledge_risk, cluster):
+    """[Caution] Clear indices on a source or target cluster"""
+    cluster_focus = ctx.env.source_cluster if cluster.lower() == 'source' else ctx.env.target_cluster
+    if acknowledge_risk:
+        click.echo("Performing clear indices operation...")
+        click.echo(logic_clusters.clear_indices(cluster_focus))
+    else:
+        if click.confirm(f'Clearing indices WILL result in the loss of all data on the {cluster.lower()} cluster. '
+                         f'Are you sure you want to continue?'):
+            click.echo(f"Performing clear indices operation on {cluster.lower()} cluster...")
+            click.echo(logic_clusters.clear_indices(cluster_focus))
+        else:
+            click.echo("Aborting command.")
+
 # ##################### REPLAYER ###################
 
 
@@ -104,11 +132,42 @@ def replayer_group(ctx):
 def start_replayer_cmd(ctx):
     ctx.env.replayer.start()
 
+# ##################### SNAPSHOT ###################
+
+
+@cli.group(name="snapshot")
+@click.pass_obj
+def snapshot_group(ctx):
+    """All actions related to snapshot creation"""
+    if ctx.env.snapshot is None:
+        raise click.UsageError("Snapshot is not set")
+
+
+@snapshot_group.command(name="create")
+@click.pass_obj
+def create_snapshot_cmd(ctx):
+    """Create a snapshot of the source cluster"""
+    snapshot = ctx.env.snapshot
+    status, message = logic_snapshot.create(snapshot)
+    if status != SnapshotStatus.COMPLETED:
+        raise click.ClickException(message)
+    click.echo(message)
+
+
+@snapshot_group.command(name="status")
+@click.pass_obj
+def status_snapshot_cmd(ctx):
+    """Check the status of the snapshot"""
+    snapshot = ctx.env.snapshot
+    _, message = logic_snapshot.status(snapshot, source_cluster=ctx.env.source_cluster,
+                                       target_cluster=ctx.env.target_cluster)
+    click.echo(message)
 
 # ##################### BACKFILL ###################
 
 # As we add other forms of backfill migrations, we should incorporate a way to dynamically allow different sets of
 # arguments depending on the type of backfill migration
+
 
 @cli.group(name="backfill")
 @click.pass_obj
@@ -133,7 +192,7 @@ def create_backfill_cmd(ctx, pipeline_template_file, print_config_only):
     exitcode, message = logic_backfill.create(ctx.env.backfill,
                                               pipeline_template_path=pipeline_template_file,
                                               print_config_only=print_config_only)
-    if exitcode != 0:
+    if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
 
@@ -143,7 +202,7 @@ def create_backfill_cmd(ctx, pipeline_template_file, print_config_only):
 @click.pass_obj
 def start_backfill_cmd(ctx, pipeline_name):
     exitcode, message = logic_backfill.start(ctx.env.backfill, pipeline_name=pipeline_name)
-    if exitcode != 0:
+    if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
 
@@ -153,7 +212,7 @@ def start_backfill_cmd(ctx, pipeline_name):
 @click.pass_obj
 def stop_backfill_cmd(ctx, pipeline_name):
     exitcode, message = logic_backfill.stop(ctx.env.backfill, pipeline_name=pipeline_name)
-    if exitcode != 0:
+    if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
 
@@ -163,7 +222,7 @@ def stop_backfill_cmd(ctx, pipeline_name):
 @click.pass_obj
 def scale_backfill_cmd(ctx, units: int):
     exitcode, message = logic_backfill.scale(ctx.env.backfill, units)
-    if exitcode != 0:
+    if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
 
@@ -172,7 +231,7 @@ def scale_backfill_cmd(ctx, units: int):
 @click.pass_obj
 def status_backfill_cmd(ctx):
     exitcode, message = logic_backfill.status(ctx.env.backfill)
-    if exitcode != 0:
+    if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
 

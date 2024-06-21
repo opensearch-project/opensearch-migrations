@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import boto3
 import botocore
 from cerberus import Validator
-from console_link.logic.utils import raise_for_aws_api_error
+from console_link.models.utils import raise_for_aws_api_error
 import requests
 import logging
 

@@ -26,27 +26,28 @@ jobs:
        run: |
         flake8 $(git ls-files '*.py')
 
-  console-library-tests:
+  python-tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        py-project:
+          - ./FetchMigration/python
+          - ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link
     defaults:
       run:
-        working-directory: ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link
+        working-directory: ${{ matrix.py-project }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
          python-version: ${{ env.python-version }}
-      - name: Install Dependencies for Console Library and Tests
-        run: |
-          python -m pip install . -r ./tests/requirements.txt
-      - name: Run Tests
-        run: |
-          python -m coverage run -m pytest
-      - name: Generate XML Coverage Report
-        run: |
-          python -m coverage xml
-      - name: Upload Coverage Report
-        uses: codecov/codecov-action@v4
+      - run: |
+          python -m pip install --upgrade pipenv
+          pipenv install --deploy --dev
+          pipenv run python -m coverage run -m pytest
+          pipenv run python -m coverage xml
+      - uses: codecov/codecov-action@v4
         with:
           files: ./coverage.xml
           flags: python-test
@@ -123,15 +124,18 @@ jobs:
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
       - name: Install python dependencies
+        working-directory: test
         run: |
-          cd test
-          python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install --upgrade pipenv
+          pipenv install --deploy --dev
       - name: Run E2E test script
+        working-directory: test
         run: |
-          cd test
-          chmod +x ./tests.py
-          pytest tests.py --unique_id="testindex"
+          pipenv run pytest tests.py --unique_id="testindex"
+      - name: Clean up migrations docker images before caching
+        run: |
+          docker stop $(docker ps -q) && docker rm $(docker ps -aq)
+          docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^migrations/' | grep -v '<none>' | xargs -I {} docker image rm {}
 
   cdk-tests:
     runs-on: ubuntu-latest
@@ -168,3 +172,16 @@ jobs:
           fail: true
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+
+  all-ci-checks-pass:
+    needs:
+      - cdk-tests
+      - gradle-tests
+      - link-checker
+      - python-e2e-tests
+      - python-lint
+      - python-tests
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo '## :heavy_check_mark: All continous integration checks pass' >> $GITHUB_STEP_SUMMARY

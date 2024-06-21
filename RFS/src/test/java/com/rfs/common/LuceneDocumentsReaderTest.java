@@ -69,7 +69,8 @@ public class LuceneDocumentsReaderTest {
     @Test
     void ReadDocuments_AsExpected() {
         // Use the TestLuceneDocumentsReader to get the mocked documents
-        Flux<Document> documents = new TestLuceneDocumentsReader(Paths.get("/fake/path")).readDocuments("testIndex", 1);
+        Flux<Document> documents =
+                new TestLuceneDocumentsReader(Paths.get("/fake/path/testIndex/0")).readDocuments();
 
         // Verify that the results are as expected
         StepVerifier.create(documents)

@@ -16,3 +16,7 @@ metrics_source:
 backfill:
     reindex_from_snapshot:
         docker:
+snapshot:
+  snapshot_name: "test_snapshot"
+  s3_repo_uri: "s3://test-bucket"
+  s3_region: "us-east-2"

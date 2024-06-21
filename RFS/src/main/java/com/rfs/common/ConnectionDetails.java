@@ -24,9 +24,15 @@ public class ConnectionDetails {
     public final String username;
     public final String password;
     public final AuthType authType;
+    public final boolean insecure;
 
     public ConnectionDetails(String url, String username, String password) {
+        this(url, username, password, false);
+    }
+
+    public ConnectionDetails(String url, String username, String password, boolean insecure) {
         this.url = url; // http://localhost:9200
+        this.insecure = insecure;
 
         // If the username is provided, the password must be as well, and vice versa
         if ((username == null && password != null) || (username != null && password == null)) {

@@ -1,4 +1,5 @@
 import pathlib
+from console_link.models.snapshot import SnapshotStatus
 
 import requests_mock
 
@@ -50,6 +51,44 @@ def test_cli_cluster_cat_indices(runner, env, mocker):
     mock.assert_called()
 
 
+def test_cli_cluster_connection_check(runner, env, mocker):
+    mock = mocker.patch('console_link.logic.clusters.connection_check')
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'connection-check'],
+                           catch_exceptions=True)
+    # Should have been called two times.
+    assert result.exit_code == 0
+    assert 'SOURCE CLUSTER' in result.output
+    assert 'TARGET CLUSTER' in result.output
+    mock.assert_called()
+
+
+def test_cli_cluster_run_test_benchmarks(runner, env, mocker):
+    mock = mocker.patch('console_link.logic.clusters.run_test_benchmarks')
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'run-test-benchmarks'],
+                           catch_exceptions=True)
+    mock.assert_called_once()
+    assert result.exit_code == 0
+
+
+def test_cli_cluster_clear_indices(runner, env, mocker):
+    mock = mocker.patch('console_link.logic.clusters.clear_indices')
+    result = runner.invoke(cli,
+                           ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'clear-indices',
+                            '--cluster', 'source', '--acknowledge-risk'],
+                           catch_exceptions=True)
+    mock.assert_called_once()
+    assert result.exit_code == 0
+
+
+def test_cli_cluster_clear_indices_no_acknowledge(runner, env, mocker):
+    mock = mocker.patch('console_link.logic.clusters.clear_indices')
+    runner.invoke(cli,
+                  ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'clear-indices',
+                   '--cluster', 'source'],
+                  catch_exceptions=True)
+    assert not mock.called
+
+
 def test_cli_with_metrics_get_data(runner, env, mocker):
     mock = mocker.patch('console_link.models.metrics_source.PrometheusMetricsSource.get_metrics')
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'metrics', 'list'],
@@ -64,6 +103,40 @@ def test_cli_with_backfill_describe(runner, env, mocker):
                            catch_exceptions=True)
     mock.assert_called_once()
     assert result.exit_code == 0
+
+
+def test_cli_snapshot_create(runner, env, mocker):
+    mock = mocker.patch('console_link.logic.snapshot.create')
+
+    # Set the mock return value
+    mock.return_value = SnapshotStatus.COMPLETED, "Snapshot created successfully."
+
+    # Test snapshot creation
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'create'],
+                           catch_exceptions=True)
+
+    assert result.exit_code == 0
+    assert "Snapshot created successfully" in result.output
+
+    # Ensure the mocks were called
+    mock.assert_called_once()
+
+
+@pytest.mark.skip(reason="Not implemented yet")
+def test_cli_snapshot_status(runner, env, mocker):
+    mock = mocker.patch('console_link.logic.snapshot.status')
+
+    # Set the mock return value
+    mock.return_value = SnapshotStatus.COMPLETED, "Snapshot status: COMPLETED"
+
+    # Test snapshot status
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'status'],
+                           catch_exceptions=True)
+    assert result.exit_code == 0
+    assert "Snapshot status: COMPLETED" in result.output
+
+    # Ensure the mocks were called
+    mock.assert_called_once()
 
 
 source_cat_indices = """
@@ -89,7 +162,7 @@ def test_cli_cat_indices_e2e(runner, env):
                text=target_cat_indices)
         result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'cat-indices'],
                                catch_exceptions=True)
-    
+
     assert result.exit_code == 0
     assert 'SOURCE CLUSTER' in result.output
     assert 'TARGET CLUSTER' in result.output
