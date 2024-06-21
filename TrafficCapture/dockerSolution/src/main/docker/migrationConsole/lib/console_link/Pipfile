@@ -9,6 +9,7 @@ boto3 = "*"
 pyyaml = "*"
 Click = "*"
 cerberus = "*"
+awscli = "*"
 
 [dev-packages]
 pytest = "*"
