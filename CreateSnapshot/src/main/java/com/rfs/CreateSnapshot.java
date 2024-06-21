@@ -2,20 +2,19 @@ package com.rfs;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
+import com.beust.jcommander.ParameterException;
 
-import com.rfs.common.UsernamePassword;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
-import com.rfs.common.ConnectionDetails;
+import com.rfs.common.FileSystemSnapshotCreator;
 import com.rfs.common.OpenSearchClient;
+import com.rfs.common.S3SnapshotCreator;
 import com.rfs.common.SnapshotCreator;
 import com.rfs.common.TryHandlePhaseFailure;
-import com.rfs.common.S3SnapshotCreator;
 import com.rfs.worker.SnapshotRunner;
 
-import java.util.Optional;
 import java.util.function.Function;
 
 @Slf4j
@@ -26,13 +25,18 @@ public class CreateSnapshot {
                 description = "The name of the snapshot to migrate")
         public String snapshotName;
 
+        @Parameter(names = {"--file-system-repo-path"},
+                required = false,
+                description = "The full path to the snapshot repo on the file system.")
+        public String fileSystemRepoPath;
+
         @Parameter(names = {"--s3-repo-uri"},
-                required = true,
+                required = false,
                 description = "The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2")
         public String s3RepoUri;
 
         @Parameter(names = {"--s3-region"},
-                required = true,
+                required = false,
                 description = "The AWS Region the S3 bucket is in, like: us-east-2"
         )
         public String s3Region;
@@ -70,12 +74,25 @@ public class CreateSnapshot {
                 .build()
                 .parse(args);
 
-        log.info("Running CreateSnapshot with " + String.join(" ", args));
-        run(c -> new S3SnapshotCreator(arguments.snapshotName, c, arguments.s3RepoUri, arguments.s3Region),
-                new OpenSearchClient(arguments.sourceHost, arguments.sourceUser, arguments.sourcePass, arguments.sourceInsecure));
+        if (arguments.fileSystemRepoPath == null && arguments.s3RepoUri == null) {
+            throw new ParameterException("Either file-system-repo-path or s3-repo-uri must be set");
+        }
+        if (arguments.fileSystemRepoPath != null && arguments.s3RepoUri != null) {
+            throw new ParameterException("Only one of file-system-repo-path and s3-repo-uri can be set");
+        }
+        if (arguments.s3RepoUri != null && arguments.s3Region == null) {
+            throw new ParameterException("If an s3 repo is being used, s3-region must be set");
+        }
+
+        log.info("Running CreateSnapshot with {}", String.join(" ", args));
+        run(c -> ((arguments.fileSystemRepoPath != null)
+                        ? new FileSystemSnapshotCreator(arguments.snapshotName, c, arguments.fileSystemRepoPath)
+                        : new S3SnapshotCreator(arguments.snapshotName, c, arguments.s3RepoUri, arguments.s3Region)),
+                new OpenSearchClient(arguments.sourceHost, arguments.sourceUser, arguments.sourcePass, arguments.sourceInsecure)
+        );
     }
 
-    public static void run(Function<OpenSearchClient,SnapshotCreator> snapshotCreatorFactory,
+    public static void run(Function<OpenSearchClient, SnapshotCreator> snapshotCreatorFactory,
                            OpenSearchClient openSearchClient)
             throws Exception {
         TryHandlePhaseFailure.executeWithTryCatch(() -> {
