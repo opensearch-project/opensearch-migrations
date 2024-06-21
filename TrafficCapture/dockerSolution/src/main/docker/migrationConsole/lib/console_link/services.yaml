@@ -1,19 +1,17 @@
 source_cluster:
   endpoint: "http://opensearchsource:9200"
   no_auth:
-  # endpoint: "http://capture-proxy:9200"
   # allow_insecure: true
-  # no_auth:
-  #basic_auth:
-  #username: "admin"
-  #password: "admin"
+  # basic_auth:
+  #     username: "admin"
+  #     password: "admin"
 target_cluster:
   endpoint: "http://opensearchtarget:9200"
-  allow_insecure: true
   no_auth:
+  # allow_insecure: true
   # basic_auth:
-  #   username: "admin"
-  #   password: "myStrongPassword123!"
+  #     username: "admin"
+  #     password: "myStrongPassword123!"
 metrics_source:
   prometheus:
     endpoint: "http://prometheus:9090"
@@ -22,8 +20,11 @@ backfill:
     docker:
 snapshot:
   snapshot_name: "snapshot_2023_01_01"
-  s3_repo_uri: "s3://os-demo-us-east-1-snapshots/2024-06-20-snapshot-test-0001/"
-  s3_region: "us-east-1"
+  s3:
+    repo_uri: "s3://os-demo-us-east-1-snapshots/2024-06-20-snapshot-test-0001/"
+    aws_region: "us-east-1"
+  fs:
+    repo_path: "/snapshot/test"
 metadata_migration:
   from_snapshot:
   min_replicas: 0
