@@ -1,63 +1,33 @@
 package com.rfs.worker;
 
-import org.apache.logging.log4j.Logger;
+import lombok.extern.slf4j.Slf4j;
 
-import java.util.Optional;
-
-import org.apache.logging.log4j.LogManager;
-
-import com.rfs.cms.CmsClient;
-import com.rfs.cms.CmsEntry;
-import com.rfs.cms.CmsEntry.Snapshot;
-import com.rfs.cms.CmsEntry.SnapshotStatus;
 import com.rfs.common.SnapshotCreator;
 
-public class SnapshotRunner implements Runner {
-    private static final Logger logger = LogManager.getLogger(SnapshotRunner.class);
-    private final SnapshotStep.SharedMembers members;
+@Slf4j
+public class SnapshotRunner {
+    private SnapshotRunner() {}
 
-    public SnapshotRunner(GlobalState globalState, CmsClient cmsClient, SnapshotCreator snapshotCreator) {
-        this.members = new SnapshotStep.SharedMembers(globalState, cmsClient, snapshotCreator);
+    protected static void waitForSnapshotToFinish(SnapshotCreator snapshotCreator) throws InterruptedException {
+        while (!snapshotCreator.isSnapshotFinished()) {
+            var waitPeriodMs = 1000;
+            log.info("Snapshot not finished yet; sleeping for " + waitPeriodMs + "ms...");
+            Thread.sleep(waitPeriodMs);
+        }
     }
 
-    @Override
-    public void runInternal() {
-        WorkerStep nextStep = null;
-
+    public static void runAndWaitForCompletion(SnapshotCreator snapshotCreator) {
         try {
-            Optional<Snapshot> snapshotEntry = members.cmsClient.getSnapshotEntry(members.snapshotCreator.getSnapshotName());
-            
-            if (snapshotEntry.isEmpty() || snapshotEntry.get().status != SnapshotStatus.COMPLETED) {
-                nextStep = new SnapshotStep.EnterPhase(members, snapshotEntry);
+            log.info("Attempting to initiate the snapshot...");
+            snapshotCreator.registerRepo();
+            snapshotCreator.createSnapshot();
 
-                while (nextStep != null) {
-                    nextStep.run();
-                    nextStep = nextStep.nextStep();
-                }
-            }
-        } catch (Exception e) {
-            throw new SnapshotPhaseFailed(
-                members.globalState.getPhase(), 
-                nextStep, 
-                members.cmsEntry.map(bar -> (CmsEntry.Base) bar), 
-                e
-            );
-        }        
-    }
-
-    @Override
-    public String getPhaseName() {
-        return "Snapshot";
-    }
-
-    @Override
-    public Logger getLogger() {
-        return logger;
-    }
-
-    public static class SnapshotPhaseFailed extends Runner.PhaseFailed {
-        public SnapshotPhaseFailed(GlobalState.Phase phase, WorkerStep nextStep, Optional<CmsEntry.Base> cmsEntry, Exception e) {
-            super("Snapshot Phase failed", phase, nextStep, cmsEntry, e);
+            log.info("Snapshot in progress...");
+            waitForSnapshotToFinish(snapshotCreator);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.error("Interrupted while waiting for Snapshot to complete", e);
+            throw new SnapshotCreator.SnapshotCreationFailed(snapshotCreator.getSnapshotName());
         }
     }
 }

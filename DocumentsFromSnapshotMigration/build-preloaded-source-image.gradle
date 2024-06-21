@@ -22,6 +22,7 @@ def createNetworkTask = task createNetwork(type: Exec) {
         println 'Network created'
     }
 }
+
 task createInitialElasticsearchContainer(type: DockerCreateContainer) {
     dependsOn createNetwork, buildDockerImage_emptyElasticsearchSource_7_10
     targetImageId 'migrations/empty_elasticsearch_source_7_10:latest'
@@ -70,7 +71,7 @@ def sourceContainerCommitTask = task commitSourceContainer() {
 }
 
 task removeClientContainer(type: DockerRemoveContainer) {
-    dependsOn commitSourceContainer
+    dependsOn waitClientContainer
     targetContainerId createClientContainer.getContainerId()
 }
 startClientTask.finalizedBy(removeClientContainer)

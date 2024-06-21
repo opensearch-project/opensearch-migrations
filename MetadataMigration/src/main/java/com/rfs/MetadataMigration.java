@@ -7,8 +7,6 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 
-import com.rfs.cms.CmsClient;
-import com.rfs.cms.OpenSearchCmsClient;
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
 import com.rfs.common.GlobalMetadata;
@@ -26,14 +24,13 @@ import com.rfs.version_es_7_10.IndexMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
 import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
-import com.rfs.worker.GlobalState;
 import com.rfs.worker.IndexRunner;
 import com.rfs.worker.MetadataRunner;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class MetadataMigration {
-    
+
     public static class Args {
         @Parameter(names = {"--snapshot-name"}, description = "The name of the snapshot to migrate", required = true)
         public String snapshotName;
@@ -79,9 +76,9 @@ public class MetadataMigration {
         // Grab out args
         Args arguments = new Args();
         JCommander.newBuilder()
-            .addObject(arguments)
-            .build()
-            .parse(args);
+                .addObject(arguments)
+                .build()
+                .parse(args);
 
         final String snapshotName = arguments.snapshotName;
         final Path s3LocalDirPath = Paths.get(arguments.s3LocalDirPath);
@@ -98,22 +95,18 @@ public class MetadataMigration {
 
         TryHandlePhaseFailure.executeWithTryCatch(() -> {
             log.info("Running RfsWorker");
-            GlobalState globalState = GlobalState.getInstance();
             OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
-            final CmsClient cmsClient = new OpenSearchCmsClient(targetClient);
 
             final SourceRepo sourceRepo = S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
             final SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
             final GlobalMetadata.Factory metadataFactory = new GlobalMetadataFactory_ES_7_10(repoDataProvider);
             final GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateAllowlist, indexTemplateAllowlist);
             final Transformer transformer = TransformFunctions.getTransformer(ClusterVersion.ES_7_10, ClusterVersion.OS_2_11, awarenessDimensionality);
-            MetadataRunner metadataWorker = new MetadataRunner(globalState, cmsClient, snapshotName, metadataFactory, metadataCreator, transformer);
-            metadataWorker.run();
+            new MetadataRunner(snapshotName, metadataFactory, metadataCreator, transformer).migrateMetadata();
 
             final IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
             final IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
-            final IndexRunner indexWorker = new IndexRunner(globalState, cmsClient, snapshotName, indexMetadataFactory, indexCreator, transformer);
-            indexWorker.run();
+            new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer).migrateIndices();
         });
     }
 }
