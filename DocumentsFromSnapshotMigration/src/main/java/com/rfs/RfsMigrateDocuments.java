@@ -116,7 +116,7 @@ public class RfsMigrateDocuments {
             log.info("Running RfsWorker");
 
             OpenSearchClient targetClient =
-                    new OpenSearchClient(arguments.targetHost, arguments.targetUser, arguments.targetPass);
+                    new OpenSearchClient(arguments.targetHost, arguments.targetUser, arguments.targetPass, false);
             DocumentReindexer reindexer = new DocumentReindexer(targetClient);
 
             SourceRepo sourceRepo = S3Repo.create(Paths.get(arguments.s3LocalDirPath),

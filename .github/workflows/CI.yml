@@ -2,26 +2,22 @@ name: CI
 
 on:
   push:
-    paths:
-      - '**.py'
   pull_request:
-    paths:
-      - '**.py'
+
+env:
+  python-version: '3.10'
+  java-version: '11'
+  gradle-version: '8.0.2'
+  node-version: '18.x'
 
 jobs:
-  lint:
+  python-lint:
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ["3.10"]
     steps:
-     - name: Checkout Repository
-       uses: actions/checkout@v4
-
-     - name: Set up Python ${{ matrix.python-version }}
-       uses: actions/setup-python@v5
+     - uses: actions/checkout@v4
+     - uses: actions/setup-python@v5
        with:
-         python-version: ${{ matrix.python-version }}
+         python-version: ${{ env.python-version }}
      - name: Install dependencies
        run: |
         python -m pip install --upgrade pip
@@ -29,3 +25,163 @@ jobs:
      - name: Analysing the code with flake8
        run: |
         flake8 $(git ls-files '*.py')
+
+  console-library-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+         python-version: ${{ env.python-version }}
+      - name: Install Dependencies for Console Library and Tests
+        run: |
+          python -m pip install . -r ./tests/requirements.txt
+      - name: Run Tests
+        run: |
+          python -m coverage run -m pytest
+      - name: Generate XML Coverage Report
+        run: |
+          python -m coverage xml
+      - name: Upload Coverage Report
+        uses: codecov/codecov-action@v4
+        with:
+          files: ./coverage.xml
+          flags: python-test
+
+  gradle-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.java-version }}
+          distribution: 'corretto'
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: ${{ env.gradle-version }}
+      - name: Run Gradle Build
+        run: ./gradlew build -x test -x TrafficCapture:dockerSolution:build --scan --stacktrace
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+
+      - name: Run Tests with Coverage
+        run: ./gradlew test -x TrafficCapture:dockerSolution:build jacocoTestReport --scan --stacktrace
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: traffic-capture-test-reports
+          path: |
+            ./TrafficCapture*/*/build/reports/
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: RFS-test-reports
+          path: |
+            ./RFS*/*/build/reports/
+
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
+        with:
+          files: "**/jacocoTestReport.xml"
+          flags: gradle-test
+          fail_ci_if_error: false
+
+  python-e2e-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.java-version }}
+          distribution: 'corretto'
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: ${{ env.gradle-version }}
+      - uses: actions/setup-python@v5
+        with:
+         python-version: ${{ env.python-version }}
+      - name: Generate Cache Key from Dockerfiles
+        id: generate_cache_key
+        run: |
+          files=$(find . -type f \( -name 'docker-compose.yml' -o -name 'Dockerfile' \))
+          file_contents=$(cat $files)
+          key=$(echo "${file_contents}" | sha1sum | awk '{print $1}')
+          echo "key=${key}" >> "$GITHUB_OUTPUT"
+      - name: Cache Docker Images
+        uses: ScribeMD/docker-cache@0.5.0
+        with:
+          key: docker-${{ runner.os }}-${{ steps.generate_cache_key.outputs.key }}
+      - name: Start Docker Solution
+        run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test --scan --info --stacktrace
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+      - name: Install python dependencies
+        run: |
+          cd test
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+      - name: Run E2E test script
+        run: |
+          cd test
+          chmod +x ./tests.py
+          pytest tests.py --unique_id="testindex"
+      - name: Clean up migrations docker images before caching
+        run: |
+          docker stop $(docker ps -q) && docker rm $(docker ps -aq)
+          docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^migrations/' | grep -v '<none>' | xargs -I {} docker image rm {}
+
+  cdk-tests:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./deployment/cdk/opensearch-service-migration
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.node-version }}
+      - name: Install NPM dependencies
+        run: npm ci
+      - name: Run CDK Jest Tests
+        run: npm test
+
+  link-checker:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+      - name: lychee Link Checker
+        id: lychee
+        uses: lycheeverse/lychee-action@v1
+        with:
+          args: --verbose --accept=200,403,429  "**/*.html" "**/*.md" "**/*.txt" "**/*.json"
+            --offline
+            --exclude "file:///github/workspace/*"
+            --exclude "http://localhost*"
+            --exclude "https://localhost*"
+            --exclude "http://capture-proxy*"
+            --exclude "https://capture-proxy*"
+            --exclude-mail
+          fail: true
+        env:
+          GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
+
+  all-ci-checks-pass:
+    needs:
+      - cdk-tests
+      - console-library-tests
+      - gradle-tests
+      - link-checker
+      - python-e2e-tests
+      - python-lint
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo '## :heavy_check_mark: All continous integration checks pass' >> $GITHUB_STEP_SUMMARY

@@ -1,6 +1,7 @@
 package com.rfs.version_es_7_10;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import java.io.File;
@@ -16,6 +17,7 @@ import com.rfs.common.SnapshotRepo.CantParseRepoFile;
 public class SnapshotRepoData_ES_7_10 {
     public static SnapshotRepoData_ES_7_10 fromRepoFile(Path filePath) {
         ObjectMapper mapper = new ObjectMapper();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         try {
             SnapshotRepoData_ES_7_10 data = mapper.readValue(new File(filePath.toString()), SnapshotRepoData_ES_7_10.class);
             data.filePath = filePath;

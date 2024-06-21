@@ -23,11 +23,10 @@ def createNetworkTask = task createNetwork(type: Exec) {
     }
 }
 task createInitialElasticsearchContainer(type: DockerCreateContainer) {
-    dependsOn createNetwork, buildDockerImage_emptyElasticsearchSource_7_17
-    targetImageId 'migrations/emptyElasticsearchSource_7_17:latest'
+    dependsOn createNetwork, buildDockerImage_emptyElasticsearchSource_7_10
+    targetImageId 'migrations/empty_elasticsearch_source_7_10:latest'
     containerName = "elasticsearch-${uniqueId}"
     hostConfig.network = myNetworkName
-    hostConfig.dns = ['elasticsearch']
     networkAliases = ['elasticsearch']
     hostName = 'elasticsearch'
 }
@@ -64,14 +63,14 @@ def sourceContainerCommitTask = task commitSourceContainer() {
         def containerId = createInitialElasticsearchContainer.getContainerId().get()
 
         client.commitCmd(containerId)
-                .withRepository("elasticsearch_rfs_source")
+                .withRepository("migrations/elasticsearch_rfs_source")
                 .withTag("latest")
                 .exec()
     }
 }
 
 task removeClientContainer(type: DockerRemoveContainer) {
-    dependsOn waitClientContainer
+    dependsOn commitSourceContainer
     targetContainerId createClientContainer.getContainerId()
 }
 startClientTask.finalizedBy(removeClientContainer)

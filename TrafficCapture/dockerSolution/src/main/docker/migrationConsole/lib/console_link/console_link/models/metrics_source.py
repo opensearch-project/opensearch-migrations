@@ -5,7 +5,7 @@ from typing import Any, Dict, List, Optional, Tuple
 import boto3
 import botocore
 from cerberus import Validator
-from console_link.logic.utils import raise_for_aws_api_error
+from console_link.models.utils import raise_for_aws_api_error
 import requests
 import logging
 
@@ -14,12 +14,6 @@ from console_link.models.schema_tools import contains_one_of
 logger = logging.getLogger(__name__)
 
 
-class UnsupportedMetricsSourceError(Exception):
-    def __init__(self, supplied_metrics_source: str):
-        super().__init__("Unsupported metrics source type", supplied_metrics_source)
-
-
-MetricsSourceType = Enum("MetricsSourceType", ["CLOUDWATCH", "PROMETHEUS"])
 MetricStatistic = Enum(
     "MetricStatistic", ["SampleCount", "Average", "Sum", "Minimum", "Maximum"]
 )
@@ -28,6 +22,9 @@ MetricStatistic = Enum(
 class Component(Enum):
     CAPTUREPROXY = "captureProxy"
     REPLAYER = "replayer"
+
+
+MetricsSourceType = Enum("MetricsSourceType", ["CLOUDWATCH", "PROMETHEUS"])
 
 
 CLOUDWATCH_SCHEMA = {
@@ -61,18 +58,6 @@ SCHEMA = {
         },
     }
 }
-
-
-def get_metrics_source(config):
-    if 'prometheus' in config:
-        return PrometheusMetricsSource(config)
-    elif 'cloudwatch' in config:
-        return CloudwatchMetricsSource(config)
-    else:
-        logger.error(f"An unsupported metrics source type was provided: {config.keys()}")
-        if len(config.keys()) > 1:
-            raise UnsupportedMetricsSourceError(', '.join(config.keys()))
-        raise UnsupportedMetricsSourceError(next(iter(config.keys())))
 
 
 class MetricsSource:

@@ -2,9 +2,16 @@ package com.rfs.common;
 
 import java.util.Base64;
 
+import io.netty.handler.ssl.SslContext;
+import io.netty.handler.ssl.SslContextBuilder;
+import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import lombok.SneakyThrows;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
+import reactor.netty.tcp.SslProvider;
 import reactor.netty.ByteBufMono;
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLParameters;
 
 public class RestClient {
     public static class Response {
@@ -22,20 +29,41 @@ public class RestClient {
     public final ConnectionDetails connectionDetails;
     private final HttpClient client;
 
+    @SneakyThrows
     public RestClient(ConnectionDetails connectionDetails) {
         this.connectionDetails = connectionDetails;
 
+        SslProvider sslProvider;
+        if (connectionDetails.insecure) {
+            SslContext sslContext = SslContextBuilder.forClient()
+                    .trustManager(InsecureTrustManagerFactory.INSTANCE)
+                    .build();
+
+            sslProvider = SslProvider.builder()
+                    .sslContext(sslContext)
+                    .handlerConfigurator(sslHandler -> {
+                        SSLEngine engine = sslHandler.engine();
+                        SSLParameters sslParameters = engine.getSSLParameters();
+                        sslParameters.setEndpointIdentificationAlgorithm(null);
+                        engine.setSSLParameters(sslParameters);
+                    })
+                    .build();
+        } else {
+            sslProvider = SslProvider.defaultClientProvider();
+        }
+
         this.client = HttpClient.create()
-            .baseUrl(connectionDetails.url)
-            .headers(h -> {
-                h.add("Content-Type", "application/json");
-                h.add("User-Agent", "RfsWorker-1.0");
-                if (connectionDetails.authType == ConnectionDetails.AuthType.BASIC) {
-                    String credentials = connectionDetails.username + ":" + connectionDetails.password;
-                    String encodedCredentials = Base64.getEncoder().encodeToString(credentials.getBytes());
-                    h.add("Authorization", "Basic " + encodedCredentials);
-                }
-            });
+                .secure(sslProvider)
+                .baseUrl(connectionDetails.url)
+                .headers(h -> {
+                    h.add("Content-Type", "application/json");
+                    h.add("User-Agent", "RfsWorker-1.0");
+                    if (connectionDetails.authType == ConnectionDetails.AuthType.BASIC) {
+                        String credentials = connectionDetails.username + ":" + connectionDetails.password;
+                        String encodedCredentials = Base64.getEncoder().encodeToString(credentials.getBytes());
+                        h.add("Authorization", "Basic " + encodedCredentials);
+                    }
+                });
     }
 
     public Mono<Response> getAsync(String path) {

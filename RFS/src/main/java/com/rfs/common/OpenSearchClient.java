@@ -28,11 +28,11 @@ public class OpenSearchClient {
     private final RestClient client;
 
     public OpenSearchClient(@NonNull String url, UsernamePassword p) {
-        this(url, p == null ? null : p.getUsername(), p == null ? null : p.getPassword());
+        this(url, p == null ? null : p.getUsername(), p == null ? null : p.getPassword(), false);
     }
 
-    public OpenSearchClient(@NonNull String url, String username, String password) {
-        this(new ConnectionDetails(url, username, password));
+    public OpenSearchClient(@NonNull String url, String username, String password, boolean insecure) {
+        this(new ConnectionDetails(url, username, password, insecure));
     }
 
     public OpenSearchClient(ConnectionDetails connectionDetails) {

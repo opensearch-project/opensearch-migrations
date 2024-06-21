@@ -27,7 +27,8 @@ test('Test vpcEnabled setting that is enabled without existing resources creates
     const contextOptions = {
         vpcEnabled: true,
         // This setting could be left out, but provides clarity into the subnets for this test case
-        vpcAZCount: 2
+        vpcAZCount: 2,
+        sourceClusterEndpoint: "https://test-cluster",
     }
 
     const openSearchStacks = createStackComposer(contextOptions)
@@ -49,7 +50,8 @@ test('Test if addOnMigrationDeployId is provided, stack does not create VPC or S
     const contextOptions = {
         addOnMigrationDeployId: "junit-addon",
         vpcEnabled: true,
-        vpcAZCount: 2
+        vpcAZCount: 2,
+        sourceClusterEndpoint: "https://test-cluster",
     }
 
     const stacks = createStackComposer(contextOptions)

@@ -49,6 +49,10 @@ public class CreateSnapshot {
         @Parameter(names = {"--source-password"},
                 description = "Optional.  The source password; if not provided, will assume no auth on source")
         public String sourcePass = null;
+
+        @Parameter(names = {"--source-insecure"},
+                description = "Allow untrusted SSL certificates for source")
+        public boolean sourceInsecure = false;
     }
 
     @Getter
@@ -68,7 +72,7 @@ public class CreateSnapshot {
 
         log.info("Running CreateSnapshot with " + String.join(" ", args));
         run(c -> new S3SnapshotCreator(arguments.snapshotName, c, arguments.s3RepoUri, arguments.s3Region),
-                new OpenSearchClient(arguments.sourceHost, arguments.sourceUser, arguments.sourcePass));
+                new OpenSearchClient(arguments.sourceHost, arguments.sourceUser, arguments.sourcePass, arguments.sourceInsecure));
     }
 
     public static void run(Function<OpenSearchClient,SnapshotCreator> snapshotCreatorFactory,

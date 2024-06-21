@@ -4,6 +4,7 @@
     "vpcEnabled": true,
     "migrationAssistanceEnabled": true,
     "kafkaBrokerServiceEnabled": true,
-    "otelCollectorEnabled": false
+    "otelCollectorEnabled": false,
+    "sourceClusterEndpoint": "https://test-cluster"
   }
 }

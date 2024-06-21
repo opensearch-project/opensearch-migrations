@@ -1,5 +1,5 @@
 source_cluster:
-  endpoint: "https://capture-proxy-es:9200"
+  endpoint: "https://capture-proxy:9200"
   allow_insecure: true
   basic_auth:
       username: "admin"
@@ -13,5 +13,10 @@ target_cluster:
 metrics_source:
   prometheus:
     endpoint: "http://prometheus:9090"
-replayer:
-  docker:
+backfill:
+    reindex_from_snapshot:
+        docker:
+snapshot:
+  snapshot_name: "snapshot_2023_01_01"
+  s3_repo_uri: "s3://my-snapshot-bucket"
+  s3_region: "us-east-2"

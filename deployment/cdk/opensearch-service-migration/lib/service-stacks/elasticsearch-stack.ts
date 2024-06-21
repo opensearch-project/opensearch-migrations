@@ -3,13 +3,14 @@ import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
-import {MigrationServiceCore} from "./migration-service-core";
-import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import {ELBTargetGroup, MigrationServiceCore, } from "./migration-service-core";
+import { MigrationSSMParameter, getMigrationStringParameterValue } from "../common-utilities";
 
 
 export interface ElasticsearchProps extends StackPropsExt {
     readonly vpc: IVpc,
-    readonly fargateCpuArch: CpuArchitecture
+    readonly fargateCpuArch: CpuArchitecture,
+    readonly targetGroups: ELBTargetGroup[]
 }
 
 /**
@@ -22,9 +23,13 @@ export class ElasticsearchStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: ElasticsearchProps) {
         super(scope, id, props)
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
-        ]
-
+            { id: "serviceSG", param: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID }
+        ].map(({ id, param }) =>
+            SecurityGroup.fromSecurityGroupId(this, id, getMigrationStringParameterValue(this, {
+                ...props,
+                parameter: param,
+            }))
+        );
         const servicePort: PortMapping = {
             name: "elasticsearch-connect",
             hostPort: 9200,

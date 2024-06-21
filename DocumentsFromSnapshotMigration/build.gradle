@@ -135,6 +135,7 @@ task buildDockerImages {
     for (dockerService in dockerServices) {
         dependsOn "buildDockerImage_${dockerService.projectName}"
     }
+    dependsOn buildDockerImage_elasticsearchRFSSource
 }
 
 tasks.named("buildDockerImage_elasticsearchRFSSource") {

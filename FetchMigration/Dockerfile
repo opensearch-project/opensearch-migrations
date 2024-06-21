@@ -6,6 +6,7 @@ RUN apt -y update
 RUN apt -y install python3 python3-pip
 RUN pip3 install --user -r requirements.txt
 
+
 ENV FM_CODE_PATH /code
 WORKDIR $FM_CODE_PATH
 # Copy only source code
