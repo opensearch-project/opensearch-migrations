@@ -120,7 +120,9 @@ public class FullTest {
                 var exceptionResults =
                         workerFutures.stream().map(cf -> {
                             try {
-                                return cf.handle((v, t) -> t.getCause()).get();
+                                return cf.handle((v, t) ->
+                                        Optional.ofNullable(t).map(Throwable::getCause).orElse(null))
+                                        .get();
                             } catch (Exception e) {
                                 throw Lombok.sneakyThrow(e);
                             }
