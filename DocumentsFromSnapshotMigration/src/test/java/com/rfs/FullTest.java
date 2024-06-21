@@ -57,6 +57,7 @@ import java.util.Comparator;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -75,7 +76,7 @@ public class FullTest {
             Pattern.compile("(?:\\S+\\s+){2}(\\S+)\\s+(?:\\S+\\s+){3}(\\S+)");
 
     public static Stream<Arguments> makeArgs() {
-        var sourceImageNames = List.of("elasticsearch_rfs_source");
+        var sourceImageNames = List.of("migrations/elasticsearch_rfs_source");
         var targetImageNames = List.of("opensearchproject/opensearch:2.13.0", "opensearchproject/opensearch:1.3.0");
         var numWorkers = List.of(1, 3, 40);
         return sourceImageNames.stream()
@@ -155,7 +156,10 @@ public class FullTest {
     }
 
     private Map<String,Integer> getIndexToCountMap(RestClient client) {;
-        var lines = client.get("_cat/indices").body.split("\n");
+        var lines = Optional.ofNullable(client.get("_cat/indices"))
+                .flatMap(r->Optional.ofNullable(r.body))
+                .map(b->b.split("\n"))
+                .orElse(new String[0]);
         return Arrays.stream(lines)
                 .map(line -> {
                     var matcher = CAT_INDICES_INDEX_COUNT_PATTERN.matcher(line);

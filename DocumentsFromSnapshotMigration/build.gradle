@@ -156,6 +156,7 @@ test {
 
 task slowTest(type: Test) {
     useJUnitPlatform()
+    dependsOn buildDockerImage_elasticsearchRFSSource
     jacoco {
         enabled = true
     }
