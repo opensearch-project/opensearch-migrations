@@ -120,6 +120,9 @@ class Metadata:
             except KeyError as e:
                 raise ValueError(f"Missing required auth details for target cluster: {e}")
 
+        if self._target_cluster.allow_insecure:
+            command.append("--target-insecure")
+
         if self._index_allowlist:
             command.extend(["--index-allowlist", ", ".join(self._index_allowlist)])
 

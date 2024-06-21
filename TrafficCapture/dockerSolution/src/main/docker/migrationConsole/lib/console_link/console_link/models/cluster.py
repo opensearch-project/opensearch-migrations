@@ -66,7 +66,7 @@ class Cluster:
     aws_secret_arn: Optional[str] = None
     auth_type: Optional[AuthMethod] = None
     auth_details: Optional[Dict[str, Any]] = None
-    allow_insecure: bool = None
+    allow_insecure: bool = False
 
     def __init__(self, config: Dict) -> None:
         logger.info(f"Initializing cluster with config: {config}")

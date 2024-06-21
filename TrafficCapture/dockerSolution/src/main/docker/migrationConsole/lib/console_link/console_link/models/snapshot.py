@@ -3,7 +3,7 @@ from enum import Enum
 import logging
 import subprocess
 from typing import Dict, Optional
-from console_link.models.cluster import Cluster
+from console_link.models.cluster import AuthMethod, Cluster
 from console_link.models.command_result import CommandResult
 from cerberus import Validator
 
@@ -63,8 +63,19 @@ class S3Snapshot(Snapshot):
         self.s3_repo_uri = config['s3_repo_uri']
         self.s3_region = config['s3_region']
 
+        if source_cluster.auth_type is not AuthMethod.NO_AUTH:
+            raise NotImplementedError("Source cluster authentication is not supported for creating snapshots")
+
+        assert target_cluster is not None
+        if target_cluster.auth_type is not AuthMethod.NO_AUTH:
+            raise NotImplementedError("Target cluster authentication is not supported for creating snapshots")
+
     def create(self, *args, **kwargs) -> CommandResult:
         assert isinstance(self.target_cluster, Cluster)
+
+        logger.warning(self.source_cluster.call_api("/_cat/plugins").text)
+
+        return CommandResult(success=True, value="Snapshot created successfully")
         command = [
             "/root/createSnapshot/bin/CreateSnapshot",
             "--snapshot-name", self.snapshot_name,

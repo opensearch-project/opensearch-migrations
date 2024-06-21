@@ -5,6 +5,7 @@ import console_link.logic.clusters as logic_clusters
 import console_link.logic.metrics as logic_metrics
 import console_link.logic.backfill as logic_backfill
 import console_link.logic.snapshot as logic_snapshot
+import console_link.logic.metadata as logic_metadata
 
 from console_link.models.utils import ExitCode
 from console_link.environment import Environment
@@ -191,6 +192,25 @@ def scale_backfill_cmd(ctx, units: int):
 @click.pass_obj
 def status_backfill_cmd(ctx):
     exitcode, message = logic_backfill.status(ctx.env.backfill)
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(message)
+
+# ##################### METRICS ###################
+
+
+@cli.group(name="metadata")
+@click.pass_obj
+def metadata_group(ctx):
+    """All actions related to metadata migration"""
+    if ctx.env.metadata is None:
+        raise click.UsageError("Metadata is not set")
+
+
+@metadata_group.command(name="migrate")
+@click.pass_obj
+def migrate_metadata_cmd(ctx):
+    exitcode, message = logic_metadata.migrate(ctx.env.metadata)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
