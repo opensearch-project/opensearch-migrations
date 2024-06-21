@@ -1,10 +1,10 @@
 package com.rfs;
 
 import com.rfs.cms.ApacheHttpClient;
-import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.OpenSearchWorkCoordinator;
 import com.rfs.cms.ProcessManager;
 import com.rfs.common.ClusterVersion;
+import com.rfs.common.ConnectionDetails;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
@@ -13,6 +13,7 @@ import com.rfs.common.GlobalMetadata;
 import com.rfs.common.IndexMetadata;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
+import com.rfs.common.RestClient;
 import com.rfs.common.ShardMetadata;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
@@ -34,14 +35,12 @@ import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.lucene.document.Document;
+import org.hamcrest.MatcherAssert;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.ArgumentsSource;
-import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.testcontainers.OpensearchContainer;
 import org.slf4j.event.Level;
@@ -51,21 +50,29 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.AbstractMap;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
+import java.util.Objects;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.UnaryOperator;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Tag("longTest")
 @Slf4j
 public class FullTest {
     final static long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
+    final static Pattern CAT_INDICES_INDEX_COUNT_PATTERN =
+            Pattern.compile("(?:\\S+\\s+){2}(\\S+)\\s+(?:\\S+\\s+){3}(\\S+)");
 
     public static Stream<Arguments> makeArgs() {
         var sourceImageNames = List.of("elasticsearch_rfs_source");
@@ -80,55 +87,84 @@ public class FullTest {
     @ParameterizedTest
     @MethodSource("makeArgs")
     public void test(String sourceImageName, String targetImageName, int numWorkers) throws Exception {
-        ElasticsearchContainer esSourceContainer =
-                new ElasticsearchContainer(new ElasticsearchContainer.Version(sourceImageName,
-                        "preloaded-ES_7_10"));
-        OpensearchContainer<?> osTargetContainer =
-                new OpensearchContainer<>(targetImageName);
+        try (ElasticsearchContainer esSourceContainer =
+                     new ElasticsearchContainer(new ElasticsearchContainer.Version(sourceImageName,
+                             "preloaded-ES_7_10"));
+             OpensearchContainer<?> osTargetContainer =
+                     new OpensearchContainer<>(targetImageName)) {
+            esSourceContainer.start();
+            osTargetContainer.start();
 
-        esSourceContainer.start();
-        osTargetContainer.start();
+            final var SNAPSHOT_NAME = "test_snapshot";
+            CreateSnapshot.run(
+                    c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, ElasticsearchContainer.CLUSTER_SNAPSHOT_DIR),
+                    new OpenSearchClient(esSourceContainer.getUrl(), null));
+            var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
+            try {
+                esSourceContainer.copySnapshotData(tempDir.toString());
 
+                var targetClient = new OpenSearchClient(osTargetContainer.getHttpHostAddress(), null);
+                var sourceRepo = new FileSystemRepo(tempDir);
+                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME);
 
-        final var SNAPSHOT_NAME = "test_snapshot";
-        CreateSnapshot.run(
-                c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, ElasticsearchContainer.CLUSTER_SNAPSHOT_DIR),
-                new OpenSearchClient(esSourceContainer.getUrl(), null));
-        var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
-        try {
-            esSourceContainer.copySnapshotData(tempDir.toString());
+                var workerFutures = new ArrayList<CompletableFuture<Void>>();
+                var runCounter = new AtomicInteger();
+                for (int i = 0; i < numWorkers; ++i) {
+                    workerFutures.add(CompletableFuture.supplyAsync(() ->
+                            migrateDocumentsSequentially(sourceRepo, SNAPSHOT_NAME,
+                                    osTargetContainer.getHttpHostAddress(), runCounter)));
+                }
+                var thrownException = Assertions.assertThrows(ExecutionException.class, () ->
+                        CompletableFuture.allOf(workerFutures.toArray(CompletableFuture[]::new)).get());
+                var exceptionResults =
+                        workerFutures.stream().map(cf -> {
+                            try {
+                                return cf.handle((v, t) -> t.getCause()).get();
+                            } catch (Exception e) {
+                                throw Lombok.sneakyThrow(e);
+                            }
+                        }).filter(Objects::nonNull).collect(Collectors.toList());
+                exceptionResults.forEach(e ->
+                        log.atLevel(e instanceof RfsMigrateDocuments.NoWorkLeftException ? Level.INFO : Level.ERROR)
+                                .setMessage(() -> "First exception for run").setCause(thrownException.getCause()).log());
+                exceptionResults.forEach(e -> Assertions.assertInstanceOf(RfsMigrateDocuments.NoWorkLeftException.class, e));
 
-            var targetClient = new OpenSearchClient(osTargetContainer.getHttpHostAddress(), null);
-            var sourceRepo = new FileSystemRepo(tempDir);
-            migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME);
-
-            var workerFutures = new ArrayList<CompletableFuture<Void>>();
-            var runCounter = new AtomicInteger();
-            for (int i=0; i<numWorkers; ++i) {
-                workerFutures.add(CompletableFuture.supplyAsync(()->
-                        migrateDocumentsSequentially(sourceRepo, SNAPSHOT_NAME,
-                                osTargetContainer.getHttpHostAddress(), runCounter)));
+                // for now, lets make sure that we got all of the
+                Assertions.assertInstanceOf(RfsMigrateDocuments.NoWorkLeftException.class, thrownException.getCause(),
+                        "expected at least one worker to notice that all work was completed.");
+                checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer);
+                var totalCompletedWorkRuns = runCounter.get();
+                Assertions.assertTrue(totalCompletedWorkRuns >= numWorkers,
+                        "Expected to make more runs (" + totalCompletedWorkRuns + ") than the number of workers " +
+                                "(" + numWorkers + ").  Increase the number of shards so that there is more work to do.");
+            } finally {
+                deleteTree(tempDir);
             }
-            var thrownException = Assertions.assertThrows(ExecutionException.class, () ->
-                CompletableFuture.allOf(workerFutures.toArray(CompletableFuture[]::new)).get());
-            log.atLevel(thrownException.getCause() instanceof RfsMigrateDocuments.NoWorkLeftException ?
-                            Level.INFO : Level.ERROR)
-                    .setMessage(()->"First found exception from runs.").setCause(thrownException.getCause()).log();
-            Assertions.assertInstanceOf(RfsMigrateDocuments.NoWorkLeftException.class, thrownException.getCause(),
-                    "expected at least one worker to notice that all work was completed.");
-            checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer);
-            var totalCompletedWorkRuns = runCounter.get();
-            Assertions.assertTrue(totalCompletedWorkRuns >= numWorkers,
-                    "Expected to make more runs (" + totalCompletedWorkRuns + ") than the number of workers " +
-                            "(" + numWorkers + ").  Increase the number of shards so that there is more work to do.");
-        } finally {
-            deleteTree(tempDir);
         }
     }
 
     private void checkClusterMigrationOnFinished(ElasticsearchContainer esSourceContainer,
                                                  OpensearchContainer<?> osTargetContainer) {
+        var targetClient = new RestClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(), null, null));
+        var sourceMap = getIndexToCountMap(new RestClient(new ConnectionDetails(esSourceContainer.getUrl(),
+                null, null)));
+        var refreshResponse = targetClient.get("_refresh");
+        Assertions.assertEquals(200, refreshResponse.code);
+        var targetMap = getIndexToCountMap(targetClient);
+        MatcherAssert.assertThat(targetMap, Matchers.equalTo(sourceMap));
+    }
 
+    private Map<String,Integer> getIndexToCountMap(RestClient client) {;
+        var lines = client.get("_cat/indices").body.split("\n");
+        return Arrays.stream(lines)
+                .map(line -> {
+                    var matcher = CAT_INDICES_INDEX_COUNT_PATTERN.matcher(line);
+                    return !matcher.find() ? null :
+                         new AbstractMap.SimpleEntry<>(matcher.group(1), matcher.group(2));
+                })
+                .filter(Objects::nonNull)
+                .filter(kvp->!kvp.getKey().startsWith("."))
+                .collect(Collectors.toMap(AbstractMap.SimpleEntry::getKey, kvp -> Integer.parseInt(kvp.getValue())));
     }
 
     @SneakyThrows
@@ -148,6 +184,9 @@ public class FullTest {
                 log.info("No work at all was found.  " +
                         "Presuming that work was complete and that all worker processes should terminate");
                 throw e;
+            } catch (Exception e) {
+                log.atError().setCause(e).setMessage(()->"Caught an exception, " +
+                        "but just going to run again with this worker to simulate task/container recycling").log();
             }
         }
     }

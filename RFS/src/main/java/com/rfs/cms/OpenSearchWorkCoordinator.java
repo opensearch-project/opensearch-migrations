@@ -460,8 +460,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         Object transformedValue;
     }
 
-    private <T,U> U doUntil(String labelThatShouldBeAContext, long initialRetryDelayMs, int maxTries,
-                            Supplier<T> supplier, Function<T,U> transformer, BiPredicate<T,U> test)
+    public static <T,U> U doUntil(String labelThatShouldBeAContext, long initialRetryDelayMs, int maxTries,
+                                  Supplier<T> supplier, Function<T,U> transformer, BiPredicate<T,U> test)
             throws InterruptedException, MaxTriesExceededException
     {
         var sleepMillis = initialRetryDelayMs;
