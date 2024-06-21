@@ -25,7 +25,7 @@ class Context(object):
 
 @click.group()
 @click.option(
-    "--config-file", default="/etc/migration_services.yaml", help="Path to config file"
+    "--config-file", default="/Volumes/workplace/opensearch/lewijacn-migrations/opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/services.yaml", help="Path to config file"
 )
 @click.option("--json", is_flag=True)
 @click.option('-v', '--verbose', count=True, help="Verbosity level. Default is warn, -v is info, -vv is debug.")
@@ -91,14 +91,25 @@ def run_test_benchmarks_cmd(ctx):
 
 
 @cluster_group.command(name="clear-indices")
-@click.option('--cluster',type=click.Choice(['source', 'target'], case_sensitive=False))
+@click.option("--acknowledge-risk", is_flag=True, show_default=True, default=False,
+              help="Flag to acknowledge risk and skip confirmation")
+@click.option('--cluster',
+              type=click.Choice(['source', 'target'], case_sensitive=False),
+              help="Cluster to perform clear indices action on",
+              required=True)
 @click.pass_obj
-def clear_indices_cmd(ctx, cluster):
+def clear_indices_cmd(ctx, acknowledge_risk, cluster):
     """[Caution] Clear indices on a source or target cluster"""
-    if click.confirm('Do you want to continue?'):
-        click.echo('Well done!')
     cluster_focus =  ctx.env.source_cluster if cluster.lower() == 'source' else ctx.env.target_cluster
-    click.echo(logic_clusters.clear_indices(cluster_focus))
+    if acknowledge_risk:
+        click.echo("Performing clear indices operation...")
+        click.echo(logic_clusters.clear_indices(cluster_focus))
+    else:
+        if click.confirm('Clearing indices can result in data loss, are you sure you want to continue?'):
+            click.echo("Performing clear indices operation...")
+            click.echo(logic_clusters.clear_indices(cluster_focus))
+        else:
+            click.echo("Aborting command.")
 
 # ##################### REPLAYER ###################
 
