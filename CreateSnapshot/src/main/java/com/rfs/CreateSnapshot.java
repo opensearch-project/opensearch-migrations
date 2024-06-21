@@ -4,18 +4,17 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
+
 import com.rfs.common.FileSystemSnapshotCreator;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3SnapshotCreator;
 import com.rfs.common.SnapshotCreator;
 import com.rfs.common.TryHandlePhaseFailure;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
-
 import com.rfs.worker.SnapshotRunner;
 
-import java.util.Optional;
 import java.util.function.Function;
 
 @Slf4j
