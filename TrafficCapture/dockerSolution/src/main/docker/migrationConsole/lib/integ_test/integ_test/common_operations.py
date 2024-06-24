@@ -4,14 +4,18 @@ import string
 import json
 import time
 from requests.exceptions import ConnectionError, SSLError
+from typing import Dict, List
 from http import HTTPStatus
 import shlex
 import subprocess
 import logging
+from unittest import TestCase
 from console_link.logic.clusters import call_api, connection_check, clear_indices, run_test_benchmarks, ConnectionResult
 from console_link.models.cluster import HttpMethod, Cluster
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_INDEX_IGNORE_LIST = ["test_", ".", "searchguard", "sg7", "security-auditlog"]
 
 
 class ClusterAPIRequestError(Exception):
@@ -19,20 +23,22 @@ class ClusterAPIRequestError(Exception):
 
 
 def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=None, headers=None, timeout=None,
-                     desired_status_code: int = 200, max_attempts: int = 5, delay: float = 2.5):
+                     session=None, expected_status_code: int = 200, max_attempts: int = 5, delay: float = 2.5,
+                     test_case=None):
     api_exception = None
     last_received_status = None
     for _ in range(1, max_attempts + 1):
         try:
-            response = call_api(cluster=cluster, path=path, method=method, data=data, headers=headers, timeout=timeout)
-            if response.status_code == desired_status_code:
+            response = call_api(cluster=cluster, path=path, method=method, data=data, headers=headers, timeout=timeout,
+                                session=session, raise_error=False)
+            if response.status_code == expected_status_code:
                 return response
             else:
                 # Ensure that our final captured exception is accurate
                 api_exception = None
                 last_received_status = response.status_code
                 logger.debug(f"Status code returned: {response.status_code} did not"
-                               f" match the expected status code: {desired_status_code}."
+                               f" match the expected status code: {expected_status_code}."
                                f" Trying again in {delay} seconds.")
         except (ConnectionError, SSLError) as e:
             api_exception = e
@@ -40,12 +46,14 @@ def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=No
                          f" and ports are setup properly. Trying again in {delay} seconds.")
         time.sleep(delay)
     if api_exception is None:
-        error_message = (f"Failed to receive desired status code of {desired_status_code} for "
-                         f"request: {response.__name__} with path: {path}. Last received status "
-                         f"code: {last_received_status}")
+        error_message = (f"Failed to receive desired status code of {expected_status_code} and instead "
+                         f"received {last_received_status} for request: {method.name} {path}")
     else:
         error_message = f"Unable to connect to server. Underlying exception: {api_exception}"
-    raise ClusterAPIRequestError(error_message)
+    if test_case is not None:
+        test_case.fail(f"Cluster API request error: {error_message}")
+    else:
+        raise ClusterAPIRequestError(error_message)
 
 
 def create_index(index_name: str, cluster: Cluster, **kwargs):
@@ -85,7 +93,63 @@ def delete_document(index_name: str, doc_id: str, cluster: Cluster, **kwargs):
                             **kwargs)
 
 
-def check_doc_match(test_case, index_name: str, doc_id: str, source_cluster: Cluster, target_cluster: Cluster):
+def index_matches_ignored_index(index_name: str, index_prefix_ignore_list: List[str]):
+    for prefix in index_prefix_ignore_list:
+        if index_name.startswith(prefix):
+            return True
+    return False
+
+
+def get_all_index_details(cluster: Cluster, **kwargs) -> Dict[str, Dict[str, str]]:
+    all_index_details = execute_api_call(cluster=cluster, path="/_cat/indices?format=json", **kwargs).json()
+    index_dict = {}
+    for index_details in all_index_details:
+        index_dict[index_details['index']] = index_details
+    return index_dict
+
+
+def check_doc_counts_match(cluster: Cluster,
+                           expected_index_details: Dict[str, Dict[str, str]],
+                           test_case: TestCase,
+                           index_prefix_ignore_list=None,
+                           max_attempts: int = 5,
+                           delay: float = 2.5):
+    if index_prefix_ignore_list is None:
+        index_prefix_ignore_list = DEFAULT_INDEX_IGNORE_LIST
+
+    error_message = ""
+    for attempt in range(1, max_attempts + 1):
+        # Refresh documents
+        execute_api_call(cluster=cluster, path="/_refresh")
+        actual_index_details = get_all_index_details(cluster=cluster)
+        logger.debug(f"Received actual indices: {actual_index_details}")
+        for index_details in actual_index_details.values():
+            index_name = index_details['index']
+            # Skip index if matching prefix
+            if index_matches_ignored_index(index_name=index_name, index_prefix_ignore_list=index_prefix_ignore_list):
+                continue
+            if expected_index_details[index_name] is None:
+                error_message = (f"Actual index {index_name} does not exist in expected "
+                                 f"indices: {expected_index_details.keys()}")
+                logger.debug(f"Error on attempt {attempt}: {error_message}")
+                break
+            actual_doc_count = index_details['docs.count']
+            expected_doc_count = expected_index_details[index_name]['docs.count']
+            if actual_doc_count != expected_doc_count:
+                error_message = (f"Index {index_name} has {actual_doc_count} documents but {expected_doc_count} were "
+                                 f"expected")
+                logger.debug(f"Error on attempt {attempt}: {error_message}")
+                break
+        if not error_message:
+            return True
+        if attempt != max_attempts:
+            error_message = ""
+            time.sleep(delay)
+    test_case.fail(error_message)
+
+
+def check_doc_match(test_case: TestCase, index_name: str, doc_id: str, source_cluster: Cluster,
+                    target_cluster: Cluster):
     source_response = get_document(index_name=index_name, doc_id=doc_id, cluster=source_cluster)
     target_response = get_document(index_name=index_name, doc_id=doc_id, cluster=target_cluster)
 

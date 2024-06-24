@@ -76,7 +76,8 @@ class Cluster:
             raise ValueError("Invalid config file for cluster", v.errors)
 
         self.endpoint = config["endpoint"]
-        self.allow_insecure = config.get("allow_insecure", False)
+        self.allow_insecure = config.get("allow_insecure", False) if self.endpoint.startswith(
+            "https") else config.get("allow_insecure", True)
         if 'no_auth' in config:
             self.auth_type = AuthMethod.NO_AUTH
         elif 'basic_auth' in config:
@@ -86,10 +87,12 @@ class Cluster:
             self.auth_type = AuthMethod.SIGV4
 
     def call_api(self, path, method: HttpMethod = HttpMethod.GET, data=None, headers=None,
-                 timeout=None) -> requests.Response:
+                 timeout=None, session=None, raise_error=True) -> requests.Response:
         """
         Calls an API on the cluster.
         """
+        if session is None:
+            session = requests.Session()
         if self.auth_type == AuthMethod.BASIC_AUTH:
             assert self.auth_details is not None  # for mypy's sake
             auth = HTTPBasicAuth(
@@ -102,7 +105,7 @@ class Cluster:
             raise NotImplementedError(f"Auth type {self.auth_type} not implemented")
 
         logger.info(f"Making api call to {self.endpoint}{path}")
-        r = requests.request(
+        r = session.request(
             method.name,
             f"{self.endpoint}{path}",
             verify=(not self.allow_insecure),
@@ -111,8 +114,9 @@ class Cluster:
             headers=headers,
             timeout=timeout
         )
-        logger.debug(f"Cluster API call request: {r.request}")
-        r.raise_for_status()
+        logger.debug(f"Cluster API call request {r.request.method} {r.request.url}")
+        if raise_error:
+            r.raise_for_status()
         return r
 
     def execute_benchmark_workload(self, workload: str,

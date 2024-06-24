@@ -12,8 +12,10 @@ class ConnectionResult:
     cluster_version: str
 
 
-def call_api(cluster: Cluster, path: str, method=HttpMethod.GET, data=None, headers=None, timeout=None):
-    r = cluster.call_api(path=path, method=method, data=data, headers=headers, timeout=timeout)
+def call_api(cluster: Cluster, path: str, method=HttpMethod.GET, data=None, headers=None, timeout=None,
+             session=None, raise_error=False):
+    r = cluster.call_api(path=path, method=method, data=data, headers=headers, timeout=timeout, session=session,
+                         raise_error=raise_error)
     return r
 
 
@@ -54,5 +56,5 @@ def run_test_benchmarks(cluster: Cluster):
 # As a default we exclude system indices and searchguard indices
 def clear_indices(cluster: Cluster):
     clear_indices_path = "/*,-.*,-searchguard*,-sg7*"
-    r = cluster.call_api(clear_indices_path, method=HttpMethod.DELETE)
+    r = cluster.call_api(clear_indices_path, method=HttpMethod.DELETE, raise_error=False)
     return r.content

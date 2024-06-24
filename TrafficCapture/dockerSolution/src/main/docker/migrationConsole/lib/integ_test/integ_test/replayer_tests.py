@@ -1,11 +1,12 @@
 import logging
 import pytest
-import json
 import unittest
-from http import HTTPStatus
+import requests
+import secrets
+from requests import Session
+from requests.adapters import HTTPAdapter
 from console_link.logic.clusters import call_api, connection_check, clear_indices, run_test_benchmarks, ConnectionResult
-from console_link.models.cluster import HttpMethod, Cluster
-from console_link.models.backfill_base import Backfill
+from console_link.models.cluster import HttpMethod, Cluster, AuthMethod
 from console_link.cli import Context
 from common_operations import *  # NOSONAR
 
@@ -16,22 +17,39 @@ def setup_replayer(request):
     unique_id = request.config.getoption("--unique_id")
     pytest.console_env = Context(config_path).env
     pytest.unique_id = unique_id
+    source_cluster: Cluster = pytest.console_env.source_cluster
+    target_cluster: Cluster = pytest.console_env.target_cluster
+
+    # Confirm source and target connection
+    source_con_result: ConnectionResult = connection_check(source_cluster)
+    assert source_con_result.connection_established is True
+    target_con_result: ConnectionResult = connection_check(target_cluster)
+    assert target_con_result.connection_established is True
+
+    # Clear any existing non-system indices
+    clear_indices(source_cluster)
+    clear_indices(target_cluster)
+
     # TODO start replayer
 
 
-@pytest.fixture(scope="session", autouse=True)
-def cleanup(request):
-    """Cleanup a testing directory once we are finished."""
-
-    def post_cleanup():
-        print("Cleanup")
-
-    request.addfinalizer(post_cleanup())
+# @pytest.fixture(scope="session", autouse=True)
+# def cleanup(request):
+#     """Cleanup a testing directory once we are finished."""
+#
+#     def post_cleanup():
+#         print("Cleanup")
+#
+#     request.addfinalizer(post_cleanup())
 
 
 @pytest.mark.usefixtures("setup_replayer")
 class ReplayerTests(unittest.TestCase):
 
+    # @assert_metrics_present({
+    #     'captureProxy': ['kafkaCommitCount_total'],
+    #     'replayer': ['kafkaCommitCount_total']
+    # })
     def test_replayer_0001_empty_index(self):
         # This test will verify that an index will be created (then deleted) on the target cluster when one is created
         # on the source cluster by going through the proxy first. It will verify that the traffic is captured by the
@@ -42,12 +60,14 @@ class ReplayerTests(unittest.TestCase):
         target_cluster: Cluster = pytest.console_env.target_cluster
         index_name = f"test_replayer_0001_{pytest.unique_id}"
 
-        create_index(cluster=source_cluster, index_name=index_name)
-        get_index(cluster=source_cluster, index_name=index_name)
-        get_index(cluster=target_cluster, index_name=index_name)
-        delete_index(cluster=source_cluster, index_name=index_name)
-        get_index(cluster=source_cluster, index_name=index_name, desired_status_code=HTTPStatus.NOT_FOUND)
-        get_index(cluster=target_cluster, index_name=index_name, desired_status_code=HTTPStatus.NOT_FOUND)
+        create_index(cluster=source_cluster, index_name=index_name, test_case=self)
+        get_index(cluster=source_cluster, index_name=index_name, test_case=self)
+        get_index(cluster=target_cluster, index_name=index_name, test_case=self)
+        delete_index(cluster=source_cluster, index_name=index_name, test_case=self)
+        get_index(cluster=source_cluster, index_name=index_name, expected_status_code=HTTPStatus.NOT_FOUND,
+                  test_case=self)
+        get_index(cluster=target_cluster, index_name=index_name, expected_status_code=HTTPStatus.NOT_FOUND,
+                  test_case=self)
 
     def test_replayer_0002_single_document(self):
         # This test will verify that a document will be created (then deleted) on the target cluster when one is created
@@ -60,17 +80,156 @@ class ReplayerTests(unittest.TestCase):
         index_name = f"test_replayer_0002_{pytest.unique_id}"
         doc_id = "replayer_0002_doc"
 
-        create_index(cluster=source_cluster, index_name=index_name)
-        get_index(cluster=source_cluster, index_name=index_name)
-        get_index(cluster=target_cluster, index_name=index_name)
-        create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id)
-        check_doc_match(test_case=self, source_cluster=source_cluster, target_cluster=target_cluster,
-                        index_name=index_name, doc_id=doc_id)
-        delete_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id)
+        create_index(cluster=source_cluster, index_name=index_name, test_case=self)
+        get_index(cluster=source_cluster, index_name=index_name, test_case=self)
+        get_index(cluster=target_cluster, index_name=index_name, test_case=self)
+        create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id,
+                        expected_status_code=HTTPStatus.CREATED, test_case=self)
+        check_doc_match(source_cluster=source_cluster, target_cluster=target_cluster,
+                        index_name=index_name, doc_id=doc_id, test_case=self)
+        delete_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id, test_case=self)
         get_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id,
-                     desired_status_code=HTTPStatus.NOT_FOUND)
+                     expected_status_code=HTTPStatus.NOT_FOUND, test_case=self)
         get_document(cluster=target_cluster, index_name=index_name, doc_id=doc_id,
-                     desired_status_code=HTTPStatus.NOT_FOUND)
+                     expected_status_code=HTTPStatus.NOT_FOUND, test_case=self)
         delete_index(cluster=source_cluster, index_name=index_name)
-        get_index(cluster=source_cluster, index_name=index_name, desired_status_code=HTTPStatus.NOT_FOUND)
-        get_index(cluster=target_cluster, index_name=index_name, desired_status_code=HTTPStatus.NOT_FOUND)
+        get_index(cluster=source_cluster, index_name=index_name, expected_status_code=HTTPStatus.NOT_FOUND,
+                  test_case=self)
+        get_index(cluster=target_cluster, index_name=index_name, expected_status_code=HTTPStatus.NOT_FOUND,
+                  test_case=self)
+
+    def test_replayer_0003_negativeAuth_invalidCreds(self):
+        # This test sends negative credentials to the clusters to validate that unauthorized access is prevented.
+        source_cluster: Cluster = pytest.console_env.source_cluster
+        if source_cluster.auth_type != AuthMethod.BASIC_AUTH or source_cluster.auth_details['password'] is None:
+            self.skipTest("Test case is only valid for a basic auth source cluster with username and password")
+
+        alphabet = string.ascii_letters + string.digits
+        for _ in range(10):
+            username = ''.join(secrets.choice(alphabet) for _ in range(8))
+            password = ''.join(secrets.choice(alphabet) for _ in range(8))
+
+            credentials = [
+                (username, password),
+                (source_cluster.auth_details['username'], password),
+                (username, source_cluster.auth_details['password'])
+            ]
+
+            for user, pw in credentials:
+                response = requests.get(source_cluster.endpoint, auth=(user, pw), verify=source_cluster.allow_insecure)
+                self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
+
+    def test_replayer_0004_negativeAuth_missingCreds(self):
+        # This test will use no credentials at all
+        source_cluster: Cluster = pytest.console_env.source_cluster
+        if source_cluster.auth_type != AuthMethod.BASIC_AUTH:
+            self.skipTest("Test case is only valid for a basic auth source cluster")
+
+        # With an empty authorization header
+        response_with_header = requests.get(source_cluster.endpoint, auth=('', ''),
+                                            verify=source_cluster.allow_insecure)
+        self.assertEqual(response_with_header.status_code, HTTPStatus.UNAUTHORIZED)
+
+        # Without an authorization header.
+        response_no_header = requests.get(source_cluster.endpoint, verify=source_cluster.allow_insecure)
+        self.assertEqual(response_no_header.status_code, HTTPStatus.UNAUTHORIZED)
+
+    def test_replayer_0005_invalidIncorrectUri(self):
+        # This test will send an invalid URI
+        source_cluster: Cluster = pytest.console_env.source_cluster
+        invalid_uri = "/invalidURI"
+        execute_api_call(source_cluster, path=invalid_uri, expected_status_code=HTTPStatus.NOT_FOUND, test_case=self)
+
+        # This test will send an incorrect URI
+        incorrect_uri = "/_cluster/incorrectUri"
+        execute_api_call(source_cluster, path=incorrect_uri, expected_status_code=HTTPStatus.METHOD_NOT_ALLOWED,
+                         test_case=self)
+
+    def test_replayer_0006_OSB(self):
+        source_cluster: Cluster = pytest.console_env.source_cluster
+        target_cluster: Cluster = pytest.console_env.target_cluster
+
+        expected_docs = {
+            "geonames": {"docs.count": "1000"},
+            "logs-221998": {"docs.count": "1000"},
+            "logs-211998": {"docs.count": "1000"},
+            "logs-231998": {"docs.count": "1000"},
+            "logs-241998": {"docs.count": "1000"},
+            "logs-181998": {"docs.count": "1000"},
+            "logs-201998": {"docs.count": "1000"},
+            "logs-191998": {"docs.count": "1000"},
+            "sonested": {"docs.count": "2977"},
+            "reindexed-logs": {"docs.count": "0"},
+            "nyc_taxis": {"docs.count": "1000"}
+        }
+
+        run_test_benchmarks(cluster=source_cluster)
+        # Confirm documents on source
+        check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_docs,
+                               test_case=self)
+        # Confirm documents on target after replay
+        check_doc_counts_match(cluster=target_cluster, expected_index_details=expected_docs,
+                               test_case=self)
+
+    def test_replayer_0007_timeBetweenRequestsOnSameConnection(self):
+        # This test will verify that the replayer functions correctly when
+        # requests on the same connection on the proxy that has a minute gap
+        source_cluster: Cluster = pytest.console_env.source_cluster
+        target_cluster: Cluster = pytest.console_env.target_cluster
+        seconds_between_requests = 60  # 1 minute
+
+        proxy_single_connection_session = Session()
+        adapter = HTTPAdapter(pool_connections=1, pool_maxsize=1, max_retries=1)
+        proxy_single_connection_session.mount(source_cluster.endpoint, adapter)
+
+        index_name = f"test_replayer_0007_{pytest.unique_id}"
+
+        number_of_docs = 3
+
+        for doc_id_int in range(number_of_docs):
+            doc_id = str(doc_id_int)
+            create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id,
+                            expected_status_code=HTTPStatus.CREATED, session=proxy_single_connection_session,
+                            test_case=self)
+            if doc_id_int + 1 < number_of_docs:
+                time.sleep(seconds_between_requests)
+
+        try:
+            for doc_id_int in range(number_of_docs):
+                doc_id = str(doc_id_int)
+                check_doc_match(source_cluster=source_cluster, target_cluster=target_cluster,
+                                index_name=index_name, doc_id=doc_id, test_case=self)
+        finally:
+            proxy_single_connection_session.close()
+
+    @unittest.skip("Flaky test needs resolution")
+    def test_replayer_0008_largeRequest(self):
+        source_cluster: Cluster = pytest.console_env.source_cluster
+        target_cluster: Cluster = pytest.console_env.target_cluster
+        index_name = f"test_replayer_0008_{pytest.unique_id}"
+        doc_id = "replayer_0008_doc"
+
+        # Create large document, 99MiB
+        # Default max 100MiB in ES/OS settings (http.max_content_length)
+        large_doc = generate_large_doc(size_mib=99)
+
+        # Measure the time taken by the create_document call
+        # Send large request to proxy and verify response
+        start_time = time.time()
+        create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id, data=large_doc,
+                        expected_status_code=HTTPStatus.CREATED, test_case=self)
+        end_time = time.time()
+        duration = end_time - start_time
+
+        # Set wait time to double the response time or 5 seconds
+        wait_time_seconds = min(round(duration, 3) * 2, 5)
+
+        # Wait for the measured duration
+        logger.debug(f"Waiting {wait_time_seconds} seconds for"
+                     f" replay of large doc creation")
+
+        time.sleep(wait_time_seconds)
+
+        # Verify document created on source and target
+        check_doc_match(source_cluster=source_cluster, target_cluster=target_cluster, index_name=index_name,
+                        doc_id=doc_id, test_case=self)
