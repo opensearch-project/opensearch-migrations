@@ -115,14 +115,14 @@ class FileSystemSnapshot(Snapshot):
         self.snapshot_name = config['snapshot_name']
         self.repo_path = config['fs']['repo_path']
 
-        if source_cluster.auth_type != AuthMethod.NO_AUTH:
-            raise NotImplementedError("Source cluster authentication is not supported for creating snapshots")
-
-        if target_cluster.auth_type != AuthMethod.NO_AUTH:
-            raise NotImplementedError("Target cluster authentication is not supported for creating snapshots")
-
     def create(self, *args, **kwargs) -> CommandResult:
         assert isinstance(self.target_cluster, Cluster)
+
+        if self.source_cluster.auth_type != AuthMethod.NO_AUTH:
+            raise NotImplementedError("Source cluster authentication is not supported for creating snapshots")
+
+        if self.target_cluster.auth_type != AuthMethod.NO_AUTH:
+            raise NotImplementedError("Target cluster authentication is not supported for creating snapshots")
 
         command = [
             "/root/createSnapshot/bin/CreateSnapshot",
