@@ -1,3 +1,4 @@
+import os
 import subprocess
 from typing import Optional
 from cerberus import Validator
@@ -83,25 +84,13 @@ class Metadata:
         # If `from_snapshot` is fully specified, use those values to define snapshot params
         if config["from_snapshot"] is not None:
             logger.debug("Using fully specified snapshot config")
-            self._snapshot_location = 's3' if 's3' in config["from_snapshot"] else 'fs'
-            self._snapshot_name = config["from_snapshot"]["snapshot_name"]
-    
-            if self._snapshot_location == 'fs':
-                self._repo_path = config["from_snapshot"]["fs"]["repo_path"]
-            else:
-                self._s3_uri = config["from_snapshot"]["s3"]["repo_uri"]
-                self._aws_region = config["from_snapshot"]["s3"]["aws_region"]
+            self._init_from_config()
         else:
             logger.debug("Using independently specified snapshot")
-            assert isinstance(snapshot, Snapshot)  # This is assumable from logic, but specifying it for mypy
-            self._snapshot_name = snapshot.snapshot_name
             if isinstance(snapshot, S3Snapshot):
-                self._snapshot_location = "s3"
-                self._s3_uri = snapshot.s3_repo_uri
-                self._aws_region = snapshot.s3_region
+                self._init_from_s3_snapshot(snapshot)
             elif isinstance(snapshot, FileSystemSnapshot):
-                self._snapshot_location = "fs"
-                self._repo_path = snapshot.repo_path
+                self._init_from_fs_snapshot(snapshot)
 
         if config["from_snapshot"] is not None and "local_dir" in config["from_snapshot"]:
             self._local_dir = config["from_snapshot"]["local_dir"]
@@ -117,7 +106,29 @@ class Metadata:
 
         logger.info("Metadata migration configuration defined")
 
-    def migrate(self) -> CommandResult:
+    def _init_from_config(self) -> None:
+        config = self._config
+        self._snapshot_location = 's3' if 's3' in config["from_snapshot"] else 'fs'
+        self._snapshot_name = config["from_snapshot"]["snapshot_name"]
+
+        if self._snapshot_location == 'fs':
+            self._repo_path = config["from_snapshot"]["fs"]["repo_path"]
+        else:
+            self._s3_uri = config["from_snapshot"]["s3"]["repo_uri"]
+            self._aws_region = config["from_snapshot"]["s3"]["aws_region"]
+
+    def _init_from_s3_snapshot(self, snapshot: S3Snapshot) -> None:
+        self._snapshot_name = snapshot.snapshot_name
+        self._snapshot_location = "s3"
+        self._s3_uri = snapshot.s3_repo_uri
+        self._aws_region = snapshot.s3_region
+
+    def _init_from_fs_snapshot(self, snapshot: FileSystemSnapshot) -> None:
+        self._snapshot_name = snapshot.snapshot_name
+        self._snapshot_location = "fs"
+        self._repo_path = snapshot.repo_path
+
+    def migrate(self, detached_log=None) -> CommandResult:
         password_field_index = None
         command = [
             "/root/metadataMigration/bin/MetadataMigration",
@@ -164,13 +175,31 @@ class Metadata:
             display_command = command[:password_field_index] + ["********"] + command[password_field_index:]
         else:
             display_command = command
-        logger.info(f"Creating snapshot with command: {' '.join(display_command)}")
+        logger.info(f"Migrating metadata with command: {' '.join(display_command)}")
 
+        if detached_log:
+            return self._run_as_detached_process(command, detached_log)
+        return self._run_as_synchronous_process(command)
+
+    def _run_as_synchronous_process(self, command) -> CommandResult:
         try:
             # Pass None to stdout and stderr to not capture output and show in terminal
-            subprocess.Popen(command, stdout=None, stderr=None, text=True, start_new_session=True)
-            logger.info(f"Metadata migration for snapshot {self._snapshot_name} initiated")
-            return CommandResult(success=True, value="Metadata migration initiated")
+            subprocess.run(command, stdout=None, stderr=None, text=True)
+            logger.info(f"Metadata migration for snapshot {self._snapshot_name} completed")
+            return CommandResult(success=True, value="Metadata migration completed")
+        except subprocess.CalledProcessError as e:
+            logger.error(f"Failed to migrate metadata: {str(e)}")
+            return CommandResult(success=False, value=f"Failed to migrate metadata: {str(e)}")
+
+    def _run_as_detached_process(self, command, log_file) -> CommandResult:
+        try:
+            with open(log_file, "w") as f:
+                # Start the process in detached mode
+                process = subprocess.Popen(command, stdout=f, stderr=subprocess.STDOUT, preexec_fn=os.setpgrp)
+                logger.info(f"Metadata migration process started with PID {process.pid}")
+                logger.info(f"Metadata migration logs available at {log_file}")
+                return CommandResult(success=True, value=f"Metadata migration started with PID {process.pid}\n"
+                                     f"Logs are being written to {log_file}")
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to create snapshot: {str(e)}")
             return CommandResult(success=False, value=f"Failed to migrate metadata: {str(e)}")

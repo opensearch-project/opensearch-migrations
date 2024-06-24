@@ -248,9 +248,10 @@ def metadata_group(ctx):
 
 
 @metadata_group.command(name="migrate")
+@click.option("--detach", is_flag=True, help="Run metadata migration in detached mode")
 @click.pass_obj
-def migrate_metadata_cmd(ctx):
-    exitcode, message = logic_metadata.migrate(ctx.env.metadata)
+def migrate_metadata_cmd(ctx, detach):
+    exitcode, message = logic_metadata.migrate(ctx.env.metadata, detach)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
