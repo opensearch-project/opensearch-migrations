@@ -88,7 +88,6 @@ class S3Snapshot(Snapshot):
             "--s3-repo-uri", self.s3_repo_uri,
             "--s3-region", self.s3_region,
             "--source-host", self.source_cluster.endpoint,
-            "--target-host", self.target_cluster.endpoint,
         ]
 
         if self.source_cluster.allow_insecure:
@@ -130,7 +129,6 @@ class FileSystemSnapshot(Snapshot):
             "--snapshot-name", self.snapshot_name,
             "--file-system-repo-path", self.repo_path,
             "--source-host", self.source_cluster.endpoint,
-            "--target-host", self.target_cluster.endpoint,
         ]
 
         if self.source_cluster.allow_insecure:
