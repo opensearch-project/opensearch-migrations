@@ -1,6 +1,7 @@
 plugins {
     id "com.dorongold.task-tree" version "2.1.1"
     id 'io.freefair.lombok' version '8.6' apply false
+    id "com.diffplug.spotless" version "7.0.0.BETA1"
 }
 
 task buildDockerImages() {
@@ -8,9 +9,44 @@ task buildDockerImages() {
     dependsOn(':DocumentsFromSnapshotMigration:buildDockerImages')
 }
 
+spotless {
+    ratchetFrom 'origin/main'
+    format 'misc', {
+        target '**/*.gradle', '.gitattributes', '.gitignore'
+
+        trimTrailingWhitespace()
+        indentWithSpaces()
+        endWithNewline()
+    }
+    yaml {
+        target '**/*.yml'
+        prettier()
+        trimTrailingWhitespace()
+        indentWithSpaces()
+        endWithNewline()
+    }
+    python {
+        target "**/*.py"
+        trimTrailingWhitespace()
+        indentWithSpaces()
+        endWithNewline()
+    }
+}
+
 subprojects {
     apply plugin: 'java'
     apply plugin: 'maven-publish'
+    apply plugin: "com.diffplug.spotless"
+
+    spotless {
+        ratchetFrom 'origin/main'
+        java {
+            target "**/*.java"
+            indentWithSpaces()
+            endWithNewline()
+            removeUnusedImports()
+        }
+    }
 
     tasks.withType(Test) {
         // Getting javadoc to compile is part of the test suite to ensure we are able to publish our artifacts
