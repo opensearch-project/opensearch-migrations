@@ -1,5 +1,5 @@
 FROM opensearchproject/data-prepper:2.5.0
-COPY python/Pipfile .
+COPY python/Pipfile python/Pipfile.lock ./
 
 # Install dependencies to local user directory
 RUN apt -y update

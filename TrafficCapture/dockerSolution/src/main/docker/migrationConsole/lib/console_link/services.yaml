@@ -1,17 +1,15 @@
 source_cluster:
-  endpoint: "http://opensearchsource:9200"
-  no_auth:
-  # allow_insecure: true
-  # basic_auth:
-  #     username: "admin"
-  #     password: "admin"
+  endpoint: "https://capture-proxy:9200"
+  allow_insecure: true
+  basic_auth:
+    username: "admin"
+    password: "admin"
 target_cluster:
-  endpoint: "http://opensearchtarget:9200"
-  no_auth:
-  # allow_insecure: true
-  # basic_auth:
-  #     username: "admin"
-  #     password: "myStrongPassword123!"
+  endpoint: "https://opensearchtarget:9200"
+  allow_insecure: true
+  basic_auth:
+    username: "admin"
+    password: "myStrongPassword123!"
 metrics_source:
   prometheus:
     endpoint: "http://prometheus:9090"
