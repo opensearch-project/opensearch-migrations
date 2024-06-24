@@ -1,16 +1,23 @@
 import logging
-from typing import Optional
+from typing import Optional, Dict
 from console_link.models.cluster import Cluster
 from console_link.models.metrics_source import MetricsSource
 from console_link.logic.metrics import get_metrics_source
 from console_link.logic.backfill import get_backfill
 from console_link.models.backfill_base import Backfill
-from console_link.models.snapshot import Snapshot, S3Snapshot
+from console_link.models.snapshot import FileSystemSnapshot, Snapshot, S3Snapshot
 import yaml
 from cerberus import Validator
 
 
 logger = logging.getLogger(__name__)
+
+
+def get_snapshot(config: Dict, source_cluster: Cluster, target_cluster: Cluster):
+    if 'fs' in config:
+        return FileSystemSnapshot(config, source_cluster, target_cluster)
+    return S3Snapshot(config, source_cluster, target_cluster)
+
 
 SCHEMA = {
     "source_cluster": {"type": "dict", "required": False},
@@ -66,9 +73,9 @@ class Environment:
             logger.info("No backfill provided")
 
         if 'snapshot' in self.config:
-            self.snapshot: Snapshot = S3Snapshot(self.config["snapshot"],
-                                                 source_cluster=self.source_cluster,
-                                                 target_cluster=self.target_cluster)
+            self.snapshot: Snapshot = get_snapshot(self.config["snapshot"],
+                                                   source_cluster=self.source_cluster,
+                                                   target_cluster=self.target_cluster)
             logger.info(f"Snapshot initialized: {self.snapshot}")
         else:
             logger.info("No snapshot provided")

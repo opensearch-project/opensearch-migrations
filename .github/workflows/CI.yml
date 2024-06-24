@@ -173,6 +173,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
 
+  fetch-migration-docker-build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./FetchMigration
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build Docker Image
+        run: docker build -t migrations/fetch-migration -f Dockerfile .
+  
   all-ci-checks-pass:
     needs:
       - cdk-tests
@@ -181,7 +191,9 @@ jobs:
       - python-e2e-tests
       - python-lint
       - python-tests
+      - fetch-migration-docker-build
     runs-on: ubuntu-latest
     steps:
       - run: |
           echo '## :heavy_check_mark: All continous integration checks pass' >> $GITHUB_STEP_SUMMARY
+

@@ -11,7 +11,7 @@ import {
     createOpenSearchServerlessIAMAccessPolicy,
     getMigrationStringParameterValue
 } from "../common-utilities";
-import { RFSBackfillYaml, S3SnapshotYaml } from "../migration-services-yaml";
+import { RFSBackfillYaml, SnapshotYaml } from "../migration-services-yaml";
 
 
 export interface ReindexFromSnapshotProps extends StackPropsExt {
@@ -23,7 +23,7 @@ export interface ReindexFromSnapshotProps extends StackPropsExt {
 
 export class ReindexFromSnapshotStack extends MigrationServiceCore {
     rfsBackfillYaml: RFSBackfillYaml;
-    rfsSnapshotYaml: S3SnapshotYaml;
+    rfsSnapshotYaml: SnapshotYaml;
 
     constructor(scope: Construct, id: string, props: ReindexFromSnapshotProps) {
         super(scope, id, props)
@@ -85,9 +85,8 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         this.rfsBackfillYaml = new RFSBackfillYaml();
         this.rfsBackfillYaml.ecs.cluster_name = `migration-${props.stage}-ecs-cluster`;
         this.rfsBackfillYaml.ecs.service_name = `migration-${props.stage}-reindex-from-snapshot`;
-        this.rfsSnapshotYaml = new S3SnapshotYaml();
-        this.rfsSnapshotYaml.s3_repo_uri = s3Uri;
-        this.rfsSnapshotYaml.s3_region = this.region;
+        this.rfsSnapshotYaml = new SnapshotYaml();
+        this.rfsSnapshotYaml.s3 = {repo_uri: s3Uri, aws_region: this.region};
         this.rfsSnapshotYaml.snapshot_name = "rfs-snapshot";
     }
 

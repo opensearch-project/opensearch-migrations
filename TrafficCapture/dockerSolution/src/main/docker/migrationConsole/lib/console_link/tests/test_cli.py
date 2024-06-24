@@ -154,10 +154,10 @@ green  open nyc_taxis                    j1HSbvtGRbG7H7SlJXrB0g 1 0 1000 0 159.3
 
 def test_cli_cat_indices_e2e(runner, env):
     with requests_mock.Mocker() as rm:
-        rm.get(f"{env.source_cluster.endpoint}/_cat/indices",
+        rm.get(f"{env.source_cluster.endpoint}/_cat/indices/_all",
                status_code=200,
                text=source_cat_indices)
-        rm.get(f"{env.target_cluster.endpoint}/_cat/indices",
+        rm.get(f"{env.target_cluster.endpoint}/_cat/indices/_all",
                status_code=200,
                text=target_cat_indices)
         result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'cat-indices'],

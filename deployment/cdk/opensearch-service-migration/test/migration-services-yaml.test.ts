@@ -1,4 +1,4 @@
-import { ClusterYaml, RFSBackfillYaml, ServicesYaml } from "../lib/migration-services-yaml"
+import { ClusterYaml, RFSBackfillYaml, ServicesYaml, SnapshotYaml } from "../lib/migration-services-yaml"
 
 test('Test default servicesYaml can be stringified', () => {
     const servicesYaml = new ServicesYaml();
@@ -57,4 +57,24 @@ test('Test servicesYaml without backfill does not include backend section', () =
     let servicesYaml = new ServicesYaml();
     const yaml = servicesYaml.stringify();
     expect(yaml).toBe(`metrics_source:\n  cloudwatch:\n`);
+})
+
+test('Test SnapshotYaml for filesystem only includes fs', () => {
+    let fsSnapshot = new SnapshotYaml();
+    fsSnapshot.fs = {"repo_path": "/path/to/shared/volume"}
+    const fsSnapshotDict = fsSnapshot.toDict()
+    expect(fsSnapshotDict).toBeDefined();
+    expect(fsSnapshotDict).toHaveProperty("fs");
+    expect(fsSnapshotDict["fs"]).toHaveProperty("repo_path");
+    expect(fsSnapshotDict).not.toHaveProperty("s3");
+})
+
+test('Test SnapshotYaml for s3 only includes s3', () => {
+    let s3Snapshot = new SnapshotYaml();
+    s3Snapshot.s3 = {"repo_uri": "s3://repo/path", "aws_region": "us-east-1"}
+    const s3SnapshotDict = s3Snapshot.toDict()
+    expect(s3SnapshotDict).toBeDefined();
+    expect(s3SnapshotDict).toHaveProperty("s3");
+    expect(s3SnapshotDict["s3"]).toHaveProperty("repo_uri");
+    expect(s3SnapshotDict).not.toHaveProperty("fs");
 })
