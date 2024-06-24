@@ -147,3 +147,6 @@ class FileSystemSnapshot(Snapshot):
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to create snapshot: {str(e)}")
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
+
+    def status(self, *args, **kwargs) -> CommandResult:
+        return CommandResult(success=False, value="Command not implemented")
