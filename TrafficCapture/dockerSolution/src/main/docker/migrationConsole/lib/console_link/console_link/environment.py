@@ -40,9 +40,11 @@ class Environment:
     metadata: Optional[Metadata] = None
 
     def __init__(self, config_file: str):
+        logger.info(f"Loading config file: {config_file}")
         self.config_file = config_file
         with open(self.config_file) as f:
             self.config = yaml.safe_load(f)
+            logger.info(f"Loaded config file: {self.config}")
         v = Validator(SCHEMA)
         if not v.validate(self.config):
             logger.error(f"Config file validation errors: {v.errors}")
