@@ -42,16 +42,27 @@ export class OSIBackfillYaml {
     }
 }
 
+export class FileSystemSnapshotYaml {
+    repo_path: string = '';
+}
+
 export class S3SnapshotYaml {
+    repo_uri: string = '';
+    aws_region: string = '';
+}
+
+export class SnapshotYaml {
     snapshot_name: string = '';
-    s3_repo_uri: string = '';
-    s3_region: string = '';
+    s3?: S3SnapshotYaml;
+    fs?: FileSystemSnapshotYaml;
 
     toDict() {
         return {
             snapshot_name: this.snapshot_name,
-            s3_repo_uri: this.s3_repo_uri,
-            s3_region: this.s3_region
+            // This conditinally includes the s3 and fs parameters if they're defined,
+            // but does not add the keys otherwise
+            ...(this.s3 && { s3: this.s3 }),
+            ...(this.fs && { fs: this.fs })
         };
     }
 }
@@ -61,7 +72,7 @@ export class ServicesYaml {
     target_cluster: ClusterYaml;
     metrics_source: MetricsSourceYaml = new MetricsSourceYaml();
     backfill: RFSBackfillYaml | OSIBackfillYaml;
-    snapshot?: S3SnapshotYaml;
+    snapshot?: SnapshotYaml;
 
     stringify(): string {
         return yaml.stringify({
