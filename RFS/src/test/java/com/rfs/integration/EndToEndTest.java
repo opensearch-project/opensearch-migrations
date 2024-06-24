@@ -6,7 +6,6 @@ import org.junit.jupiter.params.provider.ArgumentsSource;
 
 import com.rfs.framework.ElasticsearchContainer;
 import com.rfs.framework.OpenSearchContainer;
-import com.rfs.framework.OpenSearchContainer.Version;
 import com.rfs.framework.SimpleRestoreFromSnapshot;
 
 import lombok.extern.slf4j.Slf4j;
@@ -62,7 +61,7 @@ public class EndToEndTest {
         // PSEUDO: Verify documents
 
         // PSEUDO: Additional validation:
-        if (targetVersion == Version.V2_14_0) {
+        if (targetVersion == OpenSearchContainer.OS_V2_14_0) {
             //   - Mapping type parameter is removed https://opensearch.org/docs/latest/breaking-changes/#remove-mapping-types-parameter
         }
     }

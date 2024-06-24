@@ -247,7 +247,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    public void completeWorkItem(String workItemId) throws IOException {
+    public void completeWorkItem(String workItemId) throws IOException, InterruptedException {
         final var markWorkAsCompleteBodyTemplate = "{\n" +
                 "  \"script\": {\n" +
                 "    \"lang\": \"painless\",\n" +
@@ -280,6 +280,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             throw new IllegalStateException("Unexpected response for workItemId: " + workItemId + ".  Response: " +
                 response.toDiagnosticString());
         }
+        refresh();
     }
 
     private int numWorkItemsArePending(int maxItemsToCheckFor) throws IOException, InterruptedException {
@@ -497,6 +498,13 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
+    /**
+     * @param leaseDuration
+     * @return NoAvailableWorkToBeDone if all of the work items are being held by other processes or if all
+     * work has been completed.  An additional check to workItemsArePending() is required to disambiguate.
+     * @throws IOException
+     * @throws InterruptedException
+     */
     public WorkAcquisitionOutcome acquireNextWorkItem(Duration leaseDuration) throws IOException, InterruptedException {
         refresh();
         while (true) {

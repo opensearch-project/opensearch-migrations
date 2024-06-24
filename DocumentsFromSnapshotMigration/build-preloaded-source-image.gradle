@@ -107,6 +107,6 @@ task orchestrateContainers {
     }
 }
 
-task buildDockerImage_elasticsearchRFSSource {
+task buildDockerImage_elasticsearchRFSSource_withGradle {
     dependsOn sourceContainerCommitTask
 }

@@ -19,6 +19,8 @@ import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
 import com.rfs.framework.ElasticsearchContainer;
+import com.rfs.framework.PreloadedDataContainerOrchestrator;
+import com.rfs.framework.PreloadedElasticsearchContainer;
 import com.rfs.transformers.TransformFunctions;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
@@ -50,6 +52,7 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Duration;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -59,10 +62,12 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.UUID;
+import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -71,26 +76,43 @@ import java.util.stream.Stream;
 @Tag("longTest")
 @Slf4j
 public class FullTest {
+    public static final String GENERATOR_BASE_IMAGE = "migrations/elasticsearch_client_test_console:latest";
     final static long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
     final static Pattern CAT_INDICES_INDEX_COUNT_PATTERN =
             Pattern.compile("(?:\\S+\\s+){2}(\\S+)\\s+(?:\\S+\\s+){3}(\\S+)");
+    public static final String SOURCE_SERVER_ALIAS = "source";
+    public static final int MAX_SHARD_SIZE_BYTES = 64 * 1024 * 1024;
 
     public static Stream<Arguments> makeArgs() {
-        var sourceImageNames = List.of("migrations/elasticsearch_rfs_source");
-        var targetImageNames = List.of("opensearchproject/opensearch:2.13.0", "opensearchproject/opensearch:1.3.0");
-        var numWorkers = List.of(1, 3, 40);
+        var sourceImageNames = List.of(
+                makeParamsForBase(ElasticsearchContainer.ES_V7_17),
+                makeParamsForBase(ElasticsearchContainer.ES_V7_10_2));
+        var targetImageNames = List.of("opensearchproject/opensearch:2.13.0");//, "opensearchproject/opensearch:1.3.0");
+        var numWorkers = List.of(1);
         return sourceImageNames.stream()
                 .flatMap(a->
                         targetImageNames.stream().flatMap(b->
-                                numWorkers.stream().map(c->Arguments.of(a, b, c))));
+                                numWorkers.stream().map(c->Arguments.of(a[0], a[1], a[2], b, c))));
+    }
+
+    private static Object[] makeParamsForBase(ElasticsearchContainer.Version baseSourceImage) {
+        return new Object[]{
+                baseSourceImage,
+                GENERATOR_BASE_IMAGE,
+                new String[]{"/root/runTestBenchmarks.sh", "--endpoint", "http://" +SOURCE_SERVER_ALIAS + ":9200/"}
+        };
     }
 
     @ParameterizedTest
     @MethodSource("makeArgs")
-    public void test(String sourceImageName, String targetImageName, int numWorkers) throws Exception {
-        try (ElasticsearchContainer esSourceContainer =
-                     new ElasticsearchContainer(new ElasticsearchContainer.Version(sourceImageName,
-                             "preloaded-ES_7_10"));
+    public void test(ElasticsearchContainer.Version baseSourceImageVersion,
+                     String generatorImage, String[] generatorArgs,
+                     String targetImageName, int numWorkers)
+            throws Exception
+    {
+
+        try (var esSourceContainer = new PreloadedElasticsearchContainer(baseSourceImageVersion,
+                SOURCE_SERVER_ALIAS, generatorImage, generatorArgs);
              OpensearchContainer<?> osTargetContainer =
                      new OpensearchContainer<>(targetImageName)) {
             esSourceContainer.start();
@@ -267,7 +289,7 @@ public class FullTest {
                     snapshotName,
                     shardMetadataFactory,
                     unpackerFactory,
-                    16*1024*1024);
+                    MAX_SHARD_SIZE_BYTES);
         } finally {
             deleteTree(tempDir);
         }

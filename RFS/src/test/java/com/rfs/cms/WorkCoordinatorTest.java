@@ -53,18 +53,6 @@ public class WorkCoordinatorTest {
             workCoordinator.setup();
         }
     }
-//
-//    @BeforeAll
-//    static void setupOpenSearchContainer() throws Exception {
-//        httpClientSupplier = () -> new ApacheHttpClient(URI.create("http://localhost:58078"));
-//        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
-//                3600, "initializer")) {
-//            try (var httpClient = httpClientSupplier.get()) {
-//                httpClient.makeJsonRequest("DELETE", OpenSearchWorkCoordinator.INDEX_NAME, null, null);
-//            }
-//            workCoordinator.setup();
-//        }
-//    }
 
     @Test
     void testCreateOrUpdateOrReturnAsIsRequest() throws Exception {
@@ -120,7 +108,7 @@ public class WorkCoordinatorTest {
 //        log.info("doc4="+doc4);
     }
 
-    //@Test
+    @Test
     public void testAcquireLeaseForQuery() throws Exception {
         var objMapper = new ObjectMapper();
         final var NUM_DOCS = 40;
@@ -152,7 +140,8 @@ public class WorkCoordinatorTest {
                     3600, "firstPass_NONE")) {
                 var nextWorkItem = workCoordinator.acquireNextWorkItem(Duration.ofSeconds(2));
                 log.error("Next work item picked=" + nextWorkItem);
-                Assertions.assertNull(nextWorkItem);
+
+                Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, nextWorkItem);
             }
 
             Thread.sleep(expiration.multipliedBy(2).toMillis());
@@ -186,7 +175,9 @@ public class WorkCoordinatorTest {
                         }
 
                         @Override
-                        public String onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException {
+                        public String onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem)
+                                throws IOException, InterruptedException
+                        {
                             log.error("Next work item picked=" + workItem);
                             Assertions.assertNotNull(workItem);
                             Assertions.assertNotNull(workItem.workItemId);
