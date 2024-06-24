@@ -2,6 +2,7 @@ package com.rfs;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
+import com.beust.jcommander.ParameterException;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -9,14 +10,15 @@ import java.util.List;
 
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
+import com.rfs.common.FileSystemRepo;
 import com.rfs.common.GlobalMetadata;
 import com.rfs.common.IndexMetadata;
 import com.rfs.common.OpenSearchClient;
-import com.rfs.common.S3Uri;
 import com.rfs.common.S3Repo;
+import com.rfs.common.S3Uri;
+import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SourceRepo;
 import com.rfs.common.TryHandlePhaseFailure;
-import com.rfs.common.SnapshotRepo;
 import com.rfs.transformers.TransformFunctions;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_es_7_10.GlobalMetadataFactory_ES_7_10;
@@ -35,13 +37,16 @@ public class MetadataMigration {
         @Parameter(names = {"--snapshot-name"}, description = "The name of the snapshot to migrate", required = true)
         public String snapshotName;
 
-        @Parameter(names = {"--s3-local-dir"}, description = "The absolute path to the directory on local disk to download S3 files to", required = true)
+        @Parameter(names = {"--file-system-repo-path"}, required = false, description = "The full path to the snapshot repo on the file system.")
+        public String fileSystemRepoPath;
+
+        @Parameter(names = {"--s3-local-dir"}, description = "The absolute path to the directory on local disk to download S3 files to", required = false)
         public String s3LocalDirPath;
 
-        @Parameter(names = {"--s3-repo-uri"}, description = "The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2", required = true)
+        @Parameter(names = {"--s3-repo-uri"}, description = "The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2", required = false)
         public String s3RepoUri;
 
-        @Parameter(names = {"--s3-region"}, description = "The AWS Region the S3 bucket is in, like: us-east-2", required = true)
+        @Parameter(names = {"--s3-region"}, description = "The AWS Region the S3 bucket is in, like: us-east-2", required = false)
         public String s3Region;
 
         @Parameter(names = {"--target-host"}, description = "The target host and port (e.g. http://localhost:9200)", required = true)
@@ -80,8 +85,19 @@ public class MetadataMigration {
                 .build()
                 .parse(args);
 
+        if (arguments.fileSystemRepoPath == null && arguments.s3RepoUri == null) {
+            throw new ParameterException("Either file-system-repo-path or s3-repo-uri must be set");
+        }
+        if (arguments.fileSystemRepoPath != null && arguments.s3RepoUri != null) {
+            throw new ParameterException("Only one of file-system-repo-path and s3-repo-uri can be set");
+        }
+        if ((arguments.s3RepoUri != null) && (arguments.s3Region == null || arguments.s3LocalDirPath == null)) {
+            throw new ParameterException("If an s3 repo is being used, s3-region and s3-local-dir-path must be set");
+        }
+
         final String snapshotName = arguments.snapshotName;
-        final Path s3LocalDirPath = Paths.get(arguments.s3LocalDirPath);
+        final Path fileSystemRepoPath = arguments.fileSystemRepoPath != null ? Paths.get(arguments.fileSystemRepoPath): null;
+        final Path s3LocalDirPath = arguments.s3LocalDirPath != null ? Paths.get(arguments.s3LocalDirPath) : null;
         final String s3RepoUri = arguments.s3RepoUri;
         final String s3Region = arguments.s3Region;
         final String targetHost = arguments.targetHost;
@@ -93,11 +109,15 @@ public class MetadataMigration {
 
         final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
+
+
         TryHandlePhaseFailure.executeWithTryCatch(() -> {
             log.info("Running RfsWorker");
             OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
 
-            final SourceRepo sourceRepo = S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
+            final SourceRepo sourceRepo = fileSystemRepoPath != null
+                    ? new FileSystemRepo(fileSystemRepoPath)
+                    : S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
             final SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
             final GlobalMetadata.Factory metadataFactory = new GlobalMetadataFactory_ES_7_10(repoDataProvider);
             final GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateAllowlist, indexTemplateAllowlist);

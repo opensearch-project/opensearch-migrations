@@ -4,11 +4,12 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-requests = "*"
+requests = ">=2.32.3"
 boto3 = "*"
 pyyaml = "*"
 Click = "*"
 cerberus = "*"
+awscli = "*"
 
 [dev-packages]
 pytest = "*"
