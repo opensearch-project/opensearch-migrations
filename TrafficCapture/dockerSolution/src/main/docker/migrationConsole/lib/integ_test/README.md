@@ -20,53 +20,21 @@ pytest tests.py
 
 ##### Ports Setup
 The test script, by default, uses the ports assigned to the containers in this
-[docker-compose file](../TrafficCapture/dockerSolution/src/main/docker/docker-compose.yml), so if the Docker solution in
+[docker-compose file](../../../docker-compose.yml), so if the Docker solution in
 its current setup started with no issues, then the test script will run as is. If for any reason
 the user changed the ports in that file, they must also either, provide the following parameters variables:
 `proxy_endpoint`, `source_endpoint`, and `target_endpoint` respectively, or update the default value
- for them in [conftest.py](conftest.py).
+ for them in [conftest.py](integ_test/conftest.py).
 
 
 #### Script Parameters
 
 This script accepts various parameters to customize its behavior. Below is a list of available parameters along with their default values and acceptable choices:
 
-- `--proxy_endpoint`: The endpoint for the proxy endpoint.
-    - Default: `https://localhost:9200`
-
-- `--source_endpoint`: The endpoint for the source endpoint.
-    - Default: `https://localhost:19200`
-
-- `--target_endpoint`: The endpoint for the target endpoint.
-    - Default: `https://localhost:29200`
-
-- `--source_auth_type`: Specifies the authentication type for the source endpoint.
-    - Default: `basic`
-    - Choices: `none`, `basic`, `sigv4`
-
-- `--source_verify_ssl`: Determines whether to verify the SSL certificate for the source endpoint.
-    - Default: `False`
-    - Choices: `True`, `False`
-
-- `--target_auth_type`: Specifies the authentication type for the target endpoint.
-    - Default: `basic`
-    - Choices: `none`, `basic`, `sigv4`
-
-- `--target_verify_ssl`: Determines whether to verify the SSL certificate for the target endpoint.
-    - Default: `False`
-    - Choices: `True`, `False`
-
-- `--source_username`: Username for authentication with the source endpoint.
-    - Default: `admin`
-
-- `--source_password`: Password for authentication with the source endpoint.
-    - Default: `admin`
-
-- `--target_username`: Username for authentication with the target endpoint.
-    - Default: `admin`
-
-- `--target_password`: Password for authentication with the target endpoint.
-    - Default: `myStrongPassword123!`
+- `--unique_id`: The unique identifier to apply to created indices/documents.
+    - Default: Generated uuid
+- `--config_file_path`: The services yaml config file path for the console library.
+    - Default: `/etc/migration_services.yaml`
 
 
 #### Clean Up

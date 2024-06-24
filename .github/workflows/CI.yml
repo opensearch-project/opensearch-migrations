@@ -124,7 +124,7 @@ jobs:
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
       - name: Install python dependencies
-        working-directory: test
+        working-directory: TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/integ_test
         run: |
           python -m pip install --upgrade pipenv
           pipenv install --deploy --dev
@@ -182,7 +182,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build Docker Image
         run: docker build -t migrations/fetch-migration -f Dockerfile .
-  
+
   all-ci-checks-pass:
     needs:
       - cdk-tests
