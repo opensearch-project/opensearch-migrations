@@ -7,9 +7,11 @@
   },
   "checkRunSettings": {
     "vulnerableCheckRunConclusionLevel": "failure",
-    "displayMode": "diff",
+    "displayMode": "baseline",
     "useMendCheckNames": true,
-    "strictMode" : "failure"
+    "showWsInfo": true,
+    "strictMode" : "failure",
+    "strictModeInfo": true
   },
   "issueSettings": {
     "minSeverityLevel": "LOW",
