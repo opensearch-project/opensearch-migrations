@@ -18,14 +18,8 @@ backfill:
     docker:
 snapshot:
   snapshot_name: "test_snapshot"
-  s3_repo_uri: "s3://test-bucket"
-  s3_region: "us-east-2"
+  fs:
+    repo_path: "/snapshot/test-console"
 metadata_migration:
   from_snapshot: # If not provided, these are assumed from the snapshot object
   min_replicas: 0
-  index_allowlist:
-    - "my_index"
-  index_template_allowlist:
-    - "my_index_template"
-  component-template-allowlist:
-    - "my_component_template"

@@ -88,7 +88,6 @@ class S3Snapshot(Snapshot):
             "--s3-repo-uri", self.s3_repo_uri,
             "--s3-region", self.s3_region,
             "--source-host", self.source_cluster.endpoint,
-            "--target-host", self.target_cluster.endpoint,
         ]
 
         if self.source_cluster.allow_insecure:
@@ -116,21 +115,20 @@ class FileSystemSnapshot(Snapshot):
         self.snapshot_name = config['snapshot_name']
         self.repo_path = config['fs']['repo_path']
 
-        if source_cluster.auth_type != AuthMethod.NO_AUTH:
-            raise NotImplementedError("Source cluster authentication is not supported for creating snapshots")
-
-        if target_cluster.auth_type != AuthMethod.NO_AUTH:
-            raise NotImplementedError("Target cluster authentication is not supported for creating snapshots")
-
     def create(self, *args, **kwargs) -> CommandResult:
         assert isinstance(self.target_cluster, Cluster)
+
+        if self.source_cluster.auth_type != AuthMethod.NO_AUTH:
+            raise NotImplementedError("Source cluster authentication is not supported for creating snapshots")
+
+        if self.target_cluster.auth_type != AuthMethod.NO_AUTH:
+            raise NotImplementedError("Target cluster authentication is not supported for creating snapshots")
 
         command = [
             "/root/createSnapshot/bin/CreateSnapshot",
             "--snapshot-name", self.snapshot_name,
             "--file-system-repo-path", self.repo_path,
             "--source-host", self.source_cluster.endpoint,
-            "--target-host", self.target_cluster.endpoint,
         ]
 
         if self.source_cluster.allow_insecure:
@@ -147,3 +145,6 @@ class FileSystemSnapshot(Snapshot):
         except subprocess.CalledProcessError as e:
             logger.error(f"Failed to create snapshot: {str(e)}")
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
+
+    def status(self, *args, **kwargs) -> CommandResult:
+        return CommandResult(success=False, value="Command not implemented")
