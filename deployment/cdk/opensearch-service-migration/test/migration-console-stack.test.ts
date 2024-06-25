@@ -59,9 +59,9 @@ test('Test that IAM policy does not contain fetch migration IAM statements when 
 
 
 test('Test that services yaml parameter is created', () => {
-    // Mock using local Dockerfile (which may not exist and would fail synthesis) with the intent of using a "fake-image" from a public registry
+    // Mock using local Dockerfile (which may not exist and would fail synthesis)
     jest.mock("aws-cdk-lib/aws-ecr-assets")
-    jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => ContainerImage.fromRegistry("fake-image"));
+    jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => ContainerImage.fromRegistry("ServiceImage"));
 
     const contextOptions = {
         vpcEnabled: true,
