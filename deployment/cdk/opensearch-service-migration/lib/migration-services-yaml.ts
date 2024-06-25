@@ -42,6 +42,22 @@ export class OSIBackfillYaml {
     }
 }
 
+export class ECSReplayerYaml {
+    ecs: ECSService;
+    scale: number = 1;
+
+    constructor() {
+        this.ecs = new ECSService();
+    }
+
+    toDict() {
+        return {
+            ecs: this.ecs,
+            scale: this.scale
+        };
+    }
+}
+
 export class FileSystemSnapshotYaml {
     repo_path: string = '';
 }
@@ -81,6 +97,7 @@ export class ServicesYaml {
     backfill: RFSBackfillYaml | OSIBackfillYaml;
     snapshot?: SnapshotYaml;
     metadata_migration?: MetadataMigrationYaml;
+    replayer?: ECSReplayerYaml;
 
     stringify(): string {
         return yaml.stringify({
@@ -89,7 +106,8 @@ export class ServicesYaml {
             metrics_source: this.metrics_source,
             backfill: this.backfill?.toDict(),
             snapshot: this.snapshot?.toDict(),
-            metadata_migration: this.metadata_migration
+            metadata_migration: this.metadata_migration,
+            replay: this.replayer?.toDict()
         },
         {
             'nullStr': ''

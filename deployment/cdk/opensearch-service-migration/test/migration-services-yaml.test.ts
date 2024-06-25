@@ -1,4 +1,15 @@
+import { ContainerImage } from "aws-cdk-lib/aws-ecs";
 import { ClusterYaml, RFSBackfillYaml, ServicesYaml, SnapshotYaml } from "../lib/migration-services-yaml"
+import { Template, Capture, Match } from "aws-cdk-lib/assertions";
+import { MigrationConsoleStack } from "../lib/service-stacks/migration-console-stack";
+import { createStackComposer } from "./test-utils";
+import * as yaml from 'yaml';
+
+
+// Mock using local Dockerfile (which may not exist and would fail synthesis)
+jest.mock("aws-cdk-lib/aws-ecr-assets")
+jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => ContainerImage.fromRegistry("ServiceImage"));
+
 
 test('Test default servicesYaml can be stringified', () => {
     const servicesYaml = new ServicesYaml();
@@ -77,4 +88,42 @@ test('Test SnapshotYaml for s3 only includes s3', () => {
     expect(s3SnapshotDict).toHaveProperty("s3");
     expect(s3SnapshotDict["s3"]).toHaveProperty("repo_uri");
     expect(s3SnapshotDict).not.toHaveProperty("fs");
+})
+
+test('Test that services yaml parameter is created by mgiration console stack', () => {
+    const contextOptions = {
+        vpcEnabled: true,
+        migrationAssistanceEnabled: true,
+        migrationConsoleServiceEnabled: true,
+        sourceClusterEndpoint: "https://test-cluster",
+        reindexFromSnapshotServiceEnabled: true,
+        trafficReplayerServiceEnabled: true
+    }
+
+    const stacks = createStackComposer(contextOptions)
+
+    const migrationConsoleStack: MigrationConsoleStack = (stacks.stacks.filter((s) => s instanceof MigrationConsoleStack)[0]) as MigrationConsoleStack
+    const migrationConsoleStackTemplate = Template.fromStack(migrationConsoleStack)
+
+    const valueCapture = new Capture();
+    migrationConsoleStackTemplate.hasResourceProperties("AWS::SSM::Parameter", {
+        Type: "String",
+        Name: Match.stringLikeRegexp("/migration/.*/.*/servicesYamlFile"),
+        Value: valueCapture,
+    });
+    const value = valueCapture.asObject()
+    expect(value).toBeDefined();
+    expect(value['Fn::Join']).toBeInstanceOf(Array);
+    expect(value['Fn::Join'][1]).toBeInstanceOf(Array)
+    // join the strings together to get the yaml file contents
+    const yamlFileContents = value['Fn::Join'][1].join('')
+    expect(yamlFileContents).toContain('source_cluster')
+    expect(yamlFileContents).toContain('target_cluster')
+    expect(yamlFileContents).toContain('metrics_source:\n  cloudwatch:')
+    // Validates that the file can be parsed as valid yaml and has the expected fields
+    const parsedFromYaml = yaml.parse(yamlFileContents);
+    // Validates that the file has the expected fields
+    const expectedFields = ['source_cluster', 'target_cluster', 'metrics_source', 'backfill', 'snapshot', 'metadata_migration', 'replay'];
+    expect(Object.keys(parsedFromYaml).length).toEqual(expectedFields.length)
+    expect(new Set(Object.keys(parsedFromYaml))).toEqual(new Set(expectedFields))
 })

@@ -15,6 +15,7 @@ import {
 import {StreamingSourceType} from "../streaming-source-type";
 import { Duration } from "aws-cdk-lib";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
+import { ECSReplayerYaml } from "../migration-services-yaml";
 
 
 export interface TrafficReplayerProps extends StackPropsExt {
@@ -31,6 +32,7 @@ export interface TrafficReplayerProps extends StackPropsExt {
 }
 
 export class TrafficReplayerStack extends MigrationServiceCore {
+    replayerYaml: ECSReplayerYaml;
 
     constructor(scope: Construct, id: string, props: TrafficReplayerProps) {
         super(scope, id, props)
@@ -130,5 +132,9 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             taskMemoryLimitMiB: 4096,
             ...props
         });
+
+        this.replayerYaml = new ECSReplayerYaml();
+        this.replayerYaml.ecs.cluster_name = `migration-${props.stage}-ecs-cluster`;
+        this.replayerYaml.ecs.service_name = `migration-${props.stage}-traffic-replayer-${deployId}`;
     }
 }

@@ -6,6 +6,7 @@ import console_link.logic.metrics as logic_metrics
 import console_link.logic.backfill as logic_backfill
 import console_link.logic.snapshot as logic_snapshot
 import console_link.logic.metadata as logic_metadata
+import console_link.logic.replay as logic_replay
 
 from console_link.models.utils import ExitCode
 from console_link.environment import Environment
@@ -237,7 +238,61 @@ def status_backfill_cmd(ctx):
         raise click.ClickException(message)
     click.echo(message)
 
-# ##################### METRICS ###################
+
+# ##################### REPLAY ###################
+
+@cli.group(name="replay")
+@click.pass_obj
+def replay_group(ctx):
+    """All actions related to replaying data"""
+    if ctx.env.replay is None:
+        raise click.UsageError("Replay is not set")
+
+
+@replay_group.command(name="describe")
+@click.pass_obj
+def describe_replay_cmd(ctx):
+    click.echo(logic_replay.describe(ctx.env.replay, as_json=ctx.json))
+
+
+@replay_group.command(name="start")
+@click.pass_obj
+def start_replay_cmd(ctx):
+    exitcode, message = logic_replay.start(ctx.env.replay)
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(message)
+
+
+@replay_group.command(name="stop")
+@click.pass_obj
+def stop_replay_cmd(ctx):
+    exitcode, message = logic_replay.stop(ctx.env.replay)
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(message)
+
+
+@replay_group.command(name="scale")
+@click.argument("units", type=int, required=True)
+@click.pass_obj
+def scale_replay_cmd(ctx, units: int):
+    exitcode, message = logic_replay.scale(ctx.env.replay, units)
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(message)
+
+
+@replay_group.command(name="status")
+@click.pass_obj
+def status_replay_cmd(ctx):
+    exitcode, message = logic_replay.status(ctx.env.replay)
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(message)
+
+
+# ##################### METADATA ###################
 
 
 @cli.group(name="metadata")
