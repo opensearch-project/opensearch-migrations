@@ -221,7 +221,7 @@ def main_loop():
                 target_latest_document, current_time
             )
 
-            clear_message = "\033c" if not args.no_clear_output else ""
+            clear_message = "\033[H\033[J" if not args.no_clear_output else ""
 
             log_messages.append(
                 f"Source latest timestamp: {source_latest_timestamp if source_latest_timestamp else 'N/A'}"

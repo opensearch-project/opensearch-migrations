@@ -143,7 +143,7 @@ def main():
         )
         throughput_message = f"Request throughput over the last 5 seconds: {throughput:.2f} req/sec"
 
-        clear_output_message = "\033c" if not args.no_clear_output else ""
+        clear_output_message = "\033[H\033[J" if not args.no_clear_output else ""
 
         logger.info(f"{clear_output_message}" +
                     f"{request_message}\n" +
