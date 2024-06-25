@@ -191,12 +191,9 @@ public class TrafficReplayerRunner {
                                            Consumer<SourceTargetCaptureTuple> tupleReceiver,
                                            TimeShifter timeShifter) throws Exception {
         log.info("Starting a new replayer and running it");
-
-        try (var os = new NullOutputStream();
-             var trafficSource = captureSourceSupplier.get();
-             var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))) {
+        try (var trafficSource = new BlockingTrafficSource(captureSourceSupplier.get(), Duration.ofMinutes(2))) {
             trafficReplayer.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(70), Duration.ofSeconds(30),
-                blockingTrafficSource, timeShifter, tupleReceiver);
+                trafficSource, timeShifter, tupleReceiver);
         }
     }
 
