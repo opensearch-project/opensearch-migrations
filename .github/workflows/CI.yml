@@ -131,7 +131,7 @@ jobs:
       - name: Run E2E test script
         working-directory: TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/integ_test
         run: |
-          pipenv run pytest integ_test/replayer_tests.py --unique_id="testindex" --config_file_path="../console_link/services.yaml"
+          docker exec $(docker ps --filter "name=migration-console" -q) pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex"
       - name: Clean up migrations docker images before caching
         run: |
           docker stop $(docker ps -q) && docker rm $(docker ps -aq)
