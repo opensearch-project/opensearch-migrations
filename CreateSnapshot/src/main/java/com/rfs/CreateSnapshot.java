@@ -60,6 +60,11 @@ public class CreateSnapshot {
 
         @Parameter(names = {"--no-wait"}, description = "Optional.  If provided, the snapshot runner will not wait for completion")
         public boolean noWait = false;
+
+        @Parameter(names = {"--max-snapshot-rate-mb-per-node"},
+                required = false,
+                description = "The maximum snapshot rate in megabytes per second per node")
+        public Integer maxSnapshotRateMBPerNode;
     }
 
     @Getter
@@ -90,7 +95,7 @@ public class CreateSnapshot {
         log.info("Running CreateSnapshot with {}", String.join(" ", args));
         run(c -> ((arguments.fileSystemRepoPath != null)
                         ? new FileSystemSnapshotCreator(arguments.snapshotName, c, arguments.fileSystemRepoPath)
-                        : new S3SnapshotCreator(arguments.snapshotName, c, arguments.s3RepoUri, arguments.s3Region)),
+                        : new S3SnapshotCreator(arguments.snapshotName, c, arguments.s3RepoUri, arguments.s3Region, arguments.maxSnapshotRateMBPerNode)),
                 new OpenSearchClient(arguments.sourceHost, arguments.sourceUser, arguments.sourcePass, arguments.sourceInsecure),
                 arguments.noWait
         );
@@ -107,3 +112,5 @@ public class CreateSnapshot {
         });
     }
 }
+
+

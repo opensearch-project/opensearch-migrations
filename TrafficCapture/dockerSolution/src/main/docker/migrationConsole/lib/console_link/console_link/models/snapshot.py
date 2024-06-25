@@ -89,6 +89,7 @@ class S3Snapshot(Snapshot):
         if self.target_cluster.auth_type != AuthMethod.NO_AUTH:
             raise NotImplementedError("Target cluster authentication is not supported for creating snapshots")
         wait = kwargs.get('wait', False)
+        max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
         command = [
             "/root/createSnapshot/bin/CreateSnapshot",
             "--snapshot-name", self.snapshot_name,
@@ -144,6 +145,9 @@ class FileSystemSnapshot(Snapshot):
             command.append("--source-insecure")
         if not wait:
             command.append("--no-wait")
+        if max_snapshot_rate_mb_per_node is not None:
+            command.extend(["--max-snapshot-rate-mb-per-node",
+                            str(max_snapshot_rate_mb_per_node)])
 
         logger.info(f"Creating snapshot with command: {' '.join(command)}")
         try:

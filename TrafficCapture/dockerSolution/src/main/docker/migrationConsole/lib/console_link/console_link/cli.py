@@ -147,11 +147,14 @@ def snapshot_group(ctx):
 
 @snapshot_group.command(name="create")
 @click.option('--wait', is_flag=True, default=False, help='Wait for snapshot completion')
+@click.option('--max-snapshot-rate-mb-per-node', type=int, default=None,
+              help='Maximum snapshot rate in MB/s per node')
 @click.pass_obj
-def create_snapshot_cmd(ctx, wait):
+def create_snapshot_cmd(ctx, wait, max_snapshot_rate_mb_per_node):
     """Create a snapshot of the source cluster"""
     snapshot = ctx.env.snapshot
-    status, message = logic_snapshot.create(snapshot, wait=wait)
+    status, message = logic_snapshot.create(snapshot, wait=wait,
+                                            max_snapshot_rate_mb_per_node=max_snapshot_rate_mb_per_node)
     if status != SnapshotStatus.COMPLETED and wait:
         raise click.ClickException(message)
     click.echo(message)
