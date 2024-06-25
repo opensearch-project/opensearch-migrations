@@ -10,7 +10,6 @@ import console_link.logic.metadata as logic_metadata
 from console_link.models.utils import ExitCode
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
-from console_link.models.snapshot import SnapshotStatus
 from click.shell_completion import get_completion_class
 
 import logging
@@ -153,11 +152,9 @@ def snapshot_group(ctx):
 def create_snapshot_cmd(ctx, wait, max_snapshot_rate_mb_per_node):
     """Create a snapshot of the source cluster"""
     snapshot = ctx.env.snapshot
-    status, message = logic_snapshot.create(snapshot, wait=wait,
-                                            max_snapshot_rate_mb_per_node=max_snapshot_rate_mb_per_node)
-    if status != SnapshotStatus.COMPLETED and wait:
-        raise click.ClickException(message)
-    click.echo(message)
+    result = logic_snapshot.create(snapshot, wait=wait,
+                                   max_snapshot_rate_mb_per_node=max_snapshot_rate_mb_per_node)
+    click.echo(result.value)
 
 
 @snapshot_group.command(name="status")
@@ -165,8 +162,8 @@ def create_snapshot_cmd(ctx, wait, max_snapshot_rate_mb_per_node):
 @click.pass_obj
 def status_snapshot_cmd(ctx, deep_check):
     """Check the status of the snapshot"""
-    status = logic_snapshot.status(ctx.env.snapshot, deep_check=deep_check)
-    click.echo(f"Snapshot Status: {status}")
+    result = logic_snapshot.status(ctx.env.snapshot, deep_check=deep_check)
+    click.echo(result.value)
 
 # ##################### BACKFILL ###################
 

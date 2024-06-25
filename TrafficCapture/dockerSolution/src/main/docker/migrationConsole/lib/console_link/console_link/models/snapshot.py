@@ -55,7 +55,7 @@ class Snapshot(ABC):
         pass
 
     @abstractmethod
-    def status(self, *args, **kwargs) -> str:
+    def status(self, *args, **kwargs) -> CommandResult:
         """Get the status of the snapshot."""
         pass
 
@@ -108,7 +108,10 @@ class S3Snapshot(Snapshot):
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
     def status(self, *args, **kwargs) -> CommandResult:
-        return CommandResult(success=False, value="Command not implemented")
+        deep_check = kwargs.get('deep_check', False)
+        if deep_check:
+            return get_snapshot_status_full(self.source_cluster, self.snapshot_name)
+        return get_snapshot_status(self.source_cluster, self.snapshot_name)
 
 
 class FileSystemSnapshot(Snapshot):
@@ -144,11 +147,8 @@ class FileSystemSnapshot(Snapshot):
             logger.error(message)
             return CommandResult(success=False, value=message)
 
-    def status(self, *args, **kwargs) -> str:
-        deep_check = kwargs.get('deep_check', False)
-        if deep_check:
-            return get_snapshot_status_full(self.source_cluster, self.snapshot_name)
-        return get_snapshot_status(self.source_cluster, self.snapshot_name)
+    def status(self, *args, **kwargs) -> CommandResult:
+        raise NotImplementedError("Status check for FileSystemSnapshot is not implemented yet.")
 
 
 def parse_args():
@@ -163,18 +163,21 @@ def parse_args():
 
 
 def get_snapshot_status(cluster: Cluster, snapshot: str,
-                        repository: str = 'migration_assistant_repo') -> str:
+                        repository: str = 'migration_assistant_repo') -> CommandResult:
     path = f"/_snapshot/{repository}/{snapshot}"
-    response = cluster.call_api(path, HttpMethod.GET)
-    logging.debug(f"Raw get snapshot status response: {response.text}")
-    response.raise_for_status()
+    try:
+        response = cluster.call_api(path, HttpMethod.GET)
+        logging.debug(f"Raw get snapshot status response: {response.text}")
+        response.raise_for_status()
 
-    snapshot_data = response.json()
-    snapshots = snapshot_data.get('snapshots', [])
-    if not snapshots:
-        return "Snapshot not started"
+        snapshot_data = response.json()
+        snapshots = snapshot_data.get('snapshots', [])
+        if not snapshots:
+            return CommandResult(success=False, value="Snapshot not started")
 
-    return snapshots[0].get("state")
+        return CommandResult(success=True, value=snapshots[0].get("state"))
+    except Exception as e:
+        return CommandResult(success=False, value=f"Failed to get snapshot status: {str(e)}")
 
 
 def get_repository_for_snapshot(cluster: Cluster, snapshot: str) -> Optional[str]:
@@ -248,33 +251,35 @@ def get_snapshot_status_message(snapshot_info: Dict) -> str:
     )
 
 
-def get_snapshot_status_full(cluster: Cluster, snapshot: str, repository: str = 'migration_assistant_repo')\
-        -> str:
-    repository = repository if repository != '*' else get_repository_for_snapshot(cluster, snapshot)
+def get_snapshot_status_full(cluster: Cluster, snapshot: str,
+                             repository: str = 'migration_assistant_repo') -> CommandResult:
+    try:
+        repository = repository if repository != '*' else get_repository_for_snapshot(cluster, snapshot)
 
-    path = f"/_snapshot/{repository}/{snapshot}"
-    response = cluster.call_api(path, HttpMethod.GET)
-    logging.debug(f"Raw get snapshot status response: {response.text}")
-    response.raise_for_status()
+        path = f"/_snapshot/{repository}/{snapshot}"
+        response = cluster.call_api(path, HttpMethod.GET)
+        logging.debug(f"Raw get snapshot status response: {response.text}")
+        response.raise_for_status()
 
-    snapshot_data = response.json()
-    snapshots = snapshot_data.get('snapshots', [])
-    if not snapshots:
-        return "Snapshot not started"
+        snapshot_data = response.json()
+        snapshots = snapshot_data.get('snapshots', [])
+        if not snapshots:
+            return CommandResult(success=False, value="Snapshot not started")
 
-    snapshot_info = snapshots[0]
-    state = snapshot_info.get("state")
+        snapshot_info = snapshots[0]
+        state = snapshot_info.get("state")
 
-    path = f"/_snapshot/{repository}/{snapshot}/_status"
-    response = cluster.call_api(path, HttpMethod.GET)
-    logging.debug(f"Raw get snapshot status full response: {response.text}")
-    response.raise_for_status()
+        path = f"/_snapshot/{repository}/{snapshot}/_status"
+        response = cluster.call_api(path, HttpMethod.GET)
+        logging.debug(f"Raw get snapshot status full response: {response.text}")
+        response.raise_for_status()
 
-    snapshot_data = response.json()
-    snapshots = snapshot_data.get('snapshots', [])
-    if not snapshots:
-        return "Snapshot not started"
+        snapshot_data = response.json()
+        snapshots = snapshot_data.get('snapshots', [])
+        if not snapshots:
+            return CommandResult(success=False, value="Snapshot status not available")
 
-    snapshot_info = snapshots[0]
-    message = get_snapshot_status_message(snapshot_info)
-    return state, message
+        message = get_snapshot_status_message(snapshot_info)
+        return CommandResult(success=True, value=f"{state}\n{message}")
+    except Exception as e:
+        return CommandResult(success=False, value=f"Failed to get full snapshot status: {str(e)}")

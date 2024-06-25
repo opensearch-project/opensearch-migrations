@@ -1,8 +1,93 @@
 from console_link.models.snapshot import S3Snapshot, FileSystemSnapshot, Snapshot
 from console_link.environment import get_snapshot
-from console_link.models.cluster import AuthMethod
+from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
 from tests.utils import create_valid_cluster
 import pytest
+import unittest.mock as mock
+from console_link.models.command_result import CommandResult
+
+
+@pytest.fixture
+def mock_cluster():
+    cluster = mock.Mock(spec=Cluster)
+    return cluster
+
+
+@pytest.fixture
+def s3_snapshot(mock_cluster):
+    config = {
+        "snapshot_name": "test_snapshot",
+        "s3": {
+            "repo_uri": "s3://test-bucket",
+            "aws_region": "us-west-2"
+        }
+    }
+    return S3Snapshot(config, mock_cluster)
+
+
+def test_s3_snapshot_status(s3_snapshot, mock_cluster):
+    mock_response = mock.Mock()
+    mock_response.json.return_value = {
+        "snapshots": [
+            {
+                "snapshot": "test_snapshot",
+                "state": "SUCCESS"
+            }
+        ]
+    }
+    mock_cluster.call_api.return_value = mock_response
+
+    result = s3_snapshot.status()
+
+    assert isinstance(result, CommandResult)
+    assert result.success
+    assert result.value == "SUCCESS"
+    mock_cluster.call_api.assert_called_once_with("/_snapshot/migration_assistant_repo/test_snapshot",
+                                                  HttpMethod.GET)
+
+
+def test_s3_snapshot_status_full(s3_snapshot, mock_cluster):
+    mock_response = mock.Mock()
+    mock_response.json.return_value = {
+        "snapshots": [
+            {
+                "snapshot": "test_snapshot",
+                "state": "SUCCESS",
+                "shards_stats": {
+                    "total": 10,
+                    "done": 10,
+                    "failed": 0
+                },
+                "stats": {
+                    "total": {
+                        "size_in_bytes": 1000000
+                    },
+                    "processed": {
+                        "size_in_bytes": 1000000
+                    },
+                    "start_time_in_millis": 1625097600000,
+                    "time_in_millis": 60000
+                }
+            }
+        ]
+    }
+    mock_cluster.call_api.return_value = mock_response
+
+    result = s3_snapshot.status(deep_check=True)
+
+    assert isinstance(result, CommandResult)
+    assert result.success
+    assert "SUCCESS" in result.value
+    assert "Percent completed: 100.00%" in result.value
+    assert "Total shards: 10" in result.value
+    assert "Successful shards: 10" in result.value
+    assert "Failed shards: 0" in result.value
+    assert "Start time:" in result.value
+    assert "Duration:" in result.value
+    assert "Anticipated duration remaining:" in result.value
+    assert "Throughput:" in result.value
+    mock_cluster.call_api.assert_called_with("/_snapshot/migration_assistant_repo/test_snapshot/_status",
+                                             HttpMethod.GET)
 
 
 def test_s3_snapshot_init_succeeds():

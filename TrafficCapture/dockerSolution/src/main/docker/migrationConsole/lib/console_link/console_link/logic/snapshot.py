@@ -1,24 +1,19 @@
 import logging
-from typing import Tuple
-from console_link.models.snapshot import Snapshot, SnapshotStatus
+from console_link.models.snapshot import Snapshot
+from console_link.models.command_result import CommandResult
 
 logger = logging.getLogger(__name__)
 
 
-def create(snapshot: Snapshot, *args, **kwargs) -> Tuple[SnapshotStatus, str]:
+def create(snapshot: Snapshot, *args, **kwargs) -> CommandResult:
     logger.info(f"Creating snapshot with {args=} and {kwargs=}")
     try:
-        result = snapshot.create(*args, **kwargs)
+        return snapshot.create(*args, **kwargs)
     except Exception as e:
         logger.error(f"Failure running create snapshot: {e}")
-        return SnapshotStatus.FAILED, f"Failure running create snapshot: {e}"
-
-    if not result.success:
-        return SnapshotStatus.FAILED, "Snapshot creation failed." + "\n" + result.value
-
-    return status(snapshot, *args, **kwargs)
+        return CommandResult(status=False, message=f"Failure running create snapshot: {e}")
 
 
-def status(snapshot: Snapshot, *args, **kwargs) -> str:
+def status(snapshot: Snapshot, *args, **kwargs) -> CommandResult:
     logger.info("Getting snapshot status")
     return snapshot.status(*args, **kwargs)
