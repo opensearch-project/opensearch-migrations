@@ -47,4 +47,7 @@ RUN pipenv install --system --deploy --ignore-pipfile
 WORKDIR /root
 #CMD pipenv run python manage.py runserver_plus 0.0.0.0:8000
 
+# Ensure bash completion is installed
+RUN apt-get install -y bash-completion
+
 CMD /root/loadServicesFromParameterStore.sh && tail -f /dev/null

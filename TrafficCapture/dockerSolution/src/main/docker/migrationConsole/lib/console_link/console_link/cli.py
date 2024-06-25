@@ -10,7 +10,7 @@ import console_link.logic.metadata as logic_metadata
 from console_link.models.utils import ExitCode
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
-from console_link.models.snapshot import SnapshotStatus
+from click.shell_completion import get_completion_class
 
 import logging
 
@@ -145,24 +145,25 @@ def snapshot_group(ctx):
 
 
 @snapshot_group.command(name="create")
+@click.option('--wait', is_flag=True, default=False, help='Wait for snapshot completion')
+@click.option('--max-snapshot-rate-mb-per-node', type=int, default=None,
+              help='Maximum snapshot rate in MB/s per node')
 @click.pass_obj
-def create_snapshot_cmd(ctx):
+def create_snapshot_cmd(ctx, wait, max_snapshot_rate_mb_per_node):
     """Create a snapshot of the source cluster"""
     snapshot = ctx.env.snapshot
-    status, message = logic_snapshot.create(snapshot)
-    if status != SnapshotStatus.COMPLETED:
-        raise click.ClickException(message)
-    click.echo(message)
+    result = logic_snapshot.create(snapshot, wait=wait,
+                                   max_snapshot_rate_mb_per_node=max_snapshot_rate_mb_per_node)
+    click.echo(result.value)
 
 
 @snapshot_group.command(name="status")
+@click.option('--deep-check', is_flag=True, default=False, help='Perform a deep status check of the snapshot')
 @click.pass_obj
-def status_snapshot_cmd(ctx):
+def status_snapshot_cmd(ctx, deep_check):
     """Check the status of the snapshot"""
-    snapshot = ctx.env.snapshot
-    _, message = logic_snapshot.status(snapshot, source_cluster=ctx.env.source_cluster,
-                                       target_cluster=ctx.env.target_cluster)
-    click.echo(message)
+    result = logic_snapshot.status(ctx.env.snapshot, deep_check=deep_check)
+    click.echo(result.value)
 
 # ##################### BACKFILL ###################
 
@@ -305,6 +306,54 @@ def get_metrics_data_cmd(ctx, component, metric_name, statistic, lookback):
     pprint(
         metric_data
     )
+
+# ##################### UTILITIES ###################
+
+
+@cli.command()
+@click.option(
+    "--config-file", default="/etc/migration_services.yaml", help="Path to config file"
+)
+@click.option("--json", is_flag=True)
+@click.argument('shell', type=click.Choice(['bash', 'zsh', 'fish']))
+@click.pass_obj
+def completion(ctx, config_file, json, shell):
+    """Generate shell completion script and instructions for setup.
+
+    Supported shells: bash, zsh, fish
+
+    To enable completion:
+
+    Bash:
+      console completion bash > /etc/bash_completion.d/console
+      # Then restart your shell
+
+    Zsh:
+      # If shell completion is not already enabled in your environment,
+      # you will need to enable it. You can execute the following once:
+      echo "autoload -U compinit; compinit" >> ~/.zshrc
+
+      console completion zsh > "${fpath[1]}/_console"
+      # Then restart your shell
+
+    Fish:
+      console completion fish > ~/.config/fish/completions/console.fish
+      # Then restart your shell
+    """
+    completion_class = get_completion_class(shell)
+    if completion_class is None:
+        click.echo(f"Error: {shell} shell is currently not supported", err=True)
+        ctx.exit(1)
+
+    try:
+        completion_script = completion_class(lambda: cli(ctx, config_file, json),
+                                             {},
+                                             "console",
+                                             "_CONSOLE_COMPLETE").source()
+        click.echo(completion_script)
+    except RuntimeError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        ctx.exit(1)
 
 
 #################################################

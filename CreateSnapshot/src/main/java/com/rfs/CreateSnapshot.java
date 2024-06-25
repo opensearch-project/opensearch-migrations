@@ -57,6 +57,14 @@ public class CreateSnapshot {
         @Parameter(names = {"--source-insecure"},
                 description = "Allow untrusted SSL certificates for source")
         public boolean sourceInsecure = false;
+
+        @Parameter(names = {"--no-wait"}, description = "Optional.  If provided, the snapshot runner will not wait for completion")
+        public boolean noWait = false;
+
+        @Parameter(names = {"--max-snapshot-rate-mb-per-node"},
+                required = false,
+                description = "The maximum snapshot rate in megabytes per second per node")
+        public Integer maxSnapshotRateMBPerNode;
     }
 
     @Getter
@@ -87,16 +95,22 @@ public class CreateSnapshot {
         log.info("Running CreateSnapshot with {}", String.join(" ", args));
         run(c -> ((arguments.fileSystemRepoPath != null)
                         ? new FileSystemSnapshotCreator(arguments.snapshotName, c, arguments.fileSystemRepoPath)
-                        : new S3SnapshotCreator(arguments.snapshotName, c, arguments.s3RepoUri, arguments.s3Region)),
-                new OpenSearchClient(arguments.sourceHost, arguments.sourceUser, arguments.sourcePass, arguments.sourceInsecure)
+                        : new S3SnapshotCreator(arguments.snapshotName, c, arguments.s3RepoUri, arguments.s3Region, arguments.maxSnapshotRateMBPerNode)),
+                new OpenSearchClient(arguments.sourceHost, arguments.sourceUser, arguments.sourcePass, arguments.sourceInsecure),
+                arguments.noWait
         );
     }
 
     public static void run(Function<OpenSearchClient, SnapshotCreator> snapshotCreatorFactory,
-                           OpenSearchClient openSearchClient)
-            throws Exception {
+                           OpenSearchClient openSearchClient, boolean noWait) throws Exception {
         TryHandlePhaseFailure.executeWithTryCatch(() -> {
-            SnapshotRunner.runAndWaitForCompletion(snapshotCreatorFactory.apply(openSearchClient));
+            if (noWait) {
+                SnapshotRunner.run(snapshotCreatorFactory.apply(openSearchClient));
+            } else {
+                SnapshotRunner.runAndWaitForCompletion(snapshotCreatorFactory.apply(openSearchClient));
+            }
         });
     }
 }
+
+

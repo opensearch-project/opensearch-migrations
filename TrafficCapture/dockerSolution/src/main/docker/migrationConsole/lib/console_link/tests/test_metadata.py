@@ -14,8 +14,7 @@ def s3_snapshot():
             "aws_region": "us-east-1"
         }
     }
-    return S3Snapshot(snapshot_config, create_valid_cluster(auth_type=AuthMethod.NO_AUTH),
-                      create_valid_cluster(auth_type=AuthMethod.NO_AUTH))
+    return S3Snapshot(snapshot_config, create_valid_cluster(auth_type=AuthMethod.NO_AUTH))
 
 
 @pytest.fixture()
@@ -26,8 +25,7 @@ def fs_snapshot():
             "repo_path": "/path/for/repo"
         }
     }
-    return FileSystemSnapshot(snapshot_config, create_valid_cluster(auth_type=AuthMethod.NO_AUTH),
-                              create_valid_cluster(auth_type=AuthMethod.NO_AUTH))
+    return FileSystemSnapshot(snapshot_config, create_valid_cluster(auth_type=AuthMethod.NO_AUTH))
 
 
 def test_metadata_init_with_fully_specified_config_succeeds():
