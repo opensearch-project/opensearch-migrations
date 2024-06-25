@@ -4,6 +4,11 @@ import {MigrationConsoleStack} from "../lib/service-stacks/migration-console-sta
 import {ContainerImage} from "aws-cdk-lib/aws-ecs";
 import * as yaml from 'yaml';
 
+// Mock using local Dockerfile (which may not exist and would fail synthesis)
+jest.mock("aws-cdk-lib/aws-ecr-assets")
+jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => ContainerImage.fromRegistry("ServiceImage"));
+
+
 test('Test that IAM policy contains fetch migration IAM statements when fetch migration is enabled', () => {
     const contextOptions = {
         vpcEnabled: true,
@@ -59,10 +64,6 @@ test('Test that IAM policy does not contain fetch migration IAM statements when 
 
 
 test('Test that services yaml parameter is created', () => {
-    // Mock using local Dockerfile (which may not exist and would fail synthesis)
-    jest.mock("aws-cdk-lib/aws-ecr-assets")
-    jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => ContainerImage.fromRegistry("ServiceImage"));
-
     const contextOptions = {
         vpcEnabled: true,
         migrationAssistanceEnabled: true,
