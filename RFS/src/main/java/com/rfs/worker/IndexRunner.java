@@ -1,59 +1,47 @@
 package com.rfs.worker;
 
-import java.util.Optional;
+import java.util.List;
+import java.util.function.BiConsumer;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import com.rfs.common.SnapshotRepo;
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
-import com.rfs.cms.CmsClient;
-import com.rfs.cms.CmsEntry;
+import com.rfs.common.FilterScheme;
 import com.rfs.common.IndexMetadata;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 
-public class IndexRunner implements Runner {
-    private static final Logger logger = LogManager.getLogger(IndexRunner.class);
+@Slf4j
+@AllArgsConstructor
+public class IndexRunner {
 
-    private final IndexStep.SharedMembers members;
+    private final String snapshotName;
+    private final IndexMetadata.Factory metadataFactory;
+    private final IndexCreator_OS_2_11 indexCreator;
+    private final Transformer transformer;
+    private final List<String> indexAllowlist;
 
-    public IndexRunner(GlobalState globalState, CmsClient cmsClient, String snapshotName, IndexMetadata.Factory metadataFactory, 
-            IndexCreator_OS_2_11 indexCreator, Transformer transformer) {
-        this.members = new IndexStep.SharedMembers(globalState, cmsClient, snapshotName, metadataFactory, indexCreator, transformer);
-    }
-
-    @Override
-    public void runInternal() {
-        WorkerStep nextStep = null;
-        try {
-            nextStep = new IndexStep.EnterPhase(members);
-
-            while (nextStep != null) {
-                nextStep.run();
-                nextStep = nextStep.nextStep();
+    public void migrateIndices() {
+        SnapshotRepo.Provider repoDataProvider = metadataFactory.getRepoDataProvider();
+        // TODO - parallelize this, maybe ~400-1K requests per thread and do it asynchronously
+        
+        BiConsumer<String, Boolean> logger = (indexName, accepted) -> {
+            if (!accepted) {
+                log.info("Index " + indexName + " rejected by allowlist");
             }
-        } catch (Exception e) {
-            throw new IndexMigrationPhaseFailed(
-                members.globalState.getPhase(), 
-                nextStep, 
-                members.cmsEntry.map(bar -> (CmsEntry.Base) bar), 
-                e
-            );
-        }
+        };
+        repoDataProvider.getIndicesInSnapshot(snapshotName).stream()
+            .filter(FilterScheme.filterIndicesByAllowList(indexAllowlist, logger))
+            .peek(index -> {
+                var indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
+                var root = indexMetadata.toObjectNode();
+                var transformedRoot = transformer.transformIndexMetadata(root);
+                var resultOp = indexCreator.create(transformedRoot, index.getName(), indexMetadata.getId());
+                resultOp.ifPresentOrElse(value -> log.info("Index " + index.getName() + " created successfully"),
+                        () -> log.info("Index " + index.getName() + " already existed; no work required")
+                );
+            })
+            .count(); // Force the stream to execute
     }
-
-    @Override
-    public String getPhaseName() {
-        return "Index Migration";
-    }
-
-    @Override
-    public Logger getLogger() {
-        return logger;
-    }
-
-    public static class IndexMigrationPhaseFailed extends Runner.PhaseFailed {
-        public IndexMigrationPhaseFailed(GlobalState.Phase phase, WorkerStep nextStep, Optional<CmsEntry.Base> cmsEntry, Exception e) {
-            super("Index Migration Phase failed", phase, nextStep, cmsEntry, e);
-        }
-    }    
 }

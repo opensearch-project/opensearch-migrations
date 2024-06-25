@@ -10,9 +10,12 @@ RUN wget -O kafka/libs/msk-iam-auth.jar https://github.com/aws/aws-msk-iam-auth/
 WORKDIR /root
 
 # Add Traffic Replayer jars for running KafkaPrinter from this container
-COPY build/jars /root/kafka-tools/replayer-jars
+COPY staging/trafficReplayer/lib /root/kafka-tools/replayer-jars
 RUN printf "#!/bin/sh\njava -cp `echo /root/kafka-tools/replayer-jars/*.jar | tr \   :` \"\$@\" " > /root/kafka-tools/runJavaWithClasspath.sh
 RUN chmod +x /root/kafka-tools/runJavaWithClasspath.sh
+
+COPY staging/CreateSnapshot /root/createSnapshot
+COPY staging/MetadataMigration /root/metadataMigration
 
 COPY osiPipelineTemplate.yaml /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
@@ -34,13 +37,17 @@ COPY loadServicesFromParameterStore.sh /root/
 RUN chmod ug+x /root/loadServicesFromParameterStore.sh
 
 COPY lib /root/lib
-RUN pip install -e /root/lib/console_link/
+WORKDIR /root/lib/console_link
+RUN pipenv install --system --deploy --ignore-pipfile
 
 # Experimental console API, not started by default
 COPY console_api /root/console_api
 WORKDIR /root/console_api
-RUN pip3 install -r /root/console_api/requirements.txt
+RUN pipenv install --system --deploy --ignore-pipfile
 WORKDIR /root
-#CMD python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000
+#CMD pipenv run python manage.py runserver_plus 0.0.0.0:8000
+
+# Ensure bash completion is installed
+RUN apt-get install -y bash-completion
 
 CMD /root/loadServicesFromParameterStore.sh && tail -f /dev/null

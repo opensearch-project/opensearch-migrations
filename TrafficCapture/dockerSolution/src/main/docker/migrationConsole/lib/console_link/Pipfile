@@ -1,0 +1,21 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+requests = ">=2.32.3"
+boto3 = "*"
+pyyaml = "*"
+Click = "*"
+cerberus = "*"
+awscli = "*"
+
+[dev-packages]
+pytest = "*"
+pytest-mock = "*"
+requests-mock = "*"
+coverage = "*"
+
+[requires]
+python_version = "3.10"

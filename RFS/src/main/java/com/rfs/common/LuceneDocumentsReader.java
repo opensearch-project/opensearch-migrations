@@ -2,9 +2,13 @@ package com.rfs.common;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.concurrent.ArrayBlockingQueue;
+import java.util.concurrent.BlockingQueue;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexReader;
@@ -12,36 +16,37 @@ import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
 
 import lombok.Lombok;
+import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
 
-
+@RequiredArgsConstructor
+@Slf4j
 public class LuceneDocumentsReader {
-    private static final Logger logger = LogManager.getLogger(LuceneDocumentsReader.class);
+    public static final int NUM_DOCUMENTS_BUFFERED = 1024;
+    protected final Path indexDirectoryPath;
 
-    public Flux<Document> readDocuments(Path luceneFilesBasePath, String indexName, int shardId) {
-        Path indexDirectoryPath = luceneFilesBasePath.resolve(indexName).resolve(String.valueOf(shardId));
-
+    public Flux<Document> readDocuments() {
         return Flux.using(
-            () -> openIndexReader(indexDirectoryPath),
-            reader -> {
-                logger.info(reader.maxDoc() + " documents found in the current Lucene index");
+                () -> openIndexReader(indexDirectoryPath),
+                reader -> {
+                    log.info(reader.maxDoc() + " documents found in the current Lucene index");
 
-                return Flux.range(0, reader.maxDoc()) // Extract all the Documents in the IndexReader
-                .handle((i, sink) -> {
-                    Document doc = getDocument(reader, i);
-                    if (doc != null) { // Skip malformed docs
-                        sink.next(doc);
+                    return Flux.range(0, reader.maxDoc()) // Extract all the Documents in the IndexReader
+                            .handle((i, sink) -> {
+                                Document doc = getDocument(reader, i);
+                                if (doc != null) { // Skip malformed docs
+                                    sink.next(doc);
+                                }
+                            }).cast(Document.class);
+                },
+                reader -> { // Close the IndexReader when done
+                    try {
+                        reader.close();
+                    } catch (IOException e) {
+                        log.error("Failed to close IndexReader", e);
+                        throw Lombok.sneakyThrow(e);
                     }
-                }).cast(Document.class);
-            },
-            reader -> { // Close the IndexReader when done
-                try {
-                    reader.close();
-                } catch (IOException e) {
-                    logger.error("Failed to close IndexReader", e);
-                    throw Lombok.sneakyThrow(e);
                 }
-            }
         );
     }
 
@@ -60,18 +65,18 @@ public class LuceneDocumentsReader {
                 StringBuilder errorMessage = new StringBuilder();
                 errorMessage.append("Unable to parse Document id from Document.  The Document's Fields: ");
                 document.getFields().forEach(f -> errorMessage.append(f.name()).append(", "));
-                logger.error(errorMessage.toString());
+                log.error(errorMessage.toString());
                 return null; // Skip documents with missing id
             }
             if (source_bytes == null || source_bytes.bytes.length == 0) {
-                logger.warn("Document " + id + " is deleted or doesn't have the _source field enabled");
+                log.warn("Document " + id + " is deleted or doesn't have the _source field enabled");
                 return null;  // Skip these too
             }
 
-            logger.debug("Document " + id + " read successfully");
+            log.debug("Document " + id + " read successfully");
             return document;
         } catch (Exception e) {
-            logger.error("Failed to read document at Lucene index location " + docId, e);
+            log.error("Failed to read document at Lucene index location " + docId, e);
             return null;
         }
     }

@@ -18,6 +18,10 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 
 class TestLuceneDocumentsReader extends LuceneDocumentsReader {
+    public TestLuceneDocumentsReader(Path luceneFilesBasePath) {
+        super(luceneFilesBasePath);
+    }
+
     // Helper method to correctly encode the Document IDs for test
     public static byte[] encodeUtf8Id(String id) {
         byte[] idBytes = id.getBytes(StandardCharsets.UTF_8);
@@ -65,7 +69,8 @@ public class LuceneDocumentsReaderTest {
     @Test
     void ReadDocuments_AsExpected() {
         // Use the TestLuceneDocumentsReader to get the mocked documents
-        Flux<Document> documents = new TestLuceneDocumentsReader().readDocuments(Paths.get("/fake/path"), "testIndex", 1);
+        Flux<Document> documents =
+                new TestLuceneDocumentsReader(Paths.get("/fake/path/testIndex/0")).readDocuments();
 
         // Verify that the results are as expected
         StepVerifier.create(documents)

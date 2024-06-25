@@ -1,0 +1,18 @@
+[[source]]
+url = "https://pypi.org/simple"
+verify_ssl = true
+name = "pypi"
+
+[packages]
+urllib3 = "==1.26.19"
+opensearch-benchmark = "==1.5.0"
+awscli = "==1.32.106"
+awscurl = "==0.33"
+tqdm = "==4.66.4"
+h5py = "==3.10.0"
+numpy = "<2.0,>=1.26.4"
+
+[dev-packages]
+
+[requires]
+python_version = "3.10"

@@ -3,7 +3,7 @@ import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {MigrationServiceCore} from "./migration-service-core";
-import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import { MigrationSSMParameter, createMigrationStringParameter, getMigrationStringParameterValue } from "../common-utilities";
 
 export interface KafkaBrokerProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -19,10 +19,14 @@ export class KafkaStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: KafkaBrokerProps) {
         super(scope, id, props)
         let securityGroups = [
-            SecurityGroup.fromSecurityGroupId(this, "serviceSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/serviceSecurityGroupId`)),
-            SecurityGroup.fromSecurityGroupId(this, "trafficStreamSourceAccessSG", StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/trafficStreamSourceAccessSecurityGroupId`))
-        ]
-
+            { id: "serviceSG", param: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID },
+            { id: "trafficStreamSourceAccessSG", param: MigrationSSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID }
+        ].map(({ id, param }) =>
+            SecurityGroup.fromSecurityGroupId(this, id, getMigrationStringParameterValue(this, {
+                ...props,
+                parameter: param,
+            }))
+        );
         const servicePort: PortMapping = {
             name: "kafka-connect",
             hostPort: 9092,
@@ -30,12 +34,10 @@ export class KafkaStack extends MigrationServiceCore {
             protocol: Protocol.TCP
         }
 
-        new StringParameter(this, 'SSMParameterKafkaBrokers', {
-            description: 'OpenSearch Migration Parameter for Kafka brokers',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`,
-            stringValue: 'kafka:9092'
+        createMigrationStringParameter(this, 'kafka:9092', {
+            ...props,
+            parameter: MigrationSSMParameter.KAFKA_BROKERS
         });
-
         this.createService({
             serviceName: "kafka",
             dockerImageRegistryName: "docker.io/apache/kafka:3.7.0",

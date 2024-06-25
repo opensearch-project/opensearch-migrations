@@ -3,14 +3,15 @@ import pathlib
 
 import requests
 from console_link.models.metrics_source import MetricsSource, CloudwatchMetricsSource, PrometheusMetricsSource, \
-    MetricStatistic, get_metrics_source, Component, UnsupportedMetricsSourceError
+    MetricStatistic, Component
+from console_link.logic.metrics import get_metrics_source, UnsupportedMetricsSourceError
 import pytest
 import requests_mock
 
 import botocore.session
 from botocore.stub import Stubber
 
-from console_link.logic.utils import AWSAPIError
+from console_link.models.utils import AWSAPIError
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 AWS_REGION = "us-east-1"
@@ -29,8 +30,9 @@ def prometheus_ms():
     # fail if the endpoint doesn't start with http
     endpoint = "http://localhost:9090"
     return PrometheusMetricsSource({
-        "type": "prometheus",
-        "endpoint": endpoint
+        "prometheus": {
+            "endpoint": endpoint
+        }
     })
 
 
@@ -44,45 +46,48 @@ def cw_stubber():
 @pytest.fixture
 def cw_ms():
     return CloudwatchMetricsSource({
-        "type": "cloudwatch",
-        "aws_region": AWS_REGION
+        "cloudwatch": {
+            "aws_region": AWS_REGION
+        }
     })
 
 
 def test_get_metrics_source():
     cw_config = {
-        "type": "cloudwatch",
-        "aws_region": AWS_REGION
+        "cloudwatch": {
+            "aws_region": AWS_REGION
+        }
     }
     cw_metrics_source = get_metrics_source(cw_config)
     assert isinstance(cw_metrics_source, CloudwatchMetricsSource)
     assert isinstance(cw_metrics_source, MetricsSource)
 
     prometheus_config = {
-        "type": "prometheus",
-        "endpoint": "localhost:9090"
+        "prometheus": {
+            "endpoint": "localhost:9090"
+        }
     }
     prometheus_metrics_source = get_metrics_source(prometheus_config)
     assert isinstance(prometheus_metrics_source, PrometheusMetricsSource)
     assert isinstance(prometheus_metrics_source, MetricsSource)
 
     unknown_conig = {
-        "type": "made_up_metrics_source",
+        "made_up_metrics_source": {"data": "xyz"}
     }
     with pytest.raises(UnsupportedMetricsSourceError) as excinfo:
         get_metrics_source(unknown_conig)
     assert "Unsupported metrics source type" in str(excinfo.value.args[0])
-    assert unknown_conig["type"] in str(excinfo.value.args[1])
+    assert "made_up_metrics_source" in str(excinfo.value.args[1])
 
 
 def test_prometheus_metrics_source_validates_endpoint():
     wrong_prometheus_config = {
-        "type": "prometheus",
+        "prometheus": {'different-key': 'value'}
     }
     with pytest.raises(ValueError) as excinfo:
         PrometheusMetricsSource(wrong_prometheus_config)
-    assert "Invalid config file for PrometheusMetricsSource" in str(excinfo.value.args[0])
-    assert "endpoint" in str(excinfo.value.args[1])
+    assert "Invalid config file for MetricsSource" in str(excinfo.value.args[0])
+    assert "endpoint" in str(excinfo.value.args[1]['metrics'][0]['prometheus'])
 
 
 def test_cloudwatch_metrics_get_metrics(cw_ms, cw_stubber):
@@ -169,3 +174,11 @@ def test_prometheus_get_metrics_error(prometheus_ms):
                status_code=500)
         with pytest.raises(requests.exceptions.HTTPError):
             prometheus_ms.get_metrics()
+
+
+def test_prometheus_get_metric_for_nonexistent_component(prometheus_ms):
+    with pytest.raises(ValueError):
+        prometheus_ms.get_metric_data(
+            Component(3), "kafkaCommitCount",
+            MetricStatistic.Average, startTime=datetime.datetime.now()
+        )

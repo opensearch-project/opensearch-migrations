@@ -1,5 +1,6 @@
 package com.rfs.version_es_7_10;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -16,6 +17,7 @@ public class SnapshotMetadataFactory_ES_7_10 implements com.rfs.common.SnapshotM
     @Override
     public SnapshotMetadata.Data fromJsonNode(JsonNode root) throws Exception {
         ObjectMapper mapper = new ObjectMapper();
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         ObjectNode objectNodeRoot = (ObjectNode) root;
         SnapshotMetadataData_ES_7_10 snapshotMetadata = mapper.treeToValue(objectNodeRoot.get("snapshot"), SnapshotMetadataData_ES_7_10.class);
         return snapshotMetadata;

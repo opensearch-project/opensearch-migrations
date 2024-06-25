@@ -2,6 +2,9 @@ plugins {
   id "java-library"
 }
 
+java.sourceCompatibility = JavaVersion.VERSION_11
+java.targetCompatibility = JavaVersion.VERSION_11
+
 dependencies {
 
   constraints {
@@ -48,7 +51,7 @@ dependencies {
     api group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: jackson
     api group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-smile', version: jackson
 
-    def jupiter = '5.9.3'
+    def jupiter = '5.10.2'
     api group: 'org.junit.jupiter', name:'junit-jupiter-api', version: jupiter
     api group: 'org.junit.jupiter', name:'junit-jupiter-params', version: jupiter
     api group: 'org.junit.jupiter', name:'junit-jupiter-engine', version: jupiter
@@ -89,6 +92,9 @@ dependencies {
     api group: 'org.testcontainers', name: 'kafka', version: testcontainers
     api group: 'org.testcontainers', name: 'testcontainers', version: testcontainers
     api group: 'org.testcontainers', name: 'toxiproxy', version: testcontainers
+
+    // make sure that this is compatible with the testcontainers version
+    api group: 'org.opensearch', name: 'opensearch-testcontainers', version: '2.0.1'
 
     def mockito = '5.11.0'
     api group: 'org.mockito', name:'mockito-core', version: mockito

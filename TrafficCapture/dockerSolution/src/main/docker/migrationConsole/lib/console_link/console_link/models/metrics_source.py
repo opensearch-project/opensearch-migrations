@@ -5,19 +5,15 @@ from typing import Any, Dict, List, Optional, Tuple
 import boto3
 import botocore
 from cerberus import Validator
-from console_link.logic.utils import raise_for_aws_api_error
+from console_link.models.utils import raise_for_aws_api_error
 import requests
 import logging
+
+from console_link.models.schema_tools import contains_one_of
 
 logger = logging.getLogger(__name__)
 
 
-class UnsupportedMetricsSourceError(Exception):
-    def __init__(self, supplied_metrics_source: str):
-        super().__init__("Unsupported metrics source type", supplied_metrics_source)
-
-
-MetricsSourceType = Enum("MetricsSourceType", ["CLOUDWATCH", "PROMETHEUS"])
 MetricStatistic = Enum(
     "MetricStatistic", ["SampleCount", "Average", "Sum", "Minimum", "Maximum"]
 )
@@ -28,45 +24,46 @@ class Component(Enum):
     REPLAYER = "replayer"
 
 
-SCHEMA = {
-    "type": {
-        "type": "string",
-        "allowed": [m.name.lower() for m in MetricsSourceType],
-        "required": True,
+MetricsSourceType = Enum("MetricsSourceType", ["CLOUDWATCH", "PROMETHEUS"])
+
+
+CLOUDWATCH_SCHEMA = {
+    "type": "dict",
+    "schema": {
+        "aws_region": {
+            "type": "string",
+            "required": False,
+        },
     },
-    "endpoint": {
-        "type": "string",
-        "required": False,
-    },
-    "aws_region": {
-        "type": "string",
-        "required": False
+    "nullable": True
+}
+
+PROMETHEUS_SCHEMA = {
+    "type": "dict",
+    "schema": {
+        "endpoint": {
+            "type": "string",
+            "required": True,
+        },
     },
 }
 
-PROMETHEUS_SCHEMA = {k: v.copy() for k, v in SCHEMA.items()}
-PROMETHEUS_SCHEMA["endpoint"]["required"] = True
-
-
-def get_metrics_source(config):
-    try:
-        metric_source_type = MetricsSourceType[config["type"].upper()]
-    except KeyError:
-        raise UnsupportedMetricsSourceError(config["type"])
-    
-    if metric_source_type == MetricsSourceType.CLOUDWATCH:
-        return CloudwatchMetricsSource(config)
-    elif metric_source_type == MetricsSourceType.PROMETHEUS:
-        return PrometheusMetricsSource(config)
-    else:
-        logger.error(f"An unsupported metrics source type was provided: {config['type']}")
-        raise UnsupportedMetricsSourceError(config["type"])
+SCHEMA = {
+    "metrics": {
+        "type": "dict",
+        "check_with": contains_one_of({ms.name.lower() for ms in MetricsSourceType}),
+        "schema": {
+            "prometheus": PROMETHEUS_SCHEMA,
+            "cloudwatch": CLOUDWATCH_SCHEMA
+        },
+    }
+}
 
 
 class MetricsSource:
     def __init__(self, config: Dict) -> None:
         v = Validator(SCHEMA)
-        if not v.validate(config):
+        if not v.validate({"metrics": config}):
             raise ValueError("Invalid config file for MetricsSource", v.errors)
 
     def get_metrics(self) -> Dict[str, List[str]]:
@@ -118,8 +115,8 @@ class CloudwatchMetricsSource(MetricsSource):
     def __init__(self, config: Dict) -> None:
         super().__init__(config)
         logger.info(f"Initializing CloudwatchMetricsSource from config {config}")
-        if "aws_region" in config:
-            self.aws_region = config["aws_region"]
+        if type(config["cloudwatch"]) is dict and "aws_region" in config["cloudwatch"]:
+            self.aws_region = config["cloudwatch"]["aws_region"]
             self.boto_config = botocore.config.Config(region_name=self.aws_region)
         else:
             self.aws_region = None
@@ -211,10 +208,7 @@ class PrometheusMetricsSource(MetricsSource):
         super().__init__(config)
         logger.info(f"Initializing PrometheusMetricsSource from config {config}")
 
-        v = Validator(PROMETHEUS_SCHEMA)
-        if not v.validate(config):
-            raise ValueError("Invalid config file for PrometheusMetricsSource", v.errors)
-        self.endpoint = config["endpoint"]
+        self.endpoint = config["prometheus"]["endpoint"]
 
     def get_metrics(self, recent=False) -> Dict[str, List[str]]:
         logger.info(f"{self.__class__.__name__}.get_metrics called with {recent=}")

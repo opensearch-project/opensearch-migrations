@@ -1,21 +1,25 @@
 source_cluster:
-  endpoint: "https://capture-proxy-es:9200"
+  endpoint: "https://capture-proxy:9200"
   allow_insecure: true
-  authorization:
-    type: "basic_auth"
-    details:
-      username: "admin"
-      password: "admin"
+  basic_auth:
+    username: "admin"
+    password: "admin"
 target_cluster:
   endpoint: "https://opensearchtarget:9200"
   allow_insecure: true
-  authorization:
-    type: "basic_auth"
-    details:
-      username: "admin"
-      password: "myStrongPassword123!"
+  basic_auth:
+    username: "admin"
+    password: "myStrongPassword123!"
 metrics_source:
-  type: "prometheus"
-  endpoint: "http://prometheus:9090"
-replayer:
-  deployment_type: "docker"
+  prometheus:
+    endpoint: "http://prometheus:9090"
+backfill:
+  reindex_from_snapshot:
+    docker:
+snapshot:
+  snapshot_name: "snapshot_2023_01_01"
+  fs:
+    repo_path: "/snapshot/test-console"
+metadata_migration:
+  from_snapshot:
+  min_replicas: 0

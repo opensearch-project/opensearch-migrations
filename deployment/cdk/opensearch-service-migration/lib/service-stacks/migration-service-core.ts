@@ -13,7 +13,7 @@ import {
     OperatingSystemFamily,
     Volume,
     AwsLogDriverMode,
-    ContainerDependencyCondition
+    ContainerDependencyCondition,
 } from "aws-cdk-lib/aws-ecs";
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {Duration, RemovalPolicy, Stack} from "aws-cdk-lib";
@@ -23,6 +23,8 @@ import {CfnService as DiscoveryCfnService, PrivateDnsNamespace} from "aws-cdk-li
 import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {createDefaultECSTaskRole} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
+import { ApplicationListener, ApplicationProtocol, ApplicationProtocolVersion, ApplicationTargetGroup, IApplicationLoadBalancer, IApplicationTargetGroup, IListenerCertificate, INetworkTargetGroup, ITargetGroup, SslPolicy } from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 
 
 export interface MigrationServiceCoreProps extends StackPropsExt {
@@ -51,8 +53,12 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly taskInstanceCount?: number,
     readonly ulimits?: Ulimit[],
     readonly maxUptime?: Duration,
-    readonly otelCollectorEnabled?: boolean
+    readonly otelCollectorEnabled?: boolean,
+    readonly targetGroups?: ELBTargetGroup[],
+    readonly ephemeralStorageGiB?: number
 }
+
+export type ELBTargetGroup = IApplicationTargetGroup | INetworkTargetGroup;
 
 export class MigrationServiceCore extends Stack {
 
@@ -95,7 +101,7 @@ export class MigrationServiceCore extends Stack {
         props.taskRolePolicies?.forEach(policy => serviceTaskRole.addToPolicy(policy))
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {
-            ephemeralStorageGiB: 75,
+            ephemeralStorageGiB: props.ephemeralStorageGiB ? props.ephemeralStorageGiB : 75,
             runtimePlatform: {
                 operatingSystemFamily: OperatingSystemFamily.LINUX,
                 cpuArchitecture: props.cpuArchitecture
@@ -223,12 +229,15 @@ export class MigrationServiceCore extends Stack {
             enableExecuteCommand: true,
             securityGroups: props.securityGroups,
             vpcSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PRIVATE_WITH_EGRESS}),
-            cloudMapOptions: cloudMapOptions
+            cloudMapOptions: cloudMapOptions,
         });
+        
+        if (props.targetGroups) {
+            props.targetGroups.filter(tg => tg !== undefined).forEach(tg => tg.addTarget(fargateService));
+        }
 
         if (props.serviceDiscoveryEnabled) {
             this.addServiceDiscoveryRecords(fargateService, props.serviceDiscoveryPort)
         }
     }
-
 }

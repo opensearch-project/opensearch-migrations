@@ -9,13 +9,13 @@ test('Test default fetch migration stack creates required resources', () => {
 
     const networkStack = new NetworkStack(app, "NetworkStack", {
         defaultDeployId: "default",
+        sourceClusterEndpoint: "https://test-cluster",
         stage: "unit-test"
     })
 
     const fetchStack = new FetchMigrationStack(app, "FetchMigrationStack", {
         vpc: networkStack.vpc,
         dpPipelineTemplatePath: "./dp_pipeline_template.yaml",
-        sourceEndpoint: "https://test-cluster",
         defaultDeployId: "default",
         stage: "unit-test",
         fargateCpuArch: CpuArchitecture.X86_64,

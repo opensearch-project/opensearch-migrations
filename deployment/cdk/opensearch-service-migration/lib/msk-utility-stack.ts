@@ -7,7 +7,7 @@ import {NodejsFunction} from "aws-cdk-lib/aws-lambda-nodejs";
 import {Runtime} from "aws-cdk-lib/aws-lambda";
 import {Provider} from "aws-cdk-lib/custom-resources";
 import * as path from "path";
-import {StringParameter} from "aws-cdk-lib/aws-ssm";
+import { createMigrationStringParameter, getMigrationStringParameterValue, MigrationSSMParameter } from "./common-utilities";
 
 export interface MskUtilityStackProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -24,15 +24,18 @@ export class MSKUtilityStack extends Stack {
     constructor(scope: Construct, id: string, props: MskUtilityStackProps) {
         super(scope, id, props);
 
-        const mskARN = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/mskClusterARN`)
-        let brokerEndpoints
+        const mskARN = getMigrationStringParameterValue(this, {
+            ...props,
+            parameter: MigrationSSMParameter.MSK_CLUSTER_ARN,
+        });
+        let brokerEndpoints;
         // If the public endpoints setting is enabled we will launch a Lambda custom resource to enable public endpoints and then wait for these
         // endpoints to become created before we return the endpoints and stop the process
         if (props.mskEnablePublicEndpoints) {
             const lambdaInvokeStatement = new PolicyStatement({
                 effect: Effect.ALLOW,
                 actions: ["lambda:InvokeFunction"],
-                resources: [`arn:aws:lambda:${this.region}:${this.account}:function:OSMigrations*`]
+                resources: [`arn:${this.partition}:lambda:${this.region}:${this.account}:function:OSMigrations*`]
             })
             // Updating connectivity for an MSK cluster requires some VPC permissions
             // (https://docs.aws.amazon.com/service-authorization/latest/reference/list_amazonmanagedstreamingforapachekafka.html#amazonmanagedstreamingforapachekafka-cluster)
@@ -145,10 +148,9 @@ export class MSKUtilityStack extends Stack {
             // Access BROKER_ENDPOINTS from the Lambda return value
             brokerEndpoints = customResource.getAttString("BROKER_ENDPOINTS")
         }
-        new StringParameter(this, 'SSMParameterKafkaBrokers', {
-            description: 'OpenSearch Migration Parameter for Kafka brokers',
-            parameterName: `/migration/${props.stage}/${props.defaultDeployId}/kafkaBrokers`,
-            stringValue: brokerEndpoints
+        createMigrationStringParameter(this, brokerEndpoints, {
+            ...props,
+            parameter: MigrationSSMParameter.KAFKA_BROKERS
         });
     }
 }

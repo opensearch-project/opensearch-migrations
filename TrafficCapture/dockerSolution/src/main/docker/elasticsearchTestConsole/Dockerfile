@@ -1,21 +1,22 @@
 FROM ubuntu:jammy
 
 ENV DEBIAN_FRONTEND noninteractive
+ENV PIP_ROOT_USER_ACTION ignore
 
-COPY requirements.txt /requirements-test-console.txt
+COPY Pipfile .
+COPY Pipfile.lock .
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends python3.9 python3-pip python3-dev openjdk-11-jre-headless wget gcc libc-dev git curl vim jq unzip less && \
-    pip3 install -r /requirements-test-console.txt
+    apt-get install -y --no-install-recommends python3.10 python3-pip python3-dev openjdk-11-jre-headless wget gcc libc-dev git curl vim jq unzip less && \
+    pip install pipenv && \
+    pipenv install --ignore-pipfile --deploy
 
-COPY runTestBenchmarks.sh /root/
-COPY simpleDocumentGenerator.py /root/
-COPY catIndices.sh /root/
+COPY *.sh /root/
+COPY *.py /root/
 
 RUN ln -s /usr/bin/python3 /usr/bin/python
 
-RUN chmod ug+x /root/runTestBenchmarks.sh
-RUN chmod ug+x /root/simpleDocumentGenerator.py
-RUN chmod ug+x /root/catIndices.sh
+RUN chmod ug+x /root/*.sh
+RUN chmod ug+x /root/*.py
 
 CMD tail -f /dev/null

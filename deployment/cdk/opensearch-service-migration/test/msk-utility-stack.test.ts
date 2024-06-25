@@ -8,7 +8,8 @@ test('Test if mskEnablePublicEndpoints is provided, wait condition and max attem
         migrationAssistanceEnabled: true,
         mskEnablePublicEndpoints: true,
         mskRestrictPublicAccessTo: "10.0.0.0/32",
-        mskRestrictPublicAccessType: "ipv4"
+        mskRestrictPublicAccessType: "ipv4",
+        sourceClusterEndpoint: "https://test-cluster",
     }
 
     const stacks = createStackComposer(contextOptions)
@@ -32,7 +33,8 @@ test('Test if mskEnablePublicEndpoints is provided, wait condition and max attem
 test('Test if mskEnablePublicEndpoints is not provided, single run lambda custom resource is created', () => {
     const contextOptions = {
         vpcEnabled: true,
-        migrationAssistanceEnabled: true
+        migrationAssistanceEnabled: true,
+        sourceClusterEndpoint: "https://test-cluster",
     }
 
     const stacks = createStackComposer(contextOptions)
