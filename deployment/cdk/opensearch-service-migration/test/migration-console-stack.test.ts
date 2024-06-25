@@ -4,14 +4,12 @@ import {MigrationConsoleStack} from "../lib/service-stacks/migration-console-sta
 import {ContainerImage} from "aws-cdk-lib/aws-ecs";
 import * as yaml from 'yaml';
 
-// Mock DockerImageAsset in the specific test case
-jest.mock('aws-cdk-lib/aws-ecr-assets', () => {
-    const originalModule = jest.requireActual('aws-cdk-lib/aws-ecr-assets');
-    return {
-        ...originalModule,
-        DockerImageAsset: jest.fn((...args) => new originalModule.DockerImageAsset(...args)),
-    };
-});
+class MockDockerImageAsset {
+    imageUri: string;
+    constructor() {
+        this.imageUri = 'mock-image-uri';
+    }
+}
 
 test('Test that IAM policy contains fetch migration IAM statements when fetch migration is enabled', () => {
     const contextOptions = {
@@ -68,6 +66,16 @@ test('Test that IAM policy does not contain fetch migration IAM statements when 
 
 
 test('Test that services yaml parameter is created', () => {
+    // Mock DockerImageAsset to use the mock class
+    jest.mock('aws-cdk-lib/aws-ecr-assets', () => {
+        const originalModule = jest.requireActual('aws-cdk-lib/aws-ecr-assets');
+        return {
+            ...originalModule,
+            DockerImageAsset: MockDockerImageAsset
+        };
+    });
+
+    // Mock ContainerImage.fromDockerImageAsset to return a registry image
     jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementationOnce(() => ContainerImage.fromRegistry('ServiceImage'));
 
     const contextOptions = {
