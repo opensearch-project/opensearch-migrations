@@ -240,5 +240,6 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     @Override
     public void close() throws IOException, InterruptedException, ExecutionException {
         kafkaExecutor.submit(trackingKafkaConsumer::close).get();
+        kafkaExecutor.shutdownNow();
     }
 }

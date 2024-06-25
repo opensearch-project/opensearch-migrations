@@ -242,32 +242,32 @@ public class FullTest {
                 }
                 return d;
             };
-            var processManager = new LeaseExpireTrigger(workItemId->{
+            try (var processManager = new LeaseExpireTrigger(workItemId->{
                 log.atDebug().setMessage("Lease expired for " + workItemId + " making next document get throw").log();
                 shouldThrow.set(true);
-            });
+            })) {
+                DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
+                SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,
+                        tempDir, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
 
-            DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
-            SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,
-                    tempDir, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
+                SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
+                IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
+                ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
 
-            SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
-            IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
-            ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
-
-            return RfsMigrateDocuments.run(path -> new FilteredLuceneDocumentsReader(path, terminatingDocumentFilter),
-                    new DocumentReindexer(new OpenSearchClient(targetAddress, null)),
-                    new OpenSearchWorkCoordinator(
-                            new ApacheHttpClient(new URI(targetAddress)),
+                return RfsMigrateDocuments.run(path -> new FilteredLuceneDocumentsReader(path, terminatingDocumentFilter),
+                        new DocumentReindexer(new OpenSearchClient(targetAddress, null)),
+                        new OpenSearchWorkCoordinator(
+                                new ApacheHttpClient(new URI(targetAddress)),
 //                            new ReactorHttpClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(),
 //                                    null, null)),
-                            TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS, UUID.randomUUID().toString()),
-                    processManager,
-                    indexMetadataFactory,
-                    snapshotName,
-                    shardMetadataFactory,
-                    unpackerFactory,
-                    16*1024*1024);
+                                TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS, UUID.randomUUID().toString()),
+                        processManager,
+                        indexMetadataFactory,
+                        snapshotName,
+                        shardMetadataFactory,
+                        unpackerFactory,
+                        16 * 1024 * 1024);
+            }
         } finally {
             deleteTree(tempDir);
         }
