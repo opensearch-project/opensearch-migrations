@@ -8,7 +8,7 @@ if [ -z "$MIGRATION_SERVICES_YAML_PARAMETER" ]; then
 fi
 
 # Retrieve the parameter value from AWS Systems Manager Parameter Store
-PARAMETER_VALUE=$(aws ssm get-parameters --names "$MIGRATION_SERVICES_YAML_PARAMETER" --query "Parameters[0].Value" --output text)
+PARAMETER_VALUE=$(pipenv run aws ssm get-parameters --names "$MIGRATION_SERVICES_YAML_PARAMETER" --query "Parameters[0].Value" --output text)
 
 # Check if the retrieval was successful
 if [ $? -ne 0 ]; then

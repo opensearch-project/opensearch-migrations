@@ -89,7 +89,7 @@ test('Test that services yaml parameter is created', () => {
     // Validates that the file can be parsed as valid yaml and has the expected fields
     const parsedFromYaml = yaml.parse(yamlFileContents);
     // Validates that the file has the expected fields
-    const expectedFields = ['source_cluster', 'target_cluster', 'metrics_source', 'backfill', 'snapshot'];
+    const expectedFields = ['source_cluster', 'target_cluster', 'metrics_source', 'backfill', 'snapshot', 'metadata_migration'];
     expect(Object.keys(parsedFromYaml).length).toEqual(expectedFields.length)
     expect(new Set(Object.keys(parsedFromYaml))).toEqual(new Set(expectedFields))
 })
