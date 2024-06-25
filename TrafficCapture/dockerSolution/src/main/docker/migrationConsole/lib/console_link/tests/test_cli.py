@@ -168,3 +168,11 @@ def test_cli_cat_indices_e2e(runner, env):
     assert 'TARGET CLUSTER' in result.output
     assert source_cat_indices in result.output
     assert target_cat_indices in result.output
+
+
+def test_cli_metadata_migrate(runner, env, mocker):
+    mock = mocker.patch("subprocess.run")
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'metadata', 'migrate'],
+                           catch_exceptions=True)
+    mock.assert_called_once()
+    assert result.exit_code == 0

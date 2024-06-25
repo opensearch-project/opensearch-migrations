@@ -5,6 +5,7 @@ import console_link.logic.clusters as logic_clusters
 import console_link.logic.metrics as logic_metrics
 import console_link.logic.backfill as logic_backfill
 import console_link.logic.snapshot as logic_snapshot
+import console_link.logic.metadata as logic_metadata
 
 from console_link.models.utils import ExitCode
 from console_link.environment import Environment
@@ -36,10 +37,10 @@ class Context(object):
 @click.option('-v', '--verbose', count=True, help="Verbosity level. Default is warn, -v is info, -vv is debug.")
 @click.pass_context
 def cli(ctx, config_file, json, verbose):
-    ctx.obj = Context(config_file)
-    ctx.obj.json = json
     logging.basicConfig(level=logging.WARN - (10 * verbose))
     logger.info(f"Logging set to {logging.getLevelName(logger.getEffectiveLevel())}")
+    ctx.obj = Context(config_file)
+    ctx.obj.json = json
 
 
 # ##################### CLUSTERS ###################
@@ -231,6 +232,26 @@ def scale_backfill_cmd(ctx, units: int):
 @click.pass_obj
 def status_backfill_cmd(ctx):
     exitcode, message = logic_backfill.status(ctx.env.backfill)
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(message)
+
+# ##################### METRICS ###################
+
+
+@cli.group(name="metadata")
+@click.pass_obj
+def metadata_group(ctx):
+    """All actions related to metadata migration"""
+    if ctx.env.metadata is None:
+        raise click.UsageError("Metadata is not set")
+
+
+@metadata_group.command(name="migrate")
+@click.option("--detach", is_flag=True, help="Run metadata migration in detached mode")
+@click.pass_obj
+def migrate_metadata_cmd(ctx, detach):
+    exitcode, message = logic_metadata.migrate(ctx.env.metadata, detach)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)

@@ -15,7 +15,7 @@ def test_s3_snapshot_init_succeeds():
             },
         }
     }
-    snapshot = S3Snapshot(config['snapshot'], create_valid_cluster(), None)
+    snapshot = S3Snapshot(config['snapshot'], create_valid_cluster(), create_valid_cluster())
     assert isinstance(snapshot, Snapshot)
 
 
@@ -43,7 +43,7 @@ def test_get_snapshot_for_s3_config():
             },
         }
     }
-    snapshot = get_snapshot(config["snapshot"], create_valid_cluster(), None)
+    snapshot = get_snapshot(config["snapshot"], create_valid_cluster(), create_valid_cluster())
     assert isinstance(snapshot, S3Snapshot)
 
 

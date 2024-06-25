@@ -9,6 +9,7 @@ from console_link.models.snapshot import FileSystemSnapshot, Snapshot, S3Snapsho
 import yaml
 from cerberus import Validator
 
+from console_link.models.metadata import Metadata
 
 logger = logging.getLogger(__name__)
 
@@ -26,6 +27,7 @@ SCHEMA = {
     "backfill": {"type": "dict", "required": False},
     "metrics_source": {"type": "dict", "required": False},
     "snapshot": {"type": "dict", "required": False},
+    "metadata_migration": {"type": "dict", "required": False}
 }
 
 
@@ -35,11 +37,14 @@ class Environment:
     backfill: Optional[Backfill] = None
     metrics_source: Optional[MetricsSource] = None
     snapshot: Optional[Snapshot] = None
+    metadata: Optional[Metadata] = None
 
     def __init__(self, config_file: str):
+        logger.info(f"Loading config file: {config_file}")
         self.config_file = config_file
         with open(self.config_file) as f:
             self.config = yaml.safe_load(f)
+            logger.info(f"Loaded config file: {self.config}")
         v = Validator(SCHEMA)
         if not v.validate(self.config):
             logger.error(f"Config file validation errors: {v.errors}")
@@ -79,3 +84,7 @@ class Environment:
             logger.info(f"Snapshot initialized: {self.snapshot}")
         else:
             logger.info("No snapshot provided")
+        if 'metadata_migration' in self.config:
+            self.metadata: Metadata = Metadata(self.config["metadata_migration"],
+                                               target_cluster=self.target_cluster,
+                                               snapshot=self.snapshot)
