@@ -279,7 +279,7 @@ def get_snapshot_status_full(cluster: Cluster, snapshot: str,
         if not snapshots:
             return CommandResult(success=False, value="Snapshot status not available")
 
-        message = get_snapshot_status_message(snapshot_info)
+        message = get_snapshot_status_message(snapshots[0])
         return CommandResult(success=True, value=f"{state}\n{message}")
     except Exception as e:
         return CommandResult(success=False, value=f"Failed to get full snapshot status: {str(e)}")

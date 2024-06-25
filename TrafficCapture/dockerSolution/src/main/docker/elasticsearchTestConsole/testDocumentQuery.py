@@ -145,7 +145,7 @@ def add_delay_messages(
 
     if len(target_timestamp_diffs) >= 2:
         speedup_factor = calculate_average_speedup_factor(target_timestamp_diffs)
-        log_messages.append(f"Speedup Factor (last 5 seconds): {speedup_factor:.0%}")
+        log_messages.append(f"Speedup Ratio (last 5 seconds): {speedup_factor:.0%}")
     else:
         log_messages.append("Insufficient data points to calculate Speedup Factor")
 
@@ -162,17 +162,17 @@ def add_delay_messages(
     )
 
     log_messages.append(
-        f"Rolling average of source delay over last 5 seconds: {source_rolling_average:.3f}"
+        f"Rolling average of source delay over last 5 seconds: {source_rolling_average:.1f}"
         if source_rolling_average is not None
         else "Rolling average of source delay over last 5 seconds: N/A"
     )
     log_messages.append(
-        f"Rolling average of target delay over last 5 seconds: {target_rolling_average:.3f}"
+        f"Rolling average of target delay over last 5 seconds: {target_rolling_average:.1f}"
         if target_rolling_average is not None
         else "Rolling average of target delay over last 5 seconds: N/A"
     )
     log_messages.append(
-        f"Difference in rolling averages over last 5 seconds: {rolling_average_diff:.3f}"
+        f"Difference in rolling averages over last 5 seconds: {rolling_average_diff:.1f}"
         if rolling_average_diff is not None
         else "Difference in rolling averages over last 5 seconds: N/A"
     )
