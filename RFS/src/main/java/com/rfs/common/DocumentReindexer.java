@@ -17,7 +17,7 @@ public class DocumentReindexer {
     private static final int MAX_BATCH_SIZE = 1000; // Arbitrarily chosen
     protected final OpenSearchClient client;
 
-    public Mono<Void> reindex(String indexName, Flux<Document> documentStream) {   
+    public Mono<Void> reindex(String indexName, Flux<Document> documentStream) {
 
         return documentStream
             .map(this::convertDocumentToBulkSection)  // Convert each Document to part of a bulk operation

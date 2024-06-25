@@ -16,10 +16,10 @@ from console_link.models.metadata import Metadata
 logger = logging.getLogger(__name__)
 
 
-def get_snapshot(config: Dict, source_cluster: Cluster, target_cluster: Cluster):
+def get_snapshot(config: Dict, source_cluster: Cluster):
     if 'fs' in config:
-        return FileSystemSnapshot(config, source_cluster, target_cluster)
-    return S3Snapshot(config, source_cluster, target_cluster)
+        return FileSystemSnapshot(config, source_cluster)
+    return S3Snapshot(config, source_cluster)
 
 
 def get_replayer(config: Dict):
@@ -93,8 +93,7 @@ class Environment:
 
         if 'snapshot' in self.config:
             self.snapshot: Snapshot = get_snapshot(self.config["snapshot"],
-                                                   source_cluster=self.source_cluster,
-                                                   target_cluster=self.target_cluster)
+                                                   source_cluster=self.source_cluster)
             logger.info(f"Snapshot initialized: {self.snapshot}")
         else:
             logger.info("No snapshot provided")
