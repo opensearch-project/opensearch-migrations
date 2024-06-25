@@ -23,5 +23,3 @@ snapshot:
 metadata_migration:
   from_snapshot:
   min_replicas: 0
-replay:
-  docker:

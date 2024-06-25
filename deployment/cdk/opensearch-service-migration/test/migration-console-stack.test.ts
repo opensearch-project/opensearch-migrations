@@ -1,8 +1,8 @@
 import {createStackComposer} from "./test-utils";
 import {Capture, Match, Template} from "aws-cdk-lib/assertions";
 import {MigrationConsoleStack} from "../lib/service-stacks/migration-console-stack";
+import {ContainerImage} from "aws-cdk-lib/aws-ecs";
 import * as yaml from 'yaml';
-
 
 test('Test that IAM policy contains fetch migration IAM statements when fetch migration is enabled', () => {
     const contextOptions = {
@@ -57,7 +57,12 @@ test('Test that IAM policy does not contain fetch migration IAM statements when 
     expect(iamPassRoleStatement).toBeFalsy()
 })
 
+
 test('Test that services yaml parameter is created', () => {
+    // Mock using local Dockerfile (which may not exist and would fail synthesis) with the intent of using a "fake-image" from a public registry
+    jest.mock("aws-cdk-lib/aws-ecr-assets")
+    jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => ContainerImage.fromRegistry("fake-image"));
+
     const contextOptions = {
         vpcEnabled: true,
         migrationAssistanceEnabled: true,
