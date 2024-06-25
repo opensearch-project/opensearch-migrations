@@ -38,12 +38,12 @@ RUN chmod ug+x /root/loadServicesFromParameterStore.sh
 
 COPY lib /root/lib
 WORKDIR /root/lib/console_link
-RUN pipenv install --deploy --ignore-pipfile
+RUN pipenv install --system --deploy --ignore-pipfile
 
 # Experimental console API, not started by default
 COPY console_api /root/console_api
 WORKDIR /root/console_api
-RUN pipenv install --deploy --ignore-pipfile
+RUN pipenv install --system --deploy --ignore-pipfile
 WORKDIR /root
 #CMD pipenv run python manage.py runserver_plus 0.0.0.0:8000
 
