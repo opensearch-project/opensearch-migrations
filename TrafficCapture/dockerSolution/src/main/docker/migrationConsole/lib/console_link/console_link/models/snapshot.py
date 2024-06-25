@@ -1,3 +1,5 @@
+import argparse
+import datetime
 import logging
 import subprocess
 from abc import ABC, abstractmethod
@@ -5,7 +7,7 @@ from enum import Enum
 from typing import Dict, Optional, Tuple
 
 from cerberus import Validator
-from console_link.models.cluster import Cluster, HttpMethod
+from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
 
 from console_link.models.schema_tools import contains_one_of
@@ -127,6 +129,8 @@ class FileSystemSnapshot(Snapshot):
 
     def create(self, *args, **kwargs) -> CommandResult:
         assert isinstance(self.target_cluster, Cluster)
+        wait = kwargs.get('wait', False)
+        max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node', None)
 
         if self.source_cluster.auth_type != AuthMethod.NO_AUTH:
             raise NotImplementedError("Source cluster authentication is not supported for creating snapshots")
