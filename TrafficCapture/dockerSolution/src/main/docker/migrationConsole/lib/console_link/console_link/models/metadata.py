@@ -49,7 +49,7 @@ SCHEMA = {
     "min_replicas": {"type": "integer", "min": 0, "required": False},
     "index_allowlist": list_schema(required=False),
     "index_template_allowlist": list_schema(required=False),
-    "component-template-allowlist": list_schema(required=False)
+    "component_template_allowlist": list_schema(required=False)
 }
 
 
@@ -75,7 +75,7 @@ class Metadata:
         self._min_replicas = config.get("min_replicas", 0)
         self._index_allowlist = config.get("index_allowlist", None)
         self._index_template_allowlist = config.get("index_template_allowlist", None)
-        self._component_template_allowlist = config.get("component-template-allowlist", None)
+        self._component_template_allowlist = config.get("component_template_allowlist", None)
         logger.debug(f"Min replicas: {self._min_replicas}")
         logger.debug(f"Index allowlist: {self._index_allowlist}")
         logger.debug(f"Index template allowlist: {self._index_template_allowlist}")
@@ -163,13 +163,13 @@ class Metadata:
             command.append("--target-insecure")
 
         if self._index_allowlist:
-            command.extend(["--index-allowlist", ", ".join(self._index_allowlist)])
+            command.extend(["--index-allowlist", ",".join(self._index_allowlist)])
 
         if self._index_template_allowlist:
-            command.extend(["--index-template-allowlist", ", ".join(self._index_template_allowlist)])
+            command.extend(["--index-template-allowlist", ",".join(self._index_template_allowlist)])
 
         if self._component_template_allowlist:
-            command.extend(["--component-template-allowlist", ", ".join(self._component_template_allowlist)])
+            command.extend(["--component-template-allowlist", ",".join(self._component_template_allowlist)])
 
         if password_field_index:
             display_command = command[:password_field_index] + ["********"] + command[password_field_index:]
@@ -184,7 +184,7 @@ class Metadata:
     def _run_as_synchronous_process(self, command) -> CommandResult:
         try:
             # Pass None to stdout and stderr to not capture output and show in terminal
-            subprocess.run(command, stdout=None, stderr=None, text=True)
+            subprocess.run(command, stdout=None, stderr=None, text=True, check=True)
             logger.info(f"Metadata migration for snapshot {self._snapshot_name} completed")
             return CommandResult(success=True, value="Metadata migration completed")
         except subprocess.CalledProcessError as e:
