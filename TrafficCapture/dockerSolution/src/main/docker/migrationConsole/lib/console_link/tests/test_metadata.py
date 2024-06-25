@@ -1,5 +1,3 @@
-
-
 import pytest
 from console_link.models.metadata import Metadata
 from console_link.models.snapshot import S3Snapshot

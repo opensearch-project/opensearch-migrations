@@ -82,25 +82,12 @@ services:
     image: 'opensearchproject/opensearch:latest'
     environment:
       - discovery.type=single-node
-      - plugins.security.disabled=true
       - OPENSEARCH_INITIAL_ADMIN_PASSWORD=myStrongPassword123!
-      - plugins.security.disabled=true
     networks:
       - migrations
     ports:
       - "29200:9200"
 
-  opensearchsource:
-    image: opensearchproject/opensearch
-    environment:
-      - discovery.type=single-node
-      - plugins.security.disabled=true
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=myStrongPassword123!
-      - ~/.aws:/root/.aws
-    networks:
-      - migrations
-    ports:
-      - "39200:9200"
 
   migration-console:
     image: 'migrations/migration_console:latest'
@@ -110,28 +97,13 @@ services:
       - sharedReplayerOutput:/shared-replayer-output
       - ./migrationConsole/lib/console_link/services.yaml:/etc/migration_services.yaml
       # this is a convenience thing for testing -- it should be removed before this makes it to prod.
-      - ./migrationConsole/lib/console_link:/root/lib/console_link
+      # - ./migrationConsole/lib/console_link:/root/lib/console_link
       - ~/.aws:/root/.aws
-      - snapshot:/snapshot
     environment:
       - MIGRATION_KAFKA_BROKER_ENDPOINTS=kafka:9092
       - AWS_PROFILE=default
 #    command: ./runTestBenchmarks.sh
 
-  opensearchsource:
-    image: 'opensearchproject/opensearch:1'
-    volumes:
-       - snapshot:/snapshot
-    environment:
-      - discovery.type=single-node
-      - plugins.security.disabled=true
-      - path.repo=/snapshot
-      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=myStrongPassword123!
-      - ~/.aws:/root/.aws
-    networks:
-      - migrations
-    ports:
-      - "39200:9200"
 
 volumes:
   sharedComparatorSqlResults:
@@ -139,8 +111,6 @@ volumes:
   sharedReplayerOutput:
     driver: local
   grafana_data:
-    driver: local
-  snapshot:
     driver: local
 
 networks:
