@@ -1,5 +1,5 @@
 source_cluster:
-  endpoint: "https://capture-proxy-es:9200"
+  endpoint: "https://elasticsearch:9200"
   allow_insecure: true
   basic_auth:
     username: "admin"
@@ -17,7 +17,13 @@ backfill:
   reindex_from_snapshot:
     docker:
 snapshot:
-  snapshot_name: "snapshot_2023_01_01"
-  s3:
-    repo_uri: "s3://my-snapshot-bucket"
-    aws_region: "us-east-2"
+  snapshot_name: "test_snapshot"
+  fs:
+    repo_path: "/snapshot/test-console"
+metadata_migration:
+  from_snapshot: # If not provided, these are assumed from the snapshot object
+    snapshot_name: "snapshot_2023_01_01"
+    s3:
+      repo_uri: "s3://my-snapshot-bucket"
+      aws_region: "us-east-2"
+  min_replicas: 0

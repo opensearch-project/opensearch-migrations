@@ -67,12 +67,20 @@ export class SnapshotYaml {
     }
 }
 
+// This component can be much more complicated (specified snapshot details, index/component/template allowlists, etc.)
+// but for the time being, we are assuming that the snapshot is the one specified in SnapshotYaml.
+export class MetadataMigrationYaml {
+    from_snapshot: null = null;
+    min_replicas: number = 1;
+}
+
 export class ServicesYaml {
     source_cluster: ClusterYaml;
     target_cluster: ClusterYaml;
     metrics_source: MetricsSourceYaml = new MetricsSourceYaml();
     backfill: RFSBackfillYaml | OSIBackfillYaml;
     snapshot?: SnapshotYaml;
+    metadata_migration?: MetadataMigrationYaml;
 
     stringify(): string {
         return yaml.stringify({
@@ -80,7 +88,8 @@ export class ServicesYaml {
             target_cluster: this.target_cluster,
             metrics_source: this.metrics_source,
             backfill: this.backfill?.toDict(),
-            snapshot: this.snapshot?.toDict()
+            snapshot: this.snapshot?.toDict(),
+            metadata_migration: this.metadata_migration
         },
         {
             'nullStr': ''

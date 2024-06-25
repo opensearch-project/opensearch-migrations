@@ -97,22 +97,24 @@ public class FullTest {
             osTargetContainer.start();
 
             final var SNAPSHOT_NAME = "test_snapshot";
+            final List<String> INDEX_ALLOWLIST = List.of();
             CreateSnapshot.run(
                     c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, ElasticsearchContainer.CLUSTER_SNAPSHOT_DIR),
-                    new OpenSearchClient(esSourceContainer.getUrl(), null));
+                    new OpenSearchClient(esSourceContainer.getUrl(), null),
+                    false);
             var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
             try {
                 esSourceContainer.copySnapshotData(tempDir.toString());
 
                 var targetClient = new OpenSearchClient(osTargetContainer.getHttpHostAddress(), null);
                 var sourceRepo = new FileSystemRepo(tempDir);
-                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME);
+                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, INDEX_ALLOWLIST);
 
                 var workerFutures = new ArrayList<CompletableFuture<Void>>();
                 var runCounter = new AtomicInteger();
                 for (int i = 0; i < numWorkers; ++i) {
                     workerFutures.add(CompletableFuture.supplyAsync(() ->
-                            migrateDocumentsSequentially(sourceRepo, SNAPSHOT_NAME,
+                            migrateDocumentsSequentially(sourceRepo, SNAPSHOT_NAME, INDEX_ALLOWLIST,
                                     osTargetContainer.getHttpHostAddress(), runCounter)));
                 }
                 var thrownException = Assertions.assertThrows(ExecutionException.class, () ->
@@ -176,11 +178,12 @@ public class FullTest {
     @SneakyThrows
     private Void migrateDocumentsSequentially(FileSystemRepo sourceRepo,
                                               String snapshotName,
+                                              List<String> indexAllowlist,
                                               String targetAddress,
                                               AtomicInteger runCounter) {
         for (int runNumber=0; ; ++runNumber) {
             try {
-                var workResult = migrateDocumentsWithOneWorker(sourceRepo, snapshotName, targetAddress);
+                var workResult = migrateDocumentsWithOneWorker(sourceRepo, snapshotName, indexAllowlist, targetAddress);
                 if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
                     return null;
                 } else {
@@ -197,7 +200,7 @@ public class FullTest {
         }
     }
 
-    private static void migrateMetadata(SourceRepo sourceRepo, OpenSearchClient targetClient, String snapshotName) {
+    private static void migrateMetadata(SourceRepo sourceRepo, OpenSearchClient targetClient, String snapshotName, List<String> indexAllowlist) {
         SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
         GlobalMetadata.Factory metadataFactory = new GlobalMetadataFactory_ES_7_10(repoDataProvider);
         GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient,
@@ -208,7 +211,7 @@ public class FullTest {
 
         IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
         IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
-        new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer).migrateIndices();
+        new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer, indexAllowlist).migrateIndices();
     }
 
     private static class FilteredLuceneDocumentsReader extends LuceneDocumentsReader {
@@ -230,6 +233,7 @@ public class FullTest {
     @SneakyThrows
     private DocumentsRunner.CompletionStatus migrateDocumentsWithOneWorker(SourceRepo sourceRepo,
                                                                            String snapshotName,
+                                                                           List<String> indexAllowlist,
                                                                            String targetAddress)
         throws RfsMigrateDocuments.NoWorkLeftException
     {
@@ -265,6 +269,7 @@ public class FullTest {
                     processManager,
                     indexMetadataFactory,
                     snapshotName,
+                    indexAllowlist,
                     shardMetadataFactory,
                     unpackerFactory,
                     16*1024*1024);

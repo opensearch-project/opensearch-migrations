@@ -1,7 +1,7 @@
 import pathlib
-from console_link.models.snapshot import SnapshotStatus
 
 import requests_mock
+from console_link.models.command_result import CommandResult
 
 from console_link.cli import cli
 from console_link.environment import Environment
@@ -109,7 +109,7 @@ def test_cli_snapshot_create(runner, env, mocker):
     mock = mocker.patch('console_link.logic.snapshot.create')
 
     # Set the mock return value
-    mock.return_value = SnapshotStatus.COMPLETED, "Snapshot created successfully."
+    mock.return_value = CommandResult(success=True, value="Snapshot created successfully.")
 
     # Test snapshot creation
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'create'],
@@ -122,12 +122,11 @@ def test_cli_snapshot_create(runner, env, mocker):
     mock.assert_called_once()
 
 
-@pytest.mark.skip(reason="Not implemented yet")
 def test_cli_snapshot_status(runner, env, mocker):
     mock = mocker.patch('console_link.logic.snapshot.status')
 
     # Set the mock return value
-    mock.return_value = SnapshotStatus.COMPLETED, "Snapshot status: COMPLETED"
+    mock.return_value = CommandResult(success=True, value="Snapshot status: COMPLETED")
 
     # Test snapshot status
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'status'],
@@ -168,3 +167,11 @@ def test_cli_cat_indices_e2e(runner, env):
     assert 'TARGET CLUSTER' in result.output
     assert source_cat_indices in result.output
     assert target_cat_indices in result.output
+
+
+def test_cli_metadata_migrate(runner, env, mocker):
+    mock = mocker.patch("subprocess.run")
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'metadata', 'migrate'],
+                           catch_exceptions=True)
+    mock.assert_called_once()
+    assert result.exit_code == 0

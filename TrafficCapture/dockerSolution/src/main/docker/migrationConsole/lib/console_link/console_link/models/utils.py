@@ -1,6 +1,7 @@
 # define a custom exception for aws api errors
 from enum import Enum
 from typing import Dict
+from datetime import datetime
 
 
 class AWSAPIError(Exception):
@@ -26,3 +27,8 @@ def raise_for_aws_api_error(response: Dict) -> None:
 class ExitCode(Enum):
     SUCCESS = 0
     FAILURE = 1
+
+
+def generate_log_file_path(topic: str) -> str:
+    now = datetime.now().isoformat()
+    return f"{now}-{topic}.log"

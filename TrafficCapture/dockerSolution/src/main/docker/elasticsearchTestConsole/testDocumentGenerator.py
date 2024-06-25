@@ -48,9 +48,8 @@ def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--endpoint", help="Cluster endpoint e.g. http://test.elb.us-west-2.amazonaws.com:9200.")
-    parser.add_argument("--username", help="Cluster username.", default='admin')
-    parser.add_argument("--password", help="Cluster password.", default='admin')
-    parser.add_argument("--no-auth", action='store_true', help="Flag to provide no auth in requests.")
+    parser.add_argument("--username", help="Cluster username.")
+    parser.add_argument("--password", help="Cluster password.")
     parser.add_argument("--no-clear-output", action='store_true',
                         help="Flag to not clear the output before each run. " +
                         "Helpful for piping to a file or other utility.")
@@ -111,7 +110,7 @@ def main():
     args = parse_args()
 
     url_base = args.endpoint or os.environ.get('SOURCE_DOMAIN_ENDPOINT', 'https://capture-proxy:9200')
-    auth = None if args.no_auth else (args.username, args.password)
+    auth = (args.username, args.password) if args.username and args.password else None
 
     session = requests.Session()
     keep_alive_headers = {'Connection': 'keep-alive'}

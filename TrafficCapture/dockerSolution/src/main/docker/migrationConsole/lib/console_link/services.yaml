@@ -17,6 +17,9 @@ backfill:
   reindex_from_snapshot:
     docker:
 snapshot:
-  snapshot_name: "snapshot_2024_06_21"
+  snapshot_name: "snapshot_2023_01_01"
   fs:
     repo_path: "/snapshot/test-console"
+metadata_migration:
+  from_snapshot:
+  min_replicas: 0

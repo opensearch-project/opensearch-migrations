@@ -67,7 +67,7 @@ class Cluster:
     aws_secret_arn: Optional[str] = None
     auth_type: Optional[AuthMethod] = None
     auth_details: Optional[Dict[str, Any]] = None
-    allow_insecure: bool = None
+    allow_insecure: bool = False
 
     def __init__(self, config: Dict) -> None:
         logger.info(f"Initializing cluster with config: {config}")
@@ -135,6 +135,7 @@ class Cluster:
         elif self.auth_type == AuthMethod.SIGV4:
             raise NotImplementedError(f"Auth type {self.auth_type} is not currently support for executing "
                                       f"benchmark workloads")
+        # Note -- we should censor the password when logging this command
         logger.info(f"Running opensearch-benchmark with '{workload}' workload")
         command = (f"opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host={self.endpoint} "
                    f"--workload={workload} --pipeline=benchmark-only --test-mode --kill-running-processes "

@@ -145,7 +145,7 @@ def add_delay_messages(
 
     if len(target_timestamp_diffs) >= 2:
         speedup_factor = calculate_average_speedup_factor(target_timestamp_diffs)
-        log_messages.append(f"Speedup Factor (last 5 seconds): {speedup_factor:.3f}")
+        log_messages.append(f"Speedup Factor (last 5 seconds): {speedup_factor:.0%}")
     else:
         log_messages.append("Insufficient data points to calculate Speedup Factor")
 
