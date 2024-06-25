@@ -1,11 +1,13 @@
 package org.opensearch.migrations.transformation;
 
+import org.opensearch.migrations.transformation.entity.Entity;
+
 /**
  * Describes how to an entity is transformed from one version to another.
  */
 interface TransformationRule<T extends Entity> {
-    Version minSupportedSourceVersion();
-    Version minRequiredTargetVersion();
+    VersionRange supportedSourceVersionRange();
+    VersionRange supportedTargetVersionRange();
     boolean canApply(T entity);
     boolean applyTransformation(T entity);
 }
