@@ -6,6 +6,8 @@ from console_link.logic.metrics import get_metrics_source
 from console_link.logic.backfill import get_backfill
 from console_link.models.backfill_base import Backfill
 from console_link.models.snapshot import FileSystemSnapshot, Snapshot, S3Snapshot
+from console_link.models.replayer_base import Replayer
+from console_link.models.replayer_ecs import ECSReplayer
 import yaml
 from cerberus import Validator
 
@@ -20,6 +22,12 @@ def get_snapshot(config: Dict, source_cluster: Cluster, target_cluster: Cluster)
     return S3Snapshot(config, source_cluster, target_cluster)
 
 
+def get_replayer(config: Dict):
+    if 'ecs' in config:
+        return ECSReplayer(config)
+    raise ValueError("Invalid replayer config")
+
+
 SCHEMA = {
     "source_cluster": {"type": "dict", "required": False},
     "target_cluster": {"type": "dict", "required": True},
@@ -27,7 +35,8 @@ SCHEMA = {
     "backfill": {"type": "dict", "required": False},
     "metrics_source": {"type": "dict", "required": False},
     "snapshot": {"type": "dict", "required": False},
-    "metadata_migration": {"type": "dict", "required": False}
+    "metadata_migration": {"type": "dict", "required": False},
+    "replay": {"type": "dict", "required": False}
 }
 
 
@@ -38,6 +47,7 @@ class Environment:
     metrics_source: Optional[MetricsSource] = None
     snapshot: Optional[Snapshot] = None
     metadata: Optional[Metadata] = None
+    replay: Optional[Replayer] = None
 
     def __init__(self, config_file: str):
         logger.info(f"Loading config file: {config_file}")
@@ -76,6 +86,10 @@ class Environment:
             logger.info(f"Backfill migration initialized: {self.backfill}")
         else:
             logger.info("No backfill provided")
+
+        if 'replay' in self.config:
+            self.replay: Replayer = get_replayer(self.config["replay"])
+            logger.info(f"Replay initialized: {self.replay}")
 
         if 'snapshot' in self.config:
             self.snapshot: Snapshot = get_snapshot(self.config["snapshot"],
