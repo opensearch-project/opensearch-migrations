@@ -8,6 +8,7 @@ import time
 from http import HTTPStatus
 from requests import Session
 from requests.adapters import HTTPAdapter
+#from console_link.models.replayer import BaseReplayer, ECSReplayer
 from console_link.logic.clusters import connection_check, clear_indices, run_test_benchmarks, ConnectionResult
 from console_link.models.cluster import Cluster, AuthMethod
 from console_link.cli import Context
@@ -24,30 +25,39 @@ def setup_replayer(request):
     unique_id = request.config.getoption("--unique_id")
     pytest.console_env = Context(config_path).env
     pytest.unique_id = unique_id
-    #source_cluster: Cluster = pytest.console_env.source_cluster
-    #target_cluster: Cluster = pytest.console_env.target_cluster
+    source_cluster: Cluster = pytest.console_env.source_cluster
+    target_cluster: Cluster = pytest.console_env.target_cluster
 
     # Confirm source and target connection
-    #source_con_result: ConnectionResult = connection_check(source_cluster)
-    #assert source_con_result.connection_established is True
-    #target_con_result: ConnectionResult = connection_check(target_cluster)
-    #assert target_con_result.connection_established is True
+    source_con_result: ConnectionResult = connection_check(source_cluster)
+    assert source_con_result.connection_established is True
+    target_con_result: ConnectionResult = connection_check(target_cluster)
+    assert target_con_result.connection_established is True
 
     # Clear any existing non-system indices
-    #clear_indices(source_cluster)
-    #clear_indices(target_cluster)
+    clear_indices(source_cluster)
+    clear_indices(target_cluster)
 
-    # TODO start replayer
+    #logger.info("Stopping replayer...")
+    #replayer: BaseReplayer = pytest.console_env.replayer
+    # TODO provide support for starting Replayer in Docker
+    #if replayer is not None and type(replayer) is ECSReplayer:
+    #    replayer.start()
 
 
-# @pytest.fixture(scope="session", autouse=True)
-# def cleanup(request):
-#     """Cleanup a testing directory once we are finished."""
-#
-#     def post_cleanup():
-#         print("Cleanup")
-#
-#     request.addfinalizer(post_cleanup())
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_after_tests():
+    # Setup code
+    logger.info("Starting replayer tests...")
+
+    yield
+
+    # Teardown code
+    #logger.info("Stopping replayer...")
+    #replayer: BaseReplayer = pytest.console_env.replayer
+    # TODO provide support for stopping Replayer in Docker
+    #if replayer is not None and type(replayer) is ECSReplayer:
+    #    replayer.stop()
 
 
 @pytest.mark.usefixtures("setup_replayer")
@@ -123,7 +133,8 @@ class ReplayerTests(unittest.TestCase):
             ]
 
             for user, pw in credentials:
-                response = requests.get(source_cluster.endpoint, auth=(user, pw), verify=source_cluster.allow_insecure)
+                response = requests.get(source_cluster.endpoint, auth=(user, pw),
+                                        verify=not source_cluster.allow_insecure)
                 self.assertEqual(response.status_code, HTTPStatus.UNAUTHORIZED)
 
     def test_replayer_0004_negativeAuth_missingCreds(self):
@@ -134,11 +145,11 @@ class ReplayerTests(unittest.TestCase):
 
         # With an empty authorization header
         response_with_header = requests.get(source_cluster.endpoint, auth=('', ''),
-                                            verify=source_cluster.allow_insecure)
+                                            verify=not source_cluster.allow_insecure)
         self.assertEqual(response_with_header.status_code, HTTPStatus.UNAUTHORIZED)
 
         # Without an authorization header.
-        response_no_header = requests.get(source_cluster.endpoint, verify=source_cluster.allow_insecure)
+        response_no_header = requests.get(source_cluster.endpoint, verify=not source_cluster.allow_insecure)
         self.assertEqual(response_no_header.status_code, HTTPStatus.UNAUTHORIZED)
 
     def test_replayer_0005_invalidIncorrectUri(self):

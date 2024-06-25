@@ -122,12 +122,12 @@ class Cluster:
     def execute_benchmark_workload(self, workload: str,
                                    workload_params='target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,'
                                                    'search_clients:1'):
-        client_options = ""
+        client_options = "verify_certs:false"
         if not self.allow_insecure:
-            client_options += "use_ssl:true,verify_certs:false"
+            client_options += ",use_ssl:true"
         if self.auth_type == AuthMethod.BASIC_AUTH:
             if self.auth_details['password'] is not None:
-                client_options += (f"basic_auth_user:{self.auth_details['username']},"
+                client_options += (f",basic_auth_user:{self.auth_details['username']},"
                                    f"basic_auth_password:{self.auth_details['password']}")
             else:
                 raise NotImplementedError(f"Auth type {self.auth_type} with AWS Secret ARN is not currently support "
@@ -136,7 +136,8 @@ class Cluster:
             raise NotImplementedError(f"Auth type {self.auth_type} is not currently support for executing "
                                       f"benchmark workloads")
         logger.info(f"Running opensearch-benchmark with '{workload}' workload")
-        subprocess.run(f"opensearch-benchmark execute-test --distribution-version=1.0.0 "
-                       f"--target-host={self.endpoint} --workload={workload} --pipeline=benchmark-only --test-mode "
-                       f"--kill-running-processes --workload-params={workload_params} "
-                       f"--client-options={client_options}", shell=True)
+        command = (f"opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host={self.endpoint} "
+                   f"--workload={workload} --pipeline=benchmark-only --test-mode --kill-running-processes "
+                   f"--workload-params={workload_params} --client-options={client_options}")
+        logger.info(f"Executing command: {command}")
+        subprocess.run(command, shell=True)

@@ -2,8 +2,8 @@ import logging
 import pytest
 import unittest
 from http import HTTPStatus
-from console_link.logic.clusters import call_api, connection_check, clear_indices, run_test_benchmarks, ConnectionResult
-from console_link.models.cluster import HttpMethod, Cluster
+from console_link.logic.clusters import connection_check, clear_indices, run_test_benchmarks, ConnectionResult
+from console_link.models.cluster import Cluster
 from console_link.models.backfill_base import Backfill
 from console_link.cli import Context
 from common_operations import (get_document, create_document, create_index, check_doc_counts_match,
@@ -52,14 +52,14 @@ def setup_backfill(request):
 @pytest.fixture(scope="session", autouse=True)
 def cleanup_after_tests():
     # Setup code
-    print("Setup: Starting test session")
-    logger.error("Start")
+    logger.info("Starting backfill tests...")
 
     yield
 
     # Teardown code
-    print("Teardown: Cleaning up after test session")
-    logger.error("Finish")
+    logger.info("Stopping backfill...")
+    backfill: Backfill = pytest.console_env.backfill
+    backfill.stop()
 
 
 @pytest.mark.usefixtures("setup_backfill")
