@@ -70,7 +70,8 @@ class BackfillTests(unittest.TestCase):
     def test_backfill_0002_sample_benchmarks(self):
         source_cluster: Cluster = pytest.console_env.source_cluster
         target_cluster: Cluster = pytest.console_env.target_cluster
-
+        logger.info(source_cluster)
+        logger.info(target_cluster)
         # Assert preloaded benchmark indices exist
         #source_response = call_api(source_cluster, method=HttpMethod.GET, path=f"/{index_name}/_doc/{doc_id}")
         #self.assertEqual(source_response.status_code, HTTPStatus.OK)

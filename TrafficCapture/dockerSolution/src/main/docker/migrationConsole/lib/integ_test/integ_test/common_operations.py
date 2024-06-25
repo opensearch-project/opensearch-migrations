@@ -3,14 +3,13 @@ import random
 import string
 import json
 import time
-from requests.exceptions import ConnectionError, SSLError
-from typing import Dict, List
-from http import HTTPStatus
 import shlex
 import subprocess
 import logging
+from requests.exceptions import ConnectionError, SSLError
+from typing import Dict, List
 from unittest import TestCase
-from console_link.logic.clusters import call_api, connection_check, clear_indices, run_test_benchmarks, ConnectionResult
+from console_link.logic.clusters import call_api
 from console_link.models.cluster import HttpMethod, Cluster
 
 logger = logging.getLogger(__name__)
@@ -38,8 +37,8 @@ def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=No
                 api_exception = None
                 last_received_status = response.status_code
                 logger.debug(f"Status code returned: {response.status_code} did not"
-                               f" match the expected status code: {expected_status_code}."
-                               f" Trying again in {delay} seconds.")
+                             f" match the expected status code: {expected_status_code}."
+                             f" Trying again in {delay} seconds.")
         except (ConnectionError, SSLError) as e:
             api_exception = e
             logger.debug(f"Received exception: {e}. Unable to connect to server. Please check all containers are up"
@@ -83,7 +82,7 @@ def create_document(index_name: str, doc_id: str, cluster: Cluster, data: dict =
 
 
 def get_document(index_name: str, doc_id: str, cluster: Cluster, **kwargs):
-    #headers = {'Content-Type': 'application/json'}
+    # headers = {'Content-Type': 'application/json'}
     return execute_api_call(cluster=cluster, method=HttpMethod.GET, path=f"/{index_name}/_doc/{doc_id}",
                             **kwargs)
 

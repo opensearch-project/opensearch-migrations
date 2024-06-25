@@ -1,14 +1,20 @@
-import logging
 import pytest
 import unittest
 import requests
+import logging
 import secrets
+import string
+import time
+from http import HTTPStatus
 from requests import Session
 from requests.adapters import HTTPAdapter
-from console_link.logic.clusters import call_api, connection_check, clear_indices, run_test_benchmarks, ConnectionResult
-from console_link.models.cluster import HttpMethod, Cluster, AuthMethod
+from console_link.logic.clusters import connection_check, clear_indices, run_test_benchmarks, ConnectionResult
+from console_link.models.cluster import Cluster, AuthMethod
 from console_link.cli import Context
-from common_operations import *  # NOSONAR
+from common_operations import (get_index, create_index, delete_index, get_document, create_document, delete_document,
+                               check_doc_match, check_doc_counts_match, generate_large_doc, execute_api_call)
+
+logger = logging.getLogger(__name__)
 
 
 @pytest.fixture(scope="class")
