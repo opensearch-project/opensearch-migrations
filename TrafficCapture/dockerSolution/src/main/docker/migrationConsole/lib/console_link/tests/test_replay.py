@@ -70,3 +70,18 @@ def test_replayer_stop_sets_ecs_desired_count(mocker):
 
     assert isinstance(replayer, ECSReplayer)
     mock.assert_called_once_with(replayer.ecs_client, 0)
+
+
+def test_replayer_scale_sets_ecs_desired_count(mocker):
+    config = {
+        "ecs": {
+            "cluster_name": "migration-aws-integ-ecs-cluster",
+            "service_name": "migration-aws-integ-traffic-replayer-default"
+        }
+    }
+    replayer = get_replayer(config)
+    mock = mocker.patch.object(ECSService, 'set_desired_count', autospec=True)
+    replayer.scale(5)
+
+    assert isinstance(replayer, ECSReplayer)
+    mock.assert_called_once_with(replayer.ecs_client, 5)
