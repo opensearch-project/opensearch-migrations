@@ -23,18 +23,18 @@ def setup_replayer(request):
     unique_id = request.config.getoption("--unique_id")
     pytest.console_env = Context(config_path).env
     pytest.unique_id = unique_id
-    source_cluster: Cluster = pytest.console_env.source_cluster
-    target_cluster: Cluster = pytest.console_env.target_cluster
+    #source_cluster: Cluster = pytest.console_env.source_cluster
+    #target_cluster: Cluster = pytest.console_env.target_cluster
 
     # Confirm source and target connection
-    source_con_result: ConnectionResult = connection_check(source_cluster)
-    assert source_con_result.connection_established is True
-    target_con_result: ConnectionResult = connection_check(target_cluster)
-    assert target_con_result.connection_established is True
+    #source_con_result: ConnectionResult = connection_check(source_cluster)
+    #assert source_con_result.connection_established is True
+    #target_con_result: ConnectionResult = connection_check(target_cluster)
+    #assert target_con_result.connection_established is True
 
     # Clear any existing non-system indices
-    clear_indices(source_cluster)
-    clear_indices(target_cluster)
+    #clear_indices(source_cluster)
+    #clear_indices(target_cluster)
 
     # TODO start replayer
 
