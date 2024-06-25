@@ -12,7 +12,8 @@ from console_link.logic.clusters import connection_check, clear_indices, run_tes
 from console_link.models.cluster import Cluster, AuthMethod
 from console_link.cli import Context
 from common_operations import (get_index, create_index, delete_index, get_document, create_document, delete_document,
-                               check_doc_match, check_doc_counts_match, generate_large_doc, execute_api_call)
+                               check_doc_match, check_doc_counts_match, generate_large_doc, execute_api_call,
+                               EXPECTED_BENCHMARK_DOCS)
 
 logger = logging.getLogger(__name__)
 
@@ -155,26 +156,12 @@ class ReplayerTests(unittest.TestCase):
         source_cluster: Cluster = pytest.console_env.source_cluster
         target_cluster: Cluster = pytest.console_env.target_cluster
 
-        expected_docs = {
-            "geonames": {"docs.count": "1000"},
-            "logs-221998": {"docs.count": "1000"},
-            "logs-211998": {"docs.count": "1000"},
-            "logs-231998": {"docs.count": "1000"},
-            "logs-241998": {"docs.count": "1000"},
-            "logs-181998": {"docs.count": "1000"},
-            "logs-201998": {"docs.count": "1000"},
-            "logs-191998": {"docs.count": "1000"},
-            "sonested": {"docs.count": "2977"},
-            "reindexed-logs": {"docs.count": "0"},
-            "nyc_taxis": {"docs.count": "1000"}
-        }
-
         run_test_benchmarks(cluster=source_cluster)
         # Confirm documents on source
-        check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_docs,
+        check_doc_counts_match(cluster=source_cluster, expected_index_details=EXPECTED_BENCHMARK_DOCS,
                                test_case=self)
         # Confirm documents on target after replay
-        check_doc_counts_match(cluster=target_cluster, expected_index_details=expected_docs,
+        check_doc_counts_match(cluster=target_cluster, expected_index_details=EXPECTED_BENCHMARK_DOCS,
                                test_case=self)
 
     def test_replayer_0007_timeBetweenRequestsOnSameConnection(self):

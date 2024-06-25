@@ -1,12 +1,13 @@
 import logging
 import pytest
-import json
 import unittest
 from http import HTTPStatus
 from console_link.logic.clusters import call_api, connection_check, clear_indices, run_test_benchmarks, ConnectionResult
 from console_link.models.cluster import HttpMethod, Cluster
 from console_link.models.backfill_base import Backfill
 from console_link.cli import Context
+from common_operations import (get_document, create_document, create_index, check_doc_counts_match,
+                               EXPECTED_BENCHMARK_DOCS)
 
 logger = logging.getLogger(__name__)
 
@@ -26,11 +27,9 @@ def preload_data(source_cluster: Cluster, target_cluster: Cluster):
     # test_backfill_0001
     index_name = f"test_backfill_0001_{pytest.unique_id}"
     doc_id = "backfill_0001_doc"
-    headers = {'Content-Type': 'application/json'}
-    data = {'title': 'Test Document', 'content': 'This is a sample document for testing OpenSearch.'}
-    call_api(source_cluster, method=HttpMethod.PUT, path=f"/{index_name}")
-    call_api(source_cluster, method=HttpMethod.PUT, path=f"/{index_name}/_doc/{doc_id}", data=json.dumps(data),
-             headers=headers)
+    create_index(cluster=source_cluster, index_name=index_name)
+    create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id,
+                    expected_status_code=HTTPStatus.CREATED)
 
     # test_backfill_0002
     run_test_benchmarks(source_cluster)
@@ -46,7 +45,21 @@ def setup_backfill(request):
                  target_cluster=pytest.console_env.target_cluster)
     backfill: Backfill = pytest.console_env.backfill
     assert backfill is not None
-    # TODO start backfill
+    backfill.create()
+    backfill.start()
+
+
+@pytest.fixture(scope="session", autouse=True)
+def cleanup_after_tests():
+    # Setup code
+    print("Setup: Starting test session")
+    logger.error("Start")
+
+    yield
+
+    # Teardown code
+    print("Teardown: Cleaning up after test session")
+    logger.error("Finish")
 
 
 @pytest.mark.usefixtures("setup_backfill")
@@ -59,24 +72,23 @@ class BackfillTests(unittest.TestCase):
         target_cluster: Cluster = pytest.console_env.target_cluster
 
         # Assert preloaded document exists
-        source_response = call_api(source_cluster, method=HttpMethod.GET, path=f"/{index_name}/_doc/{doc_id}")
-        self.assertEqual(source_response.status_code, HTTPStatus.OK)
+        get_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id, test_case=self)
 
         # TODO Determine when backfill is completed
 
-        target_response = call_api(target_cluster, method=HttpMethod.GET, path=f"/{index_name}/_doc/{doc_id}")
-        self.assertEqual(target_response.status_code, HTTPStatus.OK)
+        get_document(cluster=target_cluster, index_name=index_name, doc_id=doc_id, max_attempts=30, delay=30.0,
+                     test_case=self)
 
     def test_backfill_0002_sample_benchmarks(self):
         source_cluster: Cluster = pytest.console_env.source_cluster
         target_cluster: Cluster = pytest.console_env.target_cluster
-        logger.info(source_cluster)
-        logger.info(target_cluster)
-        # Assert preloaded benchmark indices exist
-        #source_response = call_api(source_cluster, method=HttpMethod.GET, path=f"/{index_name}/_doc/{doc_id}")
-        #self.assertEqual(source_response.status_code, HTTPStatus.OK)
+
+        # Confirm documents on source
+        check_doc_counts_match(cluster=source_cluster, expected_index_details=EXPECTED_BENCHMARK_DOCS,
+                               test_case=self)
 
         # TODO Determine when backfill is completed
 
-        #target_response = call_api(target_cluster, method=HttpMethod.GET, path=f"/{index_name}/_doc/{doc_id}")
-        #self.assertEqual(target_response.status_code, HTTPStatus.OK)
+        # Confirm documents on target after backfill
+        check_doc_counts_match(cluster=target_cluster, expected_index_details=EXPECTED_BENCHMARK_DOCS,
+                               max_attempts=40, delay=30.0, test_case=self)

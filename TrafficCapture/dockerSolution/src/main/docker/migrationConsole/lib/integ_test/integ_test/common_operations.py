@@ -16,6 +16,20 @@ logger = logging.getLogger(__name__)
 
 DEFAULT_INDEX_IGNORE_LIST = ["test_", ".", "searchguard", "sg7", "security-auditlog"]
 
+EXPECTED_BENCHMARK_DOCS = {
+    "geonames": {"docs.count": "1000"},
+    "logs-221998": {"docs.count": "1000"},
+    "logs-211998": {"docs.count": "1000"},
+    "logs-231998": {"docs.count": "1000"},
+    "logs-241998": {"docs.count": "1000"},
+    "logs-181998": {"docs.count": "1000"},
+    "logs-201998": {"docs.count": "1000"},
+    "logs-191998": {"docs.count": "1000"},
+    "sonested": {"docs.count": "2977"},
+    "reindexed-logs": {"docs.count": "0"},
+    "nyc_taxis": {"docs.count": "1000"}
+}
+
 
 class ClusterAPIRequestError(Exception):
     pass

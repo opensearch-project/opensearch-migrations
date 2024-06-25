@@ -39,6 +39,9 @@ RUN chmod ug+x /root/loadServicesFromParameterStore.sh
 COPY lib /root/lib
 WORKDIR /root/lib/console_link
 RUN pipenv install --system --deploy --ignore-pipfile
+WORKDIR /root/lib/integ_test
+RUN pipenv install --system --deploy --ignore-pipfile
+
 
 # Experimental console API, not started by default
 COPY console_api /root/console_api
