@@ -11,6 +11,7 @@ from console_link.models.utils import ExitCode
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
 from console_link.models.snapshot import SnapshotStatus
+from click.shell_completion import get_completion_class
 
 import logging
 
@@ -305,8 +306,55 @@ def get_metrics_data_cmd(ctx, component, metric_name, statistic, lookback):
         metric_data
     )
 
+# ##################### UTILITIES ###################
+
+@cli.command()
+@click.option(
+    "--config-file", default="/etc/migration_services.yaml", help="Path to config file"
+)
+@click.option("--json", is_flag=True)
+@click.argument('shell', type=click.Choice(['bash', 'zsh', 'fish']))
+@click.pass_obj
+def completion(ctx, config_file, json, shell):
+    """Generate shell completion script and instructions for setup.
+
+    Supported shells: bash, zsh, fish
+
+    To enable completion:
+
+    Bash:
+      console completion bash > /etc/bash_completion.d/console
+      # Then restart your shell
+
+    Zsh:
+      # If shell completion is not already enabled in your environment,
+      # you will need to enable it. You can execute the following once:
+      echo "autoload -U compinit; compinit" >> ~/.zshrc
+
+      console completion zsh > "${fpath[1]}/_console"
+      # Then restart your shell
+
+    Fish:
+      console completion fish > ~/.config/fish/completions/console.fish
+      # Then restart your shell
+    """
+    completion_class = get_completion_class(shell)
+    if completion_class is None:
+        click.echo(f"Error: {shell} shell is currently not supported", err=True)
+        ctx.exit(1)
+
+    try:
+        completion_script = completion_class(lambda: cli(ctx, config_file, json),
+                                             {}, 
+                                            "console",
+                                             "_CONSOLE_COMPLETE").source()
+        click.echo(completion_script)
+    except RuntimeError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        ctx.exit(1)
 
 #################################################
 
 if __name__ == "__main__":
     cli()
+

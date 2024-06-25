@@ -29,3 +29,14 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "Parameter value successfully written to $OUTPUT_FILE"
+
+# Generate bash completion script
+console completion bash > /usr/share/bash-completion/completions/console
+
+# Source the completion script to enable it for the current session
+source /usr/share/bash-completion/completions/console
+
+# Add sourcing of the completion script to .bashrc for persistence across sessions
+echo '. /etc/bash_completion' >> ~/.bashrc
+
+echo "Bash completion for console command has been set up and enabled."
