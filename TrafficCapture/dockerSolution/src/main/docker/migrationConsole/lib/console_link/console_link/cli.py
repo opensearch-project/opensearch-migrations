@@ -311,6 +311,7 @@ def get_metrics_data_cmd(ctx, component, metric_name, statistic, lookback):
 
 # ##################### UTILITIES ###################
 
+
 @cli.command()
 @click.option(
     "--config-file", default="/etc/migration_services.yaml", help="Path to config file"
@@ -348,16 +349,16 @@ def completion(ctx, config_file, json, shell):
 
     try:
         completion_script = completion_class(lambda: cli(ctx, config_file, json),
-                                             {}, 
-                                            "console",
+                                             {},
+                                             "console",
                                              "_CONSOLE_COMPLETE").source()
         click.echo(completion_script)
     except RuntimeError as exc:
         click.echo(f"Error: {exc}", err=True)
         ctx.exit(1)
 
+
 #################################################
 
 if __name__ == "__main__":
     cli()
-
