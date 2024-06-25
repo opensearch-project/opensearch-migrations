@@ -5,7 +5,6 @@ import {ContainerImage} from "aws-cdk-lib/aws-ecs";
 import * as yaml from 'yaml';
 
 // Mock using local Dockerfile (which may not exist and would fail synthesis)
-jest.mock("aws-cdk-lib/aws-ecr-assets")
 jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => ContainerImage.fromRegistry("ServiceImage"));
 
 
