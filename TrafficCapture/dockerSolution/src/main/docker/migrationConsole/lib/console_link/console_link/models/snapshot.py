@@ -3,8 +3,7 @@ import datetime
 import logging
 import subprocess
 from abc import ABC, abstractmethod
-from enum import Enum
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional
 
 from cerberus import Validator
 from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
@@ -13,13 +12,6 @@ from console_link.models.command_result import CommandResult
 from console_link.models.schema_tools import contains_one_of
 
 logger = logging.getLogger(__name__)
-
-
-class SnapshotStatus(Enum):
-    NOT_STARTED = "NOT_STARTED"
-    RUNNING = "RUNNING"
-    COMPLETED = "COMPLETED"
-    FAILED = "FAILED"
 
 
 SNAPSHOT_SCHEMA = {
@@ -63,7 +55,7 @@ class Snapshot(ABC):
         pass
 
     @abstractmethod
-    def status(self, *args, **kwargs) -> CommandResult:
+    def status(self, *args, **kwargs) -> str:
         """Get the status of the snapshot."""
         pass
 
@@ -152,7 +144,7 @@ class FileSystemSnapshot(Snapshot):
             logger.error(message)
             return CommandResult(success=False, value=message)
 
-    def status(self, *args, **kwargs) -> Tuple[SnapshotStatus, str]:
+    def status(self, *args, **kwargs) -> str:
         deep_check = kwargs.get('deep_check', False)
         if deep_check:
             return get_snapshot_status_full(self.source_cluster, self.snapshot_name)
@@ -170,27 +162,8 @@ def parse_args():
     return parser.parse_args()
 
 
-class ClusterSnapshotState(Enum):
-    SUCCESS = "SUCCESS"
-    FAILED = "FAILED"
-    PARTIAL = "PARTIAL"
-    STARTED = "STARTED"
-    IN_PROGRESS = "IN_PROGRESS"
-
-
-def convert_snapshot_state_to_status(snapshot_state: str) -> Tuple[SnapshotStatus, str]:
-    state_mapping = {
-        ClusterSnapshotState.SUCCESS.value: (SnapshotStatus.COMPLETED, "Snapshot completed successfully"),
-        ClusterSnapshotState.FAILED.value: (SnapshotStatus.FAILED, "Snapshot failed"),
-        ClusterSnapshotState.PARTIAL.value: (SnapshotStatus.FAILED, "Snapshot is partially completed"),
-        ClusterSnapshotState.STARTED.value: (SnapshotStatus.RUNNING, "Snapshot is running"),
-        ClusterSnapshotState.IN_PROGRESS.value: (SnapshotStatus.RUNNING, "Snapshot is running")
-    }
-    return state_mapping.get(snapshot_state, (SnapshotStatus.FAILED, f"Unknown snapshot state: {snapshot_state}"))
-
-
-def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str = 'migration_assistant_repo')\
-        -> Tuple[SnapshotStatus, str]:
+def get_snapshot_status(cluster: Cluster, snapshot: str,
+                        repository: str = 'migration_assistant_repo') -> str:
     path = f"/_snapshot/{repository}/{snapshot}"
     response = cluster.call_api(path, HttpMethod.GET)
     logging.debug(f"Raw get snapshot status response: {response.text}")
@@ -199,10 +172,9 @@ def get_snapshot_status(cluster: Cluster, snapshot: str, repository: str = 'migr
     snapshot_data = response.json()
     snapshots = snapshot_data.get('snapshots', [])
     if not snapshots:
-        return SnapshotStatus.NOT_STARTED, "No snapshots found in the response"
+        return "Snapshot not started"
 
-    snapshot_state = snapshots[0].get("state")
-    return convert_snapshot_state_to_status(snapshot_state)
+    return snapshots[0].get("state")
 
 
 def get_repository_for_snapshot(cluster: Cluster, snapshot: str) -> Optional[str]:
@@ -277,7 +249,7 @@ def get_snapshot_status_message(snapshot_info: Dict) -> str:
 
 
 def get_snapshot_status_full(cluster: Cluster, snapshot: str, repository: str = 'migration_assistant_repo')\
-        -> Tuple[SnapshotStatus, str]:
+        -> str:
     repository = repository if repository != '*' else get_repository_for_snapshot(cluster, snapshot)
 
     path = f"/_snapshot/{repository}/{snapshot}"
@@ -288,11 +260,10 @@ def get_snapshot_status_full(cluster: Cluster, snapshot: str, repository: str = 
     snapshot_data = response.json()
     snapshots = snapshot_data.get('snapshots', [])
     if not snapshots:
-        return SnapshotStatus.NOT_STARTED, "No snapshots found in the response"
+        return "Snapshot not started"
 
     snapshot_info = snapshots[0]
-    snapshot_state = snapshot_info.get("state")
-    state, _ = convert_snapshot_state_to_status(snapshot_state)
+    state = snapshot_info.get("state")
 
     path = f"/_snapshot/{repository}/{snapshot}/_status"
     response = cluster.call_api(path, HttpMethod.GET)
@@ -302,7 +273,7 @@ def get_snapshot_status_full(cluster: Cluster, snapshot: str, repository: str = 
     snapshot_data = response.json()
     snapshots = snapshot_data.get('snapshots', [])
     if not snapshots:
-        return SnapshotStatus.NOT_STARTED, "No snapshots found in the response"
+        return "Snapshot not started"
 
     snapshot_info = snapshots[0]
     message = get_snapshot_status_message(snapshot_info)

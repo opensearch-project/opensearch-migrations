@@ -165,8 +165,9 @@ def create_snapshot_cmd(ctx, wait, max_snapshot_rate_mb_per_node):
 @click.pass_obj
 def status_snapshot_cmd(ctx, deep_check):
     """Check the status of the snapshot"""
-    status, message = logic_snapshot.status(ctx.env.snapshot, deep_check=deep_check)
-    click.echo(f"Status: {status}\n{message}")
+    status = logic_snapshot.status(ctx.env.snapshot, deep_check=deep_check)
+    click.echo(f"Snapshot Status: {status}")
+
 # ##################### BACKFILL ###################
 
 # As we add other forms of backfill migrations, we should incorporate a way to dynamically allow different sets of

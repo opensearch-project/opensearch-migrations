@@ -19,6 +19,6 @@ def create(snapshot: Snapshot, *args, **kwargs) -> Tuple[SnapshotStatus, str]:
     return status(snapshot, *args, **kwargs)
 
 
-def status(snapshot: Snapshot, *args, **kwargs) -> Tuple[SnapshotStatus, str]:
+def status(snapshot: Snapshot, *args, **kwargs) -> str:
     logger.info("Getting snapshot status")
     return snapshot.status(*args, **kwargs)
