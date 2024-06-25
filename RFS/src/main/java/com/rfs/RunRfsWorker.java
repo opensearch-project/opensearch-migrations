@@ -132,7 +132,8 @@ public class RunRfsWorker {
         final String targetHost = arguments.targetHost;
         final String targetUser = arguments.targetUser;
         final String targetPass = arguments.targetPass;
-        final List<String> indexTemplateAllowlist = arguments.indexAllowlist;
+        final List<String> indexAllowlist = arguments.indexAllowlist;
+        final List<String> indexTemplateAllowlist = arguments.indexTemplateAllowlist;
         final List<String> componentTemplateAllowlist = arguments.componentTemplateAllowlist;
         final long maxShardSizeBytes = arguments.maxShardSizeBytes;
         final int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
@@ -160,7 +161,7 @@ public class RunRfsWorker {
 
             IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
             IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
-            new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer).migrateIndices();
+            new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer, indexAllowlist).migrateIndices();
 
             ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
             DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
@@ -174,7 +175,7 @@ public class RunRfsWorker {
             var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(targetHost)),
                     5, UUID.randomUUID().toString());
             var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, processManager);
-            new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName);
+            new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName, indexAllowlist);
             new DocumentsRunner(scopedWorkCoordinator,
                     (name,shard) -> shardMetadataFactory.fromRepo(snapshotName,name,shard),
                     unpackerFactory,

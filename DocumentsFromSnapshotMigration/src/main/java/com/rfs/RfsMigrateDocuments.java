@@ -8,6 +8,7 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
+import java.util.List;
 import java.util.UUID;
 import java.util.function.Function;
 
@@ -81,6 +82,10 @@ public class RfsMigrateDocuments {
                 description = "Optional.  The target password; if not provided, will assume no auth on target")
         public String targetPass = null;
 
+        @Parameter(names = {"--index-allowlist"}, description = ("Optional.  List of index names to migrate"
+            + " (e.g. 'logs_2024_01, logs_2024_02').  Default: all non-system indices (e.g. those not starting with '.')"), required = false)
+        public List<String> indexAllowlist = List.of();
+
         @Parameter(names = {"--max-shard-size-bytes"}, description = ("Optional. The maximum shard size, in bytes, to allow when"
             + " performing the document migration.  Useful for preventing disk overflow.  Default: 50 * 1024 * 1024 * 1024 (50 GB)"), required = false)
         public long maxShardSizeBytes = 50 * 1024 * 1024 * 1024L;
@@ -126,7 +131,7 @@ public class RfsMigrateDocuments {
                     luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
 
             run(LuceneDocumentsReader::new, reindexer, workCoordinator, processManager, indexMetadataFactory,
-                    arguments.snapshotName, shardMetadataFactory, unpackerFactory, arguments.maxShardSizeBytes);
+                    arguments.snapshotName, arguments.indexAllowlist, shardMetadataFactory, unpackerFactory, arguments.maxShardSizeBytes);
         });
     }
 
@@ -136,12 +141,13 @@ public class RfsMigrateDocuments {
                                                        LeaseExpireTrigger leaseExpireTrigger,
                                                        IndexMetadata.Factory indexMetadataFactory,
                                                        String snapshotName,
+                                                       List<String> indexAllowlist,
                                                        ShardMetadata.Factory shardMetadataFactory,
                                                        SnapshotShardUnpacker.Factory unpackerFactory,
                                                        long maxShardSizeBytes)
             throws IOException, InterruptedException, NoWorkLeftException {
         var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
-        confirmShardPrepIsComplete(indexMetadataFactory, snapshotName, scopedWorkCoordinator);
+        confirmShardPrepIsComplete(indexMetadataFactory, snapshotName, indexAllowlist, scopedWorkCoordinator);
         if (!workCoordinator.workItemsArePending()) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
         }
@@ -159,6 +165,7 @@ public class RfsMigrateDocuments {
 
     private static void confirmShardPrepIsComplete(IndexMetadata.Factory indexMetadataFactory,
                                                    String snapshotName,
+                                                   List<String> indexAllowlist,
                                                    ScopedWorkCoordinator scopedWorkCoordinator)
             throws IOException, InterruptedException
     {
@@ -168,7 +175,7 @@ public class RfsMigrateDocuments {
         long lockRenegotiationMillis = 1000;
         for (int shardSetupAttemptNumber=0; ; ++shardSetupAttemptNumber) {
             try {
-                new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName);
+                new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName, indexAllowlist);
                 return;
             } catch (IWorkCoordinator.LeaseLockHeldElsewhereException e) {
                 long finalLockRenegotiationMillis = lockRenegotiationMillis;
