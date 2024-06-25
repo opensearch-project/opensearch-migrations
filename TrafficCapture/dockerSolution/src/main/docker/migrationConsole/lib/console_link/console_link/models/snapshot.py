@@ -50,10 +50,9 @@ class Snapshot(ABC):
     """
     Interface for creating and managing snapshots.
     """
-    def __init__(self, config: Dict, source_cluster: Cluster, target_cluster: Optional[Cluster] = None) -> None:
+    def __init__(self, config: Dict, source_cluster: Cluster) -> None:
         self.config = config
         self.source_cluster = source_cluster
-        self.target_cluster = target_cluster
         v = Validator(SNAPSHOT_SCHEMA)
         if not v.validate({'snapshot': config}):
             raise ValueError("Invalid config file for snapshot", v.errors)
@@ -77,19 +76,17 @@ S3_SNAPSHOT_SCHEMA = {
 
 
 class S3Snapshot(Snapshot):
-    def __init__(self, config: Dict, source_cluster: Cluster, target_cluster: Cluster) -> None:
-        super().__init__(config, source_cluster, target_cluster)
+    def __init__(self, config: Dict, source_cluster: Cluster) -> None:
+        super().__init__(config, source_cluster)
         self.snapshot_name = config['snapshot_name']
         self.s3_repo_uri = config['s3']['repo_uri']
         self.s3_region = config['s3']['aws_region']
 
     def create(self, *args, **kwargs) -> CommandResult:
-        assert isinstance(self.target_cluster, Cluster)
+        assert isinstance(self.source_cluster, Cluster)
         if self.source_cluster.auth_type != AuthMethod.NO_AUTH:
             raise NotImplementedError("Source cluster authentication is not supported for creating snapshots")
 
-        if self.target_cluster.auth_type != AuthMethod.NO_AUTH:
-            raise NotImplementedError("Target cluster authentication is not supported for creating snapshots")
         wait = kwargs.get('wait', False)
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
         command = [
@@ -102,8 +99,6 @@ class S3Snapshot(Snapshot):
 
         if self.source_cluster.allow_insecure:
             command.append("--source-insecure")
-        if self.target_cluster.allow_insecure:
-            command.append("--target-insecure")
         if not wait:
             command.append("--no-wait")
         if max_snapshot_rate_mb_per_node is not None:
@@ -125,19 +120,16 @@ class S3Snapshot(Snapshot):
 
 
 class FileSystemSnapshot(Snapshot):
-    def __init__(self, config: Dict, source_cluster: Cluster, target_cluster: Cluster) -> None:
-        super().__init__(config, source_cluster, target_cluster)
+    def __init__(self, config: Dict, source_cluster: Cluster) -> None:
+        super().__init__(config, source_cluster)
         self.snapshot_name = config['snapshot_name']
         self.repo_path = config['fs']['repo_path']
 
     def create(self, *args, **kwargs) -> CommandResult:
-        assert isinstance(self.target_cluster, Cluster)
+        assert isinstance(self.source_cluster, Cluster)
 
         if self.source_cluster.auth_type != AuthMethod.NO_AUTH:
             raise NotImplementedError("Source cluster authentication is not supported for creating snapshots")
-
-        if self.target_cluster.auth_type != AuthMethod.NO_AUTH:
-            raise NotImplementedError("Target cluster authentication is not supported for creating snapshots")
 
         command = [
             "/root/createSnapshot/bin/CreateSnapshot",
