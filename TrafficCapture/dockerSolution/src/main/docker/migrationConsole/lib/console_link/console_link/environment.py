@@ -8,6 +8,7 @@ from console_link.models.backfill_base import Backfill
 from console_link.models.snapshot import FileSystemSnapshot, Snapshot, S3Snapshot
 from console_link.models.replayer_base import Replayer
 from console_link.models.replayer_ecs import ECSReplayer
+from console_link.models.kafka import Kafka, MSK, StandardKafka
 import yaml
 from cerberus import Validator
 
@@ -28,6 +29,12 @@ def get_replayer(config: Dict):
     raise ValueError("Invalid replayer config")
 
 
+def get_kafka(config: Dict):
+    if 'msk' in config:
+        return MSK(config)
+    return StandardKafka(config)
+
+
 SCHEMA = {
     "source_cluster": {"type": "dict", "required": False},
     "target_cluster": {"type": "dict", "required": True},
@@ -35,7 +42,8 @@ SCHEMA = {
     "metrics_source": {"type": "dict", "required": False},
     "snapshot": {"type": "dict", "required": False},
     "metadata_migration": {"type": "dict", "required": False},
-    "replay": {"type": "dict", "required": False}
+    "replay": {"type": "dict", "required": False},
+    "kafka": {"type": "dict", "required": False}
 }
 
 
@@ -47,6 +55,7 @@ class Environment:
     snapshot: Optional[Snapshot] = None
     metadata: Optional[Metadata] = None
     replay: Optional[Replayer] = None
+    kafka: Optional[Kafka] = None
 
     def __init__(self, config_file: str):
         logger.info(f"Loading config file: {config_file}")
@@ -100,3 +109,6 @@ class Environment:
             self.metadata: Metadata = Metadata(self.config["metadata_migration"],
                                                target_cluster=self.target_cluster,
                                                snapshot=self.snapshot)
+        if 'kafka' in self.config:
+            self.kafka: Kafka = get_kafka(self.config["kafka"])
+            logger.info(f"Kafka initialized: {self.kafka}")
