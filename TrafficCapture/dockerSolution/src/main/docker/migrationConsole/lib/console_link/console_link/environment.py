@@ -31,7 +31,6 @@ def get_replayer(config: Dict):
 SCHEMA = {
     "source_cluster": {"type": "dict", "required": False},
     "target_cluster": {"type": "dict", "required": True},
-    "replayer": {"type": "dict", "required": False},
     "backfill": {"type": "dict", "required": False},
     "metrics_source": {"type": "dict", "required": False},
     "snapshot": {"type": "dict", "required": False},
