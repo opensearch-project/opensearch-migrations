@@ -384,6 +384,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 "        ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;" +
                 "        ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;" +
                 "        ctx._source.numAttempts += 1;" +
+                "      } else {" +
+                "        ctx.op = \\\"noop\\\";" +
                 "      }" +
                 "\" " +  // end of source script contents
                 "}" +    // end of script block
@@ -400,6 +402,9 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         var response = httpClient.makeJsonRequest(POST_METHOD,  INDEX_NAME + "/_update_by_query?refresh=true&max_docs=1",
                 null, body);
+        if (response.getStatusCode() == 409) {
+            return UpdateResult.VERSION_CONFLICT;
+        }
         var resultTree = objectMapper.readTree(response.getPayloadStream());
         final var numUpdated = resultTree.path(UPDATED_COUNT_FIELD_NAME).longValue();
         assert numUpdated <= 1;
