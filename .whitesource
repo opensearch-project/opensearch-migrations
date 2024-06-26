@@ -1,16 +1,25 @@
 {
   "scanSettings": {
-    "configMode": "LOCAL",
+    "configMode": "AUTO",
     "configExternalURL": "",
     "projectToken": "",
     "baseBranches": []
   },
+  "scanSettingsSAST": {
+    "enableScan": false,
+    "scanPullRequests": false,
+    "incrementalScan": false,
+    "baseBranches": [],
+    "snippetSize": 10
+  },
   "checkRunSettings": {
     "vulnerableCheckRunConclusionLevel": "none",
-    "displayMode": "baseline",
-    "showWsInfo": true,
-    "strictMode" : "none",
-    "strictModeInfo": true
+    "displayMode": "diff",
+    "useMendCheckNames": true
+  },
+  "checkRunSettingsSAST": {
+    "checkRunConclusionLevel": "failure",
+    "severityThreshold": "high"
   },
   "issueSettings": {
     "minSeverityLevel": "MEDIUM",
