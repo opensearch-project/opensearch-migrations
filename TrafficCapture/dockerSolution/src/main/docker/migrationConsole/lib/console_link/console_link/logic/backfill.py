@@ -130,5 +130,7 @@ def status(backfill: Backfill, deep_check, *args, **kwargs) -> Tuple[ExitCode, s
         logger.error(f"Failed to get status of backfill: {e}")
         return ExitCode.FAILURE, f"Failure when getting status of backfill: {type(e).__name__} {e}"
     if status.success:
-        return ExitCode.SUCCESS, status.value
-    return ExitCode.FAILURE, "Backfill status retrieval failed." + "\n" + status.value
+        return (ExitCode.SUCCESS,
+                f"{status.value[0]}\n{status.value[1]}" if not isinstance(status.value, str) else status.value)
+    return ExitCode.FAILURE, "Backfill status retrieval failed." + "\n" + \
+        f"{status.value[0]}\n{status.value[1]}" if not isinstance(status.value, str) else status.value

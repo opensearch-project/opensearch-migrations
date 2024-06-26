@@ -238,11 +238,7 @@ def status_backfill_cmd(ctx, deep_check):
     exitcode, message = logic_backfill.status(ctx.env.backfill, deep_check=deep_check)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
-    if len(message) == 2:
-        click.echo(message[0])
-        click.echo(message[1])
-    else:
-        click.echo(message)
+    click.echo(message)
 
 
 # ##################### REPLAY ###################
