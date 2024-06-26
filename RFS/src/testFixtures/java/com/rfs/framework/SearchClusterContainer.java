@@ -4,25 +4,26 @@ import java.io.File;
 import java.time.Duration;
 import java.util.Map;
 
+import com.google.common.collect.ImmutableMap;
 import lombok.EqualsAndHashCode;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.shaded.com.google.common.collect.ImmutableMap;
 import org.testcontainers.utility.DockerImageName;
 
 /**
  * Containerized version of Elasticsearch cluster
  */
 @Slf4j
-public class ElasticsearchContainer extends GenericContainer<ElasticsearchContainer> {
+public class SearchClusterContainer extends GenericContainer<SearchClusterContainer> {
     public static final String CLUSTER_SNAPSHOT_DIR = "/usr/share/elasticsearch/snapshots";
     public static final Version ES_V7_10_2 =
             new ElasticsearchVersion("docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2", "7.10.2");
     public static final Version ES_V7_17 =
             new ElasticsearchVersion("docker.elastic.co/elasticsearch/elasticsearch:7.17.22", "7.17.22");
 
-    public static final Version OS_V1_3_15 =
+    public static final Version OS_V1_3_16 =
             new OpenSearchVersion("opensearchproject/opensearch:1.3.16", "1.3.16");
     public static final Version OS_V2_14_0 =
             new OpenSearchVersion("opensearchproject/opensearch:2.14.0", "2.14.0");
@@ -40,7 +41,7 @@ public class ElasticsearchContainer extends GenericContainer<ElasticsearchContai
     private final Version version;
 
     @SuppressWarnings("resource")
-    public ElasticsearchContainer(final Version version) {
+    public SearchClusterContainer(final Version version) {
         this(version, getDefaultMap(version.initializationType));
     }
 
@@ -55,7 +56,7 @@ public class ElasticsearchContainer extends GenericContainer<ElasticsearchContai
         }
     }
 
-    public ElasticsearchContainer(final Version version, Map<String, String> environmentVariables) {
+    public SearchClusterContainer(final Version version, Map<String, String> environmentVariables) {
         super(DockerImageName.parse(version.imageName));
         this.withExposedPorts(9200, 9300)
                 .withEnv(environmentVariables)
@@ -117,6 +118,7 @@ public class ElasticsearchContainer extends GenericContainer<ElasticsearchContai
     }
 
     @EqualsAndHashCode
+    @Getter
     public static class Version {
         final String imageName;
         final String prettyName;
@@ -137,7 +139,7 @@ public class ElasticsearchContainer extends GenericContainer<ElasticsearchContai
 
     public static class OpenSearchVersion extends Version {
         public OpenSearchVersion(String imageName, String prettyName) {
-            super(imageName, prettyName, INITIALIZATION_FLAVOR .OPENSEARCH);
+            super(imageName, prettyName, INITIALIZATION_FLAVOR.OPENSEARCH);
         }
     }
 }

@@ -9,7 +9,7 @@ import org.mockito.ArgumentCaptor;
 
 import com.rfs.common.OpenSearchClient;
 import com.rfs.framework.ClusterOperations;
-import com.rfs.framework.ElasticsearchContainer;
+import com.rfs.framework.SearchClusterContainer;
 import com.rfs.framework.SimpleRestoreFromSnapshot_ES_7_10;
 import reactor.core.publisher.Mono;
 
@@ -37,14 +37,14 @@ public class SnapshotStateTest {
 
     @TempDir
     private File localDirectory;
-    private ElasticsearchContainer cluster;
+    private SearchClusterContainer cluster;
     private ClusterOperations operations;
     private SimpleRestoreFromSnapshot_ES_7_10 srfs;
 
     @BeforeEach
     public void setUp() throws Exception {
         // Start the cluster for testing
-        cluster = new ElasticsearchContainer(ElasticsearchContainer.ES_V7_10_2);
+        cluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
         cluster.start();
 
         // Configure operations and rfs implementation

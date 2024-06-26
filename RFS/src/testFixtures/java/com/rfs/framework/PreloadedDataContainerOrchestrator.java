@@ -22,11 +22,10 @@ import org.testcontainers.containers.Network;
 
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.nio.file.Paths;
 import java.time.Duration;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
@@ -54,13 +53,13 @@ public class PreloadedDataContainerOrchestrator {
         String[] dataLoaderArgs;
     }
 
-    private final ElasticsearchContainer.Version baseSourceVersion;
+    private final SearchClusterContainer.Version baseSourceVersion;
     private final String serverNameAlias;
     private final String dataLoaderImageName;
     private final String[] generatorContainerArgs;
 
 
-    public PreloadedDataContainerOrchestrator(ElasticsearchContainer.Version baseSourceVersion,
+    public PreloadedDataContainerOrchestrator(SearchClusterContainer.Version baseSourceVersion,
                                               String serverNameAlias,
                                               String dataLoaderImageName,
                                               String[] generatorContainerArgs)
@@ -163,7 +162,6 @@ public class PreloadedDataContainerOrchestrator {
         final var replacementCommand = Streams.concat(
                         Stream.of("/bin/sh", "-c"),
                         Stream.of(Streams.concat(
-                                Stream.of("printenv && "),
                                         Optional.ofNullable(originalEntrypoint).stream().flatMap(Arrays::stream),
                                         Optional.ofNullable(originalCmd).stream().flatMap(Arrays::stream),
                                         Stream.of("&", "tail", "-f", "/dev/null"))
@@ -171,11 +169,10 @@ public class PreloadedDataContainerOrchestrator {
                 .toArray(String[]::new);
 
         try (var network = Network.newNetwork();
-             var serverContainer = new ElasticsearchContainer(baseSourceVersion)
+             var serverContainer = new SearchClusterContainer(baseSourceVersion)
                      .withNetwork(network)
                      .withNetworkAliases(serverNameAlias)
-                     .withCreateContainerCmdModifier(cmd -> cmd.withEntrypoint(replacementCommand))
-                     .withStartupTimeout(Duration.ofDays(1))) {
+                     .withCreateContainerCmdModifier(cmd -> cmd.withEntrypoint(replacementCommand))) {
             serverContainer.start();
             var serverContainerId = serverContainer.getContainerId();
 
@@ -224,7 +221,7 @@ public class PreloadedDataContainerOrchestrator {
         }
     }
 
-    private static void makeFlushRequestToSourceServer(ElasticsearchContainer serverContainer) throws IOException {
+    private static void makeFlushRequestToSourceServer(SearchClusterContainer serverContainer) throws IOException {
         try (var httpClient = HttpClients.createDefault()) {
             var request = new HttpPost("http://localhost:" + serverContainer.getMappedPort(9200) + "/_flush");
             request.setEntity(new StringEntity(""));  // Set an empty body for the POST request
@@ -248,7 +245,7 @@ public class PreloadedDataContainerOrchestrator {
     {
         try (var execCmd = dockerClient.execCreateCmd(serverContainerId)) {
             final var script =
-                    "echo hi there && " +
+                    "" +
                             "export PID=`ps -e -o pid=,comm= | sort -n | grep java | sed 's/ \\+/ /g' | sed 's/^ //' | cut -d ' ' -f 1` && " +
                             "echo pid=${PID} && " +
                             "kill -15 ${PID} && " +

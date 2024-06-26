@@ -2,8 +2,8 @@ package com.rfs.framework;
 
 import java.io.IOException;
 
-public class PreloadedElasticsearchContainer extends ElasticsearchContainer {
-    public PreloadedElasticsearchContainer(ElasticsearchContainer.Version baseVersion,
+public class PreloadedSearchClusterContainer extends SearchClusterContainer {
+    public PreloadedSearchClusterContainer(SearchClusterContainer.Version baseVersion,
                                            String serverAlias,
                                            String dataLoaderImageName,
                                            String[] generatorArgs,
@@ -15,7 +15,7 @@ public class PreloadedElasticsearchContainer extends ElasticsearchContainer {
                 baseVersion.prettyName + "_preloaded"));
     }
 
-    public PreloadedElasticsearchContainer(ElasticsearchContainer.Version baseVersion,
+    public PreloadedSearchClusterContainer(SearchClusterContainer.Version baseVersion,
                                            String serverAlias,
                                            String dataLoaderImageName,
                                            String[] generatorArgs) throws Exception {

@@ -18,9 +18,8 @@ import com.rfs.common.ShardMetadata;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
-import com.rfs.framework.ElasticsearchContainer;
-import com.rfs.framework.PreloadedDataContainerOrchestrator;
-import com.rfs.framework.PreloadedElasticsearchContainer;
+import com.rfs.framework.SearchClusterContainer;
+import com.rfs.framework.PreloadedSearchClusterContainer;
 import com.rfs.transformers.TransformFunctions;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
@@ -64,12 +63,10 @@ import java.util.Objects;
 import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
-import java.util.concurrent.Callable;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Supplier;
 import java.util.function.UnaryOperator;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
@@ -87,9 +84,11 @@ public class FullTest {
 
     public static Stream<Arguments> makeArgs() {
         var sourceImageNames = List.of(
-                makeParamsForBase(ElasticsearchContainer.ES_V7_17),
-                makeParamsForBase(ElasticsearchContainer.ES_V7_10_2));
-        var targetImageNames = List.of("opensearchproject/opensearch:2.13.0");//, "opensearchproject/opensearch:1.3.0");
+                makeParamsForBase(SearchClusterContainer.ES_V7_17),
+                makeParamsForBase(SearchClusterContainer.ES_V7_10_2));
+        var targetImageNames = List.of(
+                SearchClusterContainer.OS_V1_3_16.getImageName(),
+                SearchClusterContainer.OS_V2_14_0.getImageName());
         var numWorkers = List.of(1, 3, 40);
         return sourceImageNames.stream()
                 .flatMap(a->
@@ -97,7 +96,7 @@ public class FullTest {
                                 numWorkers.stream().map(c->Arguments.of(a[0], a[1], a[2], b, c))));
     }
 
-    private static Object[] makeParamsForBase(ElasticsearchContainer.Version baseSourceImage) {
+    private static Object[] makeParamsForBase(SearchClusterContainer.Version baseSourceImage) {
         return new Object[]{
                 baseSourceImage,
                 GENERATOR_BASE_IMAGE,
@@ -107,13 +106,13 @@ public class FullTest {
 
     @ParameterizedTest
     @MethodSource("makeArgs")
-    public void test(ElasticsearchContainer.Version baseSourceImageVersion,
+    public void test(SearchClusterContainer.Version baseSourceImageVersion,
                      String generatorImage, String[] generatorArgs,
                      String targetImageName, int numWorkers)
             throws Exception
     {
 
-        try (var esSourceContainer = new PreloadedElasticsearchContainer(baseSourceImageVersion,
+        try (var esSourceContainer = new PreloadedSearchClusterContainer(baseSourceImageVersion,
                 SOURCE_SERVER_ALIAS, generatorImage, generatorArgs);
              OpensearchContainer<?> osTargetContainer =
                      new OpensearchContainer<>(targetImageName)) {
@@ -123,7 +122,7 @@ public class FullTest {
             final var SNAPSHOT_NAME = "test_snapshot";
             final List<String> INDEX_ALLOWLIST = List.of();
             CreateSnapshot.run(
-                    c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, ElasticsearchContainer.CLUSTER_SNAPSHOT_DIR),
+                    c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, SearchClusterContainer.CLUSTER_SNAPSHOT_DIR),
                     new OpenSearchClient(esSourceContainer.getUrl(), null),
                     false);
             var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
@@ -173,7 +172,7 @@ public class FullTest {
         }
     }
 
-    private void checkClusterMigrationOnFinished(ElasticsearchContainer esSourceContainer,
+    private void checkClusterMigrationOnFinished(SearchClusterContainer esSourceContainer,
                                                  OpensearchContainer<?> osTargetContainer) {
         var targetClient = new RestClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(), null, null));
         var sourceMap = getIndexToCountMap(new RestClient(new ConnectionDetails(esSourceContainer.getUrl(),
