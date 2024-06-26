@@ -105,10 +105,10 @@ public class PreloadedDataContainerOrchestrator {
     private int getHashCodeOfImagesAndArgs(DockerClient dockerClient, boolean pullIfUnavailable)
         throws InterruptedException
     {
-        return new HashHelper(
+        return Objects.hash(
                 getImageId(dockerClient, baseSourceVersion.imageName, pullIfUnavailable),
                 getImageId(dockerClient, dataLoaderImageName, pullIfUnavailable),
-                generatorContainerArgs).hashCode();
+                generatorContainerArgs);
     }
 
     private String getImageName() {
