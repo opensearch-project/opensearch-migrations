@@ -1,6 +1,7 @@
 package com.rfs.cms;
 
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -108,6 +109,21 @@ public class WorkCoordinatorTest {
 //        log.info("doc4="+doc4);
     }
 
+    @SneakyThrows
+    private static JsonNode searchForExpiredDocs(long expirationEpochSeconds) {
+        final var body = "{" +
+                OpenSearchWorkCoordinator.QUERY_INCOMPLETE_EXPIRED_ITEMS_STR.replace(
+                        OpenSearchWorkCoordinator.OLD_EXPIRATION_THRESHOLD_TEMPLATE, ""+expirationEpochSeconds) +
+                "}";
+        log.atInfo().setMessage(()->"Searching with... " + body).log();
+        var response = httpClientSupplier.get().makeJsonRequest(AbstractedHttpClient.GET_METHOD,
+                OpenSearchWorkCoordinator.INDEX_NAME + "/_search",
+                null, body);
+
+        var objectMapper = new ObjectMapper();
+        return objectMapper.readTree(response.getPayloadStream()).path("hits");
+    }
+
     @Test
     public void testAcquireLeaseForQuery() throws Exception {
         var objMapper = new ObjectMapper();
@@ -139,9 +155,11 @@ public class WorkCoordinatorTest {
             try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
                     3600, "firstPass_NONE")) {
                 var nextWorkItem = workCoordinator.acquireNextWorkItem(Duration.ofSeconds(2));
-                log.error("Next work item picked=" + nextWorkItem);
-
+                log.atInfo().setMessage(()->"Next work item picked=" + nextWorkItem).log();
                 Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, nextWorkItem);
+            } catch (OpenSearchWorkCoordinator.PotentialClockDriftDetectedException e) {
+                log.atError().setCause(e).setMessage(()->"Unexpected clock drift error.  Got response: "
+                +searchForExpiredDocs(e.getTimestampEpochSeconds())).log();
             }
 
             Thread.sleep(expiration.multipliedBy(2).toMillis());
@@ -178,7 +196,7 @@ public class WorkCoordinatorTest {
                         public String onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem)
                                 throws IOException, InterruptedException
                         {
-                            log.error("Next work item picked=" + workItem);
+                            log.atInfo().setMessage(()->"Next work item picked=" + workItem).log();
                             Assertions.assertNotNull(workItem);
                             Assertions.assertNotNull(workItem.workItemId);
                             Assertions.assertTrue(workItem.leaseExpirationTime.isAfter(Instant.now()));
@@ -190,6 +208,10 @@ public class WorkCoordinatorTest {
                             return workItem.workItemId;
                         }
                     });
+        } catch (OpenSearchWorkCoordinator.PotentialClockDriftDetectedException e) {
+            log.atError().setCause(e).setMessage(()->"Unexpected clock drift error.  Got response: "
+                    +searchForExpiredDocs(e.getTimestampEpochSeconds())).log();
+            throw e;
         }
     }
 }
