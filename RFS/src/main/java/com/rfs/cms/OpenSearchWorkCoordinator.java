@@ -71,13 +71,6 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     }
 
     public void setup() throws IOException, InterruptedException {
-        var indexCheckResponse = httpClient.makeJsonRequest(HEAD_METHOD, INDEX_NAME, null, null);
-        if (indexCheckResponse.getStatusCode() == 200) {
-            log.info("Not creating " + INDEX_NAME + " because it already exists");
-            return;
-        }
-        log.atInfo().setMessage("Creating " + INDEX_NAME + " because it's HEAD check returned " +
-                indexCheckResponse.getStatusCode()).log();
         var body = "{\n" +
                 "  \"settings\": {\n" +
                 "   \"index\": {" +
@@ -109,6 +102,13 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             doUntil("setup-" + INDEX_NAME, 100, MAX_SETUP_RETRIES,
                     () -> {
                         try {
+                            var indexCheckResponse = httpClient.makeJsonRequest(HEAD_METHOD, INDEX_NAME, null, null);
+                            if (indexCheckResponse.getStatusCode() == 200) {
+                                log.info("Not creating " + INDEX_NAME + " because it already exists");
+                                return indexCheckResponse;
+                            }
+                            log.atInfo().setMessage("Creating " + INDEX_NAME + " because it's HEAD check returned " +
+                                    indexCheckResponse.getStatusCode()).log();
                             return httpClient.makeJsonRequest(PUT_METHOD, INDEX_NAME, null, body);
                         } catch (Exception e) {
                             throw Lombok.sneakyThrow(e);
@@ -123,7 +123,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                             return "[ statusCode: " + r.getStatusCode() + ", payload: " + payloadStr + "]";
                         }
                     },
-                    (response, ignored) -> (response.getStatusCode() / 100) != 2);
+                    (response, ignored) -> (response.getStatusCode() / 100) == 2);
         } catch (MaxTriesExceededException e) {
             throw new IOException(e);
         }
@@ -398,7 +398,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 .replace(SCRIPT_VERSION_TEMPLATE, "poc")
                 .replace(WORKER_ID_TEMPLATE, workerId)
                 .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(timestampEpochSeconds))
-                .replace(OLD_EXPIRATION_THRESHOLD_TEMPLATE, Long.toString(timestampEpochSeconds+expirationWindowSeconds))
+                .replace(OLD_EXPIRATION_THRESHOLD_TEMPLATE, Long.toString(timestampEpochSeconds))
                 .replace(EXPIRATION_WINDOW_TEMPLATE, Long.toString(expirationWindowSeconds))
                 .replace(CLOCK_DEVIATION_SECONDS_THRESHOLD_TEMPLATE, Long.toString(tolerableClientServerClockDifferenceSeconds));
 
@@ -471,7 +471,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         Object transformedValue;
     }
 
-    private static class PotentialClockDriftDetectedException extends IllegalStateException {
+    public static class PotentialClockDriftDetectedException extends IllegalStateException {
         public PotentialClockDriftDetectedException(String s) {
             super(s);
         }
