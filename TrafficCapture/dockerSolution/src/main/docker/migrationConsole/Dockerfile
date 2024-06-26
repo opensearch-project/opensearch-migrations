@@ -24,9 +24,6 @@ COPY kafkaCmdRef.md /root/kafka-tools
 COPY humanReadableLogs.py /root/
 RUN chmod ug+x /root/humanReadableLogs.py
 
-COPY setupIntegTests.sh /root/
-RUN chmod ug+x /root/setupIntegTests.sh
-
 COPY showFetchMigrationCommand.sh /root/
 RUN chmod ug+x /root/showFetchMigrationCommand.sh
 
