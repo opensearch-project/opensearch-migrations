@@ -47,7 +47,7 @@ def cli(ctx, config_file, json, verbose):
 # ##################### CLUSTERS ###################
 
 
-@cli.group(name="clusters")
+@cli.group(name="clusters", help="Commands to interact with source and target clusters")
 @click.pass_obj
 def cluster_group(ctx):
     if ctx.env.source_cluster is None:
@@ -123,7 +123,8 @@ def clear_indices_cmd(ctx, acknowledge_risk, cluster):
 # ##################### SNAPSHOT ###################
 
 
-@cli.group(name="snapshot")
+@cli.group(name="snapshot",
+           help="Commands to create and check status of snapshots of the source cluster.")
 @click.pass_obj
 def snapshot_group(ctx):
     """All actions related to snapshot creation"""
@@ -158,7 +159,7 @@ def status_snapshot_cmd(ctx, deep_check):
 # arguments depending on the type of backfill migration
 
 
-@cli.group(name="backfill")
+@cli.group(name="backfill", help="Commands related to controlling the configured backfill mechanism.")
 @click.pass_obj
 def backfill_group(ctx):
     """All actions related to historical/backfill data migrations"""
@@ -229,7 +230,7 @@ def status_backfill_cmd(ctx, deep_check):
 
 # ##################### REPLAY ###################
 
-@cli.group(name="replay")
+@cli.group(name="replay", help="Commands related to controlling the replayer.")
 @click.pass_obj
 def replay_group(ctx):
     """All actions related to replaying data"""
@@ -283,7 +284,7 @@ def status_replay_cmd(ctx):
 # ##################### METADATA ###################
 
 
-@cli.group(name="metadata")
+@cli.group(name="metadata", help="Commands related to migrating metadata to the target cluster.")
 @click.pass_obj
 def metadata_group(ctx):
     """All actions related to metadata migration"""
@@ -303,7 +304,7 @@ def migrate_metadata_cmd(ctx, detach):
 # ##################### METRICS ###################
 
 
-@cli.group(name="metrics")
+@cli.group(name="metrics", help="Commands related to checking metrics emitted by the capture proxy and replayer.")
 @click.pass_obj
 def metrics_group(ctx):
     if ctx.env.metrics_source is None:
