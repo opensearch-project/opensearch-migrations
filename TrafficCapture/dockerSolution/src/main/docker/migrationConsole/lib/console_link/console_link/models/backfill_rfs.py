@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Optional
 from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.cluster import Cluster
 from console_link.models.schema_tools import contains_one_of
@@ -61,7 +61,7 @@ class RFSBackfill(Backfill):
     def stop(self, *args, **kwargs) -> CommandResult:
         raise NotImplementedError()
 
-    def get_status(self, *args, **kwargs) -> BackfillStatus:
+    def get_status(self, *args, **kwargs) -> CommandResult:
         raise NotImplementedError()
 
     def scale(self, units: int, *args, **kwargs) -> CommandResult:
@@ -96,3 +96,41 @@ class ECSRFSBackfill(RFSBackfill):
     def scale(self, units: int, *args, **kwargs) -> CommandResult:
         logger.info(f"Scaling RFS backfill by setting desired count to {units} instances")
         return self.ecs_client.set_desired_count(units)
+    
+    def get_status(self, deep_check, *args, **kwargs) -> CommandResult:
+        logger.info(f"Getting status of RFS backfill, with {deep_check=}")
+        instance_statuses = self.ecs_client.get_instance_statuses()
+        if not instance_statuses:
+            return CommandResult(False, "Failed to get instance statuses")
+        
+        status_string = str(instance_statuses)
+        if deep_check:
+            try:
+                shard_status = self._get_detailed_status()
+            except Exception as e:
+                logger.error(f"Failed to get detailed status: {e}")
+            if shard_status:
+                status_string += f"\n{shard_status}"
+
+        if instance_statuses.running > 0:
+            return CommandResult(True, (BackfillStatus.RUNNING, status_string))
+        elif instance_statuses.pending > 0:
+            return CommandResult(True, (BackfillStatus.STARTING, status_string))
+        return CommandResult(True, (BackfillStatus.STOPPED, status_string))
+
+    def _get_detailed_status(self) -> Optional[str]:
+        status_query = {"query": {
+            "bool": {
+                "must": [{"exists": {"field": "expiration"}}],
+                "must_not": [{"exists": {"field": "completedAt"}}]
+            }
+        }}
+        response = self.target_cluster.call_api("/.migrations_working_state/_search", json_body=status_query)
+        r_body = response.json()
+        logger.debug(f"Raw response: {r_body}")
+        if "hits" in r_body:
+            logger.info(f"Hits on detailed status query: {r_body['hits']}")
+            logger.info(f"Sample of remaining shards: {[hit['_id'] for hit in r_body['hits']['hits']]}")
+            return f"Remaining shards: {r_body['hits']['total']['value']}"
+        logger.warning("No hits on detailed status query, migration_working_state index may not exist or be populated")
+        return None

@@ -1,0 +1,121 @@
+{
+  "took": 2,
+  "timed_out": false,
+  "_shards": { "total": 1, "successful": 1, "skipped": 0, "failed": 0 },
+  "hits": {
+    "total": { "value": 43, "relation": "eq" },
+    "max_score": 1.0,
+    "hits": [
+      {
+        "_index": ".migrations_working_state",
+        "_id": "logs-211998__2",
+        "_score": 1.0,
+        "_source": {
+          "numAttempts": 0,
+          "scriptVersion": "poc",
+          "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
+          "expiration": 0
+        }
+      },
+      {
+        "_index": ".migrations_working_state",
+        "_id": "logs-211998__3",
+        "_score": 1.0,
+        "_source": {
+          "numAttempts": 0,
+          "scriptVersion": "poc",
+          "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
+          "expiration": 0
+        }
+      },
+      {
+        "_index": ".migrations_working_state",
+        "_id": "logs-211998__4",
+        "_score": 1.0,
+        "_source": {
+          "numAttempts": 0,
+          "scriptVersion": "poc",
+          "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
+          "expiration": 0
+        }
+      },
+      {
+        "_index": ".migrations_working_state",
+        "_id": "logs-221998__0",
+        "_score": 1.0,
+        "_source": {
+          "numAttempts": 0,
+          "scriptVersion": "poc",
+          "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
+          "expiration": 0
+        }
+      },
+      {
+        "_index": ".migrations_working_state",
+        "_id": "logs-221998__1",
+        "_score": 1.0,
+        "_source": {
+          "numAttempts": 0,
+          "scriptVersion": "poc",
+          "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
+          "expiration": 0
+        }
+      },
+      {
+        "_index": ".migrations_working_state",
+        "_id": "logs-221998__2",
+        "_score": 1.0,
+        "_source": {
+          "numAttempts": 0,
+          "scriptVersion": "poc",
+          "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
+          "expiration": 0
+        }
+      },
+      {
+        "_index": ".migrations_working_state",
+        "_id": "logs-221998__3",
+        "_score": 1.0,
+        "_source": {
+          "numAttempts": 0,
+          "scriptVersion": "poc",
+          "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
+          "expiration": 0
+        }
+      },
+      {
+        "_index": ".migrations_working_state",
+        "_id": "logs-221998__4",
+        "_score": 1.0,
+        "_source": {
+          "numAttempts": 0,
+          "scriptVersion": "poc",
+          "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
+          "expiration": 0
+        }
+      },
+      {
+        "_index": ".migrations_working_state",
+        "_id": "logs-201998__0",
+        "_score": 1.0,
+        "_source": {
+          "numAttempts": 0,
+          "scriptVersion": "poc",
+          "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
+          "expiration": 0
+        }
+      },
+      {
+        "_index": ".migrations_working_state",
+        "_id": "logs-201998__1",
+        "_score": 1.0,
+        "_source": {
+          "numAttempts": 0,
+          "scriptVersion": "poc",
+          "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
+          "expiration": 0
+        }
+      }
+    ]
+  }
+}
