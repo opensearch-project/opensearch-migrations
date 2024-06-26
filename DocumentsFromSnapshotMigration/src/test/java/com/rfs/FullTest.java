@@ -88,7 +88,7 @@ public class FullTest {
                 makeParamsForBase(ElasticsearchContainer.ES_V7_17),
                 makeParamsForBase(ElasticsearchContainer.ES_V7_10_2));
         var targetImageNames = List.of("opensearchproject/opensearch:2.13.0");//, "opensearchproject/opensearch:1.3.0");
-        var numWorkers = List.of(1);
+        var numWorkers = List.of(1, 3, 40);
         return sourceImageNames.stream()
                 .flatMap(a->
                         targetImageNames.stream().flatMap(b->
