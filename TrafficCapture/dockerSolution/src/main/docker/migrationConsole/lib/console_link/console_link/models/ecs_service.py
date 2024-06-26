@@ -10,7 +10,7 @@ from console_link.models.utils import AWSAPIError, raise_for_aws_api_error
 logger = logging.getLogger(__name__)
 
 
-class InstanceStatues(NamedTuple):
+class InstanceStatuses(NamedTuple):
     running: int = 0
     pending: int = 0
     desired: int = 0
@@ -48,7 +48,7 @@ class ECSService:
         return CommandResult(True, f"Service {self.service_name} set to {desired_count} desired count."
                              f" Currently {running_count} running and {pending_count} pending.")
     
-    def get_instance_statuses(self) -> Optional[InstanceStatues]:
+    def get_instance_statuses(self) -> Optional[InstanceStatuses]:
         logger.info(f"Getting instance statuses for service {self.service_name}")
         response = self.client.describe_services(
             cluster=self.cluster_name,
@@ -61,7 +61,7 @@ class ECSService:
             return None
 
         service = response["services"][0]
-        return InstanceStatues(
+        return InstanceStatuses(
             running=service["runningCount"],
             pending=service["pendingCount"],
             desired=service["desiredCount"]

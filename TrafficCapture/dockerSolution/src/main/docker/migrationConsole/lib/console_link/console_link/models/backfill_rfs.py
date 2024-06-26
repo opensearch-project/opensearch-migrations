@@ -1,4 +1,4 @@
-from typing import Dict
+from typing import Dict, Optional
 from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.cluster import Cluster
 from console_link.models.schema_tools import contains_one_of
@@ -118,7 +118,7 @@ class ECSRFSBackfill(RFSBackfill):
             return CommandResult(True, (BackfillStatus.STARTING, status_string))
         return CommandResult(True, (BackfillStatus.STOPPED, status_string))
 
-    def _get_detailed_status(self):
+    def _get_detailed_status(self) -> Optional[str]:
         status_query = {"query": {
             "bool": {
                 "must": [{"exists": {"field": "expiration"}}],
@@ -132,4 +132,5 @@ class ECSRFSBackfill(RFSBackfill):
             logger.info(f"Hits on detailed status query: {r_body['hits']}")
             logger.info(f"Sample of remaining shards: {[hit['_id'] for hit in r_body['hits']['hits']]}")
             return f"Remaining shards: {r_body['hits']['total']['value']}"
-        return response.json()
+        logger.warning("No hits on detailed status query, migration_working_state index may not exist or be populated")
+        return None
