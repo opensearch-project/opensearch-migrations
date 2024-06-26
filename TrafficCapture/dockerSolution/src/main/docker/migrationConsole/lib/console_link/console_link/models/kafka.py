@@ -113,8 +113,8 @@ class MSK(Kafka):
         return get_result_for_command(command, "Create Topic")
 
     def describe_consumer_group(self, group_name='logging-group-default') -> CommandResult:
-        command = ['/root/kafka-tools/kafka/bin/kafka-topics.sh', '--bootstrap-server', f'{self.brokers}', '--timeout',
-                   '100000', '--describe', '--group', f'{group_name}', '--command-config',
+        command = ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh', '--bootstrap-server', f'{self.brokers}',
+                   '--timeout', '100000', '--describe', '--group', f'{group_name}', '--command-config',
                    '/root/kafka-tools/aws/msk-iam-auth.properties']
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, "Describe Consumer Group")
