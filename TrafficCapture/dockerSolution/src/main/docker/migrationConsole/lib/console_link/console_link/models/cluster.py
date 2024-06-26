@@ -85,7 +85,8 @@ class Cluster:
         elif 'sigv4' in config:
             self.auth_type = AuthMethod.SIGV4
 
-    def call_api(self, path, method: HttpMethod = HttpMethod.GET, timeout=None, json_body=None) -> requests.Response:
+    def call_api(self, path, method: HttpMethod = HttpMethod.GET, timeout=None,
+                 json_body=None, **kwargs) -> requests.Response:
         """
         Calls an API on the cluster.
         """
@@ -101,16 +102,19 @@ class Cluster:
             raise NotImplementedError(f"Auth type {self.auth_type} not implemented")
 
         if json_body is not None:
-            # headers = {'Content-type': 'application/json'}
             data = json_body
         else:
-            # headers = None
             data = None
 
         logger.info(f"Making api call to {self.endpoint}{path}")
+        
+        # Extract query parameters from kwargs
+        params = kwargs.get('params', {})
+        
         r = requests.request(
             method.name,
             f"{self.endpoint}{path}",
+            params=params,
             verify=(not self.allow_insecure),
             auth=auth,
             timeout=timeout,
