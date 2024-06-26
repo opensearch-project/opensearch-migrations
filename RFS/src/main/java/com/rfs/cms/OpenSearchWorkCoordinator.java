@@ -20,9 +20,9 @@ import java.util.function.Supplier;
 @Slf4j
 public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String INDEX_NAME = ".migrations_working_state";
-    public static final int MAX_REFRESH_RETRIES = 6; // at 100ms, the total delay will be 105s
-    public static final int MAX_SETUP_RETRIES = 6; // at 100ms, the total delay will be 105s
-    public static final int MAX_JITTER_RETRIES = 4; // to recover from clock sync issues
+    public static final int MAX_REFRESH_RETRIES = 6;
+    public static final int MAX_SETUP_RETRIES = 6;
+    public static final int MAX_JITTER_RETRIES = 6;
 
     public static final String PUT_METHOD = "PUT";
     public static final String POST_METHOD = "POST";
@@ -409,6 +409,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
         var resultTree = objectMapper.readTree(response.getPayloadStream());
         final var numUpdated = resultTree.path(UPDATED_COUNT_FIELD_NAME).longValue();
+        final var noops = resultTree.path("noops").longValue();
         assert numUpdated <= 1;
         if (numUpdated > 0) {
             return UpdateResult.SUCCESSFUL_ACQUISITION;
@@ -416,8 +417,11 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             return UpdateResult.VERSION_CONFLICT;
         } else if (resultTree.path("total").longValue() == 0) {
             return UpdateResult.NOTHING_TO_ACQUIRE;
+        } else if (noops > 0) {
+            throw new PotentialClockDriftDetectedException("Found " + noops +
+                    " noop values in response with no successful updates");
         } else {
-            throw new PotentialClockDriftDetectedException("Unexpected response for update: " + resultTree);
+            throw new IllegalStateException("Unexpected response for update: " + resultTree);
         }
     }
 
