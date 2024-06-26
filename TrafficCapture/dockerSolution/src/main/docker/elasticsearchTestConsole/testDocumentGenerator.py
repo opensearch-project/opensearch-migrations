@@ -99,8 +99,8 @@ def calculate_sleep_time(request_timestamps, target_requests_per_sec):
         return 0
     
     target_time_per_iteration = 1.0 / target_requests_per_sec
-    average_time_per_iteration = (datetime.now() -
-                                   request_timestamps[0]).total_seconds() / (len(request_timestamps) + 1)
+    average_time_per_iteration = (datetime.now() - 
+                                  request_timestamps[0]).total_seconds() / (len(request_timestamps) + 1)
     
     sleep_time = (target_time_per_iteration - average_time_per_iteration) * len(request_timestamps)
     
