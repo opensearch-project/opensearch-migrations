@@ -87,7 +87,7 @@ class Cluster:
             self.auth_type = AuthMethod.SIGV4
 
     def call_api(self, path, method: HttpMethod = HttpMethod.GET, data=None, headers=None,
-                 timeout=None, session=None, raise_error=True, **kwargs) -> requests.Response:
+                 timeout=None, session=None, raise_error=True, **kwargs) -> re -> requests.Response:quests.Response:
         """
         Calls an API on the cluster.
         """

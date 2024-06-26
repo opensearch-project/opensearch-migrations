@@ -1,6 +1,8 @@
 import pathlib
 
 import requests_mock
+from console_link.models.backfill_rfs import ECSRFSBackfill
+from console_link.models.ecs_service import ECSService, InstanceStatuses
 from console_link.models.command_result import CommandResult
 
 from console_link.cli import cli
@@ -175,3 +177,49 @@ def test_cli_metadata_migrate(runner, env, mocker):
                            catch_exceptions=True)
     mock.assert_called_once()
     assert result.exit_code == 0
+
+
+def test_get_backfill_status_no_deep_check(runner, mocker):
+    mocked_running_status = InstanceStatuses(
+        desired=1,
+        running=3,
+        pending=1
+    )
+    mock = mocker.patch.object(ECSService, 'get_instance_statuses', autspec=True, return_value=mocked_running_status)
+
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+                                 'backfill', 'status'],
+                           catch_exceptions=True)
+    print(result)
+    print(result.output)
+    assert result.exit_code == 0
+    assert "RUNNING" in result.output
+    assert str(mocked_running_status) in result.output
+
+    mock.assert_called_once()
+
+
+def test_get_backfill_status_with_deep_check(runner, mocker):
+    mocked_running_status = InstanceStatuses(
+        desired=1,
+        running=3,
+        pending=1
+    )
+    mocked_detailed_status = "Remaining shards: 43"
+    mock_ecs_service_call = mocker.patch.object(ECSService, 'get_instance_statuses', autspec=True,
+                                                return_value=mocked_running_status)
+    mock_detailed_status_call = mocker.patch.object(ECSRFSBackfill, '_get_detailed_status', autspec=True,
+                                                    return_value=mocked_detailed_status)
+
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+                                 'backfill', 'status', '--deep-check'],
+                           catch_exceptions=True)
+    print(result)
+    print(result.output)
+    assert result.exit_code == 0
+    assert "RUNNING" in result.output
+    assert str(mocked_running_status) in result.output
+    assert mocked_detailed_status in result.output
+
+    mock_ecs_service_call.assert_called_once()
+    mock_detailed_status_call.assert_called_once()
