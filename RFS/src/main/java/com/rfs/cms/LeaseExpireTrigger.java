@@ -16,7 +16,7 @@ import java.util.function.Consumer;
  * time unless the work is marked as complete before that expiration.  This class may, but does not need to,
  * synchronize its clock with an external source of truth for better accuracy.
  */
-public class LeaseExpireTrigger {
+public class LeaseExpireTrigger implements AutoCloseable {
     private final ScheduledExecutorService scheduledExecutorService;
     final ConcurrentHashMap<String, Instant> workItemToLeaseMap;
     final Consumer<String> onLeaseExpired;
@@ -46,5 +46,10 @@ public class LeaseExpireTrigger {
 
     public void markWorkAsCompleted(String workItemId) {
         workItemToLeaseMap.remove(workItemId);
+    }
+
+    @Override
+    public void close() throws Exception {
+        scheduledExecutorService.shutdownNow();
     }
 }

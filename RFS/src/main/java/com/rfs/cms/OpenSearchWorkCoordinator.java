@@ -20,7 +20,9 @@ import java.util.function.Supplier;
 @Slf4j
 public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String INDEX_NAME = ".migrations_working_state";
-    public static final int MAX_RETRIES = 6; // at 100ms, the total delay will be 105s
+    public static final int MAX_REFRESH_RETRIES = 6; // at 100ms, the total delay will be 105s
+    public static final int MAX_SETUP_RETRIES = 6; // at 100ms, the total delay will be 105s
+    public static final int MAX_JITTER_RETRIES = 4; // to recover from clock sync issues
 
     public static final String PUT_METHOD = "PUT";
     public static final String POST_METHOD = "POST";
@@ -104,7 +106,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 "}\n";
 
         try {
-            doUntil("setup-" + INDEX_NAME, 100, MAX_RETRIES,
+            doUntil("setup-" + INDEX_NAME, 100, MAX_SETUP_RETRIES,
                     () -> {
                         try {
                             return httpClient.makeJsonRequest(PUT_METHOD, INDEX_NAME, null, body);
@@ -385,6 +387,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 "        ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;" +
                 "        ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;" +
                 "        ctx._source.numAttempts += 1;" +
+                "      } else {" +
+                "        ctx.op = \\\"noop\\\";" +
                 "      }" +
                 "\" " +  // end of source script contents
                 "}" +    // end of script block
@@ -401,6 +405,9 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         var response = httpClient.makeJsonRequest(POST_METHOD,  INDEX_NAME + "/_update_by_query?refresh=true&max_docs=1",
                 null, body);
+        if (response.getStatusCode() == 409) {
+            return UpdateResult.VERSION_CONFLICT;
+        }
         var resultTree = objectMapper.readTree(response.getPayloadStream());
         final var numUpdated = resultTree.path(UPDATED_COUNT_FIELD_NAME).longValue();
         assert numUpdated <= 1;
@@ -411,7 +418,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         } else if (resultTree.path("total").longValue() == 0) {
             return UpdateResult.NOTHING_TO_ACQUIRE;
         } else {
-            throw new IllegalStateException("Unexpected response for update: " + resultTree);
+            throw new PotentialClockDriftDetectedException("Unexpected response for update: " + resultTree);
         }
     }
 
@@ -461,6 +468,12 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         Object transformedValue;
     }
 
+    private static class PotentialClockDriftDetectedException extends IllegalStateException {
+        public PotentialClockDriftDetectedException(String s) {
+            super(s);
+        }
+    }
+
     public static <T,U> U doUntil(String labelThatShouldBeAContext, long initialRetryDelayMs, int maxTries,
                                   Supplier<T> supplier, Function<T,U> transformer, BiPredicate<T,U> test)
             throws InterruptedException, MaxTriesExceededException
@@ -485,7 +498,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
     private void refresh() throws IOException, InterruptedException {
         try {
-            doUntil("refresh", 100, MAX_RETRIES, () -> {
+            doUntil("refresh", 100, MAX_REFRESH_RETRIES, () -> {
                         try {
                             return httpClient.makeJsonRequest(GET_METHOD, INDEX_NAME + "/_refresh",null,null);
                         } catch (IOException e) {
@@ -507,17 +520,32 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
      */
     public WorkAcquisitionOutcome acquireNextWorkItem(Duration leaseDuration) throws IOException, InterruptedException {
         refresh();
+        int jitterRecoveryTimeMs = 10;
+        int tries = 0;
         while (true) {
-            final var obtainResult = assignOneWorkItem(leaseDuration.toSeconds());
-            switch (obtainResult) {
-                case SUCCESSFUL_ACQUISITION:
-                    return getAssignedWorkItem();
-                case NOTHING_TO_ACQUIRE:
-                    return new NoAvailableWorkToBeDone();
-                case VERSION_CONFLICT:
-                    continue;
-                default:
-                    throw new IllegalStateException("unknown result from the assignOneWorkItem: " + obtainResult);
+            try {
+                final var obtainResult = assignOneWorkItem(leaseDuration.toSeconds());
+                switch (obtainResult) {
+                    case SUCCESSFUL_ACQUISITION:
+                        return getAssignedWorkItem();
+                    case NOTHING_TO_ACQUIRE:
+                        return new NoAvailableWorkToBeDone();
+                    case VERSION_CONFLICT:
+                        continue;
+                    default:
+                        throw new IllegalStateException("unknown result from the assignOneWorkItem: " + obtainResult);
+                }
+            } catch (PotentialClockDriftDetectedException e) {
+                if (++tries > MAX_JITTER_RETRIES) {
+                    throw e;
+                }
+                int finalJitterRecoveryTimeMs = jitterRecoveryTimeMs;
+                log.atWarn().setMessage(()->"Couldn't complete work assignment.  " +
+                        "Presuming that the issue was due to clock synchronization.  " +
+                        "Backing off " + finalJitterRecoveryTimeMs +"ms and trying again.")
+                        .setCause(e).log();
+                Thread.sleep(jitterRecoveryTimeMs);
+                jitterRecoveryTimeMs *= 2;
             }
         }
     }
