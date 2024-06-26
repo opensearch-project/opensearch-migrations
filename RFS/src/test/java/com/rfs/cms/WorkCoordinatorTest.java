@@ -120,7 +120,7 @@ public class WorkCoordinatorTest {
 //        log.info("doc4="+doc4);
     }
 
-    //@Test
+    @Test
     public void testAcquireLeaseForQuery() throws Exception {
         var objMapper = new ObjectMapper();
         final var NUM_DOCS = 40;
@@ -151,8 +151,8 @@ public class WorkCoordinatorTest {
             try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
                     3600, "firstPass_NONE")) {
                 var nextWorkItem = workCoordinator.acquireNextWorkItem(Duration.ofSeconds(2));
-                log.error("Next work item picked=" + nextWorkItem);
-                Assertions.assertNull(nextWorkItem);
+                log.atInfo().setMessage(()->"Next work item picked=" + nextWorkItem).log();
+                Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, nextWorkItem);
             }
 
             Thread.sleep(expiration.multipliedBy(2).toMillis());
@@ -187,7 +187,7 @@ public class WorkCoordinatorTest {
 
                         @Override
                         public String onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException {
-                            log.error("Next work item picked=" + workItem);
+                            log.info("Next work item picked=" + workItem);
                             Assertions.assertNotNull(workItem);
                             Assertions.assertNotNull(workItem.workItemId);
                             Assertions.assertTrue(workItem.leaseExpirationTime.isAfter(Instant.now()));
