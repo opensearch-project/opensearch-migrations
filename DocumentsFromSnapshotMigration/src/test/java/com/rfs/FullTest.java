@@ -50,6 +50,8 @@ import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -58,6 +60,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
+import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
@@ -112,10 +115,11 @@ public class FullTest {
 
                 var workerFutures = new ArrayList<CompletableFuture<Void>>();
                 var runCounter = new AtomicInteger();
+                final var clockJitter = new Random(1);
                 for (int i = 0; i < numWorkers; ++i) {
                     workerFutures.add(CompletableFuture.supplyAsync(() ->
                             migrateDocumentsSequentially(sourceRepo, SNAPSHOT_NAME, INDEX_ALLOWLIST,
-                                    osTargetContainer.getHttpHostAddress(), runCounter)));
+                                    osTargetContainer.getHttpHostAddress(), runCounter, clockJitter)));
                 }
                 var thrownException = Assertions.assertThrows(ExecutionException.class, () ->
                         CompletableFuture.allOf(workerFutures.toArray(CompletableFuture[]::new)).get());
@@ -180,10 +184,12 @@ public class FullTest {
                                               String snapshotName,
                                               List<String> indexAllowlist,
                                               String targetAddress,
-                                              AtomicInteger runCounter) {
+                                              AtomicInteger runCounter,
+                                              Random clockJitter) {
         for (int runNumber=0; ; ++runNumber) {
             try {
-                var workResult = migrateDocumentsWithOneWorker(sourceRepo, snapshotName, indexAllowlist, targetAddress);
+                var workResult = migrateDocumentsWithOneWorker(sourceRepo, snapshotName, indexAllowlist, targetAddress,
+                        clockJitter);
                 if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
                     return null;
                 } else {
@@ -234,7 +240,8 @@ public class FullTest {
     private DocumentsRunner.CompletionStatus migrateDocumentsWithOneWorker(SourceRepo sourceRepo,
                                                                            String snapshotName,
                                                                            List<String> indexAllowlist,
-                                                                           String targetAddress)
+                                                                           String targetAddress,
+                                                                           Random clockJitter)
         throws RfsMigrateDocuments.NoWorkLeftException
     {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
@@ -257,6 +264,9 @@ public class FullTest {
             SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
             IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
             ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
+            final int ms_window = 1000;
+            final var nextClockShift = (int)(clockJitter.nextDouble() * ms_window)-(ms_window/2);
+            log.info("nextClockShift="+nextClockShift);
 
             return RfsMigrateDocuments.run(path -> new FilteredLuceneDocumentsReader(path, terminatingDocumentFilter),
                     new DocumentReindexer(new OpenSearchClient(targetAddress, null)),
@@ -264,7 +274,9 @@ public class FullTest {
                             new ApacheHttpClient(new URI(targetAddress)),
 //                            new ReactorHttpClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(),
 //                                    null, null)),
-                            TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS, UUID.randomUUID().toString()),
+                            TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS, UUID.randomUUID().toString(),
+                            Clock.offset(Clock.systemUTC(),
+                                    Duration.ofMillis(nextClockShift))),
                     processManager,
                     indexMetadataFactory,
                     snapshotName,
