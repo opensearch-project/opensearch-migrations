@@ -119,20 +119,6 @@ def clear_indices_cmd(ctx, acknowledge_risk, cluster):
         else:
             click.echo("Aborting command.")
 
-# ##################### REPLAYER ###################
-
-
-@cli.group(name="replayer")
-@click.pass_obj
-def replayer_group(ctx):
-    if ctx.env.replayer is None:
-        raise click.UsageError("Replayer is not set")
-
-
-@replayer_group.command(name="start")
-@click.pass_obj
-def start_replayer_cmd(ctx):
-    ctx.env.replayer.start()
 
 # ##################### SNAPSHOT ###################
 
