@@ -6,12 +6,20 @@ logger = logging.getLogger(__name__)
 
 
 def create_topic(kafka: Kafka, topic_name: str) -> CommandResult:
-    return kafka.create_topic(topic_name=topic_name)
+    result = kafka.create_topic(topic_name=topic_name)
+    return result
 
 
 def delete_topic(kafka: Kafka, topic_name: str) -> CommandResult:
-    return kafka.delete_topic(topic_name=topic_name)
+    result = kafka.delete_topic(topic_name=topic_name)
+    return result
 
 
 def describe_consumer_group(kafka: Kafka, group_name: str) -> CommandResult:
-    return kafka.describe_consumer_group(group_name=group_name)
+    result = kafka.describe_consumer_group(group_name=group_name)
+    return result
+
+
+def describe_topic_records(kafka: Kafka, topic_name: str) -> CommandResult:
+    result = kafka.delete_topic(topic_name=topic_name)
+    return result

@@ -384,18 +384,37 @@ def create_topic_cmd(ctx, topic_name):
 
 
 @kafka_group.command(name="delete-topic")
+@click.option("--acknowledge-risk", is_flag=True, show_default=True, default=False,
+              help="Flag to acknowledge risk and skip confirmation")
 @click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to delete')
 @click.pass_obj
-def delete_topic_cmd(ctx, topic_name):
-    result = ctx.env.kafka.delete_topic(topic_name=topic_name)
-    click.echo(result.value)
+def delete_topic_cmd(ctx, acknowledge_risk, topic_name):
+    if acknowledge_risk:
+        result = ctx.env.kafka.delete_topic(topic_name=topic_name)
+        click.echo(result.value)
+    else:
+        if click.confirm('Deleting a topic will irreversibly delete all captured traffic records stored in that '
+                         'topic. Are you sure you want to continue?'):
+            click.echo(f"Performing delete topic operation on {topic_name} topic...")
+            result = ctx.env.kafka.delete_topic(topic_name=topic_name)
+            click.echo(result.value)
+        else:
+            click.echo("Aborting command.")
 
 
 @kafka_group.command(name="describe-consumer-group")
-@click.option('--consumer-group-name', default="logging-group-default", help='Specify a group name to describe')
+@click.option('--group-name', default="logging-group-default", help='Specify a group name to describe')
 @click.pass_obj
-def describe_group_command(ctx, consumer_group_name):
-    result = ctx.env.kafka.describe_consumer_group(group_name=consumer_group_name)
+def describe_group_command(ctx, group_name):
+    result = ctx.env.kafka.describe_consumer_group(group_name=group_name)
+    click.echo(result.value)
+
+
+@kafka_group.command(name="describe-topic-records")
+@click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to describe')
+@click.pass_obj
+def describe_topic_records_cmd(ctx, topic_name):
+    result = ctx.env.kafka.describe_topic_records(topic_name=topic_name)
     click.echo(result.value)
 
 # ##################### UTILITIES ###################

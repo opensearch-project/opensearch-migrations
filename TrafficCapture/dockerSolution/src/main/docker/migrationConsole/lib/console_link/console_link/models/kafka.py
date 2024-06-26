@@ -3,11 +3,8 @@ from typing import List
 
 from cerberus import Validator
 import logging
-import json
 from abc import ABC, abstractmethod
-from dataclasses import dataclass
 from console_link.models.command_result import CommandResult
-from console_link.models.schema_tools import list_schema
 from console_link.models.schema_tools import contains_one_of
 
 logger = logging.getLogger(__name__)
@@ -33,36 +30,38 @@ SCHEMA = {
 }
 
 
-@dataclass
-class KafkaCommandResultValue:
-    message: str
-    command_output: str
-
-    def __str__(self):
-        # Create a dictionary of the class attributes
-        class_dict = {key: value for key, value in self.__dict__.items()}
-        # Convert the dictionary to a single-line JSON string
-        return json.dumps(class_dict)
-
-
 def get_result_for_command(command: List[str], operation_name: str) -> CommandResult:
     try:
-        # Pass None to stdout and stderr to not capture output and show in terminal
         cmd_output = subprocess.run(command, capture_output=True, text=True, check=True)
         output = cmd_output.stdout
-        if output is not None:
-            output = ' '.join(output.split())
         message = f"{operation_name} command completed successfully"
         logger.info(message)
-        return CommandResult(success=True, value=KafkaCommandResultValue(message=message, command_output=output))
+        if not output:
+            output = f"Command for {operation_name} completed successfully.\n"
+        return CommandResult(success=True, value=output)
     except subprocess.CalledProcessError as e:
-        logger.error(e.stdout)
-        message = f"Failed to perform {operation_name} command: {str(e)}"
+        message = f"Failed to perform {operation_name} command: {str(e)} Standard Error Output: {e.stderr}"
         logger.info(message)
-        output = e.stderr
-        if output is not None:
-            output = ' '.join(output.split())
-        return CommandResult(success=False, value=KafkaCommandResultValue(message=message, command_output=output))
+        output = e.stdout
+        return CommandResult(success=False, value=output)
+
+
+def pretty_print_kafka_record_count(data: str) -> str:
+    # Split the data into lines
+    lines = data.split("\n")
+
+    # Define headers
+    headers = ["TOPIC", "PARTITION", "RECORDS"]
+
+    # Initialize the formatted output with headers
+    formatted_output = "{:<30} {:<10} {:<10}".format(*headers) + "\n"
+
+    # Format each line of data
+    for line in lines:
+        if line and line.count(":") == 2:
+            topic, partition, records = line.split(":")
+            formatted_output += "{:<30} {:<10} {:<10}".format(topic, partition, records) + "\n"
+    return formatted_output
 
 
 class Kafka(ABC):
@@ -88,6 +87,10 @@ class Kafka(ABC):
 
     @abstractmethod
     def describe_consumer_group(self, group_name='logging-group-default') -> CommandResult:
+        pass
+
+    @abstractmethod
+    def describe_topic_records(self, topic_name='logging-traffic-topic') -> CommandResult:
         pass
 
 
@@ -118,6 +121,17 @@ class MSK(Kafka):
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, "Describe Consumer Group")
 
+    def describe_topic_records(self, topic_name='logging-traffic-topic') -> CommandResult:
+        command = ['/root/kafka-tools/kafka/bin/kafka-run-class.sh', 'kafka.tools.GetOffsetShell', '--broker-list',
+                   f'{self.brokers}', '--topic', f'{topic_name}', '--time', '-1', '--command-config',
+                   '/root/kafka-tools/aws/msk-iam-auth.properties']
+        logger.info(f"Executing command: {command}")
+        result = get_result_for_command(command, "Describe Topic Records")
+        if result.success and result.value:
+            pretty_value = pretty_print_kafka_record_count(result.value)
+            return CommandResult(success=result.success, value=pretty_value)
+        return result
+
 
 class StandardKafka(Kafka):
     """
@@ -144,3 +158,13 @@ class StandardKafka(Kafka):
                    '--timeout', '100000', '--describe', '--group', f'{group_name}']
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, "Describe Consumer Group")
+
+    def describe_topic_records(self, topic_name='logging-traffic-topic') -> CommandResult:
+        command = ['/root/kafka-tools/kafka/bin/kafka-run-class.sh', 'kafka.tools.GetOffsetShell', '--broker-list',
+                   f'{self.brokers}', '--topic', f'{topic_name}', '--time', '-1']
+        logger.info(f"Executing command: {command}")
+        result = get_result_for_command(command, "Describe Topic Records")
+        if result.success and result.value:
+            pretty_value = pretty_print_kafka_record_count(result.value)
+            return CommandResult(success=result.success, value=pretty_value)
+        return result
