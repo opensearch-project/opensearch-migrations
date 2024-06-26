@@ -245,18 +245,17 @@ public class FullTest {
         throws RfsMigrateDocuments.NoWorkLeftException
     {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
-        try {
-            var shouldThrow = new AtomicBoolean();
+        var shouldThrow = new AtomicBoolean();
+        try (var processManager = new LeaseExpireTrigger(workItemId->{
+            log.atDebug().setMessage("Lease expired for " + workItemId + " making next document get throw").log();
+            shouldThrow.set(true);
+        })) {
             UnaryOperator<Document> terminatingDocumentFilter = d -> {
                 if (shouldThrow.get()) {
                     throw new LeasePastError();
                 }
                 return d;
             };
-            var processManager = new LeaseExpireTrigger(workItemId->{
-                log.atDebug().setMessage("Lease expired for " + workItemId + " making next document get throw").log();
-                shouldThrow.set(true);
-            });
 
             DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
             SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,

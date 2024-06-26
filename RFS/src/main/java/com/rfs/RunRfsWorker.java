@@ -144,7 +144,10 @@ public class RunRfsWorker {
         final ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
         final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
-        try {
+        try (var processManager = new LeaseExpireTrigger(workItemId -> {
+            log.error("terminating RunRfsWorker because its lease has expired for " + workItemId);
+            System.exit(PROCESS_TIMED_OUT);
+        }, Clock.systemUTC())) {
             log.info("Running RfsWorker");
             OpenSearchClient sourceClient = new OpenSearchClient(sourceConnection);
             OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
@@ -168,10 +171,6 @@ public class RunRfsWorker {
             var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,
                     luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
             DocumentReindexer reindexer = new DocumentReindexer(targetClient);
-            var processManager = new LeaseExpireTrigger(workItemId->{
-                log.error("terminating RunRfsWorker because its lease has expired for "+workItemId);
-                System.exit(PROCESS_TIMED_OUT);
-            }, Clock.systemUTC());
             var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(targetHost)),
                     5, UUID.randomUUID().toString());
             var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, processManager);
