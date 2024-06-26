@@ -53,7 +53,7 @@ def parse_args():
     parser.add_argument("--no-clear-output", action='store_true',
                         help="Flag to not clear the output before each run. " +
                         "Helpful for piping to a file or other utility.")
-    parser.add_argument("--requests-per-sec", type=float, default=100.0, help="Target requests per second to be sent.")
+    parser.add_argument("--requests-per-sec", type=float, default=10.0, help="Target requests per second to be sent.")
     parser.add_argument("--no-refresh", action='store_true', help="Flag to disable refresh after each request.")
     return parser.parse_args()
 
@@ -99,7 +99,8 @@ def calculate_sleep_time(request_timestamps, target_requests_per_sec):
         return 0
     
     target_time_per_iteration = 1.0 / target_requests_per_sec
-    average_time_per_iteration = (datetime.now() - request_timestamps[0]).total_seconds() / len(request_timestamps)
+    average_time_per_iteration = (datetime.now() -
+                                  request_timestamps[0]).total_seconds() / (len(request_timestamps) + 1)
     
     sleep_time = (target_time_per_iteration - average_time_per_iteration) * len(request_timestamps)
     
