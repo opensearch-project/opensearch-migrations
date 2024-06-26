@@ -2,6 +2,7 @@ package com.rfs.worker;
 
 import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.ScopedWorkCoordinator;
+import com.rfs.common.FilterScheme;
 import com.rfs.common.IndexMetadata;
 import com.rfs.common.SnapshotRepo;
 import lombok.Lombok;
@@ -10,6 +11,9 @@ import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
 import java.time.Duration;
+import java.util.List;
+import java.util.function.BiConsumer;
+import java.util.stream.IntStream;
 
 /**
  * This class adds workitemes (leasable mutexes) via the WorkCoordinator so that future
@@ -22,7 +26,7 @@ public class ShardWorkPreparer {
     public static final String SHARD_SETUP_WORK_ITEM_ID = "shard_setup";
 
     public void run(ScopedWorkCoordinator scopedWorkCoordinator, IndexMetadata.Factory metadataFactory,
-                    String snapshotName)
+                    String snapshotName, List<String> indexAllowlist)
             throws IOException, InterruptedException {
 
         // ensure that there IS an index to house the shared state that we're going to be manipulating
@@ -44,7 +48,7 @@ public class ShardWorkPreparer {
 
                     @Override
                     public Void onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException {
-                        prepareShardWorkItems(scopedWorkCoordinator.workCoordinator, metadataFactory, snapshotName);
+                        prepareShardWorkItems(scopedWorkCoordinator.workCoordinator, metadataFactory, snapshotName, indexAllowlist);
                         return null;
                     }
 
@@ -56,18 +60,32 @@ public class ShardWorkPreparer {
     }
 
     @SneakyThrows
-    private static void prepareShardWorkItems(IWorkCoordinator workCoordinator,
-                                              IndexMetadata.Factory metadataFactory, String snapshotName) {
+    private static void prepareShardWorkItems(IWorkCoordinator workCoordinator, IndexMetadata.Factory metadataFactory,
+                                              String snapshotName, List<String> indexAllowlist) {
         log.info("Setting up the Documents Work Items...");
         SnapshotRepo.Provider repoDataProvider = metadataFactory.getRepoDataProvider();
-        for (SnapshotRepo.Index index : repoDataProvider.getIndicesInSnapshot(snapshotName)) {
-            IndexMetadata.Data indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
-            log.info("Index " + indexMetadata.getName() + " has " + indexMetadata.getNumberOfShards() + " shards");
-            for (int shardId = 0; shardId < indexMetadata.getNumberOfShards(); shardId++) {
-                log.info("Creating Documents Work Item for index: " + indexMetadata.getName() + ", shard: " + shardId);
-                workCoordinator.createUnassignedWorkItem(IndexAndShard.formatAsWorkItemString(indexMetadata.getName(), shardId));
+
+        BiConsumer<String, Boolean> logger = (indexName, accepted) -> {
+            if (!accepted) {
+                log.info("Index " + indexName + " rejected by allowlist");
             }
-        }
+        };
+        repoDataProvider.getIndicesInSnapshot(snapshotName).stream()
+            .filter(FilterScheme.filterIndicesByAllowList(indexAllowlist, logger))
+            .peek(index -> {
+                IndexMetadata.Data indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
+                log.info("Index " + indexMetadata.getName() + " has " + indexMetadata.getNumberOfShards() + " shards");
+                IntStream.range(0, indexMetadata.getNumberOfShards()).forEach(shardId -> {
+                    log.info("Creating Documents Work Item for index: " + indexMetadata.getName() + ", shard: " + shardId);
+                    try {
+                        workCoordinator.createUnassignedWorkItem(IndexAndShard.formatAsWorkItemString(indexMetadata.getName(), shardId));
+                    } catch (IOException e) {
+                        throw Lombok.sneakyThrow(e);
+                    }
+                });
+            })
+            .count(); // Force the stream to execute
+        
         log.info("Finished setting up the Documents Work Items.");
     }
 }

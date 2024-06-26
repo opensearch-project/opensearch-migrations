@@ -92,3 +92,7 @@ class ECSRFSBackfill(RFSBackfill):
     def stop(self, *args, **kwargs) -> CommandResult:
         logger.info("Stopping RFS backfill by setting desired count to 0 instances")
         return self.ecs_client.set_desired_count(0)
+
+    def scale(self, units: int, *args, **kwargs) -> CommandResult:
+        logger.info(f"Scaling RFS backfill by setting desired count to {units} instances")
+        return self.ecs_client.set_desired_count(units)

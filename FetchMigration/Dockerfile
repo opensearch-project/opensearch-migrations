@@ -1,11 +1,11 @@
 FROM opensearchproject/data-prepper:2.5.0
-COPY python/Pipfile .
+COPY python/Pipfile python/Pipfile.lock ./
 
 # Install dependencies to local user directory
 RUN apt -y update
 RUN apt -y install python3 python3-pip
 RUN pip3 install pipenv
-RUN pipenv install --system --deploy --ignore-pipfile
+RUN pipenv install --deploy --ignore-pipfile
 
 
 ENV FM_CODE_PATH /code

@@ -77,18 +77,17 @@ public class DocumentsRunner {
         log.info("Migrating docs for " + indexAndShard);
         ShardMetadata.Data shardMetadata = shardMetadataFactory.apply(indexAndShard.indexName, indexAndShard.shard);
 
-        try (var unpacker = unpackerFactory.create(shardMetadata)) {
-            var reader = readerFactory.apply(unpacker.unpack());
-            Flux<Document> documents = reader.readDocuments();
+        var unpacker = unpackerFactory.create(shardMetadata);
+        var reader = readerFactory.apply(unpacker.unpack());
+        Flux<Document> documents = reader.readDocuments();
 
-            reindexer.reindex(shardMetadata.getIndexName(), documents)
-                    .doOnError(error -> log.error("Error during reindexing: " + error))
-                    .doOnSuccess(done -> log.atInfo()
-                            .setMessage(()->"Reindexing completed for Index " + shardMetadata.getIndexName() +
-                                    ", Shard " + shardMetadata.getShardId()).log())
-                    // Wait for the reindexing to complete before proceeding
-                    .block();
-            log.info("Docs migrated");
-        }
+        reindexer.reindex(shardMetadata.getIndexName(), documents)
+                .doOnError(error -> log.error("Error during reindexing: " + error))
+                .doOnSuccess(done -> log.atInfo()
+                        .setMessage(()->"Reindexing completed for Index " + shardMetadata.getIndexName() +
+                                ", Shard " + shardMetadata.getShardId()).log())
+                // Wait for the reindexing to complete before proceeding
+                .block();
+        log.info("Docs migrated");
     }
 }

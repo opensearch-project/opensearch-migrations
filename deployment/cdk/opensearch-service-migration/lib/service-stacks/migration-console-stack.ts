@@ -14,7 +14,7 @@ import {
 import {StreamingSourceType} from "../streaming-source-type";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {RemovalPolicy} from "aws-cdk-lib";
-import { ServicesYaml } from "../migration-services-yaml";
+import { MetadataMigrationYaml, ServicesYaml } from "../migration-services-yaml";
 import { MigrationServiceCore } from "./migration-service-core";
 
 export interface MigrationConsoleProps extends StackPropsExt {
@@ -133,7 +133,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         let servicePortMappings: PortMapping[]|undefined
         let serviceDiscoveryPort: number|undefined
         let serviceDiscoveryEnabled = false
-        let imageCommand: string[]|undefined
+        let imageCommand = ['/bin/sh', '-c', '/root/loadServicesFromParameterStore.sh']
 
         const osClusterEndpoint = getMigrationStringParameterValue(this, {
             ...props,
@@ -212,9 +212,9 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         const artifactS3AnyObjectPath = `${artifactS3Arn}/*`;
         const artifactS3PublishPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
-            resources: [artifactS3AnyObjectPath],
+            resources: [artifactS3Arn, artifactS3AnyObjectPath],
             actions: [
-                "s3:PutObject"
+                "s3:*"
             ]
         })
 
@@ -254,6 +254,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             // TODO: We're not currently supporting auth here, this may need to be handled on the migration console
             'no_auth': ''
         }
+        servicesYaml.metadata_migration = new MetadataMigrationYaml();
         createMigrationStringParameter(this, servicesYaml.stringify(), {
             ...props,
             parameter: MigrationSSMParameter.SERVICES_YAML_FILE,

@@ -5,11 +5,13 @@ import console_link.logic.clusters as logic_clusters
 import console_link.logic.metrics as logic_metrics
 import console_link.logic.backfill as logic_backfill
 import console_link.logic.snapshot as logic_snapshot
+import console_link.logic.metadata as logic_metadata
+import console_link.logic.replay as logic_replay
 
 from console_link.models.utils import ExitCode
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
-from console_link.models.snapshot import SnapshotStatus
+from click.shell_completion import get_completion_class
 
 import logging
 
@@ -36,10 +38,10 @@ class Context(object):
 @click.option('-v', '--verbose', count=True, help="Verbosity level. Default is warn, -v is info, -vv is debug.")
 @click.pass_context
 def cli(ctx, config_file, json, verbose):
-    ctx.obj = Context(config_file)
-    ctx.obj.json = json
     logging.basicConfig(level=logging.WARN - (10 * verbose))
     logger.info(f"Logging set to {logging.getLevelName(logger.getEffectiveLevel())}")
+    ctx.obj = Context(config_file)
+    ctx.obj.json = json
 
 
 # ##################### CLUSTERS ###################
@@ -78,7 +80,47 @@ def cat_indices_cmd(ctx):
     click.echo(logic_clusters.cat_indices(ctx.env.target_cluster))
 
 
+@cluster_group.command(name="connection-check")
+@click.pass_obj
+def connection_check_cmd(ctx):
+    """Checks if a connection can be established to source and target clusters"""
+    click.echo("SOURCE CLUSTER")
+    click.echo(logic_clusters.connection_check(ctx.env.source_cluster))
+    click.echo("TARGET CLUSTER")
+    click.echo(logic_clusters.connection_check(ctx.env.target_cluster))
+
+
+@cluster_group.command(name="run-test-benchmarks")
+@click.pass_obj
+def run_test_benchmarks_cmd(ctx):
+    """Run a series of OpenSearch Benchmark workloads against the source cluster"""
+    click.echo(logic_clusters.run_test_benchmarks(ctx.env.source_cluster))
+
+
+@cluster_group.command(name="clear-indices")
+@click.option("--acknowledge-risk", is_flag=True, show_default=True, default=False,
+              help="Flag to acknowledge risk and skip confirmation")
+@click.option('--cluster',
+              type=click.Choice(['source', 'target'], case_sensitive=False),
+              help="Cluster to perform clear indices action on",
+              required=True)
+@click.pass_obj
+def clear_indices_cmd(ctx, acknowledge_risk, cluster):
+    """[Caution] Clear indices on a source or target cluster"""
+    cluster_focus = ctx.env.source_cluster if cluster.lower() == 'source' else ctx.env.target_cluster
+    if acknowledge_risk:
+        click.echo("Performing clear indices operation...")
+        click.echo(logic_clusters.clear_indices(cluster_focus))
+    else:
+        if click.confirm(f'Clearing indices WILL result in the loss of all data on the {cluster.lower()} cluster. '
+                         f'Are you sure you want to continue?'):
+            click.echo(f"Performing clear indices operation on {cluster.lower()} cluster...")
+            click.echo(logic_clusters.clear_indices(cluster_focus))
+        else:
+            click.echo("Aborting command.")
+
 # ##################### REPLAYER ###################
+
 
 @cli.group(name="replayer")
 @click.pass_obj
@@ -104,24 +146,25 @@ def snapshot_group(ctx):
 
 
 @snapshot_group.command(name="create")
+@click.option('--wait', is_flag=True, default=False, help='Wait for snapshot completion')
+@click.option('--max-snapshot-rate-mb-per-node', type=int, default=None,
+              help='Maximum snapshot rate in MB/s per node')
 @click.pass_obj
-def create_snapshot_cmd(ctx):
+def create_snapshot_cmd(ctx, wait, max_snapshot_rate_mb_per_node):
     """Create a snapshot of the source cluster"""
     snapshot = ctx.env.snapshot
-    status, message = logic_snapshot.create(snapshot)
-    if status != SnapshotStatus.COMPLETED:
-        raise click.ClickException(message)
-    click.echo(message)
+    result = logic_snapshot.create(snapshot, wait=wait,
+                                   max_snapshot_rate_mb_per_node=max_snapshot_rate_mb_per_node)
+    click.echo(result.value)
 
 
 @snapshot_group.command(name="status")
+@click.option('--deep-check', is_flag=True, default=False, help='Perform a deep status check of the snapshot')
 @click.pass_obj
-def status_snapshot_cmd(ctx):
+def status_snapshot_cmd(ctx, deep_check):
     """Check the status of the snapshot"""
-    snapshot = ctx.env.snapshot
-    _, message = logic_snapshot.status(snapshot, source_cluster=ctx.env.source_cluster,
-                                       target_cluster=ctx.env.target_cluster)
-    click.echo(message)
+    result = logic_snapshot.status(ctx.env.snapshot, deep_check=deep_check)
+    click.echo(result.value)
 
 # ##################### BACKFILL ###################
 
@@ -195,6 +238,80 @@ def status_backfill_cmd(ctx):
         raise click.ClickException(message)
     click.echo(message)
 
+
+# ##################### REPLAY ###################
+
+@cli.group(name="replay")
+@click.pass_obj
+def replay_group(ctx):
+    """All actions related to replaying data"""
+    if ctx.env.replay is None:
+        raise click.UsageError("Replay is not set")
+
+
+@replay_group.command(name="describe")
+@click.pass_obj
+def describe_replay_cmd(ctx):
+    click.echo(logic_replay.describe(ctx.env.replay, as_json=ctx.json))
+
+
+@replay_group.command(name="start")
+@click.pass_obj
+def start_replay_cmd(ctx):
+    exitcode, message = logic_replay.start(ctx.env.replay)
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(message)
+
+
+@replay_group.command(name="stop")
+@click.pass_obj
+def stop_replay_cmd(ctx):
+    exitcode, message = logic_replay.stop(ctx.env.replay)
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(message)
+
+
+@replay_group.command(name="scale")
+@click.argument("units", type=int, required=True)
+@click.pass_obj
+def scale_replay_cmd(ctx, units: int):
+    exitcode, message = logic_replay.scale(ctx.env.replay, units)
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(message)
+
+
+@replay_group.command(name="status")
+@click.pass_obj
+def status_replay_cmd(ctx):
+    exitcode, message = logic_replay.status(ctx.env.replay)
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(message)
+
+
+# ##################### METADATA ###################
+
+
+@cli.group(name="metadata")
+@click.pass_obj
+def metadata_group(ctx):
+    """All actions related to metadata migration"""
+    if ctx.env.metadata is None:
+        raise click.UsageError("Metadata is not set")
+
+
+@metadata_group.command(name="migrate")
+@click.option("--detach", is_flag=True, help="Run metadata migration in detached mode")
+@click.pass_obj
+def migrate_metadata_cmd(ctx, detach):
+    exitcode, message = logic_metadata.migrate(ctx.env.metadata, detach)
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(message)
+
 # ##################### METRICS ###################
 
 
@@ -244,6 +361,54 @@ def get_metrics_data_cmd(ctx, component, metric_name, statistic, lookback):
     pprint(
         metric_data
     )
+
+# ##################### UTILITIES ###################
+
+
+@cli.command()
+@click.option(
+    "--config-file", default="/etc/migration_services.yaml", help="Path to config file"
+)
+@click.option("--json", is_flag=True)
+@click.argument('shell', type=click.Choice(['bash', 'zsh', 'fish']))
+@click.pass_obj
+def completion(ctx, config_file, json, shell):
+    """Generate shell completion script and instructions for setup.
+
+    Supported shells: bash, zsh, fish
+
+    To enable completion:
+
+    Bash:
+      console completion bash > /etc/bash_completion.d/console
+      # Then restart your shell
+
+    Zsh:
+      # If shell completion is not already enabled in your environment,
+      # you will need to enable it. You can execute the following once:
+      echo "autoload -U compinit; compinit" >> ~/.zshrc
+
+      console completion zsh > "${fpath[1]}/_console"
+      # Then restart your shell
+
+    Fish:
+      console completion fish > ~/.config/fish/completions/console.fish
+      # Then restart your shell
+    """
+    completion_class = get_completion_class(shell)
+    if completion_class is None:
+        click.echo(f"Error: {shell} shell is currently not supported", err=True)
+        ctx.exit(1)
+
+    try:
+        completion_script = completion_class(lambda: cli(ctx, config_file, json),
+                                             {},
+                                             "console",
+                                             "_CONSOLE_COMPLETE").source()
+        click.echo(completion_script)
+    except RuntimeError as exc:
+        click.echo(f"Error: {exc}", err=True)
+        ctx.exit(1)
 
 
 #################################################
