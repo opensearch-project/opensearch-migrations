@@ -479,6 +479,7 @@ export class StackComposer {
             this.addDependentStacks(trafficReplayerStack, [networkStack, migrationStack, mskUtilityStack,
                 kafkaBrokerStack, openSearchStack, osContainerStack])
             this.stacks.push(trafficReplayerStack)
+            servicesYaml.replayer = trafficReplayerStack.replayerYaml;
         }
 
         let elasticsearchStack
