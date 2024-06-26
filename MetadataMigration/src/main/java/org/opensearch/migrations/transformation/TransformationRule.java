@@ -8,6 +8,6 @@ import org.opensearch.migrations.transformation.entity.Entity;
 public interface TransformationRule<T extends Entity> {
     VersionRange supportedSourceVersionRange();
     VersionRange supportedTargetVersionRange();
-    boolean canApply(T entity);
+    CanApplyResult canApply(T entity);
     boolean applyTransformation(T entity);
 }

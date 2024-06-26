@@ -1,10 +1,15 @@
 package org.opensearch.migrations.rules;
 
+import java.util.Map.Entry;
+
+import org.opensearch.migrations.transformation.CanApplyResult;
 import org.opensearch.migrations.transformation.TransformationRule;
 import org.opensearch.migrations.transformation.Version.Product;
 import org.opensearch.migrations.transformation.Version;
 import org.opensearch.migrations.transformation.VersionRange;
 import org.opensearch.migrations.transformation.entity.Index;
+
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class IndexMappingTypeRemoval implements TransformationRule<Index> {
 
@@ -28,33 +33,37 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
         return anyOpenSearch;
     }
 
+    @SuppressWarnings("java:S125")
     @Override
-    public boolean canApply(final Index entity) {
-        var mappingNode = entity.raw().get("mappings");
+    public CanApplyResult canApply(final Index index) {
+        final var mappingNode = index.raw().get("mappings");
         // Detect multiple type mappings, eg: {mappings: { foo: {...}, bar: {...} } } 
         if (mappingNode.size() > 1) {
-            throw new UnsupportedOperationException("Mutliple type mappings are not supported");
+            return CanApplyResult.UNSUPPORTED;
         }
 
         // Detect no intermediate type, eg: { mappings: { properties: {...} } } 
         if (mappingNode.has("properties")) {
-            return false;
-        }
-
-        // Detect default _doc mappings { mappings: { _doc: {...} } } 
-        if (mappingNode.has("_doc")) {
-            return false;
+            return CanApplyResult.NO;
         }
 
         // Detect default _doc mappings { mappings: { foobar: {...} } } 
-        return true;
+        return CanApplyResult.YES;
     }
 
     @Override
-    public boolean applyTransformation(Index entity) {
-        // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'applyTransformation'");
-    }
+    public boolean applyTransformation(final Index index) {
+        if (CanApplyResult.YES != canApply(index)) {
+            return false;
+        }
 
-    
+        final var mappingsNode = (ObjectNode)index.raw().get("mappings");
+        final var typeName = mappingsNode.properties().stream().map(Entry::getKey).findFirst().orElseThrow();
+        final var typeNode = mappingsNode.get(typeName);
+        
+        mappingsNode.remove(typeName);
+        typeNode.fields().forEachRemaining(node -> mappingsNode.set(node.getKey(), node.getValue()));
+
+        return true;
+    }
 }
