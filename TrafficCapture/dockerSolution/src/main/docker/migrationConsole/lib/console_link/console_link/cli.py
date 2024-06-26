@@ -231,12 +231,18 @@ def scale_backfill_cmd(ctx, units: int):
 
 
 @backfill_group.command(name="status")
+@click.option('--deep-check', is_flag=True, help='Perform a deep status check of the backfill')
 @click.pass_obj
-def status_backfill_cmd(ctx):
-    exitcode, message = logic_backfill.status(ctx.env.backfill)
+def status_backfill_cmd(ctx, deep_check):
+    logger.info(f"Called `console backfill status`, with {deep_check=}")
+    exitcode, message = logic_backfill.status(ctx.env.backfill, deep_check=deep_check)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
-    click.echo(message)
+    if len(message) == 2:
+        click.echo(message[0])
+        click.echo(message[1])
+    else:
+        click.echo(message)
 
 
 # ##################### REPLAY ###################

@@ -107,8 +107,7 @@ class S3Snapshot(Snapshot):
             logger.error(f"Failed to create snapshot: {str(e)}")
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
-    def status(self, *args, **kwargs) -> CommandResult:
-        deep_check = kwargs.get('deep_check', False)
+    def status(self, *args, deep_check=False, **kwargs) -> CommandResult:
         if deep_check:
             return get_snapshot_status_full(self.source_cluster, self.snapshot_name)
         return get_snapshot_status(self.source_cluster, self.snapshot_name)

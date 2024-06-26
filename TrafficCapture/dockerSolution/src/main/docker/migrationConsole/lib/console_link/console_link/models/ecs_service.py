@@ -1,4 +1,5 @@
 import logging
+from typing import NamedTuple, Optional
 
 import boto3
 
@@ -7,6 +8,15 @@ from console_link.models.utils import AWSAPIError, raise_for_aws_api_error
 
 
 logger = logging.getLogger(__name__)
+
+
+class InstanceStatues(NamedTuple):
+    running: int = 0
+    pending: int = 0
+    desired: int = 0
+
+    def __str__(self):
+        return f"Running={self.running}\nPending={self.pending}\nDesired={self.desired}"
 
 
 class ECSService:
@@ -25,7 +35,6 @@ class ECSService:
             service=self.service_name,
             desiredCount=desired_count
         )
-        logger.debug(f"Response from update_service: {response}")
 
         try:
             raise_for_aws_api_error(response)
@@ -38,3 +47,22 @@ class ECSService:
         desired_count = response["service"]["desiredCount"]
         return CommandResult(True, f"Service {self.service_name} set to {desired_count} desired count."
                              f" Currently {running_count} running and {pending_count} pending.")
+    
+    def get_instance_statuses(self) -> Optional[InstanceStatues]:
+        logger.info(f"Getting instance statuses for service {self.service_name}")
+        response = self.client.describe_services(
+            cluster=self.cluster_name,
+            services=[self.service_name]
+        )
+        try:
+            raise_for_aws_api_error(response)
+        except AWSAPIError as e:
+            logger.error(f"Error getting instance statuses: {e}")
+            return None
+
+        service = response["services"][0]
+        return InstanceStatues(
+            running=service["runningCount"],
+            pending=service["pendingCount"],
+            desired=service["desiredCount"]
+        )
