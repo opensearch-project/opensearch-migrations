@@ -90,6 +90,18 @@ export class MetadataMigrationYaml {
     min_replicas: number = 1;
 }
 
+export class MSKYaml {
+}
+
+export class StandardKafkaYaml {
+}
+
+export class KafkaYaml {
+    broker_endpoints: string = '';
+    msk?: string | null;
+    standard?: string | null;
+}
+
 export class ServicesYaml {
     source_cluster: ClusterYaml;
     target_cluster: ClusterYaml;
@@ -98,6 +110,7 @@ export class ServicesYaml {
     snapshot?: SnapshotYaml;
     metadata_migration?: MetadataMigrationYaml;
     replayer?: ECSReplayerYaml;
+    kafka?: KafkaYaml;
 
     stringify(): string {
         return yaml.stringify({
@@ -107,7 +120,8 @@ export class ServicesYaml {
             backfill: this.backfill?.toDict(),
             snapshot: this.snapshot?.toDict(),
             metadata_migration: this.metadata_migration,
-            replay: this.replayer?.toDict()
+            replay: this.replayer?.toDict(),
+            kafka: this.kafka
         },
         {
             'nullStr': ''
