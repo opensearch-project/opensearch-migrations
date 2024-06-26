@@ -24,6 +24,5 @@ metadata_migration:
   from_snapshot:
   min_replicas: 0
 kafka:
-  broker_endpoints:
-    - kafka:9092
+  broker_endpoints: "kafka:9092"
   standard: ""

@@ -24,7 +24,7 @@ SCHEMA = {
     'kafka': {
         'type': 'dict',
         'schema': {
-            'broker_endpoints': list_schema(required=True),
+            'broker_endpoints': {"type": "string", "required": True},
             'msk': MSK_SCHEMA,
             'standard': STANDARD_SCHEMA
         },
@@ -76,8 +76,7 @@ class Kafka(ABC):
         if not v.validate({'kafka': config}):
             logger.error(f"Invalid config: {v.errors}")
             raise ValueError(v.errors)
-        broker_list = config.get('broker_endpoints')
-        self.brokers = ','.join(broker_list)
+        self.brokers = config.get('broker_endpoints')
 
     @abstractmethod
     def delete_topic(self, topic_name='logging-traffic-topic') -> CommandResult:

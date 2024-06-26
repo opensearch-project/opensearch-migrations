@@ -120,10 +120,11 @@ test('Test that services yaml parameter is created by mgiration console stack', 
     expect(yamlFileContents).toContain('source_cluster')
     expect(yamlFileContents).toContain('target_cluster')
     expect(yamlFileContents).toContain('metrics_source:\n  cloudwatch:')
+    expect(yamlFileContents).toContain('kafka')
     // Validates that the file can be parsed as valid yaml and has the expected fields
     const parsedFromYaml = yaml.parse(yamlFileContents);
     // Validates that the file has the expected fields
-    const expectedFields = ['source_cluster', 'target_cluster', 'metrics_source', 'backfill', 'snapshot', 'metadata_migration', 'replay'];
+    const expectedFields = ['source_cluster', 'target_cluster', 'metrics_source', 'backfill', 'snapshot', 'metadata_migration', 'replay', 'kafka'];
     expect(Object.keys(parsedFromYaml).length).toEqual(expectedFields.length)
     expect(new Set(Object.keys(parsedFromYaml))).toEqual(new Set(expectedFields))
 })
