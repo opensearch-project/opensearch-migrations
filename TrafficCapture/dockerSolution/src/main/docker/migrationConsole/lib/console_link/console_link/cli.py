@@ -364,6 +364,40 @@ def get_metrics_data_cmd(ctx, component, metric_name, statistic, lookback):
         metric_data
     )
 
+# ##################### KAFKA ###################
+
+
+@cli.group(name="kafka")
+@click.pass_obj
+def kafka_group(ctx):
+    """All actions related to Kafka operations"""
+    if ctx.env.kafka is None:
+        raise click.UsageError("Kafka is not set")
+
+
+@kafka_group.command(name="create-topic")
+@click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to create')
+@click.pass_obj
+def create_topic_cmd(ctx, topic_name):
+    result = ctx.env.kafka.create_topic(topic_name=topic_name)
+    click.echo(result.value)
+
+
+@kafka_group.command(name="delete-topic")
+@click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to delete')
+@click.pass_obj
+def delete_topic_cmd(ctx, topic_name):
+    result = ctx.env.kafka.delete_topic(topic_name=topic_name)
+    click.echo(result.value)
+
+
+@kafka_group.command(name="describe-consumer-group")
+@click.option('--consumer-group-name', default="logging-group-default", help='Specify a group name to describe')
+@click.pass_obj
+def describe_group_command(ctx, consumer_group_name):
+    result = ctx.env.kafka.describe_consumer_group(group_name=consumer_group_name)
+    click.echo(result.value)
+
 # ##################### UTILITIES ###################
 
 
