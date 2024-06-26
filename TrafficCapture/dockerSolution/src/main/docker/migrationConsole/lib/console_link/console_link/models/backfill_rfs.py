@@ -96,13 +96,13 @@ class ECSRFSBackfill(RFSBackfill):
     def scale(self, units: int, *args, **kwargs) -> CommandResult:
         logger.info(f"Scaling RFS backfill by setting desired count to {units} instances")
         return self.ecs_client.set_desired_count(units)
-    
+
     def get_status(self, deep_check, *args, **kwargs) -> CommandResult:
         logger.info(f"Getting status of RFS backfill, with {deep_check=}")
         instance_statuses = self.ecs_client.get_instance_statuses()
         if not instance_statuses:
             return CommandResult(False, "Failed to get instance statuses")
-        
+
         status_string = str(instance_statuses)
         if deep_check:
             try:
@@ -125,7 +125,7 @@ class ECSRFSBackfill(RFSBackfill):
                 "must_not": [{"exists": {"field": "completedAt"}}]
             }
         }}
-        response = self.target_cluster.call_api("/.migrations_working_state/_search", json_body=status_query)
+        response = self.target_cluster.call_api("/.migrations_working_state/_search", data=status_query)
         r_body = response.json()
         logger.debug(f"Raw response: {r_body}")
         if "hits" in r_body:
