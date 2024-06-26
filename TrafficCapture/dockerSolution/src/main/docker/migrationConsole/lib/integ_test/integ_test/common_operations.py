@@ -3,8 +3,6 @@ import random
 import string
 import json
 import time
-import shlex
-import subprocess
 import logging
 from requests.exceptions import ConnectionError, SSLError
 from typing import Dict, List
@@ -96,7 +94,6 @@ def create_document(index_name: str, doc_id: str, cluster: Cluster, data: dict =
 
 
 def get_document(index_name: str, doc_id: str, cluster: Cluster, **kwargs):
-    # headers = {'Content-Type': 'application/json'}
     return execute_api_call(cluster=cluster, method=HttpMethod.GET, path=f"/{index_name}/_doc/{doc_id}",
                             **kwargs)
 
@@ -184,32 +181,3 @@ def generate_large_doc(size_mib):
         "timestamp": datetime.datetime.now().isoformat(),
         "large_field": large_string
     }
-
-
-class ContainerNotFoundError(Exception):
-    def __init__(self, container_filter):
-        super().__init__(f"No containers matching the filter '{container_filter}' were found.")
-
-
-# Not currently used, but keeping this command as potentially useful in future
-def run_migration_console_command(deployment_type: str, command: str):
-    if deployment_type == "local":
-        filter_criteria = 'name=\"migration-console\"'
-        cmd = f'docker ps --format=\"{{{{.ID}}}}\" --filter {filter_criteria}'
-
-        get_container_process = subprocess.run(shlex.split(cmd), stdout=subprocess.PIPE, text=True)
-        container_id = get_container_process.stdout.strip().replace('"', '')
-
-        if container_id:
-            cmd_exec = f"docker exec {container_id} bash -c '{command}'"
-            logger.warning(f"Running command: {cmd_exec} on container {container_id}")
-            process = subprocess.run(cmd_exec, shell=True, capture_output=True, text=True)
-            return process.returncode, process.stdout, process.stderr
-        else:
-            raise ContainerNotFoundError(filter_criteria)
-
-    else:
-        # In a cloud deployment case, we run the e2e tests directly on the migration console, so it's just a local call
-        logger.warning(f"Running command: {command} locally")
-        process = subprocess.run(command, shell=True, capture_output=True)
-        return process.returncode, process.stdout, process.stderr

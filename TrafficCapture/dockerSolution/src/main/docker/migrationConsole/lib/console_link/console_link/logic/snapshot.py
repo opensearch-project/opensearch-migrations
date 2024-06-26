@@ -17,3 +17,12 @@ def create(snapshot: Snapshot, *args, **kwargs) -> CommandResult:
 def status(snapshot: Snapshot, *args, **kwargs) -> CommandResult:
     logger.info("Getting snapshot status")
     return snapshot.status(*args, **kwargs)
+
+
+def delete(snapshot: Snapshot, *args, **kwargs) -> CommandResult:
+    logger.info(f"Deleting snapshot with {args=} and {kwargs=}")
+    try:
+        return snapshot.delete(*args, **kwargs)
+    except Exception as e:
+        logger.error(f"Failure running delete snapshot: {e}")
+        return CommandResult(status=False, message=f"Failure running delete snapshot: {e}")

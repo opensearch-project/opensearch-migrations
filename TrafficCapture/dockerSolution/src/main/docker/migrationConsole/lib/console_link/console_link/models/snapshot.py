@@ -59,6 +59,11 @@ class Snapshot(ABC):
         """Get the status of the snapshot."""
         pass
 
+    @abstractmethod
+    def delete(self, *args, **kwargs) -> CommandResult:
+        """Delete a snapshot."""
+        pass
+
 
 S3_SNAPSHOT_SCHEMA = {
     'snapshot_name': {'type': 'string', 'required': True},
@@ -113,6 +118,9 @@ class S3Snapshot(Snapshot):
             return get_snapshot_status_full(self.source_cluster, self.snapshot_name)
         return get_snapshot_status(self.source_cluster, self.snapshot_name)
 
+    def delete(self, *args, **kwargs) -> CommandResult:
+        return delete_snapshot(self.source_cluster, self.snapshot_name)
+
 
 class FileSystemSnapshot(Snapshot):
     def __init__(self, config: Dict, source_cluster: Cluster) -> None:
@@ -149,6 +157,9 @@ class FileSystemSnapshot(Snapshot):
 
     def status(self, *args, **kwargs) -> CommandResult:
         raise NotImplementedError("Status check for FileSystemSnapshot is not implemented yet.")
+
+    def delete(self, *args, **kwargs) -> CommandResult:
+        return delete_snapshot(self.source_cluster, self.snapshot_name)
 
 
 def parse_args():
@@ -283,3 +294,11 @@ def get_snapshot_status_full(cluster: Cluster, snapshot: str,
         return CommandResult(success=True, value=f"{state}\n{message}")
     except Exception as e:
         return CommandResult(success=False, value=f"Failed to get full snapshot status: {str(e)}")
+
+
+def delete_snapshot(cluster: Cluster, snapshot_name: str, repository: str = 'migration_assistant_repo'):
+    repository = repository if repository != '*' else get_repository_for_snapshot(cluster, snapshot_name)
+
+    path = f"/_snapshot/{repository}/{snapshot_name}"
+    response = cluster.call_api(path, HttpMethod.DELETE)
+    logging.debug(f"Raw delete snapshot status response: {response.text}")

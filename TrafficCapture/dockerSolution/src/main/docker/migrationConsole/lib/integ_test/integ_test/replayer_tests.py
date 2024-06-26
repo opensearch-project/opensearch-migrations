@@ -38,7 +38,7 @@ def setup_replayer(request):
     clear_indices(source_cluster)
     clear_indices(target_cluster)
 
-    #logger.info("Stopping replayer...")
+    #logger.info("Starting replayer...")
     #replayer: BaseReplayer = pytest.console_env.replayer
     # TODO provide support for starting Replayer in Docker
     #if replayer is not None and type(replayer) is ECSReplayer:

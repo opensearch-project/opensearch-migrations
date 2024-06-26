@@ -87,7 +87,7 @@ class Cluster:
             self.auth_type = AuthMethod.SIGV4
 
     def call_api(self, path, method: HttpMethod = HttpMethod.GET, data=None, headers=None,
-                 timeout=None, session=None, raise_error=True) -> requests.Response:
+                 timeout=None, session=None, raise_error=True, **kwargs) -> requests.Response:
         """
         Calls an API on the cluster.
         """
@@ -104,17 +104,21 @@ class Cluster:
         else:
             raise NotImplementedError(f"Auth type {self.auth_type} not implemented")
 
-        logger.info(f"Making api call to {self.endpoint}{path}")
+        # Extract query parameters from kwargs
+        params = kwargs.get('params', {})
+
+        logger.info(f"Performing request: {method.name} {self.endpoint}{path}")
         r = session.request(
             method.name,
             f"{self.endpoint}{path}",
             verify=(not self.allow_insecure),
+            params=params,
             auth=auth,
             data=data,
             headers=headers,
             timeout=timeout
         )
-        logger.debug(f"Cluster API call request {r.request.method} {r.request.url}")
+        logger.info(f"Received response: {r.status_code} {method.name} {self.endpoint}{path} - {r.text[:1000]}")
         if raise_error:
             r.raise_for_status()
         return r
