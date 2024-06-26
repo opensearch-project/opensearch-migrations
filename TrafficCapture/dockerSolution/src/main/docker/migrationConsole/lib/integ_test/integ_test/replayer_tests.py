@@ -8,7 +8,7 @@ import time
 from http import HTTPStatus
 from requests import Session
 from requests.adapters import HTTPAdapter
-#from console_link.models.replayer import BaseReplayer, ECSReplayer
+from console_link.models.replayer import BaseReplayer
 from console_link.logic.clusters import connection_check, clear_indices, run_test_benchmarks, ConnectionResult
 from console_link.models.cluster import Cluster, AuthMethod
 from console_link.cli import Context
@@ -38,11 +38,11 @@ def setup_replayer(request):
     clear_indices(source_cluster)
     clear_indices(target_cluster)
 
-    #logger.info("Starting replayer...")
-    #replayer: BaseReplayer = pytest.console_env.replayer
-    # TODO provide support for starting Replayer in Docker
-    #if replayer is not None and type(replayer) is ECSReplayer:
-    #    replayer.start()
+    logger.info("Starting replayer...")
+    replayer: BaseReplayer = pytest.console_env.replayer
+    assert replayer is not None
+    # TODO provide support for actually starting/stopping Replayer in Docker
+    replayer.start()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -53,11 +53,10 @@ def cleanup_after_tests():
     yield
 
     # Teardown code
-    #logger.info("Stopping replayer...")
-    #replayer: BaseReplayer = pytest.console_env.replayer
-    # TODO provide support for stopping Replayer in Docker
-    #if replayer is not None and type(replayer) is ECSReplayer:
-    #    replayer.stop()
+    logger.info("Stopping replayer...")
+    replayer: BaseReplayer = pytest.console_env.replayer
+    assert replayer is not None
+    replayer.stop()
 
 
 @pytest.mark.usefixtures("setup_replayer")
