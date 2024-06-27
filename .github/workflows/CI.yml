@@ -63,6 +63,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: ${{ env.gradle-version }}
+          gradle-home-cache-cleanup: true
       - name: Run Gradle Build
         run: ./gradlew build -x test -x TrafficCapture:dockerSolution:build --scan --stacktrace
         env:
@@ -182,7 +183,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build Docker Image
         run: docker build -t migrations/fetch-migration -f Dockerfile .
-  
+
   all-ci-checks-pass:
     needs:
       - cdk-tests
