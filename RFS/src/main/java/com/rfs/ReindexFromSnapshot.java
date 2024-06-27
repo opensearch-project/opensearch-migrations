@@ -287,10 +287,10 @@ public class ReindexFromSnapshot {
             // ==========================================================================================================
             logger.info("==================================================================");
             logger.info("Attempting to read Index Metadata...");
-            List<IndexMetadata.Data> indexMetadatas = new ArrayList<>();
+            List<IndexMetadata> indexMetadatas = new ArrayList<>();
             for (SnapshotRepo.Index index : repoDataProvider.getIndicesInSnapshot(snapshotName)) {
                 logger.info("Reading Index Metadata for index: " + index.getName());
-                IndexMetadata.Data indexMetadata;
+                IndexMetadata indexMetadata;
                 if (sourceVersion == ClusterVersion.ES_6_8) {
                     indexMetadata = new IndexMetadataFactory_ES_6_8(repoDataProvider).fromRepo(snapshotName, index.getName());
                 } else {
@@ -308,7 +308,7 @@ public class ReindexFromSnapshot {
                 logger.info("==================================================================");
                 logger.info("Attempting to recreate the indices...");
                 IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
-                for (IndexMetadata.Data indexMetadata : indexMetadatas) {
+                for (IndexMetadata indexMetadata : indexMetadatas) {
                     String reindexName = indexMetadata.getName() + indexSuffix;
                     logger.info("Recreating index " + indexMetadata.getName() + " as " + reindexName + " on target...");
 
@@ -333,7 +333,7 @@ public class ReindexFromSnapshot {
                 DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
                 SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,luceneDirPath, bufferSize);
 
-                for (IndexMetadata.Data indexMetadata : indexMetadatas) {
+                for (IndexMetadata indexMetadata : indexMetadatas) {
                     logger.info("Processing index: " + indexMetadata.getName());
                     for (int shardId = 0; shardId < indexMetadata.getNumberOfShards(); shardId++) {
                         logger.info("=== Shard ID: " + shardId + " ===");
@@ -364,7 +364,7 @@ public class ReindexFromSnapshot {
                 LuceneDocumentsReader reader = new LuceneDocumentsReader(luceneDirPath);
                 DocumentReindexer reindexer = new DocumentReindexer(targetClient);
 
-                for (IndexMetadata.Data indexMetadata : indexMetadatas) {
+                for (IndexMetadata indexMetadata : indexMetadatas) {
                     for (int shardId = 0; shardId < indexMetadata.getNumberOfShards(); shardId++) {
                         logger.info("=== Index Id: " + indexMetadata.getName() + ", Shard ID: " + shardId + " ===");
 

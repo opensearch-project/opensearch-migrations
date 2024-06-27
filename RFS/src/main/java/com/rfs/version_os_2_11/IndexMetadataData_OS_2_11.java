@@ -3,7 +3,7 @@ package com.rfs.version_os_2_11;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.models.IndexMetadata;
 
-public class IndexMetadataData_OS_2_11 implements IndexMetadata.Data {
+public class IndexMetadataData_OS_2_11 implements IndexMetadata {
     private ObjectNode root;
     private String indexId;
     private String indexName;

@@ -404,12 +404,12 @@ public class DocumentsStepTest {
             Stream.of(index1, index2).collect(Collectors.toList())
         );
 
-        IndexMetadata.Data indexMetadata1 = Mockito.mock(IndexMetadata.Data.class);
+        IndexMetadata indexMetadata1 = Mockito.mock(IndexMetadata.class);
         Mockito.when(indexMetadata1.getName()).thenReturn("index1");
         Mockito.when(indexMetadata1.getNumberOfShards()).thenReturn(1);
         Mockito.when(testMembers.metadataFactory.fromRepo(testMembers.snapshotName, "index1")).thenReturn(indexMetadata1);
 
-        IndexMetadata.Data indexMetadata2 = Mockito.mock(IndexMetadata.Data.class);
+        IndexMetadata indexMetadata2 = Mockito.mock(IndexMetadata.class);
         Mockito.when(indexMetadata2.getName()).thenReturn("index2");
         Mockito.when(indexMetadata2.getNumberOfShards()).thenReturn(2);
         Mockito.when(testMembers.metadataFactory.fromRepo(testMembers.snapshotName, "index2")).thenReturn(indexMetadata2);

@@ -1,7 +1,6 @@
 package com.rfs.models;
 
 import org.apache.lucene.codecs.CodecUtil;
-import org.apache.lucene.util.BytesRef;
 
 import java.io.ByteArrayInputStream;
 import java.io.FileInputStream;
@@ -15,9 +14,24 @@ import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 import com.rfs.common.ByteArrayIndexInput;
 import com.rfs.common.RfsException;
 import com.rfs.common.SnapshotRepo;
-import com.rfs.common.SnapshotRepo.Provider;
 
 public interface ShardMetadata {
+
+    /*
+    * Defines the behavior expected of an object that will surface the metadata of an shard stored in a snapshot
+    * See: https://github.com/elastic/elasticsearch/blob/7.10/server/src/main/java/org/elasticsearch/index/snapshots/blobstore/BlobStoreIndexShardSnapshot.java#L510
+    * See: https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/index/snapshots/blobstore/BlobStoreIndexShardSnapshot.java#L508
+    */
+    public String getSnapshotName();    
+    public String getIndexName();    
+    public String getIndexId();    
+    public int getShardId();    
+    public int getIndexVersion();    
+    public long getStartTime();    
+    public long getTime();    
+    public int getNumberOfFiles();    
+    public long getTotalSizeBytes();
+    public List<ShardFileInfo> getFiles();
 
     /**
     * Defines the behavior required to read a snapshot's shard metadata as JSON and convert it into a Data object
@@ -66,21 +80,4 @@ public interface ShardMetadata {
             super(message, cause);
         }
     }
-
-    /**
-    * Defines the behavior expected of an object that will surface the metadata of an shard stored in a snapshot
-    * See: https://github.com/elastic/elasticsearch/blob/7.10/server/src/main/java/org/elasticsearch/index/snapshots/blobstore/BlobStoreIndexShardSnapshot.java#L510
-    * See: https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/index/snapshots/blobstore/BlobStoreIndexShardSnapshot.java#L508
-    */
-    public String getSnapshotName();    
-    public String getIndexName();    
-    public String getIndexId();    
-    public int getShardId();    
-    public int getIndexVersion();    
-    public long getStartTime();    
-    public long getTime();    
-    public int getNumberOfFiles();    
-    public long getTotalSizeBytes();
-    public List<ShardFileInfo> getFiles();
-   
 }

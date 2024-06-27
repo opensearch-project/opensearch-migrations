@@ -245,7 +245,7 @@ public class DocumentsStep {
             logger.info("Setting up the Documents Work Items...");
             SnapshotRepo.Provider repoDataProvider = members.metadataFactory.getRepoDataProvider();
             for (SnapshotRepo.Index index : repoDataProvider.getIndicesInSnapshot(members.snapshotName)) {
-                IndexMetadata.Data indexMetadata = members.metadataFactory.fromRepo(members.snapshotName, index.getName());
+                IndexMetadata indexMetadata = members.metadataFactory.fromRepo(members.snapshotName, index.getName());
                 logger.info("Index " + indexMetadata.getName() + " has " + indexMetadata.getNumberOfShards() + " shards");
                 for (int shardId = 0; shardId < indexMetadata.getNumberOfShards(); shardId++) {
                     logger.info("Creating Documents Work Item for index: " + indexMetadata.getName() + ", shard: " + shardId);

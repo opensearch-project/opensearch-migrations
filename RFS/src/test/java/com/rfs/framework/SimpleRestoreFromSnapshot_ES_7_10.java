@@ -27,12 +27,12 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
 
     private static final Logger logger = LogManager.getLogger(SimpleRestoreFromSnapshot_ES_7_10.class);
 
-    public List<IndexMetadata.Data> extractSnapshotIndexData(final String localPath, final String snapshotName, final Path unpackedShardDataDir) throws Exception {
+    public List<IndexMetadata> extractSnapshotIndexData(final String localPath, final String snapshotName, final Path unpackedShardDataDir) throws Exception {
         IOUtils.rm(unpackedShardDataDir);
 
         final var repo = new FileSystemRepo(Path.of(localPath));
         SnapshotRepo.Provider snapShotProvider = new SnapshotRepoProvider_ES_7_10(repo);
-        final List<IndexMetadata.Data> indices = snapShotProvider.getIndicesInSnapshot(snapshotName)
+        final List<IndexMetadata> indices = snapShotProvider.getIndicesInSnapshot(snapshotName)
             .stream()
             .map(index -> {
                 try {
@@ -43,9 +43,8 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
             })
             .collect(Collectors.toList());
         
-        for (final IndexMetadata.Data index : indices) {
+        for (final IndexMetadata index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
-                System.out.println(">> " + index.toObjectNode().toPrettyString());
                 var shardMetadata = new ShardMetadataFactory_ES_7_10(snapShotProvider).fromRepo(snapshotName, index.getName(), shardId);
                 DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
                 SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(repoAccessor, unpackedShardDataDir, shardMetadata, Integer.MAX_VALUE);
@@ -55,8 +54,8 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
         return indices;
     }
 
-    public void updateTargetCluster(final List<IndexMetadata.Data> indices, final Path unpackedShardDataDir, final OpenSearchClient client) throws Exception {
-        for (final IndexMetadata.Data index : indices) {
+    public void updateTargetCluster(final List<IndexMetadata> indices, final Path unpackedShardDataDir, final OpenSearchClient client) throws Exception {
+        for (final IndexMetadata index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
                 final var documents = new LuceneDocumentsReader(unpackedShardDataDir).readDocuments(index.getName(), shardId);
 

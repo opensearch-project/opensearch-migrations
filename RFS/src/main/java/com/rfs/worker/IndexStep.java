@@ -211,7 +211,7 @@ public class IndexStep {
             logger.info("Setting up the Index Work Items...");
             SnapshotRepo.Provider repoDataProvider = members.metadataFactory.getRepoDataProvider();
             for (SnapshotRepo.Index index : repoDataProvider.getIndicesInSnapshot(members.snapshotName)) {
-                IndexMetadata.Data indexMetadata = members.metadataFactory.fromRepo(members.snapshotName, index.getName());
+                IndexMetadata indexMetadata = members.metadataFactory.fromRepo(members.snapshotName, index.getName());
                 logger.info("Creating Index Work Item for index: " + indexMetadata.getName());
                 members.cmsClient.createIndexWorkItem(indexMetadata.getName(), indexMetadata.getNumberOfShards());
             }
@@ -323,7 +323,7 @@ public class IndexStep {
 
                 try {
                     logger.info("Migrating index: " + workItem.name);
-                    IndexMetadata.Data indexMetadata = members.metadataFactory.fromRepo(members.snapshotName, workItem.name);
+                    IndexMetadata indexMetadata = members.metadataFactory.fromRepo(members.snapshotName, workItem.name);
 
                     ObjectNode transformedRoot = members.transformer.transformIndexMetadata(indexMetadata);
 

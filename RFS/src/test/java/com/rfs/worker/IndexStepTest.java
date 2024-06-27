@@ -304,12 +304,12 @@ public class IndexStepTest {
             Stream.of(index1, index2).collect(Collectors.toList())
         );
 
-        IndexMetadata.Data indexMetadata1 = Mockito.mock(IndexMetadata.Data.class);
+        IndexMetadata indexMetadata1 = Mockito.mock(IndexMetadata.class);
         Mockito.when(indexMetadata1.getName()).thenReturn("index1");
         Mockito.when(indexMetadata1.getNumberOfShards()).thenReturn(1);
         Mockito.when(testMembers.metadataFactory.fromRepo(testMembers.snapshotName, "index1")).thenReturn(indexMetadata1);
 
-        IndexMetadata.Data indexMetadata2 = Mockito.mock(IndexMetadata.Data.class);
+        IndexMetadata indexMetadata2 = Mockito.mock(IndexMetadata.class);
         Mockito.when(indexMetadata2.getName()).thenReturn("index2");
         Mockito.when(indexMetadata2.getNumberOfShards()).thenReturn(2);
         Mockito.when(testMembers.metadataFactory.fromRepo(testMembers.snapshotName, "index2")).thenReturn(indexMetadata2);
@@ -409,7 +409,7 @@ public class IndexStepTest {
     @MethodSource("provideMigrateIndicesArgs")
     void MigrateIndices_workToDo_AsExpected(CmsEntry.IndexWorkItem workItem, Optional<ObjectNode> createResponse, CmsEntry.IndexWorkItem updatedItem) {
         // Set up the test
-        IndexMetadata.Data indexMetadata = Mockito.mock(IndexMetadata.Data.class);
+        IndexMetadata indexMetadata = Mockito.mock(IndexMetadata.class);
         Mockito.when(testMembers.metadataFactory.fromRepo(testMembers.snapshotName, workItem.name)).thenReturn(indexMetadata);
 
         ObjectNode root = Mockito.mock(ObjectNode.class);

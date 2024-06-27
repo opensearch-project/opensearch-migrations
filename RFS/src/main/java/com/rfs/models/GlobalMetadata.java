@@ -14,7 +14,6 @@ import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 import com.rfs.common.ByteArrayIndexInput;
 import com.rfs.common.RfsException;
 import com.rfs.common.SnapshotRepo;
-import com.rfs.common.SnapshotRepo.Provider;
 
 
 public interface GlobalMetadata {
@@ -70,5 +69,17 @@ public interface GlobalMetadata {
 
         // Get the underlying SnapshotRepo Provider
         public SnapshotRepo.Provider getRepoDataProvider();
+    }
+
+    public static class CantFindSnapshotInRepo extends RfsException {
+        public CantFindSnapshotInRepo(String snapshotName) {
+            super("Can't find snapshot in repo: " + snapshotName);
+        }
+    }
+
+    public static class CantReadGlobalMetadataFromSnapshot extends RfsException {
+        public CantReadGlobalMetadataFromSnapshot(String snapshotName, Throwable cause) {
+            super("Can't read the global metadata from snapshot: " + snapshotName, cause);
+        }
     }
 }

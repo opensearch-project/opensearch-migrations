@@ -14,7 +14,7 @@ public class IndexMetadataFactory_ES_7_10 implements com.rfs.models.IndexMetadat
     }
     
     @Override
-    public IndexMetadata.Data fromJsonNode(JsonNode root, String indexId, String indexName) {
+    public IndexMetadata fromJsonNode(JsonNode root, String indexId, String indexName) {
         ObjectNode objectNodeRoot = (ObjectNode) root.get(indexName);
         return new IndexMetadataData_ES_7_10(objectNodeRoot, indexId, indexName);
     }

@@ -54,7 +54,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     }
 
     @Override
-    public ObjectNode transformIndexMetadata(IndexMetadata.Data index){
+    public ObjectNode transformIndexMetadata(IndexMetadata index){
         var root = index.toObjectNode();
         ObjectNode newRoot = root.deepCopy();
 

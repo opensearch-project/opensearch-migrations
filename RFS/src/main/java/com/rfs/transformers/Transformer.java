@@ -17,5 +17,5 @@ public interface Transformer {
     /**
      * Takes the raw JSON representing the Index Metadata of one version and returns a new, transformed copy of the JSON
      */
-    public ObjectNode transformIndexMetadata(IndexMetadata.Data indexData);    
+    public ObjectNode transformIndexMetadata(IndexMetadata indexData);    
 }
