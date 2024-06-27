@@ -119,8 +119,8 @@ def get_all_index_details(cluster: Cluster, index_prefix_ignore_list=None, **kwa
     all_index_details = execute_api_call(cluster=cluster, path="/_cat/indices?format=json", **kwargs).json()
     index_dict = {}
     for index_details in all_index_details:
-        valid_index = index_matches_ignored_index(index_name=index_details['index'],
-                                                  index_prefix_ignore_list=index_prefix_ignore_list)
+        valid_index = not index_matches_ignored_index(index_name=index_details['index'],
+                                                      index_prefix_ignore_list=index_prefix_ignore_list)
         if index_prefix_ignore_list is None or valid_index:
             index_dict[index_details['index']] = index_details
     return index_dict
@@ -144,16 +144,17 @@ def check_doc_counts_match(cluster: Cluster,
         if actual_index_details.keys() != expected_index_details.keys():
             error_message = (f"Indices are different: \n Expected: {expected_index_details.keys()} \n "
                              f"Actual: {actual_index_details.keys()}")
-            logger.debug(error_message)
-        for index_details in actual_index_details.values():
-            index_name = index_details['index']
-            actual_doc_count = index_details['docs.count']
-            expected_doc_count = expected_index_details[index_name]['docs.count']
-            if actual_doc_count != expected_doc_count:
-                error_message = (f"Index {index_name} has {actual_doc_count} documents but {expected_doc_count} were "
-                                 f"expected")
-                logger.debug(f"Error on attempt {attempt}: {error_message}")
-                break
+            logger.debug(f"Error on attempt {attempt}: {error_message}")
+        else:
+            for index_details in actual_index_details.values():
+                index_name = index_details['index']
+                actual_doc_count = index_details['docs.count']
+                expected_doc_count = expected_index_details[index_name]['docs.count']
+                if actual_doc_count != expected_doc_count:
+                    error_message = (f"Index {index_name} has {actual_doc_count} documents but {expected_doc_count} "
+                                     f"were expected")
+                    logger.debug(f"Error on attempt {attempt}: {error_message}")
+                    break
         if not error_message:
             return True
         if attempt != max_attempts:
