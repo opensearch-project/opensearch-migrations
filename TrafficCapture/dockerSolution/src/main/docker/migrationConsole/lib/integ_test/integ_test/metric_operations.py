@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 # Note as well, that currently the only way of assuming data is correlated with a given test is via
 # the lookback time. Soon, we should implement a way to add a specific ID to metrics from a given run
 # and check for the presence of that ID.
-def assert_metric_has_data(component: str,  metric: str, lookback_minutes: int, test_case: TestCase):
+def assert_metric_has_data(component: str, metric: str, lookback_minutes: int, test_case: TestCase):
     metrics_source: MetricsSource = pytest.console_env.metrics_source
 
     metric_data: List[Tuple[str, float]] = get_metric_data(metrics_source=metrics_source,

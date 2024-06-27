@@ -115,11 +115,14 @@ def index_matches_ignored_index(index_name: str, index_prefix_ignore_list: List[
     return False
 
 
-def get_all_index_details(cluster: Cluster, **kwargs) -> Dict[str, Dict[str, str]]:
+def get_all_index_details(cluster: Cluster, index_prefix_ignore_list=None, **kwargs) -> Dict[str, Dict[str, str]]:
     all_index_details = execute_api_call(cluster=cluster, path="/_cat/indices?format=json", **kwargs).json()
     index_dict = {}
     for index_details in all_index_details:
-        index_dict[index_details['index']] = index_details
+        valid_index = index_matches_ignored_index(index_name=index_details['index'],
+                                                  index_prefix_ignore_list=index_prefix_ignore_list)
+        if index_prefix_ignore_list is None or valid_index:
+            index_dict[index_details['index']] = index_details
     return index_dict
 
 
@@ -136,18 +139,14 @@ def check_doc_counts_match(cluster: Cluster,
     for attempt in range(1, max_attempts + 1):
         # Refresh documents
         execute_api_call(cluster=cluster, path="/_refresh")
-        actual_index_details = get_all_index_details(cluster=cluster)
+        actual_index_details = get_all_index_details(cluster=cluster, index_prefix_ignore_list=index_prefix_ignore_list)
         logger.debug(f"Received actual indices: {actual_index_details}")
+        if actual_index_details.keys() != expected_index_details.keys():
+            error_message = (f"Indices are different: \n Expected: {expected_index_details.keys()} \n "
+                             f"Actual: {actual_index_details.keys()}")
+            logger.debug(error_message)
         for index_details in actual_index_details.values():
             index_name = index_details['index']
-            # Skip index if matching prefix
-            if index_matches_ignored_index(index_name=index_name, index_prefix_ignore_list=index_prefix_ignore_list):
-                continue
-            if expected_index_details[index_name] is None:
-                error_message = (f"Actual index {index_name} does not exist in expected "
-                                 f"indices: {expected_index_details.keys()}")
-                logger.debug(f"Error on attempt {attempt}: {error_message}")
-                break
             actual_doc_count = index_details['docs.count']
             expected_doc_count = expected_index_details[index_name]['docs.count']
             if actual_doc_count != expected_doc_count:
