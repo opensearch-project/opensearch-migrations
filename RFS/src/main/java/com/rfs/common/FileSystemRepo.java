@@ -7,7 +7,6 @@ import java.nio.file.Path;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import com.rfs.models.ShardFileInfo;
 import com.rfs.models.ShardMetadata;
 
 public class FileSystemRepo implements SourceRepo {
