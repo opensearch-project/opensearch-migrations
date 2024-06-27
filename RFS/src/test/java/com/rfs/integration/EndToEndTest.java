@@ -4,9 +4,7 @@ import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ArgumentsSource;
 
-import com.rfs.framework.ElasticsearchContainer;
-import com.rfs.framework.OpenSearchContainer;
-import com.rfs.framework.OpenSearchContainer.Version;
+import com.rfs.framework.SearchClusterContainer;
 import com.rfs.framework.SimpleRestoreFromSnapshot;
 
 import lombok.extern.slf4j.Slf4j;
@@ -24,7 +22,7 @@ public class EndToEndTest {
     @ParameterizedTest(name = "Target OpenSearch {0}")
     @ArgumentsSource(SupportedTargetCluster.class)
     @Disabled
-    public void migrateFrom_ES_v6_8(final OpenSearchContainer.Version targetVersion) throws Exception {
+    public void migrateFrom_ES_v6_8(final SearchClusterContainer.Version targetVersion) throws Exception {
         // Setup
         // PSEUDO: Create a source cluster running ES 6.8
         // PSEUDO: Create 2 templates on the cluster, see https://www.elastic.co/guide/en/elasticsearch/reference/6.8/indices-templates.html
@@ -62,7 +60,7 @@ public class EndToEndTest {
         // PSEUDO: Verify documents
 
         // PSEUDO: Additional validation:
-        if (targetVersion == Version.V2_14_0) {
+        if (SearchClusterContainer.OS_V2_14_0.equals(targetVersion)) {
             //   - Mapping type parameter is removed https://opensearch.org/docs/latest/breaking-changes/#remove-mapping-types-parameter
         }
     }
@@ -70,7 +68,7 @@ public class EndToEndTest {
     @ParameterizedTest(name = "Target OpenSearch {0}")
     @ArgumentsSource(SupportedTargetCluster.class)
     @Disabled
-    public void migrateFrom_ES_v7_10(final OpenSearchContainer.Version targetVersion) throws Exception {
+    public void migrateFrom_ES_v7_10(final SearchClusterContainer.Version targetVersion) throws Exception {
         // Setup
         // PSEUDO: Create a source cluster running ES 6.8
 
@@ -80,14 +78,14 @@ public class EndToEndTest {
     @ParameterizedTest(name = "Target OpenSearch {0}")
     @ArgumentsSource(SupportedTargetCluster.class)
     @Disabled
-    public void migrateFrom_ES_v7_17(final OpenSearchContainer.Version targetVersion) throws Exception {
+    public void migrateFrom_ES_v7_17(final SearchClusterContainer.Version targetVersion) throws Exception {
         // Setup
         // PSEUDO: Create a source cluster running ES 6.8
 
         migrateFrom_ES_v7_X(null);
     }
 
-    private void migrateFrom_ES_v7_X(final ElasticsearchContainer sourceCluster) {
+    private void migrateFrom_ES_v7_X(final SearchClusterContainer sourceCluster) {
         // PSEUDO: Create 2 index templates on the cluster, see https://www.elastic.co/guide/en/elasticsearch/reference/7.17/index-templates.html
         //    - logs-*
         //    - data-rolling

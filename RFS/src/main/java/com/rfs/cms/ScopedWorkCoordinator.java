@@ -21,7 +21,9 @@ public class ScopedWorkCoordinator {
     }
 
     public <T> T ensurePhaseCompletion(WorkItemGetter workItemIdSupplier,
-                                       IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T> visitor) throws IOException {
+                                       IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T> visitor)
+            throws IOException, InterruptedException
+    {
         var acquisitionResult = workItemIdSupplier.tryAcquire(workCoordinator);
         return acquisitionResult.visit(new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T>() {
             @Override
@@ -35,7 +37,9 @@ public class ScopedWorkCoordinator {
             }
 
             @Override
-            public T onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException {
+            public T onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem)
+                    throws IOException, InterruptedException
+            {
                 var workItemId = workItem.getWorkItemId();
                 leaseExpireTrigger.registerExpiration(workItem.workItemId, workItem.leaseExpirationTime);
                 var rval = visitor.onAcquiredWork(workItem);

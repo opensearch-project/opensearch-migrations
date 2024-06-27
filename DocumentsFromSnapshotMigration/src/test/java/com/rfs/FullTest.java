@@ -18,7 +18,8 @@ import com.rfs.common.ShardMetadata;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
-import com.rfs.framework.ElasticsearchContainer;
+import com.rfs.framework.SearchClusterContainer;
+import com.rfs.framework.PreloadedSearchClusterContainer;
 import com.rfs.transformers.TransformFunctions;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
@@ -74,26 +75,45 @@ import java.util.stream.Stream;
 @Tag("longTest")
 @Slf4j
 public class FullTest {
+    public static final String GENERATOR_BASE_IMAGE = "migrations/elasticsearch_client_test_console:latest";
     final static long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
     final static Pattern CAT_INDICES_INDEX_COUNT_PATTERN =
             Pattern.compile("(?:\\S+\\s+){2}(\\S+)\\s+(?:\\S+\\s+){3}(\\S+)");
+    public static final String SOURCE_SERVER_ALIAS = "source";
+    public static final int MAX_SHARD_SIZE_BYTES = 64 * 1024 * 1024;
 
     public static Stream<Arguments> makeArgs() {
-        var sourceImageNames = List.of("migrations/elasticsearch_rfs_source");
-        var targetImageNames = List.of("opensearchproject/opensearch:2.13.0", "opensearchproject/opensearch:1.3.0");
+        var sourceImageNames = List.of(
+                makeParamsForBase(SearchClusterContainer.ES_V7_17),
+                makeParamsForBase(SearchClusterContainer.ES_V7_10_2));
+        var targetImageNames = List.of(
+                SearchClusterContainer.OS_V1_3_16.getImageName(),
+                SearchClusterContainer.OS_V2_14_0.getImageName());
         var numWorkers = List.of(1, 3, 40);
         return sourceImageNames.stream()
                 .flatMap(a->
                         targetImageNames.stream().flatMap(b->
-                                numWorkers.stream().map(c->Arguments.of(a, b, c))));
+                                numWorkers.stream().map(c->Arguments.of(a[0], a[1], a[2], b, c))));
+    }
+
+    private static Object[] makeParamsForBase(SearchClusterContainer.Version baseSourceImage) {
+        return new Object[]{
+                baseSourceImage,
+                GENERATOR_BASE_IMAGE,
+                new String[]{"/root/runTestBenchmarks.sh", "--endpoint", "http://" +SOURCE_SERVER_ALIAS + ":9200/"}
+        };
     }
 
     @ParameterizedTest
     @MethodSource("makeArgs")
-    public void test(String sourceImageName, String targetImageName, int numWorkers) throws Exception {
-        try (ElasticsearchContainer esSourceContainer =
-                     new ElasticsearchContainer(new ElasticsearchContainer.Version(sourceImageName,
-                             "preloaded-ES_7_10"));
+    public void test(SearchClusterContainer.Version baseSourceImageVersion,
+                     String generatorImage, String[] generatorArgs,
+                     String targetImageName, int numWorkers)
+            throws Exception
+    {
+
+        try (var esSourceContainer = new PreloadedSearchClusterContainer(baseSourceImageVersion,
+                SOURCE_SERVER_ALIAS, generatorImage, generatorArgs);
              OpensearchContainer<?> osTargetContainer =
                      new OpensearchContainer<>(targetImageName)) {
             esSourceContainer.start();
@@ -102,7 +122,7 @@ public class FullTest {
             final var SNAPSHOT_NAME = "test_snapshot";
             final List<String> INDEX_ALLOWLIST = List.of();
             CreateSnapshot.run(
-                    c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, ElasticsearchContainer.CLUSTER_SNAPSHOT_DIR),
+                    c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, SearchClusterContainer.CLUSTER_SNAPSHOT_DIR),
                     new OpenSearchClient(esSourceContainer.getUrl(), null),
                     false);
             var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
@@ -152,7 +172,7 @@ public class FullTest {
         }
     }
 
-    private void checkClusterMigrationOnFinished(ElasticsearchContainer esSourceContainer,
+    private void checkClusterMigrationOnFinished(SearchClusterContainer esSourceContainer,
                                                  OpensearchContainer<?> osTargetContainer) {
         var targetClient = new RestClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(), null, null));
         var sourceMap = getIndexToCountMap(new RestClient(new ConnectionDetails(esSourceContainer.getUrl(),
@@ -275,15 +295,14 @@ public class FullTest {
 //                            new ReactorHttpClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(),
 //                                    null, null)),
                             TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS, UUID.randomUUID().toString(),
-                            Clock.offset(Clock.systemUTC(),
-                                    Duration.ofMillis(nextClockShift))),
+                            Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))),
                     processManager,
                     indexMetadataFactory,
                     snapshotName,
                     indexAllowlist,
                     shardMetadataFactory,
                     unpackerFactory,
-                    16*1024*1024);
+                    MAX_SHARD_SIZE_BYTES);
         } finally {
             deleteTree(tempDir);
         }

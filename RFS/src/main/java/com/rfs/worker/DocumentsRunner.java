@@ -40,7 +40,7 @@ public class DocumentsRunner {
      * @return true if it did work, false if there was no available work at this time.
      * @throws IOException
      */
-    public CompletionStatus migrateNextShard() throws IOException {
+    public CompletionStatus migrateNextShard() throws IOException, InterruptedException {
         return workCoordinator.ensurePhaseCompletion(wc -> {
                     try {
                         return wc.acquireNextWorkItem(Duration.ofMinutes(10));
