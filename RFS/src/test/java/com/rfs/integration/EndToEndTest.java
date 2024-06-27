@@ -100,6 +100,11 @@ public class EndToEndTest {
             IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_6_8(repoDataProvider);
             IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
             new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer, List.of()).migrateIndices();
+            
+            var targetClusterOperations = new ClusterOperations(targetCluster.getUrl());
+            log.info("Lookup the template: " + targetClusterOperations.get("/_template/my_template_foo"));
+            log.info("Lookup an index: " + targetClusterOperations.get("/barstool"));
+            log.info("Search the index: " + targetClusterOperations.get("/barstool/_search")); //Note; documents were not migrated, so this is empty
         }
 
         

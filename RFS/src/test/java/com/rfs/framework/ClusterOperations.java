@@ -1,12 +1,15 @@
 package com.rfs.framework;
 
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
+import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPut;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.core5.http.ParseException;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.io.entity.StringEntity;
+
+import lombok.SneakyThrows;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -28,6 +31,7 @@ public class ClusterOperations {
         httpClient = HttpClients.createDefault();
     }
 
+    @SneakyThrows
     public void createTemplate(final String templateName) throws IOException {
         final var templateJson =
             "{\r\n" + //
@@ -65,8 +69,6 @@ public class ClusterOperations {
 
         try (var response = httpClient.execute(createRepoRequest)) {
             assertThat(EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8), response.getCode(), equalTo(200));
-        } catch (ParseException e) {
-            throw new RuntimeException(e);
         }
     }
 
@@ -104,6 +106,17 @@ public class ClusterOperations {
 
         try (var response = httpClient.execute(deleteDocumentRequest)) {
             assertThat(response.getCode(), equalTo(200));
+        }
+    }
+
+    @SneakyThrows
+    public String get(final String path) {
+        final var getRequest = new HttpGet(clusterUrl + path);
+
+        try (var response = httpClient.execute(getRequest)) {
+            var responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+            assertThat(responseBody, response.getCode(), equalTo(200));
+            return responseBody;
         }
     }
 

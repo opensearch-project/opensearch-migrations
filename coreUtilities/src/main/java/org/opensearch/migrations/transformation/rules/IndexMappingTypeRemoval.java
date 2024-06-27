@@ -58,8 +58,8 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
         final var mappingsNode = index.raw().get("mappings");
         final var mappingsInnerNode = (ObjectNode) mappingsNode.get(0);
 
-        final var typeName = mappingsNode.properties().stream().map(Entry::getKey).findFirst().orElseThrow();
-        final var typeNode = mappingsNode.get(typeName);
+        final var typeName = mappingsInnerNode.properties().stream().map(Entry::getKey).findFirst().orElseThrow();
+        final var typeNode = mappingsInnerNode.get(typeName);
         
         mappingsInnerNode.remove(typeName);
         typeNode.fields().forEachRemaining(node -> mappingsInnerNode.set(node.getKey(), node.getValue()));
