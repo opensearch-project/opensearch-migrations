@@ -42,18 +42,64 @@ export class OSIBackfillYaml {
     }
 }
 
+export class ECSReplayerYaml {
+    ecs: ECSService;
+    scale: number = 1;
+
+    constructor() {
+        this.ecs = new ECSService();
+    }
+
+    toDict() {
+        return {
+            ecs: this.ecs,
+            scale: this.scale
+        };
+    }
+}
+
+export class FileSystemSnapshotYaml {
+    repo_path: string = '';
+}
+
 export class S3SnapshotYaml {
+    repo_uri: string = '';
+    aws_region: string = '';
+}
+
+export class SnapshotYaml {
     snapshot_name: string = '';
-    s3_repo_uri: string = '';
-    s3_region: string = '';
+    s3?: S3SnapshotYaml;
+    fs?: FileSystemSnapshotYaml;
 
     toDict() {
         return {
             snapshot_name: this.snapshot_name,
-            s3_repo_uri: this.s3_repo_uri,
-            s3_region: this.s3_region
+            // This conditinally includes the s3 and fs parameters if they're defined,
+            // but does not add the keys otherwise
+            ...(this.s3 && { s3: this.s3 }),
+            ...(this.fs && { fs: this.fs })
         };
     }
+}
+
+// This component can be much more complicated (specified snapshot details, index/component/template allowlists, etc.)
+// but for the time being, we are assuming that the snapshot is the one specified in SnapshotYaml.
+export class MetadataMigrationYaml {
+    from_snapshot: null = null;
+    min_replicas: number = 1;
+}
+
+export class MSKYaml {
+}
+
+export class StandardKafkaYaml {
+}
+
+export class KafkaYaml {
+    broker_endpoints: string = '';
+    msk?: string | null;
+    standard?: string | null;
 }
 
 export class ServicesYaml {
@@ -61,7 +107,10 @@ export class ServicesYaml {
     target_cluster: ClusterYaml;
     metrics_source: MetricsSourceYaml = new MetricsSourceYaml();
     backfill: RFSBackfillYaml | OSIBackfillYaml;
-    snapshot?: S3SnapshotYaml;
+    snapshot?: SnapshotYaml;
+    metadata_migration?: MetadataMigrationYaml;
+    replayer?: ECSReplayerYaml;
+    kafka?: KafkaYaml;
 
     stringify(): string {
         return yaml.stringify({
@@ -69,7 +118,10 @@ export class ServicesYaml {
             target_cluster: this.target_cluster,
             metrics_source: this.metrics_source,
             backfill: this.backfill?.toDict(),
-            snapshot: this.snapshot?.toDict()
+            snapshot: this.snapshot?.toDict(),
+            metadata_migration: this.metadata_migration,
+            replay: this.replayer?.toDict(),
+            kafka: this.kafka
         },
         {
             'nullStr': ''

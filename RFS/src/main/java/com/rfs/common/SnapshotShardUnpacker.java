@@ -1,8 +1,6 @@
 package com.rfs.common;
 
-import java.io.IOException;
 import java.io.InputStream;
-import java.nio.file.DirectoryStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -21,7 +19,7 @@ import com.rfs.models.ShardFileInfo;
 import com.rfs.models.ShardMetadata;
 
 @RequiredArgsConstructor
-public class SnapshotShardUnpacker implements AutoCloseable {
+public class SnapshotShardUnpacker {
     private static final Logger logger = LogManager.getLogger(SnapshotShardUnpacker.class);
     private final SourceRepoAccessor repoAccessor;
     private final Path luceneFilesBasePath;
@@ -39,7 +37,7 @@ public class SnapshotShardUnpacker implements AutoCloseable {
         }
     }
 
-    public void unpack() {
+    public Path unpack() {
         try {
             // Some constants
             NativeFSLockFactory lockFactory = NativeFSLockFactory.INSTANCE;
@@ -69,38 +67,9 @@ public class SnapshotShardUnpacker implements AutoCloseable {
                     }
                 }
             }
+            return luceneIndexDir;
         } catch (Exception e) {
             throw new CouldNotUnpackShard("Could not unpack shard: Index " + shardMetadata.getIndexId() + ", Shard " + shardMetadata.getShardId(), e);
-        }
-    }
-
-    @Override
-    public void close() {
-        try {
-            Path luceneIndexDir = Paths.get(luceneFilesBasePath + "/" + shardMetadata.getIndexName() + "/" + shardMetadata.getShardId());
-            if (Files.exists(luceneIndexDir)) {
-                deleteRecursively(luceneIndexDir);
-            }
-            
-        } catch (Exception e) {
-            throw new CouldNotCleanUpShard("Could not clean up shard: Index " + shardMetadata.getIndexId() + ", Shard " + shardMetadata.getShardId(), e);
-        }
-    }
-
-    protected void deleteRecursively(Path path) throws IOException {
-        if (Files.isDirectory(path)) {
-            try (DirectoryStream<Path> entries = Files.newDirectoryStream(path)) {
-                for (Path entry : entries) {
-                    deleteRecursively(entry);
-                }
-            }
-        }
-        Files.delete(path);
-    }
-
-    public static class CouldNotCleanUpShard extends RfsException {
-        public CouldNotCleanUpShard(String message, Exception e) {
-            super(message, e);
         }
     }
 
@@ -109,5 +78,5 @@ public class SnapshotShardUnpacker implements AutoCloseable {
             super(message, e);
         }
     }
-    
+
 }

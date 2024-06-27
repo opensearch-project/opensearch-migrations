@@ -15,7 +15,8 @@ services:
       # this is a convenience thing for testing -- it should be removed before this makes it to prod.
       - ./lib/console_link:/root/lib/console_link
     environment:
-      # Copy local AWS env variables to Docker container
+      # Copy local AWS env to Docker container
+      #- ~/.aws:/root/.aws
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}

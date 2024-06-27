@@ -368,6 +368,7 @@ export class StackComposer {
                 })
                 this.addDependentStacks(mskUtilityStack, [migrationStack])
                 this.stacks.push(mskUtilityStack)
+                servicesYaml.kafka = mskUtilityStack.kafkaYaml;
             }
         }
 
@@ -401,6 +402,7 @@ export class StackComposer {
             })
             this.addDependentStacks(kafkaBrokerStack, [migrationStack])
             this.stacks.push(kafkaBrokerStack)
+            servicesYaml.kafka = kafkaBrokerStack.kafkaYaml;
         }
 
         let fetchMigrationStack
@@ -479,6 +481,7 @@ export class StackComposer {
             this.addDependentStacks(trafficReplayerStack, [networkStack, migrationStack, mskUtilityStack,
                 kafkaBrokerStack, openSearchStack, osContainerStack])
             this.stacks.push(trafficReplayerStack)
+            servicesYaml.replayer = trafficReplayerStack.replayerYaml;
         }
 
         let elasticsearchStack
@@ -523,7 +526,7 @@ export class StackComposer {
         let targetClusterProxyStack
         if (targetClusterProxyServiceEnabled && networkStack && migrationStack) {
             targetClusterProxyStack = new CaptureProxyStack(scope, "target-cluster-proxy", {
-                serviceName: "target-cluster-proxy",    
+                serviceName: "target-cluster-proxy",
                 vpc: networkStack.vpc,
                 destinationConfig: {
                     endpointMigrationSSMParameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,

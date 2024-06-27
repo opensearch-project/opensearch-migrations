@@ -129,7 +129,7 @@ public class ReindexFromSnapshot {
 
         Logging.setLevel(logLevel);
 
-        ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);        
+        ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
         ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
         // Sanity checks
@@ -146,7 +146,7 @@ public class ReindexFromSnapshot {
          * 1. A local snapshot directory
          * 2. A source host we'll take the snapshot from
          * 3. An S3 URI of an existing snapshot in S3
-         * 
+         *
          * If you provide the source host, you still need to provide the S3 details or the snapshotLocalRepoDirPath to write the snapshot to.
          */
         if (snapshotDirPath != null && (sourceHost != null || s3RepoUri != null)) {
@@ -182,7 +182,7 @@ public class ReindexFromSnapshot {
             if (sourceHost != null) {
                 // ==========================================================================================================
                 // Create the snapshot if necessary
-                // ==========================================================================================================            
+                // ==========================================================================================================
                 logger.info("==================================================================");
                 logger.info("Attempting to create the snapshot...");
                 OpenSearchClient sourceClient = new OpenSearchClient(sourceConnection);
@@ -347,9 +347,8 @@ public class ReindexFromSnapshot {
                         }
 
                         // Unpack the shard
-                        try (SnapshotShardUnpacker unpacker = unpackerFactory.create(shardMetadata)) {
-                            unpacker.unpack();
-                        }        
+                        SnapshotShardUnpacker unpacker = unpackerFactory.create(shardMetadata);
+                        unpacker.unpack();
                     }
                 }
 
@@ -368,7 +367,7 @@ public class ReindexFromSnapshot {
                     for (int shardId = 0; shardId < indexMetadata.getNumberOfShards(); shardId++) {
                         logger.info("=== Index Id: " + indexMetadata.getName() + ", Shard ID: " + shardId + " ===");
 
-                        Flux<Document> documents = reader.readDocuments(indexMetadata.getName(), shardId);
+                        Flux<Document> documents = reader.readDocuments();
                         String targetIndex = indexMetadata.getName() + indexSuffix;
 
                         final int finalShardId = shardId; // Define in local context for the lambda
@@ -384,7 +383,7 @@ public class ReindexFromSnapshot {
                 reindexer.refreshAllDocuments(targetConnection);
                 logger.info("Refresh complete");
             }
-            
+
         } catch (Exception e) {
             e.printStackTrace();
         }

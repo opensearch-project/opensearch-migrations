@@ -3,20 +3,24 @@ package com.rfs;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 
+import java.net.URI;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.time.Clock;
 import java.util.List;
+import java.util.UUID;
 
+import com.rfs.cms.ApacheHttpClient;
+import com.rfs.cms.OpenSearchWorkCoordinator;
+import com.rfs.cms.LeaseExpireTrigger;
+import com.rfs.cms.ScopedWorkCoordinator;
+import com.rfs.common.DefaultSourceRepoAccessor;
+import com.rfs.worker.ShardWorkPreparer;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.Level;
-import org.apache.logging.log4j.Logger;
-import org.apache.logging.log4j.LogManager;
 
-
-import com.rfs.cms.CmsClient;
-import com.rfs.cms.OpenSearchCmsClient;
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
-import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.Logging;
 import com.rfs.common.LuceneDocumentsReader;
@@ -42,13 +46,13 @@ import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
 import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 import com.rfs.worker.DocumentsRunner;
-import com.rfs.worker.GlobalState;
 import com.rfs.worker.IndexRunner;
 import com.rfs.worker.MetadataRunner;
 import com.rfs.worker.SnapshotRunner;
 
+@Slf4j
 public class RunRfsWorker {
-    private static final Logger logger = LogManager.getLogger(RunRfsWorker.class);
+    public static final int PROCESS_TIMED_OUT = 1;
 
     public static class Args {
         @Parameter(names = {"--snapshot-name"}, description = "The name of the snapshot to migrate", required = true)
@@ -99,7 +103,7 @@ public class RunRfsWorker {
         @Parameter(names = {"--max-shard-size-bytes"}, description = ("Optional. The maximum shard size, in bytes, to allow when"
             + " performing the document migration.  Useful for preventing disk overflow.  Default: 50 * 1024 * 1024 * 1024 (50 GB)"), required = false)
         public long maxShardSizeBytes = 50 * 1024 * 1024 * 1024L;
-        
+
         //https://opensearch.org/docs/2.11/api-reference/cluster-api/cluster-awareness/
         @Parameter(names = {"--min-replicas"}, description = ("Optional.  The minimum number of replicas configured for migrated indices on the target."
             + " This can be useful for migrating to targets which use zonal deployments and require additional replicas to meet zone requirements.  Default: 0")
@@ -129,6 +133,7 @@ public class RunRfsWorker {
         final String targetHost = arguments.targetHost;
         final String targetUser = arguments.targetUser;
         final String targetPass = arguments.targetPass;
+        final List<String> indexAllowlist = arguments.indexAllowlist;
         final List<String> indexTemplateAllowlist = arguments.indexTemplateAllowlist;
         final List<String> componentTemplateAllowlist = arguments.componentTemplateAllowlist;
         final long maxShardSizeBytes = arguments.maxShardSizeBytes;
@@ -140,37 +145,46 @@ public class RunRfsWorker {
         final ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
         final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
-        TryHandlePhaseFailure.executeWithTryCatch(() -> {
-            logger.info("Running RfsWorker");
-            GlobalState globalState = GlobalState.getInstance();
+        try (var processManager = new LeaseExpireTrigger(workItemId -> {
+            log.error("terminating RunRfsWorker because its lease has expired for " + workItemId);
+            System.exit(PROCESS_TIMED_OUT);
+        }, Clock.systemUTC())) {
+            log.info("Running RfsWorker");
             OpenSearchClient sourceClient = new OpenSearchClient(sourceConnection);
             OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
-            final CmsClient cmsClient = new OpenSearchCmsClient(targetClient);
 
-            final SnapshotCreator snapshotCreator = new S3SnapshotCreator(snapshotName, sourceClient, s3RepoUri, s3Region);
-            final SnapshotRunner snapshotWorker = new SnapshotRunner(globalState, cmsClient, snapshotCreator);
-            snapshotWorker.run();
+            SnapshotCreator snapshotCreator = new S3SnapshotCreator(snapshotName, sourceClient, s3RepoUri, s3Region);
+            SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
 
-            final SourceRepo sourceRepo = S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
-            final SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
-            final GlobalMetadata.Factory metadataFactory = new GlobalMetadataFactory_ES_7_10(repoDataProvider);
-            final GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateAllowlist, indexTemplateAllowlist);
-            final Transformer transformer = TransformFunctions.getTransformer(ClusterVersion.ES_7_10, ClusterVersion.OS_2_11, awarenessDimensionality);
-            MetadataRunner metadataWorker = new MetadataRunner(globalState, cmsClient, snapshotName, metadataFactory, metadataCreator, transformer);
-            metadataWorker.run();
+            SourceRepo sourceRepo = S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
+            SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
+            GlobalMetadata.Factory metadataFactory = new GlobalMetadataFactory_ES_7_10(repoDataProvider);
+            GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateAllowlist, indexTemplateAllowlist);
+            Transformer transformer = TransformFunctions.getTransformer(ClusterVersion.ES_7_10, ClusterVersion.OS_2_11, awarenessDimensionality);
+            new MetadataRunner(snapshotName, metadataFactory, metadataCreator, transformer).migrateMetadata();
 
-            final IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
-            final IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
-            final IndexRunner indexWorker = new IndexRunner(globalState, cmsClient, snapshotName, indexMetadataFactory, indexCreator, transformer);
-            indexWorker.run();
+            IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
+            IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
+            new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer, indexAllowlist).migrateIndices();
 
-            final ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
-            final DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
-            final SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor, luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
-            final LuceneDocumentsReader reader = new LuceneDocumentsReader(luceneDirPath);
-            final DocumentReindexer reindexer = new DocumentReindexer(targetClient);
-            DocumentsRunner documentsWorker = new DocumentsRunner(globalState, cmsClient, snapshotName, maxShardSizeBytes, indexMetadataFactory, shardMetadataFactory, unpackerFactory, reader, reindexer);
-            documentsWorker.run();
-        });
+            ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
+            DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
+            var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,
+                    luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
+            DocumentReindexer reindexer = new DocumentReindexer(targetClient);
+            var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(targetHost)),
+                    5, UUID.randomUUID().toString());
+            var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, processManager);
+            new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName, indexAllowlist);
+            new DocumentsRunner(scopedWorkCoordinator,
+                    (name,shard) -> shardMetadataFactory.fromRepo(snapshotName,name,shard),
+                    unpackerFactory,
+                    path -> new LuceneDocumentsReader(path),
+                    reindexer)
+                    .migrateNextShard();
+        } catch (Exception e) {
+            log.error("Unexpected error running RfsWorker", e);
+            throw e;
+        }
     }
 }
