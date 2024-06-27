@@ -8,6 +8,7 @@ from console_link.models.backfill_base import Backfill
 from console_link.models.snapshot import FileSystemSnapshot, Snapshot, S3Snapshot
 from console_link.models.replayer_base import Replayer
 from console_link.models.replayer_ecs import ECSReplayer
+from console_link.models.replayer_docker import DockerReplayer
 from console_link.models.kafka import Kafka, MSK, StandardKafka
 import yaml
 from cerberus import Validator
@@ -26,7 +27,7 @@ def get_snapshot(config: Dict, source_cluster: Cluster):
 def get_replayer(config: Dict):
     if 'ecs' in config:
         return ECSReplayer(config)
-    raise ValueError("Invalid replayer config")
+    return DockerReplayer(config)
 
 
 def get_kafka(config: Dict):

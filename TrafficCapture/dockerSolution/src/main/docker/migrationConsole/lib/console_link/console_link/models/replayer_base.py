@@ -9,6 +9,7 @@ from cerberus import Validator
 
 DOCKER_REPLAY_SCHEMA = {
     "type": "dict",
+    "nullable": True,
     "schema": {
         "socket": {"type": "string", "required": False}
     }

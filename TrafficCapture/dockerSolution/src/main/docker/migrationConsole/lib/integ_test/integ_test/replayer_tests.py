@@ -8,7 +8,9 @@ import time
 from http import HTTPStatus
 from requests import Session
 from requests.adapters import HTTPAdapter
-from console_link.models.replayer import BaseReplayer
+from console_link.models.replayer_base import Replayer
+from console_link.logic.kafka import delete_topic
+from console_link.models.kafka import Kafka
 from console_link.logic.clusters import connection_check, clear_indices, run_test_benchmarks, ConnectionResult
 from console_link.models.cluster import Cluster, AuthMethod
 from console_link.cli import Context
@@ -27,6 +29,9 @@ def setup_replayer(request):
     pytest.unique_id = unique_id
     source_cluster: Cluster = pytest.console_env.source_cluster
     target_cluster: Cluster = pytest.console_env.target_cluster
+    kafka: Kafka = pytest.console_env.kafka
+    replayer: Replayer = pytest.console_env.replay
+    assert replayer is not None
 
     # Confirm source and target connection
     source_con_result: ConnectionResult = connection_check(source_cluster)
@@ -38,9 +43,10 @@ def setup_replayer(request):
     clear_indices(source_cluster)
     clear_indices(target_cluster)
 
+    # Delete existing Kafka topic to clear records
+    delete_topic(kafka=kafka, topic_name="logging-traffic-topic")
+
     logger.info("Starting replayer...")
-    replayer: BaseReplayer = pytest.console_env.replayer
-    assert replayer is not None
     # TODO provide support for actually starting/stopping Replayer in Docker
     replayer.start()
 
@@ -54,7 +60,7 @@ def cleanup_after_tests():
 
     # Teardown code
     logger.info("Stopping replayer...")
-    replayer: BaseReplayer = pytest.console_env.replayer
+    replayer: Replayer = pytest.console_env.replay
     assert replayer is not None
     replayer.stop()
 

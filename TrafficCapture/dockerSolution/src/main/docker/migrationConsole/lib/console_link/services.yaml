@@ -16,6 +16,8 @@ metrics_source:
 backfill:
   reindex_from_snapshot:
     docker:
+replay:
+  docker:
 snapshot:
   snapshot_name: "snapshot_2023_01_01"
   fs:
