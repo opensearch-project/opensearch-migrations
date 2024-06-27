@@ -57,27 +57,28 @@ def cluster_group(ctx):
 
 
 @cluster_group.command(name="cat-indices")
+@click.option("--refresh", is_flag=True, default=False)
 @click.pass_obj
-def cat_indices_cmd(ctx):
+def cat_indices_cmd(ctx, refresh):
     """Simple program that calls `_cat/indices` on both a source and target cluster."""
     if ctx.json:
         click.echo(
             json.dumps(
                 {
                     "source_cluster": logic_clusters.cat_indices(
-                        ctx.env.source_cluster, as_json=True
+                        ctx.env.source_cluster, as_json=True, refresh=refresh
                     ),
                     "target_cluster": logic_clusters.cat_indices(
-                        ctx.env.target_cluster, as_json=True
+                        ctx.env.target_cluster, as_json=True, refresh=refresh
                     ),
                 }
             )
         )
         return
     click.echo("SOURCE CLUSTER")
-    click.echo(logic_clusters.cat_indices(ctx.env.source_cluster))
+    click.echo(logic_clusters.cat_indices(ctx.env.source_cluster, refresh=refresh))
     click.echo("TARGET CLUSTER")
-    click.echo(logic_clusters.cat_indices(ctx.env.target_cluster))
+    click.echo(logic_clusters.cat_indices(ctx.env.target_cluster, refresh=refresh))
 
 
 @cluster_group.command(name="connection-check")

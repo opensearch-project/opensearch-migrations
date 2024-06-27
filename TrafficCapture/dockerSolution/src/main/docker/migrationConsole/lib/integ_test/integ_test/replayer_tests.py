@@ -14,9 +14,11 @@ from console_link.models.kafka import Kafka
 from console_link.logic.clusters import connection_check, clear_indices, run_test_benchmarks, ConnectionResult
 from console_link.models.cluster import Cluster, AuthMethod
 from console_link.cli import Context
+
 from common_operations import (get_index, create_index, delete_index, get_document, create_document, delete_document,
                                check_doc_match, check_doc_counts_match, generate_large_doc, execute_api_call,
-                               EXPECTED_BENCHMARK_DOCS)
+                               wait_for_running_replayer, EXPECTED_BENCHMARK_DOCS)
+from metric_operations import assert_metrics_present
 
 logger = logging.getLogger(__name__)
 
@@ -49,6 +51,7 @@ def setup_replayer(request):
     logger.info("Starting replayer...")
     # TODO provide support for actually starting/stopping Replayer in Docker
     replayer.start()
+    wait_for_running_replayer(replayer=replayer)
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -68,10 +71,10 @@ def cleanup_after_tests():
 @pytest.mark.usefixtures("setup_replayer")
 class ReplayerTests(unittest.TestCase):
 
-    # @assert_metrics_present({
-    #     'captureProxy': ['kafkaCommitCount_total'],
-    #     'replayer': ['kafkaCommitCount_total']
-    # })
+    @assert_metrics_present({
+        'captureProxy': ['kafkaCommitCount_total'],
+        'replayer': ['kafkaCommitCount_total']
+    })
     def test_replayer_0001_empty_index(self):
         # This test will verify that an index will be created (then deleted) on the target cluster when one is created
         # on the source cluster by going through the proxy first. It will verify that the traffic is captured by the

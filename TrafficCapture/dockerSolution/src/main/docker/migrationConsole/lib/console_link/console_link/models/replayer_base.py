@@ -37,7 +37,7 @@ SCHEMA = {
 }
 
 
-ReplayStatus = Enum("ReplayStatus", ["NOT_STARTED", "RUNNING", "STOPPED", "FAILED"])
+ReplayStatus = Enum("ReplayStatus", ["NOT_STARTED", "STARTING", "RUNNING", "STOPPED", "FAILED"])
 
 
 class Replayer(ABC):
@@ -63,7 +63,7 @@ class Replayer(ABC):
         pass
 
     @abstractmethod
-    def get_status(self, *args, **kwargs) -> ReplayStatus:
+    def get_status(self, *args, **kwargs) -> CommandResult:
         """Return a status"""
         pass
 

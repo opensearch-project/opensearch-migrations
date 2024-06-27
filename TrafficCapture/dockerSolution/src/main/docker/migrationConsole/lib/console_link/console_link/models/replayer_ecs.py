@@ -23,8 +23,19 @@ class ECSReplayer(Replayer):
         logger.info("Stopping ECS replayer by setting desired count to 0 instances")
         return self.ecs_client.set_desired_count(0)
 
-    def get_status(self, *args, **kwargs) -> ReplayStatus:
-        raise NotImplementedError()
+    def get_status(self, *args, **kwargs) -> CommandResult:
+        # Simple implementation that only checks ECS service status currently
+        instance_statuses = self.ecs_client.get_instance_statuses()
+        if not instance_statuses:
+            return CommandResult(False, "Failed to get instance statuses")
+
+        status_string = str(instance_statuses)
+
+        if instance_statuses.running > 0:
+            return CommandResult(True, (ReplayStatus.RUNNING, status_string))
+        elif instance_statuses.pending > 0:
+            return CommandResult(True, (ReplayStatus.STARTING, status_string))
+        return CommandResult(True, (ReplayStatus.STOPPED, status_string))
 
     def scale(self, units: int, *args, **kwargs) -> CommandResult:
         logger.info(f"Scaling ECS replayer by setting desired count to {units} instances")

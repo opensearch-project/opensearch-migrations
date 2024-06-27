@@ -8,6 +8,7 @@ from console_link.models.backfill_base import Backfill
 from console_link.models.backfill_rfs import RFSBackfill
 from console_link.models.command_result import CommandResult
 from console_link.models.snapshot import Snapshot
+from console_link.models.metadata import Metadata
 from console_link.cli import Context
 from common_operations import (get_document, create_document, create_index, check_doc_counts_match,
                                EXPECTED_BENCHMARK_DOCS)
@@ -48,6 +49,8 @@ def setup_backfill(request):
                  target_cluster=pytest.console_env.target_cluster)
     backfill: Backfill = pytest.console_env.backfill
     assert backfill is not None
+    metadata: Metadata = pytest.console_env.metadata
+    assert metadata is not None
     backfill.create()
     if isinstance(backfill, RFSBackfill):
         snapshot: Snapshot = pytest.console_env.snapshot
@@ -55,8 +58,12 @@ def setup_backfill(request):
         if status_result.success:
             snapshot.delete()
         snapshot.create(wait=True)
+        metadata.migrate()
+        backfill.start()
         backfill.scale(units=10)
-    backfill.start()
+    else:
+        metadata.migrate()
+        backfill.start()
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -89,7 +96,6 @@ class BackfillTests(unittest.TestCase):
         get_document(cluster=target_cluster, index_name=index_name, doc_id=doc_id, max_attempts=30, delay=30.0,
                      test_case=self)
 
-    #@unittest.skip("Support needed for RFS to handle multiple shards and OSI general support")
     def test_backfill_0002_sample_benchmarks(self):
         source_cluster: Cluster = pytest.console_env.source_cluster
         target_cluster: Cluster = pytest.console_env.target_cluster

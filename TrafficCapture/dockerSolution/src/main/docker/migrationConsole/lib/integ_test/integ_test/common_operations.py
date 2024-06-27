@@ -9,6 +9,7 @@ from typing import Dict, List
 from unittest import TestCase
 from console_link.logic.clusters import call_api
 from console_link.models.cluster import HttpMethod, Cluster
+from console_link.models.replayer_base import Replayer, ReplayStatus
 
 logger = logging.getLogger(__name__)
 
@@ -33,8 +34,12 @@ class ClusterAPIRequestError(Exception):
     pass
 
 
+class ReplayerNotActiveError(Exception):
+    pass
+
+
 def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=None, headers=None, timeout=None,
-                     session=None, expected_status_code: int = 200, max_attempts: int = 5, delay: float = 2.5,
+                     session=None, expected_status_code: int = 200, max_attempts: int = 10, delay: float = 2.5,
                      test_case=None):
     api_exception = None
     last_received_status = None
@@ -181,3 +186,25 @@ def generate_large_doc(size_mib):
         "timestamp": datetime.datetime.now().isoformat(),
         "large_field": large_string
     }
+
+
+def wait_for_running_replayer(replayer: Replayer,
+                              test_case: TestCase = None,
+                              max_attempts: int = 25,
+                              delay: float = 3.0):
+    error_message = ""
+    for attempt in range(1, max_attempts + 1):
+        cmd_result = replayer.get_status()
+        status = cmd_result.value[0]
+        logger.debug(f"Received status {status} for Replayer on attempt {attempt}")
+        if status == ReplayStatus.RUNNING:
+            return
+        error_message = (f"Received replayer status of {status} but expecting to receive: {ReplayStatus.RUNNING} "
+                         f"after {max_attempts} attempts")
+        if attempt != max_attempts:
+            error_message = ""
+            time.sleep(delay)
+    if test_case:
+        test_case.fail(error_message)
+    else:
+        raise ReplayerNotActiveError(error_message)
