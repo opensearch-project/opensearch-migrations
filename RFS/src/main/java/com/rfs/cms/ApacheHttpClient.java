@@ -16,7 +16,6 @@ import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URI;
 import java.util.AbstractMap;
 import java.util.Arrays;
@@ -37,9 +36,9 @@ public class ApacheHttpClient implements AbstractedHttpClient {
         switch (method.toUpperCase()) {
             case "GET":
                 return new HttpGet(baseUri + "/" + path);
-            case OpenSearchWorkCoordinator.POST_METHOD:
+            case AbstractedHttpClient.POST_METHOD:
                 return new HttpPost(baseUri + "/" + path);
-            case OpenSearchWorkCoordinator.PUT_METHOD:
+            case AbstractedHttpClient.PUT_METHOD:
                 return new HttpPut(baseUri + "/" + path);
             case "PATCH":
                 return new HttpPatch(baseUri + "/" + path);

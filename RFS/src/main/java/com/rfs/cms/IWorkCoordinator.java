@@ -76,7 +76,7 @@ public interface IWorkCoordinator extends AutoCloseable {
      * @param workItemId
      * @throws IOException
      */
-    void completeWorkItem(String workItemId) throws IOException;
+    void completeWorkItem(String workItemId) throws IOException, InterruptedException;
 
     /**
      * @return the number of items that are not yet complete.  This will include items with and without claimed leases.
@@ -101,13 +101,13 @@ public interface IWorkCoordinator extends AutoCloseable {
      * critical to glue different components together in a readable fashion.
      */
     interface WorkAcquisitionOutcome {
-        <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException;
+        <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException, InterruptedException;
     }
 
     interface WorkAcquisitionOutcomeVisitor<T> {
         T onAlreadyCompleted() throws IOException;
         T onNoAvailableWorkToBeDone() throws IOException;
-        T onAcquiredWork(WorkItemAndDuration workItem) throws IOException;
+        T onAcquiredWork(WorkItemAndDuration workItem) throws IOException, InterruptedException;
     }
 
     /**
@@ -147,7 +147,7 @@ public interface IWorkCoordinator extends AutoCloseable {
     class WorkItemAndDuration implements WorkAcquisitionOutcome {
         final String workItemId;
         final Instant leaseExpirationTime;
-        @Override public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException {
+        @Override public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException, InterruptedException {
             return v.onAcquiredWork(this);
         }
     }

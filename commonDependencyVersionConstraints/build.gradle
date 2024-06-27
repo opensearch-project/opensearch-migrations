@@ -16,6 +16,12 @@ dependencies {
 
     api group: 'org.slf4j', name: 'slf4j-api', version: '2.0.13'
 
+    def dockerapi = '3.3.6'
+    api group: 'com.github.docker-java', name: 'docker-java', version: dockerapi
+    api group: 'com.github.docker-java', name: 'docker-java-core', version: dockerapi
+    // docker-java-transport-zerodep is also an option if this apache http client is a lot to maintain
+    api group: 'com.github.docker-java', name: 'docker-java-transport-httpclient5', version: dockerapi
+
     api group: 'com.google.guava', name: 'guava', version: '32.0.1-jre'
 
     api group: 'com.google.protobuf', name: 'protobuf-java', version: '3.22.2'
