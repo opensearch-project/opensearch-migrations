@@ -45,7 +45,11 @@ public class IndexMetadataData_OS_2_11 implements IndexMetadata {
     }
 
     @Override
-    public ObjectNode toObjectNode() {
+    public ObjectNode raw() {
         return root;
+    }
+    @Override
+    public IndexMetadata deepCopy() {
+        return new IndexMetadataData_OS_2_11(root.deepCopy(), indexId, indexName);
     }
 }

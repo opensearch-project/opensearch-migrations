@@ -3,10 +3,12 @@ package com.rfs.transformers;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.models.GlobalMetadata;
 import com.rfs.models.IndexMetadata;
+import com.rfs.version_os_2_11.GlobalMetadataData_OS_2_11;
 
 public class Transformer_ES_7_10_OS_2_11 implements Transformer {
     private static final Logger logger = LogManager.getLogger(Transformer_ES_7_10_OS_2_11.class);
@@ -18,8 +20,8 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
     }
 
     @Override
-    public ObjectNode transformGlobalMetadata(GlobalMetadata metaData){
-        ObjectNode root = metaData.toObjectNode();
+    public GlobalMetadata transformGlobalMetadata(GlobalMetadata metaData){
+        ObjectNode root = metaData.toObjectNode().deepCopy();
 
         // Transform the legacy templates
         if (root.get("templates") != null) {
@@ -79,22 +81,22 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
             root.set("component_template", componentTemplatesRoot);
         }
 
-        return root;
+        return new GlobalMetadataData_OS_2_11(root);
     }
 
     @Override
-    public ObjectNode transformIndexMetadata(IndexMetadata indexData){
+    public IndexMetadata transformIndexMetadata(IndexMetadata indexData){
+        logger.debug("Original Object: " + indexData.raw().toString());
+        var copy = indexData.deepCopy();
+        var newRoot = copy.raw();
         
-        ObjectNode newRoot = indexData.toObjectNode().deepCopy();
-
         TransformFunctions.removeIntermediateMappingsLevels(newRoot);
 
         newRoot.set("settings", TransformFunctions.convertFlatSettingsToTree((ObjectNode) newRoot.get("settings")));
         TransformFunctions.removeIntermediateIndexSettingsLevel(newRoot); // run before fixNumberOfReplicas
         TransformFunctions.fixReplicasForDimensionality(newRoot, awarenessAttributeDimensionality);
 
-        logger.debug("Original Object: " + indexData.toObjectNode().toString());
         logger.debug("Transformed Object: " + newRoot.toString());
-        return newRoot;
+        return indexData;
     }
 }

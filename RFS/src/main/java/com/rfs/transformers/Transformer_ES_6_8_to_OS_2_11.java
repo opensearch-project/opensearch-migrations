@@ -1,5 +1,7 @@
 package com.rfs.transformers;
 
+import java.util.List;
+
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -7,10 +9,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.models.GlobalMetadata;
 import com.rfs.models.IndexMetadata;
+import com.rfs.version_os_2_11.GlobalMetadataData_OS_2_11;
+
+import org.opensearch.migrations.transformation.TransformationRule;
+import org.opensearch.migrations.transformation.entity.Index;
+import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
 
 public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     private static final Logger logger = LogManager.getLogger(Transformer_ES_6_8_to_OS_2_11.class);
     private static final ObjectMapper mapper = new ObjectMapper();
+
+    private final List<TransformationRule<Index>> indexTransformations = List.of(new IndexMappingTypeRemoval());
     private int awarenessAttributeDimensionality;
 
     public Transformer_ES_6_8_to_OS_2_11(int awarenessAttributeDimensionality) {
@@ -18,7 +27,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     }
 
     @Override
-    public ObjectNode transformGlobalMetadata(GlobalMetadata globalData) {
+    public GlobalMetadata transformGlobalMetadata(GlobalMetadata globalData) {
         var root = globalData.toObjectNode();
         ObjectNode newRoot = mapper.createObjectNode();
 
@@ -50,13 +59,16 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
         componentTemplatesRoot.set("component_template", componentTemplatesSubRoot);
         newRoot.set("component_template", componentTemplatesRoot);
 
-        return newRoot;
+        return new GlobalMetadataData_OS_2_11(newRoot);
     }
 
     @Override
-    public ObjectNode transformIndexMetadata(IndexMetadata index){
-        var root = index.toObjectNode();
-        ObjectNode newRoot = root.deepCopy();
+    public IndexMetadata transformIndexMetadata(IndexMetadata index) {
+        logger.debug("Original Object: " + index.raw().toString());
+        var copy = index.deepCopy();
+        var newRoot = copy.raw();
+
+        indexTransformations.forEach(transformer -> transformer.applyTransformation(index));
 
         TransformFunctions.removeIntermediateMappingsLevels(newRoot);
 
@@ -64,8 +76,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
         TransformFunctions.removeIntermediateIndexSettingsLevel(newRoot); // run before fixNumberOfReplicas
         TransformFunctions.fixReplicasForDimensionality(newRoot, awarenessAttributeDimensionality);
 
-        logger.debug("Original Object: " + root.toString());
         logger.debug("Transformed Object: " + newRoot.toString());
-        return newRoot;
+        return copy;
     }    
 }

@@ -1,6 +1,5 @@
 package com.rfs.transformers;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.models.GlobalMetadata;
 import com.rfs.models.IndexMetadata;
 
@@ -12,10 +11,10 @@ public interface Transformer {
     /**
      * Takes the raw JSON representing the Global Metadata of one version and returns a new, transformed copy of the JSON
      */
-    public ObjectNode transformGlobalMetadata(GlobalMetadata globalData);
+    public GlobalMetadata transformGlobalMetadata(GlobalMetadata globalData);
 
     /**
      * Takes the raw JSON representing the Index Metadata of one version and returns a new, transformed copy of the JSON
      */
-    public ObjectNode transformIndexMetadata(IndexMetadata indexData);    
+    public IndexMetadata transformIndexMetadata(IndexMetadata indexData);    
 }

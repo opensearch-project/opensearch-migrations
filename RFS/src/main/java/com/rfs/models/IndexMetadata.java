@@ -1,6 +1,7 @@
 package com.rfs.models;
 
 import org.apache.lucene.codecs.CodecUtil;
+import org.opensearch.migrations.transformation.entity.Index;
 
 import java.io.ByteArrayInputStream;
 import java.io.FileInputStream;
@@ -15,7 +16,7 @@ import com.rfs.common.ByteArrayIndexInput;
 import com.rfs.common.RfsException;
 import com.rfs.common.SnapshotRepo;
 
-public interface IndexMetadata {
+public interface IndexMetadata extends Index {
 
     /*
     * Defines the behavior expected of an object that will surface the metadata of an index stored in a snapshot
@@ -28,7 +29,7 @@ public interface IndexMetadata {
     public String getName();
     public int getNumberOfShards();
     public ObjectNode getSettings();
-    public ObjectNode toObjectNode();
+    public IndexMetadata deepCopy();
 
     /**
     * Defines the behavior required to read a snapshot's index metadata as JSON and convert it into a Data object

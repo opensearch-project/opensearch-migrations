@@ -2,6 +2,7 @@ package com.rfs.version_es_6_8;
 
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.rfs.models.IndexMetadata;
 import com.rfs.transformers.TransformFunctions;
 
 public class IndexMetadataData_ES_6_8 implements com.rfs.models.IndexMetadata {
@@ -68,7 +69,12 @@ public class IndexMetadataData_ES_6_8 implements com.rfs.models.IndexMetadata {
     }
 
     @Override
-    public ObjectNode toObjectNode() {
+    public ObjectNode raw() {
         return root;
+    }
+
+    @Override
+    public IndexMetadata deepCopy() {
+        return new IndexMetadataData_ES_6_8(root.deepCopy(), indexId, indexName);
     }
 }
