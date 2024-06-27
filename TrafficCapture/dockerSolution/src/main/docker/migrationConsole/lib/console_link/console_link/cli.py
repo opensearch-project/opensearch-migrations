@@ -47,7 +47,7 @@ def cli(ctx, config_file, json, verbose):
 # ##################### CLUSTERS ###################
 
 
-@cli.group(name="clusters")
+@cli.group(name="clusters", help="Commands to interact with source and target clusters")
 @click.pass_obj
 def cluster_group(ctx):
     if ctx.env.source_cluster is None:
@@ -119,25 +119,12 @@ def clear_indices_cmd(ctx, acknowledge_risk, cluster):
         else:
             click.echo("Aborting command.")
 
-# ##################### REPLAYER ###################
-
-
-@cli.group(name="replayer")
-@click.pass_obj
-def replayer_group(ctx):
-    if ctx.env.replayer is None:
-        raise click.UsageError("Replayer is not set")
-
-
-@replayer_group.command(name="start")
-@click.pass_obj
-def start_replayer_cmd(ctx):
-    ctx.env.replayer.start()
 
 # ##################### SNAPSHOT ###################
 
 
-@cli.group(name="snapshot")
+@cli.group(name="snapshot",
+           help="Commands to create and check status of snapshots of the source cluster.")
 @click.pass_obj
 def snapshot_group(ctx):
     """All actions related to snapshot creation"""
@@ -172,7 +159,7 @@ def status_snapshot_cmd(ctx, deep_check):
 # arguments depending on the type of backfill migration
 
 
-@cli.group(name="backfill")
+@cli.group(name="backfill", help="Commands related to controlling the configured backfill mechanism.")
 @click.pass_obj
 def backfill_group(ctx):
     """All actions related to historical/backfill data migrations"""
@@ -231,9 +218,11 @@ def scale_backfill_cmd(ctx, units: int):
 
 
 @backfill_group.command(name="status")
+@click.option('--deep-check', is_flag=True, help='Perform a deep status check of the backfill')
 @click.pass_obj
-def status_backfill_cmd(ctx):
-    exitcode, message = logic_backfill.status(ctx.env.backfill)
+def status_backfill_cmd(ctx, deep_check):
+    logger.info(f"Called `console backfill status`, with {deep_check=}")
+    exitcode, message = logic_backfill.status(ctx.env.backfill, deep_check=deep_check)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -241,7 +230,7 @@ def status_backfill_cmd(ctx):
 
 # ##################### REPLAY ###################
 
-@cli.group(name="replay")
+@cli.group(name="replay", help="Commands related to controlling the replayer.")
 @click.pass_obj
 def replay_group(ctx):
     """All actions related to replaying data"""
@@ -295,7 +284,7 @@ def status_replay_cmd(ctx):
 # ##################### METADATA ###################
 
 
-@cli.group(name="metadata")
+@cli.group(name="metadata", help="Commands related to migrating metadata to the target cluster.")
 @click.pass_obj
 def metadata_group(ctx):
     """All actions related to metadata migration"""
@@ -315,7 +304,7 @@ def migrate_metadata_cmd(ctx, detach):
 # ##################### METRICS ###################
 
 
-@cli.group(name="metrics")
+@cli.group(name="metrics", help="Commands related to checking metrics emitted by the capture proxy and replayer.")
 @click.pass_obj
 def metrics_group(ctx):
     if ctx.env.metrics_source is None:
@@ -361,6 +350,59 @@ def get_metrics_data_cmd(ctx, component, metric_name, statistic, lookback):
     pprint(
         metric_data
     )
+
+# ##################### KAFKA ###################
+
+
+@cli.group(name="kafka")
+@click.pass_obj
+def kafka_group(ctx):
+    """All actions related to Kafka operations"""
+    if ctx.env.kafka is None:
+        raise click.UsageError("Kafka is not set")
+
+
+@kafka_group.command(name="create-topic")
+@click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to create')
+@click.pass_obj
+def create_topic_cmd(ctx, topic_name):
+    result = ctx.env.kafka.create_topic(topic_name=topic_name)
+    click.echo(result.value)
+
+
+@kafka_group.command(name="delete-topic")
+@click.option("--acknowledge-risk", is_flag=True, show_default=True, default=False,
+              help="Flag to acknowledge risk and skip confirmation")
+@click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to delete')
+@click.pass_obj
+def delete_topic_cmd(ctx, acknowledge_risk, topic_name):
+    if acknowledge_risk:
+        result = ctx.env.kafka.delete_topic(topic_name=topic_name)
+        click.echo(result.value)
+    else:
+        if click.confirm('Deleting a topic will irreversibly delete all captured traffic records stored in that '
+                         'topic. Are you sure you want to continue?'):
+            click.echo(f"Performing delete topic operation on {topic_name} topic...")
+            result = ctx.env.kafka.delete_topic(topic_name=topic_name)
+            click.echo(result.value)
+        else:
+            click.echo("Aborting command.")
+
+
+@kafka_group.command(name="describe-consumer-group")
+@click.option('--group-name', default="logging-group-default", help='Specify a group name to describe')
+@click.pass_obj
+def describe_group_command(ctx, group_name):
+    result = ctx.env.kafka.describe_consumer_group(group_name=group_name)
+    click.echo(result.value)
+
+
+@kafka_group.command(name="describe-topic-records")
+@click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to describe')
+@click.pass_obj
+def describe_topic_records_cmd(ctx, topic_name):
+    result = ctx.env.kafka.describe_topic_records(topic_name=topic_name)
+    click.echo(result.value)
 
 # ##################### UTILITIES ###################
 

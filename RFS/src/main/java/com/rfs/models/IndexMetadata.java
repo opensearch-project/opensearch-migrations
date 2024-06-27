@@ -1,4 +1,4 @@
-package com.rfs.common;
+package com.rfs.models;
 
 import org.apache.lucene.codecs.CodecUtil;
 
@@ -11,8 +11,24 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
+import com.rfs.common.ByteArrayIndexInput;
+import com.rfs.common.RfsException;
+import com.rfs.common.SnapshotRepo;
 
-public class IndexMetadata {
+public interface IndexMetadata {
+
+    /*
+    * Defines the behavior expected of an object that will surface the metadata of an index stored in a snapshot
+    * See: https://github.com/elastic/elasticsearch/blob/v7.10.2/server/src/main/java/org/elasticsearch/cluster/metadata/IndexMetadata.java#L1475
+    * See: https://github.com/elastic/elasticsearch/blob/v6.8.23/server/src/main/java/org/elasticsearch/cluster/metadata/IndexMetaData.java#L1284
+    */
+    public ObjectNode getAliases();
+    public String getId();
+    public ObjectNode getMappings();
+    public String getName();
+    public int getNumberOfShards();
+    public ObjectNode getSettings();
+    public ObjectNode toObjectNode();
 
     /**
     * Defines the behavior required to read a snapshot's index metadata as JSON and convert it into a Data object
@@ -38,7 +54,7 @@ public class IndexMetadata {
             }
         }
 
-        default IndexMetadata.Data fromRepo(String snapshotName, String indexName) {
+        default IndexMetadata fromRepo(String snapshotName, String indexName) {
             SmileFactory smileFactory = getSmileFactory();
             String indexId = getRepoDataProvider().getIndexId(indexName);
             String indexFileId = getIndexFileId(snapshotName, indexName);
@@ -47,7 +63,7 @@ public class IndexMetadata {
         }
 
         // Version-specific implementation
-        public IndexMetadata.Data fromJsonNode(JsonNode root, String indexId, String indexName);
+        public IndexMetadata fromJsonNode(JsonNode root, String indexId, String indexName);
 
         // Version-specific implementation
         public SmileFactory getSmileFactory();
@@ -58,20 +74,4 @@ public class IndexMetadata {
         // Get the underlying SnapshotRepo Provider
         public SnapshotRepo.Provider getRepoDataProvider();
     }
-
-    /**
-    * Defines the behavior expected of an object that will surface the metadata of an index stored in a snapshot
-    * See: https://github.com/elastic/elasticsearch/blob/v7.10.2/server/src/main/java/org/elasticsearch/cluster/metadata/IndexMetadata.java#L1475
-    * See: https://github.com/elastic/elasticsearch/blob/v6.8.23/server/src/main/java/org/elasticsearch/cluster/metadata/IndexMetaData.java#L1284
-    */
-    public static interface Data {
-        public ObjectNode getAliases();
-        public String getId();
-        public ObjectNode getMappings();
-        public String getName();
-        public int getNumberOfShards();
-        public ObjectNode getSettings();
-        public ObjectNode toObjectNode();
-    }
-    
 }

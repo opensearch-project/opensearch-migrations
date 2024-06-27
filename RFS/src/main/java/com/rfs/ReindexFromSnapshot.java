@@ -16,6 +16,10 @@ import org.apache.logging.log4j.LogManager;
 import reactor.core.publisher.Flux;
 
 import com.rfs.common.*;
+import com.rfs.models.GlobalMetadata;
+import com.rfs.models.IndexMetadata;
+import com.rfs.models.ShardMetadata;
+import com.rfs.models.SnapshotMetadata;
 import com.rfs.transformers.*;
 import com.rfs.version_es_6_8.*;
 import com.rfs.version_es_7_10.*;
@@ -224,7 +228,7 @@ public class ReindexFromSnapshot {
                 logger.error("Snapshot not found");
                 return;
             }
-            SnapshotMetadata.Data snapshotMetadata;
+            SnapshotMetadata snapshotMetadata;
             if (sourceVersion == ClusterVersion.ES_6_8) {
                 snapshotMetadata = new SnapshotMetadataFactory_ES_6_8().fromRepo(repo, repoDataProvider, snapshotName);
             } else {
@@ -252,7 +256,7 @@ public class ReindexFromSnapshot {
                 // ==========================================================================================================
                 logger.info("==================================================================");
                 logger.info("Attempting to read Global Metadata details...");
-                GlobalMetadata.Data globalMetadata;
+                GlobalMetadata globalMetadata;
                 if (sourceVersion == ClusterVersion.ES_6_8) {
                     globalMetadata = new GlobalMetadataFactory_ES_6_8(repoDataProvider).fromRepo(snapshotName);
                 } else {
@@ -269,13 +273,11 @@ public class ReindexFromSnapshot {
                 OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
                 if (sourceVersion == ClusterVersion.ES_6_8) {
                     GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, templateWhitelist, componentTemplateWhitelist, List.of());
-                    ObjectNode root = globalMetadata.toObjectNode();
-                    ObjectNode transformedRoot = transformer.transformGlobalMetadata(root);
+                    ObjectNode transformedRoot = transformer.transformGlobalMetadata(globalMetadata);
                     metadataCreator.create(transformedRoot);
                 } else if (sourceVersion == ClusterVersion.ES_7_10) {
                     GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateWhitelist, templateWhitelist);
-                    ObjectNode root = globalMetadata.toObjectNode();
-                    ObjectNode transformedRoot = transformer.transformGlobalMetadata(root);
+                    ObjectNode transformedRoot = transformer.transformGlobalMetadata(globalMetadata);
                     metadataCreator.create(transformedRoot);
                 }
             }
@@ -285,10 +287,10 @@ public class ReindexFromSnapshot {
             // ==========================================================================================================
             logger.info("==================================================================");
             logger.info("Attempting to read Index Metadata...");
-            List<IndexMetadata.Data> indexMetadatas = new ArrayList<>();
+            List<IndexMetadata> indexMetadatas = new ArrayList<>();
             for (SnapshotRepo.Index index : repoDataProvider.getIndicesInSnapshot(snapshotName)) {
                 logger.info("Reading Index Metadata for index: " + index.getName());
-                IndexMetadata.Data indexMetadata;
+                IndexMetadata indexMetadata;
                 if (sourceVersion == ClusterVersion.ES_6_8) {
                     indexMetadata = new IndexMetadataFactory_ES_6_8(repoDataProvider).fromRepo(snapshotName, index.getName());
                 } else {
@@ -306,12 +308,11 @@ public class ReindexFromSnapshot {
                 logger.info("==================================================================");
                 logger.info("Attempting to recreate the indices...");
                 IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
-                for (IndexMetadata.Data indexMetadata : indexMetadatas) {
+                for (IndexMetadata indexMetadata : indexMetadatas) {
                     String reindexName = indexMetadata.getName() + indexSuffix;
                     logger.info("Recreating index " + indexMetadata.getName() + " as " + reindexName + " on target...");
 
-                    ObjectNode root = indexMetadata.toObjectNode();
-                    ObjectNode transformedRoot = transformer.transformIndexMetadata(root);
+                    ObjectNode transformedRoot = transformer.transformIndexMetadata(indexMetadata);
                     indexCreator.create(transformedRoot, reindexName, indexMetadata.getId());
                 }
             }
@@ -332,13 +333,13 @@ public class ReindexFromSnapshot {
                 DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
                 SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,luceneDirPath, bufferSize);
 
-                for (IndexMetadata.Data indexMetadata : indexMetadatas) {
+                for (IndexMetadata indexMetadata : indexMetadatas) {
                     logger.info("Processing index: " + indexMetadata.getName());
                     for (int shardId = 0; shardId < indexMetadata.getNumberOfShards(); shardId++) {
                         logger.info("=== Shard ID: " + shardId + " ===");
 
                         // Get the shard metadata
-                        ShardMetadata.Data shardMetadata;
+                        ShardMetadata shardMetadata;
                         if (sourceVersion == ClusterVersion.ES_6_8) {
                             shardMetadata = new ShardMetadataFactory_ES_6_8(repoDataProvider).fromRepo(snapshotName, indexMetadata.getName(), shardId);
                         } else {
@@ -362,7 +363,7 @@ public class ReindexFromSnapshot {
                 LuceneDocumentsReader reader = new LuceneDocumentsReader(luceneDirPath);
                 DocumentReindexer reindexer = new DocumentReindexer(targetClient);
 
-                for (IndexMetadata.Data indexMetadata : indexMetadatas) {
+                for (IndexMetadata indexMetadata : indexMetadatas) {
                     for (int shardId = 0; shardId < indexMetadata.getNumberOfShards(); shardId++) {
                         logger.info("=== Index Id: " + indexMetadata.getName() + ", Shard ID: " + shardId + " ===");
 

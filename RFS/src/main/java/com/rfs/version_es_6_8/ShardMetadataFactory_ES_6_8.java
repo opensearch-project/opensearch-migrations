@@ -7,15 +7,16 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 import lombok.RequiredArgsConstructor;
 
-import com.rfs.common.ShardMetadata;
 import com.rfs.common.SnapshotRepo;
+import com.rfs.models.ShardFileInfo;
+import com.rfs.models.ShardMetadata;
 
 @RequiredArgsConstructor
 public class ShardMetadataFactory_ES_6_8 implements ShardMetadata.Factory {
     protected final SnapshotRepo.Provider repoDataProvider;
 
     @Override
-    public ShardMetadata.Data fromJsonNode(JsonNode root, String indexId, String indexName, int shardId) {
+    public ShardMetadata fromJsonNode(JsonNode root, String indexId, String indexName, int shardId) {
         ObjectMapper objectMapper = new ObjectMapper();
         SimpleModule module = new SimpleModule();
         module.addDeserializer(ShardMetadataData_ES_6_8.FileInfoRaw.class, new ShardMetadataData_ES_6_8.FileInfoRawDeserializer());
@@ -37,7 +38,7 @@ public class ShardMetadataFactory_ES_6_8 implements ShardMetadata.Factory {
                     shardMetadataRaw.files
             );
         } catch (Exception e) {
-            throw new ShardMetadata.CouldNotParseShardMetadata("Could not parse shard metadata for Index " + indexId + ", Shard " + shardId, e);
+            throw new RuntimeException("Could not parse shard metadata for Index " + indexId + ", Shard " + shardId, e);
         }
         
     }

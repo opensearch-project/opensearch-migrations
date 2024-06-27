@@ -4,8 +4,8 @@ import java.nio.file.Path;
 import java.util.List;
 
 import com.rfs.common.ConnectionDetails;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.OpenSearchClient;
+import com.rfs.models.IndexMetadata;
 
 public interface SimpleRestoreFromSnapshot {
 
@@ -31,8 +31,8 @@ public interface SimpleRestoreFromSnapshot {
         updateTargetCluster(indices, unpackedShardDataDir, targetClusterClient);
     }
 
-    public List<IndexMetadata.Data> extractSnapshotIndexData(final String localPath, final String snapshotName, final Path unpackedShardDataDir) throws Exception;
+    public List<IndexMetadata> extractSnapshotIndexData(final String localPath, final String snapshotName, final Path unpackedShardDataDir) throws Exception;
 
-    public void updateTargetCluster(final List<IndexMetadata.Data> indices, final Path unpackedShardDataDir, final OpenSearchClient client) throws Exception;
+    public void updateTargetCluster(final List<IndexMetadata> indices, final Path unpackedShardDataDir, final OpenSearchClient client) throws Exception;
 
 }

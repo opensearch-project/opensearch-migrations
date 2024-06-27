@@ -22,16 +22,17 @@ import org.apache.logging.log4j.Level;
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
 import com.rfs.common.DocumentReindexer;
-import com.rfs.common.GlobalMetadata;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.Logging;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Uri;
-import com.rfs.common.ShardMetadata;
 import com.rfs.common.S3Repo;
 import com.rfs.common.SnapshotCreator;
 import com.rfs.common.SourceRepo;
+import com.rfs.common.TryHandlePhaseFailure;
+import com.rfs.models.GlobalMetadata;
+import com.rfs.models.IndexMetadata;
+import com.rfs.models.ShardMetadata;
 import com.rfs.common.S3SnapshotCreator;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
@@ -144,7 +145,10 @@ public class RunRfsWorker {
         final ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
         final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
-        try {
+        try (var processManager = new LeaseExpireTrigger(workItemId -> {
+            log.error("terminating RunRfsWorker because its lease has expired for " + workItemId);
+            System.exit(PROCESS_TIMED_OUT);
+        }, Clock.systemUTC())) {
             log.info("Running RfsWorker");
             OpenSearchClient sourceClient = new OpenSearchClient(sourceConnection);
             OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
@@ -168,10 +172,6 @@ public class RunRfsWorker {
             var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,
                     luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
             DocumentReindexer reindexer = new DocumentReindexer(targetClient);
-            var processManager = new LeaseExpireTrigger(workItemId->{
-                log.error("terminating RunRfsWorker because its lease has expired for "+workItemId);
-                System.exit(PROCESS_TIMED_OUT);
-            }, Clock.systemUTC());
             var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(targetHost)),
                     5, UUID.randomUUID().toString());
             var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, processManager);

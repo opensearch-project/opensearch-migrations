@@ -5,6 +5,8 @@ import org.apache.logging.log4j.Logger;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.rfs.models.GlobalMetadata;
+import com.rfs.models.IndexMetadata;
 
 public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     private static final Logger logger = LogManager.getLogger(Transformer_ES_6_8_to_OS_2_11.class);
@@ -16,7 +18,8 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     }
 
     @Override
-    public ObjectNode transformGlobalMetadata(ObjectNode root) {
+    public ObjectNode transformGlobalMetadata(GlobalMetadata globalData) {
+        var root = globalData.toObjectNode();
         ObjectNode newRoot = mapper.createObjectNode();
 
         // Transform the original "templates", but put them into the legacy "templates" bucket on the target
@@ -51,7 +54,8 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     }
 
     @Override
-    public ObjectNode transformIndexMetadata(ObjectNode root){
+    public ObjectNode transformIndexMetadata(IndexMetadata index){
+        var root = index.toObjectNode();
         ObjectNode newRoot = root.deepCopy();
 
         TransformFunctions.removeIntermediateMappingsLevels(newRoot);

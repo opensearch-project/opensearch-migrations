@@ -22,14 +22,15 @@ import com.rfs.worker.ShardWorkPreparer;
 
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
-import com.rfs.common.IndexMetadata;
+import com.rfs.common.Logging;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Uri;
-import com.rfs.common.ShardMetadata;
 import com.rfs.common.S3Repo;
 import com.rfs.common.SourceRepo;
 import com.rfs.common.TryHandlePhaseFailure;
+import com.rfs.models.IndexMetadata;
+import com.rfs.models.ShardMetadata;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
@@ -106,34 +107,35 @@ public class RfsMigrateDocuments {
                 .parse(args);
 
         var luceneDirPath = Paths.get(arguments.luceneDirPath);
-        var processManager = new LeaseExpireTrigger(workItemId->{
+        try (var processManager = new LeaseExpireTrigger(workItemId->{
             log.error("terminating RunRfsWorker because its lease has expired for " + workItemId);
             System.exit(PROCESS_TIMED_OUT);
-        }, Clock.systemUTC());
-        var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(arguments.targetHost)),
-                TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS, UUID.randomUUID().toString());
+        }, Clock.systemUTC())) {
+            var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(arguments.targetHost)),
+                    TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS, UUID.randomUUID().toString());
 
-        TryHandlePhaseFailure.executeWithTryCatch(() -> {
-            log.info("Running RfsWorker");
+            TryHandlePhaseFailure.executeWithTryCatch(() -> {
+                log.info("Running RfsWorker");
 
-            OpenSearchClient targetClient =
-                    new OpenSearchClient(arguments.targetHost, arguments.targetUser, arguments.targetPass, false);
-            DocumentReindexer reindexer = new DocumentReindexer(targetClient);
+                OpenSearchClient targetClient =
+                        new OpenSearchClient(arguments.targetHost, arguments.targetUser, arguments.targetPass, false);
+                DocumentReindexer reindexer = new DocumentReindexer(targetClient);
 
-            SourceRepo sourceRepo = S3Repo.create(Paths.get(arguments.s3LocalDirPath),
-                    new S3Uri(arguments.s3RepoUri), arguments.s3Region);
-            SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
+                SourceRepo sourceRepo = S3Repo.create(Paths.get(arguments.s3LocalDirPath),
+                        new S3Uri(arguments.s3RepoUri), arguments.s3Region);
+                SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
 
-            IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
-            ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
-            DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
-            SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,
-                    luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
+                IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
+                ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
+                DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
+                SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,
+                        luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
 
-            run(LuceneDocumentsReader::new, reindexer, workCoordinator, processManager, indexMetadataFactory,
-                    arguments.snapshotName, arguments.indexAllowlist, shardMetadataFactory, unpackerFactory,
-                    arguments.maxShardSizeBytes);
-        });
+                run(LuceneDocumentsReader::new, reindexer, workCoordinator, processManager, indexMetadataFactory,
+                        arguments.snapshotName, arguments.indexAllowlist, shardMetadataFactory, unpackerFactory,
+                        arguments.maxShardSizeBytes);
+            });
+        }
     }
 
     public static DocumentsRunner.CompletionStatus run(Function<Path,LuceneDocumentsReader> readerFactory,
