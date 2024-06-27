@@ -1,6 +1,4 @@
-package org.opensearch.migrations.rules;
-
-import static org.mockito.Mockito.mock;
+package org.opensearch.migrations.migrations.rules;
 
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -9,16 +7,20 @@ import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 import org.opensearch.migrations.transformation.CanApplyResult;
 import org.opensearch.migrations.transformation.entity.Index;
+import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import lombok.extern.slf4j.Slf4j;
 
+import static org.mockito.Mockito.mock;
+
 import static org.hamcrest.Matchers.not;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
+
 @Slf4j
 public class IndexMappingTypeRemovalTest {
 
@@ -34,13 +36,6 @@ public class IndexMappingTypeRemovalTest {
     private final ObjectNode mappingWithoutAnyType = indexSettingJson( //
         "\"mappings\": {\n" + //
         defaultMappingProperties + //
-        "},\n");
-
-    private final ObjectNode mappingWithDocType = indexSettingJson( //
-        "\"mappings\": {\n" + //
-        "  \"_doc\": {\n" + //
-        defaultMappingProperties + //
-        "  }\n" + //
         "},\n");
 
     private final Function<String, ObjectNode> mappingWithCustomType = typeName -> indexSettingJson( //
@@ -114,9 +109,9 @@ public class IndexMappingTypeRemovalTest {
     }
 
     @Test
-    void testApplyTransformation_DocType() {
+    void testApplyTransformation_docType() {
         // Setup 
-        var originalJson = mappingWithDocType;
+        var originalJson = mappingWithCustomType.apply("_doc");
         var indexJson = originalJson.deepCopy();
 
         // Action

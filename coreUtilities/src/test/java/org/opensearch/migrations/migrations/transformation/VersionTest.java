@@ -1,4 +1,4 @@
-package org.opensearch.migrations.transformation;
+package org.opensearch.migrations.migrations.transformation;
 
 import org.junit.jupiter.api.Test;
 

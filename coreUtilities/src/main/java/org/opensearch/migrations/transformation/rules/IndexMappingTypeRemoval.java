@@ -1,4 +1,4 @@
-package org.opensearch.migrations.rules;
+package org.opensearch.migrations.transformation.rules;
 
 import java.util.Map.Entry;
 
@@ -33,7 +33,7 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
         return anyOpenSearch;
     }
 
-    @SuppressWarnings("java:S125")
+    @SuppressWarnings("java:S125") // False positive for commented out code, comments include json snippets for clarify
     @Override
     public CanApplyResult canApply(final Index index) {
         final var mappingNode = index.raw().get("mappings");
@@ -47,7 +47,7 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
             return CanApplyResult.NO;
         }
 
-        // Detect default _doc mappings { mappings: { foobar: {...} } } 
+        //  There is a type under mappings, e.g. { mappings: { foobar: {...} } } 
         return CanApplyResult.YES;
     }
 
