@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.models.GlobalMetadata;
 import com.rfs.models.IndexMetadata;
+import com.rfs.version_es_6_8.IndexMetadataData_ES_6_8;
 import com.rfs.version_os_2_11.GlobalMetadataData_OS_2_11;
 
 import org.opensearch.migrations.transformation.TransformationRule;
@@ -32,19 +33,16 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
         ObjectNode newRoot = mapper.createObjectNode();
 
         // Transform the original "templates", but put them into the legacy "templates" bucket on the target
-        if (root.get("templates") != null) {
-            ObjectNode templatesRoot = (ObjectNode) root.get("templates").deepCopy();
-            templatesRoot.fieldNames().forEachRemaining(templateName -> {
-                ObjectNode template = (ObjectNode) templatesRoot.get(templateName);
-                logger.info("Transforming template: " + templateName);
-                logger.debug("Original template: " + template.toString());
-                TransformFunctions.removeIntermediateMappingsLevels(template);
-                TransformFunctions.removeIntermediateIndexSettingsLevel(template); // run before fixNumberOfReplicas
-                TransformFunctions.fixReplicasForDimensionality(template, awarenessAttributeDimensionality);
-                logger.debug("Transformed template: " + template.toString());
-                templatesRoot.set(templateName, template);
+        var originalTemplates = root.get("templates");
+        if (originalTemplates != null) {
+            var templates = mapper.createObjectNode();
+            originalTemplates.fieldNames().forEachRemaining(templateName -> {
+                var templateCopy = (ObjectNode) originalTemplates.get(templateName).deepCopy();
+                var indexTemplate = (Index) () -> templateCopy;
+                tranformIndex(indexTemplate);
+                templates.set(templateName, indexTemplate.raw());
             });
-            newRoot.set("templates", templatesRoot);
+            newRoot.set("templates", templates);
         }
 
         // Make empty index_templates
@@ -64,19 +62,21 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
 
     @Override
     public IndexMetadata transformIndexMetadata(IndexMetadata index) {
-        logger.debug("Original Object: " + index.raw().toString());
         var copy = index.deepCopy();
-        var newRoot = copy.raw();
+        tranformIndex(copy);
+        return copy;
+    }
+
+    private void tranformIndex(Index index) {
+        logger.debug("Original Object: " + index.raw().toPrettyString());
+        var newRoot = index.raw();
 
         indexTransformations.forEach(transformer -> transformer.applyTransformation(index));
-
-        TransformFunctions.removeIntermediateMappingsLevels(newRoot);
 
         newRoot.set("settings", TransformFunctions.convertFlatSettingsToTree((ObjectNode) newRoot.get("settings")));
         TransformFunctions.removeIntermediateIndexSettingsLevel(newRoot); // run before fixNumberOfReplicas
         TransformFunctions.fixReplicasForDimensionality(newRoot, awarenessAttributeDimensionality);
 
-        logger.debug("Transformed Object: " + newRoot.toString());
-        return copy;
-    }    
+        logger.debug("Transformed Object: " + newRoot.toPrettyString());
+    }
 }

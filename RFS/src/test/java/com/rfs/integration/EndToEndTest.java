@@ -1,13 +1,38 @@
 package com.rfs.integration;
 
+import java.io.File;
+import java.nio.file.Path;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+
 import org.junit.jupiter.api.Disabled;
+import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ArgumentsSource;
 
+import com.rfs.common.ClusterVersion;
+import com.rfs.common.FileSystemRepo;
+import com.rfs.common.FileSystemSnapshotCreator;
+import com.rfs.common.OpenSearchClient;
+import com.rfs.common.SnapshotRepo;
+import com.rfs.framework.ClusterOperations;
 import com.rfs.framework.ElasticsearchContainer;
 import com.rfs.framework.OpenSearchContainer;
 import com.rfs.framework.OpenSearchContainer.Version;
 import com.rfs.framework.SimpleRestoreFromSnapshot;
+import com.rfs.models.GlobalMetadata;
+import com.rfs.models.IndexMetadata;
+import com.rfs.transformers.TransformFunctions;
+import com.rfs.transformers.Transformer;
+import com.rfs.version_es_6_8.SnapshotRepoProvider_ES_6_8;
+import com.rfs.version_es_6_8.GlobalMetadataFactory_ES_6_8;
+import com.rfs.version_es_6_8.IndexMetadataFactory_ES_6_8;
+import com.rfs.version_es_6_8.SnapshotRepoProvider_ES_6_8;
+import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
+import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
+import com.rfs.worker.IndexRunner;
+import com.rfs.worker.MetadataRunner;
+import com.rfs.worker.SnapshotRunner;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -17,13 +42,13 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class EndToEndTest {
 
-    protected Object sourceCluster;
-    protected Object targetCluster;
+    @TempDir
+    private File localDirectory;
+
     protected SimpleRestoreFromSnapshot simpleRfsInstance;
 
     @ParameterizedTest(name = "Target OpenSearch {0}")
     @ArgumentsSource(SupportedTargetCluster.class)
-    @Disabled
     public void migrateFrom_ES_v6_8(final OpenSearchContainer.Version targetVersion) throws Exception {
         // Setup
         // PSEUDO: Create a source cluster running ES 6.8
@@ -42,6 +67,42 @@ public class EndToEndTest {
         //    - 29x data-rolling
         //    - 5x geonames docs into playground
         //    - 7x geopoint into playground2
+        try (final var sourceCluster = new ElasticsearchContainer(ElasticsearchContainer.V6_8_23);
+            final var targetCluster = new OpenSearchContainer(targetVersion)) {
+            // Start the cluster for testing
+            var bothClustersStarted = CompletableFuture.allOf(
+                CompletableFuture.runAsync(() -> sourceCluster.start()),
+                CompletableFuture.runAsync(() -> targetCluster.start()));
+            bothClustersStarted.join();
+
+            var sourceClusterOperations = new ClusterOperations(sourceCluster.getUrl());
+            sourceClusterOperations.createTemplate("my_template_foo");
+            sourceClusterOperations.createDocument("barstool", "222", "{\"hi\":\"yay\"}");
+
+            var snapshotName = "my_snap";
+
+            var sourceClient = new OpenSearchClient(sourceCluster.getUrl(), null, null, true);
+            var snapshotCreator = new FileSystemSnapshotCreator(snapshotName, sourceClient, ElasticsearchContainer.CLUSTER_SNAPSHOT_DIR);
+            SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
+
+            sourceCluster.copySnapshotData(localDirectory.toString());
+
+            var sourceRepo = new FileSystemRepo(localDirectory.toPath());
+            var targetClient = new OpenSearchClient(targetCluster.getUrl(), null, null, true);
+
+            SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_6_8(sourceRepo);
+            GlobalMetadata.Factory metadataFactory = new GlobalMetadataFactory_ES_6_8(repoDataProvider);
+            GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, null, null, null);
+            Transformer transformer =
+                    TransformFunctions.getTransformer(ClusterVersion.ES_6_8, ClusterVersion.OS_2_11, 1);
+            new MetadataRunner(snapshotName, metadataFactory, metadataCreator, transformer).migrateMetadata();
+
+            IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_6_8(repoDataProvider);
+            IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
+            new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer, List.of()).migrateIndices();
+        }
+
+        
 
         // PSEUDO: Create a target cluster running OS 2.X (Where x is the latest released version)
 

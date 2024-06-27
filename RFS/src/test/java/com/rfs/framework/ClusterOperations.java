@@ -4,9 +4,12 @@ import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpPut;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.core5.http.ParseException;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 import static org.hamcrest.CoreMatchers.anyOf;
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -23,6 +26,48 @@ public class ClusterOperations {
     public ClusterOperations(final String clusterUrl) {
         this.clusterUrl = clusterUrl;
         httpClient = HttpClients.createDefault();
+    }
+
+    public void createTemplate(final String templateName) throws IOException {
+        final var templateJson =
+            "{\r\n" + //
+            "  \"index_patterns\": [\r\n" + //
+            "    \"te*\",\r\n" + //
+            "    \"bar*\"\r\n" + //
+            "  ],\r\n" + //
+            "  \"settings\": {\r\n" + //
+            "    \"number_of_shards\": 1\r\n" + //
+            "  },\r\n" + //
+            "  \"aliases\": {\r\n" + //
+            "    \"alias1\": {}\r\n" + //
+            "  },\r\n" + //
+            "  \"mappings\": {\r\n" + //
+            "    \"_doc\": {\r\n" + //
+            "      \"_source\": {\r\n" + //
+            "        \"enabled\": false\r\n" + //
+            "      },\r\n" + //
+            "      \"properties\": {\r\n" + //
+            "        \"host_name\": {\r\n" + //
+            "          \"type\": \"keyword\"\r\n" + //
+            "        },\r\n" + //
+            "        \"created_at\": {\r\n" + //
+            "          \"type\": \"date\",\r\n" + //
+            "          \"format\": \"EEE MMM dd HH:mm:ss Z yyyy\"\r\n" + //
+            "        }\r\n" + //
+            "      }\r\n" + //
+            "    }\r\n" + //
+            "  }\r\n" + //
+            "}";    
+
+        final var createRepoRequest = new HttpPut(clusterUrl + "/_template/" + templateName);
+        createRepoRequest.setEntity(new StringEntity(templateJson));
+        createRepoRequest.setHeader("Content-Type", "application/json");
+
+        try (var response = httpClient.execute(createRepoRequest)) {
+            assertThat(EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8), response.getCode(), equalTo(200));
+        } catch (ParseException e) {
+            throw new RuntimeException(e);
+        }
     }
 
     public void createSnapshotRepository() throws IOException {

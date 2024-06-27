@@ -29,7 +29,7 @@ public class IndexCreator_OS_2_11 {
         // Assemble the request body
         ObjectNode body = mapper.createObjectNode();
         body.set("aliases", indexMetadata.getAliases());
-        body.set("mappings", indexMetadata.getMappings());
+        body.set("mappings", indexMetadata.raw().get("mappings"));
         body.set("settings", settings);
 
         // Create the index; it's fine if it already exists

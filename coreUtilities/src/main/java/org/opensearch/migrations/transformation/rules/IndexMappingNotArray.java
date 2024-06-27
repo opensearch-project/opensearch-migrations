@@ -9,9 +9,8 @@ import org.opensearch.migrations.transformation.Version;
 import org.opensearch.migrations.transformation.VersionRange;
 import org.opensearch.migrations.transformation.entity.Index;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 
-public class IndexMappingTypeRemoval implements TransformationRule<Index> {
+public class IndexMappingNotArray implements TransformationRule<Index> {
 
     @Override
     public VersionRange supportedSourceVersionRange() {
@@ -29,23 +28,17 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
         );
     }
 
-    @SuppressWarnings("java:S125") // False positive for commented out code, comments include json snippets for clarify
     @Override
     public CanApplyResult canApply(final Index index) {
         final var mappingNode = index.raw().get("mappings");
-
-        if (mappingNode.isNull() || mappingNode.isObject()) {
-            return CanApplyResult.NO;
-        }
-
-        // Detect multiple type mappings, eg:
-        //  { mappings: [{ foo: {...}}, { bar: {...} }] } } or
-        //  { mappings: [{ foo: {...}, bar: {...}] } }
-        if (mappingNode.size() > 1 || mappingNode.get(0).size() > 1) {
+        if (mappingNode.isNull() || mappingNode.size() > 1) {
             return CanApplyResult.UNSUPPORTED;
         }
 
-        //  There is a type under mappings, e.g. { mappings: [{ foobar: {...} }] } 
+        if (mappingNode.isObject()) {
+            return CanApplyResult.NO;
+        }
+
         return CanApplyResult.YES;
     }
 
@@ -56,14 +49,9 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
         }
 
         final var mappingsNode = index.raw().get("mappings");
-        final var mappingsInnerNode = (ObjectNode) mappingsNode.get(0);
-
-        final var typeName = mappingsNode.properties().stream().map(Entry::getKey).findFirst().orElseThrow();
-        final var typeNode = mappingsNode.get(typeName);
-        
-        mappingsInnerNode.remove(typeName);
-        typeNode.fields().forEachRemaining(node -> mappingsInnerNode.set(node.getKey(), node.getValue()));
-        index.raw().set("mappings", mappingsInnerNode);
+        final var inner = mappingsNode.get(0);
+       
+        index.raw().set("mappings", inner);
 
         return true;
     }

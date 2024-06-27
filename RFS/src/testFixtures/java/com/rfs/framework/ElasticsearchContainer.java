@@ -16,6 +16,8 @@ public class ElasticsearchContainer implements AutoCloseable {
     public static final String CLUSTER_SNAPSHOT_DIR = "/usr/share/elasticsearch/snapshots";
     public static final Version V7_10_2 =
             new Version("docker.elastic.co/elasticsearch/elasticsearch:7.10.2", "7.10.2");
+    public static final Version V6_8_23 =
+        new Version("docker.elastic.co/elasticsearch/elasticsearch:6.8.23", "6.8.23");
 
     private final GenericContainer<?> container;
     private final Version version;
