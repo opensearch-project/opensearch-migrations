@@ -2,7 +2,7 @@ import logging
 import pytest
 import unittest
 from http import HTTPStatus
-from console_link.logic.clusters import connection_check, clear_indices, ConnectionResult
+from console_link.logic.clusters import run_test_benchmarks, connection_check, clear_indices, ConnectionResult
 from console_link.models.cluster import Cluster
 from console_link.models.backfill_base import Backfill
 from console_link.models.backfill_rfs import RFSBackfill
@@ -35,7 +35,7 @@ def preload_data(source_cluster: Cluster, target_cluster: Cluster):
                     expected_status_code=HTTPStatus.CREATED)
 
     # test_backfill_0002
-    #run_test_benchmarks(source_cluster)
+    run_test_benchmarks(source_cluster)
 
 
 @pytest.fixture(scope="class")
@@ -55,6 +55,7 @@ def setup_backfill(request):
         if status_result.success:
             snapshot.delete()
         snapshot.create(wait=True)
+        backfill.scale(units=10)
     backfill.start()
 
 
@@ -88,7 +89,7 @@ class BackfillTests(unittest.TestCase):
         get_document(cluster=target_cluster, index_name=index_name, doc_id=doc_id, max_attempts=30, delay=30.0,
                      test_case=self)
 
-    @unittest.skip("Support needed for RFS to handle multiple shards and OSI general support")
+    #@unittest.skip("Support needed for RFS to handle multiple shards and OSI general support")
     def test_backfill_0002_sample_benchmarks(self):
         source_cluster: Cluster = pytest.console_env.source_cluster
         target_cluster: Cluster = pytest.console_env.target_cluster
