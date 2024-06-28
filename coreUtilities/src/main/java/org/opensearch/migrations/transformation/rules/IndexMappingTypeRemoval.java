@@ -10,7 +10,7 @@ import org.opensearch.migrations.transformation.entity.Index;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
- * Supports transformation of the Index Mapping types that were changed from mutliple types to a single type between ES 6->7
+ * Supports transformation of the Index Mapping types that were changed from mutliple types to a single type between ES 6 to 7
  */
 public class IndexMappingTypeRemoval implements TransformationRule<Index> {
 
