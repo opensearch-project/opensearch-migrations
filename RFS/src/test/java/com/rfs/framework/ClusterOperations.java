@@ -36,7 +36,7 @@ public class ClusterOperations {
         final var repositoryJson = "{\n" +
         "  \"type\": \"fs\",\n" +
         "  \"settings\": {\n" +
-        "    \"location\": \"/usr/share/elasticsearch/snapshots\",\n" +
+        "    \"location\": \"" + SearchClusterContainer.CLUSTER_SNAPSHOT_DIR + "\",\n" +
         "    \"compress\": false\n" +
         "  }\n" +
         "}";
