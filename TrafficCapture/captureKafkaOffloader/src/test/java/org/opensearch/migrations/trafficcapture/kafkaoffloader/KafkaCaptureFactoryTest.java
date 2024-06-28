@@ -1,16 +1,19 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader;
 
-import io.netty.buffer.Unpooled;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.time.Clock;
+import java.time.Instant;
+import java.util.ArrayList;
 import java.util.Arrays;
-import java.util.concurrent.CompletableFuture;
+import java.util.List;
 import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.Future;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
-import lombok.SneakyThrows;
-import lombok.extern.slf4j.Slf4j;
+
 import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.MockProducer;
@@ -25,18 +28,15 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.Mock;
-import org.mockito.junit.jupiter.MockitoExtension;
+
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.TestRootKafkaOffloaderContext;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.time.Clock;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.concurrent.ExecutionException;
+import io.netty.buffer.Unpooled;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
+import org.mockito.Mock;
+import org.mockito.junit.jupiter.MockitoExtension;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -55,17 +55,19 @@ public class KafkaCaptureFactoryTest {
     public void testLargeRequestIsWithinKafkaMessageSizeLimit() throws IOException, ExecutionException, InterruptedException {
         final var referenceTimestamp = Instant.now(Clock.systemUTC());
 
-        int maxAllowableMessageSize = 1024*1024;
+        int maxAllowableMessageSize = 1024 * 1024;
         MockProducer<String, byte[]> producer = new MockProducer<>(true, new StringSerializer(), new ByteArraySerializer());
-        KafkaCaptureFactory kafkaCaptureFactory =
-            new KafkaCaptureFactory(TestRootKafkaOffloaderContext.noTracking(),
-                    TEST_NODE_ID_STRING, producer, maxAllowableMessageSize);
+        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            producer,
+            maxAllowableMessageSize
+        );
         var serializer = kafkaCaptureFactory.createOffloader(createCtx());
 
-        var testStr = "{ \"create\": { \"_index\": \"office-index\" } }\n{ \"title\": \"Malone's Cones\", \"year\": 2013 }\n"
-                .repeat(15000);
+        var testStr = "{ \"create\": { \"_index\": \"office-index\" } }\n{ \"title\": \"Malone's Cones\", \"year\": 2013 }\n".repeat(15000);
         var fakeDataBytes = testStr.getBytes(StandardCharsets.UTF_8);
-        Assertions.assertTrue(fakeDataBytes.length > 1024*1024);
+        Assertions.assertTrue(fakeDataBytes.length > 1024 * 1024);
         var bb = Unpooled.wrappedBuffer(fakeDataBytes);
         serializer.addReadEvent(referenceTimestamp, bb);
         var future = serializer.flushCommitAndResetStream(true);
@@ -95,30 +97,33 @@ public class KafkaCaptureFactoryTest {
         StringSerializer stringSerializer = new StringSerializer();
         ByteArraySerializer byteArraySerializer = new ByteArraySerializer();
         String recordKey = recordKeySubstitute == null ? record.key() : recordKeySubstitute;
-        byte[] serializedKey = stringSerializer.serialize(record.topic(), record.headers(),  recordKey);
+        byte[] serializedKey = stringSerializer.serialize(record.topic(), record.headers(), recordKey);
         byte[] serializedValue = byteArraySerializer.serialize(record.topic(), record.headers(), record.value());
         ApiVersions apiVersions = new ApiVersions();
         stringSerializer.close();
         byteArraySerializer.close();
-        return AbstractRecords.estimateSizeInBytesUpperBound(apiVersions.maxUsableProduceMagic(),
-            CompressionType.NONE, serializedKey, serializedValue, record.headers().toArray());
+        return AbstractRecords.estimateSizeInBytesUpperBound(
+            apiVersions.maxUsableProduceMagic(),
+            CompressionType.NONE,
+            serializedKey,
+            serializedValue,
+            record.headers().toArray()
+        );
     }
 
     @Test
-    public void testLinearOffloadingIsSuccessful()
-        throws IOException, InterruptedException, ExecutionException, TimeoutException {
-        KafkaCaptureFactory kafkaCaptureFactory =
-                new KafkaCaptureFactory(TestRootKafkaOffloaderContext.noTracking(),
-                        TEST_NODE_ID_STRING, mockProducer, 1024*1024);
+    public void testLinearOffloadingIsSuccessful() throws IOException, InterruptedException, ExecutionException, TimeoutException {
+        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            mockProducer,
+            1024 * 1024
+        );
         var offloader = kafkaCaptureFactory.createOffloader(createCtx());
 
         List<FutureTask<RecordMetadata>> recordSentFutures = new ArrayList<>(3);
 
-        List<CountDownLatch> latches = Arrays.asList(
-            new CountDownLatch(1),
-            new CountDownLatch(1),
-            new CountDownLatch(1)
-        );
+        List<CountDownLatch> latches = Arrays.asList(new CountDownLatch(1), new CountDownLatch(1), new CountDownLatch(1));
 
         var latchIterator = latches.iterator();
         when(mockProducer.send(any(), any())).thenAnswer(invocation -> {
@@ -181,11 +186,14 @@ public class KafkaCaptureFactoryTest {
     }
 
     @Test
-    public void testOffloaderFlushCommitIsNonBlockingOnKafkaProducer()
-        throws IOException, InterruptedException, ExecutionException, TimeoutException {
-        KafkaCaptureFactory kafkaCaptureFactory =
-            new KafkaCaptureFactory(TestRootKafkaOffloaderContext.noTracking(),
-                TEST_NODE_ID_STRING, mockProducer, 1024*1024);
+    public void testOffloaderFlushCommitIsNonBlockingOnKafkaProducer() throws IOException, InterruptedException, ExecutionException,
+        TimeoutException {
+        KafkaCaptureFactory kafkaCaptureFactory = new KafkaCaptureFactory(
+            TestRootKafkaOffloaderContext.noTracking(),
+            TEST_NODE_ID_STRING,
+            mockProducer,
+            1024 * 1024
+        );
         var offloader = kafkaCaptureFactory.createOffloader(createCtx());
 
         List<FutureTask<RecordMetadata>> recordSentFutures = new ArrayList<>(3);

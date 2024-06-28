@@ -1,8 +1,7 @@
-version: '3.7'
+version: "3.7"
 services:
-
   elasticsearchsource:
-    image: 'migrations/elasticsearch_rfs_source:latest'
+    image: "migrations/elasticsearch_rfs_source:latest"
     networks:
       - migrations
     environment:
@@ -12,13 +11,13 @@ services:
       - AWS_SECRET_ACCESS_KEY=${secret_key}
       - AWS_SESSION_TOKEN=${session_token}
     ports:
-      - '19200:9200'
+      - "19200:9200"
     volumes:
       - snapshotStorage:/snapshots
 
   # Sample command to kick off RFS here: https://github.com/opensearch-project/opensearch-migrations/blob/main/RFS/README.md#using-docker
   reindex-from-snapshot:
-    image: 'migrations/reindex_from_snapshot:latest'
+    image: "migrations/reindex_from_snapshot:latest"
     depends_on:
       elasticsearchsource:
         condition: service_started
@@ -34,7 +33,7 @@ services:
       - snapshotStorage:/snapshots
 
   opensearchtarget:
-    image: 'opensearchproject/opensearch:2.11.1'
+    image: "opensearchproject/opensearch:2.11.1"
     environment:
       - discovery.type=single-node
       - plugins.security.disabled=true

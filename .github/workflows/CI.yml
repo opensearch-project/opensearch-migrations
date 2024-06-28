@@ -5,26 +5,40 @@ on:
   pull_request:
 
 env:
-  python-version: '3.10'
-  java-version: '11'
-  gradle-version: '8.0.2'
-  node-version: '18.x'
+  python-version: "3.10"
+  java-version: "11"
+  gradle-version: "8.0.2"
+  node-version: "18.x"
 
 jobs:
+  style-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.java-version }}
+          distribution: "corretto"
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: ${{ env.gradle-version }}
+      - name: Run Gradle Build
+        run: ./gradlew spotlessCheck
+
   python-lint:
     runs-on: ubuntu-latest
     steps:
-     - uses: actions/checkout@v4
-     - uses: actions/setup-python@v5
-       with:
-         python-version: ${{ env.python-version }}
-     - name: Install dependencies
-       run: |
-        python -m pip install --upgrade pip
-        pip install flake8
-     - name: Analysing the code with flake8
-       run: |
-        flake8 $(git ls-files '*.py')
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.python-version }}
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install flake8
+      - name: Analysing the code with flake8
+        run: |
+          flake8 $(git ls-files '*.py')
 
   python-tests:
     runs-on: ubuntu-latest
@@ -41,7 +55,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-         python-version: ${{ env.python-version }}
+          python-version: ${{ env.python-version }}
       - run: |
           python -m pip install --upgrade pipenv
           pipenv install --deploy --dev
@@ -59,34 +73,27 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           java-version: ${{ env.java-version }}
-          distribution: 'corretto'
+          distribution: "corretto"
       - uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
       - name: Run Gradle Build
-        run: ./gradlew build -x test -x TrafficCapture:dockerSolution:build --scan --stacktrace
+        run: ./gradlew build -x test -x TrafficCapture:dockerSolution:build -x spotlessCheck --scan --stacktrace
         env:
-          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ""
 
       - name: Run Tests with Coverage
-        run: ./gradlew test -x TrafficCapture:dockerSolution:build jacocoTestReport --scan --stacktrace
+        run: ./gradlew test -x TrafficCapture:dockerSolution:build -x spotlessCheck jacocoTestReport --scan --stacktrace
         env:
-          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ""
 
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: traffic-capture-test-reports
+          name: test-reports
           path: |
-            ./TrafficCapture*/*/build/reports/
-
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: RFS-test-reports
-          path: |
-            ./RFS*/*/build/reports/
+            **/build/reports/tests/
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
@@ -102,13 +109,13 @@ jobs:
       - uses: actions/setup-java@v4
         with:
           java-version: ${{ env.java-version }}
-          distribution: 'corretto'
+          distribution: "corretto"
       - uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: ${{ env.gradle-version }}
       - uses: actions/setup-python@v5
         with:
-         python-version: ${{ env.python-version }}
+          python-version: ${{ env.python-version }}
       - name: Generate Cache Key from Dockerfiles
         id: generate_cache_key
         run: |
@@ -121,9 +128,9 @@ jobs:
         with:
           key: docker-${{ runner.os }}-${{ steps.generate_cache_key.outputs.key }}
       - name: Start Docker Solution
-        run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test --scan --info --stacktrace
+        run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --scan --info --stacktrace
         env:
-          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ""
       - name: Install python dependencies
         working-directory: test
         run: |
@@ -162,7 +169,8 @@ jobs:
         id: lychee
         uses: lycheeverse/lychee-action@v1
         with:
-          args: --verbose --accept=200,403,429  "**/*.html" "**/*.md" "**/*.txt" "**/*.json"
+          args:
+            --verbose --accept=200,403,429  "**/*.html" "**/*.md" "**/*.txt" "**/*.json"
             --offline
             --exclude "file:///github/workspace/*"
             --exclude "http://localhost*"
@@ -197,4 +205,3 @@ jobs:
     steps:
       - run: |
           echo '## :heavy_check_mark: All continous integration checks pass' >> $GITHUB_STEP_SUMMARY
-
