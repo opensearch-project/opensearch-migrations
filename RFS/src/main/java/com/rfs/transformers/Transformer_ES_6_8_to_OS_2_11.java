@@ -67,7 +67,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     }
 
     private void tranformIndex(Index index) {
-        logger.debug("Original Object: " + index.raw().toPrettyString());
+        logger.debug("Original Object: " + index.raw().toString());
         var newRoot = index.raw();
 
         indexTransformations.forEach(transformer -> transformer.applyTransformation(index));
@@ -76,6 +76,6 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
         TransformFunctions.removeIntermediateIndexSettingsLevel(newRoot); // run before fixNumberOfReplicas
         TransformFunctions.fixReplicasForDimensionality(newRoot, awarenessAttributeDimensionality);
 
-        logger.debug("Transformed Object: " + newRoot.toPrettyString());
+        logger.debug("Transformed Object: " + newRoot.toString());
     }
 }

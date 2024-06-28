@@ -15,13 +15,13 @@ import com.rfs.common.ByteArrayIndexInput;
 import com.rfs.common.RfsException;
 import com.rfs.common.SnapshotRepo;
 
+/**
+ * Defines the behavior expected of an object that will surface the metadata of an shard stored in a snapshot
+ * See: https://github.com/elastic/elasticsearch/blob/7.10/server/src/main/java/org/elasticsearch/index/snapshots/blobstore/BlobStoreIndexShardSnapshot.java#L510
+ * See: https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/index/snapshots/blobstore/BlobStoreIndexShardSnapshot.java#L508
+ */
 public interface ShardMetadata {
 
-    /*
-    * Defines the behavior expected of an object that will surface the metadata of an shard stored in a snapshot
-    * See: https://github.com/elastic/elasticsearch/blob/7.10/server/src/main/java/org/elasticsearch/index/snapshots/blobstore/BlobStoreIndexShardSnapshot.java#L510
-    * See: https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/index/snapshots/blobstore/BlobStoreIndexShardSnapshot.java#L508
-    */
     public String getSnapshotName();    
     public String getIndexName();    
     public String getIndexId();    

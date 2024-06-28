@@ -32,7 +32,7 @@ public interface GlobalMetadata {
             String snapshotId = repoDataProvider.getSnapshotId(snapshotName);
 
             if (snapshotId == null) {
-                throw new RuntimeException(snapshotName);
+                throw new CantFindSnapshotInRepo(snapshotName);
             }
 
             Path filePath = repoDataProvider.getRepo().getGlobalMetadataFilePath(snapshotId);
@@ -50,7 +50,7 @@ public interface GlobalMetadata {
                 ObjectMapper smileMapper = new ObjectMapper(smileFactory);
                 return smileMapper.readTree(bis);
             } catch (Exception e) {
-                throw new RuntimeException(snapshotName, e);
+                throw new CantReadGlobalMetadataFromSnapshot(snapshotName, e);
             }
         }
 
@@ -82,4 +82,5 @@ public interface GlobalMetadata {
             super("Can't read the global metadata from snapshot: " + snapshotName, cause);
         }
     }
+
 }
