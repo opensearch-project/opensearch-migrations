@@ -97,9 +97,15 @@ public class OpenSearchClient {
         .block();
 
         if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
-            client.put(objectPath, settings.toString());
-            return Optional.of(settings);
-        } 
+            response = client.put(objectPath, settings.toString());
+            if (response.code == HttpURLConnection.HTTP_CREATED || response.code == HttpURLConnection.HTTP_OK) {
+                return Optional.of(settings);
+            } else {
+                logger.error("Could not create object: " + objectPath + ". Response Code: " + response.code +
+                    ", Response Message: " + response.message + ", Response Body: " + response.body);
+                return Optional.empty();
+            }
+        }
         // The only response code that can end up here is HTTP_OK, which means the object already existed
         return Optional.empty();
     }
