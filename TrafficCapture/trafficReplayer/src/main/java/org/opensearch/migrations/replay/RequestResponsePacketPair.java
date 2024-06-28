@@ -1,8 +1,13 @@
 package org.opensearch.migrations.replay;
 
+import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 import com.google.common.base.Objects;
-import lombok.NonNull;
-import lombok.extern.slf4j.Slf4j;
+
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
@@ -10,12 +15,8 @@ import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 
-import java.nio.charset.StandardCharsets;
-import java.time.Instant;
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-import java.util.function.Consumer;
+import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class RequestResponsePacketPair {
@@ -36,17 +37,21 @@ public class RequestResponsePacketPair {
     // or just leave this null, in which case, the context from the trafficStreamKey should be used
     private IScopedInstrumentationAttributes requestOrResponseAccumulationContext;
 
-    public RequestResponsePacketPair(@NonNull ITrafficStreamKey startingAtTrafficStreamKey, Instant sourceTimestamp,
-                                     int startingSourceRequestIndex, int indexOfCurrentRequest) {
+    public RequestResponsePacketPair(
+        @NonNull ITrafficStreamKey startingAtTrafficStreamKey,
+        Instant sourceTimestamp,
+        int startingSourceRequestIndex,
+        int indexOfCurrentRequest
+    ) {
         this.firstTrafficStreamKeyForRequest = startingAtTrafficStreamKey;
-        var requestKey = new UniqueReplayerRequestKey(startingAtTrafficStreamKey,
-                startingSourceRequestIndex, indexOfCurrentRequest);
+        var requestKey = new UniqueReplayerRequestKey(startingAtTrafficStreamKey, startingSourceRequestIndex, indexOfCurrentRequest);
         var httpTransactionContext = startingAtTrafficStreamKey.getTrafficStreamsContext()
-                .createHttpTransactionContext(requestKey, sourceTimestamp);
+            .createHttpTransactionContext(requestKey, sourceTimestamp);
         requestOrResponseAccumulationContext = httpTransactionContext.createRequestAccumulationContext();
     }
 
-    @NonNull ISourceTrafficChannelKey getBeginningTrafficStreamKey() {
+    @NonNull
+    ISourceTrafficChannelKey getBeginningTrafficStreamKey() {
         return firstTrafficStreamKeyForRequest;
     }
 
@@ -57,9 +62,8 @@ public class RequestResponsePacketPair {
         // than trying to engineer a compile time static check
         assert looseCtx instanceof IWithTypedEnclosingScope;
         assert looseCtx instanceof IReplayContexts.IRequestAccumulationContext
-                || looseCtx instanceof IReplayContexts.IResponseAccumulationContext;
-        return ((IWithTypedEnclosingScope<IReplayContexts.IReplayerHttpTransactionContext>) looseCtx)
-                .getLogicalEnclosingScope();
+            || looseCtx instanceof IReplayContexts.IResponseAccumulationContext;
+        return ((IWithTypedEnclosingScope<IReplayContexts.IReplayerHttpTransactionContext>) looseCtx).getLogicalEnclosingScope();
 
     }
 
@@ -74,8 +78,7 @@ public class RequestResponsePacketPair {
     public void rotateRequestGatheringToResponse() {
         var looseCtx = requestOrResponseAccumulationContext;
         assert looseCtx instanceof IReplayContexts.IRequestAccumulationContext;
-        requestOrResponseAccumulationContext =
-                getRequestContext().getLogicalEnclosingScope().createResponseAccumulationContext();
+        requestOrResponseAccumulationContext = getRequestContext().getLogicalEnclosingScope().createResponseAccumulationContext();
     }
 
     public void addRequestData(Instant packetTimeStamp, byte[] data) {
@@ -104,16 +107,16 @@ public class RequestResponsePacketPair {
         if (trafficStreamKeysBeingHeld == null) {
             trafficStreamKeysBeingHeld = new ArrayList<>();
         }
-        if (trafficStreamKeysBeingHeld.isEmpty() ||
-                trafficStreamKey != trafficStreamKeysBeingHeld.get(trafficStreamKeysBeingHeld.size()-1)) {
+        if (trafficStreamKeysBeingHeld.isEmpty()
+            || trafficStreamKey != trafficStreamKeysBeingHeld.get(trafficStreamKeysBeingHeld.size() - 1)) {
             trafficStreamKeysBeingHeld.add(trafficStreamKey);
         }
     }
 
     private static final List<ITrafficStreamKey> emptyUnmodifiableList = List.of();
+
     public List<ITrafficStreamKey> getTrafficStreamsHeld() {
-        return (trafficStreamKeysBeingHeld == null) ? emptyUnmodifiableList :
-                Collections.unmodifiableList(trafficStreamKeysBeingHeld);
+        return (trafficStreamKeysBeingHeld == null) ? emptyUnmodifiableList : Collections.unmodifiableList(trafficStreamKeysBeingHeld);
     }
 
     @Override
@@ -122,8 +125,8 @@ public class RequestResponsePacketPair {
         if (o == null || getClass() != o.getClass()) return false;
         RequestResponsePacketPair that = (RequestResponsePacketPair) o;
         return Objects.equal(requestData, that.requestData)
-                && Objects.equal(responseData, that.responseData)
-                && Objects.equal(trafficStreamKeysBeingHeld, that.trafficStreamKeysBeingHeld);
+            && Objects.equal(responseData, that.responseData)
+            && Objects.equal(trafficStreamKeysBeingHeld, that.trafficStreamKeysBeingHeld);
     }
 
     @Override
