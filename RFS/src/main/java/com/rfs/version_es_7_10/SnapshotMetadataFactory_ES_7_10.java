@@ -7,7 +7,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 import com.rfs.models.SnapshotMetadata;
 
-public class SnapshotMetadataFactory_ES_7_10 implements com.rfs.models.SnapshotMetadata.Factory {
+public class SnapshotMetadataFactory_ES_7_10 implements SnapshotMetadata.Factory {
 
     /**
      * A version of the Elasticsearch approach simplified by assuming JSON; see here [1] for more details.

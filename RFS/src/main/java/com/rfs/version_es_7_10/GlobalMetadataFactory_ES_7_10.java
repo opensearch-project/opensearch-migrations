@@ -6,7 +6,7 @@ import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.models.GlobalMetadata;
 
-public class GlobalMetadataFactory_ES_7_10 implements com.rfs.models.GlobalMetadata.Factory{
+public class GlobalMetadataFactory_ES_7_10 implements GlobalMetadata.Factory{
     private final SnapshotRepo.Provider repoDataProvider;
 
     public GlobalMetadataFactory_ES_7_10(SnapshotRepo.Provider repoDataProvider) {

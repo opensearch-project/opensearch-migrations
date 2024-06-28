@@ -6,7 +6,7 @@ import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.models.IndexMetadata;
 
-public class IndexMetadataFactory_ES_6_8 implements com.rfs.models.IndexMetadata.Factory {
+public class IndexMetadataFactory_ES_6_8 implements IndexMetadata.Factory {
     private final SnapshotRepo.Provider repoDataProvider;
 
     public IndexMetadataFactory_ES_6_8(SnapshotRepo.Provider repoDataProvider) {

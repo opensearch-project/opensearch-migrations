@@ -94,10 +94,10 @@ public class TransformFunctions {
     }
 
     /**
+     * If allocation awareness is enabled, we need to ensure that the number of copies of our data matches the dimensionality.
      * As a specific example, if you spin up a cluster spread across 3 availability zones and your awareness attribute is "zone",
      * then the dimensionality would be 3.  This means you need to ensure the number of total copies is a multiple of 3, with
-     * the minimum number of     * If allocation awareness is enabled, we need to ensure that the number of copies of our data matches the dimensionality.
- replicas being 2.
+     * the minimum number of replicas being 2.
      */
     public static void fixReplicasForDimensionality(ObjectNode root, int dimensionality) {
         if (root.has("settings")) {

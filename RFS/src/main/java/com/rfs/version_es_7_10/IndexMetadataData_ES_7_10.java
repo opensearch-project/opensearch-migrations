@@ -5,7 +5,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.models.IndexMetadata;
 import com.rfs.transformers.TransformFunctions;
 
-public class IndexMetadataData_ES_7_10 implements com.rfs.models.IndexMetadata {
+public class IndexMetadataData_ES_7_10 implements IndexMetadata {
     private ObjectNode root;
     private ObjectNode mappings;
     private ObjectNode settings;
