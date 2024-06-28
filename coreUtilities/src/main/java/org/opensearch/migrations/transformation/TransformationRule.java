@@ -8,7 +8,7 @@ import org.opensearch.migrations.transformation.entity.Entity;
 public interface TransformationRule<T extends Entity> {
     /**
      * Given an entity can a transformation be run on it
-     * 
+     *
      * MUST ALWAYS BE READ ONLY
      */
     CanApplyResult canApply(T entity);
