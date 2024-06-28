@@ -10,10 +10,8 @@ task buildDockerImages() {
 }
 
 spotless {
-    ratchetFrom 'origin/main'
     format 'misc', {
         target '**/*.gradle', '.gitattributes', '.gitignore'
-
         trimTrailingWhitespace()
         indentWithSpaces()
         endWithNewline()
@@ -39,12 +37,19 @@ subprojects {
     apply plugin: "com.diffplug.spotless"
 
     spotless {
-        ratchetFrom 'origin/main'
         java {
             target "**/*.java"
+            importOrder(
+                'java|javax',
+                'io.opentelemetry|com.google|com.fasterxml|org.apache|org.hamcrest|org.junit',
+                'org.opensearch',
+                '',
+                '\\#java|\\#org.apache|\\#org.hamcrest|\\#org.opensearch|\\#'
+            )
             indentWithSpaces()
             endWithNewline()
             removeUnusedImports()
+            eclipse().configFile rootProject.file('formatter.xml')
         }
     }
 

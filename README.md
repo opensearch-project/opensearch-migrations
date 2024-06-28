@@ -4,16 +4,24 @@ OpenSearch upgrade, migration, and comparison tooling facilitates OpenSearch mig
 
 ## Table of Contents
 
-- [ Supported cluster versions and platforms](#supported-cluster-versions-and-platforms)
+- [OpenSearch upgrades, migrations, and comparison tooling](#opensearch-upgrades-migrations-and-comparison-tooling)
+- [Table of Contents](#table-of-contents)
+- [Supported cluster versions and platforms](#supported-cluster-versions-and-platforms)
+  - [Supported Source and Target Versions](#supported-source-and-target-versions)
+  - [Supported Source and Target Platforms](#supported-source-and-target-platforms)
 - [Build and deploy](#build-and-deploy)
-    - [Local deployment](#local-deployment)
-    - [AWS deployment](#aws-deployment)
+  - [Local deployment](#local-deployment)
+  - [AWS deployment](#aws-deployment)
 - [Developer contributions](#developer-contributions)
-    - [Pre-commit hooks](#pre-commit-hooks)
-    - [Traffic Capture Proxy and Replayer](#traffic-capture-proxy-and-replayer)
-    - [Running Tests](#running-tests)
+  - [Code Style](#code-style)
+  - [Pre-commit hooks](#pre-commit-hooks)
+  - [Traffic Capture Proxy and Replayer](#traffic-capture-proxy-and-replayer)
+  - [Fetch Migration](#fetch-migration)
+  - [Running Tests](#running-tests)
 - [Security](#security)
 - [License](#license)
+- [Releasing](#releasing)
+- [Publishing](#publishing)
 
 ## Supported cluster versions and platforms
 
@@ -42,6 +50,10 @@ A containerized end-to-end solution can be deployed locally using the
 Refer to [AWS Deployment](deployment/README.md) to deploy this solution to AWS.
 
 ## Developer contributions
+
+### Code Style
+
+There are many different source type unders this project, the overall style is enforced via `./gradlew spotlessCheck` and is verified on all pull requests.  You can ask resolve the issues automatically with `./gradlew spotlessApply`.  For java files an eclipse formatter is avaliable [formatter.xml](./formatter.xml) in the root of the project, consult your IDE extensions/plugins for how to use this formatter during development.
 
 ### Pre-commit hooks
 
