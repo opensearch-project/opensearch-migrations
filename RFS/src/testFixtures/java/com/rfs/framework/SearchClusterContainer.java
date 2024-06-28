@@ -107,6 +107,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     @EqualsAndHashCode
     @Getter
+    @ToString(onlyExplicitlyIncluded = true, includeFieldNames = false)
     public static class Version {
         final String imageName;
         @ToString.Include
