@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.models.GlobalMetadata;
 import com.rfs.models.IndexMetadata;
-import com.rfs.version_es_6_8.IndexMetadataData_ES_6_8;
 import com.rfs.version_os_2_11.GlobalMetadataData_OS_2_11;
 
 import org.opensearch.migrations.transformation.TransformationRule;
