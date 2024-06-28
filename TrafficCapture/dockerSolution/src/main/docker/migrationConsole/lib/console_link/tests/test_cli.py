@@ -1,7 +1,9 @@
 import pathlib
-from console_link.models.snapshot import SnapshotStatus
 
 import requests_mock
+from console_link.models.backfill_rfs import ECSRFSBackfill
+from console_link.models.ecs_service import ECSService, InstanceStatuses
+from console_link.models.command_result import CommandResult
 
 from console_link.cli import cli
 from console_link.environment import Environment
@@ -109,7 +111,7 @@ def test_cli_snapshot_create(runner, env, mocker):
     mock = mocker.patch('console_link.logic.snapshot.create')
 
     # Set the mock return value
-    mock.return_value = SnapshotStatus.COMPLETED, "Snapshot created successfully."
+    mock.return_value = CommandResult(success=True, value="Snapshot created successfully.")
 
     # Test snapshot creation
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'create'],
@@ -122,12 +124,11 @@ def test_cli_snapshot_create(runner, env, mocker):
     mock.assert_called_once()
 
 
-@pytest.mark.skip(reason="Not implemented yet")
 def test_cli_snapshot_status(runner, env, mocker):
     mock = mocker.patch('console_link.logic.snapshot.status')
 
     # Set the mock return value
-    mock.return_value = SnapshotStatus.COMPLETED, "Snapshot status: COMPLETED"
+    mock.return_value = CommandResult(success=True, value="Snapshot status: COMPLETED")
 
     # Test snapshot status
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'status'],
@@ -154,10 +155,10 @@ green  open nyc_taxis                    j1HSbvtGRbG7H7SlJXrB0g 1 0 1000 0 159.3
 
 def test_cli_cat_indices_e2e(runner, env):
     with requests_mock.Mocker() as rm:
-        rm.get(f"{env.source_cluster.endpoint}/_cat/indices",
+        rm.get(f"{env.source_cluster.endpoint}/_cat/indices/_all",
                status_code=200,
                text=source_cat_indices)
-        rm.get(f"{env.target_cluster.endpoint}/_cat/indices",
+        rm.get(f"{env.target_cluster.endpoint}/_cat/indices/_all",
                status_code=200,
                text=target_cat_indices)
         result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'cat-indices'],
@@ -168,3 +169,57 @@ def test_cli_cat_indices_e2e(runner, env):
     assert 'TARGET CLUSTER' in result.output
     assert source_cat_indices in result.output
     assert target_cat_indices in result.output
+
+
+def test_cli_metadata_migrate(runner, env, mocker):
+    mock = mocker.patch("subprocess.run")
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'metadata', 'migrate'],
+                           catch_exceptions=True)
+    mock.assert_called_once()
+    assert result.exit_code == 0
+
+
+def test_get_backfill_status_no_deep_check(runner, mocker):
+    mocked_running_status = InstanceStatuses(
+        desired=1,
+        running=3,
+        pending=1
+    )
+    mock = mocker.patch.object(ECSService, 'get_instance_statuses', autspec=True, return_value=mocked_running_status)
+
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+                                 'backfill', 'status'],
+                           catch_exceptions=True)
+    print(result)
+    print(result.output)
+    assert result.exit_code == 0
+    assert "RUNNING" in result.output
+    assert str(mocked_running_status) in result.output
+
+    mock.assert_called_once()
+
+
+def test_get_backfill_status_with_deep_check(runner, mocker):
+    mocked_running_status = InstanceStatuses(
+        desired=1,
+        running=3,
+        pending=1
+    )
+    mocked_detailed_status = "Remaining shards: 43"
+    mock_ecs_service_call = mocker.patch.object(ECSService, 'get_instance_statuses', autspec=True,
+                                                return_value=mocked_running_status)
+    mock_detailed_status_call = mocker.patch.object(ECSRFSBackfill, '_get_detailed_status', autspec=True,
+                                                    return_value=mocked_detailed_status)
+
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+                                 'backfill', 'status', '--deep-check'],
+                           catch_exceptions=True)
+    print(result)
+    print(result.output)
+    assert result.exit_code == 0
+    assert "RUNNING" in result.output
+    assert str(mocked_running_status) in result.output
+    assert mocked_detailed_status in result.output
+
+    mock_ecs_service_call.assert_called_once()
+    mock_detailed_status_call.assert_called_once()

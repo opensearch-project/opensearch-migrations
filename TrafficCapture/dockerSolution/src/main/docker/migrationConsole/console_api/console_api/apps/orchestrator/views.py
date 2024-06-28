@@ -1,7 +1,6 @@
 from console_api.apps.orchestrator.serializers import OpenSearchIngestionCreateRequestSerializer
 from console_link.models.osi_utils import (InvalidAuthParameters, create_pipeline_from_json, start_pipeline,
                                            stop_pipeline)
-from console_link.models.migration import MigrationType
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import JSONParser
 from rest_framework.response import Response
@@ -9,11 +8,14 @@ from rest_framework import status
 from pathlib import Path
 import boto3
 import datetime
+from enum import Enum
 import logging
 
 logger = logging.getLogger(__name__)
 
 PIPELINE_TEMPLATE_PATH = f"{Path(__file__).parents[4]}/osiPipelineTemplate.yaml"
+
+MigrationType = Enum('MigrationType', ['OSI_HISTORICAL_MIGRATION'])
 
 
 def pretty_request(request, data):

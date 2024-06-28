@@ -33,6 +33,8 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -75,6 +77,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
     private final AtomicLong trafficStreamsRead;
     private final KafkaBehavioralPolicy behavioralPolicy;
     private final ChannelContextManager channelContextManager;
+    private final AtomicBoolean isClosed;
 
     public KafkaTrafficCaptureSource(@NonNull RootReplayerContext globalContext,
                                      Consumer<String, byte[]> kafkaConsumer, String topic, Duration keepAliveInterval) {
@@ -95,6 +98,7 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
         this.behavioralPolicy = behavioralPolicy;
         kafkaConsumer.subscribe(Collections.singleton(topic), trackingKafkaConsumer);
         kafkaExecutor = Executors.newSingleThreadExecutor(new DefaultThreadFactory("kafkaConsumerThread"));
+        isClosed = new AtomicBoolean(false);
     }
 
     private void onKeyFinishedCommitting(ITrafficStreamKey trafficStreamKey) {
@@ -239,6 +243,9 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
 
     @Override
     public void close() throws IOException, InterruptedException, ExecutionException {
-        kafkaExecutor.submit(trackingKafkaConsumer::close).get();
+        if (isClosed.compareAndSet(false, true)) {
+            kafkaExecutor.submit(trackingKafkaConsumer::close).get();
+            kafkaExecutor.shutdownNow();
+        }
     }
 }

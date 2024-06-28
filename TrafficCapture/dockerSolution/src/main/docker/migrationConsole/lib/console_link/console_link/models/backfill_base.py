@@ -19,7 +19,7 @@ SCHEMA = {
 }
 
 
-BackfillStatus = Enum("BackfillStatus", ["NOT_STARTED", "RUNNING", "STOPPED", "FAILED"])
+BackfillStatus = Enum("BackfillStatus", ["NOT_STARTED", "STARTING", "RUNNING", "STOPPED", "FAILED"])
 
 
 class Backfill(ABC):
@@ -50,7 +50,7 @@ class Backfill(ABC):
         pass
 
     @abstractmethod
-    def get_status(self, *args, **kwargs) -> BackfillStatus:
+    def get_status(self, *args, **kwargs) -> CommandResult:
         """Return a status"""
         pass
 

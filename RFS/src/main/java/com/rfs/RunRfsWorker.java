@@ -132,7 +132,8 @@ public class RunRfsWorker {
         final String targetHost = arguments.targetHost;
         final String targetUser = arguments.targetUser;
         final String targetPass = arguments.targetPass;
-        final List<String> indexTemplateAllowlist = arguments.indexAllowlist;
+        final List<String> indexAllowlist = arguments.indexAllowlist;
+        final List<String> indexTemplateAllowlist = arguments.indexTemplateAllowlist;
         final List<String> componentTemplateAllowlist = arguments.componentTemplateAllowlist;
         final long maxShardSizeBytes = arguments.maxShardSizeBytes;
         final int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
@@ -143,7 +144,10 @@ public class RunRfsWorker {
         final ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
         final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
 
-        try {
+        try (var processManager = new LeaseExpireTrigger(workItemId -> {
+            log.error("terminating RunRfsWorker because its lease has expired for " + workItemId);
+            System.exit(PROCESS_TIMED_OUT);
+        }, Clock.systemUTC())) {
             log.info("Running RfsWorker");
             OpenSearchClient sourceClient = new OpenSearchClient(sourceConnection);
             OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
@@ -160,21 +164,17 @@ public class RunRfsWorker {
 
             IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
             IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
-            new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer).migrateIndices();
+            new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer, indexAllowlist).migrateIndices();
 
             ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
             DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
             var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,
                     luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
             DocumentReindexer reindexer = new DocumentReindexer(targetClient);
-            var processManager = new LeaseExpireTrigger(workItemId->{
-                log.error("terminating RunRfsWorker because its lease has expired for "+workItemId);
-                System.exit(PROCESS_TIMED_OUT);
-            }, Clock.systemUTC());
             var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(targetHost)),
                     5, UUID.randomUUID().toString());
             var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, processManager);
-            new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName);
+            new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName, indexAllowlist);
             new DocumentsRunner(scopedWorkCoordinator,
                     (name,shard) -> shardMetadataFactory.fromRepo(snapshotName,name,shard),
                     unpackerFactory,

@@ -119,16 +119,18 @@ def scale(backfill: Backfill, units: int, *args, **kwargs) -> Tuple[ExitCode, st
     return ExitCode.FAILURE, "Backfill scale failed." + "\n" + result.display()
 
 
-def status(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
-    logger.info("Getting backfill status")
+def status(backfill: Backfill, deep_check, *args, **kwargs) -> Tuple[ExitCode, str]:
+    logger.info(f"Getting backfill status with {deep_check=}")
     try:
-        status = backfill.get_status(*args, **kwargs)
+        status = backfill.get_status(deep_check, *args, **kwargs)
     except NotImplementedError:
         logger.error(f"Status is not implemented for backfill {type(backfill).__name__}")
         return ExitCode.FAILURE, f"Status is not implemented for backfill: {type(backfill).__name__}"
     except Exception as e:
         logger.error(f"Failed to get status of backfill: {e}")
         return ExitCode.FAILURE, f"Failure when getting status of backfill: {type(e).__name__} {e}"
-    if status:
-        return ExitCode.SUCCESS, status.value
-    return ExitCode.FAILURE, "Backfill status retrieval failed." + "\n" + status
+    if status.success:
+        return (ExitCode.SUCCESS,
+                f"{status.value[0]}\n{status.value[1]}" if not isinstance(status.value, str) else status.value)
+    return ExitCode.FAILURE, "Backfill status retrieval failed." + "\n" + \
+        f"{status.value[0]}\n{status.value[1]}" if not isinstance(status.value, str) else status.value

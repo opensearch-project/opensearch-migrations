@@ -8,7 +8,7 @@ if [ -z "$MIGRATION_SERVICES_YAML_PARAMETER" ]; then
 fi
 
 # Retrieve the parameter value from AWS Systems Manager Parameter Store
-PARAMETER_VALUE=$(aws ssm get-parameters --names "$MIGRATION_SERVICES_YAML_PARAMETER" --query "Parameters[0].Value" --output text)
+PARAMETER_VALUE=$(pipenv run aws ssm get-parameters --names "$MIGRATION_SERVICES_YAML_PARAMETER" --query "Parameters[0].Value" --output text)
 
 # Check if the retrieval was successful
 if [ $? -ne 0 ]; then
@@ -29,3 +29,14 @@ if [ $? -ne 0 ]; then
 fi
 
 echo "Parameter value successfully written to $OUTPUT_FILE"
+
+# Generate bash completion script
+console completion bash > /usr/share/bash-completion/completions/console
+
+# Source the completion script to enable it for the current session
+source /usr/share/bash-completion/completions/console
+
+# Add sourcing of the completion script to .bashrc for persistence across sessions
+echo '. /etc/bash_completion' >> ~/.bashrc
+
+echo "Bash completion for console command has been set up and enabled."

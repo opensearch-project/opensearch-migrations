@@ -58,8 +58,11 @@ public class MetadataMigration {
         @Parameter(names = {"--target-password"}, description = "Optional.  The target password; if not provided, will assume no auth on target", required = false)
         public String targetPass = null;
 
+        @Parameter(names = {"--target-insecure"}, description = "Allow untrusted SSL certificates for target", required = false)
+        public boolean targetInsecure = false;
+
         @Parameter(names = {"--index-allowlist"}, description = ("Optional.  List of index names to migrate"
-            + " (e.g. 'logs_2024_01, logs_2024_02').  Default: all indices"), required = false)
+            + " (e.g. 'logs_2024_01, logs_2024_02').  Default: all non-system indices (e.g. those not starting with '.')"), required = false)
         public List<String> indexAllowlist = List.of();
 
         @Parameter(names = {"--index-template-allowlist"}, description = ("Optional.  List of index template names to migrate"
@@ -103,12 +106,13 @@ public class MetadataMigration {
         final String targetHost = arguments.targetHost;
         final String targetUser = arguments.targetUser;
         final String targetPass = arguments.targetPass;
+        final List<String> indexAllowlist = arguments.indexAllowlist;
+        final boolean targetInsecure = arguments.targetInsecure;
         final List<String> indexTemplateAllowlist = arguments.indexTemplateAllowlist;
         final List<String> componentTemplateAllowlist = arguments.componentTemplateAllowlist;
         final int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
 
-        final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
-
+        final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass, targetInsecure);
 
 
         TryHandlePhaseFailure.executeWithTryCatch(() -> {
@@ -126,7 +130,7 @@ public class MetadataMigration {
 
             final IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
             final IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
-            new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer).migrateIndices();
+            new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer, indexAllowlist).migrateIndices();
         });
     }
 }

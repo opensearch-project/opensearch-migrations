@@ -4,6 +4,7 @@ import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {MigrationServiceCore} from "./migration-service-core";
 import { MigrationSSMParameter, createMigrationStringParameter, getMigrationStringParameterValue } from "../common-utilities";
+import {KafkaYaml} from "../migration-services-yaml";
 
 export interface KafkaBrokerProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -15,6 +16,7 @@ export interface KafkaBrokerProps extends StackPropsExt {
  * dev environment deployments. With this in mind, it should only be used on a test basis.
  */
 export class KafkaStack extends MigrationServiceCore {
+    kafkaYaml: KafkaYaml;
 
     constructor(scope: Construct, id: string, props: KafkaBrokerProps) {
         super(scope, id, props)
@@ -65,6 +67,9 @@ export class KafkaStack extends MigrationServiceCore {
             taskMemoryLimitMiB: 2048,
             ...props
         });
+        this.kafkaYaml = new KafkaYaml();
+        this.kafkaYaml.standard = '';
+        this.kafkaYaml.broker_endpoints = 'kafka:9092';
     }
 
 }

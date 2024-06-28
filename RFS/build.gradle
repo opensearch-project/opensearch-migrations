@@ -62,6 +62,9 @@ dependencies {
     testImplementation group: 'org.hamcrest', name: 'hamcrest'
 
     testFixturesImplementation project(":commonDependencyVersionConstraints")
+    testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java'
+    testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java-core'
+    testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java-transport-httpclient5'
     testFixturesImplementation group: 'org.testcontainers', name: 'testcontainers'
 }
 

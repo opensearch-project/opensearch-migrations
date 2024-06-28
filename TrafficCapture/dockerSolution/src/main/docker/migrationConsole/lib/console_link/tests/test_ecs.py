@@ -7,7 +7,7 @@ import botocore.session
 from botocore.stub import Stubber
 
 from console_link.models.utils import AWSAPIError
-from console_link.models.ecs_service import ECSService
+from console_link.models.ecs_service import ECSService, InstanceStatuses
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 AWS_REGION = "us-east-1"
@@ -57,3 +57,16 @@ def test_ecs_update_service_unsuccessful(ecs_stubber, ecs_service):
     result = ecs_service.set_desired_count(1)
     assert result.success is False
     assert isinstance(result.value, AWSAPIError)
+
+
+def test_ecs_get_instance_statues(ecs_stubber, ecs_service):
+    with open(TEST_DATA_DIRECTORY / "ecs_describe_services_5d_2p_1r.json") as f:
+        data = json.load(f)
+        ecs_stubber.add_response("describe_services", service_response=data)
+    ecs_stubber.activate()
+
+    expected = InstanceStatuses(desired=5, pending=2, running=1)
+
+    ecs_service.client = ecs_stubber.client
+    result = ecs_service.get_instance_statuses()
+    assert str(result) == str(expected)

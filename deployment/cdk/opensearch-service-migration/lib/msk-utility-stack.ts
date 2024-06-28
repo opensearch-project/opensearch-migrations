@@ -8,6 +8,7 @@ import {Runtime} from "aws-cdk-lib/aws-lambda";
 import {Provider} from "aws-cdk-lib/custom-resources";
 import * as path from "path";
 import { createMigrationStringParameter, getMigrationStringParameterValue, MigrationSSMParameter } from "./common-utilities";
+import {KafkaYaml} from "./migration-services-yaml";
 
 export interface MskUtilityStackProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -20,6 +21,7 @@ export interface MskUtilityStackProps extends StackPropsExt {
  * a consistent ORDERED fashion.
  */
 export class MSKUtilityStack extends Stack {
+    kafkaYaml: KafkaYaml;
 
     constructor(scope: Construct, id: string, props: MskUtilityStackProps) {
         super(scope, id, props);
@@ -152,5 +154,8 @@ export class MSKUtilityStack extends Stack {
             ...props,
             parameter: MigrationSSMParameter.KAFKA_BROKERS
         });
+        this.kafkaYaml = new KafkaYaml();
+        this.kafkaYaml.msk = '';
+        this.kafkaYaml.broker_endpoints = brokerEndpoints;
     }
 }

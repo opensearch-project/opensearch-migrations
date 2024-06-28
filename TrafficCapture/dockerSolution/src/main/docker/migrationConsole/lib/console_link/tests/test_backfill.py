@@ -1,12 +1,14 @@
+import json
 import pathlib
 
 import pytest
+import requests_mock
 
 from console_link.logic.backfill import get_backfill, UnsupportedBackfillTypeError
-from console_link.models.backfill_base import Backfill
+from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
 from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill
-from console_link.models.ecs_service import ECSService
+from console_link.models.ecs_service import ECSService, InstanceStatuses
 
 from tests.utils import create_valid_cluster
 
@@ -173,3 +175,95 @@ def test_ecs_rfs_backfill_stop_sets_ecs_desired_count(ecs_rfs_backfill, mocker):
 
     assert isinstance(ecs_rfs_backfill, ECSRFSBackfill)
     mock.assert_called_once_with(ecs_rfs_backfill.ecs_client, 0)
+
+
+def test_ecs_rfs_backfill_scale_sets_ecs_desired_count(ecs_rfs_backfill, mocker):
+    mock = mocker.patch.object(ECSService, 'set_desired_count', autospec=True)
+    ecs_rfs_backfill.scale(3)
+
+    assert isinstance(ecs_rfs_backfill, ECSRFSBackfill)
+    mock.assert_called_once_with(ecs_rfs_backfill.ecs_client, 3)
+
+
+def test_ecs_rfs_backfill_status_gets_ecs_instance_statuses(ecs_rfs_backfill, mocker):
+    mocked_instance_status = InstanceStatuses(
+        desired=3,
+        running=1,
+        pending=2
+    )
+    mock = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True, return_value=mocked_instance_status)
+    value = ecs_rfs_backfill.get_status(deep_check=False)
+
+    mock.assert_called_once_with(ecs_rfs_backfill.ecs_client)
+    assert value.success
+    assert BackfillStatus.RUNNING == value.value[0]
+    assert str(mocked_instance_status) == value.value[1]
+
+
+def test_ecs_rfs_calculates_backfill_status_from_ecs_instance_statuses_stopped(ecs_rfs_backfill, mocker):
+    mocked_stopped_status = InstanceStatuses(
+        desired=8,
+        running=0,
+        pending=0
+    )
+    mock = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True, return_value=mocked_stopped_status)
+    value = ecs_rfs_backfill.get_status(deep_check=False)
+
+    mock.assert_called_once_with(ecs_rfs_backfill.ecs_client)
+    assert value.success
+    assert BackfillStatus.STOPPED == value.value[0]
+    assert str(mocked_stopped_status) == value.value[1]
+
+
+def test_ecs_rfs_calculates_backfill_status_from_ecs_instance_statuses_starting(ecs_rfs_backfill, mocker):
+    mocked_starting_status = InstanceStatuses(
+        desired=8,
+        running=0,
+        pending=6
+    )
+    mock = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True, return_value=mocked_starting_status)
+    value = ecs_rfs_backfill.get_status(deep_check=False)
+
+    mock.assert_called_once_with(ecs_rfs_backfill.ecs_client)
+    assert value.success
+    assert BackfillStatus.STARTING == value.value[0]
+    assert str(mocked_starting_status) == value.value[1]
+
+
+def test_ecs_rfs_calculates_backfill_status_from_ecs_instance_statuses_running(ecs_rfs_backfill, mocker):
+    mocked_running_status = InstanceStatuses(
+        desired=1,
+        running=3,
+        pending=1
+    )
+    mock = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True, return_value=mocked_running_status)
+    value = ecs_rfs_backfill.get_status(deep_check=False)
+
+    mock.assert_called_once_with(ecs_rfs_backfill.ecs_client)
+    assert value.success
+    assert BackfillStatus.RUNNING == value.value[0]
+    assert str(mocked_running_status) == value.value[1]
+
+
+def test_ecs_rfs_get_status_deep_check(ecs_rfs_backfill, mocker):
+    target = create_valid_cluster()
+    mocked_stopped_status = InstanceStatuses(
+        desired=1,
+        running=1,
+        pending=0
+    )
+    mock = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True, return_value=mocked_stopped_status)
+    with open(TEST_DATA_DIRECTORY / "migrations_working_state_search.json") as f:
+        data = json.load(f)
+        total_shards = data['hits']['total']['value']
+    with requests_mock.Mocker() as rm:
+        rm.get(f"{target.endpoint}/.migrations_working_state/_search",
+               status_code=200,
+               json=data)
+        value = ecs_rfs_backfill.get_status(deep_check=True)
+
+    mock.assert_called_once_with(ecs_rfs_backfill.ecs_client)
+    assert value.success
+    assert BackfillStatus.RUNNING == value.value[0]
+    assert str(mocked_stopped_status) in value.value[1]
+    assert str(total_shards) in value.value[1]

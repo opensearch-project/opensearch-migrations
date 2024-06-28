@@ -48,13 +48,12 @@ def parse_args():
     """Parse command line arguments."""
     parser = argparse.ArgumentParser()
     parser.add_argument("--endpoint", help="Cluster endpoint e.g. http://test.elb.us-west-2.amazonaws.com:9200.")
-    parser.add_argument("--username", help="Cluster username.", default='admin')
-    parser.add_argument("--password", help="Cluster password.", default='admin')
-    parser.add_argument("--no-auth", action='store_true', help="Flag to provide no auth in requests.")
+    parser.add_argument("--username", help="Cluster username.")
+    parser.add_argument("--password", help="Cluster password.")
     parser.add_argument("--no-clear-output", action='store_true',
                         help="Flag to not clear the output before each run. " +
                         "Helpful for piping to a file or other utility.")
-    parser.add_argument("--requests-per-sec", type=float, default=100.0, help="Target requests per second to be sent.")
+    parser.add_argument("--requests-per-sec", type=float, default=10.0, help="Target requests per second to be sent.")
     parser.add_argument("--no-refresh", action='store_true', help="Flag to disable refresh after each request.")
     return parser.parse_args()
 
@@ -100,7 +99,8 @@ def calculate_sleep_time(request_timestamps, target_requests_per_sec):
         return 0
     
     target_time_per_iteration = 1.0 / target_requests_per_sec
-    average_time_per_iteration = (datetime.now() - request_timestamps[0]).total_seconds() / len(request_timestamps)
+    average_time_per_iteration = (datetime.now() -
+                                  request_timestamps[0]).total_seconds() / (len(request_timestamps) + 1)
     
     sleep_time = (target_time_per_iteration - average_time_per_iteration) * len(request_timestamps)
     
@@ -111,7 +111,7 @@ def main():
     args = parse_args()
 
     url_base = args.endpoint or os.environ.get('SOURCE_DOMAIN_ENDPOINT', 'https://capture-proxy:9200')
-    auth = None if args.no_auth else (args.username, args.password)
+    auth = (args.username, args.password) if args.username and args.password else None
 
     session = requests.Session()
     keep_alive_headers = {'Connection': 'keep-alive'}
@@ -144,7 +144,7 @@ def main():
         )
         throughput_message = f"Request throughput over the last 5 seconds: {throughput:.2f} req/sec"
 
-        clear_output_message = "\033c" if not args.no_clear_output else ""
+        clear_output_message = "\033[H\033[J" if not args.no_clear_output else ""
 
         logger.info(f"{clear_output_message}" +
                     f"{request_message}\n" +

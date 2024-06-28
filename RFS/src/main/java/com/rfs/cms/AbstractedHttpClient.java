@@ -10,6 +10,11 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 public interface AbstractedHttpClient extends AutoCloseable {
+    String PUT_METHOD = "PUT";
+    String POST_METHOD = "POST";
+    String GET_METHOD = "GET";
+    String HEAD_METHOD = "HEAD";
+
     interface AbstractHttpResponse {
         Stream<Map.Entry<String, String>> getHeaders();
 

@@ -14,7 +14,7 @@ class ConnectionResult:
 
 def cat_indices(cluster: Cluster, as_json=False):
     as_json_suffix = "?format=json" if as_json else "?v"
-    cat_indices_path = f"/_cat/indices{as_json_suffix}"
+    cat_indices_path = f"/_cat/indices/_all{as_json_suffix}"
     r = cluster.call_api(cat_indices_path)
     return r.json() if as_json else r.content
 
@@ -48,6 +48,6 @@ def run_test_benchmarks(cluster: Cluster):
 
 # As a default we exclude system indices and searchguard indices
 def clear_indices(cluster: Cluster):
-    clear_indices_path = "/*,-.*,-searchguard*,-sg7*"
-    r = cluster.call_api(clear_indices_path, method=HttpMethod.DELETE)
+    clear_indices_path = "/*,-.*,-searchguard*,-sg7*,.migrations_working_state"
+    r = cluster.call_api(clear_indices_path, method=HttpMethod.DELETE, params={"ignore_unavailable": "true"})
     return r.content

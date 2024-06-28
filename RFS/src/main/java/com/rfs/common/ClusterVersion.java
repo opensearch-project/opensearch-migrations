@@ -31,6 +31,10 @@ public enum ClusterVersion {
             return ES_6_8;
         } else if (versionString.startsWith("710")){
             return ES_7_10;
+        }
+        // temp bypass for 717 to 710
+        else if (versionString.startsWith("717")){
+            return ES_7_10;
         } else {
             throw new IllegalArgumentException("Invalid version: " + versionId);
         }

@@ -67,7 +67,7 @@ class Cluster:
     aws_secret_arn: Optional[str] = None
     auth_type: Optional[AuthMethod] = None
     auth_details: Optional[Dict[str, Any]] = None
-    allow_insecure: bool = None
+    allow_insecure: bool = False
 
     def __init__(self, config: Dict) -> None:
         logger.info(f"Initializing cluster with config: {config}")
@@ -85,7 +85,8 @@ class Cluster:
         elif 'sigv4' in config:
             self.auth_type = AuthMethod.SIGV4
 
-    def call_api(self, path, method: HttpMethod = HttpMethod.GET, timeout=None) -> requests.Response:
+    def call_api(self, path, method: HttpMethod = HttpMethod.GET, timeout=None,
+                 json_body=None, **kwargs) -> requests.Response:
         """
         Calls an API on the cluster.
         """
@@ -100,13 +101,24 @@ class Cluster:
         else:
             raise NotImplementedError(f"Auth type {self.auth_type} not implemented")
 
+        if json_body is not None:
+            data = json_body
+        else:
+            data = None
+
         logger.info(f"Making api call to {self.endpoint}{path}")
+        
+        # Extract query parameters from kwargs
+        params = kwargs.get('params', {})
+        
         r = requests.request(
             method.name,
             f"{self.endpoint}{path}",
+            params=params,
             verify=(not self.allow_insecure),
             auth=auth,
-            timeout=timeout
+            timeout=timeout,
+            json=data
         )
         logger.debug(f"Cluster API call request: {r.request}")
         r.raise_for_status()
@@ -128,6 +140,7 @@ class Cluster:
         elif self.auth_type == AuthMethod.SIGV4:
             raise NotImplementedError(f"Auth type {self.auth_type} is not currently support for executing "
                                       f"benchmark workloads")
+        # Note -- we should censor the password when logging this command
         logger.info(f"Running opensearch-benchmark with '{workload}' workload")
         subprocess.run(f"opensearch-benchmark execute-test --distribution-version=1.0.0 "
                        f"--target-host={self.endpoint} --workload={workload} --pipeline=benchmark-only --test-mode "

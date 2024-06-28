@@ -18,11 +18,7 @@ public class SnapshotRunner {
 
     public static void runAndWaitForCompletion(SnapshotCreator snapshotCreator) {
         try {
-            log.info("Attempting to initiate the snapshot...");
-            snapshotCreator.registerRepo();
-            snapshotCreator.createSnapshot();
-
-            log.info("Snapshot in progress...");
+            run(snapshotCreator);
             waitForSnapshotToFinish(snapshotCreator);
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -30,4 +26,13 @@ public class SnapshotRunner {
             throw new SnapshotCreator.SnapshotCreationFailed(snapshotCreator.getSnapshotName());
         }
     }
+
+    public static void run(SnapshotCreator snapshotCreator) {
+        log.info("Attempting to initiate the snapshot...");
+        snapshotCreator.registerRepo();
+        snapshotCreator.createSnapshot();
+        log.info("Snapshot in progress...");
+    }
+
+
 }

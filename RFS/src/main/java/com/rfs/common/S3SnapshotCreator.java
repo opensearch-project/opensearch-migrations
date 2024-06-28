@@ -6,17 +6,19 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 public class S3SnapshotCreator extends SnapshotCreator {
     private static final ObjectMapper mapper = new ObjectMapper();
 
-    private final OpenSearchClient client;
-    private final String snapshotName;
     private final String s3Uri;
     private final String s3Region;
+    private final Integer maxSnapshotRateMBPerNode;
 
     public S3SnapshotCreator(String snapshotName, OpenSearchClient client, String s3Uri, String s3Region) {
+        this(snapshotName, client, s3Uri, s3Region, null);
+    }
+
+    public S3SnapshotCreator(String snapshotName, OpenSearchClient client, String s3Uri, String s3Region, Integer maxSnapshotRateMBPerNode) {
         super(snapshotName, client);
-        this.snapshotName = snapshotName;
-        this.client = client;
         this.s3Uri = s3Uri;
         this.s3Region = s3Region;
+        this.maxSnapshotRateMBPerNode = maxSnapshotRateMBPerNode;
     }
 
     @Override
@@ -26,6 +28,9 @@ public class S3SnapshotCreator extends SnapshotCreator {
         settings.put("bucket", getBucketName());
         settings.put("region", s3Region);
         settings.put("base_path", getBasePath());
+        if (maxSnapshotRateMBPerNode != null) {
+            settings.put("max_snapshot_bytes_per_sec", maxSnapshotRateMBPerNode + "mb");
+        }
 
         ObjectNode body = mapper.createObjectNode();
         body.put("type", "s3");

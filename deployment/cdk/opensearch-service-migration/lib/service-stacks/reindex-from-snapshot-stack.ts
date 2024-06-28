@@ -11,7 +11,7 @@ import {
     createOpenSearchServerlessIAMAccessPolicy,
     getMigrationStringParameterValue
 } from "../common-utilities";
-import { RFSBackfillYaml, S3SnapshotYaml } from "../migration-services-yaml";
+import { RFSBackfillYaml, SnapshotYaml } from "../migration-services-yaml";
 
 
 export interface ReindexFromSnapshotProps extends StackPropsExt {
@@ -23,7 +23,7 @@ export interface ReindexFromSnapshotProps extends StackPropsExt {
 
 export class ReindexFromSnapshotStack extends MigrationServiceCore {
     rfsBackfillYaml: RFSBackfillYaml;
-    rfsSnapshotYaml: S3SnapshotYaml;
+    rfsSnapshotYaml: SnapshotYaml;
 
     constructor(scope: Construct, id: string, props: ReindexFromSnapshotProps) {
         super(scope, id, props)
@@ -66,7 +66,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
         });
         const s3Uri = `s3://migration-artifacts-${this.account}-${props.stage}-${this.region}/rfs-snapshot-repo`;
-        let rfsCommand = `/rfs-app/runJavaWithClasspath.sh com.rfs.ReindexFromSnapshot --s3-local-dir /tmp/s3_files --s3-repo-uri ${s3Uri} --s3-region ${this.region} --snapshot-name rfs-snapshot --min-replicas 1 --enable-persistent-run --lucene-dir '/lucene' --source-host ${sourceEndpoint} --target-host ${osClusterEndpoint} --source-version es_7_10 --target-version os_2_11`
+        let rfsCommand = `/rfs-app/runJavaWithClasspath.sh com.rfs.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri ${s3Uri} --s3-region ${this.region} --snapshot-name rfs-snapshot --lucene-dir '/lucene' --target-host ${osClusterEndpoint}`
         rfsCommand = props.extraArgs ? rfsCommand.concat(` ${props.extraArgs}`) : rfsCommand
 
         this.createService({
@@ -79,15 +79,15 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,
+            ephemeralStorageGiB: 200,
             ...props
         });
 
         this.rfsBackfillYaml = new RFSBackfillYaml();
         this.rfsBackfillYaml.ecs.cluster_name = `migration-${props.stage}-ecs-cluster`;
         this.rfsBackfillYaml.ecs.service_name = `migration-${props.stage}-reindex-from-snapshot`;
-        this.rfsSnapshotYaml = new S3SnapshotYaml();
-        this.rfsSnapshotYaml.s3_repo_uri = s3Uri;
-        this.rfsSnapshotYaml.s3_region = this.region;
+        this.rfsSnapshotYaml = new SnapshotYaml();
+        this.rfsSnapshotYaml.s3 = {repo_uri: s3Uri, aws_region: this.region};
         this.rfsSnapshotYaml.snapshot_name = "rfs-snapshot";
     }
 

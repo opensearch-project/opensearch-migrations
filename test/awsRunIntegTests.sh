@@ -73,10 +73,9 @@ source_endpoint="http://${source_lb_endpoint}:19200"
 proxy_endpoint="http://${source_lb_endpoint}:9200"
 target_endpoint=$(aws ssm get-parameter --name "/migration/${STAGE}/default/osClusterEndpoint" --query 'Parameter.Value' --output text)
 echo "Clearing non-system source indices"
-unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "curl -XDELETE ${source_endpoint}/*,-.*,-searchguard*,-sg7*"
+unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "curl -XDELETE '${source_endpoint}/*,-.*,-searchguard*,-sg7*?ignore_unavailable=true'"
 echo "Clearing non-system target indices"
-unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "curl -XDELETE ${target_endpoint}/*,-.*"
-
+unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "curl -XDELETE '${target_endpoint}/*,-.*,.migrations_working_state?ignore_unavailable=true'"
 echo "Print initial source and target indices after clearing indices: "
 unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "./catIndices.sh --source-endpoint ${source_endpoint} --source-no-auth --target-no-auth"
 

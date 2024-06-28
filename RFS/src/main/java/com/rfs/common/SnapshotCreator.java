@@ -1,5 +1,6 @@
 package com.rfs.common;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -11,6 +12,9 @@ import java.util.Optional;
 public abstract class SnapshotCreator {
     private static final Logger logger = LogManager.getLogger(SnapshotCreator.class);
     private static final ObjectMapper mapper = new ObjectMapper();
+    static {
+        mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    }
 
     private final OpenSearchClient client;
     private final String snapshotName;

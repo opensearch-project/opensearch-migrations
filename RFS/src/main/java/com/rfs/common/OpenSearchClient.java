@@ -12,6 +12,7 @@ import lombok.NonNull;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JavaType;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
@@ -23,6 +24,10 @@ import reactor.util.retry.Retry;
 public class OpenSearchClient {
     private static final Logger logger = LogManager.getLogger(OpenSearchClient.class);
     private static final ObjectMapper objectMapper = new ObjectMapper();
+
+    static {
+        objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+    }
 
     public final ConnectionDetails connectionDetails;
     private final RestClient client;
