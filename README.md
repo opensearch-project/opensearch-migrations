@@ -4,16 +4,26 @@ OpenSearch upgrade, migration, and comparison tooling facilitates OpenSearch mig
 
 ## Table of Contents
 
-- [ Supported cluster versions and platforms](#supported-cluster-versions-and-platforms)
+- [OpenSearch upgrades, migrations, and comparison tooling](#opensearch-upgrades-migrations-and-comparison-tooling)
+- [Table of Contents](#table-of-contents)
+- [Supported cluster versions and platforms](#supported-cluster-versions-and-platforms)
+  - [Supported Source and Target Versions](#supported-source-and-target-versions)
+  - [Supported Source and Target Platforms](#supported-source-and-target-platforms)
 - [Build and deploy](#build-and-deploy)
-    - [Local deployment](#local-deployment)
-    - [AWS deployment](#aws-deployment)
+  - [Local deployment](#local-deployment)
+  - [AWS deployment](#aws-deployment)
 - [Developer contributions](#developer-contributions)
-    - [Pre-commit hooks](#pre-commit-hooks)
-    - [Traffic Capture Proxy and Replayer](#traffic-capture-proxy-and-replayer)
-    - [Running Tests](#running-tests)
+  - [Pre-commit hooks](#pre-commit-hooks)
+  - [Traffic Capture Proxy and Replayer](#traffic-capture-proxy-and-replayer)
+  - [Fetch Migration](#fetch-migration)
+  - [Testing](#testing)
+    - [Component and Unit testing](#component-and-unit-testing)
+    - [Cloud end to end testing](#cloud-end-to-end-testing)
+    - [Local end to end testing](#local-end-to-end-testing)
 - [Security](#security)
 - [License](#license)
+- [Releasing](#releasing)
+- [Publishing](#publishing)
 
 ## Supported cluster versions and platforms
 
@@ -59,12 +69,71 @@ The FetchMigration directory hosts tools that simplify the process of backfillin
 
 Further documentation can be found here: [Fetch Migration README](FetchMigration/README.md).
 
-### Running Tests
+### Testing 
 
-Developers can run a test script which will verify the end-to-end Local Docker Solution.
+Migration assisant is built for being run in a cloud environment to scale up to large clusters of all kinds.  This creates challenges to quickly validate and detect failures introduced by changes.  This project balances these scenarios with two forms of 'end to end' testing, cloud and local end to end testing.
 
-More documentation on this test script can be found here:
-[End-to-End Testing](test/README.md)
+#### Component and Unit testing
+
+While end to end tests can be very useful for testing integration boundaries, for simplier components and functions it is advised to write junit tests that focus on edge cases.  When adding functionality its advised to start at these lower level test and then see what end to end tests might need to be included or modified to check for coverage if needed.
+
+#### Cloud end to end testing
+
+These tests are setup once with a deployment into a cloud ecosystem, because full infrastructure is inheriantly expensive monitarily and time wise - there will be only a small number of tests that make sure the migrations tools are working as expected.  In this example diagram, tests to validate historical migration from a snapshot use the full cloud resources.  Control of the test scenarios is largely through the deployed migration console.
+
+See [End-to-End Testing](test/README.md) for more details on deployment and execution of these test cases.
+
+```mermaid
+graph LR;
+    Test[Python Tests] --> MC
+    subgraph AWSCloud
+        MC[Migration Console]
+        SC[Source Cluster]
+        TC[Target Cluster]
+        S3[S3 Snapshot]
+
+        subgraph ECS
+            HW[Historical Workers - RFS]
+        end
+
+        HW --> SC
+        HW --> TC
+        HW --> S3
+
+        MC --> ECS
+        MC --> SC
+        MC --> TC
+    end
+```
+
+#### Local end to end testing
+
+Locally performing end to end test cases is done slightly differently, by subtituting cloud services for the local file system, and TestContainers to provider source and target migration clusters its much faster to validate different configurations and versions.  By running inside of a JUnit JVM this also allows deep access into the running historical worker for monitoring or fault injection.  When test cases themselves do not require full source or target clusters using mock endpoints or data can greatly accelerate test speed.
+
+These tests are all be run with the command `./gradlew test` from the root directory.
+
+```mermaid
+graph LR;
+    Test[JUnit E2E Test]
+    subgraph TestSetup
+        HW[Historical Workers - RFS]
+        S3[Local Disk Snapshot]
+
+        subgraph TestContainers
+            SC[Source Cluster]
+            TC[Target Cluster]
+        end
+
+        HW --> S3
+        HW --> SC
+        HW --> TC
+
+    end
+
+Test --> HW
+Test --> TestContainers
+
+```
 
 ## Security
 
