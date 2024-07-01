@@ -1,23 +1,22 @@
 {
   "scanSettings": {
-    "configMode": "LOCAL",
-    "configExternalURL": "",
+    "configMode": "AUTO",
     "projectToken": "",
-    "baseBranches": []
+    "baseBranches": ["main"],
+    "skipScanningStage":     {
+      "connectivity": ["maven", "npm", "nuget-csproj", "nuget-packages", "pip", "yarn"],
+      "config": ["maven", "npm", "nuget-csproj", "nuget-packages", "pip", "yarn"],
+      "preStep": ["maven", "npm", "nuget-csproj", "nuget-packages", "pip", "yarn"]
+    } 
+
   },
   "checkRunSettings": {
-    "vulnerableCheckRunConclusionLevel": "failure",
-    "displayMode": "diff",
+    "vulnerableCheckRunConclusionLevel": "none",
+    "displayMode": "baseline",
     "useMendCheckNames": true,
-    "strictMode" : "failure"
+    "strictMode" : "none"
   },
   "issueSettings": {
-    "minSeverityLevel": "LOW",
-    "issueType": "DEPENDENCY"
-  },
-  "remediateSettings": {
-    "workflowRules": {
-      "enabled": true
-    }
+    "minSeverityLevel": "NONE"
   }
 }
