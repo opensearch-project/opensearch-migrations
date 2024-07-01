@@ -11,7 +11,7 @@ import { ARecord, HostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
 import { LoadBalancerTarget } from "aws-cdk-lib/aws-route53-targets";
 import { AcmCertificateImporter } from "./service-stacks/acm-cert-importer";
 import { Stack } from "aws-cdk-lib";
-import { createMigrationStringParameter, getCustomStringParameterValue, getMigrationStringParameterName, MigrationSSMParameter } from "./common-utilities";
+import { createMigrationStringParameter, getMigrationStringParameterName, MigrationSSMParameter } from "./common-utilities";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
 
 export interface NetworkStackProps extends StackPropsExt {
@@ -19,9 +19,9 @@ export interface NetworkStackProps extends StackPropsExt {
     readonly vpcAZCount?: number;
     readonly elasticsearchServiceEnabled?: boolean;
     readonly captureProxyESServiceEnabled?: boolean;
+    readonly migrationAPIEnabled?: boolean;
     readonly sourceClusterEndpoint?: string;
     readonly targetClusterEndpoint?: string;
-    readonly albEnabled?: boolean;
     readonly albAcmCertArn?: string;
     readonly env?: { [key: string]: any };
 }
@@ -31,6 +31,7 @@ export class NetworkStack extends Stack {
     public readonly albSourceProxyTG: IApplicationTargetGroup;
     public readonly albTargetProxyTG: IApplicationTargetGroup;
     public readonly albSourceClusterTG: IApplicationTargetGroup;
+    public readonly albMigrationConsoleTG: IApplicationTargetGroup;
 
     // Validate a proper url string is provided and return an url string which contains a protocol, host name, and port.
     // If a port is not provided, the default protocol port (e.g. 443, 80) will be explicitly added
@@ -131,53 +132,56 @@ export class NetworkStack extends Stack {
             });
         }
 
-        if (props.albEnabled) {
-            // Create the ALB with the strongest TLS 1.3 security policy
-            const alb = new ApplicationLoadBalancer(this, 'ALB', {
-                vpc: this.vpc,
-                internetFacing: false,
-                http2Enabled: false,      
-            });
+        // Create the ALB with the strongest TLS 1.3 security policy
+        const alb = new ApplicationLoadBalancer(this, 'ALB', {
+            vpc: this.vpc,
+            internetFacing: false,
+            http2Enabled: false,      
+        });
 
-            const route53 = new HostedZone(this, 'ALBHostedZone', {
-                zoneName: `alb.migration.${props.stage}.local`,
-                vpcs: [this.vpc]
-            });
+        const route53 = new HostedZone(this, 'ALBHostedZone', {
+            zoneName: `alb.migration.${props.stage}.local`,
+            vpcs: [this.vpc]
+        });
 
-            const albDnsRecord = new ARecord(this, 'albDnsRecord', {
-                zone: route53,
-                target: RecordTarget.fromAlias(new LoadBalancerTarget(alb)),
-            });
+        const albDnsRecord = new ARecord(this, 'albDnsRecord', {
+            zone: route53,
+            target: RecordTarget.fromAlias(new LoadBalancerTarget(alb)),
+        });
 
-            createMigrationStringParameter(this, `https://${albDnsRecord.domainName}`, {
-                ...props,
-                parameter: MigrationSSMParameter.ALB_MIGRATION_URL
-            });
-            let cert: ICertificate;
-            if (props.albAcmCertArn) {
-                cert = Certificate.fromCertificateArn(this, 'ALBListenerCert', props.albAcmCertArn);
-            } else {
-                cert = new AcmCertificateImporter(this, 'ALBListenerCertImport', props.stage).acmCert;
-            }
-
-            this.albSourceProxyTG = this.createSecureTargetGroup('ALBSourceProxy', props.stage, 9200, this.vpc);
-            this.albTargetProxyTG = this.createSecureTargetGroup('ALBTargetProxy', props.stage, 9200, this.vpc);
-
-            if (props.elasticsearchServiceEnabled || props.captureProxyESServiceEnabled) {
-                this.albSourceClusterTG = this.createSecureTargetGroup('ALBSourceCluster', props.stage, 9200, this.vpc);
-                this.createSecureListener('ALBSourceClusterListener', 19200,
-                    alb, cert, this.albSourceClusterTG);
-            }
-
-            const albMigrationListener = this.createSecureListener('ALBMigrationListener', 9200,
-                alb, cert);
-            albMigrationListener.addAction("default", {
-                action: ListenerAction.weightedForward([
-                    {targetGroup: this.albSourceProxyTG, weight: 1},
-                    {targetGroup: this.albTargetProxyTG, weight: 0}
-                ]) 
-            });
+        createMigrationStringParameter(this, `https://${albDnsRecord.domainName}`, {
+            ...props,
+            parameter: MigrationSSMParameter.ALB_MIGRATION_URL
+        });
+        let cert: ICertificate;
+        if (props.albAcmCertArn) {
+            cert = Certificate.fromCertificateArn(this, 'ALBListenerCert', props.albAcmCertArn);
+        } else {
+            cert = new AcmCertificateImporter(this, 'ALBListenerCertImport', props.stage).acmCert;
         }
+
+        this.albSourceProxyTG = this.createSecureTargetGroup('ALBSourceProxy', props.stage, 9200, this.vpc);
+        this.albTargetProxyTG = this.createSecureTargetGroup('ALBTargetProxy', props.stage, 9200, this.vpc);
+        if (props.migrationAPIEnabled) {
+            this.albMigrationConsoleTG = this.createSecureTargetGroup('ALBMigrationConsole', props.stage, 8000, this.vpc);
+            this.createSecureListener('ALBSourceClusterListener', 8000,
+            alb, cert, this.albMigrationConsoleTG);
+        }
+
+        if (props.elasticsearchServiceEnabled || props.captureProxyESServiceEnabled) {
+            this.albSourceClusterTG = this.createSecureTargetGroup('ALBSourceCluster', props.stage, 9200, this.vpc);
+            this.createSecureListener('ALBSourceClusterListener', 19200,
+                alb, cert, this.albSourceClusterTG);
+        }
+
+        const albMigrationListener = this.createSecureListener('ALBMigrationListener', 9200,
+            alb, cert);
+        albMigrationListener.addAction("default", {
+            action: ListenerAction.weightedForward([
+                {targetGroup: this.albSourceProxyTG, weight: 1},
+                {targetGroup: this.albTargetProxyTG, weight: 0}
+            ]) 
+        });
 
         // Create Source SSM Parameter
         if (props.sourceClusterEndpoint) {
@@ -186,21 +190,11 @@ export class NetworkStack extends Stack {
                 parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
             });
         } else if (props.captureProxyESServiceEnabled || props.elasticsearchServiceEnabled) {
-            if (props.albEnabled) {
-                const albSourceClusterEndpoint = `https://alb.migration.${props.stage}.local:19200`;
-                createMigrationStringParameter(this, albSourceClusterEndpoint, {
-                    ...props,
-                    parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
-                });
-            } else {
-                const serviceDiscoveryServiceClusterEndpoint = props.captureProxyESServiceEnabled
-                    ? `https://capture-proxy-es.migration.${props.stage}.local:19200`
-                    : `https://elasticsearch.migration.${props.stage}.local:9200`;
-                createMigrationStringParameter(this, serviceDiscoveryServiceClusterEndpoint, {
-                    ...props,
-                    parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
-                });
-            }
+            const albSourceClusterEndpoint = `https://alb.migration.${props.stage}.local:9999`;
+            createMigrationStringParameter(this, albSourceClusterEndpoint, {
+                ...props,
+                parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
+            });
         } else {
             throw new Error(`Capture Proxy ESService, Elasticsearch Service, or SourceClusterEndpoint must be enabled`);
         }
