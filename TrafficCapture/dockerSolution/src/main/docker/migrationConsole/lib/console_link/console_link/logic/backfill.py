@@ -140,3 +140,25 @@ def status(backfill: Backfill, deep_check: bool, *args, **kwargs) -> Tuple[ExitC
 
     return handle_backfill_operation(backfill.get_status, backfill, "get status", on_success,
                                      deep_check, *args, **kwargs)
+
+
+def handle_errors(on_success: Callable[[Any], Tuple[ExitCode, str]]) -> Callable[[Any], Tuple[ExitCode, str]]:
+    def decorator(func: Callable[[Any], Tuple[ExitCode, str]]) -> Callable[[Any], Tuple[ExitCode, str]]:
+        def wrapper(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
+            try:
+                result = func(*args, **kwargs)
+            except NotImplementedError:
+                logger.error(f"{func.__name__} is not implemented for backfill {type(backfill).__name__}")
+                return ExitCode.FAILURE, f"{func.__name__} is not implemented for backfill {type(backfill).__name__}"
+            except Exception as e:
+                logger.error(f"Failed to {func.__name__} backfill: {e}")
+                return ExitCode.FAILURE, f"Failure on {func.__name__} for backfill: {type(e).__name__} {e}"
+            return on_success(result.value)
+        return wrapper
+    return decorator
+
+
+@handle_errors(on_success=lambda status: (ExitCode.SUCCESS, f"{status[0]}\n{status[1]}"))
+def status2(backfill: Backfill, deep_check: bool, *args, **kwargs) -> Tuple[ExitCode, str]:
+    logger.info(f"Getting backfill status with {deep_check=}")
+    return backfill.get_status(deep_check, *args, **kwargs)
