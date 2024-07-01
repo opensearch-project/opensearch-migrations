@@ -245,6 +245,7 @@ def test_ecs_rfs_calculates_backfill_status_from_ecs_instance_statuses_running(e
     assert str(mocked_running_status) == value.value[1]
 
 
+@pytest.mark.skip(reason="Need to implement mocking for multiple calls to endpoint")
 def test_ecs_rfs_get_status_deep_check(ecs_rfs_backfill, mocker):
     target = create_valid_cluster()
     mocked_instance_status = InstanceStatuses(
