@@ -81,19 +81,22 @@ public class FullTest {
     final static long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
     final static Pattern CAT_INDICES_INDEX_COUNT_PATTERN =
             Pattern.compile("(?:\\S+\\s+){2}(\\S+)\\s+(?:\\S+\\s+){3}(\\S+)");
-<<<<<<< Updated upstream
+    final static List<SearchClusterContainer.Version> SOURCE_IMAGES = List.of(
+        SearchClusterContainer.ES_V7_10_2,
+        SearchClusterContainer.ES_V7_17
+    );
+    final static List<SearchClusterContainer.Version> TARGET_IMAGES = List.of(
+        SearchClusterContainer.OS_V1_3_16,
+        SearchClusterContainer.OS_V2_14_0
+    );
     public static final String SOURCE_SERVER_ALIAS = "source";
     public static final int MAX_SHARD_SIZE_BYTES = 64 * 1024 * 1024;
 
-    public static Stream<Arguments> makeArgs() {
-        var sourceImageNames = List.of(
-                makeParamsForBase(SearchClusterContainer.ES_V7_17),
-                makeParamsForBase(SearchClusterContainer.ES_V7_10_2));
-        var targetImageNames = List.of(
-                SearchClusterContainer.OS_V1_3_16.getImageName(),
-                SearchClusterContainer.OS_V2_14_0.getImageName());
+    public static Stream<Arguments> makeDocumentMigrationArgs() {
+        List<Object[]> sourceImageArgs = SOURCE_IMAGES.stream().map(name -> makeParamsForBase(name)).collect(Collectors.toList());
+        var targetImageNames = TARGET_IMAGES.stream().map(SearchClusterContainer.Version::getImageName).collect(Collectors.toList());
         var numWorkers = List.of(1, 3, 40);
-        return sourceImageNames.stream()
+        return sourceImageArgs.stream()
                 .flatMap(a->
                         targetImageNames.stream().flatMap(b->
                                 numWorkers.stream().map(c->Arguments.of(a[0], a[1], a[2], b, c))));
@@ -108,8 +111,8 @@ public class FullTest {
     }
 
     @ParameterizedTest
-    @MethodSource("makeArgs")
-    public void test(SearchClusterContainer.Version baseSourceImageVersion,
+    @MethodSource("makeDocumentMigrationArgs")
+    public void testDocumentMigration(SearchClusterContainer.Version baseSourceImageVersion,
                      String generatorImage, String[] generatorArgs,
                      String targetImageName, int numWorkers)
             throws Exception
@@ -117,25 +120,6 @@ public class FullTest {
 
         try (var esSourceContainer = new PreloadedSearchClusterContainer(baseSourceImageVersion,
                 SOURCE_SERVER_ALIAS, generatorImage, generatorArgs);
-=======
-    final static List<String> SOURCE_IMAGE_NAMES = List.of("migrations/elasticsearch_rfs_source");
-    final static List<String> TARGET_IMAGE_NAMES = List.of("opensearchproject/opensearch:2.13.0", "opensearchproject/opensearch:1.3.0");
-
-    public static Stream<Arguments> makeDocumentMigrationArgs() {
-        var numWorkers = List.of(1, 3, 40);
-        return SOURCE_IMAGE_NAMES.stream()
-            .flatMap(a->
-                TARGET_IMAGE_NAMES.stream().flatMap(b->
-                    numWorkers.stream().map(c->Arguments.of(a, b, c))));
-    }
-
-    @ParameterizedTest
-    @MethodSource("makeDocumentMigrationArgs")
-    public void testDocumentMigration(String sourceImageName, String targetImageName, int numWorkers) throws Exception {
-        try (ElasticsearchContainer esSourceContainer =
-                     new ElasticsearchContainer(new ElasticsearchContainer.Version(sourceImageName,
-                             "preloaded-ES_7_10"));
->>>>>>> Stashed changes
              OpensearchContainer<?> osTargetContainer =
                      new OpensearchContainer<>(targetImageName)) {
             esSourceContainer.start();
@@ -331,27 +315,31 @@ public class FullTest {
     }
 
     public static Stream<Arguments> makeProcessExitArgs() {
-        return SOURCE_IMAGE_NAMES.stream()
+        var sourceImageArgs = SOURCE_IMAGES.stream().map(name -> makeParamsForBase(name)).collect(Collectors.toList());
+        var targetImageNames = TARGET_IMAGES.stream().map(SearchClusterContainer.Version::getImageName).collect(Collectors.toList());
+
+        return sourceImageArgs.stream()
             .flatMap(a->
-                TARGET_IMAGE_NAMES.stream().map(b->Arguments.of(a, b)));
+            targetImageNames.stream().map(b->Arguments.of(a[0], a[1], a[2], b)));
     }
 
     @ParameterizedTest
     @MethodSource("makeProcessExitArgs")
-    public void testProcessExitsAsExpected(String sourceImageName, String targetImageName) throws Exception {
+    public void testProcessExitsAsExpected(SearchClusterContainer.Version baseSourceImageVersion,
+            String generatorImage, String[] generatorArgs,
+            String targetImageName) throws Exception {
 
-        try (ElasticsearchContainer esSourceContainer =
-                     new ElasticsearchContainer(new ElasticsearchContainer.Version(sourceImageName,
-                             "preloaded-ES_7_10"));
-             OpensearchContainer<?> osTargetContainer =
-                     new OpensearchContainer<>(targetImageName)) {
+        try (var esSourceContainer = new PreloadedSearchClusterContainer(baseSourceImageVersion,
+                    SOURCE_SERVER_ALIAS, generatorImage, generatorArgs);
+                OpensearchContainer<?> osTargetContainer =
+                        new OpensearchContainer<>(targetImageName)) {
             esSourceContainer.start();
             osTargetContainer.start();
 
             final var SNAPSHOT_NAME = "test_snapshot";
             final List<String> INDEX_ALLOWLIST = List.of();
             CreateSnapshot.run(
-                    c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, ElasticsearchContainer.CLUSTER_SNAPSHOT_DIR),
+                    c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, SearchClusterContainer.CLUSTER_SNAPSHOT_DIR),
                     new OpenSearchClient(esSourceContainer.getUrl(), null),
                     false);
             var tempDirSnapshot = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
