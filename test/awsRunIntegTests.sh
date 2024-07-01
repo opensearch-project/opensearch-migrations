@@ -45,12 +45,13 @@ done
 
 task_arn=$(aws ecs list-tasks --cluster migration-${STAGE}-ecs-cluster --family "migration-${STAGE}-migration-console" | jq --raw-output '.taskArns[0]')
 
+test_dir="/root/lib/integ_test/integ_test"
 # Kickoff integration tests
 set -o xtrace
-unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id ${UNIQUE_ID}"
+unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "pytest --log-file=${test_dir}/reports/${UNIQUE_ID}/pytest.log --junitxml=${test_dir}/reports/${UNIQUE_ID}/report.xml ${test_dir}/replayer_tests.py --unique_id ${UNIQUE_ID} -k test_replayer_0004 -s"
 set +o xtrace
-test_output=$(unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "awk '/failures/ && /errors/' /root/lib/integ_test/integ_test/reports/${UNIQUE_ID}.xml")
-echo "Fetch integ test summary: "
+test_output=$(unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${task_arn}" --container "migration-console" --interactive --command "awk '/failures/ && /errors/' /root/lib/integ_test/integ_test/reports/${UNIQUE_ID}/report.xml")
+echo "Integration test generated summary: "
 echo "$test_output"
 failure_output=$(echo "$test_output" | grep -o "failures=\"0\"")
 if [ -z "$failure_output" ]; then

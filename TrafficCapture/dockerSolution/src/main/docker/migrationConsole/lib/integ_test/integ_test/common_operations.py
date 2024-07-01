@@ -43,12 +43,14 @@ def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=No
                      test_case=None):
     api_exception = None
     last_received_status = None
+    last_response = None
     for _ in range(1, max_attempts + 1):
         try:
             response = call_api(cluster=cluster, path=path, method=method, data=data, headers=headers, timeout=timeout,
                                 session=session, raise_error=False)
+            last_response = response
             if response.status_code == expected_status_code:
-                return response
+                break
             else:
                 # Ensure that our final captured exception is accurate
                 api_exception = None
@@ -57,19 +59,23 @@ def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=No
                              f" match the expected status code: {expected_status_code}."
                              f" Trying again in {delay} seconds.")
         except (ConnectionError, SSLError) as e:
+            last_response = None
             api_exception = e
             logger.debug(f"Received exception: {e}. Unable to connect to server. Please check all containers are up"
                          f" and ports are setup properly. Trying again in {delay} seconds.")
         time.sleep(delay)
-    if api_exception is None:
+
+    if api_exception:
+        error_message = f"Unable to connect to server. Underlying exception: {api_exception}"
+        raise ClusterAPIRequestError(error_message)
+    else:
         error_message = (f"Failed to receive desired status code of {expected_status_code} and instead "
                          f"received {last_received_status} for request: {method.name} {path}")
-    else:
-        error_message = f"Unable to connect to server. Underlying exception: {api_exception}"
-    if test_case is not None:
-        test_case.fail(f"Cluster API request error: {error_message}")
-    else:
-        raise ClusterAPIRequestError(error_message)
+        if test_case is not None:
+            test_case.assertEqual(expected_status_code, last_response.status_code, error_message)
+        elif expected_status_code != last_response.status_code:
+            raise ClusterAPIRequestError(error_message)
+    return last_response
 
 
 def create_index(index_name: str, cluster: Cluster, **kwargs):
