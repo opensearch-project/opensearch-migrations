@@ -47,6 +47,7 @@ import org.opensearch.testcontainers.OpensearchContainer;
 import org.slf4j.event.Level;
 import reactor.core.publisher.Flux;
 
+import java.io.File;
 import java.io.IOException;
 import java.net.URI;
 import java.nio.file.Files;
@@ -65,6 +66,7 @@ import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.UnaryOperator;
@@ -79,6 +81,7 @@ public class FullTest {
     final static long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
     final static Pattern CAT_INDICES_INDEX_COUNT_PATTERN =
             Pattern.compile("(?:\\S+\\s+){2}(\\S+)\\s+(?:\\S+\\s+){3}(\\S+)");
+<<<<<<< Updated upstream
     public static final String SOURCE_SERVER_ALIAS = "source";
     public static final int MAX_SHARD_SIZE_BYTES = 64 * 1024 * 1024;
 
@@ -114,6 +117,25 @@ public class FullTest {
 
         try (var esSourceContainer = new PreloadedSearchClusterContainer(baseSourceImageVersion,
                 SOURCE_SERVER_ALIAS, generatorImage, generatorArgs);
+=======
+    final static List<String> SOURCE_IMAGE_NAMES = List.of("migrations/elasticsearch_rfs_source");
+    final static List<String> TARGET_IMAGE_NAMES = List.of("opensearchproject/opensearch:2.13.0", "opensearchproject/opensearch:1.3.0");
+
+    public static Stream<Arguments> makeDocumentMigrationArgs() {
+        var numWorkers = List.of(1, 3, 40);
+        return SOURCE_IMAGE_NAMES.stream()
+            .flatMap(a->
+                TARGET_IMAGE_NAMES.stream().flatMap(b->
+                    numWorkers.stream().map(c->Arguments.of(a, b, c))));
+    }
+
+    @ParameterizedTest
+    @MethodSource("makeDocumentMigrationArgs")
+    public void testDocumentMigration(String sourceImageName, String targetImageName, int numWorkers) throws Exception {
+        try (ElasticsearchContainer esSourceContainer =
+                     new ElasticsearchContainer(new ElasticsearchContainer.Version(sourceImageName,
+                             "preloaded-ES_7_10"));
+>>>>>>> Stashed changes
              OpensearchContainer<?> osTargetContainer =
                      new OpensearchContainer<>(targetImageName)) {
             esSourceContainer.start();
@@ -305,6 +327,86 @@ public class FullTest {
                     MAX_SHARD_SIZE_BYTES);
         } finally {
             deleteTree(tempDir);
+        }
+    }
+
+    public static Stream<Arguments> makeProcessExitArgs() {
+        return SOURCE_IMAGE_NAMES.stream()
+            .flatMap(a->
+                TARGET_IMAGE_NAMES.stream().map(b->Arguments.of(a, b)));
+    }
+
+    @ParameterizedTest
+    @MethodSource("makeProcessExitArgs")
+    public void testProcessExitsAsExpected(String sourceImageName, String targetImageName) throws Exception {
+
+        try (ElasticsearchContainer esSourceContainer =
+                     new ElasticsearchContainer(new ElasticsearchContainer.Version(sourceImageName,
+                             "preloaded-ES_7_10"));
+             OpensearchContainer<?> osTargetContainer =
+                     new OpensearchContainer<>(targetImageName)) {
+            esSourceContainer.start();
+            osTargetContainer.start();
+
+            final var SNAPSHOT_NAME = "test_snapshot";
+            final List<String> INDEX_ALLOWLIST = List.of();
+            CreateSnapshot.run(
+                    c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, ElasticsearchContainer.CLUSTER_SNAPSHOT_DIR),
+                    new OpenSearchClient(esSourceContainer.getUrl(), null),
+                    false);
+            var tempDirSnapshot = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
+            var tempDirLucene = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
+
+            String[] args = {
+                "--snapshot-name", SNAPSHOT_NAME,
+                "--snapshot-local-dir", tempDirSnapshot.toString(),
+                "--lucene-dir", tempDirLucene.toString(),
+                "--target-host", osTargetContainer.getHttpHostAddress()
+            };
+
+            try {
+                esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
+
+                var targetClient = new OpenSearchClient(osTargetContainer.getHttpHostAddress(), null);
+                var sourceRepo = new FileSystemRepo(tempDirSnapshot);
+                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, INDEX_ALLOWLIST);
+
+                String classpath = System.getProperty("java.class.path");
+                String javaHome = System.getProperty("java.home");
+                String javaExecutable = javaHome + File.separator + "bin" + File.separator + "java";
+
+                // Kick off the doc migration process
+                log.atInfo().setMessage("Running RfsMigrateDocuments with args: " + Arrays.toString(args)).log();
+                ProcessBuilder processBuilder = new ProcessBuilder(
+                        javaExecutable, "-cp", classpath, "com.rfs.RfsMigrateDocuments"
+                );
+                processBuilder.command().addAll(Arrays.asList(args));
+
+                Process process = processBuilder.start();
+                log.atInfo().setMessage("Process started with ID: " + Long.toString(process.toHandle().pid())).log();
+                
+                // Kill the process and fail if we have to wait too long
+                boolean finished = process.waitFor(2, TimeUnit.MINUTES);
+                if (!finished) {
+                    log.atError().setMessage("Process timed out, attempting to kill it...").log();
+                    process.destroy(); // Try to be nice about things first...
+                    if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                        log.atError().setMessage("Process still running, attempting to force kill it...").log();
+                        process.destroyForcibly(); // ..then avada kedavra
+                    }
+                    Assertions.fail("The process did not finish within the timeout period.");
+                }
+
+                int exitCode = process.exitValue();
+
+                // Check if the exit code is as expected
+                int expectedExitCode = 0;
+                Assertions.assertEquals(expectedExitCode, exitCode, "The program did not exit with the expected status code.");
+                
+            } finally {
+                deleteTree(tempDirSnapshot);
+                deleteTree(tempDirLucene);
+            }
         }
     }
 

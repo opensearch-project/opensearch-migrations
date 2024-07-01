@@ -148,10 +148,26 @@ test {
 }
 
 task slowTest(type: Test) {
+    doFirst {
+        println "Running slow tests..."
+    }
+
     useJUnitPlatform()
     dependsOn(':TrafficCapture:dockerSolution:buildDockerImage_elasticsearchTestConsole')
     jacoco {
         enabled = true
+    }
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+        showExceptions true
+        showCauses true
+        showStackTraces true
+        // showStandardStreams = true
+    }
+    reports {
+        html.required = true
+        html.destination file("${buildDir}/reports/tests/slowTest")
     }
 }
 
