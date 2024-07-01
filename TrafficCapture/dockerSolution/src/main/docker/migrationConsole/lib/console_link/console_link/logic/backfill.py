@@ -1,12 +1,13 @@
 from enum import Enum
 import json
 import logging
-from typing import Dict, Optional, Tuple
+from typing import Dict, Optional, Tuple, Callable, Any
+from console_link.models.command_result import CommandResult
 from console_link.models.utils import ExitCode
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
 from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill
 from console_link.models.cluster import Cluster
-from console_link.models.backfill_base import Backfill
+from console_link.models.backfill_base import Backfill, BackfillStatus
 import yaml
 
 
@@ -49,6 +50,25 @@ def get_backfill(config: Dict, source_cluster: Optional[Cluster], target_cluster
     if len(config.keys()) > 1:
         raise UnsupportedBackfillTypeError(', '.join(config.keys()))
     raise UnsupportedBackfillTypeError(next(iter(config.keys())))
+
+
+def handle_backfill_operation(
+    operation: Callable[[Any], CommandResult],
+    backfill: Backfill,
+    operation_name: str,
+    on_success: Callable[[Any], Tuple[ExitCode, str]],
+    *args: Any,
+    **kwargs: Any
+) -> Tuple[ExitCode, str]:
+    try:
+        result = operation(*args, **kwargs)
+    except NotImplementedError:
+        logger.error(f"{operation_name} is not implemented for backfill {type(backfill).__name__}")
+        return ExitCode.FAILURE, f"{operation_name} is not implemented for backfill: {type(backfill).__name__}"
+    except Exception as e:
+        logger.error(f"Failed to {operation_name.lower()} backfill: {e}")
+        return ExitCode.FAILURE, f"Failure on {operation_name.lower()} for backfill: {type(e).__name__} {e}"
+    return on_success(result.value)
 
 
 def describe(backfill: Backfill, as_json=False) -> str:
@@ -106,31 +126,17 @@ def stop(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
 
 def scale(backfill: Backfill, units: int, *args, **kwargs) -> Tuple[ExitCode, str]:
     logger.info(f"Scaling backfill to {units} units")
-    try:
-        result = backfill.scale(units, *args, **kwargs)
-    except NotImplementedError:
-        logger.error(f"Scale is not implemented for backfill {type(backfill).__name__}")
-        return ExitCode.FAILURE, f"Scale is not implemented for backfill {type(backfill).__name__}"
-    except Exception as e:
-        logger.error(f"Failed to scale backfill: {e}")
-        return ExitCode.FAILURE, f"Failure when scaling backfill: {type(e).__name__} {e}"
-    if result.success:
-        return ExitCode.SUCCESS, "Backfill scaled successfully." + "\n" + result.display()
-    return ExitCode.FAILURE, "Backfill scale failed." + "\n" + result.display()
+
+    return handle_backfill_operation(backfill.scale, backfill, "scale",
+                                     lambda status: (ExitCode.SUCCESS, f"{status[0]}\n{status[1]}"),
+                                     units, *args, **kwargs)
 
 
-def status(backfill: Backfill, deep_check, *args, **kwargs) -> Tuple[ExitCode, str]:
+def status(backfill: Backfill, deep_check: bool, *args, **kwargs) -> Tuple[ExitCode, str]:
     logger.info(f"Getting backfill status with {deep_check=}")
-    try:
-        status = backfill.get_status(deep_check, *args, **kwargs)
-    except NotImplementedError:
-        logger.error(f"Status is not implemented for backfill {type(backfill).__name__}")
-        return ExitCode.FAILURE, f"Status is not implemented for backfill: {type(backfill).__name__}"
-    except Exception as e:
-        logger.error(f"Failed to get status of backfill: {e}")
-        return ExitCode.FAILURE, f"Failure when getting status of backfill: {type(e).__name__} {e}"
-    if status.success:
-        return (ExitCode.SUCCESS,
-                f"{status.value[0]}\n{status.value[1]}" if not isinstance(status.value, str) else status.value)
-    return ExitCode.FAILURE, "Backfill status retrieval failed." + "\n" + \
-        f"{status.value[0]}\n{status.value[1]}" if not isinstance(status.value, str) else status.value
+    
+    def on_success(status: Tuple[BackfillStatus, str]) -> Tuple[ExitCode, str]:
+        return (ExitCode.SUCCESS, f"{status[0]}\n{status[1]}")
+
+    return handle_backfill_operation(backfill.get_status, backfill, "get status", on_success,
+                                     deep_check, *args, **kwargs)
