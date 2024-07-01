@@ -74,8 +74,6 @@ export class CaptureProxyESStack extends MigrationServiceCore {
                 // Set Elasticsearch port to 19200 to allow capture proxy at port 9200
                 "http.port": "19200"
             },
-            serviceDiscoveryEnabled: true,
-            serviceDiscoveryPort: 19200,
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,

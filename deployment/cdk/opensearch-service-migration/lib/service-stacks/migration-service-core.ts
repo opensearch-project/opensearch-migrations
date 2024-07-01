@@ -1,7 +1,7 @@
 import {StackPropsExt} from "../stack-composer";
 import {ISecurityGroup, IVpc, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {
-    CfnService as FargateCfnService, CloudMapOptions,
+    CfnService as FargateCfnService,
     Cluster,
     ContainerImage, CpuArchitecture,
     FargateService,
@@ -19,12 +19,9 @@ import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {Duration, RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {PolicyStatement} from "aws-cdk-lib/aws-iam";
-import {CfnService as DiscoveryCfnService, PrivateDnsNamespace} from "aws-cdk-lib/aws-servicediscovery";
-import {StringParameter} from "aws-cdk-lib/aws-ssm";
 import {createDefaultECSTaskRole} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
-import { ApplicationListener, ApplicationProtocol, ApplicationProtocolVersion, ApplicationTargetGroup, IApplicationLoadBalancer, IApplicationTargetGroup, IListenerCertificate, INetworkTargetGroup, ITargetGroup, SslPolicy } from "aws-cdk-lib/aws-elasticloadbalancingv2";
-import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
+import { IApplicationTargetGroup, INetworkTargetGroup } from "aws-cdk-lib/aws-elasticloadbalancingv2";
 
 
 export interface MigrationServiceCoreProps extends StackPropsExt {
@@ -46,8 +43,6 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly environment?: {
         [key: string]: string;
     },
-    readonly serviceDiscoveryEnabled?: boolean,
-    readonly serviceDiscoveryPort?: number,
     readonly taskCpuUnits?: number,
     readonly taskMemoryLimitMiB?: number,
     readonly taskInstanceCount?: number,
@@ -61,31 +56,6 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
 export type ELBTargetGroup = IApplicationTargetGroup | INetworkTargetGroup;
 
 export class MigrationServiceCore extends Stack {
-
-    // Use CDK escape hatch to modify the underlying CFN for the generated AWS::ServiceDiscovery::Service to allow
-    // multiple DnsRecords. GitHub issue can be found here: https://github.com/aws/aws-cdk/issues/18894
-    addServiceDiscoveryRecords(fargateService: FargateService, serviceDiscoveryPort: number|undefined) {
-        const multipleDnsRecords = {
-            DnsRecords: [
-                {
-                    TTL: 10,
-                    Type: "A"
-                },
-                {
-                    TTL: 10,
-                    Type: "SRV"
-                }
-            ]
-        }
-        const cloudMapCfn = fargateService.node.findChild("CloudmapService")
-        const cloudMapServiceCfn = cloudMapCfn.node.defaultChild as DiscoveryCfnService
-        cloudMapServiceCfn.addPropertyOverride("DnsConfig", multipleDnsRecords)
-
-        if (serviceDiscoveryPort) {
-            const fargateCfn = fargateService.node.defaultChild as FargateCfnService
-            fargateCfn.addPropertyOverride("ServiceRegistries.0.Port", serviceDiscoveryPort)
-        }
-    }
 
     createService(props: MigrationServiceCoreProps) {
         if ((!props.dockerDirectoryPath && !props.dockerImageRegistryName) || (props.dockerDirectoryPath && props.dockerImageRegistryName)) {
@@ -201,21 +171,6 @@ export class MigrationServiceCore extends Stack {
             });
         }
 
-
-        let cloudMapOptions: CloudMapOptions|undefined = undefined
-        if (props.serviceDiscoveryEnabled) {
-            const namespaceId = StringParameter.valueForStringParameter(this, `/migration/${props.stage}/${props.defaultDeployId}/cloudMapNamespaceId`)
-            const namespace = PrivateDnsNamespace.fromPrivateDnsNamespaceAttributes(this, "PrivateDNSNamespace", {
-                namespaceName: `migration.${props.stage}.local`,
-                namespaceId: namespaceId,
-                namespaceArn: `arn:${this.partition}:servicediscovery:${this.region}:${this.account}:namespace/${namespaceId}`
-            })
-            cloudMapOptions = {
-                name: props.serviceName,
-                cloudMapNamespace: namespace,
-            }
-        }
-
         if (props.otelCollectorEnabled) {
             OtelCollectorSidecar.addOtelCollectorContainer(serviceTaskDef, serviceLogGroup.logGroupName);
         }
@@ -229,15 +184,11 @@ export class MigrationServiceCore extends Stack {
             enableExecuteCommand: true,
             securityGroups: props.securityGroups,
             vpcSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PRIVATE_WITH_EGRESS}),
-            cloudMapOptions: cloudMapOptions,
         });
         
         if (props.targetGroups) {
             props.targetGroups.filter(tg => tg !== undefined).forEach(tg => tg.addTarget(fargateService));
         }
 
-        if (props.serviceDiscoveryEnabled) {
-            this.addServiceDiscoveryRecords(fargateService, props.serviceDiscoveryPort)
-        }
     }
 }
