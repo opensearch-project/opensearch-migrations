@@ -121,12 +121,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: MigrationConsoleProps) {
         super(scope, id, props)
 
-        const test = getMigrationStringParameterValue(this, {
-            ...props,
-            parameter: MigrationSSMParameter.TEST
-        });
-        this.exportValue(test, {name: 'testExportFromSSM'});
-
         let securityGroups = [
             { id: "serviceSG", param: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID },
             { id: "trafficStreamSourceAccessSG", param: MigrationSSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID },

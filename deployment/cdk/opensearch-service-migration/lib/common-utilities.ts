@@ -175,13 +175,11 @@ export interface MigrationSSMConfig {
 }
 
 export function createMigrationStringParameter(scope: Construct, stringValue: string, props: MigrationSSMConfig) {
-    const ssmParamter = new StringParameter(scope, `SSMParameter${props.parameter.charAt(0).toUpperCase() + props.parameter.slice(1)}`, {
+    return new StringParameter(scope, `SSMParameter${props.parameter.charAt(0).toUpperCase() + props.parameter.slice(1)}`, {
         parameterName: getMigrationStringParameterName(props),
         stringValue: stringValue,
         description: `Opensearch migration SSM parameter for ${props.parameter} with stage ${props.stage} and deploy id ${props.defaultDeployId}`,
     });
-    ssmParamter.applyRemovalPolicy(RemovalPolicy.RETAIN);
-    return ssmParamter;
 }
 
 export function getMigrationStringParameter(scope: Construct, props: MigrationSSMConfig): IStringParameter {
@@ -202,7 +200,10 @@ export function getMigrationStringParameterName(props: MigrationSSMConfig): stri
 }
 
 export enum MigrationSSMParameter {
-    ALB_MIGRATION_URL = 'albMigrationUrl',
+    MIGRATION_API_URL = 'albMigrationApiUrl',
+    SOURCE_PROXY_URL = 'albSourceProxyUrl',
+    TARGET_PROXY_URL = 'albTargetProxyUrl',
+    MIGRATION_LISTENER_URL = 'albMigrationListenerUrl',
     ARTIFACT_S3_ARN = 'artifactS3Arn',
     FETCH_MIGRATION_COMMAND = 'fetchMigrationCommand',
     FETCH_MIGRATION_TASK_DEF_ARN = 'fetchMigrationTaskDefArn',

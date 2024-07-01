@@ -273,6 +273,8 @@ export class StackComposer {
                 albAcmCertArn: albAcmCertArn,
                 elasticsearchServiceEnabled,
                 captureProxyESServiceEnabled,
+                captureProxyServiceEnabled,
+                targetClusterProxyServiceEnabled,
                 migrationAPIEnabled,
                 sourceClusterEndpoint: sourceClusterEndpoint,
                 env: props.env
