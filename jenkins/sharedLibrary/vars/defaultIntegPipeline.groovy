@@ -82,7 +82,10 @@ def call(Map config = [:]) {
                                 } else {
                                     def time = new Date().getTime()
                                     def uniqueId = "integ_min_${time}_${currentBuild.number}"
-                                    sh "sudo ./awsRunIntegTests.sh --stage ${stageId} --migrations-git-url ${gitUrl} --migrations-git-branch ${gitBranch} --unique-id ${uniqueId}"
+                                    def test_dir = "/root/lib/integ_test/integ_test"
+                                    def test_result_file = "${test_dir}/reports/${uniqueId}/report.xml"
+                                    def command = "pytest --log-file=${test_dir}/reports/${uniqueId}/pytest.log --junitxml=${test_result_file} ${test_dir}/replayer_tests.py --unique_id ${uniqueId} -s"
+                                    sh "sudo ./awsRunIntegTests.sh --command ${command} --test-result-file ${test_result_file} --stage ${stageId}"
                                 }
                             }
                         }
@@ -99,7 +102,7 @@ def call(Map config = [:]) {
                             if (config.finishStep) {
                                 config.finishStep()
                             } else {
-                                sh "sudo ./awsE2ESolutionSetup.sh --stage ${stageId} --run-post-actions"
+                                sh "echo 'Default post step performs no actions'"
                             }
                         }
                     }

@@ -12,7 +12,16 @@ class ConnectionResult:
     cluster_version: str
 
 
-def cat_indices(cluster: Cluster, as_json=False):
+def call_api(cluster: Cluster, path: str, method=HttpMethod.GET, data=None, headers=None, timeout=None,
+             session=None, raise_error=False):
+    r = cluster.call_api(path=path, method=method, data=data, headers=headers, timeout=timeout, session=session,
+                         raise_error=raise_error)
+    return r
+
+
+def cat_indices(cluster: Cluster, refresh=False, as_json=False):
+    if refresh:
+        cluster.call_api('/_refresh')
     as_json_suffix = "?format=json" if as_json else "?v"
     cat_indices_path = f"/_cat/indices/_all{as_json_suffix}"
     r = cluster.call_api(cat_indices_path)

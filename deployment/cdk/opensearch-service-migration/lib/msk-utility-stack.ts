@@ -104,6 +104,8 @@ export class MSKUtilityStack extends Stack {
                 handle: wcHandle.ref
             })
             waitCondition.node.addDependency(customResource);
+            // CFN limitation prevents accessing a specific field like "BROKER_ENDPOINTS" in the response data, so this
+            // will actually be more data than just broker endpoints
             brokerEndpoints = waitCondition.attrData.toString()
         }
         // If public endpoints are not enabled we will launch a simple Lambda custom resource to retrieve the private broker endpoints

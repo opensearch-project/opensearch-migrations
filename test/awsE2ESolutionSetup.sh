@@ -71,21 +71,6 @@ validate_required_options () {
   fi
 }
 
-restore_and_record () {
-  deploy_stage=$1
-  source_lb_endpoint=$(aws cloudformation describe-stacks --stack-name "$SOURCE_INFRA_STACK_NAME" --query "Stacks[0].Outputs[?OutputKey==\`loadbalancerurl\`].OutputValue" --output text)
-  source_endpoint="http://${source_lb_endpoint}:19200"
-  kafka_brokers=$(aws ssm get-parameter --name "/migration/$deploy_stage/default/kafkaBrokers" --query 'Parameter.Value' --output text)
-  console_task_arn=$(aws ecs list-tasks --cluster migration-${deploy_stage}-ecs-cluster --family "migration-${deploy_stage}-migration-console" | jq --raw-output '.taskArns[0]')
-
-  # Print final doc counts and Kafka topic status
-  unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${console_task_arn}" --container "migration-console" --interactive --command "./catIndices.sh --source-endpoint $source_endpoint --source-no-auth --target-no-auth"
-  unbuffer aws ecs execute-command --cluster "migration-${STAGE}-ecs-cluster" --task "${console_task_arn}" --container "migration-console" --interactive --command "./kafka-tools/kafka/bin/kafka-consumer-groups.sh --bootstrap-server ${kafka_brokers} --timeout 100000 --describe --group logging-group-default --command-config kafka-tools/aws/msk-iam-auth.properties"
-
-  # Turn off Replayer
-  aws ecs update-service --cluster "migration-${deploy_stage}-ecs-cluster" --service "migration-${deploy_stage}-traffic-replayer-default" --desired-count 0 > /dev/null 2>&1
-}
-
 # One-time required service-linked-role creation for AWS accounts which do not have these roles, will ignore/fail if
 # any of these roles already exist
 create_service_linked_roles () {
@@ -139,7 +124,6 @@ usage() {
   echo "  --migrations-git-url                             The Github http url used for building the capture proxy on setups with a dedicated source cluster, default is 'https://github.com/opensearch-project/opensearch-migrations.git'."
   echo "  --migrations-git-branch                          The Github branch associated with the 'git-url' to pull from, default is 'main'."
   echo "  --stage                                          The stage name to use for naming/grouping of AWS deployment resources, default is 'aws-integ'."
-  echo "  --run-post-actions                               Flag to enable only running post test actions for cleaning up and recording a test run."
   echo "  --create-service-linked-roles                    Flag to create required service linked roles for the AWS account"
   echo "  --bootstrap-region                               Flag to CDK bootstrap the region to allow CDK deployments"
   echo "  --skip-capture-proxy                             Flag to skip setting up the Capture Proxy on source cluster nodes"
@@ -151,7 +135,6 @@ usage() {
 }
 
 STAGE='aws-integ'
-RUN_POST_ACTIONS=false
 CREATE_SLR=false
 BOOTSTRAP_REGION=false
 SKIP_CAPTURE_PROXY=false
@@ -173,10 +156,6 @@ while [[ $# -gt 0 ]]; do
       ;;
     --bootstrap-region)
       BOOTSTRAP_REGION=true
-      shift # past argument
-      ;;
-    --run-post-actions)
-      RUN_POST_ACTIONS=true
       shift # past argument
       ;;
     --skip-capture-proxy)
@@ -247,11 +226,6 @@ SOURCE_NETWORK_STACK_NAME="opensearch-network-stack-ec2-source-$STAGE"
 SOURCE_INFRA_STACK_NAME="opensearch-infra-stack-ec2-source-$STAGE"
 SOURCE_GEN_CONTEXT_FILE="$TMP_DIR_PATH/generatedSourceContext.json"
 MIGRATION_GEN_CONTEXT_FILE="$TMP_DIR_PATH/generatedMigrationContext.json"
-
-if [ "$RUN_POST_ACTIONS" = true ] ; then
-  restore_and_record "$STAGE"
-  exit 0
-fi
 
 if [ "$CREATE_SLR" = true ] ; then
   create_service_linked_roles

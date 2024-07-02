@@ -25,7 +25,7 @@ def start(replayer: Replayer, *args, **kwargs) -> Tuple[ExitCode, str]:
     except Exception as e:
         logger.error(f"Failed to start replayer: {e}")
         return ExitCode.FAILURE, f"Failure when starting replayer: {type(e).__name__} {e}"
-    
+
     if result.success:
         return ExitCode.SUCCESS, "Replayer started successfully." + "\n" + result.display()
     return ExitCode.FAILURE, "Replayer start failed." + "\n" + result.display()
@@ -64,13 +64,13 @@ def scale(replayer: Replayer, units: int, *args, **kwargs) -> Tuple[ExitCode, st
 def status(replayer: Replayer, *args, **kwargs) -> Tuple[ExitCode, str]:
     logger.info("Getting replayer status")
     try:
-        status = replayer.get_status(*args, **kwargs)
+        result = replayer.get_status(*args, **kwargs)
     except NotImplementedError:
         logger.error(f"Status is not implemented for replayer {type(replayer).__name__}")
         return ExitCode.FAILURE, f"Status is not implemented for replayer: {type(replayer).__name__}"
     except Exception as e:
         logger.error(f"Failed to get status of replayer: {e}")
         return ExitCode.FAILURE, f"Failure when getting status of replayer: {type(e).__name__} {e}"
-    if status:
-        return ExitCode.SUCCESS, status.value
-    return ExitCode.FAILURE, "Replayer status retrieval failed." + "\n" + status
+    if result.success:
+        return ExitCode.SUCCESS, result.value[0].name
+    return ExitCode.FAILURE, "Replayer status retrieval failed." + "\n" + result.value[1]
