@@ -15,7 +15,7 @@ import {StreamingSourceType} from "../streaming-source-type";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {RemovalPolicy} from "aws-cdk-lib";
 import { MetadataMigrationYaml, ServicesYaml } from "../migration-services-yaml";
-import { MigrationServiceCore } from "./migration-service-core";
+import { ELBTargetGroup, MigrationServiceCore } from "./migration-service-core";
 
 export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationsSolutionVersion: string,
@@ -25,6 +25,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly fargateCpuArch: CpuArchitecture,
     readonly migrationConsoleEnableOSI: boolean,
     readonly migrationAPIEnabled?: boolean,
+    readonly targetGroups: ELBTargetGroup[],
     readonly servicesYaml: ServicesYaml,
 }
 
@@ -118,6 +119,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
     constructor(scope: Construct, id: string, props: MigrationConsoleProps) {
         super(scope, id, props)
+
         let securityGroups = [
             { id: "serviceSG", param: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID },
             { id: "trafficStreamSourceAccessSG", param: MigrationSSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID },
@@ -131,8 +133,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         );
 
         let servicePortMappings: PortMapping[]|undefined
-        let serviceDiscoveryPort: number|undefined
-        let serviceDiscoveryEnabled = false
         let imageCommand = ['/bin/sh', '-c', '/root/loadServicesFromParameterStore.sh']
 
         const osClusterEndpoint = getMigrationStringParameterValue(this, {
@@ -322,10 +322,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 containerPort: 8000,
                 protocol: Protocol.TCP
             }]
-            serviceDiscoveryPort = 8000
-            serviceDiscoveryEnabled = true
             imageCommand = ['/bin/sh', '-c',
-                '/root/loadServicesFromParameterStore.sh && python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000'
+                '/root/loadServicesFromParameterStore.sh && python /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt'
             ]
         }
 
@@ -349,8 +347,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             securityGroups: securityGroups,
             portMappings: servicePortMappings,
             dockerImageCommand: imageCommand,
-            serviceDiscoveryEnabled: serviceDiscoveryEnabled,
-            serviceDiscoveryPort: serviceDiscoveryPort,
             volumes: [replayerOutputEFSVolume],
             mountPoints: [replayerOutputMountPoint],
             environment: environment,
