@@ -3,10 +3,10 @@ package com.rfs.version_es_7_10;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.SnapshotRepo;
+import com.rfs.models.IndexMetadata;
 
-public class IndexMetadataFactory_ES_7_10 implements com.rfs.common.IndexMetadata.Factory {
+public class IndexMetadataFactory_ES_7_10 implements IndexMetadata.Factory {
     private final SnapshotRepo.Provider repoDataProvider;
 
     public IndexMetadataFactory_ES_7_10(SnapshotRepo.Provider repoDataProvider) {
@@ -14,7 +14,7 @@ public class IndexMetadataFactory_ES_7_10 implements com.rfs.common.IndexMetadat
     }
     
     @Override
-    public IndexMetadata.Data fromJsonNode(JsonNode root, String indexId, String indexName) {
+    public IndexMetadata fromJsonNode(JsonNode root, String indexId, String indexName) {
         ObjectNode objectNodeRoot = (ObjectNode) root.get(indexName);
         return new IndexMetadataData_ES_7_10(objectNodeRoot, indexId, indexName);
     }

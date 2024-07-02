@@ -51,6 +51,12 @@ dependencies {
     implementation group: 'io.opentelemetry', name: 'opentelemetry-exporter-otlp'
     implementation group: 'io.opentelemetry.semconv', name: 'opentelemetry-semconv'
 
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
+
+    testImplementation group: 'org.mockito', name: 'mockito-core'
+    testImplementation group: 'org.hamcrest', name: 'hamcrest'
+
     testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-api'
     testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-sdk'
     testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'

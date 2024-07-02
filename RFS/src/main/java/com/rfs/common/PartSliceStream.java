@@ -3,6 +3,9 @@ package com.rfs.common;
 import java.io.IOException;
 import java.io.InputStream;
 
+import com.rfs.models.ShardFileInfo;
+import com.rfs.models.ShardMetadata;
+
 /**
  * Taken from Elasticsearch 6.8, combining the SlicedInputStream and PartSliceStream classes with our special sauce
  * See: https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/index/snapshots/blobstore/SlicedInputStream.java
@@ -11,14 +14,14 @@ import java.io.InputStream;
 
 public class PartSliceStream extends InputStream {
     private final SourceRepoAccessor repoAccessor;
-    private final ShardMetadata.FileInfo fileMetadata;
+    private final ShardFileInfo fileMetadata;
     private final String indexId;
     private final int shardId;
     private long slice = 0;
     private InputStream currentStream;
     private boolean initialized = false;
 
-    public PartSliceStream(SourceRepoAccessor repoAccessor, ShardMetadata.FileInfo fileMetadata, String indexId, int shardId) {
+    public PartSliceStream(SourceRepoAccessor repoAccessor, ShardFileInfo fileMetadata, String indexId, int shardId) {
         this.repoAccessor = repoAccessor;
         this.fileMetadata = fileMetadata;
         this.indexId = indexId;

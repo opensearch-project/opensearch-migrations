@@ -15,9 +15,10 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.rfs.common.ShardMetadata;
+import com.rfs.models.ShardFileInfo;
+import com.rfs.models.ShardMetadata;
 
-public class ShardMetadataData_ES_7_10 implements ShardMetadata.Data {
+public class ShardMetadataData_ES_7_10 implements ShardMetadata {
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     static {
@@ -110,8 +111,8 @@ public class ShardMetadataData_ES_7_10 implements ShardMetadata.Data {
     }
 
     @Override
-    public List<ShardMetadata.FileInfo> getFiles() {
-        List<ShardMetadata.FileInfo> convertedFiles = new ArrayList<>(files);
+    public List<ShardFileInfo> getFiles() {
+        List<ShardFileInfo> convertedFiles = new ArrayList<>(files);
         return convertedFiles;
     }
 
@@ -152,7 +153,7 @@ public class ShardMetadataData_ES_7_10 implements ShardMetadata.Data {
         }
     }
 
-    public static class FileInfo implements ShardMetadata.FileInfo {
+    public static class FileInfo implements ShardFileInfo {
         private String name;
         private String physicalName;
         private long length;

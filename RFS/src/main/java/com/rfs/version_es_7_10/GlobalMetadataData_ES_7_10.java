@@ -1,8 +1,9 @@
 package com.rfs.version_es_7_10;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.rfs.models.GlobalMetadata;
 
-public class GlobalMetadataData_ES_7_10 implements com.rfs.common.GlobalMetadata.Data {
+public class GlobalMetadataData_ES_7_10 implements GlobalMetadata {
     private final ObjectNode root;
 
     public GlobalMetadataData_ES_7_10(ObjectNode root) {

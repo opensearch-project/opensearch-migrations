@@ -1,12 +1,18 @@
 package com.rfs.framework;
 
+import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
+import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPut;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
+import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 
+import lombok.SneakyThrows;
+
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 
 import static org.hamcrest.CoreMatchers.anyOf;
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -30,7 +36,7 @@ public class ClusterOperations {
         final var repositoryJson = "{\n" +
         "  \"type\": \"fs\",\n" +
         "  \"settings\": {\n" +
-        "    \"location\": \"/usr/share/elasticsearch/snapshots\",\n" +
+        "    \"location\": \"" + SearchClusterContainer.CLUSTER_SNAPSHOT_DIR + "\",\n" +
         "    \"compress\": false\n" +
         "  }\n" +
         "}";
@@ -62,6 +68,16 @@ public class ClusterOperations {
         }
     }
 
+    @SneakyThrows
+    public Pair<Integer, String> get(final String path) {
+        final var getRequest = new HttpGet(clusterUrl + path);
+
+        try (var response = httpClient.execute(getRequest)) {
+            var responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+            return Pair.of(response.getCode(), responseBody);
+        }
+    }
+
     public void takeSnapshot(final String snapshotName, final String indexPattern) throws IOException {
         final var snapshotJson = "{\n" +
                 "  \"indices\": \"" + indexPattern + "\",\n" +
@@ -75,6 +91,49 @@ public class ClusterOperations {
 
         try (var response = httpClient.execute(createSnapshotRequest)) {
             assertThat(response.getCode(), equalTo(200));
+        }
+    }
+
+    /**
+     * Intented for use on ES 6 clusters
+     */
+    @SneakyThrows
+    public void createLegacyTemplate(final String templateName, final String pattern) throws IOException {
+        final var templateJson =
+            "{\r\n" + //
+            "  \"index_patterns\": [\r\n" + //
+            "    \"" + pattern + "\"\r\n" + //
+            "  ],\r\n" + //
+            "  \"settings\": {\r\n" + //
+            "    \"number_of_shards\": 1\r\n" + //
+            "  },\r\n" + //
+            "  \"aliases\": {\r\n" + //
+            "    \"alias1\": {}\r\n" + //
+            "  },\r\n" + //
+            "  \"mappings\": {\r\n" + //
+            "    \"_doc\": {\r\n" + //
+            "      \"_source\": {\r\n" + //
+            "        \"enabled\": true\r\n" + //
+            "      },\r\n" + //
+            "      \"properties\": {\r\n" + //
+            "        \"host_name\": {\r\n" + //
+            "          \"type\": \"keyword\"\r\n" + //
+            "        },\r\n" + //
+            "        \"created_at\": {\r\n" + //
+            "          \"type\": \"date\",\r\n" + //
+            "          \"format\": \"EEE MMM dd HH:mm:ss Z yyyy\"\r\n" + //
+            "        }\r\n" + //
+            "      }\r\n" + //
+            "    }\r\n" + //
+            "  }\r\n" + //
+            "}";    
+
+        final var createRepoRequest = new HttpPut(clusterUrl + "/_template/" + templateName);
+        createRepoRequest.setEntity(new StringEntity(templateJson));
+        createRepoRequest.setHeader("Content-Type", "application/json");
+
+        try (var response = httpClient.execute(createRepoRequest)) {
+            assertThat(EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8), response.getCode(), equalTo(200));
         }
     }
 }

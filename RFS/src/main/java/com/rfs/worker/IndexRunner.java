@@ -7,8 +7,8 @@ import com.rfs.common.SnapshotRepo;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+import com.rfs.models.IndexMetadata;
 import com.rfs.common.FilterScheme;
-import com.rfs.common.IndexMetadata;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 
@@ -35,8 +35,7 @@ public class IndexRunner {
             .filter(FilterScheme.filterIndicesByAllowList(indexAllowlist, logger))
             .peek(index -> {
                 var indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
-                var root = indexMetadata.toObjectNode();
-                var transformedRoot = transformer.transformIndexMetadata(root);
+                var transformedRoot = transformer.transformIndexMetadata(indexMetadata);
                 var resultOp = indexCreator.create(transformedRoot, index.getName(), indexMetadata.getId());
                 resultOp.ifPresentOrElse(value -> log.info("Index " + index.getName() + " created successfully"),
                         () -> log.info("Index " + index.getName() + " already existed; no work required")
