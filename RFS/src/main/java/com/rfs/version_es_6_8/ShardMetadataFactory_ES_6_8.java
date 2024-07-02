@@ -38,7 +38,7 @@ public class ShardMetadataFactory_ES_6_8 implements ShardMetadata.Factory {
                     shardMetadataRaw.files
             );
         } catch (Exception e) {
-            throw new RuntimeException("Could not parse shard metadata for Index " + indexId + ", Shard " + shardId, e);
+            throw new ShardMetadata.CouldNotParseShardMetadata("Could not parse shard metadata for Index " + indexId + ", Shard " + shardId, e);
         }
         
     }
