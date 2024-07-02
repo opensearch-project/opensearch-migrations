@@ -56,14 +56,14 @@ public class RfsMigrateDocuments {
                 description = ("The absolute path to the directory on local disk where the snapshot exists.  Use this parameter"
                     + " if have a copy of the snapshot disk.  Mutually exclusive with --s3-local-dir, --s3-repo-uri, and --s3-region."
                 ))
-        public String snapshotLocalDirPath = null;
+        public String snapshotLocalDir = null;
 
         @Parameter(names = {"--s3-local-dir"},
                 required = false,
                 description = ("The absolute path to the directory on local disk to download S3 files to.  If you supply this, you must"
                     + " also supply --s3-repo-uri and --s3-region.  Mutually exclusive with --snapshot-local-dir."
                 ))
-        public String s3LocalDirPath = null;
+        public String s3LocalDir = null;
 
         @Parameter(names = {"--s3-repo-uri"},
                 required = false,
@@ -82,7 +82,7 @@ public class RfsMigrateDocuments {
         @Parameter(names = {"--lucene-dir"},
                 required = true,
                 description = "The absolute path to the directory where we'll put the Lucene docs")
-        public String luceneDirPath;
+        public String luceneDir;
 
         @Parameter(names = {"--target-host"},
                 required = true,
@@ -113,9 +113,9 @@ public class RfsMigrateDocuments {
     }
 
     public static void validateArgs(Args args) {
-        boolean isSnapshotLocalDirProvided = args.snapshotLocalDirPath != null;
-        boolean areAllS3ArgsProvided = args.s3LocalDirPath != null && args.s3RepoUri != null && args.s3Region != null;
-        boolean areAnyS3ArgsProvided = args.s3LocalDirPath != null || args.s3RepoUri != null || args.s3Region != null;
+        boolean isSnapshotLocalDirProvided = args.snapshotLocalDir != null;
+        boolean areAllS3ArgsProvided = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
+        boolean areAnyS3ArgsProvided = args.s3LocalDir != null || args.s3RepoUri != null || args.s3Region != null;
 
         if (isSnapshotLocalDirProvided && areAnyS3ArgsProvided) {
             throw new ParameterException("You must provide either --snapshot-local-dir or --s3-local-dir, --s3-repo-uri, and --s3-region, but not both.");
@@ -140,9 +140,12 @@ public class RfsMigrateDocuments {
 
         validateArgs(arguments);
 
-        var luceneDirPath = Paths.get(arguments.luceneDirPath);
+        var luceneDirPath = Paths.get(arguments.luceneDir);
+        var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
+
+
         try (var processManager = new LeaseExpireTrigger(workItemId->{
-            log.error("terminating RunRfsWorker because its lease has expired for " + workItemId);
+            log.error("Terminating RunRfsWorker because its lease has expired for " + workItemId);
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC())) {
             var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(arguments.targetHost)),
@@ -156,14 +159,14 @@ public class RfsMigrateDocuments {
                 DocumentReindexer reindexer = new DocumentReindexer(targetClient);
 
                 SourceRepo sourceRepo;
-                if (arguments.snapshotLocalDirPath == null) {
+                if (snapshotLocalDirPath == null) {
                     sourceRepo = S3Repo.create(
-                        Paths.get(arguments.s3LocalDirPath),
+                        Paths.get(arguments.s3LocalDir),
                         new S3Uri(arguments.s3RepoUri),
                         arguments.s3Region
                     );
                 } else {
-                    sourceRepo = new FileSystemRepo(Paths.get(arguments.snapshotLocalDirPath));
+                    sourceRepo = new FileSystemRepo(snapshotLocalDirPath);
                 }
                 SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
 

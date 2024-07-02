@@ -47,8 +47,10 @@ import org.opensearch.testcontainers.OpensearchContainer;
 import org.slf4j.event.Level;
 import reactor.core.publisher.Flux;
 
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -315,19 +317,20 @@ public class FullTest {
     }
 
     public static Stream<Arguments> makeProcessExitArgs() {
-        var sourceImageArgs = SOURCE_IMAGES.stream().map(name -> makeParamsForBase(name)).collect(Collectors.toList());
-        var targetImageNames = TARGET_IMAGES.stream().map(SearchClusterContainer.Version::getImageName).collect(Collectors.toList());
-
-        return sourceImageArgs.stream()
-            .flatMap(a->
-            targetImageNames.stream().map(b->Arguments.of(a[0], a[1], a[2], b)));
+        return Stream.of(
+            Arguments.of(true, 0),
+            Arguments.of(false, 1)
+        );
     }
 
     @ParameterizedTest
     @MethodSource("makeProcessExitArgs")
-    public void testProcessExitsAsExpected(SearchClusterContainer.Version baseSourceImageVersion,
-            String generatorImage, String[] generatorArgs,
-            String targetImageName) throws Exception {
+    public void testProcessExitsAsExpected(boolean targetAvailable, int expectedExitCode) throws Exception {
+        var sourceImageArgs = makeParamsForBase(SearchClusterContainer.ES_V7_10_2);
+        var baseSourceImageVersion = (SearchClusterContainer.Version) sourceImageArgs[0];
+        var generatorImage = (String) sourceImageArgs[1];
+        var generatorArgs = (String[]) sourceImageArgs[2];
+        var targetImageName = SearchClusterContainer.OS_V2_14_0.getImageName();
 
         try (var esSourceContainer = new PreloadedSearchClusterContainer(baseSourceImageVersion,
                     SOURCE_SERVER_ALIAS, generatorImage, generatorArgs);
@@ -345,19 +348,27 @@ public class FullTest {
             var tempDirSnapshot = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
             var tempDirLucene = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
 
+            String targetAddress = osTargetContainer.getHttpHostAddress();
+
             String[] args = {
                 "--snapshot-name", SNAPSHOT_NAME,
                 "--snapshot-local-dir", tempDirSnapshot.toString(),
                 "--lucene-dir", tempDirLucene.toString(),
-                "--target-host", osTargetContainer.getHttpHostAddress()
+                "--target-host", targetAddress
             };
 
             try {
                 esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
-                var targetClient = new OpenSearchClient(osTargetContainer.getHttpHostAddress(), null);
+                var targetClient = new OpenSearchClient(targetAddress, null);
                 var sourceRepo = new FileSystemRepo(tempDirSnapshot);
                 migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, INDEX_ALLOWLIST);
+
+                // Stop the target container if we don't want it to be available.  We've already cached the address it was
+                // using, so we can have reasonable confidence that nothing else will be using it and bork our test.
+                if (!targetAvailable) {
+                    osTargetContainer.stop();
+                }
 
                 String classpath = System.getProperty("java.class.path");
                 String javaHome = System.getProperty("java.home");
@@ -369,27 +380,40 @@ public class FullTest {
                         javaExecutable, "-cp", classpath, "com.rfs.RfsMigrateDocuments"
                 );
                 processBuilder.command().addAll(Arrays.asList(args));
+                processBuilder.redirectErrorStream(true);
 
                 Process process = processBuilder.start();
                 log.atInfo().setMessage("Process started with ID: " + Long.toString(process.toHandle().pid())).log();
                 
                 // Kill the process and fail if we have to wait too long
-                boolean finished = process.waitFor(2, TimeUnit.MINUTES);
+                int timeoutSeconds = 90;
+                boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
                 if (!finished) {
+                    // Print the process output
+                    StringBuilder output = new StringBuilder();
+                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            output.append(line).append(System.lineSeparator());
+                        }
+                    }
+                    log.atError().setMessage("Process Output:").log();
+                    log.atError().setMessage(output.toString()).log();
+
                     log.atError().setMessage("Process timed out, attempting to kill it...").log();
                     process.destroy(); // Try to be nice about things first...
                     if (!process.waitFor(10, TimeUnit.SECONDS)) {
                         log.atError().setMessage("Process still running, attempting to force kill it...").log();
                         process.destroyForcibly(); // ..then avada kedavra
                     }
-                    Assertions.fail("The process did not finish within the timeout period.");
+                    Assertions.fail("The process did not finish within the timeout period (" + timeoutSeconds + " seconds).");
                 }
 
-                int exitCode = process.exitValue();
+                int actualExitCode = process.exitValue();
+                log.atInfo().setMessage("Process exited with code: " + actualExitCode).log();
 
                 // Check if the exit code is as expected
-                int expectedExitCode = 0;
-                Assertions.assertEquals(expectedExitCode, exitCode, "The program did not exit with the expected status code.");
+                Assertions.assertEquals(expectedExitCode, actualExitCode, "The program did not exit with the expected status code.");
                 
             } finally {
                 deleteTree(tempDirSnapshot);
