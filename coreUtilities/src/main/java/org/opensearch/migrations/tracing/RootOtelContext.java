@@ -113,11 +113,6 @@ public class RootOtelContext implements IRootOtelContext {
         this(scopeName, contextTracker, null);
     }
 
-    public RootOtelContext(String scopeName, IContextTracker contextTracker,
-                           String collectorEndpoint, String serviceName) {
-        this(scopeName, contextTracker, initializeOpenTelemetryWithCollectorOrAsNoop(collectorEndpoint, serviceName));
-    }
-
     public RootOtelContext(String scopeName, IContextTracker contextTracker, OpenTelemetry sdk) {
         openTelemetryImpl = sdk != null ? sdk : initializeOpenTelemetryWithCollectorOrAsNoop(null, null);
         this.scopeName = scopeName;

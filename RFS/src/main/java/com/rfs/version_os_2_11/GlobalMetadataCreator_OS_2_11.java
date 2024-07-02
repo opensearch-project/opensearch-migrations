@@ -3,6 +3,7 @@ package com.rfs.version_os_2_11;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.rfs.tracing.IRfsContexts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -16,12 +17,18 @@ public class GlobalMetadataCreator_OS_2_11 {
     private final List<String> legacyTemplateAllowlist;
     private final List<String> componentTemplateAllowlist;
     private final List<String> indexTemplateAllowlist;
+    private final IRfsContexts.IClusterMetadataContext context;
 
-    public GlobalMetadataCreator_OS_2_11(OpenSearchClient client, List<String> legacyTemplateAllowlist, List<String> componentTemplateAllowlist, List<String> indexTemplateAllowlist) {
+    public GlobalMetadataCreator_OS_2_11(OpenSearchClient client,
+                                         List<String> legacyTemplateAllowlist,
+                                         List<String> componentTemplateAllowlist,
+                                         List<String> indexTemplateAllowlist,
+                                         IRfsContexts.IClusterMetadataContext context) {
         this.client = client;
         this.legacyTemplateAllowlist = legacyTemplateAllowlist;
         this.componentTemplateAllowlist = componentTemplateAllowlist;
         this.indexTemplateAllowlist = indexTemplateAllowlist;
+        this.context = context;
     }
 
     public void create(ObjectNode root) {
@@ -44,7 +51,6 @@ public class GlobalMetadataCreator_OS_2_11 {
 
         if (templateAllowlist != null && templateAllowlist.size() == 0) {
             logger.info("No Legacy Templates in specified allowlist");
-            return;
         } else if (templateAllowlist != null) {
             for (String templateName : templateAllowlist) {
                 if (!templates.has(templateName) || templates.get(templateName) == null) {
@@ -54,7 +60,8 @@ public class GlobalMetadataCreator_OS_2_11 {
 
                 logger.info("Setting Legacy Template: " + templateName);
                 ObjectNode settings = (ObjectNode) globalMetadata.getTemplates().get(templateName);
-                client.createLegacyTemplate(templateName, settings);
+                client.createLegacyTemplate(templateName, settings,
+                        context.createMigrateLegacyTemplateContext()); // purposefully make a new one each loop iteration
             }
         } else {
             // Get the template names
@@ -65,7 +72,8 @@ public class GlobalMetadataCreator_OS_2_11 {
             for (String templateName : templateKeys) {
                 logger.info("Setting Legacy Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
-                client.createLegacyTemplate(templateName, settings);
+                client.createLegacyTemplate(templateName, settings,
+                        context.createMigrateLegacyTemplateContext()); // purposefully make a new one each loop iteration
             }
         }
     }
@@ -82,7 +90,7 @@ public class GlobalMetadataCreator_OS_2_11 {
         if (templateAllowlist != null && templateAllowlist.size() == 0) {
             logger.info("No Component Templates in specified allowlist");
             return;
-        } else if (templateAllowlist != null) {            
+        } else if (templateAllowlist != null) {
             for (String templateName : templateAllowlist) {
                 if (!templates.has(templateName) || templates.get(templateName) == null) {
                     logger.warn("Component Template not found: " + templateName);
@@ -91,7 +99,8 @@ public class GlobalMetadataCreator_OS_2_11 {
 
                 logger.info("Setting Component Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
-                client.createComponentTemplate(templateName, settings);
+                client.createComponentTemplate(templateName, settings,
+                        context.createComponentTemplateContext()); // purposefully make a new one each loop iteration
             }
         } else {
             // Get the template names
@@ -102,7 +111,8 @@ public class GlobalMetadataCreator_OS_2_11 {
             for (String templateName : templateKeys) {
                 logger.info("Setting Component Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
-                client.createComponentTemplate(templateName, settings);
+                client.createComponentTemplate(templateName, settings,
+                        context.createComponentTemplateContext()); // purposefully make a new one each loop iteration
             }
         }
     }
@@ -128,7 +138,8 @@ public class GlobalMetadataCreator_OS_2_11 {
 
                 logger.info("Setting Index Template: " + templateName);
                 ObjectNode settings = (ObjectNode) globalMetadata.getIndexTemplates().get(templateName);
-                client.createIndexTemplate(templateName, settings);
+                client.createIndexTemplate(templateName, settings,
+                        context.createMigrateTemplateContext()); // purposefully make a new one each loop iteration
             }
         } else {
             // Get the template names
@@ -139,7 +150,8 @@ public class GlobalMetadataCreator_OS_2_11 {
             for (String templateName : templateKeys) {
                 logger.info("Setting Index Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
-                client.createIndexTemplate(templateName, settings);
+                client.createIndexTemplate(templateName, settings,
+                        context.createMigrateTemplateContext()); // purposefully make a new one each loop iteration
             }
         }
     }

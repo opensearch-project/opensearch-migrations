@@ -20,6 +20,8 @@ import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.framework.PreloadedSearchClusterContainer;
+import com.rfs.framework.tracing.TestContext;
+import com.rfs.tracing.IRfsContexts;
 import com.rfs.transformers.TransformFunctions;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
@@ -111,18 +113,19 @@ public class FullTest {
                      String targetImageName, int numWorkers)
             throws Exception
     {
-
+        final var testContext = TestContext.noOtelTracking();
         try (var esSourceContainer = new PreloadedSearchClusterContainer(baseSourceImageVersion,
                 SOURCE_SERVER_ALIAS, generatorImage, generatorArgs);
-             OpensearchContainer<?> osTargetContainer =
-                     new OpensearchContainer<>(targetImageName)) {
+             OpensearchContainer<?> osTargetContainer = new OpensearchContainer<>(targetImageName))
+        {
             esSourceContainer.start();
             osTargetContainer.start();
 
             final var SNAPSHOT_NAME = "test_snapshot";
             final List<String> INDEX_ALLOWLIST = List.of();
             CreateSnapshot.run(
-                    c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, SearchClusterContainer.CLUSTER_SNAPSHOT_DIR),
+                    c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
+                            testContext.createSnapshotCreateContext()),
                     new OpenSearchClient(esSourceContainer.getUrl(), null),
                     false);
             var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
@@ -131,7 +134,7 @@ public class FullTest {
 
                 var targetClient = new OpenSearchClient(osTargetContainer.getHttpHostAddress(), null);
                 var sourceRepo = new FileSystemRepo(tempDir);
-                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, INDEX_ALLOWLIST);
+                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, INDEX_ALLOWLIST, testContext);
 
                 var workerFutures = new ArrayList<CompletableFuture<Void>>();
                 var runCounter = new AtomicInteger();
@@ -139,7 +142,7 @@ public class FullTest {
                 for (int i = 0; i < numWorkers; ++i) {
                     workerFutures.add(CompletableFuture.supplyAsync(() ->
                             migrateDocumentsSequentially(sourceRepo, SNAPSHOT_NAME, INDEX_ALLOWLIST,
-                                    osTargetContainer.getHttpHostAddress(), runCounter, clockJitter)));
+                                    osTargetContainer.getHttpHostAddress(), runCounter, clockJitter, testContext)));
                 }
                 var thrownException = Assertions.assertThrows(ExecutionException.class, () ->
                         CompletableFuture.allOf(workerFutures.toArray(CompletableFuture[]::new)).get());
@@ -161,7 +164,7 @@ public class FullTest {
                 // for now, lets make sure that we got all of the
                 Assertions.assertInstanceOf(RfsMigrateDocuments.NoWorkLeftException.class, thrownException.getCause(),
                         "expected at least one worker to notice that all work was completed.");
-                checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer);
+                checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer, testContext);
                 var totalCompletedWorkRuns = runCounter.get();
                 Assertions.assertTrue(totalCompletedWorkRuns >= numWorkers,
                         "Expected to make more runs (" + totalCompletedWorkRuns + ") than the number of workers " +
@@ -173,18 +176,19 @@ public class FullTest {
     }
 
     private void checkClusterMigrationOnFinished(SearchClusterContainer esSourceContainer,
-                                                 OpensearchContainer<?> osTargetContainer) {
+                                                 OpensearchContainer<?> osTargetContainer,
+                                                 TestContext context) {
         var targetClient = new RestClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(), null, null));
         var sourceMap = getIndexToCountMap(new RestClient(new ConnectionDetails(esSourceContainer.getUrl(),
-                null, null)));
-        var refreshResponse = targetClient.get("_refresh");
+                null, null)), context.createUnboundRequestContext());
+        var refreshResponse = targetClient.get("_refresh", context.createUnboundRequestContext());
         Assertions.assertEquals(200, refreshResponse.code);
-        var targetMap = getIndexToCountMap(targetClient);
+        var targetMap = getIndexToCountMap(targetClient, context.createUnboundRequestContext());
         MatcherAssert.assertThat(targetMap, Matchers.equalTo(sourceMap));
     }
 
-    private Map<String,Integer> getIndexToCountMap(RestClient client) {;
-        var lines = Optional.ofNullable(client.get("_cat/indices"))
+    private Map<String,Integer> getIndexToCountMap(RestClient client, IRfsContexts.IRequestContext context) {;
+        var lines = Optional.ofNullable(client.get("_cat/indices", context))
                 .flatMap(r->Optional.ofNullable(r.body))
                 .map(b->b.split("\n"))
                 .orElse(new String[0]);
@@ -205,11 +209,12 @@ public class FullTest {
                                               List<String> indexAllowlist,
                                               String targetAddress,
                                               AtomicInteger runCounter,
-                                              Random clockJitter) {
+                                              Random clockJitter,
+                                              TestContext testContext) {
         for (int runNumber=0; ; ++runNumber) {
             try {
                 var workResult = migrateDocumentsWithOneWorker(sourceRepo, snapshotName, indexAllowlist, targetAddress,
-                        clockJitter);
+                        clockJitter, testContext);
                 if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
                     return null;
                 } else {
@@ -226,18 +231,25 @@ public class FullTest {
         }
     }
 
-    private static void migrateMetadata(SourceRepo sourceRepo, OpenSearchClient targetClient, String snapshotName, List<String> indexAllowlist) {
+    private static void migrateMetadata(SourceRepo sourceRepo,
+                                        OpenSearchClient targetClient,
+                                        String snapshotName,
+                                        List<String> indexAllowlist,
+                                        TestContext context)
+    {
         SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
         GlobalMetadata.Factory metadataFactory = new GlobalMetadataFactory_ES_7_10(repoDataProvider);
         GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient,
-                List.of(), List.of(), List.of());
+                List.of(), List.of(), List.of(), context.createMetadataMigrationContext());
         Transformer transformer =
                 TransformFunctions.getTransformer(ClusterVersion.ES_7_10, ClusterVersion.OS_2_11, 1);
         new MetadataRunner(snapshotName, metadataFactory, metadataCreator, transformer).migrateMetadata();
 
         IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
         IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
-        new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer, indexAllowlist).migrateIndices();
+        new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer, indexAllowlist,
+                context.createIndexContext())
+                .migrateIndices();
     }
 
     private static class FilteredLuceneDocumentsReader extends LuceneDocumentsReader {
@@ -261,7 +273,8 @@ public class FullTest {
                                                                            String snapshotName,
                                                                            List<String> indexAllowlist,
                                                                            String targetAddress,
-                                                                           Random clockJitter)
+                                                                           Random clockJitter,
+                                                                           TestContext context)
         throws RfsMigrateDocuments.NoWorkLeftException
     {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
@@ -302,7 +315,8 @@ public class FullTest {
                     indexAllowlist,
                     shardMetadataFactory,
                     unpackerFactory,
-                    MAX_SHARD_SIZE_BYTES);
+                    MAX_SHARD_SIZE_BYTES,
+                    context);
         } finally {
             deleteTree(tempDir);
         }

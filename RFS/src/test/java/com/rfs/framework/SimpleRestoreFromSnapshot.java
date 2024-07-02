@@ -6,6 +6,7 @@ import java.util.List;
 import com.rfs.common.ConnectionDetails;
 import com.rfs.common.IndexMetadata;
 import com.rfs.common.OpenSearchClient;
+import com.rfs.tracing.IRfsContexts;
 
 public interface SimpleRestoreFromSnapshot {
 
@@ -14,7 +15,8 @@ public interface SimpleRestoreFromSnapshot {
         return new SimpleRestoreFromSnapshot_ES_7_10();
     }
 
-    public default void fullMigrationViaLocalSnapshot(final String targetClusterUrl) throws Exception {
+    public default void fullMigrationViaLocalSnapshot(final String targetClusterUrl,
+                                                      IRfsContexts.IDocumentReindexContext context) throws Exception {
         // TODO: Dynamically create / clean these up during tests
         final var tempSnapshotName = "";
         final var compressedSnapshotDirectory = "";
@@ -28,11 +30,14 @@ public interface SimpleRestoreFromSnapshot {
         //    - Indices
         //    - Documents
 
-        updateTargetCluster(indices, unpackedShardDataDir, targetClusterClient);
+        updateTargetCluster(indices, unpackedShardDataDir, targetClusterClient, context);
     }
 
-    public List<IndexMetadata.Data> extractSnapshotIndexData(final String localPath, final String snapshotName, final Path unpackedShardDataDir) throws Exception;
+    public List<IndexMetadata.Data> extractSnapshotIndexData(final String localPath, final String snapshotName,
+                                                             final Path unpackedShardDataDir) throws Exception;
 
-    public void updateTargetCluster(final List<IndexMetadata.Data> indices, final Path unpackedShardDataDir, final OpenSearchClient client) throws Exception;
+    public void updateTargetCluster(final List<IndexMetadata.Data> indices, final Path unpackedShardDataDir,
+                                    final OpenSearchClient client, IRfsContexts.IDocumentReindexContext context)
+            throws Exception;
 
 }

@@ -3,12 +3,12 @@ package com.rfs.cms;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rfs.framework.SearchClusterContainer;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-import org.opensearch.testcontainers.OpensearchContainer;
 
 import java.io.IOException;
 import java.net.URI;
@@ -38,8 +38,7 @@ import java.util.function.Supplier;
 @Slf4j
 public class WorkCoordinatorTest {
 
-    final static OpensearchContainer<?> container =
-            new OpensearchContainer<>("opensearchproject/opensearch:1.3.0");
+    final static SearchClusterContainer container = new SearchClusterContainer(SearchClusterContainer.OS_V1_3_16);
     public static final String DUMMY_FINISHED_DOC_ID = "dummy_finished_doc";
     private static Supplier<ApacheHttpClient> httpClientSupplier;
 
@@ -48,7 +47,7 @@ public class WorkCoordinatorTest {
     static void setupOpenSearchContainer() throws Exception {
         // Start the container. This step might take some time...
         container.start();
-        httpClientSupplier = () -> new ApacheHttpClient(URI.create(container.getHttpHostAddress()));
+        httpClientSupplier = () -> new ApacheHttpClient(URI.create(container.getUrl()));
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
                 2, "testWorker")) {
             workCoordinator.setup();

@@ -13,6 +13,7 @@ import java.util.UUID;
 import java.util.function.Function;
 
 import com.rfs.cms.IWorkCoordinator;
+import com.rfs.tracing.RootRfsContext;
 import lombok.extern.slf4j.Slf4j;
 import com.rfs.cms.ApacheHttpClient;
 import com.rfs.cms.OpenSearchWorkCoordinator;
@@ -37,6 +38,11 @@ import com.rfs.version_es_7_10.IndexMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.worker.DocumentsRunner;
+import org.opensearch.migrations.tracing.ActiveContextTracker;
+import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
+import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.IRootOtelContext;
+import org.opensearch.migrations.tracing.RootOtelContext;
 
 @Slf4j
 public class RfsMigrateDocuments {
@@ -89,6 +95,13 @@ public class RfsMigrateDocuments {
         @Parameter(names = {"--max-shard-size-bytes"}, description = ("Optional. The maximum shard size, in bytes, to allow when"
             + " performing the document migration.  Useful for preventing disk overflow.  Default: 50 * 1024 * 1024 * 1024 (50 GB)"), required = false)
         public long maxShardSizeBytes = 50 * 1024 * 1024 * 1024L;
+
+        @Parameter(required = false,
+                names = {"--otelCollectorEndpoint"},
+                arity = 1,
+                description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be" +
+                        "forwarded. If no value is provided, metrics will not be forwarded.")
+        String otelCollectorEndpoint;
     }
 
     public static class NoWorkLeftException extends Exception {
@@ -105,9 +118,13 @@ public class RfsMigrateDocuments {
                 .build()
                 .parse(args);
 
+        var rootContext = new RootRfsContext(
+                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "rfs"),
+                new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
+
         var luceneDirPath = Paths.get(arguments.luceneDirPath);
         try (var processManager = new LeaseExpireTrigger(workItemId->{
-            log.error("terminating RunRfsWorker because its lease has expired for " + workItemId);
+            log.error("terminating because the lease has expired for " + workItemId);
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC())) {
             var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(arguments.targetHost)),
@@ -132,7 +149,7 @@ public class RfsMigrateDocuments {
 
                 run(LuceneDocumentsReader::new, reindexer, workCoordinator, processManager, indexMetadataFactory,
                         arguments.snapshotName, arguments.indexAllowlist, shardMetadataFactory, unpackerFactory,
-                        arguments.maxShardSizeBytes);
+                        arguments.maxShardSizeBytes, rootContext);
             });
         }
     }
@@ -146,7 +163,8 @@ public class RfsMigrateDocuments {
                                                        List<String> indexAllowlist,
                                                        ShardMetadata.Factory shardMetadataFactory,
                                                        SnapshotShardUnpacker.Factory unpackerFactory,
-                                                       long maxShardSizeBytes)
+                                                       long maxShardSizeBytes,
+                                                       RootRfsContext rootRfsContext)
             throws IOException, InterruptedException, NoWorkLeftException {
         var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
         confirmShardPrepIsComplete(indexMetadataFactory, snapshotName, indexAllowlist, scopedWorkCoordinator);
@@ -162,7 +180,7 @@ public class RfsMigrateDocuments {
                     }
                     return shardMetadata;
                 },
-                unpackerFactory, readerFactory, reindexer).migrateNextShard();
+                unpackerFactory, readerFactory, reindexer, rootRfsContext.createReindexContext()).migrateNextShard();
     }
 
     private static void confirmShardPrepIsComplete(IndexMetadata.Factory indexMetadataFactory,

@@ -1,5 +1,6 @@
 package com.rfs.integration;
 
+import com.rfs.framework.tracing.TestContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
@@ -61,6 +62,7 @@ public class SnapshotStateTest {
     @Test
     public void SingleSnapshot_SingleDocument() throws Exception {
         // Setup
+        final var testContext = TestContext.noOtelTracking();
         final var indexName = "my-index";
         final var document1Id = "doc1";
         final var document1Body = "{\"fo$o\":\"bar\"}";
@@ -76,14 +78,14 @@ public class SnapshotStateTest {
         final var indices = srfs.extractSnapshotIndexData(snapshotCopy.getAbsolutePath(), snapshotName, unpackedShardDataDir);
 
         final var client = mock(OpenSearchClient.class);
-        when(client.sendBulkRequest(any(), any())).thenReturn(Mono.empty());
+        when(client.sendBulkRequest(any(), any(), any())).thenReturn(Mono.empty());
 
         // Action
-        srfs.updateTargetCluster(indices, unpackedShardDataDir, client);
+        srfs.updateTargetCluster(indices, unpackedShardDataDir, client, testContext.createReindexContext());
 
         // Validation
         final var bodyCaptor = ArgumentCaptor.forClass(String.class);
-        verify(client, times(1)).sendBulkRequest(eq(indexName), bodyCaptor.capture());
+        verify(client, times(1)).sendBulkRequest(eq(indexName), bodyCaptor.capture(), any());
         final var bulkRequestRaw = bodyCaptor.getValue();
         assertThat(bulkRequestRaw, allOf(containsString(document1Id), containsString(document1Body)));
 
@@ -94,6 +96,7 @@ public class SnapshotStateTest {
     @Disabled("https://opensearch.atlassian.net/browse/MIGRATIONS-1746")
     public void SingleSnapshot_SingleDocument_Then_DeletedDocument() throws Exception {
         // Setup
+        final var testContext = TestContext.noOtelTracking();
         final var indexName = "my-index-with-deleted-item";
         final var document1Id = "doc1-going-to-be-deleted";
         final var document1Body = "{\"foo\":\"bar\"}";
@@ -109,14 +112,14 @@ public class SnapshotStateTest {
         final var indices = srfs.extractSnapshotIndexData(snapshotCopy.getAbsolutePath(), snapshotName, unpackedShardDataDir);
 
         final var client = mock(OpenSearchClient.class);
-        when(client.sendBulkRequest(any(), any())).thenReturn(Mono.empty());
+        when(client.sendBulkRequest(any(), any(), any())).thenReturn(Mono.empty());
 
         // Action
-        srfs.updateTargetCluster(indices, unpackedShardDataDir, client);
+        srfs.updateTargetCluster(indices, unpackedShardDataDir, client, testContext.createReindexContext());
 
         // Validation
         final var bodyCaptor = ArgumentCaptor.forClass(String.class);
-        verify(client, times(1)).sendBulkRequest(eq(indexName), bodyCaptor.capture());
+        verify(client, times(1)).sendBulkRequest(eq(indexName), bodyCaptor.capture(), any());
         final var bulkRequestRaw = bodyCaptor.getValue();
         assertThat(bulkRequestRaw, not(anyOf(containsString(document1Id), containsString(document1Body))));
 
@@ -127,6 +130,7 @@ public class SnapshotStateTest {
     @Disabled("https://opensearch.atlassian.net/browse/MIGRATIONS-1747")
     public void SingleSnapshot_SingleDocument_Then_UpdateDocument() throws Exception {
         // Setup
+        final var testContext = TestContext.noOtelTracking();
         final var indexName = "my-index-with-updated-item";
         final var document1Id = "doc1-going-to-be-updated";
         final var document1BodyOrginal = "{\"foo\":\"bar\"}";
@@ -144,14 +148,14 @@ public class SnapshotStateTest {
         final var indices = srfs.extractSnapshotIndexData(snapshotCopy.getAbsolutePath(), snapshotName, unpackedShardDataDir);
 
         final var client = mock(OpenSearchClient.class);
-        when(client.sendBulkRequest(any(), any())).thenReturn(Mono.empty());
+        when(client.sendBulkRequest(any(), any(), any())).thenReturn(Mono.empty());
 
         // Action
-        srfs.updateTargetCluster(indices, unpackedShardDataDir, client);
+        srfs.updateTargetCluster(indices, unpackedShardDataDir, client, testContext.createReindexContext());
 
         // Validation
         final var bodyCaptor = ArgumentCaptor.forClass(String.class);
-        verify(client, times(1)).sendBulkRequest(eq(indexName), bodyCaptor.capture());
+        verify(client, times(1)).sendBulkRequest(eq(indexName), bodyCaptor.capture(), any());
         final var bulkRequestRaw = bodyCaptor.getValue();
         assertThat(bulkRequestRaw, allOf(containsString(document1Id), containsString(document1BodyUpdated), not(containsString(document1BodyOrginal))));
 

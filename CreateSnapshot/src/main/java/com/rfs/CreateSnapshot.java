@@ -4,6 +4,7 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 
+import com.rfs.tracing.RootRfsContext;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -14,6 +15,10 @@ import com.rfs.common.S3SnapshotCreator;
 import com.rfs.common.SnapshotCreator;
 import com.rfs.common.TryHandlePhaseFailure;
 import com.rfs.worker.SnapshotRunner;
+import org.opensearch.migrations.tracing.ActiveContextTracker;
+import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
+import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.RootOtelContext;
 
 import java.util.function.Function;
 
@@ -65,6 +70,13 @@ public class CreateSnapshot {
                 required = false,
                 description = "The maximum snapshot rate in megabytes per second per node")
         public Integer maxSnapshotRateMBPerNode;
+
+        @Parameter(required = false,
+                names = {"--otelCollectorEndpoint"},
+                arity = 1,
+                description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be" +
+                        "forwarded. If no value is provided, metrics will not be forwarded.")
+        String otelCollectorEndpoint;
     }
 
     @Getter
@@ -82,6 +94,10 @@ public class CreateSnapshot {
                 .build()
                 .parse(args);
 
+        var rootContext = new RootRfsContext(
+                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "rfs"),
+                new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
+
         if (arguments.fileSystemRepoPath == null && arguments.s3RepoUri == null) {
             throw new ParameterException("Either file-system-repo-path or s3-repo-uri must be set");
         }
@@ -94,8 +110,10 @@ public class CreateSnapshot {
 
         log.info("Running CreateSnapshot with {}", String.join(" ", args));
         run(c -> ((arguments.fileSystemRepoPath != null)
-                        ? new FileSystemSnapshotCreator(arguments.snapshotName, c, arguments.fileSystemRepoPath)
-                        : new S3SnapshotCreator(arguments.snapshotName, c, arguments.s3RepoUri, arguments.s3Region, arguments.maxSnapshotRateMBPerNode)),
+                        ? new FileSystemSnapshotCreator(arguments.snapshotName, c, arguments.fileSystemRepoPath,
+                        rootContext.createSnapshotCreateContext())
+                        : new S3SnapshotCreator(arguments.snapshotName, c, arguments.s3RepoUri, arguments.s3Region,
+                        arguments.maxSnapshotRateMBPerNode, rootContext.createSnapshotCreateContext())),
                 new OpenSearchClient(arguments.sourceHost, arguments.sourceUser, arguments.sourcePass, arguments.sourceInsecure),
                 arguments.noWait
         );

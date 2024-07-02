@@ -9,6 +9,7 @@ import java.util.function.Function;
 import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.ScopedWorkCoordinator;
 import com.rfs.common.RfsException;
+import com.rfs.tracing.IRfsContexts;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
@@ -30,6 +31,7 @@ public class DocumentsRunner {
     private final SnapshotShardUnpacker.Factory unpackerFactory;
     private final Function<Path,LuceneDocumentsReader> readerFactory;
     private final DocumentReindexer reindexer;
+    private final IRfsContexts.IDocumentReindexContext context;
 
     public enum CompletionStatus {
         NOTHING_DONE,
@@ -81,7 +83,7 @@ public class DocumentsRunner {
         var reader = readerFactory.apply(unpacker.unpack());
         Flux<Document> documents = reader.readDocuments();
 
-        reindexer.reindex(shardMetadata.getIndexName(), documents)
+        reindexer.reindex(shardMetadata.getIndexName(), documents, context)
                 .doOnError(error -> log.error("Error during reindexing: " + error))
                 .doOnSuccess(done -> log.atInfo()
                         .setMessage(()->"Reindexing completed for Index " + shardMetadata.getIndexName() +

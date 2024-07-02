@@ -1,15 +1,21 @@
 package com.rfs.common;
 
 import java.util.Base64;
+import java.util.function.BiConsumer;
 
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.SneakyThrows;
+import com.rfs.netty.ReadMeteringHandler;
+import com.rfs.netty.WriteMeteringHandler;
+import com.rfs.tracing.IRfsContexts;
 import reactor.core.publisher.Mono;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.tcp.SslProvider;
+import reactor.netty.http.client.HttpClientRequest;
 import reactor.netty.ByteBufMono;
+import reactor.netty.Connection;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLParameters;
 
@@ -66,34 +72,53 @@ public class RestClient {
                 });
     }
 
-    public Mono<Response> getAsync(String path) {
-        return client.get()
-            .uri("/" + path)
-            .responseSingle((response, bytes) -> bytes.asString()
-                .map(body -> new Response(response.status().code(), body, response.status().reasonPhrase())));
+    public Mono<Response> getAsync(String path, IRfsContexts.IRequestContext context) {
+        return client
+                .doOnRequest(addSizeMetricsHandlers(context))
+                .get()
+                .uri("/" + path)
+                .responseSingle((response, bytes) -> bytes.asString()
+                    .map(body -> new Response(response.status().code(), body, response.status().reasonPhrase())))
+                .doOnError(t->context.addTraceException(t, true))
+                .doFinally(r->context.close());
     }
 
-    public Response get(String path) {
-        return getAsync(path).block();
+    public Response get(String path, IRfsContexts.IRequestContext context) {
+        return getAsync(path, context).block();
     }
 
-    public Mono<Response> postAsync(String path, String body) {
-        return client.post()
-            .uri("/" + path)
-            .send(ByteBufMono.fromString(Mono.just(body)))
-            .responseSingle((response, bytes) -> bytes.asString()
-                .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())));
+    public Mono<Response> postAsync(String path, String body, IRfsContexts.IRequestContext context) {
+        return client
+                .doOnRequest(addSizeMetricsHandlers(context))
+                .post()
+                .uri("/" + path)
+                .send(ByteBufMono.fromString(Mono.just(body)))
+                .responseSingle((response, bytes) -> bytes.asString()
+                    .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())))
+                .doOnError(t->context.addTraceException(t, true))
+                .doFinally(r->context.close());
     }
 
-    public Mono<Response> putAsync(String path, String body) {
-        return client.put()
-            .uri("/" + path)
-            .send(ByteBufMono.fromString(Mono.just(body)))
-            .responseSingle((response, bytes) -> bytes.asString()
-                .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())));
+    public Mono<Response> putAsync(String path, String body, IRfsContexts.IRequestContext context) {
+        return client
+                .doOnRequest(addSizeMetricsHandlers(context))
+                .put()
+                .uri("/" + path)
+                .send(ByteBufMono.fromString(Mono.just(body)))
+                .responseSingle((response, bytes) -> bytes.asString()
+                    .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase())))
+                .doOnError(t->context.addTraceException(t, true))
+                .doFinally(r->context.close());
     }
 
-    public Response put(String path, String body) {
-        return putAsync(path, body).block();
+    public Response put(String path, String body, IRfsContexts.IRequestContext context) {
+        return putAsync(path, body, context).block();
+    }
+
+    private BiConsumer<HttpClientRequest, Connection> addSizeMetricsHandlers(final IRfsContexts.IRequestContext ctx) {
+        return (r, conn) -> {
+            conn.channel().pipeline().addFirst(new WriteMeteringHandler(ctx::addBytesSent));
+            conn.channel().pipeline().addFirst(new ReadMeteringHandler(ctx::addBytesRead));
+        };
     }
 }

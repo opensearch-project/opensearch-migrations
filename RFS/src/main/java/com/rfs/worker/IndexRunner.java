@@ -4,6 +4,7 @@ import java.util.List;
 import java.util.function.BiConsumer;
 
 import com.rfs.common.SnapshotRepo;
+import com.rfs.tracing.IRfsContexts;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -21,6 +22,7 @@ public class IndexRunner {
     private final IndexCreator_OS_2_11 indexCreator;
     private final Transformer transformer;
     private final List<String> indexAllowlist;
+    private final IRfsContexts.ICreateIndexContext context;
 
     public void migrateIndices() {
         SnapshotRepo.Provider repoDataProvider = metadataFactory.getRepoDataProvider();
@@ -37,7 +39,7 @@ public class IndexRunner {
                 var indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
                 var root = indexMetadata.toObjectNode();
                 var transformedRoot = transformer.transformIndexMetadata(root);
-                var resultOp = indexCreator.create(transformedRoot, index.getName(), indexMetadata.getId());
+                var resultOp = indexCreator.create(transformedRoot, index.getName(), indexMetadata.getId(), context);
                 resultOp.ifPresentOrElse(value -> log.info("Index " + index.getName() + " created successfully"),
                         () -> log.info("Index " + index.getName() + " already existed; no work required")
                 );

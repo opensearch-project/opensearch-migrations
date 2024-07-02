@@ -32,7 +32,9 @@ dependencies {
     implementation platform('io.projectreactor:reactor-bom:2023.0.5')
     testImplementation platform('io.projectreactor:reactor-bom:2023.0.5')
 
+    implementation project(":coreUtilities")
     implementation project(":RFS")
+
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     implementation group: 'com.beust', name: 'jcommander'
