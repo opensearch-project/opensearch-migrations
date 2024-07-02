@@ -28,8 +28,23 @@ SECRET_KEY = 'django-insecure-26h*wo1qzffhpum=bn#8d(7e8mo-w9fr6*wdy#%izy#5^85-a9
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-DEPLOYED_STAGE = os.environ.get('MIGRATION_STAGE')
-ALLOWED_HOSTS = ['migration-console', f'migration-console.migration.{DEPLOYED_STAGE}.local', 'localhost']
+
+def get_allowed_hosts():
+    hosts = os.getenv('API_ALLOWED_HOSTS', '')
+    if not hosts:
+        return ['localhost']
+    # Remove extra spacing and/or quotes
+    hosts = hosts.strip()
+    hosts = hosts.replace('"', '')
+    hosts = hosts.replace('\'', '')
+
+    host_list = []
+    for host in hosts.split(','):
+        host_list.append(host.strip())
+    return host_list
+
+
+ALLOWED_HOSTS = get_allowed_hosts()
 
 
 # Application definition
