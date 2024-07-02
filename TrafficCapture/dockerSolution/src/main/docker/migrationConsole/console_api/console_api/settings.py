@@ -29,8 +29,11 @@ SECRET_KEY = 'django-insecure-26h*wo1qzffhpum=bn#8d(7e8mo-w9fr6*wdy#%izy#5^85-a9
 DEBUG = True
 
 DEPLOYED_STAGE = os.environ.get('MIGRATION_STAGE')
+<<<<<<< Updated upstream
 ALLOWED_HOSTS = ['migration-console', f'migration-console.migration.{DEPLOYED_STAGE}.local', 'localhost']
-
+=======
+ALLOWED_HOSTS = ['*']
+>>>>>>> Stashed changes
 
 # Application definition
 
@@ -129,3 +132,4 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
