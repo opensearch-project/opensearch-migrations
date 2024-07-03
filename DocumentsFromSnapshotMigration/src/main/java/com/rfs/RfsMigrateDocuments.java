@@ -22,7 +22,6 @@ import com.rfs.worker.ShardWorkPreparer;
 
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
-import com.rfs.common.Logging;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Uri;

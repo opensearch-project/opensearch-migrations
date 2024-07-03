@@ -55,7 +55,7 @@ public class EndToEndTest {
             // Setup
             var sourceClusterOperations = new ClusterOperations(sourceCluster.getUrl());
             var templateName = "my_template_foo";
-            sourceClusterOperations.createLegacyTemplate(templateName, "bar*");
+            sourceClusterOperations.createES6LegacyTemplate(templateName, "bar*");
             var indexName = "barstool";
             // Creates a document that uses the template
             sourceClusterOperations.createDocument(indexName, "222", "{\"hi\":\"yay\"}");
@@ -81,12 +81,12 @@ public class EndToEndTest {
             // Validation
             var targetClusterOperations = new ClusterOperations(targetCluster.getUrl());
             var res = targetClusterOperations.get("/_template/" + templateName);
-            assertThat(res.getRight(), res.getLeft(), equalTo(200));
+            assertThat(res.getValue(), res.getKey(), equalTo(200));
             // Be sure that the mapping type on the template is an object
-            assertThat(res.getRight(), Matchers.containsString("mappings\":{"));
+            assertThat(res.getValue(), Matchers.containsString("mappings\":{"));
 
             res = targetClusterOperations.get("/" + indexName);
-            assertThat("Shouldn't exist yet, body:\n" + res.getRight(), res.getLeft(), equalTo(404));
+            assertThat("Shouldn't exist yet, body:\n" + res.getValue(), res.getKey(), equalTo(404));
 
             // Action
             // Migrate indices
@@ -95,7 +95,7 @@ public class EndToEndTest {
             new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer, List.of()).migrateIndices();
             
             res = targetClusterOperations.get("/barstool");
-            assertThat(res.getRight(), res.getLeft(), equalTo(200));
+            assertThat(res.getValue(), res.getKey(), equalTo(200));
 
             // Action
             // PSEUDOMigrate documents

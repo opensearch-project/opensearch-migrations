@@ -16,7 +16,7 @@ public interface TransformationRule<T extends Entity> {
     /**
      * Apply a transformation on the entity
      * @param entity The entity to be transformed in place
-     * @return true if the entity was updated, or false if no changse were made
+     * @return true if the entity was updated, or false if no changes were made
      */
     boolean applyTransformation(T entity);
 }

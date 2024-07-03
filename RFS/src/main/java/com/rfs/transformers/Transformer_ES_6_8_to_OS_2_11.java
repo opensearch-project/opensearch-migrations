@@ -38,7 +38,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
             originalTemplates.fieldNames().forEachRemaining(templateName -> {
                 var templateCopy = (ObjectNode) originalTemplates.get(templateName).deepCopy();
                 var indexTemplate = (Index) () -> templateCopy;
-                tranformIndex(indexTemplate);
+                transformIndex(indexTemplate);
                 templates.set(templateName, indexTemplate.raw());
             });
             newRoot.set("templates", templates);
@@ -62,11 +62,11 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     @Override
     public IndexMetadata transformIndexMetadata(IndexMetadata index) {
         var copy = index.deepCopy();
-        tranformIndex(copy);
+        transformIndex(copy);
         return copy;
     }
 
-    private void tranformIndex(Index index) {
+    private void transformIndex(Index index) {
         logger.debug("Original Object: " + index.raw().toString());
         var newRoot = index.raw();
 

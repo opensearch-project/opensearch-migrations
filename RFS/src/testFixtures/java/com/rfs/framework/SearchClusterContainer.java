@@ -31,6 +31,23 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static final Version OS_V2_14_0 =
             new OpenSearchVersion("opensearchproject/opensearch:2.14.0", "OS 2.14.0");
 
+    private enum INITIALIZATION_FLAVOR {
+        ELASTICSEARCH(Map.of(
+            "discovery.type", "single-node",
+            "path.repo", CLUSTER_SNAPSHOT_DIR)),
+        OPENSEARCH(new ImmutableMap.Builder<String, String>()
+            .putAll(ELASTICSEARCH.getEnvVariables())
+            .put("plugins.security.disabled", "true")
+            .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
+            .build());
+
+        @Getter
+        public final Map<String, String> envVariables;
+        INITIALIZATION_FLAVOR(Map<String, String> envVariables) {
+            this.envVariables = envVariables;
+        }
+    }
+
     private final Version version;
 
     @SuppressWarnings("resource")
@@ -86,23 +103,6 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         log.info("Stopping container version:" + version.prettyName);
         log.debug("Instance logs:\n" + this.getLogs());
         this.stop();
-    }
-
-    public enum INITIALIZATION_FLAVOR {
-        ELASTICSEARCH(Map.of(
-            "discovery.type", "single-node",
-            "path.repo", CLUSTER_SNAPSHOT_DIR)),
-        OPENSEARCH(new ImmutableMap.Builder<String, String>()
-            .putAll(ELASTICSEARCH.getEnvVariables())
-        .put("plugins.security.disabled", "true")
-        .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
-            .build());
-
-        @Getter
-        public final Map<String, String> envVariables;
-        INITIALIZATION_FLAVOR(Map<String, String> envVariables) {
-            this.envVariables = envVariables;
-        }
     }
 
     @EqualsAndHashCode

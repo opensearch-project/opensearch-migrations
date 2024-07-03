@@ -10,7 +10,32 @@ import org.opensearch.migrations.transformation.entity.Index;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
- * Supports transformation of the Index Mapping types that were changed from mutliple types to a single type between ES 6 to 7
+ * Supports transformation of the Index Mapping types that were changed from mutliple types to a single type between ES 6 to ES 7
+ * 
+ * Example:
+ * Starting state (ES 6):
+ * {
+ *   "mappings": [
+ *     {
+ *       "foo": {
+ *         "properties": {
+ *           "field1": { "type": "text" },
+ *           "field2": { "type": "keyword" }
+ *         }
+ *       }
+ *     }
+ *   ]
+ * }
+ * 
+ * Ending state (ES 7):
+ * {
+ *   "mappings": {
+ *     "properties": {
+ *       "field1": { "type": "text" },
+ *       "field2": { "type": "keyword" },
+ *     }
+ *   }
+ * }
  */
 public class IndexMappingTypeRemoval implements TransformationRule<Index> {
 
@@ -22,14 +47,14 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
             return CanApplyResult.NO;
         }
 
-        // Detect multiple type mappings, eg:
-        // { mappings: [{ foo: {...}}, { bar: {...} }] } } or
-        // { mappings: [{ foo: {...}, bar: {...}] } }
+        // Detect unsupported multiple type mappings, eg:
+        // { "mappings": [{ "foo": {...}}, { "bar": {...} }] }
+        // { "mappings": [{ "foo": {...}, "bar": {...} }] }
         if (mappingNode.size() > 1 || mappingNode.get(0).size() > 1) {
             return new Unsupported("Multiple mapping types are not supported");
         }
 
-        // There is a type under mappings, e.g. { mappings: [{ foobar: {...} }] }
+        // There is a type under mappings, e.g. { "mappings": [{ "foo": {...} }] }
         return CanApplyResult.YES;
     }
 

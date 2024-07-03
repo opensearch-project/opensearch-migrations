@@ -1,6 +1,5 @@
 package com.rfs.framework;
 
-import org.apache.commons.lang3.tuple.Pair;
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPut;
@@ -13,6 +12,8 @@ import lombok.SneakyThrows;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.Map.Entry;
 
 import static org.hamcrest.CoreMatchers.anyOf;
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -31,12 +32,12 @@ public class ClusterOperations {
         httpClient = HttpClients.createDefault();
     }
 
-    public void createSnapshotRepository() throws IOException {
+    public void createSnapshotRepository(final String repoPath) throws IOException {
         // Create snapshot repository
         final var repositoryJson = "{\n" +
         "  \"type\": \"fs\",\n" +
         "  \"settings\": {\n" +
-        "    \"location\": \"" + SearchClusterContainer.CLUSTER_SNAPSHOT_DIR + "\",\n" +
+        "    \"location\": \"" + repoPath + "\",\n" +
         "    \"compress\": false\n" +
         "  }\n" +
         "}";
@@ -69,12 +70,12 @@ public class ClusterOperations {
     }
 
     @SneakyThrows
-    public Pair<Integer, String> get(final String path) {
+    public Map.Entry<Integer, String> get(final String path) {
         final var getRequest = new HttpGet(clusterUrl + path);
 
         try (var response = httpClient.execute(getRequest)) {
             var responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
-            return Pair.of(response.getCode(), responseBody);
+            return Map.entry(response.getCode(), responseBody);
         }
     }
 
@@ -95,10 +96,10 @@ public class ClusterOperations {
     }
 
     /**
-     * Intented for use on ES 6 clusters
+     * Creates a ES6 legacy template, intended for use on only ES 6 clusters
      */
     @SneakyThrows
-    public void createLegacyTemplate(final String templateName, final String pattern) throws IOException {
+    public void createES6LegacyTemplate(final String templateName, final String pattern) throws IOException {
         final var templateJson =
             "{\r\n" + //
             "  \"index_patterns\": [\r\n" + //
