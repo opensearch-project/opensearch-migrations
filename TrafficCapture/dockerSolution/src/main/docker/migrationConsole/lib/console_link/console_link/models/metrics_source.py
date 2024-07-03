@@ -1,15 +1,14 @@
+import logging
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
 
 import boto3
 import botocore
-from cerberus import Validator
-from console_link.models.utils import raise_for_aws_api_error
 import requests
-import logging
-
+from cerberus import Validator
 from console_link.models.schema_tools import contains_one_of
+from console_link.models.utils import raise_for_aws_api_error
 
 logger = logging.getLogger(__name__)
 

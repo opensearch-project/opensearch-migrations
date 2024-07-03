@@ -1,11 +1,13 @@
-from console_link.models.snapshot import S3Snapshot, FileSystemSnapshot, Snapshot
-from console_link.environment import get_snapshot
-from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
-from console_link.logic import snapshot as snapshot_logic
-from tests.utils import create_valid_cluster
-import pytest
 import unittest.mock as mock
+
+import pytest
+from console_link.environment import get_snapshot
+from console_link.logic import snapshot as snapshot_logic
+from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
+from console_link.models.snapshot import (FileSystemSnapshot, S3Snapshot,
+                                          Snapshot)
+from tests.utils import create_valid_cluster
 
 
 @pytest.fixture

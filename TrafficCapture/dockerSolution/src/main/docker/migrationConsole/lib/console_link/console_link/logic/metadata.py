@@ -1,8 +1,8 @@
+import logging
 from typing import Tuple
 
 from console_link.models.metadata import Metadata
 from console_link.models.utils import ExitCode, generate_log_file_path
-import logging
 
 logger = logging.getLogger(__name__)
 

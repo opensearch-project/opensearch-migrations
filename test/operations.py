@@ -1,11 +1,12 @@
 import datetime
-import random
-import string
 import json
-from requests import Session
-import shlex
-import subprocess
 import logging
+import random
+import shlex
+import string
+import subprocess
+
+from requests import Session
 
 logger = logging.getLogger(__name__)
 

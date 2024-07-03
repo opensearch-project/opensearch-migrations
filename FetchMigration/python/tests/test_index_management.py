@@ -10,15 +10,14 @@
 import copy
 import unittest
 
+import index_management
 import requests
 import responses
-from responses import matchers
-
-import index_management
 from component_template_info import ComponentTemplateInfo
 from endpoint_info import EndpointInfo
 from exceptions import IndexManagementError, RequestError
 from index_template_info import IndexTemplateInfo
+from responses import matchers
 from tests import test_constants
 
 

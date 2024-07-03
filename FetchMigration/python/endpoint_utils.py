@@ -10,10 +10,9 @@
 import re
 from typing import Optional, Union
 
-from requests_aws4auth import AWS4Auth
 from botocore.session import Session
-
 from endpoint_info import EndpointInfo
+from requests_aws4auth import AWS4Auth
 
 # Constants
 SOURCE_KEY = "source"

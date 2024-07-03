@@ -10,11 +10,10 @@
 import argparse
 import logging
 
-import yaml
-
 import endpoint_utils
 import index_management
 import utils
+import yaml
 from endpoint_info import EndpointInfo
 from exceptions import MetadataMigrationError
 from index_diff import IndexDiff

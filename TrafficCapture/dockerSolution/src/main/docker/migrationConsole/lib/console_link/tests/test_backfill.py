@@ -3,13 +3,12 @@ import pathlib
 
 import pytest
 import requests_mock
-
-from console_link.logic.backfill import get_backfill, UnsupportedBackfillTypeError
+from console_link.logic.backfill import (UnsupportedBackfillTypeError,
+                                         get_backfill)
 from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
 from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill
 from console_link.models.ecs_service import ECSService, InstanceStatuses
-
 from tests.utils import create_valid_cluster
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"

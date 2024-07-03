@@ -2,10 +2,8 @@ import logging
 from typing import NamedTuple, Optional
 
 import boto3
-
 from console_link.models.command_result import CommandResult
 from console_link.models.utils import AWSAPIError, raise_for_aws_api_error
-
 
 logger = logging.getLogger(__name__)
 

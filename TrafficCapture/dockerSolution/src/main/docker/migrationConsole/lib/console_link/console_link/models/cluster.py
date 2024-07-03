@@ -1,11 +1,12 @@
-from typing import Any, Dict, Optional
-from enum import Enum
-import requests
-from requests.auth import HTTPBasicAuth
-from cerberus import Validator
 import logging
 import subprocess
+from enum import Enum
+from typing import Any, Dict, Optional
+
+import requests
+from cerberus import Validator
 from console_link.models.schema_tools import contains_one_of
+from requests.auth import HTTPBasicAuth
 
 requests.packages.urllib3.disable_warnings()  # ignore: type
 

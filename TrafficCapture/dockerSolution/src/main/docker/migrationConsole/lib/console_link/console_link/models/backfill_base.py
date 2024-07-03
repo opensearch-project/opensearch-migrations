@@ -1,11 +1,10 @@
+from abc import ABC, abstractmethod
 from enum import Enum
 from typing import Dict
-from abc import ABC, abstractmethod
-
-from console_link.models.schema_tools import contains_one_of
-from console_link.models.command_result import CommandResult
 
 from cerberus import Validator
+from console_link.models.command_result import CommandResult
+from console_link.models.schema_tools import contains_one_of
 
 SCHEMA = {
     "backfill": {

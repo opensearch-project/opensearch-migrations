@@ -1,5 +1,5 @@
-from rest_framework import serializers
 from console_link.models.cluster import AuthMethod
+from rest_framework import serializers
 
 
 class DataProviderSerializer(serializers.Serializer):

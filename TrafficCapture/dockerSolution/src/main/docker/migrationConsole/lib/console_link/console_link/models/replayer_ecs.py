@@ -1,9 +1,9 @@
+import logging
 from typing import Dict
+
 from console_link.models.command_result import CommandResult
 from console_link.models.ecs_service import ECSService
 from console_link.models.replayer_base import Replayer, ReplayStatus
-
-import logging
 
 logger = logging.getLogger(__name__)
 

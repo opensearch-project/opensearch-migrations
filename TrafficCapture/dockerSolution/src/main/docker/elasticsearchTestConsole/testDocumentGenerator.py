@@ -1,14 +1,15 @@
 #!/usr/bin/env python
-import sys
-import requests
-import time
 import argparse
-from datetime import datetime
-import urllib3
-import os
-from collections import deque
-import logging
 import json
+import logging
+import os
+import sys
+import time
+from collections import deque
+from datetime import datetime
+
+import requests
+import urllib3
 
 # Disable InsecureRequestWarning
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)

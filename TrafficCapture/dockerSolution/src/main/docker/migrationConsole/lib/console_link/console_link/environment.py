@@ -1,18 +1,19 @@
 import logging
-from typing import Optional, Dict
-from console_link.models.cluster import Cluster
-from console_link.models.metrics_source import MetricsSource
-from console_link.logic.metrics import get_metrics_source
-from console_link.logic.backfill import get_backfill
-from console_link.models.backfill_base import Backfill
-from console_link.models.snapshot import FileSystemSnapshot, Snapshot, S3Snapshot
-from console_link.models.replayer_base import Replayer
-from console_link.models.replayer_ecs import ECSReplayer
-from console_link.models.kafka import Kafka, MSK, StandardKafka
+from typing import Dict, Optional
+
 import yaml
 from cerberus import Validator
-
+from console_link.logic.backfill import get_backfill
+from console_link.logic.metrics import get_metrics_source
+from console_link.models.backfill_base import Backfill
+from console_link.models.cluster import Cluster
+from console_link.models.kafka import MSK, Kafka, StandardKafka
 from console_link.models.metadata import Metadata
+from console_link.models.metrics_source import MetricsSource
+from console_link.models.replayer_base import Replayer
+from console_link.models.replayer_ecs import ECSReplayer
+from console_link.models.snapshot import (FileSystemSnapshot, S3Snapshot,
+                                          Snapshot)
 
 logger = logging.getLogger(__name__)
 
