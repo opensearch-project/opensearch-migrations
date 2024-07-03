@@ -1,9 +1,11 @@
-from typing import NamedTuple, TypeVar, Generic
+from typing import Generic, TypeVar
+from dataclasses import dataclass
 
 T = TypeVar('T')
 
 
-class CommandResult(NamedTuple, Generic[T]):
+@dataclass
+class CommandResult(Generic[T]):
     success: bool
     value: T | Exception | None
 

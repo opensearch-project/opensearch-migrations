@@ -4,6 +4,7 @@ import pathlib
 import pytest
 import yaml
 
+from console_link.models.ecs_service import ECSService
 from console_link.models.factories import get_replayer
 from console_link.models.replayer_base import Replayer
 from console_link.models.replayer_ecs import ECSReplayer
