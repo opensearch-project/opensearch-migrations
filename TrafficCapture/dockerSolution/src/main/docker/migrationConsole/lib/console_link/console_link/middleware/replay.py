@@ -1,19 +1,16 @@
-import json
 import logging
-from typing import Tuple
-from console_link.models.utils import ExitCode
-from console_link.models.replayer_base import Replayer
-import yaml
+from typing import Dict, Tuple
 
+from console_link.middleware.json_support import support_json_return
+from console_link.models.replayer_base import Replayer
+from console_link.models.utils import ExitCode
 
 logger = logging.getLogger(__name__)
 
 
-def describe(replayer: Replayer, as_json=False) -> str:
-    response = replayer.describe()
-    if as_json:
-        return json.dumps(response)
-    return yaml.safe_dump(response)
+@support_json_return()
+def describe(replayer: Replayer, as_json=False) -> Tuple[ExitCode, Dict]:
+    return (ExitCode.SUCCESS, replayer.describe())
 
 
 def start(replayer: Replayer, *args, **kwargs) -> Tuple[ExitCode, str]:

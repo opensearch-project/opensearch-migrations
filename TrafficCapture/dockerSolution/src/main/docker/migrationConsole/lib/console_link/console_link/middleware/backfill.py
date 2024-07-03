@@ -1,10 +1,10 @@
-import json
 import logging
-from typing import Dict, List, Tuple, Callable, Any
+from typing import Any, Callable, Dict, Tuple
+
+from console_link.middleware.json_support import support_json_return
+from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.command_result import CommandResult
 from console_link.models.utils import ExitCode
-from console_link.models.backfill_base import Backfill, BackfillStatus
-import yaml
 
 
 logger = logging.getLogger(__name__)
@@ -22,18 +22,6 @@ def handle_errors(on_success: Callable[[Any], Tuple[ExitCode, str]]) -> Callable
                 logger.error(f"Failed to {func.__name__} backfill: {e}")
                 return ExitCode.FAILURE, f"Failure on {func.__name__} for backfill: {type(e).__name__} {e}"
             return on_success(result.value)
-        return wrapper
-    return decorator
-
-
-def support_json_return() -> Callable[[Tuple[ExitCode, Dict | List | str]], Tuple[ExitCode, str]]:
-    def decorator(func: Callable[[Tuple[ExitCode, Dict | List | str]], Tuple[ExitCode, str]]) \
-            -> Callable[[Any], Tuple[ExitCode, str]]:
-        def wrapper(backfill: Backfill, *args, as_json=False, **kwargs) -> Tuple[ExitCode, str]:
-            result = func(backfill, *args, **kwargs)
-            if as_json:
-                return (result[0], json.dumps(result))
-            return (result[0], yaml.safe_dump(result[1]))
         return wrapper
     return decorator
 
