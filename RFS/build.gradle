@@ -115,8 +115,8 @@ test {
     }
 
     testLogging {
-        exceptionFormat = 'full'
-        events "failed"
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
         showExceptions true
         showCauses true
         showStackTraces true
