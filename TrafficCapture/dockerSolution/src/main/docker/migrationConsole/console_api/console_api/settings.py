@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 
 import os
 from pathlib import Path
+from typing import List
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -29,19 +30,13 @@ SECRET_KEY = 'django-insecure-26h*wo1qzffhpum=bn#8d(7e8mo-w9fr6*wdy#%izy#5^85-a9
 DEBUG = True
 
 
-def get_allowed_hosts():
+def get_allowed_hosts() -> List[str]:
     hosts = os.getenv('API_ALLOWED_HOSTS', '')
     if not hosts:
         return ['localhost']
-    # Remove extra spacing and/or quotes
-    hosts = hosts.strip()
-    hosts = hosts.replace('"', '')
-    hosts = hosts.replace('\'', '')
-
-    host_list = []
-    for host in hosts.split(','):
-        host_list.append(host.strip())
-    return host_list
+    # Remove any quotes and strip extra spacing characters
+    hosts = hosts.replace('"', '').replace('\'', '')
+    return [host.strip() for host in hosts.split(',')]
 
 
 ALLOWED_HOSTS = get_allowed_hosts()
