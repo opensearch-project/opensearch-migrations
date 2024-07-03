@@ -2,7 +2,8 @@ import pathlib
 
 import pytest
 
-from console_link.middleware.backfill import get_backfill, describe
+from console_link.models.factories import get_backfill
+from console_link.middleware.backfill import describe
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
 from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill
 

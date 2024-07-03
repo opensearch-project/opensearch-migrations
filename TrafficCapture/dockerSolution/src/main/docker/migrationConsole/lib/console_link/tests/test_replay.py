@@ -2,7 +2,7 @@ import pathlib
 
 import pytest
 
-from console_link.environment import get_replayer
+from console_link.models.factories import get_replayer
 from console_link.models.replayer_base import Replayer
 from console_link.models.replayer_ecs import ECSReplayer
 from console_link.models.ecs_service import ECSService

@@ -1,27 +1,9 @@
 from typing import List, Tuple
-from console_link.models.metrics_source import MetricsSource, Component, MetricStatistic, PrometheusMetricsSource, \
-    CloudwatchMetricsSource
+from console_link.models.metrics_source import MetricsSource, Component, MetricStatistic
 from datetime import datetime, timedelta
 import logging
 
 logger = logging.getLogger(__name__)
-
-
-class UnsupportedMetricsSourceError(Exception):
-    def __init__(self, supplied_metrics_source: str):
-        super().__init__("Unsupported metrics source type", supplied_metrics_source)
-
-
-def get_metrics_source(config):
-    if 'prometheus' in config:
-        return PrometheusMetricsSource(config)
-    elif 'cloudwatch' in config:
-        return CloudwatchMetricsSource(config)
-    else:
-        logger.error(f"An unsupported metrics source type was provided: {config.keys()}")
-        if len(config.keys()) > 1:
-            raise UnsupportedMetricsSourceError(', '.join(config.keys()))
-        raise UnsupportedMetricsSourceError(next(iter(config.keys())))
 
 
 def get_metric_data(metrics_source: MetricsSource, component: str, metric_name: str,

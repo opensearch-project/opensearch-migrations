@@ -4,7 +4,7 @@ import pathlib
 import pytest
 import requests_mock
 
-from console_link.middleware.backfill import get_backfill, UnsupportedBackfillTypeError
+from console_link.models.factories import get_backfill, UnsupportedBackfillTypeError
 from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
 from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill

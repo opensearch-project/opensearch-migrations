@@ -1,55 +1,13 @@
-from enum import Enum
 import json
 import logging
-from typing import Dict, List, Optional, Tuple, Callable, Any
+from typing import Dict, List, Tuple, Callable, Any
 from console_link.models.command_result import CommandResult
 from console_link.models.utils import ExitCode
-from console_link.models.backfill_osi import OpenSearchIngestionBackfill
-from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill
-from console_link.models.cluster import Cluster
 from console_link.models.backfill_base import Backfill, BackfillStatus
 import yaml
 
 
 logger = logging.getLogger(__name__)
-
-
-BackfillType = Enum("BackfillType",
-                    ["opensearch_ingestion", "reindex_from_snapshot"])
-
-
-class UnsupportedBackfillTypeError(Exception):
-    def __init__(self, supplied_backfill: str):
-        super().__init__("Unsupported backfill type", supplied_backfill)
-
-
-def get_backfill(config: Dict, source_cluster: Optional[Cluster], target_cluster: Optional[Cluster]) -> Backfill:
-    if BackfillType.opensearch_ingestion.name in config:
-        if source_cluster is None:
-            raise ValueError("source_cluster must be provided for OpenSearch Ingestion backfill")
-        if target_cluster is None:
-            raise ValueError("target_cluster must be provided for OpenSearch Ingestion backfill")
-        logger.debug("Creating OpenSearch Ingestion backfill instance")
-        return OpenSearchIngestionBackfill(config=config,
-                                           source_cluster=source_cluster,
-                                           target_cluster=target_cluster)
-    elif BackfillType.reindex_from_snapshot.name in config:
-        if target_cluster is None:
-            raise ValueError("target_cluster must be provided for RFS backfill")
-
-        if 'docker' in config[BackfillType.reindex_from_snapshot.name]:
-            logger.debug("Creating Docker RFS backfill instance")
-            return DockerRFSBackfill(config=config,
-                                     target_cluster=target_cluster)
-        elif 'ecs' in config[BackfillType.reindex_from_snapshot.name]:
-            logger.debug("Creating ECS RFS backfill instance")
-            return ECSRFSBackfill(config=config,
-                                  target_cluster=target_cluster)
-
-    logger.error(f"An unsupported metrics source type was provided: {config.keys()}")
-    if len(config.keys()) > 1:
-        raise UnsupportedBackfillTypeError(', '.join(config.keys()))
-    raise UnsupportedBackfillTypeError(next(iter(config.keys())))
 
 
 def handle_errors(on_success: Callable[[Any], Tuple[ExitCode, str]]) -> Callable[[Any], Tuple[ExitCode, str]]:
