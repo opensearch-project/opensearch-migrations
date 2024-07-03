@@ -1,16 +1,13 @@
 import pathlib
 
+import pytest
 import requests_mock
-from console_link.models.backfill_rfs import ECSRFSBackfill
-from console_link.models.ecs_service import ECSService, InstanceStatuses
-from console_link.models.command_result import CommandResult
-
+from click.testing import CliRunner
 from console_link.cli import cli
 from console_link.environment import Environment
-
-from click.testing import CliRunner
-import pytest
-
+from console_link.models.backfill_rfs import ECSRFSBackfill
+from console_link.models.command_result import CommandResult
+from console_link.models.ecs_service import ECSService, InstanceStatuses
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 VALID_SERVICES_YAML = TEST_DATA_DIRECTORY / "services.yaml"

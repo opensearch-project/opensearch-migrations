@@ -1,6 +1,6 @@
 import pytest
-from tests.utils import create_valid_cluster
 from console_link.models.cluster import AuthMethod, Cluster
+from tests.utils import create_valid_cluster
 
 # Define a valid cluster configuration
 valid_cluster_config = {

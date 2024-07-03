@@ -12,15 +12,14 @@ import logging
 import subprocess
 import time
 from subprocess import Popen
-from typing import Optional, List
+from typing import List, Optional
 
 import requests
-from prometheus_client import Metric
-from prometheus_client.parser import text_string_to_metric_families
-
 from endpoint_info import EndpointInfo
 from migration_monitor_params import MigrationMonitorParams
 from progress_metrics import ProgressMetrics
+from prometheus_client import Metric
+from prometheus_client.parser import text_string_to_metric_families
 
 # Path to the Data Prepper Prometheus metrics API endpoint
 # Used to monitor the progress of the migration

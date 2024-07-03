@@ -11,7 +11,6 @@ from typing import Optional
 
 import jsonpath_ng
 import requests
-
 from component_template_info import ComponentTemplateInfo
 from endpoint_info import EndpointInfo
 from exceptions import IndexManagementError, RequestError

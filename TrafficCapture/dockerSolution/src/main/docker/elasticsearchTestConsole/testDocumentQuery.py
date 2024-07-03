@@ -1,13 +1,14 @@
 #!/usr/bin/env python
-import requests
-from datetime import datetime
 import argparse
+import logging
 import os
-import urllib3
 import time
 from collections import deque
 from concurrent import futures
-import logging
+from datetime import datetime
+
+import requests
+import urllib3
 
 # Suppress only the single InsecureRequestWarning from urllib3 needed for this script
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)

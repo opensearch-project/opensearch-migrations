@@ -8,7 +8,7 @@
 #
 
 import utils
-from index_management import SETTINGS_KEY, MAPPINGS_KEY
+from index_management import MAPPINGS_KEY, SETTINGS_KEY
 
 
 # Computes and captures differences in indices between a "source" cluster

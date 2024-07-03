@@ -1,9 +1,9 @@
+import logging
 import subprocess
+from abc import ABC, abstractmethod
 from typing import List
 
 from cerberus import Validator
-import logging
-from abc import ABC, abstractmethod
 from console_link.models.command_result import CommandResult
 from console_link.models.schema_tools import contains_one_of
 

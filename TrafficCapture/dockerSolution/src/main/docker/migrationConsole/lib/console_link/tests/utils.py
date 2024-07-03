@@ -1,5 +1,6 @@
 from typing import Dict, Optional
-from console_link.models.cluster import Cluster, AuthMethod
+
+from console_link.models.cluster import AuthMethod, Cluster
 
 
 def create_valid_cluster(endpoint: str = "https://opensearchtarget:9200",

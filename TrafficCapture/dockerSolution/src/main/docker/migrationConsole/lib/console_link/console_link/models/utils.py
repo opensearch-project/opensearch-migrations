@@ -1,7 +1,7 @@
 # define a custom exception for aws api errors
+from datetime import datetime
 from enum import Enum
 from typing import Dict
-from datetime import datetime
 
 
 class AWSAPIError(Exception):

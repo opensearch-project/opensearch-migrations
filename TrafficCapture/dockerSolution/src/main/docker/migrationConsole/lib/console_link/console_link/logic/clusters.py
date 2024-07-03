@@ -1,6 +1,7 @@
-from console_link.models.cluster import Cluster, HttpMethod
-from dataclasses import dataclass
 import logging
+from dataclasses import dataclass
+
+from console_link.models.cluster import Cluster, HttpMethod
 
 logger = logging.getLogger(__name__)
 

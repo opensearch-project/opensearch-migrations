@@ -1,23 +1,23 @@
-import boto3
 import functools
 import json
 import logging
-import pytest
-import requests
 import secrets
 import string
-from operations import generate_large_doc
 import time
 import unittest
 from http import HTTPStatus
+from typing import Callable, Dict, List, Tuple
+
+import boto3
+import pytest
+import requests
+from operations import (check_index, create_document, create_index,
+                        delete_document, delete_index, generate_large_doc,
+                        get_document, run_migration_console_command)
 from requests import Session
 from requests.adapters import HTTPAdapter
 from requests.exceptions import ConnectionError, SSLError
 from requests_aws4auth import AWS4Auth
-from typing import Tuple, Callable, List, Dict
-
-from operations import create_index, check_index, create_document, \
-    delete_document, delete_index, get_document, run_migration_console_command
 
 logger = logging.getLogger(__name__)
 

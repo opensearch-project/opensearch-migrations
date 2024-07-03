@@ -1,6 +1,7 @@
 import logging
-from console_link.models.kafka import Kafka
+
 from console_link.models.command_result import CommandResult
+from console_link.models.kafka import Kafka
 
 logger = logging.getLogger(__name__)
 

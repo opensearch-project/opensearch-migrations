@@ -10,15 +10,14 @@
 import logging
 import subprocess
 import unittest
-from unittest.mock import patch, MagicMock, PropertyMock, ANY
-
-import requests
-import responses
-from prometheus_client.parser import text_string_to_metric_families
+from unittest.mock import ANY, MagicMock, PropertyMock, patch
 
 import migration_monitor
+import requests
+import responses
 from endpoint_info import EndpointInfo
 from migration_monitor_params import MigrationMonitorParams
+from prometheus_client.parser import text_string_to_metric_families
 
 # Constants
 TEST_ENDPOINT = "test"

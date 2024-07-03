@@ -16,11 +16,10 @@ import subprocess
 import sys
 from typing import Optional
 
-import yaml
-
 import endpoint_utils
 import metadata_migration
 import migration_monitor
+import yaml
 from fetch_orchestrator_params import FetchOrchestratorParams
 from metadata_migration_params import MetadataMigrationParams
 from migration_monitor_params import MigrationMonitorParams

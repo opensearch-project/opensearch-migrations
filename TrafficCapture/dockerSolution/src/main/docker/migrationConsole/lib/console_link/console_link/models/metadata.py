@@ -1,14 +1,15 @@
+import logging
 import os
 import subprocess
-from typing import Optional
-from cerberus import Validator
 import tempfile
-import logging
+from typing import Optional
 
+from cerberus import Validator
+from console_link.models.cluster import AuthMethod, Cluster
 from console_link.models.command_result import CommandResult
 from console_link.models.schema_tools import list_schema
-from console_link.models.cluster import AuthMethod, Cluster
-from console_link.models.snapshot import S3Snapshot, Snapshot, FileSystemSnapshot
+from console_link.models.snapshot import (FileSystemSnapshot, S3Snapshot,
+                                          Snapshot)
 
 logger = logging.getLogger(__name__)
 

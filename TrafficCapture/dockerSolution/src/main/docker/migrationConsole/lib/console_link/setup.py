@@ -1,4 +1,4 @@
-from setuptools import setup, find_packages  # ignore: type
+from setuptools import find_packages, setup  # ignore: type
 
 setup(
     name="console_link",

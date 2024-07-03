@@ -1,10 +1,10 @@
 import json
 import logging
 from typing import Tuple
-from console_link.models.utils import ExitCode
-from console_link.models.replayer_base import Replayer
-import yaml
 
+import yaml
+from console_link.models.replayer_base import Replayer
+from console_link.models.utils import ExitCode
 
 logger = logging.getLogger(__name__)
 

@@ -1,11 +1,9 @@
 import pathlib
 
 import pytest
-
-from console_link.logic.backfill import get_backfill, describe
+from console_link.logic.backfill import describe, get_backfill
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
 from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill
-
 from tests.utils import create_valid_cluster
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"

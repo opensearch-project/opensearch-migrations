@@ -1,8 +1,11 @@
-from typing import List, Tuple
-from console_link.models.metrics_source import MetricsSource, Component, MetricStatistic, PrometheusMetricsSource, \
-    CloudwatchMetricsSource
-from datetime import datetime, timedelta
 import logging
+from datetime import datetime, timedelta
+from typing import List, Tuple
+
+from console_link.models.metrics_source import (CloudwatchMetricsSource,
+                                                Component, MetricsSource,
+                                                MetricStatistic,
+                                                PrometheusMetricsSource)
 
 logger = logging.getLogger(__name__)
 

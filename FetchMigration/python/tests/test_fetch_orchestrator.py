@@ -12,7 +12,7 @@ import logging
 import os
 import unittest
 from unittest import mock
-from unittest.mock import patch, MagicMock, ANY, mock_open
+from unittest.mock import ANY, MagicMock, mock_open, patch
 
 import fetch_orchestrator as orchestrator
 from fetch_orchestrator_params import FetchOrchestratorParams

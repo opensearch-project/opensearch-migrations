@@ -1,7 +1,8 @@
 # conftest.py
-import pytest
-import uuid
 import logging
+import uuid
+
+import pytest
 
 
 def pytest_configure(config):

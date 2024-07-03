@@ -1,6 +1,7 @@
 import logging
-from console_link.models.snapshot import Snapshot
+
 from console_link.models.command_result import CommandResult
+from console_link.models.snapshot import Snapshot
 
 logger = logging.getLogger(__name__)
 

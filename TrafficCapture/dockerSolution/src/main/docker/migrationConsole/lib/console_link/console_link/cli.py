@@ -1,19 +1,18 @@
 import json
+import logging
 from pprint import pprint
-import click
-import console_link.logic.clusters as logic_clusters
-import console_link.logic.metrics as logic_metrics
-import console_link.logic.backfill as logic_backfill
-import console_link.logic.snapshot as logic_snapshot
-import console_link.logic.metadata as logic_metadata
-import console_link.logic.replay as logic_replay
 
-from console_link.models.utils import ExitCode
+import click
+import console_link.logic.backfill as logic_backfill
+import console_link.logic.clusters as logic_clusters
+import console_link.logic.metadata as logic_metadata
+import console_link.logic.metrics as logic_metrics
+import console_link.logic.replay as logic_replay
+import console_link.logic.snapshot as logic_snapshot
+from click.shell_completion import get_completion_class
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
-from click.shell_completion import get_completion_class
-
-import logging
+from console_link.models.utils import ExitCode
 
 logger = logging.getLogger(__name__)
 

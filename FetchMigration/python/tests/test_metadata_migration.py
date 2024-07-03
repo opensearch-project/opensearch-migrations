@@ -11,11 +11,10 @@ import copy
 import logging
 import pickle
 import unittest
-from unittest.mock import patch, MagicMock, ANY
-
-import requests
+from unittest.mock import ANY, MagicMock, patch
 
 import metadata_migration
+import requests
 from endpoint_info import EndpointInfo
 from exceptions import MetadataMigrationError
 from index_doc_count import IndexDocCount

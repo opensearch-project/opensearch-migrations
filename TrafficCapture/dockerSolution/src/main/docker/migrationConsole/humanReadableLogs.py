@@ -4,9 +4,9 @@ import argparse
 import base64
 import gzip
 import json
+import logging
 import pathlib
 from typing import Optional
-import logging
 
 from tqdm import tqdm
 from tqdm.contrib.logging import logging_redirect_tqdm

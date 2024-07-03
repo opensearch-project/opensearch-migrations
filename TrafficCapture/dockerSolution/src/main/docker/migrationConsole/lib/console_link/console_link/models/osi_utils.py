@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
-from console_link.models.cluster import AuthMethod, Cluster
-from pathlib import Path
-from typing import List, Dict, Optional
-from urllib.parse import urlparse
 import logging
 import re
+from pathlib import Path
+from typing import Dict, List, Optional
+from urllib.parse import urlparse
+
+from console_link.models.cluster import AuthMethod, Cluster
 
 logger = logging.getLogger(__name__)
 DEFAULT_PIPELINE_NAME = "migration-assistant-pipeline"

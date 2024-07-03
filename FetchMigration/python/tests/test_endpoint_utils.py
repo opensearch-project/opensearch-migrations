@@ -14,10 +14,9 @@ import unittest
 from typing import Optional
 from unittest.mock import MagicMock, patch
 
-from moto import mock_aws
-
 import endpoint_utils
 from endpoint_info import EndpointInfo
+from moto import mock_aws
 from tests import test_constants
 
 # Constants

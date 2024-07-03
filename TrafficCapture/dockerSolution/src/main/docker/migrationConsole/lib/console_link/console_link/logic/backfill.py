@@ -1,14 +1,14 @@
-from enum import Enum
 import json
 import logging
+from enum import Enum
 from typing import Dict, Optional, Tuple
-from console_link.models.utils import ExitCode
+
+import yaml
+from console_link.models.backfill_base import Backfill
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
 from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill
 from console_link.models.cluster import Cluster
-from console_link.models.backfill_base import Backfill
-import yaml
-
+from console_link.models.utils import ExitCode
 
 logger = logging.getLogger(__name__)
 

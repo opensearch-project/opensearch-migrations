@@ -1,15 +1,13 @@
+import logging
 from datetime import datetime
 from typing import Dict, Optional
 
+from cerberus import Validator
 from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.cluster import Cluster
-from console_link.models.schema_tools import contains_one_of
 from console_link.models.command_result import CommandResult
 from console_link.models.ecs_service import ECSService
-
-from cerberus import Validator
-
-import logging
+from console_link.models.schema_tools import contains_one_of
 
 logger = logging.getLogger(__name__)
 
