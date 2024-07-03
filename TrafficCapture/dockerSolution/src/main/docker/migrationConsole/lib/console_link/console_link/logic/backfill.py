@@ -68,7 +68,7 @@ def create(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
     except Exception as e:
         logger.error(f"Failed to create backfill: {e}")
         return ExitCode.FAILURE, f"Failure when creating backfill: {type(e).__name__} {e}"
-    
+
     if result.success:
         return ExitCode.SUCCESS, "Backfill created successfully." + "\n" + result.display()
     return ExitCode.FAILURE, "Backfill creation failed." + "\n" + result.display()
@@ -83,7 +83,7 @@ def start(backfill: Backfill, *args, **kwargs) -> Tuple[ExitCode, str]:
     except Exception as e:
         logger.error(f"Failed to start backfill: {e}")
         return ExitCode.FAILURE, f"Failure when starting backfill: {type(e).__name__} {e}"
-    
+
     if result.success:
         return ExitCode.SUCCESS, "Backfill started successfully." + "\n" + result.display()
     return ExitCode.FAILURE, "Backfill start failed." + "\n" + result.display()
@@ -119,7 +119,7 @@ def scale(backfill: Backfill, units: int, *args, **kwargs) -> Tuple[ExitCode, st
     return ExitCode.FAILURE, "Backfill scale failed." + "\n" + result.display()
 
 
-def status(backfill: Backfill, deep_check, *args, **kwargs) -> Tuple[ExitCode, str]:
+def status(backfill: Backfill, deep_check: bool, *args, **kwargs) -> Tuple[ExitCode, str]:
     logger.info(f"Getting backfill status with {deep_check=}")
     try:
         status = backfill.get_status(deep_check, *args, **kwargs)
