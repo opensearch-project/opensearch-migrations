@@ -43,7 +43,7 @@ def test_cli_with_valid_services_file_does_not_raise_error(runner):
 
 
 def test_cli_cluster_cat_indices(runner, env, mocker):
-    mock = mocker.patch('console_link.logic.clusters.cat_indices')
+    mock = mocker.patch('console_link.middleware.clusters.cat_indices')
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'cat-indices'],
                            catch_exceptions=True)
     # Should have been called two times.
@@ -54,7 +54,7 @@ def test_cli_cluster_cat_indices(runner, env, mocker):
 
 
 def test_cli_cluster_connection_check(runner, env, mocker):
-    mock = mocker.patch('console_link.logic.clusters.connection_check')
+    mock = mocker.patch('console_link.middleware.clusters.connection_check')
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'connection-check'],
                            catch_exceptions=True)
     # Should have been called two times.
@@ -65,7 +65,7 @@ def test_cli_cluster_connection_check(runner, env, mocker):
 
 
 def test_cli_cluster_run_test_benchmarks(runner, env, mocker):
-    mock = mocker.patch('console_link.logic.clusters.run_test_benchmarks')
+    mock = mocker.patch('console_link.middleware.clusters.run_test_benchmarks')
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'run-test-benchmarks'],
                            catch_exceptions=True)
     mock.assert_called_once()
@@ -73,7 +73,7 @@ def test_cli_cluster_run_test_benchmarks(runner, env, mocker):
 
 
 def test_cli_cluster_clear_indices(runner, env, mocker):
-    mock = mocker.patch('console_link.logic.clusters.clear_indices')
+    mock = mocker.patch('console_link.middleware.clusters.clear_indices')
     result = runner.invoke(cli,
                            ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'clear-indices',
                             '--cluster', 'source', '--acknowledge-risk'],
@@ -83,7 +83,7 @@ def test_cli_cluster_clear_indices(runner, env, mocker):
 
 
 def test_cli_cluster_clear_indices_no_acknowledge(runner, env, mocker):
-    mock = mocker.patch('console_link.logic.clusters.clear_indices')
+    mock = mocker.patch('console_link.middleware.clusters.clear_indices')
     runner.invoke(cli,
                   ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'clear-indices',
                    '--cluster', 'source'],
@@ -100,7 +100,7 @@ def test_cli_with_metrics_get_data(runner, env, mocker):
 
 
 def test_cli_with_backfill_describe(runner, env, mocker):
-    mock = mocker.patch('console_link.logic.backfill.describe')
+    mock = mocker.patch('console_link.middleware.backfill.describe')
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'backfill', 'describe'],
                            catch_exceptions=True)
     mock.assert_called_once()
@@ -108,7 +108,7 @@ def test_cli_with_backfill_describe(runner, env, mocker):
 
 
 def test_cli_snapshot_create(runner, env, mocker):
-    mock = mocker.patch('console_link.logic.snapshot.create')
+    mock = mocker.patch('console_link.middleware.snapshot.create')
 
     # Set the mock return value
     mock.return_value = CommandResult(success=True, value="Snapshot created successfully.")
@@ -125,7 +125,7 @@ def test_cli_snapshot_create(runner, env, mocker):
 
 
 def test_cli_snapshot_status(runner, env, mocker):
-    mock = mocker.patch('console_link.logic.snapshot.status')
+    mock = mocker.patch('console_link.middleware.snapshot.status')
 
     # Set the mock return value
     mock.return_value = CommandResult(success=True, value="Snapshot status: COMPLETED")

@@ -1,12 +1,12 @@
 import json
 from pprint import pprint
 import click
-import console_link.logic.clusters as logic_clusters
-import console_link.logic.metrics as logic_metrics
-import console_link.logic.backfill as logic_backfill
-import console_link.logic.snapshot as logic_snapshot
-import console_link.logic.metadata as logic_metadata
-import console_link.logic.replay as logic_replay
+import console_link.middleware.clusters as clusters_
+import console_link.middleware.metrics as metrics_
+import console_link.middleware.backfill as backfill_
+import console_link.middleware.snapshot as snapshot_
+import console_link.middleware.metadata as metadata_
+import console_link.middleware.replay as replay_
 
 from console_link.models.utils import ExitCode
 from console_link.environment import Environment
@@ -65,10 +65,10 @@ def cat_indices_cmd(ctx, refresh):
         click.echo(
             json.dumps(
                 {
-                    "source_cluster": logic_clusters.cat_indices(
+                    "source_cluster": clusters_.cat_indices(
                         ctx.env.source_cluster, as_json=True, refresh=refresh
                     ),
-                    "target_cluster": logic_clusters.cat_indices(
+                    "target_cluster": clusters_.cat_indices(
                         ctx.env.target_cluster, as_json=True, refresh=refresh
                     ),
                 }
@@ -76,9 +76,9 @@ def cat_indices_cmd(ctx, refresh):
         )
         return
     click.echo("SOURCE CLUSTER")
-    click.echo(logic_clusters.cat_indices(ctx.env.source_cluster, refresh=refresh))
+    click.echo(clusters_.cat_indices(ctx.env.source_cluster, refresh=refresh))
     click.echo("TARGET CLUSTER")
-    click.echo(logic_clusters.cat_indices(ctx.env.target_cluster, refresh=refresh))
+    click.echo(clusters_.cat_indices(ctx.env.target_cluster, refresh=refresh))
 
 
 @cluster_group.command(name="connection-check")
@@ -86,16 +86,16 @@ def cat_indices_cmd(ctx, refresh):
 def connection_check_cmd(ctx):
     """Checks if a connection can be established to source and target clusters"""
     click.echo("SOURCE CLUSTER")
-    click.echo(logic_clusters.connection_check(ctx.env.source_cluster))
+    click.echo(clusters_.connection_check(ctx.env.source_cluster))
     click.echo("TARGET CLUSTER")
-    click.echo(logic_clusters.connection_check(ctx.env.target_cluster))
+    click.echo(clusters_.connection_check(ctx.env.target_cluster))
 
 
 @cluster_group.command(name="run-test-benchmarks")
 @click.pass_obj
 def run_test_benchmarks_cmd(ctx):
     """Run a series of OpenSearch Benchmark workloads against the source cluster"""
-    click.echo(logic_clusters.run_test_benchmarks(ctx.env.source_cluster))
+    click.echo(clusters_.run_test_benchmarks(ctx.env.source_cluster))
 
 
 @cluster_group.command(name="clear-indices")
@@ -111,12 +111,12 @@ def clear_indices_cmd(ctx, acknowledge_risk, cluster):
     cluster_focus = ctx.env.source_cluster if cluster.lower() == 'source' else ctx.env.target_cluster
     if acknowledge_risk:
         click.echo("Performing clear indices operation...")
-        click.echo(logic_clusters.clear_indices(cluster_focus))
+        click.echo(clusters_.clear_indices(cluster_focus))
     else:
         if click.confirm(f'Clearing indices WILL result in the loss of all data on the {cluster.lower()} cluster. '
                          f'Are you sure you want to continue?'):
             click.echo(f"Performing clear indices operation on {cluster.lower()} cluster...")
-            click.echo(logic_clusters.clear_indices(cluster_focus))
+            click.echo(clusters_.clear_indices(cluster_focus))
         else:
             click.echo("Aborting command.")
 
@@ -141,8 +141,8 @@ def snapshot_group(ctx):
 def create_snapshot_cmd(ctx, wait, max_snapshot_rate_mb_per_node):
     """Create a snapshot of the source cluster"""
     snapshot = ctx.env.snapshot
-    result = logic_snapshot.create(snapshot, wait=wait,
-                                   max_snapshot_rate_mb_per_node=max_snapshot_rate_mb_per_node)
+    result = snapshot_.create(snapshot, wait=wait,
+                              max_snapshot_rate_mb_per_node=max_snapshot_rate_mb_per_node)
     click.echo(result.value)
 
 
@@ -151,7 +151,7 @@ def create_snapshot_cmd(ctx, wait, max_snapshot_rate_mb_per_node):
 @click.pass_obj
 def status_snapshot_cmd(ctx, deep_check):
     """Check the status of the snapshot"""
-    result = logic_snapshot.status(ctx.env.snapshot, deep_check=deep_check)
+    result = snapshot_.status(ctx.env.snapshot, deep_check=deep_check)
     click.echo(result.value)
 
 # ##################### BACKFILL ###################
@@ -171,7 +171,7 @@ def backfill_group(ctx):
 @backfill_group.command(name="describe")
 @click.pass_obj
 def describe_backfill_cmd(ctx):
-    click.echo(logic_backfill.describe(ctx.env.backfill, as_json=ctx.json))
+    click.echo(backfill_.describe(ctx.env.backfill, as_json=ctx.json))
 
 
 @backfill_group.command(name="create")
@@ -180,9 +180,9 @@ def describe_backfill_cmd(ctx):
               help="Flag to only print populated pipeline config when executed")
 @click.pass_obj
 def create_backfill_cmd(ctx, pipeline_template_file, print_config_only):
-    exitcode, message = logic_backfill.create(ctx.env.backfill,
-                                              pipeline_template_path=pipeline_template_file,
-                                              print_config_only=print_config_only)
+    exitcode, message = backfill_.create(ctx.env.backfill,
+                                         pipeline_template_path=pipeline_template_file,
+                                         print_config_only=print_config_only)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -192,7 +192,7 @@ def create_backfill_cmd(ctx, pipeline_template_file, print_config_only):
 @click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
 @click.pass_obj
 def start_backfill_cmd(ctx, pipeline_name):
-    exitcode, message = logic_backfill.start(ctx.env.backfill, pipeline_name=pipeline_name)
+    exitcode, message = backfill_.start(ctx.env.backfill, pipeline_name=pipeline_name)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -202,7 +202,7 @@ def start_backfill_cmd(ctx, pipeline_name):
 @click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
 @click.pass_obj
 def stop_backfill_cmd(ctx, pipeline_name):
-    exitcode, message = logic_backfill.stop(ctx.env.backfill, pipeline_name=pipeline_name)
+    exitcode, message = backfill_.stop(ctx.env.backfill, pipeline_name=pipeline_name)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -212,7 +212,7 @@ def stop_backfill_cmd(ctx, pipeline_name):
 @click.argument("units", type=int, required=True)
 @click.pass_obj
 def scale_backfill_cmd(ctx, units: int):
-    exitcode, message = logic_backfill.scale(ctx.env.backfill, units)
+    exitcode, message = backfill_.scale(ctx.env.backfill, units)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -223,7 +223,7 @@ def scale_backfill_cmd(ctx, units: int):
 @click.pass_obj
 def status_backfill_cmd(ctx, deep_check):
     logger.info(f"Called `console backfill status`, with {deep_check=}")
-    exitcode, message = logic_backfill.status(ctx.env.backfill, deep_check=deep_check)
+    exitcode, message = backfill_.status(ctx.env.backfill, deep_check=deep_check)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -242,13 +242,13 @@ def replay_group(ctx):
 @replay_group.command(name="describe")
 @click.pass_obj
 def describe_replay_cmd(ctx):
-    click.echo(logic_replay.describe(ctx.env.replay, as_json=ctx.json))
+    click.echo(replay_.describe(ctx.env.replay, as_json=ctx.json))
 
 
 @replay_group.command(name="start")
 @click.pass_obj
 def start_replay_cmd(ctx):
-    exitcode, message = logic_replay.start(ctx.env.replay)
+    exitcode, message = replay_.start(ctx.env.replay)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -257,7 +257,7 @@ def start_replay_cmd(ctx):
 @replay_group.command(name="stop")
 @click.pass_obj
 def stop_replay_cmd(ctx):
-    exitcode, message = logic_replay.stop(ctx.env.replay)
+    exitcode, message = replay_.stop(ctx.env.replay)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -267,7 +267,7 @@ def stop_replay_cmd(ctx):
 @click.argument("units", type=int, required=True)
 @click.pass_obj
 def scale_replay_cmd(ctx, units: int):
-    exitcode, message = logic_replay.scale(ctx.env.replay, units)
+    exitcode, message = replay_.scale(ctx.env.replay, units)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -276,7 +276,7 @@ def scale_replay_cmd(ctx, units: int):
 @replay_group.command(name="status")
 @click.pass_obj
 def status_replay_cmd(ctx):
-    exitcode, message = logic_replay.status(ctx.env.replay)
+    exitcode, message = replay_.status(ctx.env.replay)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -297,7 +297,7 @@ def metadata_group(ctx):
 @click.option("--detach", is_flag=True, help="Run metadata migration in detached mode")
 @click.pass_obj
 def migrate_metadata_cmd(ctx, detach):
-    exitcode, message = logic_metadata.migrate(ctx.env.metadata, detach)
+    exitcode, message = metadata_.migrate(ctx.env.metadata, detach)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -332,7 +332,7 @@ def list_metrics_cmd(ctx):
 @click.option("--lookback", type=int, default=60, help="Lookback in minutes")
 @click.pass_obj
 def get_metrics_data_cmd(ctx, component, metric_name, statistic, lookback):
-    metric_data = logic_metrics.get_metric_data(
+    metric_data = metrics_.get_metric_data(
         ctx.env.metrics_source,
         component,
         metric_name,
