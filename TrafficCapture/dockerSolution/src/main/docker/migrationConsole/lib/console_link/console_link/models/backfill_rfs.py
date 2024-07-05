@@ -2,6 +2,8 @@ from datetime import datetime
 from typing import Dict, Optional
 import json
 
+import requests
+
 from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.cluster import Cluster
 from console_link.models.schema_tools import contains_one_of
@@ -77,6 +79,12 @@ class DockerRFSBackfill(RFSBackfill):
         self.target_cluster = target_cluster
         self.docker_config = self.config["reindex_from_snapshot"]["docker"]
 
+    def get_status(self, *args, **kwargs) -> CommandResult:
+        return CommandResult(True, (BackfillStatus.RUNNING, "This is my running state message"))
+
+    def scale(self, units: int, *args, **kwargs) -> CommandResult:
+        raise NotImplementedError()
+
 
 class ECSRFSBackfill(RFSBackfill):
     def __init__(self, config: Dict, target_cluster: Cluster) -> None:
@@ -123,6 +131,13 @@ class ECSRFSBackfill(RFSBackfill):
         return CommandResult(True, (BackfillStatus.STOPPED, status_string))
 
     def _get_detailed_status(self) -> Optional[str]:
+        # Check whether the working state index exists. If not, we can't run queries.
+        try:
+            self.target_cluster.call_api("/.migrations_working_state")
+        except requests.exceptions.RequestException:
+            logger.warning("Working state index does not yet exist, deep status checks can't be performed.")
+            return None
+
         current_epoch_seconds = int(datetime.now().timestamp())
         incomplete_query = {"query": {
             "bool": {"must_not": [{"exists": {"field": "completedAt"}}]}

@@ -25,6 +25,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly fargateCpuArch: CpuArchitecture,
     readonly migrationConsoleEnableOSI: boolean,
     readonly migrationAPIEnabled?: boolean,
+    readonly migrationAPIAllowedHosts?: string,
     readonly servicesYaml: ServicesYaml,
 }
 
@@ -327,6 +328,9 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             imageCommand = ['/bin/sh', '-c',
                 '/root/loadServicesFromParameterStore.sh && python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000'
             ]
+
+            const defaultAllowedHosts = `migration-console.migration.${props.stage}.local,localhost`
+            environment["API_ALLOWED_HOSTS"] = props.migrationAPIAllowedHosts ? `${defaultAllowedHosts},${props.migrationAPIAllowedHosts}` : defaultAllowedHosts
         }
 
         if (props.migrationConsoleEnableOSI) {
