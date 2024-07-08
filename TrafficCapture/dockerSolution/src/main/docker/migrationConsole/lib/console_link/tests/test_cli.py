@@ -1,5 +1,6 @@
 import json
 import pathlib
+import os
 
 import pytest
 import requests_mock
@@ -8,7 +9,7 @@ from click.testing import CliRunner
 import console_link.middleware as middleware
 from console_link.cli import cli
 from console_link.environment import Environment
-from console_link.models.backfill_rfs import ECSRFSBackfill, RFSBackfill
+from console_link.models.backfill_rfs import ECSRFSBackfill
 from console_link.models.cluster import Cluster
 from console_link.models.command_result import CommandResult
 from console_link.models.ecs_service import ECSService, InstanceStatuses
@@ -30,6 +31,16 @@ def runner():
 def env():
     """A valid Environment for the given VALID_SERVICES_YAML file"""
     return Environment(VALID_SERVICES_YAML)
+
+
+@pytest.fixture(autouse=True)
+def set_fake_aws_credentials():
+    # These are example credentials from
+    # https://docs.aws.amazon.com/IAM/latest/UserGuide/security-creds.html#sec-access-keys-and-secret-access-keys
+    # They allow the boto client to be created for any AWS services, but functions must be intercepted
+    # before any real calls are made.
+    os.environ['AWS_ACCESS_KEY_ID'] = 'AKIAIOSFODNN7EXAMPLE'
+    os.environ['AWS_SECRET_ACCESS_KEY'] = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'
 
 # Tests around the general CLI functionality
 
@@ -191,7 +202,7 @@ def test_cli_with_backfill_describe(runner, mocker):
 
 
 def test_cli_backfill_create_rfs(runner, mocker):
-    mock = mocker.patch.object(RFSBackfill, 'create', autospec=True)
+    mock = mocker.patch.object(ECSRFSBackfill, 'create', autospec=True)
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
                                  'backfill', 'create'],
                            catch_exceptions=True)
@@ -200,7 +211,7 @@ def test_cli_backfill_create_rfs(runner, mocker):
 
 
 def test_cli_backfill_start(runner, mocker):
-    mock = mocker.patch.object(RFSBackfill, 'start', autospec=True)
+    mock = mocker.patch.object(ECSRFSBackfill, 'start', autospec=True)
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
                                  'backfill', 'start'],
                            catch_exceptions=True)
@@ -209,7 +220,7 @@ def test_cli_backfill_start(runner, mocker):
 
 
 def test_cli_backfill_stop(runner, mocker):
-    mock = mocker.patch.object(RFSBackfill, 'stop', autospec=True)
+    mock = mocker.patch.object(ECSRFSBackfill, 'stop', autospec=True)
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
                                  'backfill', 'stop'],
                            catch_exceptions=True)
@@ -218,7 +229,7 @@ def test_cli_backfill_stop(runner, mocker):
 
 
 def test_cli_backfill_scale(runner, mocker):
-    mock = mocker.patch.object(RFSBackfill, 'scale', autospec=True)
+    mock = mocker.patch.object(ECSRFSBackfill, 'scale', autospec=True)
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
                                  'backfill', 'scale', '3'],
                            catch_exceptions=True)
@@ -227,7 +238,7 @@ def test_cli_backfill_scale(runner, mocker):
 
 
 def test_cli_backfill_scale_with_no_units_fails(runner, mocker):
-    mock = mocker.patch.object(RFSBackfill, 'scale', autospec=True)
+    mock = mocker.patch.object(ECSRFSBackfill, 'scale', autospec=True)
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
                                  'backfill', 'scale'],
                            catch_exceptions=True)
