@@ -1,21 +1,21 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {CpuArchitecture, PortMapping, Protocol, MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, MountPoint, PortMapping, Protocol, Volume} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {
+    createMigrationStringParameter,
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy,
     getMigrationStringParameterValue,
-    createMigrationStringParameter,
     MigrationSSMParameter
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {RemovalPolicy} from "aws-cdk-lib";
-import { MetadataMigrationYaml, ServicesYaml } from "../migration-services-yaml";
-import { ELBTargetGroup, MigrationServiceCore } from "./migration-service-core";
+import {MetadataMigrationYaml, ServicesYaml} from "../migration-services-yaml";
+import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
 
 export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationsSolutionVersion: string,
@@ -329,6 +329,16 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
             const defaultAllowedHosts = `migration-console.migration.${props.stage}.local,localhost`
             environment["API_ALLOWED_HOSTS"] = props.migrationAPIAllowedHosts ? `${defaultAllowedHosts},${props.migrationAPIAllowedHosts}` : defaultAllowedHosts
+            const migrationApiUrl = getMigrationStringParameterValue(this, {
+                ...props,
+                parameter: MigrationSSMParameter.MIGRATION_API_URL
+            });
+            const migrationApiUrlAlias = getMigrationStringParameterValue(this, {
+                ...props,
+                parameter: MigrationSSMParameter.MIGRATION_API_URL_ALIAS
+            });
+            environment["API_ALLOWED_HOSTS"] += migrationApiUrl ? `,${migrationApiUrl}` : ""
+            environment["API_ALLOWED_HOSTS"] += migrationApiUrlAlias ? `,${migrationApiUrlAlias}` : ""
         }
 
         if (props.migrationConsoleEnableOSI) {

@@ -155,11 +155,19 @@ export class NetworkStack extends Stack {
             });
 
             const createALBListenerUrlParameter = (port: number, parameter: MigrationSSMParameter): void => {
+                createMigrationStringParameter(this, `https://${alb.loadBalancerDnsName}:${port}`, {
+                    ...props,
+                    parameter: parameter
+                });
+            };
+
+            const createALBListenerUrlParameterAlias = (port: number, parameter: MigrationSSMParameter): void => {
                 createMigrationStringParameter(this, `https://${albDnsRecord.domainName}:${port}`, {
                     ...props,
                     parameter: parameter
                 });
             };
+
             const albDnsRecord = new ARecord(this, 'albDnsRecord', {
                 zone: route53,
                 target: RecordTarget.fromAlias(new LoadBalancerTarget(alb)),
@@ -185,6 +193,7 @@ export class NetworkStack extends Stack {
                 this.albMigrationConsoleTG = this.createSecureTargetGroup('ALBMigrationConsole', props.stage, 8000, this.vpc);
                 this.createSecureListener('MigrationConsole', 8000, alb, cert, this.albMigrationConsoleTG);
                 createALBListenerUrlParameter(8000, MigrationSSMParameter.MIGRATION_API_URL);
+                createALBListenerUrlParameterAlias(8000, MigrationSSMParameter.MIGRATION_API_URL_ALIAS);
             }
 
             // Setup when deploying capture proxy in ECS
@@ -192,6 +201,7 @@ export class NetworkStack extends Stack {
                 this.albSourceProxyTG = this.createSecureTargetGroup('ALBSourceProxy', props.stage, 9200, this.vpc);
                 this.createSecureListener('SourceProxy', 9201, alb, cert, this.albSourceProxyTG);
                 createALBListenerUrlParameter(9201, MigrationSSMParameter.SOURCE_PROXY_URL);
+                createALBListenerUrlParameterAlias(9201, MigrationSSMParameter.SOURCE_PROXY_URL_ALIAS);
             }
 
             // Setup when deploying target cluster proxy in ECS
@@ -199,6 +209,7 @@ export class NetworkStack extends Stack {
                 this.albTargetProxyTG = this.createSecureTargetGroup('ALBTargetProxy', props.stage, 9200, this.vpc);
                 this.createSecureListener('TargetProxy', 9202, alb, cert, this.albTargetProxyTG);
                 createALBListenerUrlParameter(9202, MigrationSSMParameter.TARGET_PROXY_URL);
+                createALBListenerUrlParameterAlias(9202, MigrationSSMParameter.TARGET_PROXY_URL_ALIAS);
             }
 
             // Setup ALB weighted listener when both source and target proxies are enabled
@@ -211,6 +222,7 @@ export class NetworkStack extends Stack {
                     ])
                 });
                 createALBListenerUrlParameter(9200, MigrationSSMParameter.MIGRATION_LISTENER_URL);
+                createALBListenerUrlParameterAlias(9200, MigrationSSMParameter.MIGRATION_LISTENER_URL_ALIAS);
             }
         }
 
