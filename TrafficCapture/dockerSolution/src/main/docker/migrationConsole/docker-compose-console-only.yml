@@ -24,7 +24,7 @@ services:
       - API_ALLOWED_HOSTS=localhost
     ports:
       - "8000:8000"
-    command: python /root/console_api/manage.py runserver_plus 0.0.0.0:8000
+    command: python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000
 
 networks:
   migrations:

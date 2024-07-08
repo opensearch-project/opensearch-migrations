@@ -105,6 +105,8 @@ services:
       - MIGRATION_KAFKA_BROKER_ENDPOINTS=kafka:9092
       - AWS_PROFILE=default
 #    command: ./runTestBenchmarks.sh
+    ports:
+      - "8000:8000"
 
 
 volumes:

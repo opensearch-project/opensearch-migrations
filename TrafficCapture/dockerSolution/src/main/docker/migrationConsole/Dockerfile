@@ -40,8 +40,6 @@ WORKDIR /root/lib/integ_test
 RUN pipenv install --system --deploy --ignore-pipfile
 
 
-# Experimental console API, uncomment to start.
-# ENV ENABLE_CONSOLE_API=true
 COPY console_api /root/console_api
 WORKDIR /root/console_api
 RUN pipenv install --system --deploy --ignore-pipfile
@@ -51,10 +49,7 @@ WORKDIR /root
 # Ensure bash completion is installed
 RUN apt-get install -y bash-completion
 
-ENV ENABLE_CONSOLE_API=${ENABLE_CONSOLE_API:-false}
-CMD if [ "$ENABLE_CONSOLE_API" = "true" ]; then \
-        /root/loadServicesFromParameterStore.sh && \
-        python /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt; \
-    else \
-        /root/loadServicesFromParameterStore.sh && tail -f /dev/null; \
-    fi
+CMD /root/loadServicesFromParameterStore.sh && tail -f /dev/null
+
+# Experimental console API, uncomment to start.
+#CMD /root/loadServicesFromParameterStore.sh && python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt
