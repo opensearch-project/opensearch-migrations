@@ -20,6 +20,9 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     private static final ObjectMapper mapper = new ObjectMapper();
 
     private final List<TransformationRule<Index>> indexTransformations = List.of(new IndexMappingTypeRemoval());
+    private final List<TransformationRule<Index>> indexTemplateTransformations = List.of(new IndexMappingTypeRemoval());
+
+
     private int awarenessAttributeDimensionality;
 
     public Transformer_ES_6_8_to_OS_2_11(int awarenessAttributeDimensionality) {
@@ -38,7 +41,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
             originalTemplates.fieldNames().forEachRemaining(templateName -> {
                 var templateCopy = (ObjectNode) originalTemplates.get(templateName).deepCopy();
                 var indexTemplate = (Index) () -> templateCopy;
-                transformIndex(indexTemplate);
+                transformIndex(indexTemplate, IndexType.Concrete);
                 templates.set(templateName, indexTemplate.raw());
             });
             newRoot.set("templates", templates);
@@ -62,20 +65,32 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     @Override
     public IndexMetadata transformIndexMetadata(IndexMetadata index) {
         var copy = index.deepCopy();
-        transformIndex(copy);
+        transformIndex(copy, IndexType.Concrete);
         return copy;
     }
 
-    private void transformIndex(Index index) {
+    private void transformIndex(Index index, IndexType type) {
         logger.debug("Original Object: " + index.raw().toString());
         var newRoot = index.raw();
 
-        indexTransformations.forEach(transformer -> transformer.applyTransformation(index));
+        switch (type) {
+            case Concrete:
+                indexTransformations.forEach(transformer -> transformer.applyTransformation(index));
+                break;
+            case Template:
+                indexTemplateTransformations.forEach(transformer -> transformer.applyTransformation(index));
+                break;
+        }
 
         newRoot.set("settings", TransformFunctions.convertFlatSettingsToTree((ObjectNode) newRoot.get("settings")));
         TransformFunctions.removeIntermediateIndexSettingsLevel(newRoot); // run before fixNumberOfReplicas
         TransformFunctions.fixReplicasForDimensionality(newRoot, awarenessAttributeDimensionality);
 
         logger.debug("Transformed Object: " + newRoot.toString());
+    }
+
+    private enum IndexType {
+        Concrete,
+        Template;
     }
 }
