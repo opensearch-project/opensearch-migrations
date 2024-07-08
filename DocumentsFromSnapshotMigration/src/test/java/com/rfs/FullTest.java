@@ -416,7 +416,7 @@ public class FullTest {
                 // Check if the exit code is as expected
                 Assertions.assertEquals(expectedExitCode, actualExitCode, "The program did not exit with the expected status code.");
                 
-            } finally {f
+            } finally {
                 deleteTree(tempDirSnapshot);
                 deleteTree(tempDirLucene);
             }
