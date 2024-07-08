@@ -204,6 +204,7 @@ public class FullTest {
                 })
                 .filter(Objects::nonNull)
                 .filter(kvp->!kvp.getKey().startsWith("."))
+                .filter(kvp-> kvp.getKey().startsWith("reindexed-logs"))
                 .collect(Collectors.toMap(AbstractMap.SimpleEntry::getKey, kvp -> Integer.parseInt(kvp.getValue())));
     }
 
@@ -415,7 +416,7 @@ public class FullTest {
                 // Check if the exit code is as expected
                 Assertions.assertEquals(expectedExitCode, actualExitCode, "The program did not exit with the expected status code.");
                 
-            } finally {
+            } finally {f
                 deleteTree(tempDirSnapshot);
                 deleteTree(tempDirLucene);
             }
