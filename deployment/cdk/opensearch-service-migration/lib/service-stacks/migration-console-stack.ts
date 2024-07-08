@@ -13,7 +13,7 @@ import {
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
-import {RemovalPolicy} from "aws-cdk-lib";
+import {Fn, RemovalPolicy} from "aws-cdk-lib";
 import {MetadataMigrationYaml, ServicesYaml} from "../migration-services-yaml";
 import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
 
@@ -31,6 +31,11 @@ export interface MigrationConsoleProps extends StackPropsExt {
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
+
+    getHostname(url: string): string {
+        // https://alb.migration.dev.local:8000 -> alb.migration.dev.local
+        return Fn.select(0, Fn.split(':', Fn.select(2, Fn.split('/', url))));
+    }
 
     createMSKAdminIAMPolicies(stage: string, deployId: string): PolicyStatement[] {
         const mskClusterARN = getMigrationStringParameterValue(this, {
@@ -337,8 +342,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 ...props,
                 parameter: MigrationSSMParameter.MIGRATION_API_URL_ALIAS
             });
-            environment["API_ALLOWED_HOSTS"] += migrationApiUrl ? `,${migrationApiUrl}` : ""
-            environment["API_ALLOWED_HOSTS"] += migrationApiUrlAlias ? `,${migrationApiUrlAlias}` : ""
+            environment["API_ALLOWED_HOSTS"] += migrationApiUrl ? `,${this.getHostname(migrationApiUrl)}` : ""
+            environment["API_ALLOWED_HOSTS"] += migrationApiUrlAlias ? `,${this.getHostname(migrationApiUrlAlias)}` : ""
         }
 
         if (props.migrationConsoleEnableOSI) {
@@ -370,6 +375,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             taskMemoryLimitMiB: 2048,
             ...props
         });
+        
     }
 
 }
