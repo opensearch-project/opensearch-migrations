@@ -5,7 +5,7 @@ name = "pypi"
 
 [packages]
 console-link = {file = "../console_link", editable = true}
-certifi = "==2023.7.22"
+certifi = "==2024.7.4"
 charset-normalizer = "==3.1.0"
 idna = "==3.7"
 iniconfig = "==2.0.0"
