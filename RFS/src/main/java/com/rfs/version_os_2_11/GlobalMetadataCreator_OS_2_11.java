@@ -3,12 +3,12 @@ package com.rfs.version_os_2_11;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.rfs.tracing.IRfsContexts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.common.OpenSearchClient;
+import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts;
 
 public class GlobalMetadataCreator_OS_2_11 {
     private static final Logger logger = LogManager.getLogger(GlobalMetadataCreator_OS_2_11.class);
@@ -17,13 +17,13 @@ public class GlobalMetadataCreator_OS_2_11 {
     private final List<String> legacyTemplateAllowlist;
     private final List<String> componentTemplateAllowlist;
     private final List<String> indexTemplateAllowlist;
-    private final IRfsContexts.IClusterMetadataContext context;
+    private final IMetadataMigrationContexts.IClusterMetadataContext context;
 
     public GlobalMetadataCreator_OS_2_11(OpenSearchClient client,
                                          List<String> legacyTemplateAllowlist,
                                          List<String> componentTemplateAllowlist,
                                          List<String> indexTemplateAllowlist,
-                                         IRfsContexts.IClusterMetadataContext context) {
+                                         IMetadataMigrationContexts.IClusterMetadataContext context) {
         this.client = client;
         this.legacyTemplateAllowlist = legacyTemplateAllowlist;
         this.componentTemplateAllowlist = componentTemplateAllowlist;

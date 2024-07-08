@@ -9,6 +9,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 
 import java.io.IOException;
 import java.net.URI;
@@ -45,12 +46,13 @@ public class WorkCoordinatorTest {
 
     @BeforeAll
     static void setupOpenSearchContainer() throws Exception {
+        var testContext = WorkCoordinationTestContext.factory().noOtelTracking();
         // Start the container. This step might take some time...
         container.start();
         httpClientSupplier = () -> new ApacheHttpClient(URI.create(container.getUrl()));
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
                 2, "testWorker")) {
-            workCoordinator.setup();
+            workCoordinator.setup(testContext::createCoordinationInitializationStateContext);
         }
     }
 
@@ -125,17 +127,17 @@ public class WorkCoordinatorTest {
 
     @Test
     public void testAcquireLeaseForQuery() throws Exception {
-        var objMapper = new ObjectMapper();
+        var testContext = WorkCoordinationTestContext.factory().noOtelTracking();
         final var NUM_DOCS = 40;
         final var MAX_RUNS = 2;
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
                 3600, "docCreatorWorker")) {
-            Assertions.assertFalse(workCoordinator.workItemsArePending());
+            Assertions.assertFalse(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));
             for (var i = 0; i < NUM_DOCS; ++i) {
                 final var docId = "R" + i;
-                workCoordinator.createUnassignedWorkItem(docId);
+                workCoordinator.createUnassignedWorkItem(docId, testContext::createUnassignedWorkContext);
             }
-            Assertions.assertTrue(workCoordinator.workItemsArePending());
+            Assertions.assertTrue(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));
         }
 
         for (int run = 0; run < MAX_RUNS; ++run) {
@@ -146,14 +148,15 @@ public class WorkCoordinatorTest {
             for (int i = 0; i < NUM_DOCS; ++i) {
                 var label = run + "-" + i;
                 allFutures.add(CompletableFuture.supplyAsync(() ->
-                        getWorkItemAndVerify(label, seenWorkerItems, expiration, markAsComplete)));
+                        getWorkItemAndVerify(testContext, label, seenWorkerItems, expiration, markAsComplete)));
             }
             CompletableFuture.allOf(allFutures.toArray(CompletableFuture[]::new)).join();
             Assertions.assertEquals(NUM_DOCS, seenWorkerItems.size());
 
             try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
                     3600, "firstPass_NONE")) {
-                var nextWorkItem = workCoordinator.acquireNextWorkItem(Duration.ofSeconds(2));
+                var nextWorkItem = workCoordinator.acquireNextWorkItem(Duration.ofSeconds(2),
+                        testContext::createAcquireNextItemContext);
                 log.atInfo().setMessage(()->"Next work item picked=" + nextWorkItem).log();
                 Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, nextWorkItem);
             } catch (OpenSearchWorkCoordinator.PotentialClockDriftDetectedException e) {
@@ -165,22 +168,25 @@ public class WorkCoordinatorTest {
         }
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
                 3600, "docCreatorWorker")) {
-            Assertions.assertFalse(workCoordinator.workItemsArePending());
+            Assertions.assertFalse(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));
         }
     }
 
     static AtomicInteger nonce = new AtomicInteger();
     @SneakyThrows
-    private static String getWorkItemAndVerify(String workerSuffix, ConcurrentHashMap<String, String> seenWorkerItems,
-                                               Duration expirationWindow, boolean markCompleted) {
+    private static String getWorkItemAndVerify(WorkCoordinationTestContext testContext,
+                                               String workerSuffix,
+                                               ConcurrentHashMap<String, String> seenWorkerItems,
+                                               Duration expirationWindow,
+                                               boolean markCompleted) {
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
                 3600, "firstPass_"+ workerSuffix)) {
             var doneId = DUMMY_FINISHED_DOC_ID + "_" + nonce.incrementAndGet();
             workCoordinator.createOrUpdateLeaseForDocument(doneId, 1);
-            workCoordinator.completeWorkItem(doneId);
+            workCoordinator.completeWorkItem(doneId, testContext::createCompleteWorkContext);
 
-            return workCoordinator.acquireNextWorkItem(expirationWindow).visit(
-                    new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<>() {
+            return workCoordinator.acquireNextWorkItem(expirationWindow, testContext::createAcquireNextItemContext)
+                    .visit(new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<>() {
                         @Override
                         public String onAlreadyCompleted() throws IOException {
                             throw new IllegalStateException();
@@ -202,7 +208,8 @@ public class WorkCoordinatorTest {
                             seenWorkerItems.put(workItem.workItemId, workItem.workItemId);
 
                             if (markCompleted) {
-                                workCoordinator.completeWorkItem(workItem.workItemId);
+                                workCoordinator.completeWorkItem(workItem.workItemId,
+                                        testContext::createCompleteWorkContext);
                             }
                             return workItem.workItemId;
                         }

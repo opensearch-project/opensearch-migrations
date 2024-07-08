@@ -3,8 +3,8 @@ package com.rfs.common;
 import java.time.Duration;
 import java.util.List;
 
+import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import lombok.RequiredArgsConstructor;
-import com.rfs.tracing.IRfsContexts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.document.Document;
@@ -20,7 +20,7 @@ public class DocumentReindexer {
 
     public Mono<Void> reindex(String indexName,
                                      Flux<Document> documentStream,
-                                     IRfsContexts.IDocumentReindexContext context) {
+                                     IDocumentMigrationContexts.IDocumentReindexContext context) {
 
         return documentStream
             .map(this::convertDocumentToBulkSection)  // Convert each Document to part of a bulk operation
@@ -54,7 +54,7 @@ public class DocumentReindexer {
     }
 
     public void refreshAllDocuments(ConnectionDetails targetConnection,
-                                           IRfsContexts.IDocumentReindexContext context) throws Exception {
+                                           IDocumentMigrationContexts.IDocumentReindexContext context) throws Exception {
         // Send the request
         OpenSearchClient client = new OpenSearchClient(targetConnection);
         client.refresh(context.createRefreshContext());

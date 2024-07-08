@@ -19,7 +19,7 @@ import com.rfs.common.S3Uri;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SourceRepo;
 import com.rfs.common.TryHandlePhaseFailure;
-import com.rfs.tracing.RootRfsContext;
+import com.rfs.tracing.BaseRootRfsContext;
 import com.rfs.transformers.TransformFunctions;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_es_7_10.GlobalMetadataFactory_ES_7_10;
@@ -30,6 +30,7 @@ import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 import com.rfs.worker.IndexRunner;
 import com.rfs.worker.MetadataRunner;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
@@ -100,7 +101,7 @@ public class MetadataMigration {
                 .build()
                 .parse(args);
 
-        var rootContext = new RootRfsContext(
+        var rootContext = new RootMetadataMigrationContext(
                 RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "rfs"),
                 new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
 

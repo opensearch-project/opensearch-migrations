@@ -5,6 +5,9 @@ import com.rfs.cms.ScopedWorkCoordinator;
 import com.rfs.common.FilterScheme;
 import com.rfs.common.IndexMetadata;
 import com.rfs.common.SnapshotRepo;
+import com.rfs.tracing.RootWorkCoordinationContext;
+import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
+import org.opensearch.migrations.reindexer.tracing.IRootDocumentMigrationContext;
 import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -25,17 +28,33 @@ public class ShardWorkPreparer {
 
     public static final String SHARD_SETUP_WORK_ITEM_ID = "shard_setup";
 
-    public void run(ScopedWorkCoordinator scopedWorkCoordinator, IndexMetadata.Factory metadataFactory,
-                    String snapshotName, List<String> indexAllowlist)
+    public void run(ScopedWorkCoordinator scopedWorkCoordinator,
+                    IndexMetadata.Factory metadataFactory,
+                    String snapshotName,
+                    List<String> indexAllowlist,
+                    IRootDocumentMigrationContext rootContext)
             throws IOException, InterruptedException {
-
         // ensure that there IS an index to house the shared state that we're going to be manipulating
-        scopedWorkCoordinator.workCoordinator.setup();
+        scopedWorkCoordinator.workCoordinator
+                .setup(rootContext.getWorkCoordinationContext()::createCoordinationInitializationStateContext);
 
+        try (var context = rootContext.createDocsMigrationSetupContext()) {
+            setupShardWorkItems(scopedWorkCoordinator, metadataFactory, snapshotName, indexAllowlist, context);
+        }
+    }
+
+    private void setupShardWorkItems(ScopedWorkCoordinator scopedWorkCoordinator,
+                                     IndexMetadata.Factory metadataFactory,
+                                     String snapshotName,
+                                     List<String> indexAllowlist,
+                                     IDocumentMigrationContexts.IShardSetupContext context)
+        throws IOException, InterruptedException
+    {
         scopedWorkCoordinator.ensurePhaseCompletion(
                 wc -> {
                     try {
-                        return wc.createOrUpdateLeaseForWorkItem(SHARD_SETUP_WORK_ITEM_ID, Duration.ofMinutes(5));
+                        return wc.createOrUpdateLeaseForWorkItem(SHARD_SETUP_WORK_ITEM_ID, Duration.ofMinutes(5),
+                                context::createWorkAcquisitionContext);
                     } catch (Exception e) {
                         throw Lombok.sneakyThrow(e);
                     }
@@ -48,7 +67,8 @@ public class ShardWorkPreparer {
 
                     @Override
                     public Void onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException {
-                        prepareShardWorkItems(scopedWorkCoordinator.workCoordinator, metadataFactory, snapshotName, indexAllowlist);
+                        prepareShardWorkItems(scopedWorkCoordinator.workCoordinator, metadataFactory, snapshotName,
+                                indexAllowlist, context);
                         return null;
                     }
 
@@ -56,12 +76,15 @@ public class ShardWorkPreparer {
                     public Void onNoAvailableWorkToBeDone() throws IOException {
                         return null;
                     }
-                });
+                }, context::createWorkCompletionContext);
     }
 
     @SneakyThrows
-    private static void prepareShardWorkItems(IWorkCoordinator workCoordinator, IndexMetadata.Factory metadataFactory,
-                                              String snapshotName, List<String> indexAllowlist) {
+    private static void prepareShardWorkItems(IWorkCoordinator workCoordinator,
+                                              IndexMetadata.Factory metadataFactory,
+                                              String snapshotName,
+                                              List<String> indexAllowlist,
+                                              IDocumentMigrationContexts.IShardSetupContext context) {
         log.info("Setting up the Documents Work Items...");
         SnapshotRepo.Provider repoDataProvider = metadataFactory.getRepoDataProvider();
 
@@ -78,7 +101,9 @@ public class ShardWorkPreparer {
                 IntStream.range(0, indexMetadata.getNumberOfShards()).forEach(shardId -> {
                     log.info("Creating Documents Work Item for index: " + indexMetadata.getName() + ", shard: " + shardId);
                     try {
-                        workCoordinator.createUnassignedWorkItem(IndexAndShard.formatAsWorkItemString(indexMetadata.getName(), shardId));
+                        workCoordinator.createUnassignedWorkItem(
+                                IndexAndShard.formatAsWorkItemString(indexMetadata.getName(), shardId),
+                                context::createShardWorkItemContext);
                     } catch (IOException e) {
                         throw Lombok.sneakyThrow(e);
                     }

@@ -4,7 +4,6 @@ import java.util.List;
 import java.util.function.BiConsumer;
 
 import com.rfs.common.SnapshotRepo;
-import com.rfs.tracing.IRfsContexts;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
@@ -12,6 +11,7 @@ import com.rfs.common.FilterScheme;
 import com.rfs.common.IndexMetadata;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
+import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts;
 
 @Slf4j
 @AllArgsConstructor
@@ -22,7 +22,7 @@ public class IndexRunner {
     private final IndexCreator_OS_2_11 indexCreator;
     private final Transformer transformer;
     private final List<String> indexAllowlist;
-    private final IRfsContexts.ICreateIndexContext context;
+    private final IMetadataMigrationContexts.ICreateIndexContext context;
 
     public void migrateIndices() {
         SnapshotRepo.Provider repoDataProvider = metadataFactory.getRepoDataProvider();

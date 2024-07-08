@@ -77,7 +77,7 @@ import java.util.stream.Stream;
 @Tag("longTest")
 @Slf4j
 public class FullTest {
-    public static final String GENERATOR_BASE_IMAGE = "migrations/elasticsearch_client_test_console:latest";
+    public static final String GENERATOR_BASE_IMAGE = "org/opensearch/migrations/elasticsearch_client_test_console:latest";
     final static long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
     final static Pattern CAT_INDICES_INDEX_COUNT_PATTERN =
             Pattern.compile("(?:\\S+\\s+){2}(\\S+)\\s+(?:\\S+\\s+){3}(\\S+)");

@@ -4,7 +4,7 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 
-import com.rfs.tracing.RootRfsContext;
+import com.rfs.tracing.BaseRootRfsContext;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -94,7 +94,7 @@ public class CreateSnapshot {
                 .build()
                 .parse(args);
 
-        var rootContext = new RootRfsContext(
+        var rootContext = new BaseRootRfsContext(
                 RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "rfs"),
                 new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
 

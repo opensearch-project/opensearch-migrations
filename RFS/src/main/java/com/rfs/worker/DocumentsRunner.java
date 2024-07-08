@@ -9,7 +9,8 @@ import java.util.function.Function;
 import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.ScopedWorkCoordinator;
 import com.rfs.common.RfsException;
-import com.rfs.tracing.IRfsContexts;
+import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
+import com.rfs.tracing.IWorkCoordinationContexts;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
@@ -31,7 +32,7 @@ public class DocumentsRunner {
     private final SnapshotShardUnpacker.Factory unpackerFactory;
     private final Function<Path,LuceneDocumentsReader> readerFactory;
     private final DocumentReindexer reindexer;
-    private final IRfsContexts.IDocumentReindexContext context;
+    private final IDocumentMigrationContexts.IDocumentReindexContext context;
 
     public enum CompletionStatus {
         NOTHING_DONE,
@@ -42,10 +43,13 @@ public class DocumentsRunner {
      * @return true if it did work, false if there was no available work at this time.
      * @throws IOException
      */
-    public CompletionStatus migrateNextShard() throws IOException, InterruptedException {
+    public CompletionStatus
+    migrateNextShard(IWorkCoordinationContexts.IScopedWorkContext<IWorkCoordinationContexts.IAcquireNextWorkItemContext> context)
+            throws IOException, InterruptedException
+    {
         return workCoordinator.ensurePhaseCompletion(wc -> {
                     try {
-                        return wc.acquireNextWorkItem(Duration.ofMinutes(10));
+                        return wc.acquireNextWorkItem(Duration.ofMinutes(10), context::createOpeningContext);
                     } catch (Exception e) {
                         throw Lombok.sneakyThrow(e);
                     }
@@ -66,7 +70,7 @@ public class DocumentsRunner {
                     public CompletionStatus onNoAvailableWorkToBeDone() throws IOException {
                         return CompletionStatus.NOTHING_DONE;
                     }
-                });
+                }, context::createCloseContet);
     }
 
     public static class ShardTooLargeException extends RfsException {

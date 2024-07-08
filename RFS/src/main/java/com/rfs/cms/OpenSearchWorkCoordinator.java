@@ -1,6 +1,7 @@
 package com.rfs.cms;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.rfs.tracing.IWorkCoordinationContexts;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.Lombok;
@@ -39,7 +40,6 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String VERSION_CONFLICTS_FIELD_NAME = "version_conflicts";
     public static final String COMPLETED_AT_FIELD_NAME = "completedAt";
     public static final String SOURCE_FIELD_NAME = "_source";
-    public static final String ERROR_OPENSEARCH_FIELD_NAME = "error";
 
     public static final String QUERY_INCOMPLETE_EXPIRED_ITEMS_STR = "    \"query\": {\n" +
             "      \"bool\": {" +
@@ -83,7 +83,9 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         httpClient.close();
     }
 
-    public void setup() throws IOException, InterruptedException {
+    public void setup(Supplier<IWorkCoordinationContexts.IInitializeCoordinatorStateContext> contextSupplier)
+            throws IOException, InterruptedException
+    {
         var body = "{\n" +
                 "  \"settings\": {\n" +
                 "   \"index\": {" +
@@ -113,6 +115,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         try {
             doUntil("setup-" + INDEX_NAME, 100, MAX_SETUP_RETRIES,
+                    contextSupplier::get,
                     () -> {
                         try {
                             var indexCheckResponse = httpClient.makeJsonRequest(AbstractedHttpClient.HEAD_METHOD, INDEX_NAME, null, null);
@@ -225,7 +228,10 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     }
 
     @Override
-    public boolean createUnassignedWorkItem(String workItemId) throws IOException {
+    public boolean
+    createUnassignedWorkItem(String workItemId,
+                             Supplier<IWorkCoordinationContexts.ICreateUnassignedWorkItemContext> contextSupplier)
+            throws IOException {
         var response = createOrUpdateLeaseForDocument(workItemId, 0);
         try {
             return getResult(response) == DocumentModificationResult.CREATED;
@@ -237,7 +243,9 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
     @Override
     @NonNull
-    public WorkAcquisitionOutcome createOrUpdateLeaseForWorkItem(String workItemId, Duration leaseDuration)
+    public WorkAcquisitionOutcome
+    createOrUpdateLeaseForWorkItem(String workItemId, Duration leaseDuration,
+                                   Supplier<IWorkCoordinationContexts.IAcquireSpecificWorkContext> contextSupplier)
             throws IOException {
         var startTime = Instant.now();
         var updateResponse = createOrUpdateLeaseForDocument(workItemId, leaseDuration.toSeconds());
@@ -262,83 +270,94 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    public void completeWorkItem(String workItemId) throws IOException, InterruptedException {
-        final var markWorkAsCompleteBodyTemplate = "{\n" +
-                "  \"script\": {\n" +
-                "    \"lang\": \"painless\",\n" +
-                "    \"params\": { \n" +
-                "      \"clientTimestamp\": " + CLIENT_TIMESTAMP_TEMPLATE + ",\n" +
-                "      \"workerId\": \"" + WORKER_ID_TEMPLATE + "\"\n" +
-                "    },\n" +
-                "    \"source\": \"" +
-                "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {" +
-                "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx.source.scriptVersion);" +
-                "      } " +
-                "      if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " != params.workerId) {" +
-                "        throw new IllegalArgumentException(\\\"work item was owned by \\\" + ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " + \\\" not \\\" + params.workerId);" +
-                "      } else {" +
-                "        ctx._source." + COMPLETED_AT_FIELD_NAME + " = System.currentTimeMillis() / 1000;" +
-                "     }" +
-                "\"\n" +
-                "  }\n" +
-                "}";
+    public void completeWorkItem(String workItemId,
+                                 Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier)
+            throws IOException, InterruptedException {
+        try (var ctx = contextSupplier.get()) {
+            final var markWorkAsCompleteBodyTemplate = "{\n" +
+                    "  \"script\": {\n" +
+                    "    \"lang\": \"painless\",\n" +
+                    "    \"params\": { \n" +
+                    "      \"clientTimestamp\": " + CLIENT_TIMESTAMP_TEMPLATE + ",\n" +
+                    "      \"workerId\": \"" + WORKER_ID_TEMPLATE + "\"\n" +
+                    "    },\n" +
+                    "    \"source\": \"" +
+                    "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {" +
+                    "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx.source.scriptVersion);" +
+                    "      } " +
+                    "      if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " != params.workerId) {" +
+                    "        throw new IllegalArgumentException(\\\"work item was owned by \\\" + ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " + \\\" not \\\" + params.workerId);" +
+                    "      } else {" +
+                    "        ctx._source." + COMPLETED_AT_FIELD_NAME + " = System.currentTimeMillis() / 1000;" +
+                    "     }" +
+                    "\"\n" +
+                    "  }\n" +
+                    "}";
 
-        var body = markWorkAsCompleteBodyTemplate
-                .replace(SCRIPT_VERSION_TEMPLATE, "poc")
-                .replace(WORKER_ID_TEMPLATE, workerId)
-                .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().toEpochMilli()/1000));
+            var body = markWorkAsCompleteBodyTemplate
+                    .replace(SCRIPT_VERSION_TEMPLATE, "poc")
+                    .replace(WORKER_ID_TEMPLATE, workerId)
+                    .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().toEpochMilli() / 1000));
 
-        var response = httpClient.makeJsonRequest(AbstractedHttpClient.POST_METHOD, INDEX_NAME + "/_update/" + workItemId,
-                null, body);
-        final var resultStr = objectMapper.readTree(response.getPayloadStream()).get(RESULT_OPENSSEARCH_FIELD_NAME).textValue();
-        if (DocumentModificationResult.UPDATED != DocumentModificationResult.parse(resultStr)) {
-            throw new IllegalStateException("Unexpected response for workItemId: " + workItemId + ".  Response: " +
-                response.toDiagnosticString());
+            var response = httpClient.makeJsonRequest(AbstractedHttpClient.POST_METHOD, INDEX_NAME + "/_update/" + workItemId,
+                    null, body);
+            final var resultStr = objectMapper.readTree(response.getPayloadStream()).get(RESULT_OPENSSEARCH_FIELD_NAME).textValue();
+            if (DocumentModificationResult.UPDATED != DocumentModificationResult.parse(resultStr)) {
+                throw new IllegalStateException("Unexpected response for workItemId: " + workItemId + ".  Response: " +
+                        response.toDiagnosticString());
+            }
+            refresh(ctx::getRefreshContext);
         }
-        refresh();
     }
 
-    private int numWorkItemsArePending(int maxItemsToCheckFor) throws IOException, InterruptedException {
-        refresh();
-        // TODO: Switch this to use _count
-        log.warn("Switch this to use _count");
-        final var queryBody = "{\n" +
-                "\"query\": {" +
-                "  \"bool\": {" +
-                "    \"must\": [" +
-                "      { \"exists\":" +
-                "        { \"field\": \"" + EXPIRATION_FIELD_NAME + "\"}" +
-                "      }" +
-                "    ]," +
-                "    \"must_not\": [" +
-                "      { \"exists\":" +
-                "        { \"field\": \"" + COMPLETED_AT_FIELD_NAME + "\"}" +
-                "      }" +
-                "    ]" +
-                "  }" +
-                "}" +
-                "}";
+    private int numWorkItemsArePending(int maxItemsToCheckFor,
+                                       Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
+            throws IOException, InterruptedException {
+        try (var context = contextSupplier.get()) {
+            refresh(context::getRefreshContext);
+            // TODO: Switch this to use _count
+            log.warn("Switch this to use _count");
+            final var queryBody = "{\n" +
+                    "\"query\": {" +
+                    "  \"bool\": {" +
+                    "    \"must\": [" +
+                    "      { \"exists\":" +
+                    "        { \"field\": \"" + EXPIRATION_FIELD_NAME + "\"}" +
+                    "      }" +
+                    "    ]," +
+                    "    \"must_not\": [" +
+                    "      { \"exists\":" +
+                    "        { \"field\": \"" + COMPLETED_AT_FIELD_NAME + "\"}" +
+                    "      }" +
+                    "    ]" +
+                    "  }" +
+                    "}" +
+                    "}";
 
-        var path = INDEX_NAME + "/_search" + (maxItemsToCheckFor <= 0 ? "" : "?size=" + maxItemsToCheckFor);
-        var response = httpClient.makeJsonRequest(AbstractedHttpClient.POST_METHOD,  path, null, queryBody);
+            var path = INDEX_NAME + "/_search" + (maxItemsToCheckFor <= 0 ? "" : "?size=" + maxItemsToCheckFor);
+            var response = httpClient.makeJsonRequest(AbstractedHttpClient.POST_METHOD, path, null, queryBody);
 
-        final var resultHitsUpper = objectMapper.readTree(response.getPayloadStream()).path("hits");
-        var statusCode = response.getStatusCode();
-        if (statusCode != 200) {
-            throw new IllegalStateException("Querying for pending (expired or not) work, " +
-                    "returned an unexpected status code " + statusCode + " instead of 200");
+            final var resultHitsUpper = objectMapper.readTree(response.getPayloadStream()).path("hits");
+            var statusCode = response.getStatusCode();
+            if (statusCode != 200) {
+                throw new IllegalStateException("Querying for pending (expired or not) work, " +
+                        "returned an unexpected status code " + statusCode + " instead of 200");
+            }
+            return resultHitsUpper.path("hits").size();
         }
-        return resultHitsUpper.path("hits").size();
     }
 
     @Override
-    public int numWorkItemsArePending() throws IOException, InterruptedException {
-        return numWorkItemsArePending(-1);
+    public int numWorkItemsArePending(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
+            throws IOException, InterruptedException {
+        return numWorkItemsArePending(-1, contextSupplier);
     }
 
     @Override
-    public boolean workItemsArePending() throws IOException, InterruptedException {
-        return numWorkItemsArePending(1) >= 1;
+    public boolean workItemsArePending(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
+            throws IOException, InterruptedException
+    {
+        return numWorkItemsArePending(1, contextSupplier) >= 1;
     }
 
     enum UpdateResult {
@@ -481,31 +500,42 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    public static <T,U> U doUntil(String labelThatShouldBeAContext, long initialRetryDelayMs, int maxTries,
-                                  Supplier<T> supplier, Function<T,U> transformer, BiPredicate<T,U> test)
+    static <T,U> U doUntil(String labelThatShouldBeAContext, long initialRetryDelayMs, int maxTries,
+                           Supplier<IWorkCoordinationContexts.IRetryableActivityContext> contextSupplier,
+                           Supplier<T> supplier, Function<T,U> transformer, BiPredicate<T,U> test)
             throws InterruptedException, MaxTriesExceededException
     {
         var sleepMillis = initialRetryDelayMs;
-        for (var attempt = 1; ; ++attempt) {
-            var suppliedVal = supplier.get();
-            var transformedVal = transformer.apply(suppliedVal);
-            if (test.test(suppliedVal, transformedVal)) {
-                return transformedVal;
-            } else {
-                log.atWarn().setMessage(() -> "Retrying " + labelThatShouldBeAContext +
-                        " because the predicate failed for: (" + suppliedVal + "," + transformedVal + ")").log();
-                if (attempt >= maxTries) {
-                    throw new MaxTriesExceededException(suppliedVal, transformedVal);
+
+        try (var context = contextSupplier.get()) {
+            for (var attempt = 1; ; ++attempt) {
+                var suppliedVal = supplier.get();
+                var transformedVal = transformer.apply(suppliedVal);
+                if (test.test(suppliedVal, transformedVal)) {
+                    return transformedVal;
+                } else {
+                    log.atWarn().setMessage(() -> "Retrying " + labelThatShouldBeAContext +
+                            " because the predicate failed for: (" + suppliedVal + "," + transformedVal + ")").log();
+                    if (attempt >= maxTries) {
+                        context.recordFailure();
+                        throw new MaxTriesExceededException(suppliedVal, transformedVal);
+                    } else {
+                        context.recordRetry();
+                    }
+                    Thread.sleep(sleepMillis);
+                    sleepMillis *= 2;
                 }
-                Thread.sleep(sleepMillis);
-                sleepMillis *= 2;
             }
         }
     }
 
-    private void refresh() throws IOException, InterruptedException {
+    private void refresh(Supplier<IWorkCoordinationContexts.IRefreshContext> contextSupplier)
+            throws IOException, InterruptedException
+    {
         try {
-            doUntil("refresh", 100, MAX_REFRESH_RETRIES, () -> {
+            doUntil("refresh", 100, MAX_REFRESH_RETRIES,
+                    contextSupplier::get,
+                    () -> {
                         try {
                             return httpClient.makeJsonRequest(AbstractedHttpClient.GET_METHOD, INDEX_NAME + "/_refresh",null,null);
                         } catch (IOException e) {
@@ -525,36 +555,45 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
      * @throws IOException
      * @throws InterruptedException
      */
-    public WorkAcquisitionOutcome acquireNextWorkItem(Duration leaseDuration) throws IOException, InterruptedException {
-        refresh();
-        int jitterRecoveryTimeMs = 10;
-        int tries = 0;
-        while (true) {
-            try {
-                final var obtainResult = assignOneWorkItem(leaseDuration.toSeconds());
-                switch (obtainResult) {
-                    case SUCCESSFUL_ACQUISITION:
-                        return getAssignedWorkItem();
-                    case NOTHING_TO_ACQUIRE:
-                        return new NoAvailableWorkToBeDone();
-                    case VERSION_CONFLICT:
-                        continue;
-                    default:
-                        throw new IllegalStateException("unknown result from the assignOneWorkItem: " + obtainResult);
+    public WorkAcquisitionOutcome
+    acquireNextWorkItem(Duration leaseDuration,
+                        Supplier<IWorkCoordinationContexts.IAcquireNextWorkItemContext> contextSupplier)
+            throws IOException, InterruptedException {
+        try (var ctx = contextSupplier.get()) {
+            refresh(ctx::getRefreshContext);
+            int jitterRecoveryTimeMs = 10;
+            int tries = 0;
+            while (true) {
+                try {
+                    final var obtainResult = assignOneWorkItem(leaseDuration.toSeconds());
+                    switch (obtainResult) {
+                        case SUCCESSFUL_ACQUISITION:
+                            ctx.recordAssigned();
+                            return getAssignedWorkItem();
+                        case NOTHING_TO_ACQUIRE:
+                            ctx.recordNothingAvailable();
+                            return new NoAvailableWorkToBeDone();
+                        case VERSION_CONFLICT:
+                            ctx.recordRetry();
+                            continue;
+                        default:
+                            throw new IllegalStateException("unknown result from the assignOneWorkItem: " + obtainResult);
+                    }
+                } catch (PotentialClockDriftDetectedException e) {
+                    if (++tries > MAX_JITTER_RETRIES) {
+                        ctx.recordFailure(e);
+                        throw e;
+                    }
+                    ctx.recordRecoverableClockError();
+                    int finalJitterRecoveryTimeMs = jitterRecoveryTimeMs;
+                    log.atWarn().setMessage(() -> "Couldn't complete work assignment.  " +
+                                    "Presuming that the issue was due to clock synchronization.  " +
+                                    "Backing off " + finalJitterRecoveryTimeMs + "ms and trying again.")
+                            .setCause(e).log();
+                    Thread.sleep(jitterRecoveryTimeMs);
+                    jitterRecoveryTimeMs *= 2;
                 }
-            } catch (PotentialClockDriftDetectedException e) {
-                if (++tries > MAX_JITTER_RETRIES) {
-                    throw e;
-                }
-                int finalJitterRecoveryTimeMs = jitterRecoveryTimeMs;
-                log.atWarn().setMessage(()->"Couldn't complete work assignment.  " +
-                        "Presuming that the issue was due to clock synchronization.  " +
-                        "Backing off " + finalJitterRecoveryTimeMs +"ms and trying again.")
-                        .setCause(e).log();
-                Thread.sleep(jitterRecoveryTimeMs);
-                jitterRecoveryTimeMs *= 2;
             }
         }
     }
-
 }

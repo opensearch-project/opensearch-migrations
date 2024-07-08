@@ -5,7 +5,7 @@ import java.util.Optional;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.common.OpenSearchClient;
-import com.rfs.tracing.IRfsContexts;
+import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts;
 
 public class IndexCreator_OS_2_11 {
     private static final ObjectMapper mapper = new ObjectMapper();
@@ -16,7 +16,7 @@ public class IndexCreator_OS_2_11 {
     }
 
     public Optional<ObjectNode> create(ObjectNode root, String indexName, String indexId,
-                                       IRfsContexts.ICreateIndexContext context) {
+                                       IMetadataMigrationContexts.ICreateIndexContext context) {
         IndexMetadataData_OS_2_11 indexMetadata = new IndexMetadataData_OS_2_11(root, indexId, indexName);
 
         // Remove some settings which will cause errors if you try to pass them to the API

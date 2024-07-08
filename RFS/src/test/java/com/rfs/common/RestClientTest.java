@@ -1,12 +1,12 @@
 package com.rfs.common;
 
 import com.rfs.tracing.RfsContexts;
-import com.rfs.framework.tracing.TestContext;
 
 import io.opentelemetry.sdk.trace.data.SpanData;
 import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Test;
+import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.HttpRequestFirstLine;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
@@ -20,7 +20,7 @@ import java.util.stream.Collectors;
 class RestClientTest {
     @Test
     public void testGetEmitsInstrumentation() throws Exception{
-        var rootContext = TestContext.withAllTracking();
+        var rootContext = SnapshotTestContext.factory().withAllTracking();
         try (var testServer = SimpleNettyHttpServer.makeServer(false, null,
                 this::makeResponseContext)) {
             var restClient = new RestClient(new ConnectionDetails("http://localhost:" + testServer.port, null, null));
@@ -31,7 +31,7 @@ class RestClientTest {
         }
 
         Thread.sleep(200);
-        var allMetricData = rootContext.instrumentationBundle.getFinishedMetrics();
+        var allMetricData = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
 
         for (var kvp : Map.of(
                 "createGetSnapshotContext", new long[]{133, 66},
@@ -53,7 +53,7 @@ class RestClientTest {
                     new long[]{bytesSent, bytesRead}, Matchers.equalTo(kvp.getValue()));
         }
 
-        final var finishedSpans = rootContext.instrumentationBundle.getFinishedSpans();
+        final var finishedSpans = rootContext.inMemoryInstrumentationBundle.getFinishedSpans();
         final var finishedSpanNames = finishedSpans.stream().map(SpanData::getName).collect(Collectors.toList());
         MatcherAssert.assertThat(finishedSpanNames,
                 Matchers.containsInAnyOrder("httpRequest", "httpRequest", "createSnapshot"));

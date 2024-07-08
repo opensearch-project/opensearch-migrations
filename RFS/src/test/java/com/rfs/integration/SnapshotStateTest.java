@@ -1,6 +1,6 @@
 package com.rfs.integration;
 
-import com.rfs.framework.tracing.TestContext;
+import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
@@ -62,7 +62,7 @@ public class SnapshotStateTest {
     @Test
     public void SingleSnapshot_SingleDocument() throws Exception {
         // Setup
-        final var testContext = TestContext.noOtelTracking();
+        final var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
         final var indexName = "my-index";
         final var document1Id = "doc1";
         final var document1Body = "{\"fo$o\":\"bar\"}";
@@ -96,7 +96,7 @@ public class SnapshotStateTest {
     @Disabled("https://opensearch.atlassian.net/browse/MIGRATIONS-1746")
     public void SingleSnapshot_SingleDocument_Then_DeletedDocument() throws Exception {
         // Setup
-        final var testContext = TestContext.noOtelTracking();
+        final var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
         final var indexName = "my-index-with-deleted-item";
         final var document1Id = "doc1-going-to-be-deleted";
         final var document1Body = "{\"foo\":\"bar\"}";
@@ -130,7 +130,7 @@ public class SnapshotStateTest {
     @Disabled("https://opensearch.atlassian.net/browse/MIGRATIONS-1747")
     public void SingleSnapshot_SingleDocument_Then_UpdateDocument() throws Exception {
         // Setup
-        final var testContext = TestContext.noOtelTracking();
+        final var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
         final var indexName = "my-index-with-updated-item";
         final var document1Id = "doc1-going-to-be-updated";
         final var document1BodyOrginal = "{\"foo\":\"bar\"}";

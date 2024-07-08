@@ -4,7 +4,7 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import com.rfs.tracing.IRfsContexts;
+import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.util.IOUtils;
@@ -59,7 +59,7 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
     public void updateTargetCluster(final List<IndexMetadata.Data> indices,
                                     final Path unpackedShardDataDir,
                                     final OpenSearchClient client,
-                                    IRfsContexts.IDocumentReindexContext context) {
+                                    IDocumentMigrationContexts.IDocumentReindexContext context) {
         for (final IndexMetadata.Data index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
                 final var documents =

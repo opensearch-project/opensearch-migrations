@@ -6,7 +6,7 @@ import java.util.List;
 import com.rfs.common.ConnectionDetails;
 import com.rfs.common.IndexMetadata;
 import com.rfs.common.OpenSearchClient;
-import com.rfs.tracing.IRfsContexts;
+import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
 public interface SimpleRestoreFromSnapshot {
 
@@ -16,7 +16,7 @@ public interface SimpleRestoreFromSnapshot {
     }
 
     public default void fullMigrationViaLocalSnapshot(final String targetClusterUrl,
-                                                      IRfsContexts.IDocumentReindexContext context) throws Exception {
+                                                      IDocumentMigrationContexts.IDocumentReindexContext context) throws Exception {
         // TODO: Dynamically create / clean these up during tests
         final var tempSnapshotName = "";
         final var compressedSnapshotDirectory = "";
@@ -37,7 +37,7 @@ public interface SimpleRestoreFromSnapshot {
                                                              final Path unpackedShardDataDir) throws Exception;
 
     public void updateTargetCluster(final List<IndexMetadata.Data> indices, final Path unpackedShardDataDir,
-                                    final OpenSearchClient client, IRfsContexts.IDocumentReindexContext context)
+                                    final OpenSearchClient client, IDocumentMigrationContexts.IDocumentReindexContext context)
             throws Exception;
 
 }

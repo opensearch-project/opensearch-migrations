@@ -13,7 +13,7 @@ import java.util.UUID;
 import java.util.function.Function;
 
 import com.rfs.cms.IWorkCoordinator;
-import com.rfs.tracing.RootRfsContext;
+import com.rfs.tracing.RootWorkCoordinationContext;
 import lombok.extern.slf4j.Slf4j;
 import com.rfs.cms.ApacheHttpClient;
 import com.rfs.cms.OpenSearchWorkCoordinator;
@@ -38,10 +38,10 @@ import com.rfs.version_es_7_10.IndexMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.worker.DocumentsRunner;
+import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
-import org.opensearch.migrations.tracing.IRootOtelContext;
 import org.opensearch.migrations.tracing.RootOtelContext;
 
 @Slf4j
@@ -118,9 +118,13 @@ public class RfsMigrateDocuments {
                 .build()
                 .parse(args);
 
-        var rootContext = new RootRfsContext(
-                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "rfs"),
+        var rootWorkCoordinationContext = new RootWorkCoordinationContext(
+                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "docMigrationCoordination"),
                 new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
+        var rootDocumentContext = new RootDocumentMigrationContext(
+                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "docMigration"),
+                new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()),
+                rootWorkCoordinationContext);
 
         var luceneDirPath = Paths.get(arguments.luceneDirPath);
         try (var processManager = new LeaseExpireTrigger(workItemId->{
@@ -149,7 +153,7 @@ public class RfsMigrateDocuments {
 
                 run(LuceneDocumentsReader::new, reindexer, workCoordinator, processManager, indexMetadataFactory,
                         arguments.snapshotName, arguments.indexAllowlist, shardMetadataFactory, unpackerFactory,
-                        arguments.maxShardSizeBytes, rootContext);
+                        arguments.maxShardSizeBytes, rootDocumentContext);
             });
         }
     }
@@ -164,11 +168,11 @@ public class RfsMigrateDocuments {
                                                        ShardMetadata.Factory shardMetadataFactory,
                                                        SnapshotShardUnpacker.Factory unpackerFactory,
                                                        long maxShardSizeBytes,
-                                                       RootRfsContext rootRfsContext)
+                                                       RootDocumentMigrationContext rootDocumentContext)
             throws IOException, InterruptedException, NoWorkLeftException {
         var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
-        confirmShardPrepIsComplete(indexMetadataFactory, snapshotName, indexAllowlist, scopedWorkCoordinator);
-        if (!workCoordinator.workItemsArePending()) {
+        confirmShardPrepIsComplete(indexMetadataFactory, snapshotName, indexAllowlist, scopedWorkCoordinator, rootDocumentContext);
+        if (!workCoordinator.workItemsArePending(rootDocumentContext.getWorkCoordinationContext()::createItemsPendingContext)) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
         }
         return new DocumentsRunner(scopedWorkCoordinator,
@@ -180,13 +184,15 @@ public class RfsMigrateDocuments {
                     }
                     return shardMetadata;
                 },
-                unpackerFactory, readerFactory, reindexer, rootRfsContext.createReindexContext()).migrateNextShard();
+                unpackerFactory, readerFactory, reindexer, rootDocumentContext.createReindexContext())
+                .migrateNextShard(rootDocumentContext.getWorkCoordinationContext()::createAcquireNextItemContext);
     }
 
     private static void confirmShardPrepIsComplete(IndexMetadata.Factory indexMetadataFactory,
                                                    String snapshotName,
                                                    List<String> indexAllowlist,
-                                                   ScopedWorkCoordinator scopedWorkCoordinator)
+                                                   ScopedWorkCoordinator scopedWorkCoordinator,
+                                                   RootDocumentMigrationContext rootContext)
             throws IOException, InterruptedException
     {
         // assume that the shard setup work will be done quickly, much faster than its lease in most cases.
@@ -195,7 +201,8 @@ public class RfsMigrateDocuments {
         long lockRenegotiationMillis = 1000;
         for (int shardSetupAttemptNumber=0; ; ++shardSetupAttemptNumber) {
             try {
-                new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName, indexAllowlist);
+                new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName, indexAllowlist,
+                        rootContext);
                 return;
             } catch (IWorkCoordinator.LeaseLockHeldElsewhereException e) {
                 long finalLockRenegotiationMillis = lockRenegotiationMillis;

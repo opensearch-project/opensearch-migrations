@@ -42,7 +42,7 @@ import java.util.stream.Stream;
  */
 @Slf4j
 public class PreloadedDataContainerOrchestrator {
-    public static String PRELOADED_IMAGE_BASE_NAME = "migrations/preloaded_source_";
+    public static String PRELOADED_IMAGE_BASE_NAME = "org/opensearch/migrations/preloaded_source_";
     public static int PULL_TIMEOUT_SECONDS = 600;
 
     @EqualsAndHashCode

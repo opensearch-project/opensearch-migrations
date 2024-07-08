@@ -1,9 +1,11 @@
 package com.rfs.cms;
 
+import com.rfs.tracing.IWorkCoordinationContexts;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 import java.io.IOException;
+import java.util.function.Supplier;
 
 @Slf4j
 public class ScopedWorkCoordinator {
@@ -21,7 +23,8 @@ public class ScopedWorkCoordinator {
     }
 
     public <T> T ensurePhaseCompletion(WorkItemGetter workItemIdSupplier,
-                                       IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T> visitor)
+                                       IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T> visitor,
+                                       Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier)
             throws IOException, InterruptedException
     {
         var acquisitionResult = workItemIdSupplier.tryAcquire(workCoordinator);
@@ -43,7 +46,7 @@ public class ScopedWorkCoordinator {
                 var workItemId = workItem.getWorkItemId();
                 leaseExpireTrigger.registerExpiration(workItem.workItemId, workItem.leaseExpirationTime);
                 var rval = visitor.onAcquiredWork(workItem);
-                workCoordinator.completeWorkItem(workItemId);
+                workCoordinator.completeWorkItem(workItemId, contextSupplier);
                 leaseExpireTrigger.markWorkAsCompleted(workItemId);
                 return rval;
             }
