@@ -41,7 +41,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
             originalTemplates.fieldNames().forEachRemaining(templateName -> {
                 var templateCopy = (ObjectNode) originalTemplates.get(templateName).deepCopy();
                 var indexTemplate = (Index) () -> templateCopy;
-                transformIndex(indexTemplate, IndexType.Concrete);
+                transformIndex(indexTemplate, IndexType.Template);
                 templates.set(templateName, indexTemplate.rawJson());
             });
             newRoot.set("templates", templates);
