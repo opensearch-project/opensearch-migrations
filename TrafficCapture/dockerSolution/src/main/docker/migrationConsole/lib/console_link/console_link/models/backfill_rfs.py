@@ -106,13 +106,13 @@ class ECSRFSBackfill(RFSBackfill):
     def scale(self, units: int, *args, **kwargs) -> CommandResult:
         logger.info(f"Scaling RFS backfill by setting desired count to {units} instances")
         return self.ecs_client.set_desired_count(units)
-    
+
     def get_status(self, deep_check, *args, **kwargs) -> CommandResult:
         logger.info(f"Getting status of RFS backfill, with {deep_check=}")
         instance_statuses = self.ecs_client.get_instance_statuses()
         if not instance_statuses:
             return CommandResult(False, "Failed to get instance statuses")
-        
+
         status_string = str(instance_statuses)
         if deep_check:
             try:
@@ -185,7 +185,7 @@ class ECSRFSBackfill(RFSBackfill):
 
 def parse_query_response(query: dict, cluster: Cluster, label: str) -> Optional[int]:
     try:
-        response = cluster.call_api("/.migrations_working_state/_search", json_body=query)
+        response = cluster.call_api("/.migrations_working_state/_search", data=query)
     except Exception as e:
         logger.error(f"Failed to execute query: {e}")
         return None

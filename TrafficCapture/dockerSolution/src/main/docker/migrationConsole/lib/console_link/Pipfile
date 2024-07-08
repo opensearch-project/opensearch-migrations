@@ -5,6 +5,7 @@ name = "pypi"
 
 [packages]
 requests = ">=2.32.3"
+opensearch-benchmark = "*"
 boto3 = "*"
 pyyaml = "*"
 Click = "*"
