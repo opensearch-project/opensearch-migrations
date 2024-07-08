@@ -91,7 +91,7 @@ class E2ETests(unittest.TestCase):
         metadata.migrate()
         backfill.start()
         backfill.scale(units=10)
-        # This document created after snapshot was taken should not be included in Backfill but expected in Replay
+        # This document was created after snapshot and should not be included in Backfill but expected in Replay
         create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id_base + "_2",
                         expected_status_code=HTTPStatus.CREATED, test_case=self)
 
