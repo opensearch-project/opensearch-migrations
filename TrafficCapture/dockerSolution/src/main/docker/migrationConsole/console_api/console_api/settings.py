@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 
 import os
 from pathlib import Path
+from typing import List
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -28,8 +29,17 @@ SECRET_KEY = 'django-insecure-26h*wo1qzffhpum=bn#8d(7e8mo-w9fr6*wdy#%izy#5^85-a9
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-DEPLOYED_STAGE = os.environ.get('MIGRATION_STAGE')
-ALLOWED_HOSTS = ['migration-console', f'migration-console.migration.{DEPLOYED_STAGE}.local', 'localhost']
+
+def get_allowed_hosts() -> List[str]:
+    hosts = os.getenv('API_ALLOWED_HOSTS', '')
+    if not hosts:
+        return ['localhost']
+    # Remove any quotes and strip extra spacing characters
+    hosts = hosts.replace('"', '').replace('\'', '')
+    return [host.strip() for host in hosts.split(',')]
+
+
+ALLOWED_HOSTS = get_allowed_hosts()
 
 
 # Application definition

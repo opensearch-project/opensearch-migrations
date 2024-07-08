@@ -2,6 +2,7 @@ package com.rfs;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
+import com.beust.jcommander.ParameterException;
 
 import java.io.IOException;
 import java.net.URI;
@@ -22,6 +23,8 @@ import com.rfs.worker.ShardWorkPreparer;
 
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
+import com.rfs.common.FileSystemRepo;
+import com.rfs.common.IndexMetadata;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Uri;
@@ -49,25 +52,38 @@ public class RfsMigrateDocuments {
                 description = "The name of the snapshot to migrate")
         public String snapshotName;
 
+        @Parameter(names = {"--snapshot-local-dir"},
+                required = false,
+                description = ("The absolute path to the directory on local disk where the snapshot exists.  Use this parameter"
+                    + " if have a copy of the snapshot disk.  Mutually exclusive with --s3-local-dir, --s3-repo-uri, and --s3-region."
+                ))
+        public String snapshotLocalDir = null;
+
         @Parameter(names = {"--s3-local-dir"},
-                required = true,
-                description = "The absolute path to the directory on local disk to download S3 files to")
-        public String s3LocalDirPath;
+                required = false,
+                description = ("The absolute path to the directory on local disk to download S3 files to.  If you supply this, you must"
+                    + " also supply --s3-repo-uri and --s3-region.  Mutually exclusive with --snapshot-local-dir."
+                ))
+        public String s3LocalDir = null;
 
         @Parameter(names = {"--s3-repo-uri"},
-                required = true,
-                description = "The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2")
-        public String s3RepoUri;
+                required = false,
+                description = ("The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2.  If you supply this, you must"
+                    + " also supply --s3-local-dir and --s3-region.  Mutually exclusive with --snapshot-local-dir."
+                ))
+        public String s3RepoUri = null;
 
         @Parameter(names = {"--s3-region"},
-                required = true,
-                description = "The AWS Region the S3 bucket is in, like: us-east-2")
-        public String s3Region;
+                required = false,
+                description = ("The AWS Region the S3 bucket is in, like: us-east-2.  If you supply this, you must"
+                    + " also supply --s3-local-dir and --s3-repo-uri.  Mutually exclusive with --snapshot-local-dir."
+                ))
+        public String s3Region = null;
 
         @Parameter(names = {"--lucene-dir"},
                 required = true,
                 description = "The absolute path to the directory where we'll put the Lucene docs")
-        public String luceneDirPath;
+        public String luceneDir;
 
         @Parameter(names = {"--target-host"},
                 required = true,
@@ -97,17 +113,40 @@ public class RfsMigrateDocuments {
         }
     }
 
+    public static void validateArgs(Args args) {
+        boolean isSnapshotLocalDirProvided = args.snapshotLocalDir != null;
+        boolean areAllS3ArgsProvided = args.s3LocalDir != null && args.s3RepoUri != null && args.s3Region != null;
+        boolean areAnyS3ArgsProvided = args.s3LocalDir != null || args.s3RepoUri != null || args.s3Region != null;
+
+        if (isSnapshotLocalDirProvided && areAnyS3ArgsProvided) {
+            throw new ParameterException("You must provide either --snapshot-local-dir or --s3-local-dir, --s3-repo-uri, and --s3-region, but not both.");
+        }
+
+        if (areAnyS3ArgsProvided && !areAllS3ArgsProvided) {
+            throw new ParameterException("If provide the S3 Snapshot args, you must provide all of them (--s3-local-dir, --s3-repo-uri and --s3-region).");
+        }
+
+        if (!isSnapshotLocalDirProvided && !areAllS3ArgsProvided) {
+            throw new ParameterException("You must provide either --snapshot-local-dir or --s3-local-dir, --s3-repo-uri, and --s3-region.");
+        }
+
+    }
+
     public static void main(String[] args) throws Exception {
-        // Grab out args
         Args arguments = new Args();
         JCommander.newBuilder()
                 .addObject(arguments)
                 .build()
                 .parse(args);
 
-        var luceneDirPath = Paths.get(arguments.luceneDirPath);
+        validateArgs(arguments);
+
+        var luceneDirPath = Paths.get(arguments.luceneDir);
+        var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
+
+
         try (var processManager = new LeaseExpireTrigger(workItemId->{
-            log.error("terminating RunRfsWorker because its lease has expired for " + workItemId);
+            log.error("Terminating RunRfsWorker because its lease has expired for " + workItemId);
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC())) {
             var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(arguments.targetHost)),
@@ -120,8 +159,16 @@ public class RfsMigrateDocuments {
                         new OpenSearchClient(arguments.targetHost, arguments.targetUser, arguments.targetPass, false);
                 DocumentReindexer reindexer = new DocumentReindexer(targetClient);
 
-                SourceRepo sourceRepo = S3Repo.create(Paths.get(arguments.s3LocalDirPath),
-                        new S3Uri(arguments.s3RepoUri), arguments.s3Region);
+                SourceRepo sourceRepo;
+                if (snapshotLocalDirPath == null) {
+                    sourceRepo = S3Repo.create(
+                        Paths.get(arguments.s3LocalDir),
+                        new S3Uri(arguments.s3RepoUri),
+                        arguments.s3Region
+                    );
+                } else {
+                    sourceRepo = new FileSystemRepo(snapshotLocalDirPath);
+                }
                 SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
 
                 IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
