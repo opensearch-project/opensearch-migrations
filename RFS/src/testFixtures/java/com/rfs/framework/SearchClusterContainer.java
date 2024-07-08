@@ -7,6 +7,7 @@ import java.util.Map;
 import com.google.common.collect.ImmutableMap;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
@@ -118,6 +119,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     }
 
     @EqualsAndHashCode
+    @ToString
     @Getter
     public static class Version {
         final String imageName;
@@ -129,6 +131,8 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             this.prettyName = prettyName;
             this.initializationType = initializationType;
         }
+
+
     }
 
     public static class ElasticsearchVersion extends Version {
