@@ -192,7 +192,8 @@ def test_cli_with_backfill_describe(runner, mocker):
 
 def test_cli_backfill_create_rfs(runner, mocker):
     mock = mocker.patch.object(RFSBackfill, 'create', autospec=True)
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'backfill', 'create'],
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+                                 'backfill', 'create'],
                            catch_exceptions=True)
     mock.assert_called_once()
     assert result.exit_code == 0
@@ -200,7 +201,8 @@ def test_cli_backfill_create_rfs(runner, mocker):
 
 def test_cli_backfill_start(runner, mocker):
     mock = mocker.patch.object(RFSBackfill, 'start', autospec=True)
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'backfill', 'start'],
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+                                 'backfill', 'start'],
                            catch_exceptions=True)
     mock.assert_called_once()
     assert result.exit_code == 0
@@ -208,7 +210,8 @@ def test_cli_backfill_start(runner, mocker):
 
 def test_cli_backfill_stop(runner, mocker):
     mock = mocker.patch.object(RFSBackfill, 'stop', autospec=True)
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'backfill', 'stop'],
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+                                 'backfill', 'stop'],
                            catch_exceptions=True)
     mock.assert_called_once()
     assert result.exit_code == 0
@@ -216,7 +219,8 @@ def test_cli_backfill_stop(runner, mocker):
 
 def test_cli_backfill_scale(runner, mocker):
     mock = mocker.patch.object(RFSBackfill, 'scale', autospec=True)
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'backfill', 'scale', '3'],
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+                                 'backfill', 'scale', '3'],
                            catch_exceptions=True)
     mock.assert_called_once()
     assert result.exit_code == 0
@@ -224,7 +228,8 @@ def test_cli_backfill_scale(runner, mocker):
 
 def test_cli_backfill_scale_with_no_units_fails(runner, mocker):
     mock = mocker.patch.object(RFSBackfill, 'scale', autospec=True)
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'backfill', 'scale'],
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+                                 'backfill', 'scale'],
                            catch_exceptions=True)
     mock.assert_not_called()
     assert result.exit_code == 2
