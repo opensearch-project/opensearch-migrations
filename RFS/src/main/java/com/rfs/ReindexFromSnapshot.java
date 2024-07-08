@@ -8,6 +8,7 @@ import java.util.concurrent.TimeUnit;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
+import com.beust.jcommander.ParametersDelegate;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.lucene.document.Document;
 import org.apache.logging.log4j.Level;
@@ -50,23 +51,11 @@ public class ReindexFromSnapshot {
         @Parameter(names = {"-l", "--lucene-dir"}, description = "The absolute path to the directory where we'll put the Lucene docs", required = true)
         public String luceneDirPath;
 
-        @Parameter(names = {"--source-host"}, description = "The source host and port (e.g. http://localhost:9200)", required = false)
-        public String sourceHost = null;
+        @ParametersDelegate
+        public ConnectionDetails.SourceArgs sourceArgs;
 
-        @Parameter(names = {"--source-username"}, description = "The source username; if not provided, will assume no auth on source", required = false)
-        public String sourceUser = null;
-
-        @Parameter(names = {"--source-password"}, description = "The source password; if not provided, will assume no auth on source", required = false)
-        public String sourcePass = null;
-
-        @Parameter(names = {"--target-host"}, description = "The target host and port (e.g. http://localhost:9200)", required = true)
-        public String targetHost;
-
-        @Parameter(names = {"--target-username"}, description = "The target username; if not provided, will assume no auth on target", required = false)
-        public String targetUser = null;
-
-        @Parameter(names = {"--target-password"}, description = "The target password; if not provided, will assume no auth on target", required = false)
-        public String targetPass = null;
+        @ParametersDelegate
+        public ConnectionDetails.TargetArgs targetArgs;
 
         @Parameter(names = {"-s", "--source-version"}, description = "The source cluster's version (e.g. 'es_6_8')", required = true, converter = ClusterVersion.ArgsConverter.class)
         public ClusterVersion sourceVersion;
@@ -112,12 +101,6 @@ public class ReindexFromSnapshot {
         String s3RepoUri = arguments.s3RepoUri;
         String s3Region = arguments.s3Region;
         Path luceneDirPath = Paths.get(arguments.luceneDirPath);
-        String sourceHost = arguments.sourceHost;
-        String sourceUser = arguments.sourceUser;
-        String sourcePass = arguments.sourcePass;
-        String targetHost = arguments.targetHost;
-        String targetUser = arguments.targetUser;
-        String targetPass = arguments.targetPass;
         int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
         ClusterVersion sourceVersion = arguments.sourceVersion;
         ClusterVersion targetVersion = arguments.targetVersion;
@@ -129,8 +112,8 @@ public class ReindexFromSnapshot {
 
         Logging.setLevel(logLevel);
 
-        ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
-        ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
+        ConnectionDetails sourceConnection = new ConnectionDetails(arguments.sourceArgs);
+        ConnectionDetails targetConnection = new ConnectionDetails(arguments.targetArgs);
 
         // Sanity checks
         if (!((sourceVersion == ClusterVersion.ES_6_8) || (sourceVersion == ClusterVersion.ES_7_10))) {
@@ -149,9 +132,9 @@ public class ReindexFromSnapshot {
          *
          * If you provide the source host, you still need to provide the S3 details or the snapshotLocalRepoDirPath to write the snapshot to.
          */
-        if (snapshotDirPath != null && (sourceHost != null || s3RepoUri != null)) {
+        if (snapshotDirPath != null && (arguments.sourceArgs.getHost() != null || s3RepoUri != null)) {
             throw new IllegalArgumentException("If you specify a local directory to take the snapshot from, you cannot specify a source host or S3 URI");
-        } else if (sourceHost != null) {
+        } else if (arguments.sourceArgs.getHost() != null) {
            if (s3RepoUri == null && s3Region == null && s3LocalDirPath == null && snapshotLocalRepoDirPath == null) {
                 throw new IllegalArgumentException(
                     "If you specify a source host, you must also specify the S3 details or the snapshotLocalRepoDirPath to write the snapshot to as well");
@@ -179,7 +162,7 @@ public class ReindexFromSnapshot {
 
         try {
 
-            if (sourceHost != null) {
+            if (arguments.sourceArgs.getHost() != null) {
                 // ==========================================================================================================
                 // Create the snapshot if necessary
                 // ==========================================================================================================
