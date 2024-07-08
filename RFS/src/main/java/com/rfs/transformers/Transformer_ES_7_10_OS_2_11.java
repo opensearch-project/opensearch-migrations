@@ -86,9 +86,9 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
 
     @Override
     public IndexMetadata transformIndexMetadata(IndexMetadata indexData){
-        logger.debug("Original Object: " + indexData.raw().toString());
+        logger.debug("Original Object: " + indexData.rawJson().toString());
         var copy = indexData.deepCopy();
-        var newRoot = copy.raw();
+        var newRoot = copy.rawJson();
         
         TransformFunctions.removeIntermediateMappingsLevels(newRoot);
 

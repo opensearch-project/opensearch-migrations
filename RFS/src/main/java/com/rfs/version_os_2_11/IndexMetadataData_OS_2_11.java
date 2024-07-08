@@ -45,7 +45,7 @@ public class IndexMetadataData_OS_2_11 implements IndexMetadata {
     }
 
     @Override
-    public ObjectNode raw() {
+    public ObjectNode rawJson() {
         return root;
     }
     @Override

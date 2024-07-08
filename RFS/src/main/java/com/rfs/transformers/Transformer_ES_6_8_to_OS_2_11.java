@@ -42,7 +42,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
                 var templateCopy = (ObjectNode) originalTemplates.get(templateName).deepCopy();
                 var indexTemplate = (Index) () -> templateCopy;
                 transformIndex(indexTemplate, IndexType.Concrete);
-                templates.set(templateName, indexTemplate.raw());
+                templates.set(templateName, indexTemplate.rawJson());
             });
             newRoot.set("templates", templates);
         }
@@ -70,8 +70,8 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     }
 
     private void transformIndex(Index index, IndexType type) {
-        logger.debug("Original Object: " + index.raw().toString());
-        var newRoot = index.raw();
+        logger.debug("Original Object: " + index.rawJson().toString());
+        var newRoot = index.rawJson();
 
         switch (type) {
             case Concrete:

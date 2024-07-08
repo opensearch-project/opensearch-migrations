@@ -93,14 +93,14 @@ public class IndexMappingTypeRemovalTest {
     private CanApplyResult canApply(final ObjectNode indexJson) {
         var transformer = new IndexMappingTypeRemoval();
         var index = mock(Index.class);
-        Mockito.when(index.raw()).thenReturn(indexJson);
+        Mockito.when(index.rawJson()).thenReturn(indexJson);
         return transformer.canApply(index);
     }
 
     private boolean applyTransformation(final ObjectNode indexJson) {
         var transformer = new IndexMappingTypeRemoval();
         var index = mock(Index.class);
-        Mockito.when(index.raw()).thenReturn(indexJson);
+        Mockito.when(index.rawJson()).thenReturn(indexJson);
 
         log.atInfo().setMessage("Original\n{}").addArgument(indexJson.toPrettyString()).log();
         var wasChanged = transformer.applyTransformation(index);

@@ -41,7 +41,7 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
 
     @Override
     public CanApplyResult canApply(final Index index) {
-        final var mappingNode = index.raw().get("mappings");
+        final var mappingNode = index.rawJson().get("mappings");
 
         if (mappingNode == null || mappingNode.isObject()) {
             return CanApplyResult.NO;
@@ -64,7 +64,7 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
             return false;
         }
 
-        final var mappingsNode = index.raw().get("mappings");
+        final var mappingsNode = index.rawJson().get("mappings");
         final var mappingsInnerNode = (ObjectNode) mappingsNode.get(0);
 
         final var typeName = mappingsInnerNode.properties().stream().map(Entry::getKey).findFirst().orElseThrow();
@@ -72,7 +72,7 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
 
         mappingsInnerNode.remove(typeName);
         typeNode.fields().forEachRemaining(node -> mappingsInnerNode.set(node.getKey(), node.getValue()));
-        index.raw().set("mappings", mappingsInnerNode);
+        index.rawJson().set("mappings", mappingsInnerNode);
 
         return true;
     }

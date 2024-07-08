@@ -69,7 +69,7 @@ public class IndexMetadataData_ES_6_8 implements IndexMetadata {
     }
 
     @Override
-    public ObjectNode raw() {
+    public ObjectNode rawJson() {
         return root;
     }
 

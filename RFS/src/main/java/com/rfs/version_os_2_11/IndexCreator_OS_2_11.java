@@ -16,7 +16,7 @@ public class IndexCreator_OS_2_11 {
     }
 
     public Optional<ObjectNode> create(IndexMetadata index, String indexName, String indexId) {
-        IndexMetadataData_OS_2_11 indexMetadata = new IndexMetadataData_OS_2_11(index.raw(), indexId, indexName);
+        IndexMetadataData_OS_2_11 indexMetadata = new IndexMetadataData_OS_2_11(index.rawJson(), indexId, indexName);
 
         // Remove some settings which will cause errors if you try to pass them to the API
         ObjectNode settings = indexMetadata.getSettings();
