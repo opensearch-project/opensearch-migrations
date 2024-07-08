@@ -16,8 +16,10 @@ services:
       - '--enable-feature=exemplar-storage'
 
   # Jaeger
+  # Found regression with latest tag not being able to connect to port 4317 on docker startup, reverted to '1' tag
+  # until resolved
   jaeger:
-    image: jaegertracing/all-in-one:latest
+    image: jaegertracing/all-in-one:1
     networks:
       - migrations
     ports:
