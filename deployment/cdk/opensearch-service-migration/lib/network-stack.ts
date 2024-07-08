@@ -137,9 +137,9 @@ export class NetworkStack extends Stack {
         const needAlb = props.captureProxyServiceEnabled ||
             props.elasticsearchServiceEnabled ||
             props.migrationAPIEnabled ||
-            props.captureProxyServiceEnabled ||
+            props.captureProxyESServiceEnabled ||
             props.targetClusterProxyServiceEnabled;
-        
+
         if(needAlb) {
             // Create the ALB with the strongest TLS 1.3 security policy
             const alb = new ApplicationLoadBalancer(this, 'ALB', {
@@ -186,7 +186,7 @@ export class NetworkStack extends Stack {
                 this.createSecureListener('MigrationConsole', 8000, alb, cert, this.albMigrationConsoleTG);
                 createALBListenerUrlParameter(8000, MigrationSSMParameter.MIGRATION_API_URL);
             }
-            
+
             // Setup when deploying capture proxy in ECS
             if (props.captureProxyServiceEnabled || props.captureProxyESServiceEnabled) {
                 this.albSourceProxyTG = this.createSecureTargetGroup('ALBSourceProxy', props.stage, 9200, this.vpc);
@@ -223,7 +223,7 @@ export class NetworkStack extends Stack {
         } else if (!this.albSourceClusterTG) {
             throw new Error(`Capture Proxy ESService, Elasticsearch Service, or SourceClusterEndpoint must be enabled`);
         }
-        
+
         if (!props.addOnMigrationDeployId) {
             // Create a default SG which only allows members of this SG to access the Domain endpoints
             const defaultSecurityGroup = new SecurityGroup(this, 'osClusterAccessSG', {
