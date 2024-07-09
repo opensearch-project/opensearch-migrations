@@ -66,6 +66,8 @@ dependencies {
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java-core'
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java-transport-httpclient5'
     testFixturesImplementation group: 'org.testcontainers', name: 'testcontainers'
+
+    testFixturesImplementation group: 'org.hamcrest', name: 'hamcrest'
 }
 
 application {
