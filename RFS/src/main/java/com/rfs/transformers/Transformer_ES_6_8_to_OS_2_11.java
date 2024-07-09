@@ -10,6 +10,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.models.GlobalMetadata;
 import com.rfs.models.IndexMetadata;
 import com.rfs.version_os_2_11.GlobalMetadataData_OS_2_11;
+import com.rfs.version_os_2_11.IndexMetadataData_OS_2_11;
 
 import org.opensearch.migrations.transformation.TransformationRule;
 import org.opensearch.migrations.transformation.entity.Index;
@@ -66,7 +67,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     public IndexMetadata transformIndexMetadata(IndexMetadata index) {
         var copy = index.deepCopy();
         transformIndex(copy, IndexType.Concrete);
-        return copy;
+        return new IndexMetadataData_OS_2_11(copy.rawJson(), copy.getId(), copy.getName());
     }
 
     private void transformIndex(Index index, IndexType type) {

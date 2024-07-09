@@ -23,12 +23,12 @@ public interface IndexMetadata extends Index {
     * See: https://github.com/elastic/elasticsearch/blob/v7.10.2/server/src/main/java/org/elasticsearch/cluster/metadata/IndexMetadata.java#L1475
     * See: https://github.com/elastic/elasticsearch/blob/v6.8.23/server/src/main/java/org/elasticsearch/cluster/metadata/IndexMetaData.java#L1284
     */
-    public ObjectNode getAliases();
+    public JsonNode getAliases();
     public String getId();
-    public ObjectNode getMappings();
+    public JsonNode getMappings();
     public String getName();
     public int getNumberOfShards();
-    public ObjectNode getSettings();
+    public JsonNode getSettings();
     public IndexMetadata deepCopy();
 
     /**
