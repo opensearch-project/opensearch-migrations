@@ -25,13 +25,13 @@ public abstract class IDocumentMigrationContexts {
         IWorkCoordinationContexts.ICreateUnassignedWorkItemContext createShardWorkItemContext();
     }
 
-    public interface IDocumentReindexContext extends IScopedInstrumentationAttributes {
+    public interface IDocumentReindexContext
+            extends IWorkCoordinationContexts.IScopedWorkContext<IWorkCoordinationContexts.IAcquireNextWorkItemContext>
+    {
         String ACTIVITY_NAME = ActivityNames.DOCUMENT_REINDEX;
 
         IRfsContexts.IRequestContext createBulkRequest();
 
         IRfsContexts.IRequestContext createRefreshContext();
     }
-
-
 }

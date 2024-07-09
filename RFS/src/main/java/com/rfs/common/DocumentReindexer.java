@@ -54,7 +54,7 @@ public class DocumentReindexer {
     }
 
     public void refreshAllDocuments(ConnectionDetails targetConnection,
-                                           IDocumentMigrationContexts.IDocumentReindexContext context) throws Exception {
+                                    IDocumentMigrationContexts.IDocumentReindexContext context) throws Exception {
         // Send the request
         OpenSearchClient client = new OpenSearchClient(targetConnection);
         client.refresh(context.createRefreshContext());

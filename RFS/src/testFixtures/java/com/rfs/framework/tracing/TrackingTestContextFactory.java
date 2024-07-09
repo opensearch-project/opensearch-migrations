@@ -1,35 +1,44 @@
 package com.rfs.framework.tracing;
 
+import lombok.AllArgsConstructor;
 import lombok.Lombok;
+import lombok.SneakyThrows;
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 
+import java.lang.reflect.InvocationTargetException;
+import java.util.function.BiFunction;
+
+@AllArgsConstructor
 public class TrackingTestContextFactory<T> extends TrackingTestContextCreator {
 
-    private final Class<T> c;
+    BiFunction<InMemoryInstrumentationBundle, IContextTracker, T> factory;
 
-    public TrackingTestContextFactory(Class<T> c) {
-        this.c = c;
-    }
-
-    T buildRootContext(InMemoryInstrumentationBundle a, IContextTracker b) {
+    @SneakyThrows
+    public static <U> TrackingTestContextFactory<U> factoryViaCtor(Class<U> c) {
         try {
-            return c.getDeclaredConstructor(InMemoryInstrumentationBundle.class, IContextTracker.class)
-                    .newInstance(a,b);
+            return new TrackingTestContextFactory<U>((a,b) -> {
+                try {
+                    return c.getDeclaredConstructor(InMemoryInstrumentationBundle.class, IContextTracker.class)
+                            .newInstance(a,b);
+                } catch (Exception e) {
+                    throw Lombok.sneakyThrow(e);
+                }
+            });
         } catch (Exception e) {
             throw Lombok.sneakyThrow(e);
         }
     }
 
     public T withTracking(boolean tracing, boolean metrics, boolean consoleLogging) {
-        return withTracking(tracing, metrics, consoleLogging, this::buildRootContext);
+        return withTracking(tracing, metrics, consoleLogging, factory);
     }
 
     public T withAllTracking() {
-        return withAllTracking(this::buildRootContext);
+        return withAllTracking(factory);
     }
 
     public T noOtelTracking() {
-        return noOtelTracking(this::buildRootContext);
+        return noOtelTracking(factory);
     }
 }

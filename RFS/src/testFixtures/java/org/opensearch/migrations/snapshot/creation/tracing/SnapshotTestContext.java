@@ -16,7 +16,7 @@ public class SnapshotTestContext extends RootSnapshotContext {
     }
 
     public static TrackingTestContextFactory<SnapshotTestContext> factory() {
-        return new TrackingTestContextFactory<>(SnapshotTestContext.class);
+        return TrackingTestContextFactory.factoryViaCtor(SnapshotTestContext.class);
     }
 
     public IRfsContexts.IRequestContext createUnboundRequestContext() {

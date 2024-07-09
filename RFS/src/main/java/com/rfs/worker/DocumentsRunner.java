@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.function.BiFunction;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.ScopedWorkCoordinator;
@@ -32,7 +33,6 @@ public class DocumentsRunner {
     private final SnapshotShardUnpacker.Factory unpackerFactory;
     private final Function<Path,LuceneDocumentsReader> readerFactory;
     private final DocumentReindexer reindexer;
-    private final IDocumentMigrationContexts.IDocumentReindexContext context;
 
     public enum CompletionStatus {
         NOTHING_DONE,
@@ -44,33 +44,34 @@ public class DocumentsRunner {
      * @throws IOException
      */
     public CompletionStatus
-    migrateNextShard(IWorkCoordinationContexts.IScopedWorkContext<IWorkCoordinationContexts.IAcquireNextWorkItemContext> context)
-            throws IOException, InterruptedException
-    {
-        return workCoordinator.ensurePhaseCompletion(wc -> {
-                    try {
-                        return wc.acquireNextWorkItem(Duration.ofMinutes(10), context::createOpeningContext);
-                    } catch (Exception e) {
-                        throw Lombok.sneakyThrow(e);
-                    }
-                },
-                new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<>() {
-                    @Override
-                    public CompletionStatus onAlreadyCompleted() throws IOException {
-                        return CompletionStatus.NOTHING_DONE;
-                    }
+    migrateNextShard(Supplier<IDocumentMigrationContexts.IDocumentReindexContext> contextSupplier)
+            throws IOException, InterruptedException {
+        try (var context = contextSupplier.get()) {
+            return workCoordinator.ensurePhaseCompletion(wc -> {
+                        try {
+                            return wc.acquireNextWorkItem(Duration.ofMinutes(10), context::createOpeningContext);
+                        } catch (Exception e) {
+                            throw Lombok.sneakyThrow(e);
+                        }
+                    },
+                    new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<>() {
+                        @Override
+                        public CompletionStatus onAlreadyCompleted() throws IOException {
+                            return CompletionStatus.NOTHING_DONE;
+                        }
 
-                    @Override
-                    public CompletionStatus onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException {
-                        doDocumentsMigration(IndexAndShard.valueFromWorkItemString(workItem.getWorkItemId()));
-                        return CompletionStatus.WORK_COMPLETED;
-                    }
+                        @Override
+                        public CompletionStatus onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) {
+                            doDocumentsMigration(IndexAndShard.valueFromWorkItemString(workItem.getWorkItemId()), context);
+                            return CompletionStatus.WORK_COMPLETED;
+                        }
 
-                    @Override
-                    public CompletionStatus onNoAvailableWorkToBeDone() throws IOException {
-                        return CompletionStatus.NOTHING_DONE;
-                    }
-                }, context::createCloseContet);
+                        @Override
+                        public CompletionStatus onNoAvailableWorkToBeDone() throws IOException {
+                            return CompletionStatus.NOTHING_DONE;
+                        }
+                    }, context::createCloseContet);
+        }
     }
 
     public static class ShardTooLargeException extends RfsException {
@@ -79,7 +80,8 @@ public class DocumentsRunner {
         }
     }
 
-    private void doDocumentsMigration(IndexAndShard indexAndShard) {
+    private void doDocumentsMigration(IndexAndShard indexAndShard,
+                                      IDocumentMigrationContexts.IDocumentReindexContext context) {
         log.info("Migrating docs for " + indexAndShard);
         ShardMetadata.Data shardMetadata = shardMetadataFactory.apply(indexAndShard.indexName, indexAndShard.shard);
 

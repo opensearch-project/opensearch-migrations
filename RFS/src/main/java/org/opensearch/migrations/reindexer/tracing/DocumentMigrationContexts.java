@@ -12,16 +12,19 @@ import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 public class DocumentMigrationContexts extends IDocumentMigrationContexts {
 
-    public static class ShardSetupContext
-        extends BaseSpanContext<RootDocumentMigrationContext>
-        implements IShardSetupContext
-    {
-        private final RootWorkCoordinationContext workCoordinatorScope;
-
-        protected ShardSetupContext(RootDocumentMigrationContext rootScope,
-                                    RootWorkCoordinationContext workCoordinatorScope) {
+    public static abstract class BaseDocumentMigrationContext extends BaseSpanContext<RootDocumentMigrationContext> {
+        protected BaseDocumentMigrationContext(RootDocumentMigrationContext rootScope) {
             super(rootScope);
-            this.workCoordinatorScope = workCoordinatorScope;
+        }
+
+        public RootWorkCoordinationContext getWorkCoordinationRootContext() {
+            return this.rootInstrumentationScope.getWorkCoordinationContext();
+        }
+    }
+
+    public static class ShardSetupContext extends BaseDocumentMigrationContext implements IShardSetupContext {
+        protected ShardSetupContext(RootDocumentMigrationContext rootScope) {
+            super(rootScope);
             initializeSpan(rootScope);
         }
 
@@ -52,23 +55,21 @@ public class DocumentMigrationContexts extends IDocumentMigrationContexts {
 
         @Override
         public IWorkCoordinationContexts.IAcquireSpecificWorkContext createWorkAcquisitionContext() {
-            return workCoordinatorScope.createAcquireSpecificItemContext(getEnclosingScope());
+            return getWorkCoordinationRootContext().createAcquireSpecificItemContext(getEnclosingScope());
         }
 
         @Override
         public IWorkCoordinationContexts.ICompleteWorkItemContext createWorkCompletionContext() {
-            return workCoordinatorScope.createCompleteWorkContext(getEnclosingScope());
+            return getWorkCoordinationRootContext().createCompleteWorkContext(getEnclosingScope());
         }
 
         @Override
         public IWorkCoordinationContexts.ICreateUnassignedWorkItemContext createShardWorkItemContext() {
-            return workCoordinatorScope.createUnassignedWorkContext(getEnclosingScope());
+            return getWorkCoordinationRootContext().createUnassignedWorkContext(getEnclosingScope());
         }
     }
 
-    public static class DocumentReindexContext
-            extends BaseSpanContext<RootDocumentMigrationContext>
-            implements IDocumentReindexContext {
+    public static class DocumentReindexContext extends BaseDocumentMigrationContext implements IDocumentReindexContext {
 
         protected DocumentReindexContext(RootDocumentMigrationContext rootScope) {
             super(rootScope);
@@ -112,5 +113,14 @@ public class DocumentMigrationContexts extends IDocumentMigrationContexts {
                     "DocumentReindexContext.createRefreshContext");
         }
 
+        @Override
+        public IWorkCoordinationContexts.IAcquireNextWorkItemContext createOpeningContext() {
+            return getWorkCoordinationRootContext().createAcquireNextItemContext();
+        }
+
+        @Override
+        public IWorkCoordinationContexts.ICompleteWorkItemContext createCloseContet() {
+            return getWorkCoordinationRootContext().createCompleteWorkContext();
+        }
     }
 }

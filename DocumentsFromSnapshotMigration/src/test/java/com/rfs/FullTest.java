@@ -20,7 +20,6 @@ import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.framework.PreloadedSearchClusterContainer;
-import com.rfs.framework.tracing.TestContext;
 import com.rfs.tracing.IRfsContexts;
 import com.rfs.transformers.TransformFunctions;
 import com.rfs.transformers.Transformer;
@@ -45,6 +44,10 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
+import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
+import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 import org.opensearch.testcontainers.OpensearchContainer;
 import org.slf4j.event.Level;
 import reactor.core.publisher.Flux;
@@ -113,7 +116,12 @@ public class FullTest {
                      String targetImageName, int numWorkers)
             throws Exception
     {
-        final var testContext = TestContext.noOtelTracking();
+        final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        final var testMetadataMigrationContext = MetadataMigrationTestContext.factory().noOtelTracking();
+        final var workCoordinationContext = WorkCoordinationTestContext.factory().noOtelTracking();
+        final var testDocMigrationContext =
+                DocumentMigrationTestContext.factory(workCoordinationContext).noOtelTracking();
+
         try (var esSourceContainer = new PreloadedSearchClusterContainer(baseSourceImageVersion,
                 SOURCE_SERVER_ALIAS, generatorImage, generatorArgs);
              OpensearchContainer<?> osTargetContainer = new OpensearchContainer<>(targetImageName))
@@ -125,7 +133,7 @@ public class FullTest {
             final List<String> INDEX_ALLOWLIST = List.of();
             CreateSnapshot.run(
                     c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
-                            testContext.createSnapshotCreateContext()),
+                            testSnapshotContext.createSnapshotCreateContext()),
                     new OpenSearchClient(esSourceContainer.getUrl(), null),
                     false);
             var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
@@ -134,7 +142,7 @@ public class FullTest {
 
                 var targetClient = new OpenSearchClient(osTargetContainer.getHttpHostAddress(), null);
                 var sourceRepo = new FileSystemRepo(tempDir);
-                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, INDEX_ALLOWLIST, testContext);
+                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, INDEX_ALLOWLIST, testMetadataMigrationContext);
 
                 var workerFutures = new ArrayList<CompletableFuture<Void>>();
                 var runCounter = new AtomicInteger();
@@ -142,7 +150,7 @@ public class FullTest {
                 for (int i = 0; i < numWorkers; ++i) {
                     workerFutures.add(CompletableFuture.supplyAsync(() ->
                             migrateDocumentsSequentially(sourceRepo, SNAPSHOT_NAME, INDEX_ALLOWLIST,
-                                    osTargetContainer.getHttpHostAddress(), runCounter, clockJitter, testContext)));
+                                    osTargetContainer.getHttpHostAddress(), runCounter, clockJitter, testDocMigrationContext)));
                 }
                 var thrownException = Assertions.assertThrows(ExecutionException.class, () ->
                         CompletableFuture.allOf(workerFutures.toArray(CompletableFuture[]::new)).get());
@@ -164,7 +172,7 @@ public class FullTest {
                 // for now, lets make sure that we got all of the
                 Assertions.assertInstanceOf(RfsMigrateDocuments.NoWorkLeftException.class, thrownException.getCause(),
                         "expected at least one worker to notice that all work was completed.");
-                checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer, testContext);
+                checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer, testDocMigrationContext);
                 var totalCompletedWorkRuns = runCounter.get();
                 Assertions.assertTrue(totalCompletedWorkRuns >= numWorkers,
                         "Expected to make more runs (" + totalCompletedWorkRuns + ") than the number of workers " +
@@ -177,7 +185,7 @@ public class FullTest {
 
     private void checkClusterMigrationOnFinished(SearchClusterContainer esSourceContainer,
                                                  OpensearchContainer<?> osTargetContainer,
-                                                 TestContext context) {
+                                                 DocumentMigrationTestContext context) {
         var targetClient = new RestClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(), null, null));
         var sourceMap = getIndexToCountMap(new RestClient(new ConnectionDetails(esSourceContainer.getUrl(),
                 null, null)), context.createUnboundRequestContext());
@@ -210,7 +218,7 @@ public class FullTest {
                                               String targetAddress,
                                               AtomicInteger runCounter,
                                               Random clockJitter,
-                                              TestContext testContext) {
+                                              DocumentMigrationTestContext testContext) {
         for (int runNumber=0; ; ++runNumber) {
             try {
                 var workResult = migrateDocumentsWithOneWorker(sourceRepo, snapshotName, indexAllowlist, targetAddress,
@@ -235,7 +243,7 @@ public class FullTest {
                                         OpenSearchClient targetClient,
                                         String snapshotName,
                                         List<String> indexAllowlist,
-                                        TestContext context)
+                                        MetadataMigrationTestContext context)
     {
         SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
         GlobalMetadata.Factory metadataFactory = new GlobalMetadataFactory_ES_7_10(repoDataProvider);
@@ -274,7 +282,7 @@ public class FullTest {
                                                                            List<String> indexAllowlist,
                                                                            String targetAddress,
                                                                            Random clockJitter,
-                                                                           TestContext context)
+                                                                           DocumentMigrationTestContext context)
         throws RfsMigrateDocuments.NoWorkLeftException
     {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");

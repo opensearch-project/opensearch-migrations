@@ -10,8 +10,8 @@ import java.util.function.BiFunction;
 
 public class TrackingTestContextCreator {
 
-    static <T> T withTracking(boolean tracing, boolean metrics, boolean consoleLogging,
-                              BiFunction<InMemoryInstrumentationBundle, IContextTracker, T> ctor) {
+    public static <T> T withTracking(boolean tracing, boolean metrics, boolean consoleLogging,
+                                     BiFunction<InMemoryInstrumentationBundle, IContextTracker, T> ctor) {
         IContextTracker tracker = new BacktracingContextTracker();
         if (consoleLogging) {
             tracker = new CompositeContextTracker(tracker, new LoggingContextTracer());
@@ -20,11 +20,11 @@ public class TrackingTestContextCreator {
         return ctor.apply(new InMemoryInstrumentationBundle(tracing, metrics), tracker);
     }
 
-    static <T> T withAllTracking(BiFunction<InMemoryInstrumentationBundle, IContextTracker, T> ctor) {
+    public static <T> T withAllTracking(BiFunction<InMemoryInstrumentationBundle, IContextTracker, T> ctor) {
         return withTracking(true, true, true, ctor);
     }
 
-    static <T> T noOtelTracking(BiFunction<InMemoryInstrumentationBundle, IContextTracker, T> ctor) {
+    public static <T> T noOtelTracking(BiFunction<InMemoryInstrumentationBundle, IContextTracker, T> ctor) {
         return withTracking(false, false, false, ctor);
     }
 }

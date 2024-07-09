@@ -8,7 +8,7 @@ public class MetadataMigrationTestContext extends RootMetadataMigrationContext {
     public final InMemoryInstrumentationBundle inMemoryInstrumentationBundle;
 
     public static TrackingTestContextFactory<MetadataMigrationTestContext> factory() {
-        return new TrackingTestContextFactory<>(MetadataMigrationTestContext.class);
+        return TrackingTestContextFactory.factoryViaCtor(MetadataMigrationTestContext.class);
     }
 
     public MetadataMigrationTestContext(InMemoryInstrumentationBundle inMemoryInstrumentationBundle,

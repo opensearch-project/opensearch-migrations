@@ -184,8 +184,8 @@ public class RfsMigrateDocuments {
                     }
                     return shardMetadata;
                 },
-                unpackerFactory, readerFactory, reindexer, rootDocumentContext.createReindexContext())
-                .migrateNextShard(rootDocumentContext.getWorkCoordinationContext()::createAcquireNextItemContext);
+                unpackerFactory, readerFactory, reindexer)
+                .migrateNextShard(rootDocumentContext::createReindexContext);
     }
 
     private static void confirmShardPrepIsComplete(IndexMetadata.Factory indexMetadataFactory,

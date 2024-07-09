@@ -52,11 +52,13 @@ public abstract class IWorkCoordinationContexts {
         String ACTIVITY_NAME = ActivityNames.SYNC_REFRESH_CLUSTER;
     }
 
-    public interface IAcquireSpecificWorkContext extends IRetryableActivityContext {
+    public interface IBaseAcquireWorkContext extends IRetryableActivityContext {}
+
+    public interface IAcquireSpecificWorkContext extends IBaseAcquireWorkContext {
         String ACTIVITY_NAME = ActivityNames.ACQUIRE_SPECIFIC_WORK;
     }
 
-    public interface IAcquireNextWorkItemContext extends IRetryableActivityContext {
+    public interface IAcquireNextWorkItemContext extends IBaseAcquireWorkContext {
         String ACTIVITY_NAME = ActivityNames.ACQUIRE_NEXT_WORK;
         IRefreshContext getRefreshContext();
         void recordAssigned();
@@ -70,8 +72,8 @@ public abstract class IWorkCoordinationContexts {
         IRefreshContext getRefreshContext();
     }
 
-    public interface IScopedWorkContext<OPENING_CONTEXT> extends IScopedInstrumentationAttributes {
-        OPENING_CONTEXT createOpeningContext();
+    public interface IScopedWorkContext<C extends IBaseAcquireWorkContext> extends IScopedInstrumentationAttributes {
+        C createOpeningContext();
         ICompleteWorkItemContext createCloseContet();
     }
 }

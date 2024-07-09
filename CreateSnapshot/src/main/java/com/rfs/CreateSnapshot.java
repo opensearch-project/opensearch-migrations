@@ -15,6 +15,7 @@ import com.rfs.common.S3SnapshotCreator;
 import com.rfs.common.SnapshotCreator;
 import com.rfs.common.TryHandlePhaseFailure;
 import com.rfs.worker.SnapshotRunner;
+import org.opensearch.migrations.snapshot.creation.tracing.RootSnapshotContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
@@ -94,7 +95,7 @@ public class CreateSnapshot {
                 .build()
                 .parse(args);
 
-        var rootContext = new BaseRootRfsContext(
+        var rootContext = new RootSnapshotContext(
                 RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "rfs"),
                 new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
 

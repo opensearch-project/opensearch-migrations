@@ -12,6 +12,7 @@ import com.rfs.common.OpenSearchClient;
 import com.rfs.framework.ClusterOperations;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.framework.SimpleRestoreFromSnapshot_ES_7_10;
+import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 import reactor.core.publisher.Mono;
 
 import static org.mockito.ArgumentMatchers.any;
@@ -62,7 +63,8 @@ public class SnapshotStateTest {
     @Test
     public void SingleSnapshot_SingleDocument() throws Exception {
         // Setup
-        final var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
+        final var workCoordinationContext = WorkCoordinationTestContext.factory().noOtelTracking();
+        final var testContext = DocumentMigrationTestContext.factory(workCoordinationContext).noOtelTracking();
         final var indexName = "my-index";
         final var document1Id = "doc1";
         final var document1Body = "{\"fo$o\":\"bar\"}";
@@ -96,7 +98,8 @@ public class SnapshotStateTest {
     @Disabled("https://opensearch.atlassian.net/browse/MIGRATIONS-1746")
     public void SingleSnapshot_SingleDocument_Then_DeletedDocument() throws Exception {
         // Setup
-        final var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
+        final var workCoordinationContext = WorkCoordinationTestContext.factory().noOtelTracking();
+        final var testContext = DocumentMigrationTestContext.factory(workCoordinationContext).noOtelTracking();
         final var indexName = "my-index-with-deleted-item";
         final var document1Id = "doc1-going-to-be-deleted";
         final var document1Body = "{\"foo\":\"bar\"}";
@@ -130,7 +133,8 @@ public class SnapshotStateTest {
     @Disabled("https://opensearch.atlassian.net/browse/MIGRATIONS-1747")
     public void SingleSnapshot_SingleDocument_Then_UpdateDocument() throws Exception {
         // Setup
-        final var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
+        final var workCoordinationContext = WorkCoordinationTestContext.factory().noOtelTracking();
+        final var testContext = DocumentMigrationTestContext.factory(workCoordinationContext).noOtelTracking();
         final var indexName = "my-index-with-updated-item";
         final var document1Id = "doc1-going-to-be-updated";
         final var document1BodyOrginal = "{\"foo\":\"bar\"}";

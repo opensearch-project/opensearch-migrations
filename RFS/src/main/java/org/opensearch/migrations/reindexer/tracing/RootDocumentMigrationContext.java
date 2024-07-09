@@ -26,7 +26,7 @@ public class RootDocumentMigrationContext extends BaseRootRfsContext implements 
 
     @Override
     public IDocumentMigrationContexts.IShardSetupContext createDocsMigrationSetupContext() {
-        return new DocumentMigrationContexts.ShardSetupContext(this, workCoordinationContext);
+        return new DocumentMigrationContexts.ShardSetupContext(this);
     }
 
     @Override

@@ -16,6 +16,6 @@ public class WorkCoordinationTestContext extends RootWorkCoordinationContext {
     }
 
     public static TrackingTestContextFactory<WorkCoordinationTestContext> factory() {
-        return new TrackingTestContextFactory<>(WorkCoordinationTestContext.class);
+        return TrackingTestContextFactory.factoryViaCtor(WorkCoordinationTestContext.class);
     }
 }
