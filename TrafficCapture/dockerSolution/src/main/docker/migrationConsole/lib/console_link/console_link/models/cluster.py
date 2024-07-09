@@ -76,7 +76,8 @@ class Cluster:
             raise ValueError("Invalid config file for cluster", v.errors)
 
         self.endpoint = config["endpoint"]
-        self.allow_insecure = config.get("allow_insecure", False)
+        self.allow_insecure = config.get("allow_insecure", False) if self.endpoint.startswith(
+            "https") else config.get("allow_insecure", True)
         if 'no_auth' in config:
             self.auth_type = AuthMethod.NO_AUTH
         elif 'basic_auth' in config:
@@ -85,11 +86,13 @@ class Cluster:
         elif 'sigv4' in config:
             self.auth_type = AuthMethod.SIGV4
 
-    def call_api(self, path, method: HttpMethod = HttpMethod.GET, timeout=None,
-                 json_body=None, **kwargs) -> requests.Response:
+    def call_api(self, path, method: HttpMethod = HttpMethod.GET, data=None, headers=None,
+                 timeout=None, session=None, raise_error=True, **kwargs) -> requests.Response:
         """
         Calls an API on the cluster.
         """
+        if session is None:
+            session = requests.Session()
         if self.auth_type == AuthMethod.BASIC_AUTH:
             assert self.auth_details is not None  # for mypy's sake
             auth = HTTPBasicAuth(
@@ -101,38 +104,34 @@ class Cluster:
         else:
             raise NotImplementedError(f"Auth type {self.auth_type} not implemented")
 
-        if json_body is not None:
-            data = json_body
-        else:
-            data = None
-
-        logger.info(f"Making api call to {self.endpoint}{path}")
-        
         # Extract query parameters from kwargs
         params = kwargs.get('params', {})
-        
-        r = requests.request(
+
+        logger.info(f"Performing request: {method.name} {self.endpoint}{path}")
+        r = session.request(
             method.name,
             f"{self.endpoint}{path}",
-            params=params,
             verify=(not self.allow_insecure),
+            params=params,
             auth=auth,
-            timeout=timeout,
-            json=data
+            data=data,
+            headers=headers,
+            timeout=timeout
         )
-        logger.debug(f"Cluster API call request: {r.request}")
-        r.raise_for_status()
+        logger.info(f"Received response: {r.status_code} {method.name} {self.endpoint}{path} - {r.text[:1000]}")
+        if raise_error:
+            r.raise_for_status()
         return r
 
     def execute_benchmark_workload(self, workload: str,
                                    workload_params='target_throughput:0.5,bulk_size:10,bulk_indexing_clients:1,'
                                                    'search_clients:1'):
-        client_options = ""
+        client_options = "verify_certs:false"
         if not self.allow_insecure:
-            client_options += "use_ssl:true,verify_certs:false"
+            client_options += ",use_ssl:true"
         if self.auth_type == AuthMethod.BASIC_AUTH:
             if self.auth_details['password'] is not None:
-                client_options += (f"basic_auth_user:{self.auth_details['username']},"
+                client_options += (f",basic_auth_user:{self.auth_details['username']},"
                                    f"basic_auth_password:{self.auth_details['password']}")
             else:
                 raise NotImplementedError(f"Auth type {self.auth_type} with AWS Secret ARN is not currently support "
@@ -142,7 +141,8 @@ class Cluster:
                                       f"benchmark workloads")
         # Note -- we should censor the password when logging this command
         logger.info(f"Running opensearch-benchmark with '{workload}' workload")
-        subprocess.run(f"opensearch-benchmark execute-test --distribution-version=1.0.0 "
-                       f"--target-host={self.endpoint} --workload={workload} --pipeline=benchmark-only --test-mode "
-                       f"--kill-running-processes --workload-params={workload_params} "
-                       f"--client-options={client_options}", shell=True)
+        command = (f"opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host={self.endpoint} "
+                   f"--workload={workload} --pipeline=benchmark-only --test-mode --kill-running-processes "
+                   f"--workload-params={workload_params} --client-options={client_options}")
+        logger.info(f"Executing command: {command}")
+        subprocess.run(command, shell=True)

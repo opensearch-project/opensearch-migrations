@@ -24,9 +24,6 @@ COPY kafkaCmdRef.md /root/kafka-tools
 COPY humanReadableLogs.py /root/
 RUN chmod ug+x /root/humanReadableLogs.py
 
-COPY setupIntegTests.sh /root/
-RUN chmod ug+x /root/setupIntegTests.sh
-
 COPY showFetchMigrationCommand.sh /root/
 RUN chmod ug+x /root/showFetchMigrationCommand.sh
 
@@ -39,6 +36,9 @@ RUN chmod ug+x /root/loadServicesFromParameterStore.sh
 COPY lib /root/lib
 WORKDIR /root/lib/console_link
 RUN pipenv install --system --deploy --ignore-pipfile
+WORKDIR /root/lib/integ_test
+RUN pipenv install --system --deploy --ignore-pipfile
+
 
 # Experimental console API, not started by default
 COPY console_api /root/console_api

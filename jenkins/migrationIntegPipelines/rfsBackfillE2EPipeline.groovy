@@ -59,8 +59,5 @@ defaultIntegPipeline(
         migrationContextId: migrationContextId,
         gitUrl: gitUrl,
         gitBranch: gitBranch,
-        stageId: stageId,
-        finishStep: {
-            echo 'Skipping step for RFS'
-        }
+        stageId: stageId
 )
