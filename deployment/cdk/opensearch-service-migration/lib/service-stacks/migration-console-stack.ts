@@ -332,7 +332,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 '/root/loadServicesFromParameterStore.sh && python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt'
             ]
 
-            const defaultAllowedHosts = `migration-console.migration.${props.stage}.local,localhost`
+            const defaultAllowedHosts = 'localhost'
             environment["API_ALLOWED_HOSTS"] = props.migrationAPIAllowedHosts ? `${defaultAllowedHosts},${props.migrationAPIAllowedHosts}` : defaultAllowedHosts
             const migrationApiUrl = getMigrationStringParameterValue(this, {
                 ...props,
@@ -375,7 +375,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             taskMemoryLimitMiB: 2048,
             ...props
         });
-        
+
     }
 
 }
