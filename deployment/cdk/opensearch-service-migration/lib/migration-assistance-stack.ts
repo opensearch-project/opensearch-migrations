@@ -14,7 +14,6 @@ import {CfnCluster, CfnConfiguration} from "aws-cdk-lib/aws-msk";
 import {Cluster} from "aws-cdk-lib/aws-ecs";
 import {StackPropsExt} from "./stack-composer";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
-import {NamespaceType} from "aws-cdk-lib/aws-servicediscovery";
 import {StreamingSourceType} from "./streaming-source-type";
 import {Bucket, BucketEncryption} from "aws-cdk-lib/aws-s3";
 import {createMigrationStringParameter, MigrationSSMParameter, parseRemovalPolicy} from "./common-utilities";
@@ -251,19 +250,10 @@ export class MigrationAssistanceStack extends Stack {
             parameter: MigrationSSMParameter.ARTIFACT_S3_ARN
         });
 
-        const ecsCluster = new Cluster(this, 'migrationECSCluster', {
+        new Cluster(this, 'migrationECSCluster', {
             vpc: props.vpc,
             clusterName: `migration-${props.stage}-ecs-cluster`
         })
-        ecsCluster.addDefaultCloudMapNamespace( {
-            name: `migration.${props.stage}.local`,
-            type: NamespaceType.DNS_PRIVATE,
-            vpc: props.vpc
-        })
-        const cloudMapNamespaceId = ecsCluster.defaultCloudMapNamespace!.namespaceId
-        createMigrationStringParameter(this, cloudMapNamespaceId, {
-            ...props,
-            parameter: MigrationSSMParameter.CLOUD_MAP_NAMESPACE_ID
-        });
+
     }
 }
