@@ -135,14 +135,12 @@ def test_valid_json_creates_pipeline(osi_client_stubber):
         "IndexRegexSelections": [INDEX_INCLUSION_RULE_1, INDEX_INCLUSION_RULE_2],
         "LogGroupName": CW_LOG_GROUP_NAME,
         "SourceDataProvider": {
-            "Host": "source.amazonaws.com",
-            "Port": "9200",
+            "Uri": "http://source.amazonaws.com:9200",
             "AuthType": AuthMethod.BASIC_AUTH.name,
             "SecretArn": SECRET_ARN
         },
         "TargetDataProvider": {
-            "Host": "target.amazonaws.com",
-            "Port": "443",
+            "Uri": "https://target.amazonaws.com:443",
             "AuthType": AuthMethod.SIGV4.name
         },
         "VpcSubnetIds": [VPC_SUBNET_1, VPC_SUBNET_2],
