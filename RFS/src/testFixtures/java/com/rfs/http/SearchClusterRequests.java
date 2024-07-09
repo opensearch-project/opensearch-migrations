@@ -1,7 +1,5 @@
 package com.rfs.http;
 
-import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.equalTo;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -12,6 +10,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rfs.common.RestClient;
 
 import lombok.SneakyThrows;
+
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.equalTo;
 
 public class SearchClusterRequests {
 
