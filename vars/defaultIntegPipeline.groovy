@@ -1,8 +1,3 @@
-// The parent 'vars' folder is not at the root of the repo which presents issues for Jenkins to dynamically load
-// this library for a given branch in our pipelines, as Jenkins typically expects a shared library to be its own
-// repository. This means that if a branch makes changes to this shared library and also wants to use those changes
-// in a given pipeline, the library version declaration will need to be manually updated to that branch. Potentially,
-// this issue could be resolved by simply moving this 'vars' folder to the repo root.
 def call(Map config = [:]) {
     def source_cdk_context = config.sourceContext
     def migration_cdk_context = config.migrationContext
