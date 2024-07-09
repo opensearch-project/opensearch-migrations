@@ -155,13 +155,23 @@ task slowTest(type: Test) {
     jacoco {
         enabled = true
     }
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+        showExceptions true
+        showCauses true
+        showStackTraces true
+        // showStandardStreams true
+    }
+    reports {
+        html.required = true
+        html.destination file("${buildDir}/reports/tests/slowTest")
+    }
 }
 
 jacocoTestReport {
     dependsOn slowTest
     reports {
-        xml.required = true
-        xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
         html.required = true
         html.destination file("${buildDir}/reports/jacoco/test/html")
     }

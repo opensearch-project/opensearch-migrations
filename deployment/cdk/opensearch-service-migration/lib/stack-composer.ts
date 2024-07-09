@@ -195,6 +195,7 @@ export class StackComposer {
         const migrationConsoleServiceEnabled = this.getContextForType('migrationConsoleServiceEnabled', 'boolean', defaultValues, contextJSON)
         const migrationConsoleEnableOSI = this.getContextForType('migrationConsoleEnableOSI', 'boolean', defaultValues, contextJSON)
         const migrationAPIEnabled = this.getContextForType('migrationAPIEnabled', 'boolean', defaultValues, contextJSON)
+        const migrationAPIAllowedHosts = this.getContextForType('migrationAPIAllowedHosts', 'string', defaultValues, contextJSON)
         const trafficReplayerServiceEnabled = this.getContextForType('trafficReplayerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const trafficReplayerEnableClusterFGACAuth = this.getContextForType('trafficReplayerEnableClusterFGACAuth', 'boolean', defaultValues, contextJSON)
         const trafficReplayerMaxUptime = this.getContextForType('trafficReplayerMaxUptime', 'string', defaultValues, contextJSON);
@@ -214,7 +215,6 @@ export class StackComposer {
         const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotServiceEnabled = this.getContextForType('reindexFromSnapshotServiceEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotExtraArgs = this.getContextForType('reindexFromSnapshotExtraArgs', 'string', defaultValues, contextJSON)
-        const albEnabled = this.getContextForType('albEnabled', 'boolean', defaultValues, contextJSON);
         const albAcmCertArn = this.getContextForType('albAcmCertArn', 'string', defaultValues, contextJSON);
 
         const requiredFields: { [key: string]: any; } = {"stage":stage, "domainName":domainName}
@@ -270,10 +270,12 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 addOnMigrationDeployId: addOnMigrationDeployId,
-                albEnabled: albEnabled,
                 albAcmCertArn: albAcmCertArn,
                 elasticsearchServiceEnabled,
                 captureProxyESServiceEnabled,
+                captureProxyServiceEnabled,
+                targetClusterProxyServiceEnabled,
+                migrationAPIEnabled,
                 sourceClusterEndpoint: sourceClusterEndpoint,
                 env: props.env
             })
@@ -368,6 +370,7 @@ export class StackComposer {
                 })
                 this.addDependentStacks(mskUtilityStack, [migrationStack])
                 this.stacks.push(mskUtilityStack)
+                servicesYaml.kafka = mskUtilityStack.kafkaYaml;
             }
         }
 
@@ -401,6 +404,7 @@ export class StackComposer {
             })
             this.addDependentStacks(kafkaBrokerStack, [migrationStack])
             this.stacks.push(kafkaBrokerStack)
+            servicesYaml.kafka = kafkaBrokerStack.kafkaYaml;
         }
 
         let fetchMigrationStack
@@ -524,7 +528,7 @@ export class StackComposer {
         let targetClusterProxyStack
         if (targetClusterProxyServiceEnabled && networkStack && migrationStack) {
             targetClusterProxyStack = new CaptureProxyStack(scope, "target-cluster-proxy", {
-                serviceName: "target-cluster-proxy",    
+                serviceName: "target-cluster-proxy",
                 vpc: networkStack.vpc,
                 destinationConfig: {
                     endpointMigrationSSMParameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
@@ -554,7 +558,9 @@ export class StackComposer {
                 fetchMigrationEnabled: fetchMigrationEnabled,
                 migrationConsoleEnableOSI: migrationConsoleEnableOSI,
                 migrationAPIEnabled: migrationAPIEnabled,
+                targetGroups: [networkStack.albMigrationConsoleTG],
                 servicesYaml: servicesYaml,
+                migrationAPIAllowedHosts: migrationAPIAllowedHosts,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,

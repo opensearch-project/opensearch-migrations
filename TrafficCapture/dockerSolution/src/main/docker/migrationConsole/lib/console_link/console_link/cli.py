@@ -57,27 +57,28 @@ def cluster_group(ctx):
 
 
 @cluster_group.command(name="cat-indices")
+@click.option("--refresh", is_flag=True, default=False)
 @click.pass_obj
-def cat_indices_cmd(ctx):
+def cat_indices_cmd(ctx, refresh):
     """Simple program that calls `_cat/indices` on both a source and target cluster."""
     if ctx.json:
         click.echo(
             json.dumps(
                 {
                     "source_cluster": logic_clusters.cat_indices(
-                        ctx.env.source_cluster, as_json=True
+                        ctx.env.source_cluster, as_json=True, refresh=refresh
                     ),
                     "target_cluster": logic_clusters.cat_indices(
-                        ctx.env.target_cluster, as_json=True
+                        ctx.env.target_cluster, as_json=True, refresh=refresh
                     ),
                 }
             )
         )
         return
     click.echo("SOURCE CLUSTER")
-    click.echo(logic_clusters.cat_indices(ctx.env.source_cluster))
+    click.echo(logic_clusters.cat_indices(ctx.env.source_cluster, refresh=refresh))
     click.echo("TARGET CLUSTER")
-    click.echo(logic_clusters.cat_indices(ctx.env.target_cluster))
+    click.echo(logic_clusters.cat_indices(ctx.env.target_cluster, refresh=refresh))
 
 
 @cluster_group.command(name="connection-check")
@@ -350,6 +351,59 @@ def get_metrics_data_cmd(ctx, component, metric_name, statistic, lookback):
     pprint(
         metric_data
     )
+
+# ##################### KAFKA ###################
+
+
+@cli.group(name="kafka")
+@click.pass_obj
+def kafka_group(ctx):
+    """All actions related to Kafka operations"""
+    if ctx.env.kafka is None:
+        raise click.UsageError("Kafka is not set")
+
+
+@kafka_group.command(name="create-topic")
+@click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to create')
+@click.pass_obj
+def create_topic_cmd(ctx, topic_name):
+    result = ctx.env.kafka.create_topic(topic_name=topic_name)
+    click.echo(result.value)
+
+
+@kafka_group.command(name="delete-topic")
+@click.option("--acknowledge-risk", is_flag=True, show_default=True, default=False,
+              help="Flag to acknowledge risk and skip confirmation")
+@click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to delete')
+@click.pass_obj
+def delete_topic_cmd(ctx, acknowledge_risk, topic_name):
+    if acknowledge_risk:
+        result = ctx.env.kafka.delete_topic(topic_name=topic_name)
+        click.echo(result.value)
+    else:
+        if click.confirm('Deleting a topic will irreversibly delete all captured traffic records stored in that '
+                         'topic. Are you sure you want to continue?'):
+            click.echo(f"Performing delete topic operation on {topic_name} topic...")
+            result = ctx.env.kafka.delete_topic(topic_name=topic_name)
+            click.echo(result.value)
+        else:
+            click.echo("Aborting command.")
+
+
+@kafka_group.command(name="describe-consumer-group")
+@click.option('--group-name', default="logging-group-default", help='Specify a group name to describe')
+@click.pass_obj
+def describe_group_command(ctx, group_name):
+    result = ctx.env.kafka.describe_consumer_group(group_name=group_name)
+    click.echo(result.value)
+
+
+@kafka_group.command(name="describe-topic-records")
+@click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to describe')
+@click.pass_obj
+def describe_topic_records_cmd(ctx, topic_name):
+    result = ctx.env.kafka.describe_topic_records(topic_name=topic_name)
+    click.echo(result.value)
 
 # ##################### UTILITIES ###################
 

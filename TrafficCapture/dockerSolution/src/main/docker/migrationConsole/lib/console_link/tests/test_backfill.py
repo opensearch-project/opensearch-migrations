@@ -247,16 +247,17 @@ def test_ecs_rfs_calculates_backfill_status_from_ecs_instance_statuses_running(e
 
 def test_ecs_rfs_get_status_deep_check(ecs_rfs_backfill, mocker):
     target = create_valid_cluster()
-    mocked_stopped_status = InstanceStatuses(
+    mocked_instance_status = InstanceStatuses(
         desired=1,
         running=1,
         pending=0
     )
-    mock = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True, return_value=mocked_stopped_status)
+    mock = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True, return_value=mocked_instance_status)
     with open(TEST_DATA_DIRECTORY / "migrations_working_state_search.json") as f:
         data = json.load(f)
         total_shards = data['hits']['total']['value']
     with requests_mock.Mocker() as rm:
+        rm.get(f"{target.endpoint}/.migrations_working_state", status_code=200)
         rm.get(f"{target.endpoint}/.migrations_working_state/_search",
                status_code=200,
                json=data)
@@ -265,5 +266,5 @@ def test_ecs_rfs_get_status_deep_check(ecs_rfs_backfill, mocker):
     mock.assert_called_once_with(ecs_rfs_backfill.ecs_client)
     assert value.success
     assert BackfillStatus.RUNNING == value.value[0]
-    assert str(mocked_stopped_status) in value.value[1]
+    assert str(mocked_instance_status) in value.value[1]
     assert str(total_shards) in value.value[1]

@@ -16,6 +16,8 @@ metrics_source:
 backfill:
   reindex_from_snapshot:
     docker:
+replay:
+  docker:
 snapshot:
   snapshot_name: "snapshot_2023_01_01"
   fs:
@@ -23,3 +25,6 @@ snapshot:
 metadata_migration:
   from_snapshot:
   min_replicas: 0
+kafka:
+  broker_endpoints: "kafka:9092"
+  standard: ""

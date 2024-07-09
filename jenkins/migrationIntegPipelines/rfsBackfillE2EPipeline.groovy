@@ -50,7 +50,9 @@ def migration_cdk_context = """
     }
 """
 
-@Library("migrations-shared-lib@main")_
+library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
+        [$class: 'GitSCMSource',
+         remote: "${gitUrl}"])
 
 defaultIntegPipeline(
         sourceContext: source_cdk_context,
@@ -59,8 +61,5 @@ defaultIntegPipeline(
         migrationContextId: migrationContextId,
         gitUrl: gitUrl,
         gitBranch: gitBranch,
-        stageId: stageId,
-        finishStep: {
-            echo 'Skipping step for RFS'
-        }
+        stageId: stageId
 )

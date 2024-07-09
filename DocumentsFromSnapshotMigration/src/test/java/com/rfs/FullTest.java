@@ -19,6 +19,7 @@ import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
 import com.rfs.framework.SearchClusterContainer;
+import com.rfs.http.SearchClusterRequests;
 import com.rfs.framework.PreloadedSearchClusterContainer;
 import com.rfs.tracing.IRfsContexts;
 import com.rfs.transformers.TransformFunctions;
@@ -52,7 +53,10 @@ import org.opensearch.testcontainers.OpensearchContainer;
 import org.slf4j.event.Level;
 import reactor.core.publisher.Flux;
 
+import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -70,6 +74,7 @@ import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.UnaryOperator;
@@ -84,18 +89,22 @@ public class FullTest {
     final static long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
     final static Pattern CAT_INDICES_INDEX_COUNT_PATTERN =
             Pattern.compile("(?:\\S+\\s+){2}(\\S+)\\s+(?:\\S+\\s+){3}(\\S+)");
+    final static List<SearchClusterContainer.Version> SOURCE_IMAGES = List.of(
+        SearchClusterContainer.ES_V7_10_2,
+        SearchClusterContainer.ES_V7_17
+    );
+    final static List<SearchClusterContainer.Version> TARGET_IMAGES = List.of(
+        SearchClusterContainer.OS_V1_3_16,
+        SearchClusterContainer.OS_V2_14_0
+    );
     public static final String SOURCE_SERVER_ALIAS = "source";
     public static final int MAX_SHARD_SIZE_BYTES = 64 * 1024 * 1024;
 
-    public static Stream<Arguments> makeArgs() {
-        var sourceImageNames = List.of(
-                makeParamsForBase(SearchClusterContainer.ES_V7_17),
-                makeParamsForBase(SearchClusterContainer.ES_V7_10_2));
-        var targetImageNames = List.of(
-                SearchClusterContainer.OS_V1_3_16.getImageName(),
-                SearchClusterContainer.OS_V2_14_0.getImageName());
+    public static Stream<Arguments> makeDocumentMigrationArgs() {
+        List<Object[]> sourceImageArgs = SOURCE_IMAGES.stream().map(name -> makeParamsForBase(name)).collect(Collectors.toList());
+        var targetImageNames = TARGET_IMAGES.stream().map(SearchClusterContainer.Version::getImageName).collect(Collectors.toList());
         var numWorkers = List.of(1, 3, 40);
-        return sourceImageNames.stream()
+        return sourceImageArgs.stream()
                 .flatMap(a->
                         targetImageNames.stream().flatMap(b->
                                 numWorkers.stream().map(c->Arguments.of(a[0], a[1], a[2], b, c))));
@@ -110,8 +119,8 @@ public class FullTest {
     }
 
     @ParameterizedTest
-    @MethodSource("makeArgs")
-    public void test(SearchClusterContainer.Version baseSourceImageVersion,
+    @MethodSource("makeDocumentMigrationArgs")
+    public void testDocumentMigration(SearchClusterContainer.Version baseSourceImageVersion,
                      String generatorImage, String[] generatorArgs,
                      String targetImageName, int numWorkers)
             throws Exception
@@ -187,28 +196,15 @@ public class FullTest {
                                                  OpensearchContainer<?> osTargetContainer,
                                                  DocumentMigrationTestContext context) {
         var targetClient = new RestClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(), null, null));
-        var sourceMap = getIndexToCountMap(new RestClient(new ConnectionDetails(esSourceContainer.getUrl(),
-                null, null)), context.createUnboundRequestContext());
+        var sourceClient = new RestClient(new ConnectionDetails(esSourceContainer.getUrl(), null, null));
+
+        var requests = new SearchClusterRequests(context);
+        var sourceMap = requests.getMapOfIndexAndDocCount(sourceClient);
         var refreshResponse = targetClient.get("_refresh", context.createUnboundRequestContext());
         Assertions.assertEquals(200, refreshResponse.code);
-        var targetMap = getIndexToCountMap(targetClient, context.createUnboundRequestContext());
-        MatcherAssert.assertThat(targetMap, Matchers.equalTo(sourceMap));
-    }
+        var targetMap = requests.getMapOfIndexAndDocCount(targetClient);
 
-    private Map<String,Integer> getIndexToCountMap(RestClient client, IRfsContexts.IRequestContext context) {;
-        var lines = Optional.ofNullable(client.get("_cat/indices", context))
-                .flatMap(r->Optional.ofNullable(r.body))
-                .map(b->b.split("\n"))
-                .orElse(new String[0]);
-        return Arrays.stream(lines)
-                .map(line -> {
-                    var matcher = CAT_INDICES_INDEX_COUNT_PATTERN.matcher(line);
-                    return !matcher.find() ? null :
-                         new AbstractMap.SimpleEntry<>(matcher.group(1), matcher.group(2));
-                })
-                .filter(Objects::nonNull)
-                .filter(kvp->!kvp.getKey().startsWith("."))
-                .collect(Collectors.toMap(AbstractMap.SimpleEntry::getKey, kvp -> Integer.parseInt(kvp.getValue())));
+        MatcherAssert.assertThat(targetMap, Matchers.equalTo(sourceMap));
     }
 
     @SneakyThrows
@@ -327,6 +323,116 @@ public class FullTest {
                     context);
         } finally {
             deleteTree(tempDir);
+        }
+    }
+
+    public static Stream<Arguments> makeProcessExitArgs() {
+        return Stream.of(
+            Arguments.of(true, 0),
+            Arguments.of(false, 1)
+        );
+    }
+
+    @ParameterizedTest
+    @MethodSource("makeProcessExitArgs")
+    public void testProcessExitsAsExpected(boolean targetAvailable, int expectedExitCode) throws Exception {
+        final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        final var testMetadataMigrationContext = MetadataMigrationTestContext.factory().noOtelTracking();
+
+        var sourceImageArgs = makeParamsForBase(SearchClusterContainer.ES_V7_10_2);
+        var baseSourceImageVersion = (SearchClusterContainer.Version) sourceImageArgs[0];
+        var generatorImage = (String) sourceImageArgs[1];
+        var generatorArgs = (String[]) sourceImageArgs[2];
+        var targetImageName = SearchClusterContainer.OS_V2_14_0.getImageName();
+
+        try (var esSourceContainer = new PreloadedSearchClusterContainer(baseSourceImageVersion,
+                    SOURCE_SERVER_ALIAS, generatorImage, generatorArgs);
+                OpensearchContainer<?> osTargetContainer =
+                        new OpensearchContainer<>(targetImageName)) {
+            esSourceContainer.start();
+            osTargetContainer.start();
+
+            final var SNAPSHOT_NAME = "test_snapshot";
+            final List<String> INDEX_ALLOWLIST = List.of();
+            CreateSnapshot.run(
+                    c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
+                            testSnapshotContext.createSnapshotCreateContext()),
+                    new OpenSearchClient(esSourceContainer.getUrl(), null),
+                    false);
+            var tempDirSnapshot = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
+            var tempDirLucene = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
+
+            String targetAddress = osTargetContainer.getHttpHostAddress();
+
+            String[] args = {
+                "--snapshot-name", SNAPSHOT_NAME,
+                "--snapshot-local-dir", tempDirSnapshot.toString(),
+                "--lucene-dir", tempDirLucene.toString(),
+                "--target-host", targetAddress
+            };
+
+            try {
+                esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
+
+                var targetClient = new OpenSearchClient(targetAddress, null);
+                var sourceRepo = new FileSystemRepo(tempDirSnapshot);
+                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, INDEX_ALLOWLIST, testMetadataMigrationContext);
+
+                // Stop the target container if we don't want it to be available.  We've already cached the address it was
+                // using, so we can have reasonable confidence that nothing else will be using it and bork our test.
+                if (!targetAvailable) {
+                    osTargetContainer.stop();
+                }
+
+                String classpath = System.getProperty("java.class.path");
+                String javaHome = System.getProperty("java.home");
+                String javaExecutable = javaHome + File.separator + "bin" + File.separator + "java";
+
+                // Kick off the doc migration process
+                log.atInfo().setMessage("Running RfsMigrateDocuments with args: " + Arrays.toString(args)).log();
+                ProcessBuilder processBuilder = new ProcessBuilder(
+                        javaExecutable, "-cp", classpath, "com.rfs.RfsMigrateDocuments"
+                );
+                processBuilder.command().addAll(Arrays.asList(args));
+                processBuilder.redirectErrorStream(true);
+
+                Process process = processBuilder.start();
+                log.atInfo().setMessage("Process started with ID: " + Long.toString(process.toHandle().pid())).log();
+
+                // Kill the process and fail if we have to wait too long
+                int timeoutSeconds = 90;
+                boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+                if (!finished) {
+                    // Print the process output
+                    StringBuilder output = new StringBuilder();
+                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) {
+                            output.append(line).append(System.lineSeparator());
+                        }
+                    }
+                    log.atError().setMessage("Process Output:").log();
+                    log.atError().setMessage(output.toString()).log();
+
+                    log.atError().setMessage("Process timed out, attempting to kill it...").log();
+                    process.destroy(); // Try to be nice about things first...
+                    if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                        log.atError().setMessage("Process still running, attempting to force kill it...").log();
+                        process.destroyForcibly(); // ..then avada kedavra
+                    }
+                    Assertions.fail("The process did not finish within the timeout period (" + timeoutSeconds + " seconds).");
+                }
+
+                int actualExitCode = process.exitValue();
+                log.atInfo().setMessage("Process exited with code: " + actualExitCode).log();
+
+                // Check if the exit code is as expected
+                Assertions.assertEquals(expectedExitCode, actualExitCode, "The program did not exit with the expected status code.");
+
+            } finally {
+                deleteTree(tempDirSnapshot);
+                deleteTree(tempDirLucene);
+            }
         }
     }
 

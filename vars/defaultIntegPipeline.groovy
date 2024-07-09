@@ -1,8 +1,3 @@
-// The parent 'vars' folder is not at the root of the repo which presents issues for Jenkins to dynamically load
-// this library for a given branch in our pipelines, as Jenkins typically expects a shared library to be its own
-// repository. This means that if a branch makes changes to this shared library and also wants to use those changes
-// in a given pipeline, the library version declaration will need to be manually updated to that branch. Potentially,
-// this issue could be resolved by simply moving this 'vars' folder to the repo root.
 def call(Map config = [:]) {
     def source_cdk_context = config.sourceContext
     def migration_cdk_context = config.migrationContext
@@ -82,7 +77,10 @@ def call(Map config = [:]) {
                                 } else {
                                     def time = new Date().getTime()
                                     def uniqueId = "integ_min_${time}_${currentBuild.number}"
-                                    sh "sudo ./awsRunIntegTests.sh --stage ${stageId} --migrations-git-url ${gitUrl} --migrations-git-branch ${gitBranch} --unique-id ${uniqueId}"
+                                    def test_dir = "/root/lib/integ_test/integ_test"
+                                    def test_result_file = "${test_dir}/reports/${uniqueId}/report.xml"
+                                    def command = "pytest --log-file=${test_dir}/reports/${uniqueId}/pytest.log --junitxml=${test_result_file} ${test_dir}/replayer_tests.py --unique_id ${uniqueId} -s"
+                                    sh "sudo ./awsRunIntegTests.sh --command ${command} --test-result-file ${test_result_file} --stage ${stageId}"
                                 }
                             }
                         }
@@ -99,7 +97,7 @@ def call(Map config = [:]) {
                             if (config.finishStep) {
                                 config.finishStep()
                             } else {
-                                sh "sudo ./awsE2ESolutionSetup.sh --stage ${stageId} --run-post-actions"
+                                sh "echo 'Default post step performs no actions'"
                             }
                         }
                     }

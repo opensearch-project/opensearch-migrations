@@ -63,6 +63,7 @@ jobs:
       - uses: gradle/actions/setup-gradle@v3
         with:
           gradle-version: ${{ env.gradle-version }}
+          gradle-home-cache-cleanup: true
       - name: Run Gradle Build
         run: ./gradlew build -x test -x TrafficCapture:dockerSolution:build --scan --stacktrace
         env:
@@ -123,15 +124,10 @@ jobs:
         run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test --scan --info --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
-      - name: Install python dependencies
-        working-directory: test
-        run: |
-          python -m pip install --upgrade pipenv
-          pipenv install --deploy --dev
       - name: Run E2E test script
-        working-directory: test
+        working-directory: TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/integ_test
         run: |
-          pipenv run pytest tests.py --unique_id="testindex"
+          docker exec $(docker ps --filter "name=migration-console" -q) pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s
       - name: Clean up migrations docker images before caching
         run: |
           docker stop $(docker ps -q) && docker rm $(docker ps -aq)
@@ -182,7 +178,7 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build Docker Image
         run: docker build -t migrations/fetch-migration -f Dockerfile .
-  
+
   all-ci-checks-pass:
     needs:
       - cdk-tests

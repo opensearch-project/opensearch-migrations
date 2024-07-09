@@ -42,8 +42,6 @@ export class ElasticsearchStack extends MigrationServiceCore {
             dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard"),
             securityGroups: securityGroups,
             portMappings: [servicePort],
-            serviceDiscoveryEnabled: true,
-            serviceDiscoveryPort: 9200,
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 512,
             taskMemoryLimitMiB: 2048,

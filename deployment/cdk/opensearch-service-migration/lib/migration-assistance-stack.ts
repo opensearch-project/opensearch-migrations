@@ -1,15 +1,22 @@
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
-import {IPeer, IVpc, Peer, Port, SecurityGroup, SubnetFilter, SubnetType} from "aws-cdk-lib/aws-ec2";
+import {
+    IPeer,
+    IVpc,
+    Peer,
+    Port,
+    SecurityGroup,
+    SubnetFilter,
+    SubnetType
+} from "aws-cdk-lib/aws-ec2";
 import {FileSystem} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnCluster, CfnConfiguration} from "aws-cdk-lib/aws-msk";
 import {Cluster} from "aws-cdk-lib/aws-ecs";
 import {StackPropsExt} from "./stack-composer";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
-import {NamespaceType} from "aws-cdk-lib/aws-servicediscovery";
 import {StreamingSourceType} from "./streaming-source-type";
 import {Bucket, BucketEncryption} from "aws-cdk-lib/aws-s3";
-import {MigrationSSMParameter, createMigrationStringParameter, parseRemovalPolicy} from "./common-utilities";
+import {createMigrationStringParameter, MigrationSSMParameter, parseRemovalPolicy} from "./common-utilities";
 
 export interface MigrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -44,6 +51,23 @@ export class MigrationAssistanceStack extends Stack {
         }
     }
 
+    // This function exists to overcome the limitation on the vpc.selectSubnets() call which requires the subnet
+    // type to be provided or else an empty list will be returned if public subnets are provided, thus this function
+    // tries different subnet types if unable to select the provided subnetIds
+    selectSubnetsFromTypes(vpc: IVpc, subnetIds: string[]): string[] {
+        const subnetsTypeList = [SubnetType.PRIVATE_WITH_EGRESS, SubnetType.PUBLIC, SubnetType.PRIVATE_ISOLATED]
+        for (const subnetType of subnetsTypeList) {
+            const subnets = vpc.selectSubnets({
+                subnetType: subnetType,
+                subnetFilters: [SubnetFilter.byIds(subnetIds)]
+            })
+            if (subnets.subnetIds.length == subnetIds.length) {
+                return subnets.subnetIds
+            }
+        }
+        throw Error(`Unable to find subnet ids: ${subnetIds} in VPC: ${vpc.vpcId}. Please ensure all subnet ids exist and are of the same subnet type`)
+    }
+
     validateAndReturnVPCSubnetsForMSK(vpc: IVpc, brokerNodeCount: number, azCount: number, specifiedSubnetIds?: string[]): string[] {
         if (specifiedSubnetIds) {
             if (specifiedSubnetIds.length !== 2 && specifiedSubnetIds.length !== 3) {
@@ -53,10 +77,7 @@ export class MigrationAssistanceStack extends Stack {
                 throw new Error(`The MSK broker node count (${brokerNodeCount} nodes inferred) must be a multiple of the number of 
                     AZs (${specifiedSubnetIds.length} AZs inferred from provided 'mskSubnetIds'). The node count can be set with the 'mskBrokerNodeCount' context option.`)
             }
-            const selectSubnets = vpc.selectSubnets({
-                subnetFilters: [SubnetFilter.byIds(specifiedSubnetIds)]
-            })
-            return selectSubnets.subnetIds
+            return this.selectSubnetsFromTypes(vpc, specifiedSubnetIds)
         }
         if (azCount !== 2 && azCount !== 3) {
             throw new Error(`MSK requires subnets for 2 or 3 AZs, but have detected an AZ count of ${azCount} has been provided with 'mskAZCount'`)
@@ -229,19 +250,10 @@ export class MigrationAssistanceStack extends Stack {
             parameter: MigrationSSMParameter.ARTIFACT_S3_ARN
         });
 
-        const ecsCluster = new Cluster(this, 'migrationECSCluster', {
+        new Cluster(this, 'migrationECSCluster', {
             vpc: props.vpc,
             clusterName: `migration-${props.stage}-ecs-cluster`
         })
-        ecsCluster.addDefaultCloudMapNamespace( {
-            name: `migration.${props.stage}.local`,
-            type: NamespaceType.DNS_PRIVATE,
-            vpc: props.vpc
-        })
-        const cloudMapNamespaceId = ecsCluster.defaultCloudMapNamespace!.namespaceId
-        createMigrationStringParameter(this, cloudMapNamespaceId, {
-            ...props,
-            parameter: MigrationSSMParameter.CLOUD_MAP_NAMESPACE_ID
-        });
+
     }
 }

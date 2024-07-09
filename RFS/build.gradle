@@ -82,6 +82,8 @@ dependencies {
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java-core'
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java-transport-httpclient5'
     testFixturesImplementation group: 'org.testcontainers', name: 'testcontainers'
+
+    testFixturesImplementation group: 'org.hamcrest', name: 'hamcrest'
 }
 
 task createSnapshot (type: JavaExec) {
@@ -122,8 +124,8 @@ test {
     }
 
     testLogging {
-        exceptionFormat = 'full'
-        events "failed"
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
         showExceptions true
         showCauses true
         showStackTraces true

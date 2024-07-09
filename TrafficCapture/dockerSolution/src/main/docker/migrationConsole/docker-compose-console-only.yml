@@ -13,14 +13,15 @@ services:
     volumes:
       - ./lib/console_link/services.yaml:/etc/migration_services.yaml
       # this is a convenience thing for testing -- it should be removed before this makes it to prod.
-      - ./lib/console_link:/root/lib/console_link
+      - ./lib:/root/lib
+      - ~/.aws:/root/.aws
     environment:
       # Copy local AWS env to Docker container
-      #- ~/.aws:/root/.aws
       - AWS_ACCESS_KEY_ID=${AWS_ACCESS_KEY_ID}
       - AWS_SECRET_ACCESS_KEY=${AWS_SECRET_ACCESS_KEY}
       - AWS_SESSION_TOKEN=${AWS_SESSION_TOKEN}
-      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION}
+      - AWS_DEFAULT_REGION=us-east-1
+      - API_ALLOWED_HOSTS=localhost
     ports:
       - "8000:8000"
     command: python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000
