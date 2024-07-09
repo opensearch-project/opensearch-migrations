@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import Dict, Optional
 
+from console_link.models.replayer_docker import DockerReplayer
 from console_link.models.metrics_source import CloudwatchMetricsSource, PrometheusMetricsSource
 from console_link.models.backfill_base import Backfill
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
@@ -57,6 +58,8 @@ def get_snapshot(config: Dict, source_cluster: Cluster):
 def get_replayer(config: Dict):
     if 'ecs' in config:
         return ECSReplayer(config)
+    if 'docker' in config:
+        return DockerReplayer(config)
     logger.error(f"An unsupported replayer type was provided: {config.keys()}")
     raise UnsupportedReplayerError(next(iter(config.keys())))
 

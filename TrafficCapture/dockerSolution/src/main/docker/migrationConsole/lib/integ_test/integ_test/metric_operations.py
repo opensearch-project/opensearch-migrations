@@ -5,7 +5,7 @@ import pytest
 from typing import List, Dict, Tuple
 from unittest import TestCase
 from console_link.models.metrics_source import MetricsSource, CloudwatchMetricsSource
-from console_link.logic.metrics import get_metric_data
+from console_link.middleware.metrics import get_metric_data
 
 logger = logging.getLogger(__name__)
 
