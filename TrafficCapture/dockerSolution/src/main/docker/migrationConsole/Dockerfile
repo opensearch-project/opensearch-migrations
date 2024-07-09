@@ -33,6 +33,8 @@ RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 COPY loadServicesFromParameterStore.sh /root/
 RUN chmod ug+x /root/loadServicesFromParameterStore.sh
 
+RUN apt-get install -y pkg-config libhdf5-dev
+
 COPY lib /root/lib
 WORKDIR /root/lib/console_link
 RUN pipenv install --system --deploy --ignore-pipfile
@@ -49,7 +51,6 @@ WORKDIR /root
 # Ensure bash completion is installed
 RUN apt-get install -y bash-completion
 
-CMD /root/loadServicesFromParameterStore.sh && tail -f /dev/null
-
-# Experimental console API, uncomment to start.
-#CMD /root/loadServicesFromParameterStore.sh && python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt
+# Experimental console API, flip comments to stop.
+CMD /root/loadServicesFromParameterStore.sh && python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt
+# CMD /root/loadServicesFromParameterStore.sh && tail -f /dev/null
