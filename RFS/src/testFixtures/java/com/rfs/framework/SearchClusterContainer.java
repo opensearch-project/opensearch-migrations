@@ -32,11 +32,10 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
                     "discovery.type", "single-node",
                     "path.repo", CLUSTER_SNAPSHOT_DIR);
 
-    protected static Map<String, String> DEFAULT_OS_LAUNCH_ENV_VARIABLES = new ImmutableMap.Builder<String, String>()
-        .putAll(DEFAULT_ES_LAUNCH_ENV_VARIABLES)
-                .put("plugins.security.disabled", "true")
-                .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
-                .build();
+    protected static Map<String, String> DEFAULT_OS_LAUNCH_ENV_VARIABLES = Map.of(
+            "discovery.type", "single-node",
+            "plugins.security.disabled", "true",
+            "OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^");
 
     private final Version version;
 
