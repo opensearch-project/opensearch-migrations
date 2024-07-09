@@ -88,7 +88,6 @@ public class FullTest {
         SearchClusterContainer.ES_V7_17
     );
     final static List<SearchClusterContainer.Version> TARGET_IMAGES = List.of(
-        SearchClusterContainer.OS_V1_3_16,
         SearchClusterContainer.OS_V2_14_0
     );
     public static final String SOURCE_SERVER_ALIAS = "source";
@@ -204,7 +203,7 @@ public class FullTest {
                 })
                 .filter(Objects::nonNull)
                 .filter(kvp->!kvp.getKey().startsWith("."))
-                .filter(kvp-> kvp.getKey().startsWith("reindexed-logs"))
+                .filter(kvp-> !kvp.getKey().startsWith("reindexed-logs"))
                 .collect(Collectors.toMap(AbstractMap.SimpleEntry::getKey, kvp -> Integer.parseInt(kvp.getValue())));
     }
 

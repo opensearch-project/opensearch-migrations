@@ -30,7 +30,7 @@ public class IndexCreator_OS_2_11 {
         ObjectNode body = mapper.createObjectNode();
         body.set("aliases", indexMetadata.getAliases());
         // Working around for missing OS_1_3 definition
-        body.set("mappings", index.rawJson().get("mappings"));
+        body.set("mappings", index.getMappings());
         body.set("settings", settings);
 
         // Create the index; it's fine if it already exists
