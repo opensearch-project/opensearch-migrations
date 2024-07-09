@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 
 public class IndexMetadata {
+    private IndexMetadata() {}
 
     /**
     * Defines the behavior required to read a snapshot's index metadata as JSON and convert it into a Data object

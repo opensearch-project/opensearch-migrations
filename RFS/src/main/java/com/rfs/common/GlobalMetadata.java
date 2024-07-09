@@ -14,6 +14,8 @@ import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 
 
 public class GlobalMetadata {
+    private GlobalMetadata() {}
+
     /**
     * Defines the behavior required to read a snapshot's global metadata as JSON and convert it into a Data object
     */

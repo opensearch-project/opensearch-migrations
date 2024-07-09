@@ -3,6 +3,7 @@ package com.rfs.common;
 import java.util.List;
 
 public class SnapshotRepo {
+    private SnapshotRepo() {}
 
     /**
      * Defines the behavior required to surface a snapshot repo's metadata
