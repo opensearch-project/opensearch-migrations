@@ -21,6 +21,7 @@ FROM_SNAPSHOT_SCHEMA = {
     "nullable": True,
     "schema": {
         "snapshot_name": {"type": "string", "required": True},
+        "otel_endpoint": {"type": "string", "required": False},
         "local_dir": {"type": "string", "required": False},
         "s3": {
             'type': 'dict',
@@ -46,6 +47,7 @@ FROM_SNAPSHOT_SCHEMA = {
 
 SCHEMA = {
     "from_snapshot": FROM_SNAPSHOT_SCHEMA,
+    "otel_endpoint": {"type": "string", "required": False},
     "min_replicas": {"type": "integer", "min": 0, "required": False},
     "index_allowlist": list_schema(required=False),
     "index_template_allowlist": list_schema(required=False),
@@ -76,10 +78,13 @@ class Metadata:
         self._index_allowlist = config.get("index_allowlist", None)
         self._index_template_allowlist = config.get("index_template_allowlist", None)
         self._component_template_allowlist = config.get("component_template_allowlist", None)
+        self._otel_endpoint = config.get("otel_endpoint", None)
+
         logger.debug(f"Min replicas: {self._min_replicas}")
         logger.debug(f"Index allowlist: {self._index_allowlist}")
         logger.debug(f"Index template allowlist: {self._index_template_allowlist}")
         logger.debug(f"Component template allowlist: {self._component_template_allowlist}")
+        logger.debug(f"Otel endpoint: {self._otel_endpoint}")
 
         # If `from_snapshot` is fully specified, use those values to define snapshot params
         if config["from_snapshot"] is not None:
@@ -170,6 +175,9 @@ class Metadata:
 
         if self._component_template_allowlist:
             command.extend(["--component-template-allowlist", ",".join(self._component_template_allowlist)])
+        
+        if self._otel_endpoint:
+            command.extend(["--otelCollectorEndpoint", self._otel_endpoint])
 
         if password_field_index:
             display_command = command[:password_field_index] + ["********"] + command[password_field_index:]

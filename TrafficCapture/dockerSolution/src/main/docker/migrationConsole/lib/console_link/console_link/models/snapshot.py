@@ -19,6 +19,7 @@ SNAPSHOT_SCHEMA = {
         'type': 'dict',
         'schema': {
             'snapshot_name': {'type': 'string', 'required': True},
+            'otel_endpoint': {'type': 'string', 'required': False},
             's3': {
                 'type': 'dict',
                 'schema': {
@@ -67,6 +68,7 @@ class Snapshot(ABC):
 
 S3_SNAPSHOT_SCHEMA = {
     'snapshot_name': {'type': 'string', 'required': True},
+    'otel_endpoint': {'type': 'string', 'required': False},
     's3_repo_uri': {'type': 'string', 'required': True},
     's3_region': {'type': 'string', 'required': True}
 }
@@ -76,6 +78,7 @@ class S3Snapshot(Snapshot):
     def __init__(self, config: Dict, source_cluster: Cluster) -> None:
         super().__init__(config, source_cluster)
         self.snapshot_name = config['snapshot_name']
+        self.otel_endpoint = config.get("otel_endpoint", None)
         self.s3_repo_uri = config['s3']['repo_uri']
         self.s3_region = config['s3']['aws_region']
 
@@ -101,6 +104,8 @@ class S3Snapshot(Snapshot):
         if max_snapshot_rate_mb_per_node is not None:
             command.extend(["--max-snapshot-rate-mb-per-node",
                             str(max_snapshot_rate_mb_per_node)])
+        if self.otel_endpoint:
+            command.extend(["--otelCollectorEndpoint", self.otel_endpoint])
 
         logger.info(f"Creating snapshot with command: {' '.join(command)}")
         try:
@@ -125,6 +130,7 @@ class FileSystemSnapshot(Snapshot):
     def __init__(self, config: Dict, source_cluster: Cluster) -> None:
         super().__init__(config, source_cluster)
         self.snapshot_name = config['snapshot_name']
+        self.otel_endpoint = config.get("otel_endpoint", None)
         self.repo_path = config['fs']['repo_path']
 
     def create(self, *args, **kwargs) -> CommandResult:
@@ -142,6 +148,8 @@ class FileSystemSnapshot(Snapshot):
 
         if self.source_cluster.allow_insecure:
             command.append("--source-insecure")
+        if self.otel_endpoint:
+            command.extend(["--otelCollectorEndpoint", self.otel_endpoint])
 
         logger.info(f"Creating snapshot with command: {' '.join(command)}")
         try:

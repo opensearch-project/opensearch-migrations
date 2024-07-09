@@ -20,12 +20,14 @@ snapshot:
   snapshot_name: "test_snapshot"
   fs:
     repo_path: "/snapshot/test-console"
+  otel_endpoint: "otel-collector:4317"
 metadata_migration:
   from_snapshot: # If not provided, these are assumed from the snapshot object
     snapshot_name: "snapshot_2023_01_01"
     s3:
       repo_uri: "s3://my-snapshot-bucket"
       aws_region: "us-east-2"
+  otel_endpoint: "otel-collector:4317"
   min_replicas: 0
 replay:
   ecs:

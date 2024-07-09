@@ -150,7 +150,8 @@ def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
                 "repo_uri": "s3://my-bucket",
                 "aws_region": "us-east-1"
             },
-        }
+        },
+        "otel_endpoint": "otel:1111",
     }
     target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     metadata = Metadata(config, target, None)
@@ -166,7 +167,8 @@ def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
         "--s3-local-dir", config["from_snapshot"]["local_dir"],
         "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
-        '--target-insecure'
+        "--target-insecure",
+        "--otelCollectorEndpoint", config["otel_endpoint"],
     ], stdout=None, stderr=None, text=True, check=True
     )
 
@@ -178,7 +180,8 @@ def test_metadata_with_fs_snapshot_makes_correct_subprocess_call(mocker):
             "fs": {
                 "repo_path": "path/to/repo"
             },
-        }
+        },
+        "otel_endpoint": "otel:1111",
     }
     target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     metadata = Metadata(config, target, None)
@@ -192,9 +195,9 @@ def test_metadata_with_fs_snapshot_makes_correct_subprocess_call(mocker):
         "--target-host", target.endpoint,
         "--min-replicas", '0',
         "--file-system-repo-path", config["from_snapshot"]["fs"]["repo_path"],
-        '--target-insecure'
-    ], stdout=None, stderr=None, text=True, check=True
-    )
+        "--target-insecure",
+        "--otelCollectorEndpoint", config["otel_endpoint"],
+    ], stdout=None, stderr=None, text=True, check=True)
 
 
 def test_metadata_with_min_replicas_makes_correct_subprocess_call(mocker):
@@ -232,6 +235,7 @@ def test_metadata_with_allowlists_makes_correct_subprocess_call(mocker):
                 "repo_path": "path/to/repo"
             },
         },
+        "otel_endpoint": "otel:1111",
         "index_allowlist": ["index1", "index2"],
         "index_template_allowlist": ["index_template1", "index_template2"],
         "component_template_allowlist": ["component_template1", "component_template2"]
@@ -251,7 +255,8 @@ def test_metadata_with_allowlists_makes_correct_subprocess_call(mocker):
         "--target-insecure",
         "--index-allowlist", "index1,index2",
         "--index-template-allowlist", "index_template1,index_template2",
-        "--component-template-allowlist", "component_template1,component_template2"
+        "--component-template-allowlist", "component_template1,component_template2",
+        "--otelCollectorEndpoint", config["otel_endpoint"],
     ], stdout=None, stderr=None, text=True, check=True
     )
 
