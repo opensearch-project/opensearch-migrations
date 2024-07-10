@@ -1,4 +1,4 @@
-package com.rfs.common;
+package com.rfs.models;
 
 import org.apache.lucene.codecs.CodecUtil;
 
@@ -11,10 +11,18 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
+import com.rfs.common.ByteArrayIndexInput;
+import com.rfs.common.RfsException;
+import com.rfs.common.SnapshotRepo;
 
 
-public class GlobalMetadata {
-    private GlobalMetadata() {}
+public interface GlobalMetadata {
+    /**
+    * Defines the behavior expected of an object that will surface the global metadata of a snapshot
+    * See: https://github.com/elastic/elasticsearch/blob/v7.10.2/server/src/main/java/org/elasticsearch/cluster/metadata/Metadata.java#L1622
+    * See: https://github.com/elastic/elasticsearch/blob/v6.8.23/server/src/main/java/org/elasticsearch/cluster/metadata/MetaData.java#L1214
+    */
+    public ObjectNode toObjectNode();
 
     /**
     * Defines the behavior required to read a snapshot's global metadata as JSON and convert it into a Data object
@@ -46,7 +54,7 @@ public class GlobalMetadata {
             }
         }
 
-        default GlobalMetadata.Data fromRepo(String snapshotName) {
+        default GlobalMetadata fromRepo(String snapshotName) {
             SnapshotRepo.Provider repoDataProvider = getRepoDataProvider();
             SmileFactory smileFactory = getSmileFactory();
             JsonNode root = getJsonNode(repoDataProvider, snapshotName, smileFactory);
@@ -54,22 +62,13 @@ public class GlobalMetadata {
         }
 
         // Version-specific implementation
-        public GlobalMetadata.Data fromJsonNode(JsonNode root);
+        public GlobalMetadata fromJsonNode(JsonNode root);
 
         // Version-specific implementation
         public SmileFactory getSmileFactory();
 
         // Get the underlying SnapshotRepo Provider
         public SnapshotRepo.Provider getRepoDataProvider();
-    }
-
-    /**
-    * Defines the behavior expected of an object that will surface the global metadata of a snapshot
-    * See: https://github.com/elastic/elasticsearch/blob/v7.10.2/server/src/main/java/org/elasticsearch/cluster/metadata/Metadata.java#L1622
-    * See: https://github.com/elastic/elasticsearch/blob/v6.8.23/server/src/main/java/org/elasticsearch/cluster/metadata/MetaData.java#L1214
-    */
-    public static interface Data {
-        public ObjectNode toObjectNode();
     }
 
     public static class CantFindSnapshotInRepo extends RfsException {
@@ -83,5 +82,5 @@ public class GlobalMetadata {
             super("Can't read the global metadata from snapshot: " + snapshotName, cause);
         }
     }
-    
+
 }

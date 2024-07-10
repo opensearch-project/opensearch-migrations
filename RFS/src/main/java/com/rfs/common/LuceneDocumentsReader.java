@@ -2,7 +2,6 @@ package com.rfs.common;
 
 import java.io.IOException;
 import java.nio.file.Path;
-
 import lombok.extern.slf4j.Slf4j;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;

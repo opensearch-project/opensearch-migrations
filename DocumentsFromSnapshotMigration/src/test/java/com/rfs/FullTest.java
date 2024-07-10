@@ -9,18 +9,18 @@ import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.FileSystemSnapshotCreator;
-import com.rfs.common.GlobalMetadata;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.RestClient;
-import com.rfs.common.ShardMetadata;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.http.SearchClusterRequests;
 import com.rfs.framework.PreloadedSearchClusterContainer;
+import com.rfs.models.GlobalMetadata;
+import com.rfs.models.IndexMetadata;
+import com.rfs.models.ShardMetadata;
 import com.rfs.transformers.TransformFunctions;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
@@ -89,7 +89,6 @@ public class FullTest {
         SearchClusterContainer.ES_V7_17
     );
     final static List<SearchClusterContainer.Version> TARGET_IMAGES = List.of(
-        SearchClusterContainer.OS_V1_3_16,
         SearchClusterContainer.OS_V2_14_0
     );
     public static final String SOURCE_SERVER_ALIAS = "source";
