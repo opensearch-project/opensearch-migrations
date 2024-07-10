@@ -2,6 +2,7 @@ package com.rfs;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
+import com.beust.jcommander.ParametersDelegate;
 
 import java.net.URI;
 import java.nio.file.Path;
@@ -22,16 +23,17 @@ import org.apache.logging.log4j.Level;
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
 import com.rfs.common.DocumentReindexer;
-import com.rfs.common.GlobalMetadata;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.Logging;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Uri;
-import com.rfs.common.ShardMetadata;
 import com.rfs.common.S3Repo;
 import com.rfs.common.SnapshotCreator;
 import com.rfs.common.SourceRepo;
+import com.rfs.common.TryHandlePhaseFailure;
+import com.rfs.models.GlobalMetadata;
+import com.rfs.models.IndexMetadata;
+import com.rfs.models.ShardMetadata;
 import com.rfs.common.S3SnapshotCreator;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
@@ -68,24 +70,12 @@ public class RunRfsWorker {
 
         @Parameter(names = {"--lucene-dir"}, description = "The absolute path to the directory where we'll put the Lucene docs", required = true)
         public String luceneDirPath;
+        
+        @ParametersDelegate
+        public ConnectionDetails.SourceArgs sourceArgs;
 
-        @Parameter(names = {"--source-host"}, description = "The source host and port (e.g. http://localhost:9200)", required = true)
-        public String sourceHost;
-
-        @Parameter(names = {"--source-username"}, description = "Optional.  The source username; if not provided, will assume no auth on source", required = false)
-        public String sourceUser = null;
-
-        @Parameter(names = {"--source-password"}, description = "Optional.  The source password; if not provided, will assume no auth on source", required = false)
-        public String sourcePass = null;
-
-        @Parameter(names = {"--target-host"}, description = "The target host and port (e.g. http://localhost:9200)", required = true)
-        public String targetHost;
-
-        @Parameter(names = {"--target-username"}, description = "Optional.  The target username; if not provided, will assume no auth on target", required = false)
-        public String targetUser = null;
-
-        @Parameter(names = {"--target-password"}, description = "Optional.  The target password; if not provided, will assume no auth on target", required = false)
-        public String targetPass = null;
+        @ParametersDelegate
+        public ConnectionDetails.TargetArgs targetArgs;
 
         @Parameter(names = {"--index-allowlist"}, description = ("Optional.  List of index names to migrate"
             + " (e.g. 'logs_2024_01, logs_2024_02').  Default: all indices"), required = false)
@@ -126,12 +116,6 @@ public class RunRfsWorker {
         final String s3RepoUri = arguments.s3RepoUri;
         final String s3Region = arguments.s3Region;
         final Path luceneDirPath = Paths.get(arguments.luceneDirPath);
-        final String sourceHost = arguments.sourceHost;
-        final String sourceUser = arguments.sourceUser;
-        final String sourcePass = arguments.sourcePass;
-        final String targetHost = arguments.targetHost;
-        final String targetUser = arguments.targetUser;
-        final String targetPass = arguments.targetPass;
         final List<String> indexAllowlist = arguments.indexAllowlist;
         final List<String> indexTemplateAllowlist = arguments.indexTemplateAllowlist;
         final List<String> componentTemplateAllowlist = arguments.componentTemplateAllowlist;
@@ -141,8 +125,8 @@ public class RunRfsWorker {
 
         Logging.setLevel(logLevel);
 
-        final ConnectionDetails sourceConnection = new ConnectionDetails(sourceHost, sourceUser, sourcePass);
-        final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass);
+        final ConnectionDetails sourceConnection = new ConnectionDetails(arguments.sourceArgs);
+        final ConnectionDetails targetConnection = new ConnectionDetails(arguments.targetArgs);
 
         try (var processManager = new LeaseExpireTrigger(workItemId -> {
             log.error("terminating RunRfsWorker because its lease has expired for " + workItemId);
@@ -171,7 +155,7 @@ public class RunRfsWorker {
             var unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,
                     luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
             DocumentReindexer reindexer = new DocumentReindexer(targetClient);
-            var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(targetHost)),
+            var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(arguments.targetArgs.getHost())),
                     5, UUID.randomUUID().toString());
             var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, processManager);
             new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName, indexAllowlist);

@@ -21,8 +21,8 @@ ext {
 
 dependencies {
     implementation project(":commonDependencyVersionConstraints")
-
     implementation project(':coreUtilities')
+    implementation project(':transformation')
 
     implementation group: 'com.beust', name: 'jcommander'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'

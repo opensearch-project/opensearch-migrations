@@ -1,15 +1,19 @@
+import os
 from pathlib import Path
-from botocore.stub import Stubber, ANY
-from moto import mock_aws
+
 import botocore.session
 import pytest
-import os
-
-from console_link.models.osi_utils import (construct_pipeline_config, create_pipeline_from_json,
-                                           create_pipeline_from_env, start_pipeline, stop_pipeline, delete_pipeline,
-                                           get_assume_role_session, InvalidAuthParameters,
-                                           OpenSearchIngestionMigrationProps)
+from botocore.stub import ANY, Stubber
+from console_link.models.osi_utils import (InvalidAuthParameters,
+                                           OpenSearchIngestionMigrationProps,
+                                           construct_pipeline_config,
+                                           create_pipeline_from_env,
+                                           create_pipeline_from_json,
+                                           get_assume_role_session,
+                                           start_pipeline,
+                                           stop_pipeline)
 from console_link.models.cluster import AuthMethod
+from moto import mock_aws
 from tests.utils import create_valid_cluster
 
 PIPELINE_TEMPLATE_PATH = f"{Path(__file__).parents[3]}/osiPipelineTemplate.yaml"

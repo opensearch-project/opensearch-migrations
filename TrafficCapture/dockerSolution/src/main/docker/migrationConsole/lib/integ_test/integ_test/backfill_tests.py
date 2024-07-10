@@ -2,7 +2,7 @@ import logging
 import pytest
 import unittest
 from http import HTTPStatus
-from console_link.logic.clusters import run_test_benchmarks, connection_check, clear_indices, ConnectionResult
+from console_link.middleware.clusters import run_test_benchmarks, connection_check, clear_indices, ConnectionResult
 from console_link.models.cluster import Cluster
 from console_link.models.backfill_base import Backfill
 from console_link.models.command_result import CommandResult

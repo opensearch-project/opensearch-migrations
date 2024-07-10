@@ -57,9 +57,9 @@ public abstract class SnapshotCreator {
         // Create the snapshot; idempotent operation
         try {
             client.createSnapshot(getRepoName(), snapshotName, body);
-            logger.info("Snapshot " + snapshotName + " creation initiated");
+            logger.info("Snapshot {} creation initiated", snapshotName);
         } catch (Exception e) {
-            logger.error("Snapshot " + snapshotName + " creation failed", e);
+            logger.error("Snapshot {} creation failed", snapshotName, e);
             throw new SnapshotCreationFailed(snapshotName);
         }
     }
@@ -74,7 +74,7 @@ public abstract class SnapshotCreator {
         }
 
         if (response.isEmpty()) {
-            logger.error("Snapshot " + snapshotName + " does not exist");
+            logger.error("Snapshot {} does not exist", snapshotName);
             throw new SnapshotDoesNotExist(snapshotName);
         }
 
@@ -88,7 +88,7 @@ public abstract class SnapshotCreator {
         } else if (state.equals("IN_PROGRESS")) {
             return false;
         } else {
-            logger.error("Snapshot " + snapshotName + " has failed with state " + state);
+            logger.error("Snapshot {} has failed with state {}", snapshotName, state);
             throw new SnapshotCreationFailed(snapshotName);
         }
     }

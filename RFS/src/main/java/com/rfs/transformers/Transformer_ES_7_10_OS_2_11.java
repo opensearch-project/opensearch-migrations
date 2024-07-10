@@ -3,8 +3,12 @@ package com.rfs.transformers;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.rfs.models.GlobalMetadata;
+import com.rfs.models.IndexMetadata;
+import com.rfs.version_os_2_11.GlobalMetadataData_OS_2_11;
 
 public class Transformer_ES_7_10_OS_2_11 implements Transformer {
     private static final Logger logger = LogManager.getLogger(Transformer_ES_7_10_OS_2_11.class);
@@ -16,8 +20,8 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
     }
 
     @Override
-    public ObjectNode transformGlobalMetadata(ObjectNode root){
-        ObjectNode newRoot = mapper.createObjectNode();
+    public GlobalMetadata transformGlobalMetadata(GlobalMetadata metaData){
+        ObjectNode root = metaData.toObjectNode().deepCopy();
 
         // Transform the legacy templates
         if (root.get("templates") != null) {
@@ -31,7 +35,7 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
                 logger.debug("Transformed template: " + template.toString());
                 templatesRoot.set(templateName, template);
             });
-            newRoot.set("templates", templatesRoot);
+            root.set("templates", templatesRoot);
         }
 
         // Transform the index templates
@@ -53,7 +57,7 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
                 logger.debug("Transformed template: " + template.toString());
                 indexTemplateValuesRoot.set(templateName, template);
             });
-            newRoot.set("index_template", indexTemplatesRoot);
+            root.set("index_template", indexTemplatesRoot);
         }
 
         // Transform the component templates
@@ -74,24 +78,25 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
                 logger.debug("Transformed template: " + template.toString());
                 componentTemplateValuesRoot.set(templateName, template);
             });
-            newRoot.set("component_template", componentTemplatesRoot);
+            root.set("component_template", componentTemplatesRoot);
         }
 
-        return newRoot;
+        return new GlobalMetadataData_OS_2_11(root);
     }
 
     @Override
-    public ObjectNode transformIndexMetadata(ObjectNode root){
-        ObjectNode newRoot = root.deepCopy();
-
+    public IndexMetadata transformIndexMetadata(IndexMetadata indexData){
+        logger.debug("Original Object: " + indexData.rawJson().toString());
+        var copy = indexData.deepCopy();
+        var newRoot = copy.rawJson();
+        
         TransformFunctions.removeIntermediateMappingsLevels(newRoot);
 
         newRoot.set("settings", TransformFunctions.convertFlatSettingsToTree((ObjectNode) newRoot.get("settings")));
         TransformFunctions.removeIntermediateIndexSettingsLevel(newRoot); // run before fixNumberOfReplicas
         TransformFunctions.fixReplicasForDimensionality(newRoot, awarenessAttributeDimensionality);
 
-        logger.debug("Original Object: " + root.toString());
         logger.debug("Transformed Object: " + newRoot.toString());
-        return newRoot;
+        return indexData;
     }
 }

@@ -1,10 +1,9 @@
 package com.rfs.worker;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
-import com.rfs.common.GlobalMetadata;
+import com.rfs.models.GlobalMetadata;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
 
@@ -20,8 +19,7 @@ public class MetadataRunner {
     public void migrateMetadata() {
         log.info("Migrating the Templates...");
         var globalMetadata = metadataFactory.fromRepo(snapshotName);
-        var root = globalMetadata.toObjectNode();
-        var transformedRoot = transformer.transformGlobalMetadata(root);
+        var transformedRoot = transformer.transformGlobalMetadata(globalMetadata);
         metadataCreator.create(transformedRoot);
         log.info("Templates migration complete");
     }
