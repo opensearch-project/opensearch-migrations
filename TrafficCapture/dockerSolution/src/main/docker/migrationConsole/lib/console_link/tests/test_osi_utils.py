@@ -1,11 +1,13 @@
 from pathlib import Path
 from botocore.stub import Stubber, ANY
+from moto import mock_aws
 import botocore.session
 import pytest
 import os
 
 from console_link.models.osi_utils import (construct_pipeline_config, create_pipeline_from_json,
-                                           create_pipeline_from_env, InvalidAuthParameters,
+                                           create_pipeline_from_env, start_pipeline, stop_pipeline, delete_pipeline,
+                                           get_assume_role_session, InvalidAuthParameters,
                                            OpenSearchIngestionMigrationProps)
 from console_link.models.cluster import AuthMethod
 from tests.utils import create_valid_cluster
@@ -235,3 +237,47 @@ def test_valid_env_creates_pipeline(osi_client_stubber):
                              print_config_only=False)
 
     osi_client_stubber.assert_no_pending_responses()
+
+
+def test_valid_start_pipeline(osi_client_stubber):
+    expected_request_body = {'PipelineName': f'{PIPELINE_NAME}'}
+    osi_client_stubber.add_response("start_pipeline", {}, expected_request_body)
+    osi_client_stubber.activate()
+
+    start_pipeline(osi_client=osi_client_stubber.client, pipeline_name=PIPELINE_NAME)
+
+    osi_client_stubber.assert_no_pending_responses()
+
+
+def test_valid_stop_pipeline(osi_client_stubber):
+    expected_request_body = {'PipelineName': f'{PIPELINE_NAME}'}
+    osi_client_stubber.add_response("stop_pipeline", {}, expected_request_body)
+    osi_client_stubber.activate()
+
+    stop_pipeline(osi_client=osi_client_stubber.client, pipeline_name=PIPELINE_NAME)
+
+    osi_client_stubber.assert_no_pending_responses()
+
+
+def test_valid_delete_pipeline(osi_client_stubber):
+    expected_request_body = {'PipelineName': f'{PIPELINE_NAME}'}
+    osi_client_stubber.add_response("delete_pipeline", {}, expected_request_body)
+    osi_client_stubber.activate()
+
+    delete_pipeline(osi_client=osi_client_stubber.client, pipeline_name=PIPELINE_NAME)
+
+    osi_client_stubber.assert_no_pending_responses()
+
+
+@mock_aws
+def test_valid_get_assume_role_session():
+    session_name = 'unittest-session'
+
+    session = get_assume_role_session(PIPELINE_ROLE_ARN, session_name)
+
+    # Validate the session
+    credentials = session.get_credentials()
+    assert credentials is not None
+    assert isinstance(credentials.access_key, str)
+    assert isinstance(credentials.secret_key, str)
+    assert isinstance(credentials.token, str)

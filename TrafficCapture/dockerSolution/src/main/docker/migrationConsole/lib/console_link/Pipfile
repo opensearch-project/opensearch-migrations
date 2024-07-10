@@ -17,6 +17,7 @@ pytest = "*"
 pytest-mock = "*"
 requests-mock = "*"
 coverage = "*"
+moto = "*"
 
 [requires]
 python_version = "3.10"

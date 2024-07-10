@@ -36,12 +36,12 @@ def pretty_request(request, data):
     )
 
 
-def determine_osi_client(request_data):
+def determine_osi_client(request_data, action_name: str):
     pipeline_manager_role_arn = request_data.get('PipelineManagerAssumeRoleArn')
     if pipeline_manager_role_arn:
         logger.debug(f'Assuming provided role: {pipeline_manager_role_arn}')
         session = get_assume_role_session(role_arn=pipeline_manager_role_arn,
-                                          session_name='ConsoleCreatePipelineAssumeRole')
+                                          session_name=f'Console{action_name}PipelineAssumeRole')
         osi_client = session.client('osis')
     else:
         osi_client = boto3.client('osis')
@@ -56,9 +56,10 @@ def osi_update_workflow(request, osi_action_func: Callable, action_name: str):
     osi_serializer.is_valid(raise_exception=True)
     pipeline_name = request_data.get('PipelineName')
     try:
-        osi_action_func(osi_client=determine_osi_client(request_data), pipeline_name=pipeline_name)
+        osi_action_func(osi_client=determine_osi_client(request_data=request_data, action_name=action_name),
+                        pipeline_name=pipeline_name)
     except Exception as e:
-        logger.error(f'Error performing {action_name} API: {e}')
+        logger.error(f'Error performing OSI {action_name} Pipeline API: {e}')
         return Response(str(e), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     response_data = {
@@ -72,18 +73,19 @@ def osi_update_workflow(request, osi_action_func: Callable, action_name: str):
 def osi_create_migration(request):
     request_data = request.data
     logger.info(pretty_request(request, request_data))
+    action_name = 'Create'
 
     osi_serializer = OpenSearchIngestionCreateRequestSerializer(data=request_data)
     osi_serializer.is_valid(raise_exception=True)
     try:
-        create_pipeline_from_json(osi_client=determine_osi_client(request_data),
+        create_pipeline_from_json(osi_client=determine_osi_client(request_data=request_data, action_name=action_name),
                                   input_json=request_data,
                                   pipeline_template_path=PIPELINE_TEMPLATE_PATH)
     except InvalidAuthParameters as i:
-        logger.error(f'Error performing osi_create_migration API: {i}')
+        logger.error(f'Error performing OSI {action_name} Pipeline API: {i}')
         return Response(str(i), status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
-        logger.error(f'Error performing osi_create_migration API: {e}')
+        logger.error(f'Error performing OSI {action_name} Pipeline API: {e}')
         return Response(str(e), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     response_data = {
@@ -95,16 +97,16 @@ def osi_create_migration(request):
 @api_view(['POST'])
 @parser_classes([JSONParser])
 def osi_start_migration(request):
-    osi_update_workflow(request=request, osi_action_func=start_pipeline, action_name='osi_start_migration')
+    osi_update_workflow(request=request, osi_action_func=start_pipeline, action_name='Start')
 
 
 @api_view(['POST'])
 @parser_classes([JSONParser])
 def osi_stop_migration(request):
-    osi_update_workflow(request=request, osi_action_func=stop_pipeline, action_name='osi_stop_migration')
+    osi_update_workflow(request=request, osi_action_func=stop_pipeline, action_name='Stop')
 
 
 @api_view(['POST'])
 @parser_classes([JSONParser])
 def osi_delete_migration(request):
-    osi_update_workflow(request=request, osi_action_func=delete_pipeline, action_name='osi_delete_migration')
+    osi_update_workflow(request=request, osi_action_func=delete_pipeline, action_name='Delete')
