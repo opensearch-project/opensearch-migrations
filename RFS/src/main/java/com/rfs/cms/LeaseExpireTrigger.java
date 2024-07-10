@@ -41,7 +41,7 @@ public class LeaseExpireTrigger implements AutoCloseable {
             if (workItemToLeaseMap.containsKey(workItemId)) {
                 onLeaseExpired.accept(workItemId);
             }
-        }, killDuration.toSeconds(), TimeUnit.SECONDS);
+        }, killDuration.toMillis(), TimeUnit.MILLISECONDS);
     }
 
     public void markWorkAsCompleted(String workItemId) {

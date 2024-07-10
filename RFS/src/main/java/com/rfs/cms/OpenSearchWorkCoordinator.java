@@ -481,7 +481,9 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             log.warn("Expiration wasn't found or wasn't set to > 0.  Returning null.");
             return null;
         }
-        return new WorkItemAndDuration(resultHitInner.get("_id").asText(), Instant.ofEpochMilli(1000*expiration));
+        var rval = new WorkItemAndDuration(resultHitInner.get("_id").asText(), Instant.ofEpochMilli(1000*expiration));
+        log.atInfo().setMessage(() -> "Returning work item and lease: " + rval).log();
+        return rval;
     }
 
     @AllArgsConstructor

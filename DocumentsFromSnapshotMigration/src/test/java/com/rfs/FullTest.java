@@ -21,19 +21,12 @@ import com.rfs.common.SourceRepo;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.http.SearchClusterRequests;
 import com.rfs.framework.PreloadedSearchClusterContainer;
-import com.rfs.tracing.IRfsContexts;
-import com.rfs.transformers.TransformFunctions;
-import com.rfs.transformers.Transformer;
 import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
 import com.rfs.version_es_7_10.GlobalMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.IndexMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
-import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
-import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 import com.rfs.worker.DocumentsRunner;
-import com.rfs.worker.IndexRunner;
-import com.rfs.worker.MetadataRunner;
 import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -53,21 +46,13 @@ import org.opensearch.testcontainers.OpensearchContainer;
 import org.slf4j.event.Level;
 import reactor.core.publisher.Flux;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
 import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
-import java.util.AbstractMap;
 import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Comparator;
 import java.util.List;
-import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Random;
@@ -75,17 +60,15 @@ import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.UnaryOperator;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 @Tag("longTest")
 @Slf4j
-public class FullTest {
+public class FullTest extends SourceTestBase {
     public static final String GENERATOR_BASE_IMAGE = "migrations/elasticsearch_client_test_console:latest";
     final static long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
     final static List<SearchClusterContainer.Version> SOURCE_IMAGES = List.of(
@@ -96,7 +79,6 @@ public class FullTest {
         SearchClusterContainer.OS_V1_3_16,
         SearchClusterContainer.OS_V2_14_0
     );
-    public static final String SOURCE_SERVER_ALIAS = "source";
     public static final int MAX_SHARD_SIZE_BYTES = 64 * 1024 * 1024;
 
     public static Stream<Arguments> makeDocumentMigrationArgs() {
@@ -107,14 +89,6 @@ public class FullTest {
                 .flatMap(a->
                         targetImageNames.stream().flatMap(b->
                                 numWorkers.stream().map(c->Arguments.of(a[0], a[1], a[2], b, c))));
-    }
-
-    private static Object[] makeParamsForBase(SearchClusterContainer.Version baseSourceImage) {
-        return new Object[]{
-                baseSourceImage,
-                GENERATOR_BASE_IMAGE,
-                new String[]{"/root/runTestBenchmarks.sh", "--endpoint", "http://" +SOURCE_SERVER_ALIAS + ":9200/"}
-        };
     }
 
     @ParameterizedTest
@@ -241,27 +215,6 @@ public class FullTest {
         }
     }
 
-    private static void migrateMetadata(SourceRepo sourceRepo,
-                                        OpenSearchClient targetClient,
-                                        String snapshotName,
-                                        List<String> indexAllowlist,
-                                        MetadataMigrationTestContext context)
-    {
-        SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
-        GlobalMetadata.Factory metadataFactory = new GlobalMetadataFactory_ES_7_10(repoDataProvider);
-        GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient,
-                List.of(), List.of(), List.of(), context.createMetadataMigrationContext());
-        Transformer transformer =
-                TransformFunctions.getTransformer(ClusterVersion.ES_7_10, ClusterVersion.OS_2_11, 1);
-        new MetadataRunner(snapshotName, metadataFactory, metadataCreator, transformer).migrateMetadata();
-
-        IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
-        IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
-        new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer, indexAllowlist,
-                context.createIndexContext())
-                .migrateIndices();
-    }
-
     private static class FilteredLuceneDocumentsReader extends LuceneDocumentsReader {
         private final UnaryOperator<Document> docTransformer;
 
@@ -319,6 +272,7 @@ public class FullTest {
 //                                    null, null)),
                             TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS, UUID.randomUUID().toString(),
                             Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))),
+                    Duration.ofMinutes(10),
                     processManager,
                     indexMetadataFactory,
                     snapshotName,
@@ -332,127 +286,4 @@ public class FullTest {
         }
     }
 
-    public static Stream<Arguments> makeProcessExitArgs() {
-        return Stream.of(
-            Arguments.of(true, 0),
-            Arguments.of(false, 1)
-        );
-    }
-
-    @ParameterizedTest
-    @MethodSource("makeProcessExitArgs")
-    public void testProcessExitsAsExpected(boolean targetAvailable, int expectedExitCode) throws Exception {
-        final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
-        final var testMetadataMigrationContext = MetadataMigrationTestContext.factory().noOtelTracking();
-
-        var sourceImageArgs = makeParamsForBase(SearchClusterContainer.ES_V7_10_2);
-        var baseSourceImageVersion = (SearchClusterContainer.Version) sourceImageArgs[0];
-        var generatorImage = (String) sourceImageArgs[1];
-        var generatorArgs = (String[]) sourceImageArgs[2];
-        var targetImageName = SearchClusterContainer.OS_V2_14_0.getImageName();
-
-        try (var esSourceContainer = new PreloadedSearchClusterContainer(baseSourceImageVersion,
-                    SOURCE_SERVER_ALIAS, generatorImage, generatorArgs);
-                OpensearchContainer<?> osTargetContainer =
-                        new OpensearchContainer<>(targetImageName)) {
-            CompletableFuture.allOf(
-                            CompletableFuture.supplyAsync(()->{ esSourceContainer.start(); return null; }),
-                            CompletableFuture.supplyAsync(()->{ osTargetContainer.start(); return null; }))
-                    .join();
-
-            final var SNAPSHOT_NAME = "test_snapshot";
-            final List<String> INDEX_ALLOWLIST = List.of();
-            CreateSnapshot.run(
-                    c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
-                            testSnapshotContext.createSnapshotCreateContext()),
-                    new OpenSearchClient(esSourceContainer.getUrl(), null),
-                    false);
-            var tempDirSnapshot = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
-            var tempDirLucene = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
-
-            String targetAddress = osTargetContainer.getHttpHostAddress();
-
-            String[] args = {
-                "--snapshot-name", SNAPSHOT_NAME,
-                "--snapshot-local-dir", tempDirSnapshot.toString(),
-                "--lucene-dir", tempDirLucene.toString(),
-                "--target-host", targetAddress
-            };
-
-            try {
-                esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
-
-                var targetClient = new OpenSearchClient(targetAddress, null);
-                var sourceRepo = new FileSystemRepo(tempDirSnapshot);
-                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, INDEX_ALLOWLIST, testMetadataMigrationContext);
-
-                // Stop the target container if we don't want it to be available.  We've already cached the address it was
-                // using, so we can have reasonable confidence that nothing else will be using it and bork our test.
-                if (!targetAvailable) {
-                    osTargetContainer.stop();
-                }
-
-                String classpath = System.getProperty("java.class.path");
-                String javaHome = System.getProperty("java.home");
-                String javaExecutable = javaHome + File.separator + "bin" + File.separator + "java";
-
-                // Kick off the doc migration process
-                log.atInfo().setMessage("Running RfsMigrateDocuments with args: " + Arrays.toString(args)).log();
-                ProcessBuilder processBuilder = new ProcessBuilder(
-                        javaExecutable, "-cp", classpath, "com.rfs.RfsMigrateDocuments"
-                );
-                processBuilder.command().addAll(Arrays.asList(args));
-                processBuilder.redirectErrorStream(true);
-
-                Process process = processBuilder.start();
-                log.atInfo().setMessage("Process started with ID: " + Long.toString(process.toHandle().pid())).log();
-
-                // Kill the process and fail if we have to wait too long
-                int timeoutSeconds = 90;
-                boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
-                if (!finished) {
-                    // Print the process output
-                    StringBuilder output = new StringBuilder();
-                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()))) {
-                        String line;
-                        while ((line = reader.readLine()) != null) {
-                            output.append(line).append(System.lineSeparator());
-                        }
-                    }
-                    log.atError().setMessage("Process Output:").log();
-                    log.atError().setMessage(output.toString()).log();
-
-                    log.atError().setMessage("Process timed out, attempting to kill it...").log();
-                    process.destroy(); // Try to be nice about things first...
-                    if (!process.waitFor(10, TimeUnit.SECONDS)) {
-                        log.atError().setMessage("Process still running, attempting to force kill it...").log();
-                        process.destroyForcibly(); // ..then avada kedavra
-                    }
-                    Assertions.fail("The process did not finish within the timeout period (" + timeoutSeconds + " seconds).");
-                }
-
-                int actualExitCode = process.exitValue();
-                log.atInfo().setMessage("Process exited with code: " + actualExitCode).log();
-
-                // Check if the exit code is as expected
-                Assertions.assertEquals(expectedExitCode, actualExitCode, "The program did not exit with the expected status code.");
-
-            } finally {
-                deleteTree(tempDirSnapshot);
-                deleteTree(tempDirLucene);
-            }
-        }
-    }
-
-    private static void deleteTree(Path path) throws IOException {
-        try (var walk = Files.walk(path)) {
-            walk.sorted(Comparator.reverseOrder()).forEach(p -> {
-                try {
-                    Files.delete(p);
-                } catch (IOException e) {
-                    throw Lombok.sneakyThrow(e);
-                }
-            });
-        }
-    }
 }

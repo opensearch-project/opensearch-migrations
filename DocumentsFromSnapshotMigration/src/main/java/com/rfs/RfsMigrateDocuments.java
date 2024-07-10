@@ -1,5 +1,6 @@
 package com.rfs;
 
+import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
@@ -9,6 +10,7 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Function;
@@ -48,8 +50,15 @@ import org.opensearch.migrations.tracing.RootOtelContext;
 
 @Slf4j
 public class RfsMigrateDocuments {
-    public static final int PROCESS_TIMED_OUT = 1;
+    public static final int PROCESS_TIMED_OUT = 2;
     public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
+
+    public static class DurationConverter implements IStringConverter<Duration> {
+        @Override
+        public Duration convert(String value) {
+            return Duration.parse(value);
+        }
+    }
 
     public static class Args {
         @Parameter(names = {"--snapshot-name"},
@@ -110,6 +119,12 @@ public class RfsMigrateDocuments {
         @Parameter(names = {"--max-shard-size-bytes"}, description = ("Optional. The maximum shard size, in bytes, to allow when"
             + " performing the document migration.  Useful for preventing disk overflow.  Default: 50 * 1024 * 1024 * 1024 (50 GB)"), required = false)
         public long maxShardSizeBytes = 50 * 1024 * 1024 * 1024L;
+        @Parameter(names = {"--max-initial-lease-duration"}, description = ("Optional. The maximum time that the " +
+                "first attempt to migrate a shard's documents should take.  If a process takes longer than this " +
+                "the process will terminate, allowing another process to attempt the migration, but with double the " +
+                "amount of time than the last time.  Default: PT10M"), required = false,
+                converter = DurationConverter.class)
+        public Duration maxInitialLeaseDuration = Duration.ofMinutes(10);
 
         @Parameter(required = false,
                 names = {"--otelCollectorEndpoint"},
@@ -168,6 +183,11 @@ public class RfsMigrateDocuments {
 
         try (var processManager = new LeaseExpireTrigger(workItemId->{
             log.error("Terminating RunRfsWorker because the lease has expired for " + workItemId);
+            try {
+                Thread.sleep(10);
+            } catch (InterruptedException e) {
+                throw new RuntimeException(e);
+            }
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC())) {
             var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(arguments.targetHost)),
@@ -198,9 +218,9 @@ public class RfsMigrateDocuments {
                 SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,
                         luceneDirPath, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
 
-                run(LuceneDocumentsReader::new, reindexer, workCoordinator, processManager, indexMetadataFactory,
-                        arguments.snapshotName, arguments.indexAllowlist, shardMetadataFactory, unpackerFactory,
-                        arguments.maxShardSizeBytes, rootDocumentContext);
+                run(LuceneDocumentsReader::new, reindexer, workCoordinator, arguments.maxInitialLeaseDuration,
+                        processManager, indexMetadataFactory, arguments.snapshotName, arguments.indexAllowlist,
+                        shardMetadataFactory, unpackerFactory, arguments.maxShardSizeBytes, rootDocumentContext);
             });
         }
     }
@@ -208,6 +228,7 @@ public class RfsMigrateDocuments {
     public static DocumentsRunner.CompletionStatus run(Function<Path,LuceneDocumentsReader> readerFactory,
                                                        DocumentReindexer reindexer,
                                                        IWorkCoordinator workCoordinator,
+                                                       Duration maxInitialLeaseDuration,
                                                        LeaseExpireTrigger leaseExpireTrigger,
                                                        IndexMetadata.Factory indexMetadataFactory,
                                                        String snapshotName,
@@ -222,7 +243,7 @@ public class RfsMigrateDocuments {
         if (!workCoordinator.workItemsArePending(rootDocumentContext.getWorkCoordinationContext()::createItemsPendingContext)) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
         }
-        return new DocumentsRunner(scopedWorkCoordinator,
+        return new DocumentsRunner(scopedWorkCoordinator, maxInitialLeaseDuration,
                 (name, shard) -> {
                     var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, name, shard);
                     log.info("Shard size: " + shardMetadata.getTotalSizeBytes());

@@ -26,9 +26,9 @@ import reactor.core.publisher.Flux;
 @Slf4j
 @AllArgsConstructor
 public class DocumentsRunner {
-    public static final String ALL_INDEX_MANIFEST = "all_index_manifest";
 
-    ScopedWorkCoordinator workCoordinator;
+    private final ScopedWorkCoordinator workCoordinator;
+    private final Duration maxInitialLeaseDuration;
     private final BiFunction<String,Integer,ShardMetadata.Data> shardMetadataFactory;
     private final SnapshotShardUnpacker.Factory unpackerFactory;
     private final Function<Path,LuceneDocumentsReader> readerFactory;
@@ -49,7 +49,7 @@ public class DocumentsRunner {
         try (var context = contextSupplier.get()) {
             return workCoordinator.ensurePhaseCompletion(wc -> {
                         try {
-                            return wc.acquireNextWorkItem(Duration.ofMinutes(10), context::createOpeningContext);
+                            return wc.acquireNextWorkItem(maxInitialLeaseDuration, context::createOpeningContext);
                         } catch (Exception e) {
                             throw Lombok.sneakyThrow(e);
                         }
