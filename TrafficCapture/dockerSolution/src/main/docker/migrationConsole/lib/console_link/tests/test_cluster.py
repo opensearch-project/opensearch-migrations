@@ -1,6 +1,8 @@
 import pytest
-from tests.utils import create_valid_cluster
+
+import console_link.middleware.clusters as clusters_
 from console_link.models.cluster import AuthMethod, Cluster
+from tests.utils import create_valid_cluster
 
 # Define a valid cluster configuration
 valid_cluster_config = {
@@ -77,3 +79,23 @@ def test_valid_cluster_api_call_with_no_auth(requests_mock):
     response = cluster.call_api("/test_api")
     assert response.status_code == 200
     assert response.json() == {'test': True}
+
+
+def test_connection_check_with_exception(mocker):
+    cluster = create_valid_cluster()
+    api_mock = mocker.patch.object(Cluster, 'call_api', side_effect=Exception('Attempt to connect to cluster failed'))
+
+    result = clusters_.connection_check(cluster)
+    api_mock.assert_called()
+    assert 'Attempt to connect to cluster failed' in result.connection_message
+    assert not result.connection_established
+
+
+def test_connection_check_succesful(requests_mock):
+    cluster = create_valid_cluster()
+    requests_mock.get(f"{cluster.endpoint}/", json={'version': {'number': '2.15'}})
+
+    result = clusters_.connection_check(cluster)
+    assert result.connection_established
+    assert result.connection_message == 'Successfully connected!'
+    assert result.cluster_version == '2.15'

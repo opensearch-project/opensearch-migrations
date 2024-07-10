@@ -32,3 +32,6 @@ replay:
     cluster_name: "my-cluster"
     service_name: "my-service"
   scale: 2
+kafka:
+  broker_endpoints: "kafka1:9092,kafka2:9092,kafka3:9092"
+  standard:
