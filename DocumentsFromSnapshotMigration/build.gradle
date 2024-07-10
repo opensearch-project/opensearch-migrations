@@ -170,6 +170,8 @@ task slowTest(type: Test) {
 jacocoTestReport {
     dependsOn slowTest
     reports {
+        xml.required = true
+        xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
         html.required = true
         html.destination file("${buildDir}/reports/jacoco/test/html")
     }
