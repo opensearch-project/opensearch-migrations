@@ -80,7 +80,7 @@ def call(Map config = [:]) {
                                     def test_dir = "/root/lib/integ_test/integ_test"
                                     def test_result_file = "${test_dir}/reports/${uniqueId}/report.xml"
                                     def command = "pytest --log-file=${test_dir}/reports/${uniqueId}/pytest.log --junitxml=${test_result_file} ${test_dir}/replayer_tests.py --unique_id ${uniqueId} -s"
-                                    sh "sudo ./awsRunIntegTests.sh --command ${command} --test-result-file ${test_result_file} --stage ${stageId}"
+                                    sh "sudo ./awsRunIntegTests.sh --command '${command}' --test-result-file ${test_result_file} --stage ${stageId}"
                                 }
                             }
                         }
