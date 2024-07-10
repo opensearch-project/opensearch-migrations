@@ -52,23 +52,25 @@ Result:
 ```
 console meta evaluate
 
-Source Cluster:
-   Version: Elasticsearch 7.10.21
-   Url: http://localhost:9200
-   WARN - Elasticsearch 7.10.21 is specifically supported, will attempt to migrate with as if Elasticsearch 7.10.28
+Clusters:
+   Source:
+      Version: Elasticsearch 7.10.21
+      Url: http://localhost:9200
+      WARN - Elasticsearch 7.10.21 is specifically supported, will attempt to migrate with as if Elasticsearch 7.10.28
 
-Indexes:
-   geonames, logs-181998, logs-191998, logs-201998, logs-211998
-   INFO - 12 More not shown, use add `--full` to see all results
+Migration Candidates:
+   Indexes:
+      geonames, logs-181998, logs-191998, logs-201998, logs-211998
+      INFO - 12 More not shown, use add `--full` to see all results
 
-Index Templates:
-   daily_logs
+   Index Templates:
+      daily_logs
 
-Component Templates:
-   <None Found>
+   Component Templates:
+      <None Found>
 
-Aliases:
-   logs-all
+   Aliases:
+      logs-all
 
 Result:
    1 migration issues detected
@@ -82,12 +84,14 @@ Issues:
 ```
 console meta evaluate --full
 
-Source Cluster:
-    Version: Elasticsearch 7.10.21
-    Url: http://localhost:9200
+Clusters:
+   Source:
+      Version: Elasticsearch 7.10.21
+      Url: http://localhost:9200
 
-Indexes:
-   geonames, logs-181998, logs-191998, logs-201998, logs-211998, logs-221998, logs-231998, logs-241998, nyc_taxis, reindexed-logs, sonested
+Migration Candidates:
+   Indexes:
+      geonames, logs-181998, logs-191998, logs-201998, logs-211998, logs-221998, logs-231998, logs-241998, nyc_taxis, reindexed-logs, sonested
 ...
 ```
 
@@ -108,27 +112,29 @@ Result:
 ```
 console meta evaluate
 
-Source Cluster:
-   Version: Elasticsearch 7.10.21
-   Url: http://localhost:9200
-   WARN - Elasticsearch 7.10.21 is not specifically supported, will attempt to migrate with as if Elasticsearch 7.10.28
+Clusters:
+   Source:
+      Version: Elasticsearch 7.10.21
+      Url: http://localhost:9200
+      WARN - Elasticsearch 7.10.21 is not specifically supported, will attempt to migrate with as if Elasticsearch 7.10.28
 
-Target Cluster:
-   Version: OpenSearch 2.11.0
-   Url: http://localhost:19200
+   Target:
+      Version: OpenSearch 2.11.0
+      Url: http://localhost:19200
 
-Indexes:
-   geonames, logs-181998, logs-191998, logs-201998, logs-211998
-   INFO - 12 More not shown, add `--full` to see all results
+Migration Candidates:
+   Indexes:
+      geonames, logs-181998, logs-191998, logs-201998, logs-211998
+      INFO - 12 More not shown, add `--full` to see all results
 
-Index Templates:
-   daily_logs
+   Index Templates:
+      daily_logs
 
-Component Templates:
-   <None Found>
+   Component Templates:
+      <None Found>
 
-Aliases:
-   logs-all
+   Aliases:
+      logs-all
 
 Transformations:
    Index:
@@ -144,7 +150,7 @@ Issues:
    IndexMappingTypeRemoval is Unsupported on Index `logs-181998` "Multiple mapping types are not supported""
    IndexMappingTypeRemoval is Unsupported on Index Template `daily_logs` "Multiple mapping types are not supported"
 ```
-### Adjust meta not to migrate rolling logs indices
+### Exclude incompatible rolling logs indices
 
 #### Configure meta to only allow certain indexes
 ```
@@ -165,6 +171,7 @@ Result:
 ```
 
 #### Evaluate meta with the updated configuration 
+
 ```
 console meta evaluate
 
@@ -195,48 +202,63 @@ Migration Candidates:
 Transformations:
    Index:
       IndexMappingTypeRemoval - Will Apply - Learn more http://kb.migrations.opensearch.org/1001/
+
    Index Template:
       IndexMappingTypeRemoval - Will Apply - Learn more http://kb.migrations.opensearch.org/1001/
+
    DEBUG - 5 transformations did not apply, add --`full` to see all results
 
 Result:
    No migration issues detected
 ```
 
+## Design Details
 
+### Configuration
+Configuration data should be stored in a way that mirrors the existing [Services.yaml spec](../TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/README.md)
+
+This ensures that if the tool is run locally its setup can be deployed to the cloud with minimal effort.
+
+### Console response structure
+
+The output of the meta tool is to provide a top-to-bottom list of what is relevant to a migration. Overall command line response is structured as follows 
+```
+Clusters:
+   ...
+Migration Candidates:
+   ...
+Transformations:
+   ...
+Result:
+   ...
+Issues:
+   ...
 ```
 
+If there are any DEBUG/INFO/WARN/ERROR messages they are printed at in the highest level bucket available.  ERROR messages are all captured and repeated under issues at the bottom of the output.
+
+Each section is indented in the same amount, and if there are subsections those receive their own level of indenting.
+
+```
+Migration Candidates:
+   Indexes:
+      my-index, your-index
+   Plugins:
+      Security:
+         Authentication:
+            OIDCProvider
 ```
 
+#### Transformations
 
+Transformations should be printed out by what components they are applied to, their name, and where to get more detailed information on their function.  The following is an `index` transformation named `IndexMappingTypeRemoval` that `will` be applied that can be referred on `http://kb.migrations.opensearch.org/1001/`
 
 ```
-console meta (evaluate | verify | deploy) \
-
-    # Inspect a live source cluster
-    --source-host http://localhost:19200
-    --source-username admin \
-    --source-password admin \
-
-    # Inspect source cluster from its snapshot
-    --snapshot-name my-snapshot \
-
-        # Local copy of the snapshot
-        --file-system-repo-path [C:\snapshots] \
-
-        # Snapshot in the S3 service
-        --s3-repo-uri [s3://bucket/snapshots] \
-        --s3-region [us-east-1] \
-
-    # Determine the cluster target from a live cluster
-    --target-host http://localhost:19200 \
-    --target-username admin \
-    --target-password admin \
-
-    # Provide the target cluster version manually
-    --target-cluster-version OpenSearch 2.15
-
-    # Configure the evaluation parameters
-    --index-allow-list index1, index2 \
-    --index-template-allow-list rollover-daily \
+Transformations:
+   Index:
+      IndexMappingTypeRemoval - Will Apply - Learn more http://kb.migrations.opensearch.org/1001/
 ```
+
+#### Exit codes
+
+0 for success, otherwise failure with the code being the number of issues.
