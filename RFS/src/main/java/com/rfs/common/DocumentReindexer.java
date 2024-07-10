@@ -25,7 +25,7 @@ public class DocumentReindexer {
         return documentStream
             .map(this::convertDocumentToBulkSection)  // Convert each Document to part of a bulk operation
             .buffer(MAX_BATCH_SIZE) // Collect until you hit the batch size
-            .doOnNext(bulk -> logger.info(bulk.size() + " documents in current bulk request"))
+            .doOnNext(bulk -> logger.info("{} documents in current bulk request", bulk.size()))
             .map(this::convertToBulkRequestBody)  // Assemble the bulk request body from the parts
             .flatMap(bulkJson -> client.sendBulkRequest(indexName, bulkJson, context.createBulkRequest()) // Send the request
                 .doOnSuccess(unused -> logger.debug("Batch succeeded"))
@@ -54,9 +54,8 @@ public class DocumentReindexer {
     }
 
     public void refreshAllDocuments(ConnectionDetails targetConnection,
-                                    IDocumentMigrationContexts.IDocumentReindexContext context) throws Exception {
+                                    IDocumentMigrationContexts.IDocumentReindexContext context) {
         // Send the request
-        OpenSearchClient client = new OpenSearchClient(targetConnection);
-        client.refresh(context.createRefreshContext());
+        new OpenSearchClient(targetConnection).refresh(context.createRefreshContext());
     }
 }

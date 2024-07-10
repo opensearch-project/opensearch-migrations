@@ -2,12 +2,7 @@ package com.rfs.common;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.concurrent.ArrayBlockingQueue;
-import java.util.concurrent.BlockingQueue;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
@@ -57,7 +52,7 @@ public class LuceneDocumentsReader {
     protected Document getDocument(IndexReader reader, int docId) {
         try {
             Document document = reader.document(docId);
-            BytesRef source_bytes = document.getBinaryValue("_source");
+            BytesRef sourceBytes = document.getBinaryValue("_source");
             String id;
             try {
                 id = Uid.decodeId(document.getBinaryValue("_id").bytes);
@@ -68,7 +63,7 @@ public class LuceneDocumentsReader {
                 log.error(errorMessage.toString());
                 return null; // Skip documents with missing id
             }
-            if (source_bytes == null || source_bytes.bytes.length == 0) {
+            if (sourceBytes == null || sourceBytes.bytes.length == 0) {
                 log.warn("Document " + id + " is deleted or doesn't have the _source field enabled");
                 return null;  // Skip these too
             }

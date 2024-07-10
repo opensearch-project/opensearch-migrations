@@ -9,9 +9,9 @@ from http import HTTPStatus
 from requests import Session
 from requests.adapters import HTTPAdapter
 from console_link.models.replayer_base import Replayer
-from console_link.logic.kafka import delete_topic
+from console_link.middleware.kafka import delete_topic
 from console_link.models.kafka import Kafka
-from console_link.logic.clusters import connection_check, clear_indices, run_test_benchmarks, ConnectionResult
+from console_link.middleware.clusters import connection_check, clear_indices, run_test_benchmarks, ConnectionResult
 from console_link.models.cluster import Cluster, AuthMethod
 from console_link.cli import Context
 

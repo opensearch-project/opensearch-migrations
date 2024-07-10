@@ -45,7 +45,7 @@ public class EphemeralSourceRepoAccessor extends SourceRepoAccessor {
             try {
                 super.close();
             } finally {
-                logger.info("Deleting local file: " + filePath.toString());
+                logger.info("Deleting local file: {}", filePath);
                 logger.warn("See: https://opensearch.atlassian.net/browse/MIGRATIONS-1786");
                 Files.deleteIfExists(filePath);
             }
