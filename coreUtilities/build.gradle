@@ -20,6 +20,7 @@ plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id 'io.freefair.lombok'
     id 'java'
+    id 'jacoco'
     id 'java-test-fixtures'
 }
 
