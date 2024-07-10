@@ -9,6 +9,7 @@ task buildDockerImages() {
 }
 
 subprojects {
+    apply plugin: 'jacoco'
     apply plugin: 'java'
     apply plugin: 'maven-publish'
 
@@ -86,6 +87,23 @@ subprojects {
                     name = 'staging'
                 }
             }
+        }
+    }
+
+    // Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
+    tasks.register('copyDependencies', Sync) {
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+        from configurations.runtimeClasspath
+        into "${buildDir}/dependencies"
+    }
+
+    jacocoTestReport {
+        reports {
+            xml.required = true
+            xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
+            html.required = true
+            html.destination file("${buildDir}/reports/jacoco/test/html")
         }
     }
 }
