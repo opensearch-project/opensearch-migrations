@@ -3,11 +3,10 @@ package com.rfs.version_es_6_8;
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+import com.rfs.models.SnapshotMetadata;
 
-import com.rfs.common.SnapshotMetadata;
 
-
-public class SnapshotMetadataData_ES_6_8 implements SnapshotMetadata.Data{
+public class SnapshotMetadataData_ES_6_8 implements SnapshotMetadata{
 
     private String name;
     private String uuid;

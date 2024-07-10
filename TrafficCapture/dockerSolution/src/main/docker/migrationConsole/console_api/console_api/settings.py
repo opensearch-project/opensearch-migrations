@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 import os
 from pathlib import Path
 from typing import List
+import socket
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -34,6 +35,9 @@ def get_allowed_hosts() -> List[str]:
     hosts = os.getenv('API_ALLOWED_HOSTS', '')
     if not hosts:
         return ['localhost']
+    # Add self ip. e.g: 172.18.0.2
+    self_ip = socket.gethostbyname(socket.gethostname())
+    hosts += ',' + self_ip
     # Remove any quotes and strip extra spacing characters
     hosts = hosts.replace('"', '').replace('\'', '')
     return [host.strip() for host in hosts.split(',')]

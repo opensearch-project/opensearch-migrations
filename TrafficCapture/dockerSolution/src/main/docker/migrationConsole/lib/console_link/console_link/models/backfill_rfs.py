@@ -1,5 +1,6 @@
 from datetime import datetime
 from typing import Dict, Optional
+import json
 
 import requests
 
@@ -107,7 +108,7 @@ class ECSRFSBackfill(RFSBackfill):
         logger.info(f"Scaling RFS backfill by setting desired count to {units} instances")
         return self.ecs_client.set_desired_count(units)
 
-    def get_status(self, deep_check, *args, **kwargs) -> CommandResult:
+    def get_status(self, deep_check: bool, *args, **kwargs) -> CommandResult:
         logger.info(f"Getting status of RFS backfill, with {deep_check=}")
         instance_statuses = self.ecs_client.get_instance_statuses()
         if not instance_statuses:
@@ -168,8 +169,6 @@ class ECSRFSBackfill(RFSBackfill):
         logger.info(f"Values: {values}")
         if None in values.values():
             logger.warning(f"Failed to get values for some queries: {values}")
-            return "\n".join([f"Shards {key}: {value}" for key, value in values.items() if value is not None])
-
         disclaimer = "This may be transient because of timing of executing the queries or indicate an issue" +\
             " with the queries or the working state index"
         # Check the various sums to make sure things add up correctly.
@@ -180,12 +179,13 @@ class ECSRFSBackfill(RFSBackfill):
             logger.warning(f"Unclaimed ({values['unclaimed']}) and in progress ({values['in progress']}) shards do not"
                            f" sum to the incomplete ({values['incomplete']}) shards." + disclaimer)
 
-        return "\n".join([f"Shards {key}: {value}" for key, value in values.items()])
+        return "\n".join([f"Shards {key}: {value}" for key, value in values.items() if value is not None])
 
 
 def parse_query_response(query: dict, cluster: Cluster, label: str) -> Optional[int]:
     try:
-        response = cluster.call_api("/.migrations_working_state/_search", data=query)
+        response = cluster.call_api("/.migrations_working_state/_search", data=json.dumps(query),
+                                    headers={'Content-Type': 'application/json'})
     except Exception as e:
         logger.error(f"Failed to execute query: {e}")
         return None

@@ -2,10 +2,9 @@ import logging
 import pytest
 import unittest
 from http import HTTPStatus
-from console_link.logic.clusters import run_test_benchmarks, connection_check, clear_indices, ConnectionResult
+from console_link.middleware.clusters import run_test_benchmarks, connection_check, clear_indices, ConnectionResult
 from console_link.models.cluster import Cluster
 from console_link.models.backfill_base import Backfill
-from console_link.models.backfill_rfs import RFSBackfill
 from console_link.models.command_result import CommandResult
 from console_link.models.snapshot import Snapshot
 from console_link.models.metadata import Metadata
@@ -51,19 +50,16 @@ def setup_backfill(request):
     assert backfill is not None
     metadata: Metadata = pytest.console_env.metadata
     assert metadata is not None
+
     backfill.create()
-    if isinstance(backfill, RFSBackfill):
-        snapshot: Snapshot = pytest.console_env.snapshot
-        status_result: CommandResult = snapshot.status()
-        if status_result.success:
-            snapshot.delete()
-        snapshot.create(wait=True)
-        metadata.migrate()
-        backfill.start()
-        backfill.scale(units=10)
-    else:
-        metadata.migrate()
-        backfill.start()
+    snapshot: Snapshot = pytest.console_env.snapshot
+    status_result: CommandResult = snapshot.status()
+    if status_result.success:
+        snapshot.delete()
+    snapshot.create(wait=True)
+    metadata.migrate()
+    backfill.start()
+    backfill.scale(units=10)
 
 
 @pytest.fixture(scope="session", autouse=True)

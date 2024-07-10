@@ -33,6 +33,8 @@ RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 COPY loadServicesFromParameterStore.sh /root/
 RUN chmod ug+x /root/loadServicesFromParameterStore.sh
 
+RUN apt-get install -y pkg-config libhdf5-dev
+
 COPY lib /root/lib
 WORKDIR /root/lib/console_link
 RUN pipenv install --system --deploy --ignore-pipfile
@@ -40,14 +42,16 @@ WORKDIR /root/lib/integ_test
 RUN pipenv install --system --deploy --ignore-pipfile
 
 
-# Experimental console API, not started by default
 COPY console_api /root/console_api
 WORKDIR /root/console_api
 RUN pipenv install --system --deploy --ignore-pipfile
+
 WORKDIR /root
-#CMD pipenv run python manage.py runserver_plus 0.0.0.0:8000
 
 # Ensure bash completion is installed
 RUN apt-get install -y bash-completion
 
-CMD /root/loadServicesFromParameterStore.sh && tail -f /dev/null
+ CMD /root/loadServicesFromParameterStore.sh && tail -f /dev/null
+
+# Experimental console API, uncomment to use in addition to uncomment port mapping in docker-compose.yml
+# CMD /root/loadServicesFromParameterStore.sh && python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt

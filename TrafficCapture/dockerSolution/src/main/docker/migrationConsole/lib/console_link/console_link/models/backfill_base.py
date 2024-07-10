@@ -1,5 +1,5 @@
 from enum import Enum
-from typing import Dict
+from typing import Dict, Tuple
 from abc import ABC, abstractmethod
 
 from console_link.models.schema_tools import contains_one_of
@@ -33,29 +33,29 @@ class Backfill(ABC):
             raise ValueError("Invalid config file for backfill", v.errors)
 
     @abstractmethod
-    def create(self, *args, **kwargs) -> CommandResult:
+    def create(self, *args, **kwargs) -> CommandResult[str]:
         """If necessary, create/deploy the backfill mechanism iteslf. After create succesfully completes,
         the backfill should be ready to start."""
         pass
 
     @abstractmethod
-    def start(self, *args, **kwargs) -> CommandResult:
+    def start(self, *args, **kwargs) -> CommandResult[str]:
         """Begin running the backfill. After running start, the user should be able to assume that--barring exceptions
         or failures--their data will begin moving to the target cluster."""
         pass
 
     @abstractmethod
-    def stop(self, *args, **kwargs) -> CommandResult:
+    def stop(self, *args, **kwargs) -> CommandResult[str]:
         """Stop or pause the backfill. This does not make guarantees about resumeability."""
         pass
 
     @abstractmethod
-    def get_status(self, *args, **kwargs) -> CommandResult:
+    def get_status(self, *args, **kwargs) -> CommandResult[Tuple[BackfillStatus, str]]:
         """Return a status"""
         pass
 
     @abstractmethod
-    def scale(self, units: int, *args, **kwargs) -> CommandResult:
+    def scale(self, units: int, *args, **kwargs) -> CommandResult[str]:
         pass
 
     def describe(self) -> Dict:

@@ -1,7 +1,6 @@
 plugins {
     id 'application'
     id 'java'
-    id 'jacoco'
     id 'io.freefair.lombok' version '8.6'
     id "com.avast.gradle.docker-compose" version "0.17.4"
     id 'com.bmuschko.docker-remote-api'
@@ -68,14 +67,6 @@ application {
 // Cleanup additional docker build directory
 clean.doFirst {
     delete project.file("./docker/build")
-}
-
-// Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
-tasks.register('copyDependencies', Sync) {
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-
-    from configurations.runtimeClasspath
-    into "${buildDir}/dependencies"
 }
 
 task copyDockerRuntimeJars (type: Sync) {
@@ -167,10 +158,6 @@ task slowTest(type: Test) {
     }
 }
 
-jacocoTestReport {
+tasks.named('jacocoTestReport').configure {
     dependsOn slowTest
-    reports {
-        html.required = true
-        html.destination file("${buildDir}/reports/jacoco/test/html")
-    }
 }

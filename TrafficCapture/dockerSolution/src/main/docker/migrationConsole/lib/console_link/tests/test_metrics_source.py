@@ -1,16 +1,18 @@
 import json
 import pathlib
 
-import requests
-from console_link.models.metrics_source import MetricsSource, CloudwatchMetricsSource, PrometheusMetricsSource, \
-    MetricStatistic, Component
-from console_link.logic.metrics import get_metrics_source, UnsupportedMetricsSourceError
-import pytest
-import requests_mock
-
 import botocore.session
+import pytest
+import requests
+import requests_mock
 from botocore.stub import Stubber
 
+from console_link.models.factories import (UnsupportedMetricsSourceError,
+                                           get_metrics_source)
+from console_link.models.metrics_source import (CloudwatchMetricsSource,
+                                                Component, MetricsSource,
+                                                MetricStatistic,
+                                                PrometheusMetricsSource)
 from console_link.models.utils import AWSAPIError
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
@@ -114,7 +116,9 @@ def test_cloudwatch_metrics_get_metrics_error(cw_ms, cw_stubber):
 
 # This one doesn't serialize to json nicely because of the datetime objects
 import datetime
+
 from dateutil.tz import tzutc  # type: ignore
+
 cw_get_metric_data = {
     'Messages': [],
     'MetricDataResults': [

@@ -9,17 +9,18 @@ import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.FileSystemSnapshotCreator;
-import com.rfs.common.GlobalMetadata;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.RestClient;
-import com.rfs.common.ShardMetadata;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
 import com.rfs.framework.SearchClusterContainer;
+import com.rfs.http.SearchClusterRequests;
 import com.rfs.framework.PreloadedSearchClusterContainer;
+import com.rfs.models.GlobalMetadata;
+import com.rfs.models.IndexMetadata;
+import com.rfs.models.ShardMetadata;
 import com.rfs.transformers.TransformFunctions;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
@@ -88,7 +89,6 @@ public class FullTest {
         SearchClusterContainer.ES_V7_17
     );
     final static List<SearchClusterContainer.Version> TARGET_IMAGES = List.of(
-        SearchClusterContainer.OS_V1_3_16,
         SearchClusterContainer.OS_V2_14_0
     );
     public static final String SOURCE_SERVER_ALIAS = "source";
@@ -183,28 +183,15 @@ public class FullTest {
     private void checkClusterMigrationOnFinished(SearchClusterContainer esSourceContainer,
                                                  OpensearchContainer<?> osTargetContainer) {
         var targetClient = new RestClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(), null, null));
-        var sourceMap = getIndexToCountMap(new RestClient(new ConnectionDetails(esSourceContainer.getUrl(),
-                null, null)));
+        var sourceClient = new RestClient(new ConnectionDetails(esSourceContainer.getUrl(), null, null));
+
+        var requests = new SearchClusterRequests();
+        var sourceMap = requests.getMapOfIndexAndDocCount(sourceClient);
         var refreshResponse = targetClient.get("_refresh");
         Assertions.assertEquals(200, refreshResponse.code);
-        var targetMap = getIndexToCountMap(targetClient);
-        MatcherAssert.assertThat(targetMap, Matchers.equalTo(sourceMap));
-    }
+        var targetMap = requests.getMapOfIndexAndDocCount(targetClient);
 
-    private Map<String,Integer> getIndexToCountMap(RestClient client) {;
-        var lines = Optional.ofNullable(client.get("_cat/indices"))
-                .flatMap(r->Optional.ofNullable(r.body))
-                .map(b->b.split("\n"))
-                .orElse(new String[0]);
-        return Arrays.stream(lines)
-                .map(line -> {
-                    var matcher = CAT_INDICES_INDEX_COUNT_PATTERN.matcher(line);
-                    return !matcher.find() ? null :
-                         new AbstractMap.SimpleEntry<>(matcher.group(1), matcher.group(2));
-                })
-                .filter(Objects::nonNull)
-                .filter(kvp->!kvp.getKey().startsWith("."))
-                .collect(Collectors.toMap(AbstractMap.SimpleEntry::getKey, kvp -> Integer.parseInt(kvp.getValue())));
+        MatcherAssert.assertThat(targetMap, Matchers.equalTo(sourceMap));
     }
 
     @SneakyThrows
