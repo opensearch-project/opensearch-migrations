@@ -74,6 +74,7 @@ import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -123,6 +124,7 @@ public class FullTest {
                      String targetImageName, int numWorkers)
             throws Exception
     {
+        var executorService = Executors.newFixedThreadPool(numWorkers);
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
         final var testMetadataMigrationContext = MetadataMigrationTestContext.factory().noOtelTracking();
         final var workCoordinationContext = WorkCoordinationTestContext.factory().noOtelTracking();
@@ -131,10 +133,12 @@ public class FullTest {
 
         try (var esSourceContainer = new PreloadedSearchClusterContainer(baseSourceImageVersion,
                 SOURCE_SERVER_ALIAS, generatorImage, generatorArgs);
-             OpensearchContainer<?> osTargetContainer = new OpensearchContainer<>(targetImageName))
-        {
-            esSourceContainer.start();
-            osTargetContainer.start();
+             OpensearchContainer<?> osTargetContainer =
+                     new OpensearchContainer<>(targetImageName)) {
+            CompletableFuture.allOf(
+                CompletableFuture.supplyAsync(()->{ esSourceContainer.start(); return null; }, executorService),
+                CompletableFuture.supplyAsync(()->{ osTargetContainer.start(); return null; }, executorService))
+                    .join();
 
             final var SNAPSHOT_NAME = "test_snapshot";
             final List<String> INDEX_ALLOWLIST = List.of();
@@ -154,10 +158,12 @@ public class FullTest {
                 var workerFutures = new ArrayList<CompletableFuture<Void>>();
                 var runCounter = new AtomicInteger();
                 final var clockJitter = new Random(1);
+
                 for (int i = 0; i < numWorkers; ++i) {
                     workerFutures.add(CompletableFuture.supplyAsync(() ->
                             migrateDocumentsSequentially(sourceRepo, SNAPSHOT_NAME, INDEX_ALLOWLIST,
-                                    osTargetContainer.getHttpHostAddress(), runCounter, clockJitter, testDocMigrationContext)));
+                                    osTargetContainer.getHttpHostAddress(), runCounter, clockJitter, testDocMigrationContext),
+                            executorService));
                 }
                 var thrownException = Assertions.assertThrows(ExecutionException.class, () ->
                         CompletableFuture.allOf(workerFutures.toArray(CompletableFuture[]::new)).get());
@@ -187,6 +193,8 @@ public class FullTest {
             } finally {
                 deleteTree(tempDir);
             }
+        } finally {
+            executorService.shutdown();
         }
     }
 
@@ -347,8 +355,10 @@ public class FullTest {
                     SOURCE_SERVER_ALIAS, generatorImage, generatorArgs);
                 OpensearchContainer<?> osTargetContainer =
                         new OpensearchContainer<>(targetImageName)) {
-            esSourceContainer.start();
-            osTargetContainer.start();
+            CompletableFuture.allOf(
+                            CompletableFuture.supplyAsync(()->{ esSourceContainer.start(); return null; }),
+                            CompletableFuture.supplyAsync(()->{ osTargetContainer.start(); return null; }))
+                    .join();
 
             final var SNAPSHOT_NAME = "test_snapshot";
             final List<String> INDEX_ALLOWLIST = List.of();
