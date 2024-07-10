@@ -97,16 +97,16 @@ def osi_create_migration(request):
 @api_view(['POST'])
 @parser_classes([JSONParser])
 def osi_start_migration(request):
-    osi_update_workflow(request=request, osi_action_func=start_pipeline, action_name='Start')
+    return osi_update_workflow(request=request, osi_action_func=start_pipeline, action_name='Start')
 
 
 @api_view(['POST'])
 @parser_classes([JSONParser])
 def osi_stop_migration(request):
-    osi_update_workflow(request=request, osi_action_func=stop_pipeline, action_name='Stop')
+    return osi_update_workflow(request=request, osi_action_func=stop_pipeline, action_name='Stop')
 
 
 @api_view(['POST'])
 @parser_classes([JSONParser])
 def osi_delete_migration(request):
-    osi_update_workflow(request=request, osi_action_func=delete_pipeline, action_name='Delete')
+    return osi_update_workflow(request=request, osi_action_func=delete_pipeline, action_name='Delete')

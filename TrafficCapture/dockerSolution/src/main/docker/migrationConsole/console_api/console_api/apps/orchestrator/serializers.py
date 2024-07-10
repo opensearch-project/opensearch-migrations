@@ -10,7 +10,7 @@ class DataProviderSerializer(serializers.Serializer):
 
 class OpenSearchIngestionCreateRequestSerializer(serializers.Serializer):
     PipelineRoleArn = serializers.CharField(max_length=2048)
-    PipelineManagerAssumeRoleArn = serializers.CharField(max_length=2048)
+    PipelineManagerAssumeRoleArn = serializers.CharField(max_length=2048, required=False)
     PipelineName = serializers.CharField(max_length=28)
     AwsRegion = serializers.CharField(max_length=28)
     IndexRegexSelections = serializers.ListField(
