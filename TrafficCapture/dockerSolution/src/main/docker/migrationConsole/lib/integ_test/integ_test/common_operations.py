@@ -7,7 +7,7 @@ import logging
 from requests.exceptions import ConnectionError, SSLError
 from typing import Dict, List
 from unittest import TestCase
-from console_link.logic.clusters import call_api
+from console_link.middleware.clusters import call_api
 from console_link.models.cluster import HttpMethod, Cluster
 from console_link.models.replayer_base import Replayer, ReplayStatus
 

@@ -33,7 +33,7 @@ public class PartSliceStream extends InputStream {
     }
 
     private InputStream nextStream() throws IOException {
-        assert initialized == false || currentStream != null;
+        assert !initialized || currentStream != null;
         initialized = true;
 
         if (currentStream != null) {

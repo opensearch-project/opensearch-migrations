@@ -1,4 +1,5 @@
 import pytest
+
 from console_link.models.cluster import AuthMethod
 from console_link.models.metadata import Metadata
 from console_link.models.snapshot import FileSystemSnapshot, S3Snapshot

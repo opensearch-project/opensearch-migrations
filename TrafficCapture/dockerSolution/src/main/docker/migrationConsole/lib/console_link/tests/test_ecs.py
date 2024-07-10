@@ -1,13 +1,12 @@
 import json
 import pathlib
 
-import pytest
-
 import botocore.session
+import pytest
 from botocore.stub import Stubber
 
-from console_link.models.utils import AWSAPIError
 from console_link.models.ecs_service import ECSService, InstanceStatuses
+from console_link.models.utils import AWSAPIError
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 AWS_REGION = "us-east-1"

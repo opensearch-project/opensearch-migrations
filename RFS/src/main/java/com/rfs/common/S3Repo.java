@@ -79,11 +79,11 @@ public class S3Repo implements SourceRepo {
         ensureS3LocalDirectoryExists(localPath.getParent());
 
         if (doesFileExistLocally(localPath)) {
-            logger.debug("File already exists locally: " + localPath);
+            logger.debug("File already exists locally: {}", localPath);
             return;
         }
 
-        logger.info("Downloading file from S3: " + s3Uri.uri + " to " + localPath);
+        logger.info("Downloading file from S3: {} to {}", s3Uri.uri, localPath);
         GetObjectRequest getObjectRequest = GetObjectRequest.builder()
                 .bucket(s3Uri.bucketName)
                 .key(s3Uri.key)
@@ -190,7 +190,7 @@ public class S3Repo implements SourceRepo {
 
         String blobFilesS3Prefix = s3RepoUri.key + "indices/" + shardMetadata.getIndexId() + "/" + shardMetadata.getShardId() + "/";
 
-        logger.info("Downloading blob files from S3: s3://" + s3RepoUri.bucketName + "/" + blobFilesS3Prefix + " to " + shardDirPath);
+        logger.info("Downloading blob files from S3: s3://%s/%s to %s", s3RepoUri.bucketName, blobFilesS3Prefix, shardDirPath);
         DirectoryDownload directoryDownload = transferManager.downloadDirectory(
             DownloadDirectoryRequest.builder()
                 .destination(shardDirPath)

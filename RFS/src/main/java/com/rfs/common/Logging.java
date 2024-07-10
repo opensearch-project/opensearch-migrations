@@ -8,6 +8,8 @@ import org.apache.logging.log4j.core.config.Configuration;
 import org.apache.logging.log4j.Level;
 
 public class Logging {
+    private Logging() {}
+
     public static void setLevel(Level level) {
         LoggerContext ctx = (LoggerContext) LogManager.getContext(false);
         Configuration config = ctx.getConfiguration();

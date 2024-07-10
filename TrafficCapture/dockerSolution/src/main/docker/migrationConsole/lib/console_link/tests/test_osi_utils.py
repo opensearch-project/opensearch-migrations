@@ -1,13 +1,16 @@
+import os
 from pathlib import Path
-from botocore.stub import Stubber, ANY
+
 import botocore.session
 import pytest
-import os
+from botocore.stub import ANY, Stubber
 
-from console_link.models.osi_utils import (construct_pipeline_config, create_pipeline_from_json,
-                                           create_pipeline_from_env, InvalidAuthParameters,
-                                           OpenSearchIngestionMigrationProps)
 from console_link.models.cluster import AuthMethod
+from console_link.models.osi_utils import (InvalidAuthParameters,
+                                           OpenSearchIngestionMigrationProps,
+                                           construct_pipeline_config,
+                                           create_pipeline_from_env,
+                                           create_pipeline_from_json)
 from tests.utils import create_valid_cluster
 
 PIPELINE_TEMPLATE_PATH = f"{Path(__file__).parents[3]}/osiPipelineTemplate.yaml"

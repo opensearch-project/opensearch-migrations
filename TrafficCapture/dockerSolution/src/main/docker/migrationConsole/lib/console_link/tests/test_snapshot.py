@@ -1,11 +1,15 @@
-from console_link.models.snapshot import S3Snapshot, FileSystemSnapshot, Snapshot
-from console_link.environment import get_snapshot
-from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
-from console_link.logic import snapshot as snapshot_logic
-from tests.utils import create_valid_cluster
-import pytest
 import unittest.mock as mock
+
+import pytest
+
+from console_link.middleware import snapshot as snapshot_
+from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
+from console_link.models.factories import (UnsupportedSnapshotError,
+                                           get_snapshot)
+from console_link.models.snapshot import (FileSystemSnapshot, S3Snapshot,
+                                          Snapshot)
+from tests.utils import create_valid_cluster
 
 
 @pytest.fixture
@@ -82,7 +86,7 @@ def test_s3_snapshot_status_full(s3_snapshot, mock_cluster):
     }
     mock_cluster.call_api.return_value = mock_response
 
-    result = snapshot_logic.status(snapshot=s3_snapshot, deep_check=True)
+    result = snapshot_.status(snapshot=s3_snapshot, deep_check=True)
 
     assert isinstance(result, CommandResult)
     assert result.success
@@ -165,9 +169,10 @@ def test_get_snapshot_fails_for_invalid_config():
             },
         }
     }
-    with pytest.raises(ValueError) as excinfo:
+    with pytest.raises(UnsupportedSnapshotError) as excinfo:
         get_snapshot(config["snapshot"], create_valid_cluster())
-    assert "Invalid config file for snapshot" in str(excinfo.value.args[0])
+    assert "Unsupported snapshot type" in excinfo.value.args[0]
+    assert "invalid" in excinfo.value.args[1]
 
 
 def test_get_snpashot_fails_for_config_with_fs_and_s3():

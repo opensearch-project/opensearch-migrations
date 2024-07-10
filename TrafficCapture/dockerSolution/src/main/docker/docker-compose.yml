@@ -105,6 +105,9 @@ services:
       - MIGRATION_KAFKA_BROKER_ENDPOINTS=kafka:9092
       - AWS_PROFILE=default
 #    command: ./runTestBenchmarks.sh
+#    Uncomment below to enable Migration Console API in addition to enable in Dockerfile
+#    ports:
+#      - "8000:8000"
 
 
 volumes:

@@ -1,10 +1,11 @@
 import pathlib
 
+import pytest
+
 from console_link.environment import Environment
 from console_link.models.backfill_base import Backfill
 from console_link.models.cluster import Cluster
 from console_link.models.metrics_source import MetricsSource
-import pytest
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 VALID_SERVICES_YAML = TEST_DATA_DIRECTORY / "services.yaml"
