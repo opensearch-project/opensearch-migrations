@@ -7,12 +7,12 @@ import java.net.URISyntaxException;
  * Stores the connection details (assuming basic auth) for an Elasticsearch/OpenSearch cluster
  */
 public class ConnectionDetails {
-    public static enum AuthType {
+    public enum AuthType {
         BASIC,
         NONE
     }
 
-    public static enum Protocol {
+    public enum Protocol {
         HTTP,
         HTTPS
     }
