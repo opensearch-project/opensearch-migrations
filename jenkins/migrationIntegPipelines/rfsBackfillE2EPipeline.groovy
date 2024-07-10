@@ -61,5 +61,6 @@ defaultIntegPipeline(
         migrationContextId: migrationContextId,
         gitUrl: gitUrl,
         gitBranch: gitBranch,
-        stageId: stageId
+        stageId: stageId,
+        skipCaptureProxyOnNodeSetup: true
 )

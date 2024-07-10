@@ -51,7 +51,7 @@ WORKDIR /root
 # Ensure bash completion is installed
 RUN apt-get install -y bash-completion
 
- CMD /root/loadServicesFromParameterStore.sh && tail -f /dev/null
+CMD /root/loadServicesFromParameterStore.sh && tail -f /dev/null
 
 # Experimental console API, uncomment to use in addition to uncomment port mapping in docker-compose.yml
 # CMD /root/loadServicesFromParameterStore.sh && python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt

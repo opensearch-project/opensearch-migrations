@@ -1,10 +1,10 @@
 def call(Map config = [:]) {
-    def source_cdk_context = config.sourceContext
-    def migration_cdk_context = config.migrationContext
-    if(source_cdk_context == null || source_cdk_context.isEmpty()){
+    def sourceContext = config.sourceContext
+    def migrationContext = config.migrationContext
+    if(sourceContext == null || sourceContext.isEmpty()){
         throw new RuntimeException("The sourceContext argument must be provided");
     }
-    if(migration_cdk_context == null || migration_cdk_context.isEmpty()){
+    if(migrationContext == null || migrationContext.isEmpty()){
         throw new RuntimeException("The migrationContext argument must be provided");
     }
     def source_context_id = config.sourceContextId ?: 'source-single-node-ec2'
@@ -14,6 +14,7 @@ def call(Map config = [:]) {
     def stageId = config.stageId ?: 'aws-integ'
     def source_context_file_name = 'sourceJenkinsContext.json'
     def migration_context_file_name = 'migrationJenkinsContext.json'
+    def skipCaptureProxyOnNodeSetup = config.skipCaptureProxyOnNodeSetup ?: false
     pipeline {
         agent { label config.workerAgent ?: 'Jenkins-Default-Agent-X64-C5xlarge-Single-Host' }
 
@@ -32,9 +33,9 @@ def call(Map config = [:]) {
 
             stage('Setup E2E CDK Context') {
                 steps {
-                    writeFile (file: "test/$source_context_file_name", text: source_cdk_context)
+                    writeFile (file: "test/$source_context_file_name", text: sourceContext)
                     sh "echo 'Using source context file options: ' && cat test/$source_context_file_name"
-                    writeFile (file: "test/$migration_context_file_name", text: migration_cdk_context)
+                    writeFile (file: "test/$migration_context_file_name", text: migrationContext)
                     sh "echo 'Using migration context file options: ' && cat test/$migration_context_file_name"
                 }
             }
@@ -58,7 +59,11 @@ def call(Map config = [:]) {
                                 } else {
                                     sh 'sudo usermod -aG docker $USER'
                                     sh 'sudo newgrp docker'
-                                    sh "sudo ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' --migration-context-file './$migration_context_file_name' --source-context-id $source_context_id --migration-context-id $migration_context_id --stage ${stageId} --migrations-git-url ${gitUrl} --migrations-git-branch ${gitBranch}"
+                                    def baseCommand = "sudo ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' --migration-context-file './$migration_context_file_name' --source-context-id $source_context_id --migration-context-id $migration_context_id --stage ${stageId} --migrations-git-url ${gitUrl} --migrations-git-branch ${gitBranch}"
+                                    if (skipCaptureProxyOnNodeSetup) {
+                                        baseCommand += " --skip-capture-proxy"
+                                    }
+                                    sh baseCommand
                                 }
                             }
                         }
