@@ -1,4 +1,3 @@
-import os
 from pathlib import Path
 
 import botocore.session
@@ -9,6 +8,7 @@ from console_link.models.osi_utils import (InvalidAuthParameters,
                                            construct_pipeline_config,
                                            create_pipeline_from_env,
                                            create_pipeline_from_json,
+                                           delete_pipeline,
                                            get_assume_role_session,
                                            start_pipeline,
                                            stop_pipeline)
@@ -47,8 +47,6 @@ def osi_client_stubber():
 
 
 def test_construct_config_sigv4_source_and_sigv4_target():
-    cwd = os.getcwd()
-    print(cwd)
     generated_config = construct_pipeline_config(
         pipeline_config_file_path=PIPELINE_TEMPLATE_PATH,
         source_endpoint=SOURCE_ENDPOINT,

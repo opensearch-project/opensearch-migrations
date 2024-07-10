@@ -1,9 +1,7 @@
-from django.test import TestCase, Client, SimpleTestCase
+from django.test import Client, SimpleTestCase
 from moto import mock_aws
 from rest_framework import status
 from unittest.mock import patch
-from console_api.apps.orchestrator.views import (osi_create_migration, osi_start_migration,
-                                                 osi_stop_migration, osi_delete_migration)
 
 
 VALID_CREATE_PAYLOAD = {
@@ -40,6 +38,7 @@ class OrchestratorViewsTest(SimpleTestCase):
     def setUp(self):
         self.client = Client()
 
+    @mock_aws
     @patch('console_api.apps.orchestrator.views.create_pipeline_from_json')
     def test_osi_create_migration(self, mock_create_pipeline_from_json):
         mock_create_pipeline_from_json.return_value = None
@@ -61,6 +60,7 @@ class OrchestratorViewsTest(SimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('Timestamp', response.data)
 
+    @mock_aws
     @patch('console_api.apps.orchestrator.views.create_pipeline_from_json')
     def test_osi_create_migration_fails_for_missing_field(self, mock_create_pipeline_from_json):
         mock_create_pipeline_from_json.return_value = None
@@ -71,6 +71,7 @@ class OrchestratorViewsTest(SimpleTestCase):
                                     content_type='application/json')
         self.assertEqual(response.status_code, status.HTTP_400_BAD_REQUEST)
 
+    @mock_aws
     @patch('console_api.apps.orchestrator.views.start_pipeline')
     def test_osi_start_migration(self, mock_start_pipeline):
         mock_start_pipeline.return_value = None
@@ -92,6 +93,7 @@ class OrchestratorViewsTest(SimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('Timestamp', response.data)
 
+    @mock_aws
     @patch('console_api.apps.orchestrator.views.stop_pipeline')
     def test_osi_stop_migration(self, mock_stop_pipeline):
         mock_stop_pipeline.return_value = None
@@ -113,6 +115,7 @@ class OrchestratorViewsTest(SimpleTestCase):
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertIn('Timestamp', response.data)
 
+    @mock_aws
     @patch('console_api.apps.orchestrator.views.delete_pipeline')
     def test_osi_delete_migration(self, mock_delete_pipeline):
         mock_delete_pipeline.return_value = None
