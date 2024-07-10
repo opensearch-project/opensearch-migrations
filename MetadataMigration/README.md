@@ -35,6 +35,181 @@ Inspect the transformation logs (tuple logs), or run queries against the live ta
 
 ## Walkthrough
 
+### Basic source cluster inspection
+
+#### Configure meta to connect to the source cluster
+```
+console meta configure -source \
+    --source-host http://localhost:19200 \
+    --source-username admin \
+    --source-password admin \
+
+Result:
+   OK - able to connect to source cluster
+```
+
+#### Evaluate the migration status
+```
+console meta evaluate
+
+Source Cluster:
+   Version: Elasticsearch 7.10.21
+   Url: http://localhost:9200
+   WARN - Elasticsearch 7.10.21 is specifically supported, will attempt to migrate with as if Elasticsearch 7.10.28
+
+Indexes:
+   geonames, logs-181998, logs-191998, logs-201998, logs-211998
+   INFO - 12 More not shown, use add `--full` to see all results
+
+Index Templates:
+   daily_logs
+
+Component Templates:
+   <None Found>
+
+Aliases:
+   logs-all
+
+Result:
+   1 migration issues detected
+
+Issues:
+   No target cluster / target version specified, add with `console meta configure -target`
+```
+
+
+#### Evaluate the migration status with full details
+```
+console meta evaluate --full
+
+Source Cluster:
+    Version: Elasticsearch 7.10.21
+    Url: http://localhost:9200
+
+Indexes:
+   geonames, logs-181998, logs-191998, logs-201998, logs-211998, logs-221998, logs-231998, logs-241998, nyc_taxis, reindexed-logs, sonested
+...
+```
+
+### Evaluate with transformation details
+
+#### Configure meta to connect to the target cluster
+```
+console meta configure -target \
+    --source-host http://localhost:19200 \
+    --source-username admin \
+    --source-password admin \
+
+Result:
+   OK - able to connect to target cluster
+```
+
+#### Evaluate the migration status
+```
+console meta evaluate
+
+Source Cluster:
+   Version: Elasticsearch 7.10.21
+   Url: http://localhost:9200
+   WARN - Elasticsearch 7.10.21 is not specifically supported, will attempt to migrate with as if Elasticsearch 7.10.28
+
+Target Cluster:
+   Version: OpenSearch 2.11.0
+   Url: http://localhost:19200
+
+Indexes:
+   geonames, logs-181998, logs-191998, logs-201998, logs-211998
+   INFO - 12 More not shown, add `--full` to see all results
+
+Index Templates:
+   daily_logs
+
+Component Templates:
+   <None Found>
+
+Aliases:
+   logs-all
+
+Transformations:
+   Index:
+      ERROR - IndexMappingTypeRemoval is Unsupported on Index `logs-181998` "Multiple mapping types are not supported""
+   Index Template:
+      ERROR - IndexMappingTypeRemoval is Unsupported on Index Template `daily_logs` "Multiple mapping types are not supported"
+   DEBUG - 6 transformations did not apply, add --`full` to see all results
+
+Result:
+   2 migration issues detected
+
+Issues:
+   IndexMappingTypeRemoval is Unsupported on Index `logs-181998` "Multiple mapping types are not supported""
+   IndexMappingTypeRemoval is Unsupported on Index Template `daily_logs` "Multiple mapping types are not supported"
+```
+### Adjust meta not to migrate rolling logs indices
+
+#### Configure meta to only allow certain indexes
+```
+console meta configure -index \
+   --allow-list geonames, nyc_taxis, sonested
+
+Result:
+    Ok - allow-list is geonames, nyc_taxis, sonested
+```
+
+#### Configure meta to deny the incompatible template
+```
+console meta configure -index-template \
+   --deny-list daily_logs
+
+Result:
+    Ok - deny-list is daily_logs
+```
+
+#### Evaluate meta with the updated configuration 
+```
+console meta evaluate
+
+Clusters:
+   Source:
+      Version: Elasticsearch 7.10.21
+      Url: http://localhost:9200
+      WARN - Elasticsearch 7.10.21 is not specifically supported, will attempt to migrate with as if Elasticsearch 7.10.28
+
+   Target:
+      Version: OpenSearch 2.11.0
+      Url: http://localhost:19200
+
+Migration Candidates:
+   Indexes:
+      geonames, nyc_taxis, sonested
+      INFO - 5 items excluded due to allow and/or deny list
+
+   Index Templates:
+      INFO - 1 items excluded due to allow and/or deny list
+
+   Component Templates:
+      <None Found>
+
+   Aliases:
+      logs-all
+
+Transformations:
+   Index:
+      IndexMappingTypeRemoval - Will Apply - Learn more http://kb.migrations.opensearch.org/1001/
+   Index Template:
+      IndexMappingTypeRemoval - Will Apply - Learn more http://kb.migrations.opensearch.org/1001/
+   DEBUG - 5 transformations did not apply, add --`full` to see all results
+
+Result:
+   No migration issues detected
+```
+
+
+```
+
+```
+
+
+
 ```
 console meta (evaluate | verify | deploy) \
 
