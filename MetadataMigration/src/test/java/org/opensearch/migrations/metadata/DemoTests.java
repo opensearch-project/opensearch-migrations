@@ -4,7 +4,8 @@ import java.util.List;
 import java.util.Map;
 
 import org.hamcrest.Matcher;
-
+import org.junit.Test;
+import org.junit.jupiter.api.Disabled;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.transformation.CanApplyResult;
 
@@ -26,6 +27,8 @@ public class DemoTests {
 
     private Meta meta = new Meta();
 
+    @Test
+    @Disabled
     @SneakyThrows
     public void evaluate_noTarget_issuesFound() {
         try (var sourceClusterContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2)) {
@@ -70,6 +73,8 @@ public class DemoTests {
         }
     }
 
+    @Test
+    @Disabled
     @SneakyThrows
     public void evaluate_withTarget_issuesFound() {
         try (
@@ -116,6 +121,8 @@ public class DemoTests {
         }
     }
 
+    @Test
+    @Disabled
     public void evaluate_success() {
         try (
             var sourceClusterContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
@@ -145,6 +152,8 @@ public class DemoTests {
         }
     }
 
+    @Test
+    @Disabled
     public void migrate_success() {
         try (
             var sourceClusterContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
