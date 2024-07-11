@@ -1,6 +1,6 @@
-package src.org.opensearch.migrations;
+package org.opensearch.migrations;
 
-import org.apache.logging.log4j.core.parser.ParseException;
+import java.text.ParseException;
 
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -36,7 +36,7 @@ public class Version {
         }
 
         if (remainingString.equals(raw.toLowerCase())) {
-            throw new ParseException("Unable to determine build flavor from '" + raw +"'");
+            throw new ParseException("Unable to determine build flavor from '" + raw +"'", 0);
         }
 
         try {
@@ -57,7 +57,7 @@ public class Version {
             }
             return builder.build();
         } catch (Exception e) {
-            throw new ParseException("Unable to parse version numbers from the string '" + raw + "'", e);
+            throw new ParseException("Unable to parse version numbers from the string '" + raw + "': " + e.getMessage(), 0);
         }
     }
 }

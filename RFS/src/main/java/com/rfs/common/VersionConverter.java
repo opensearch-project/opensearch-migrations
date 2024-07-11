@@ -1,11 +1,11 @@
 package com.rfs.common;
 
-import org.apache.logging.log4j.core.parser.ParseException;
+import java.text.ParseException;
+
+import org.opensearch.migrations.Version;
 
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.converters.BaseConverter;
-
-import src.org.opensearch.migrations.Version;
 
 public class VersionConverter extends BaseConverter<Version> {
 

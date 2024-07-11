@@ -1,4 +1,4 @@
-package src.org.opensearch.migrations;
+package org.opensearch.migrations;
 
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;

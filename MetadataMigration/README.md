@@ -54,9 +54,9 @@ console meta evaluate
 
 Clusters:
    Source:
-      Version: Elasticsearch 7.10.21
+      Version: Elasticsearch 7.10.2
       Url: http://localhost:9200
-      WARN - Elasticsearch 7.10.21 is specifically supported, will attempt to migrate with as if Elasticsearch 7.10.28
+      WARN - Elasticsearch 7.10.2 is not specifically supported, will attempt to migrate with as if Elasticsearch 7.17.22
 
 Migration Candidates:
    Indexes:
@@ -86,7 +86,7 @@ console meta evaluate --full
 
 Clusters:
    Source:
-      Version: Elasticsearch 7.10.21
+      Version: Elasticsearch 7.10.2
       Url: http://localhost:9200
 
 Migration Candidates:
@@ -114,9 +114,9 @@ console meta evaluate
 
 Clusters:
    Source:
-      Version: Elasticsearch 7.10.21
+      Version: Elasticsearch 7.10.2
       Url: http://localhost:9200
-      WARN - Elasticsearch 7.10.21 is not specifically supported, will attempt to migrate with as if Elasticsearch 7.10.28
+      WARN - Elasticsearch 7.10.2 is not specifically supported, will attempt to migrate with as if Elasticsearch 7.17.22
 
    Target:
       Version: OpenSearch 2.11.0
@@ -177,9 +177,9 @@ console meta evaluate
 
 Clusters:
    Source:
-      Version: Elasticsearch 7.10.21
+      Version: Elasticsearch 7.10.2
       Url: http://localhost:9200
-      WARN - Elasticsearch 7.10.21 is not specifically supported, will attempt to migrate with as if Elasticsearch 7.10.28
+      WARN - Elasticsearch 7.10.2 is not specifically supported, will attempt to migrate with as if Elasticsearch 7.17.22
 
    Target:
       Version: OpenSearch 2.11.0
@@ -191,6 +191,7 @@ Migration Candidates:
       INFO - 5 items excluded due to allow and/or deny list
 
    Index Templates:
+      <None Found>
       INFO - 1 items excluded due to allow and/or deny list
 
    Component Templates:
@@ -203,13 +204,43 @@ Transformations:
    Index:
       IndexMappingTypeRemoval - Will Apply - Learn more http://kb.migrations.opensearch.org/1001/
 
-   Index Template:
-      IndexMappingTypeRemoval - Will Apply - Learn more http://kb.migrations.opensearch.org/1001/
-
-   DEBUG - 5 transformations did not apply, add --`full` to see all results
+   DEBUG - 6 transformations did not apply, add --`full` to see all results
 
 Result:
    No migration issues detected
+```
+
+### Deploy meta
+
+```
+console meta deploy \
+   --no-confirmation
+
+Clusters:
+   Source:
+      Version: Elasticsearch 7.10.2
+      Url: http://localhost:9200
+      WARN - Elasticsearch 7.10.2 is not specifically supported, will attempt to migrate with as if Elasticsearch 7.17.22
+
+   Target:
+      Version: OpenSearch 2.11.0
+      Url: http://localhost:19200
+
+Migrated Items:
+   Indexes:
+      geonames, nyc_taxis, sonested
+
+   Aliases:
+      logs-all
+
+Transformations:
+   Index:
+      IndexMappingTypeRemoval - Applied on 3 items
+
+Result:
+   No migration issues detected
+   INFO - See full deployment log at `/tmp/meta_deploy_1720710618.log`
+
 ```
 
 ## Design Details
@@ -225,7 +256,7 @@ The output of the meta tool is to provide a top-to-bottom list of what is releva
 ```
 Clusters:
    ...
-Migration Candidates:
+Migration Candidates | Migrated Items:
    ...
 Transformations:
    ...

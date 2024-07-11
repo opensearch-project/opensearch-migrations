@@ -1,8 +1,8 @@
 package com.rfs.common;
 
-import com.beust.jcommander.Parameter;
+import org.opensearch.migrations.Version;
 
-import src.org.opensearch.migrations.Version;
+import com.beust.jcommander.Parameter;
 
 public class TargetVersion {
     

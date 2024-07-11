@@ -1,4 +1,4 @@
-package src.org.opensearch.migrations;
+package org.opensearch.migrations;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
