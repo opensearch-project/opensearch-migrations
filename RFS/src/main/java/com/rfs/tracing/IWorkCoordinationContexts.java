@@ -20,7 +20,7 @@ public abstract class IWorkCoordinationContexts {
 
     public static class MetricNames {
         public static final String COORDINATION_INITIALIZATION_RETRIES = "workCoordinationInitRetries";
-        public static final String COORDINATION_FAILURE = "woorkCoordinationFailure";
+        public static final String COORDINATION_FAILURE = "workCoordinationFailure";
         public static final String NEXT_WORK_ASSIGNED = "nextWorkAssigned";
         public static final String NO_NEXT_WORK_AVAILABLE = "noNextWorkAvailable";
         public static final String RECOVERABLE_CLOCK_ERROR = "recoverableClockError";

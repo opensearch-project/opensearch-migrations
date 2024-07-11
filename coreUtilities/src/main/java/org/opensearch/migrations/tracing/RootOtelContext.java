@@ -33,8 +33,6 @@ public class RootOtelContext implements IRootOtelContext {
     private final OpenTelemetry openTelemetryImpl;
     private final String scopeName;
     @Getter
-    private final MetricInstruments metrics;
-    @Getter
     private final IContextTracker contextTracker;
 
     public static OpenTelemetry initializeOpenTelemetryForCollector(@NonNull String collectorEndpoint,
@@ -103,10 +101,9 @@ public class RootOtelContext implements IRootOtelContext {
         contextTracker.onContextClosed(newScopedContext);
     }
 
-    public static class MetricInstruments extends CommonMetricInstruments {
-        public MetricInstruments(Meter meter, String activityName) {
-            super(meter, activityName);
-        }
+    @Override
+    public CommonMetricInstruments getMetrics() {
+        return null;
     }
 
     public RootOtelContext(String scopeName, IContextTracker contextTracker) {
@@ -116,7 +113,6 @@ public class RootOtelContext implements IRootOtelContext {
     public RootOtelContext(String scopeName, IContextTracker contextTracker, OpenTelemetry sdk) {
         openTelemetryImpl = sdk != null ? sdk : initializeOpenTelemetryWithCollectorOrAsNoop(null, null);
         this.scopeName = scopeName;
-        this.metrics = new MetricInstruments(this.getMeterProvider().get(scopeName), "root");
         this.contextTracker = contextTracker;
     }
 

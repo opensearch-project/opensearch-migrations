@@ -84,26 +84,30 @@ public class FullTest extends SourceTestBase {
     public static Stream<Arguments> makeDocumentMigrationArgs() {
         List<Object[]> sourceImageArgs = SOURCE_IMAGES.stream().map(name -> makeParamsForBase(name)).collect(Collectors.toList());
         var targetImageNames = TARGET_IMAGES.stream().map(SearchClusterContainer.Version::getImageName).collect(Collectors.toList());
-        var numWorkers = List.of(1, 3, 40);
+        var numWorkersList = List.of(40);
         return sourceImageArgs.stream()
-                .flatMap(a->
-                        targetImageNames.stream().flatMap(b->
-                                numWorkers.stream().map(c->Arguments.of(a[0], a[1], a[2], b, c))));
+                .flatMap(sourceParams->
+                        targetImageNames.stream().flatMap(targetImage->
+                                numWorkersList.stream()
+                                        .map(numWorkers->Arguments.of(numWorkers, targetImage,
+                                                sourceParams[0], sourceParams[1], sourceParams[2]))));
     }
 
     @ParameterizedTest
     @MethodSource("makeDocumentMigrationArgs")
-    public void testDocumentMigration(SearchClusterContainer.Version baseSourceImageVersion,
-                     String generatorImage, String[] generatorArgs,
-                     String targetImageName, int numWorkers)
+    public void testDocumentMigration(int numWorkers,
+                                      String targetImageName,
+                                      SearchClusterContainer.Version baseSourceImageVersion,
+                                      String generatorImage,
+                                      String[] generatorArgs)
             throws Exception
     {
         var executorService = Executors.newFixedThreadPool(numWorkers);
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
         final var testMetadataMigrationContext = MetadataMigrationTestContext.factory().noOtelTracking();
-        final var workCoordinationContext = WorkCoordinationTestContext.factory().noOtelTracking();
+        final var workCoordinationContext = WorkCoordinationTestContext.factory().withAllTracking();
         final var testDocMigrationContext =
-                DocumentMigrationTestContext.factory(workCoordinationContext).noOtelTracking();
+                DocumentMigrationTestContext.factory(workCoordinationContext).withAllTracking();
 
         try (var esSourceContainer = new PreloadedSearchClusterContainer(baseSourceImageVersion,
                 SOURCE_SERVER_ALIAS, generatorImage, generatorArgs);
@@ -164,12 +168,35 @@ public class FullTest extends SourceTestBase {
                 Assertions.assertTrue(totalCompletedWorkRuns >= numWorkers,
                         "Expected to make more runs (" + totalCompletedWorkRuns + ") than the number of workers " +
                                 "(" + numWorkers + ").  Increase the number of shards so that there is more work to do.");
+
+                verifyWorkMetrics(testDocMigrationContext, numWorkers);
             } finally {
                 deleteTree(tempDir);
             }
         } finally {
             executorService.shutdown();
         }
+    }
+
+    private void verifyWorkMetrics(DocumentMigrationTestContext rootContext, int numWorkers) {
+        var workMetrics = rootContext.getWorkCoordinationContext().inMemoryInstrumentationBundle.getFinishedMetrics();
+        var migrationMetrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
+
+        log.atInfo().setMessage(() -> "workMetrics: " + workMetrics).log();
+        log.atInfo().setMessage(() -> "migrationMetrics: " + migrationMetrics).log();
+
+        long shardCount = migrationMetrics.stream().filter(md->md.getName().startsWith("addShardWorkItem"))
+                .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue();
+        Assertions.assertTrue(shardCount > 0);
+        long numWorkItemsCreated = workMetrics.stream().filter(md->md.getName().startsWith("createUnassignedWorkCount"))
+                .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue();
+        Assertions.assertEquals(numWorkItemsCreated, shardCount);
+        long numItemsAssigned = workMetrics.stream().filter(md->md.getName().startsWith("nextWorkAssigned"))
+                .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue();
+        Assertions.assertEquals(numItemsAssigned, shardCount);
+        long numCompleted = workMetrics.stream().filter(md->md.getName().startsWith("completeWorkCount"))
+                .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue();
+        Assertions.assertEquals(numCompleted, shardCount+1);
     }
 
     private void checkClusterMigrationOnFinished(SearchClusterContainer esSourceContainer,

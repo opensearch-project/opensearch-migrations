@@ -5,7 +5,6 @@ import com.rfs.cms.ScopedWorkCoordinator;
 import com.rfs.common.FilterScheme;
 import com.rfs.common.IndexMetadata;
 import com.rfs.common.SnapshotRepo;
-import com.rfs.tracing.RootWorkCoordinationContext;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import org.opensearch.migrations.reindexer.tracing.IRootDocumentMigrationContext;
 import lombok.Lombok;
@@ -47,7 +46,7 @@ public class ShardWorkPreparer {
                                      IndexMetadata.Factory metadataFactory,
                                      String snapshotName,
                                      List<String> indexAllowlist,
-                                     IDocumentMigrationContexts.IShardSetupContext context)
+                                     IDocumentMigrationContexts.IShardSetupAttemptContext context)
         throws IOException, InterruptedException
     {
         scopedWorkCoordinator.ensurePhaseCompletion(
@@ -66,7 +65,8 @@ public class ShardWorkPreparer {
                     }
 
                     @Override
-                    public Void onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException {
+                    public Void onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) {
+                        log.atInfo().setMessage(()->"Acquired work to set the shard workitems").log();
                         prepareShardWorkItems(scopedWorkCoordinator.workCoordinator, metadataFactory, snapshotName,
                                 indexAllowlist, context);
                         return null;
@@ -84,7 +84,7 @@ public class ShardWorkPreparer {
                                               IndexMetadata.Factory metadataFactory,
                                               String snapshotName,
                                               List<String> indexAllowlist,
-                                              IDocumentMigrationContexts.IShardSetupContext context) {
+                                              IDocumentMigrationContexts.IShardSetupAttemptContext context) {
         log.info("Setting up the Documents Work Items...");
         SnapshotRepo.Provider repoDataProvider = metadataFactory.getRepoDataProvider();
 
@@ -95,21 +95,20 @@ public class ShardWorkPreparer {
         };
         repoDataProvider.getIndicesInSnapshot(snapshotName).stream()
             .filter(FilterScheme.filterIndicesByAllowList(indexAllowlist, logger))
-            .peek(index -> {
+            .forEach(index -> {
                 IndexMetadata.Data indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
                 log.info("Index " + indexMetadata.getName() + " has " + indexMetadata.getNumberOfShards() + " shards");
                 IntStream.range(0, indexMetadata.getNumberOfShards()).forEach(shardId -> {
                     log.info("Creating Documents Work Item for index: " + indexMetadata.getName() + ", shard: " + shardId);
-                    try {
+                    try (var shardSetupContext = context.createShardWorkItemContext()) {
                         workCoordinator.createUnassignedWorkItem(
                                 IndexAndShard.formatAsWorkItemString(indexMetadata.getName(), shardId),
-                                context::createShardWorkItemContext);
+                                shardSetupContext::createUnassignedWorkItemContext);
                     } catch (IOException e) {
                         throw Lombok.sneakyThrow(e);
                     }
                 });
-            })
-            .count(); // Force the stream to execute
+            });
         
         log.info("Finished setting up the Documents Work Items.");
     }

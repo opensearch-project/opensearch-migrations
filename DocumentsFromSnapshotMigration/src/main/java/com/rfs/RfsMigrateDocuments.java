@@ -127,7 +127,7 @@ public class RfsMigrateDocuments {
         public Duration maxInitialLeaseDuration = Duration.ofMinutes(10);
 
         @Parameter(required = false,
-                names = {"--otelCollectorEndpoint"},
+                names = {"--otel-collector-endpoint"},
                 arity = 1,
                 description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be" +
                         "forwarded. If no value is provided, metrics will not be forwarded.")
@@ -168,13 +168,16 @@ public class RfsMigrateDocuments {
 
         validateArgs(arguments);
 
-
+        var compositeContextTracker =
+                new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType());
         var rootWorkCoordinationContext = new RootWorkCoordinationContext(
-                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "docMigrationCoordination"),
-                new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
+                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint,
+                        "docMigrationCoordination"),
+                compositeContextTracker);
         var rootDocumentContext = new RootDocumentMigrationContext(
-                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "docMigration"),
-                new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()),
+                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint,
+                        "docMigration"),
+                compositeContextTracker,
                 rootWorkCoordinationContext);
 
         var luceneDirPath = Paths.get(arguments.luceneDir);
@@ -183,11 +186,6 @@ public class RfsMigrateDocuments {
 
         try (var processManager = new LeaseExpireTrigger(workItemId->{
             log.error("Terminating RunRfsWorker because the lease has expired for " + workItemId);
-            try {
-                Thread.sleep(10);
-            } catch (InterruptedException e) {
-                throw new RuntimeException(e);
-            }
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC())) {
             var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(arguments.targetHost)),

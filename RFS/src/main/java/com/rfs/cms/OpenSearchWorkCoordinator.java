@@ -232,12 +232,14 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     createUnassignedWorkItem(String workItemId,
                              Supplier<IWorkCoordinationContexts.ICreateUnassignedWorkItemContext> contextSupplier)
             throws IOException {
-        var response = createOrUpdateLeaseForDocument(workItemId, 0);
-        try {
-            return getResult(response) == DocumentModificationResult.CREATED;
-        } catch (IllegalArgumentException e) {
-            log.error("Error parsing resposne: " + response);
-            throw e;
+        try (var ctx = contextSupplier.get()) {
+            var response = createOrUpdateLeaseForDocument(workItemId, 0);
+            try {
+                return getResult(response) == DocumentModificationResult.CREATED;
+            } catch (IllegalArgumentException e) {
+                log.error("Error parsing resposne: " + response);
+                throw e;
+            }
         }
     }
 
@@ -247,25 +249,28 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     createOrUpdateLeaseForWorkItem(String workItemId, Duration leaseDuration,
                                    Supplier<IWorkCoordinationContexts.IAcquireSpecificWorkContext> contextSupplier)
             throws IOException {
-        var startTime = Instant.now();
-        var updateResponse = createOrUpdateLeaseForDocument(workItemId, leaseDuration.toSeconds());
-        var resultFromUpdate = getResult(updateResponse);
+        try (var ctx = contextSupplier.get()) {
+            var startTime = Instant.now();
+            var updateResponse = createOrUpdateLeaseForDocument(workItemId, leaseDuration.toSeconds());
+            var resultFromUpdate = getResult(updateResponse);
 
-        if (resultFromUpdate == DocumentModificationResult.CREATED) {
-            return new WorkItemAndDuration(workItemId, startTime.plus(leaseDuration));
-        } else {
-            final var httpResponse = httpClient.makeJsonRequest(AbstractedHttpClient.GET_METHOD, INDEX_NAME + "/_doc/" + workItemId,
-                    null, null);
-            final var responseDoc = objectMapper.readTree(httpResponse.getPayloadStream()).path(SOURCE_FIELD_NAME);
-            if (resultFromUpdate == DocumentModificationResult.UPDATED) {
-                return new WorkItemAndDuration(workItemId, Instant.ofEpochMilli(1000 *
-                        responseDoc.path(EXPIRATION_FIELD_NAME).longValue()));
-            } else if (!responseDoc.path(COMPLETED_AT_FIELD_NAME).isMissingNode()) {
-                return new AlreadyCompleted();
-            } else if (resultFromUpdate == DocumentModificationResult.IGNORED) {
-                throw new LeaseLockHeldElsewhereException();
+            if (resultFromUpdate == DocumentModificationResult.CREATED) {
+                return new WorkItemAndDuration(workItemId, startTime.plus(leaseDuration));
             } else {
-               throw new IllegalStateException("Unknown result: " + resultFromUpdate);
+                final var httpResponse = httpClient.makeJsonRequest(AbstractedHttpClient.GET_METHOD,
+                        INDEX_NAME + "/_doc/" + workItemId,
+                        null, null);
+                final var responseDoc = objectMapper.readTree(httpResponse.getPayloadStream()).path(SOURCE_FIELD_NAME);
+                if (resultFromUpdate == DocumentModificationResult.UPDATED) {
+                    return new WorkItemAndDuration(workItemId, Instant.ofEpochMilli(1000 *
+                            responseDoc.path(EXPIRATION_FIELD_NAME).longValue()));
+                } else if (!responseDoc.path(COMPLETED_AT_FIELD_NAME).isMissingNode()) {
+                    return new AlreadyCompleted();
+                } else if (resultFromUpdate == DocumentModificationResult.IGNORED) {
+                    throw new LeaseLockHeldElsewhereException();
+                } else {
+                    throw new IllegalStateException("Unknown result: " + resultFromUpdate);
+                }
             }
         }
     }

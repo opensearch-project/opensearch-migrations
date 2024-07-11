@@ -6,6 +6,7 @@ import com.rfs.tracing.RfsContexts;
 import com.rfs.tracing.RootWorkCoordinationContext;
 import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
+import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.BaseSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
@@ -22,8 +23,8 @@ public class DocumentMigrationContexts extends IDocumentMigrationContexts {
         }
     }
 
-    public static class ShardSetupContext extends BaseDocumentMigrationContext implements IShardSetupContext {
-        protected ShardSetupContext(RootDocumentMigrationContext rootScope) {
+    public static class ShardSetupAttemptContext extends BaseDocumentMigrationContext implements IShardSetupAttemptContext {
+        protected ShardSetupAttemptContext(RootDocumentMigrationContext rootScope) {
             super(rootScope);
             initializeSpan(rootScope);
         }
@@ -40,7 +41,8 @@ public class DocumentMigrationContexts extends IDocumentMigrationContexts {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+
+                super(meter, activityNameForTheCountMetric(activityName));
             }
         }
 
@@ -64,9 +66,43 @@ public class DocumentMigrationContexts extends IDocumentMigrationContexts {
         }
 
         @Override
-        public IWorkCoordinationContexts.ICreateUnassignedWorkItemContext createShardWorkItemContext() {
-            return getWorkCoordinationRootContext().createUnassignedWorkContext(getEnclosingScope());
+        public IAddShardWorkItemContext createShardWorkItemContext() {
+            return new AddShardWorkItemContext(rootInstrumentationScope, this);
         }
+    }
+
+    public static class AddShardWorkItemContext
+            extends BaseNestedSpanContext<RootDocumentMigrationContext, IShardSetupAttemptContext>
+            implements IAddShardWorkItemContext {
+
+        protected AddShardWorkItemContext(RootDocumentMigrationContext rootScope, IShardSetupAttemptContext enclosingScope) {
+            super(rootScope, enclosingScope);
+            initializeSpan(rootScope);
+        }
+
+        @Override
+        public String getActivityName() { return ACTIVITY_NAME; }
+
+        public static class MetricInstruments extends CommonScopedMetricInstruments {
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityNameForTheCountMetric(activityName));
+            }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
+        }
+
+        @Override
+        public MetricInstruments getMetrics() {
+            return getRootInstrumentationScope().addShardWorkItemMetrics;
+        }
+
+        @Override
+        public IWorkCoordinationContexts.ICreateUnassignedWorkItemContext createUnassignedWorkItemContext() {
+            return rootInstrumentationScope.getWorkCoordinationContext().createUnassignedWorkContext(getEnclosingScope());
+        }
+
     }
 
     public static class DocumentReindexContext extends BaseDocumentMigrationContext implements IDocumentReindexContext {
@@ -88,7 +124,7 @@ public class DocumentMigrationContexts extends IDocumentMigrationContexts {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, activityNameForTheCountMetric(activityName));
             }
         }
 

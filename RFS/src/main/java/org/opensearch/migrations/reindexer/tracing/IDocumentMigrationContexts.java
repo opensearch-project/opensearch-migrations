@@ -10,20 +10,27 @@ public abstract class IDocumentMigrationContexts {
         private ActivityNames() {
         }
         public static final String DOCUMENT_REINDEX = "documentReindex";
-        public static final String SHARD_SETUP = "shardSetup";
+        public static final String SHARD_SETUP_ATTEMPT = "shardSetupAttempt";
+        public static final String ADD_SHARD_WORK_ITEM = "addShardWorkItem";
     }
 
     public static class MetricNames {
         private MetricNames() {}
     }
 
-    public interface IShardSetupContext extends IScopedInstrumentationAttributes {
-        String ACTIVITY_NAME = ActivityNames.SHARD_SETUP;
+    public interface IShardSetupAttemptContext extends IScopedInstrumentationAttributes {
+        String ACTIVITY_NAME = ActivityNames.SHARD_SETUP_ATTEMPT;
 
         IWorkCoordinationContexts.IAcquireSpecificWorkContext createWorkAcquisitionContext();
         IWorkCoordinationContexts.ICompleteWorkItemContext createWorkCompletionContext();
-        IWorkCoordinationContexts.ICreateUnassignedWorkItemContext createShardWorkItemContext();
+        IAddShardWorkItemContext createShardWorkItemContext();
     }
+
+    public interface IAddShardWorkItemContext extends IScopedInstrumentationAttributes {
+        String ACTIVITY_NAME = ActivityNames.ADD_SHARD_WORK_ITEM;
+        IWorkCoordinationContexts.ICreateUnassignedWorkItemContext createUnassignedWorkItemContext();
+    }
+
 
     public interface IDocumentReindexContext
             extends IWorkCoordinationContexts.IScopedWorkContext<IWorkCoordinationContexts.IAcquireNextWorkItemContext>

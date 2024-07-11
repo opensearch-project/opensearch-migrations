@@ -3,6 +3,7 @@ package org.opensearch.migrations.tracing;
 import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.Meter;
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 import java.util.List;
@@ -12,22 +13,63 @@ import java.util.stream.DoubleStream;
 
 @Slf4j
 public class CommonScopedMetricInstruments extends CommonMetricInstruments {
+
+    public static final String DURATION_APPENDAGE = "Duration";
+
+    @AllArgsConstructor
+    public static class ScopeLabels {
+        public final String counter;
+        public final String duration;
+        public final String exception;
+    }
+
+    public static ScopeLabels fromActivityName(String activityName) {
+        return new ScopeLabels(
+                activityName + "Count",
+                activityName + DURATION_APPENDAGE,
+                CommonMetricInstruments.Labels.fromActivityName(activityName).exception);
+    }
+    public static ScopeLabels activityNameForTheCountMetric(String activityName) {
+        return new ScopeLabels(
+                activityName,
+                activityName + DURATION_APPENDAGE,
+                CommonMetricInstruments.Labels.fromActivityName(activityName).exception);
+    }
+
+
     final LongCounter contextCounter;
     final DoubleHistogram contextDuration;
 
     public CommonScopedMetricInstruments(Meter meter, String activityName) {
-        this(meter, activityName, null);
+        this(meter, fromActivityName(activityName));
     }
 
     public CommonScopedMetricInstruments(Meter meter, String activityName,
                                          double firstBucketSize, double lastBucketCeiling) {
-        this(meter, activityName, getBuckets(activityName, firstBucketSize, lastBucketCeiling));
+        this(meter, fromActivityName(activityName), getBuckets(firstBucketSize, lastBucketCeiling));
     }
 
-    private static List<Double> getBuckets(String activityName,
-                                           double firstBucketSize, double lastBucketCeiling) {
+    public CommonScopedMetricInstruments(Meter meter, ScopeLabels stockMetricLabels) {
+        this(meter, stockMetricLabels, null);
+    }
+
+    public CommonScopedMetricInstruments(Meter meter, ScopeLabels stockMetricLabels, List<Double> buckets) {
+        super(meter, new CommonMetricInstruments.Labels(stockMetricLabels.exception));
+        contextCounter = meter.counterBuilder(stockMetricLabels.counter).build();
+        var durationBuilder = meter
+                .histogramBuilder(stockMetricLabels.duration)
+                .setUnit("ms");
+        if (buckets != null) {
+            durationBuilder = durationBuilder.setExplicitBucketBoundariesAdvice(buckets);
+        }
+        contextDuration = durationBuilder.build();
+    }
+
+
+
+    private static List<Double> getBuckets(double firstBucketSize, double lastBucketCeiling) {
         var buckets = getExponentialBucketsBetween(firstBucketSize, lastBucketCeiling, 2.0);
-        log.atInfo().setMessage(() -> "Setting buckets for " + activityName + " to " +
+        log.atTrace().setMessage(() -> "Setting buckets to " +
                 buckets.stream().map(x -> "" + x).collect(Collectors.joining(",", "[", "]"))).log();
         return buckets;
     }
@@ -47,18 +89,5 @@ public class CommonScopedMetricInstruments extends CommonMetricInstruments {
             bucketBoundary[0] *= rate;
             return tmp;
         }).takeWhile(v -> v <= lastBucketCeiling).boxed().collect(Collectors.toList());
-    }
-
-    public CommonScopedMetricInstruments(Meter meter, String activityName, List<Double> buckets) {
-        super(meter, activityName);
-        contextCounter = meter
-                .counterBuilder(activityName + "Count").build();
-        var durationBuilder = meter
-                .histogramBuilder(activityName + "Duration")
-                .setUnit("ms");
-        if (buckets != null) {
-            durationBuilder = durationBuilder.setExplicitBucketBoundariesAdvice(buckets);
-        }
-        contextDuration = durationBuilder.build();
     }
 }

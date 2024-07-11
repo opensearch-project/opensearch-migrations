@@ -6,14 +6,16 @@ import io.opentelemetry.api.OpenTelemetry;
 import lombok.Getter;
 import org.opensearch.migrations.tracing.IContextTracker;
 
-public class RootDocumentMigrationContext extends BaseRootRfsContext implements IRootDocumentMigrationContext {
+public class RootDocumentMigrationContext
+        extends BaseRootRfsContext
+        implements IRootDocumentMigrationContext {
     public static final String SCOPE_NAME = "snapshotDocumentReindex";
 
     @Getter
-    public final RootWorkCoordinationContext workCoordinationContext;
+    private final RootWorkCoordinationContext workCoordinationContext;
     public final DocumentMigrationContexts.DocumentReindexContext.MetricInstruments documentReindexInstruments;
-    public final DocumentMigrationContexts.ShardSetupContext.MetricInstruments shardSetupMetrics;
-
+    public final DocumentMigrationContexts.ShardSetupAttemptContext.MetricInstruments shardSetupMetrics;
+    public final DocumentMigrationContexts.AddShardWorkItemContext.MetricInstruments addShardWorkItemMetrics;
 
     public RootDocumentMigrationContext(OpenTelemetry sdk, IContextTracker contextTracker,
                                         RootWorkCoordinationContext workCoordinationContext) {
@@ -21,12 +23,13 @@ public class RootDocumentMigrationContext extends BaseRootRfsContext implements 
         var meter = this.getMeterProvider().get(SCOPE_NAME);
         this.workCoordinationContext = workCoordinationContext;
         documentReindexInstruments = DocumentMigrationContexts.DocumentReindexContext.makeMetrics(meter);
-        shardSetupMetrics = DocumentMigrationContexts.ShardSetupContext.makeMetrics(meter);
+        shardSetupMetrics = DocumentMigrationContexts.ShardSetupAttemptContext.makeMetrics(meter);
+        addShardWorkItemMetrics = DocumentMigrationContexts.AddShardWorkItemContext.makeMetrics(meter);
     }
 
     @Override
-    public IDocumentMigrationContexts.IShardSetupContext createDocsMigrationSetupContext() {
-        return new DocumentMigrationContexts.ShardSetupContext(this);
+    public IDocumentMigrationContexts.IShardSetupAttemptContext createDocsMigrationSetupContext() {
+        return new DocumentMigrationContexts.ShardSetupAttemptContext(this);
     }
 
     @Override

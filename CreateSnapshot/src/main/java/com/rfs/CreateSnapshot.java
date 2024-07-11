@@ -73,7 +73,7 @@ public class CreateSnapshot {
         public Integer maxSnapshotRateMBPerNode;
 
         @Parameter(required = false,
-                names = {"--otelCollectorEndpoint"},
+                names = {"--otel-collector-endpoint"},
                 arity = 1,
                 description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be" +
                         "forwarded. If no value is provided, metrics will not be forwarded.")

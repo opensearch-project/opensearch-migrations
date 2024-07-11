@@ -49,6 +49,7 @@ dependencies {
 
 
     testImplementation testFixtures(project(":RFS"))
+    testImplementation testFixtures(project(":coreUtilities"))
     testImplementation project(":CreateSnapshot")
     testImplementation project(":MetadataMigration")
     testImplementation group: 'org.apache.lucene', name: 'lucene-core'
