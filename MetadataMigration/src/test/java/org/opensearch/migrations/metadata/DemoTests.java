@@ -4,11 +4,11 @@ import java.util.List;
 import java.util.Map;
 
 import org.hamcrest.Matcher;
+
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.transformation.CanApplyResult;
 
 import com.rfs.framework.SearchClusterContainer;
-
 import lombok.SneakyThrows;
 
 import static org.hamcrest.CoreMatchers.instanceOf;
@@ -28,31 +28,34 @@ public class DemoTests {
 
     @SneakyThrows
     public void evaluate_noTarget_issuesFound() {
-        try (var sourceClusterContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2)){
-            
+        try (var sourceClusterContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2)) {
+
             // Configure meta to connect to the source cluster
-            var configureSource = meta.configure()
-                .source(Map.of("host", sourceClusterContainer.getUrl()))
-                .execute();
+            var configureSource = meta.configure().source(Map.of("host", sourceClusterContainer.getUrl())).execute();
 
             assertThat(configureSource.result.code, equalTo(SuccessExitCode));
 
             // Evaluate the migration status
-            var evaluate = meta.evaulate()
-                .execute();
-            
+            var evaluate = meta.evaulate().execute();
+
             var sourceCluster = evaluate.clusters.source;
             assertThat(sourceCluster.version, equalTo(Version.fromString("ES 7.10.2")));
             assertThat(sourceCluster.messages, containsWarning(USING_VERSION_FALLBACK_MESSAGE));
 
             List<String> candidateIndexes = evaluate.candidates.indexes.list;
-            var expectedIndexes = List.of("geonames", "logs-181998", "logs-191998", "logs-201998", "logs-211998",
+            var expectedIndexes = List.of(
+                "geonames",
+                "logs-181998",
+                "logs-191998",
+                "logs-201998",
+                "logs-211998",
                 "logs-221998",
                 "logs-231998",
                 "logs-241998",
                 "nyc_taxis",
                 "reindexed-logs",
-                "sonested");
+                "sonested"
+            );
             assertThat(candidateIndexes, containsInAnyOrder(expectedIndexes));
 
             assertThat(evaluate.candidates.index_templates.list, contains("daily_logs"));
@@ -69,9 +72,11 @@ public class DemoTests {
 
     @SneakyThrows
     public void evaluate_withTarget_issuesFound() {
-        try (var sourceClusterContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2); 
-             var targetClusterContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)) {
-            
+        try (
+            var sourceClusterContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
+            var targetClusterContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
+        ) {
+
             // Configure meta to connect to the source & target cluster
             var configure = meta.configure()
                 .source(Map.of("host", sourceClusterContainer.getUrl()))
@@ -81,8 +86,7 @@ public class DemoTests {
             assertThat(configure.result.code, equalTo(SuccessExitCode));
 
             // Evaluate the migration status
-            var evaluate = meta.evaulate()
-                .execute();
+            var evaluate = meta.evaulate().execute();
 
             var sourceCluster = evaluate.clusters.source;
             assertThat(sourceCluster.version, equalTo(Version.fromString("ES 7.10.2")));
@@ -113,9 +117,11 @@ public class DemoTests {
     }
 
     public void evaluate_success() {
-        try (var sourceClusterContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2); 
-            var targetClusterContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)) {
-       
+        try (
+            var sourceClusterContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
+            var targetClusterContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
+        ) {
+
             var expectedIndexes = List.of("geonames", "nyc_taxis", "sonested");
             // Configure meta to connect to the source & target cluster with rules on indexes and indexTemplates
             var configure = meta.configure()
@@ -128,22 +134,23 @@ public class DemoTests {
             assertThat(configure.result.code, equalTo(SuccessExitCode));
 
             // Evaluate the migration status
-            var evaluate = meta.evaulate()
-                .execute();
+            var evaluate = meta.evaulate().execute();
 
             var candidateIndexes = evaluate.candidates.indexes.list;
             assertThat(candidateIndexes, containsInAnyOrder(expectedIndexes));
 
             assertThat(evaluate.transformations.list, everyItem(transformationWillApply()));
-            
+
             assertThat(evaluate.result.code, equalTo(SuccessExitCode));
         }
     }
 
     public void deploy_success() {
-        try (var sourceClusterContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2); 
-            var targetClusterContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)) {
-    
+        try (
+            var sourceClusterContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
+            var targetClusterContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
+        ) {
+
             var expectedIndexes = List.of("geonames", "nyc_taxis", "sonested");
             // Configure meta to connect to the source & target cluster with rules on indexes and indexTemplates
             var configure = meta.configure()
@@ -156,8 +163,7 @@ public class DemoTests {
             assertThat(configure.result.code, equalTo(SuccessExitCode));
 
             // Evaluate the migration status
-            var evaluate = meta.deploy()
-                .execute();
+            var evaluate = meta.deploy().execute();
 
             assertThat(evaluate.deployed.indexes.list, containsInAnyOrder(expectedIndexes));
             assertThat(evaluate.deployed.aliases.list, containsInAnyOrder("logs-all"));
@@ -169,13 +175,11 @@ public class DemoTests {
                 .findFirst()
                 .orElseThrow();
             assertThat(indexMappingRemovalTransformer, wasAppliedTimes(expectedIndexes.size()));
-            
+
             assertThat(evaluate.result.code, equalTo(SuccessExitCode));
         }
     }
 
-
-    //#region
     private static final int SuccessExitCode = 0;
     private static final String USING_VERSION_FALLBACK_MESSAGE = "msg";
     private static final String NO_TARGET_MESSAGE = "msg";
@@ -194,5 +198,4 @@ public class DemoTests {
         // TODO Auto-generated method stub
         throw new UnsupportedOperationException("Unimplemented method 'wasAppliedTimes'");
     }
-    //#endregion
 }

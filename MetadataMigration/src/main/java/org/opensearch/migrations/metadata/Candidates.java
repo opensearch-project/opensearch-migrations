@@ -1,6 +1,5 @@
 package org.opensearch.migrations.metadata;
 
-
 import java.util.List;
 
 public class Candidates {
