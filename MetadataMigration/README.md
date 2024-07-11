@@ -1,37 +1,38 @@
 # Metadata Migration
 
-When moving between different kinds of clusters there is moving raw data, and there is moving the containers and support materials that are part of that ecosystem.  Metadata migration is a part of the overall lifecycle, and it exists in the start of the migration process to ensure the data goes to the expected destination. 
+When performing a migration of a search cluster the metadata items such as indexes, templates, configuration and processes need to be in place before document data can be moved.  The metadata migration tool provides insight into what can be moved, if there are any issues moving that data to the target cluster and can deploy those changes.  By inspecting and analyzing the metadata issues can be discovered early in the overall migration timeline. 
 
 ## Migration Lifecycle
+
+The lifecycle of a migration revolves around a set of clients that point to the source cluster, and at the end of the lifecycle they have been updated to point to a new target cluster.  There are many individual stages to this process, for this case we are focusing on the beginning of the migration where gathering information about what is going to be migrated and indicating the change of success.
+
+
+### Metadata migration lifecycle
 
 To handle moving more than data OpenSearch Migration includes we are tooling to inspect an existing cluster, generate a recommended configuration, and apply the migration onto a target cluster.
 
 ```mermaid
 graph LR
-    A[Evaluate] --> B[Configure]
-    B --> C[Verify]
-    C --> A
-    C --> D[Deploy]
-    D --> E[Audit]
+   subgraph "Metadata migration tool"
+      A[Evaluate] --> B[Configure]
+      B --> A
+      A --> |No issues found| D[Deploy]
+    end
+    D --> E[Verification]
     E -.-> F([Start Data Migration])
 ```
 
 ### Evaluate
-By inspecting the source cluster and the target cluster, the metadata tooling will determine what items can be processed and what items need more detail to migration successfully.
-
-A target cluster is not required to perform an evaluation by provided a target cluster version to the tool. 
+By inspecting the source cluster and the target cluster, the metadata tooling will determine what items can be processed and any potential issues with them that would prevent a successful metadata migration.
 
 ### Configure
-After inspecting the kind of migration that is underway there are different options, such as which indices to move to the target cluster, down to more advanced options such as how to handle deprecated features.  By updating the command line arguments or configuration file you choose how to perform the migration.
-
-### Verify
-After filling out the configuration, run the verify process to make sure that all scenarios are handled and that no configuration errors or missing settings are present.  If there is a warning or error, you might revisit the evaluation process and repeating until everything is shaped as expected.
+By inspecting the source and the items it contains some options can be automatically configured.  As some items require manually intervention to what metadata items should be migrated or how to resolve different kinds of conflicts updating the configuration narrows down this scope.
 
 ### Deploy
-The metadata migration tool will fully read the source cluster and recreate the supported features on the target cluster.
+Following the configuration used in the evaluation the target cluster is updated with all of the metadata items. During the deployment there might have been issues these can be better understood by inspecting the output and/or detailed logs.
 
-### Audit
-Inspect the transformation logs (tuple logs), or run queries against the live target cluster.  Before the long process moving data from the source to the target check on anything that needs to be working to prevent redriving.
+### Verification
+Before starting data migration the target cluster can be inspected by running queries to confirm the state or any other checks before the longer process of migrating data from the source to the target cluster.
 
 ## Walkthrough
 
@@ -210,7 +211,7 @@ Result:
    No migration issues detected
 ```
 
-### Deploy meta
+### Deploy with meta
 
 ```
 console meta deploy \
