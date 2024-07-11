@@ -3,7 +3,8 @@ package org.opensearch.migrations;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
 
-import org.apache.logging.log4j.core.parser.ParseException;
+import java.text.ParseException;
+
 import org.junit.jupiter.api.Test;
 
 public class VersionTest {
