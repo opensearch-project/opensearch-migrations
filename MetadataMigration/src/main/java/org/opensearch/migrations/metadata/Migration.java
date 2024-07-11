@@ -1,8 +1,8 @@
 package org.opensearch.migrations.metadata;
 
-public class Deployment {
+public class Migration {
 
-    public DeploymentResponse execute() {
+    public MigrationResponse execute() {
         // TODO Auto-generated method stub
         throw new UnsupportedOperationException("Unimplemented method 'execute'");
     }

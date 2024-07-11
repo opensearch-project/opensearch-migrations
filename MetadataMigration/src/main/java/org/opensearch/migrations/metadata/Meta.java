@@ -7,12 +7,12 @@ public class Meta {
         throw new UnsupportedOperationException("Unimplemented method 'configure'");
     }
 
-    public Evaluation evaulate() {
+    public Evaluation evaluate() {
         // TODO Auto-generated method stub
-        throw new UnsupportedOperationException("Unimplemented method 'evaulate'");
+        throw new UnsupportedOperationException("Unimplemented method 'evaluate'");
     }
 
-    public Deployment deploy() {
+    public Migration migrate() {
         // TODO Auto-generated method stub
         throw new UnsupportedOperationException("Unimplemented method 'deploy'");
     }

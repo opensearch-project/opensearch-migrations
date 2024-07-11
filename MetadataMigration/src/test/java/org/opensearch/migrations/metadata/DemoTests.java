@@ -36,7 +36,7 @@ public class DemoTests {
             assertThat(configureSource.result.code, equalTo(SuccessExitCode));
 
             // Evaluate the migration status
-            var evaluate = meta.evaulate().execute();
+            var evaluate = meta.evaluate().execute();
 
             var sourceCluster = evaluate.clusters.source;
             assertThat(sourceCluster.version, equalTo(Version.fromString("ES 7.10.2")));
@@ -86,7 +86,7 @@ public class DemoTests {
             assertThat(configure.result.code, equalTo(SuccessExitCode));
 
             // Evaluate the migration status
-            var evaluate = meta.evaulate().execute();
+            var evaluate = meta.evaluate().execute();
 
             var sourceCluster = evaluate.clusters.source;
             assertThat(sourceCluster.version, equalTo(Version.fromString("ES 7.10.2")));
@@ -134,7 +134,7 @@ public class DemoTests {
             assertThat(configure.result.code, equalTo(SuccessExitCode));
 
             // Evaluate the migration status
-            var evaluate = meta.evaulate().execute();
+            var evaluate = meta.evaluate().execute();
 
             var candidateIndexes = evaluate.candidates.indexes.list;
             assertThat(candidateIndexes, containsInAnyOrder(expectedIndexes));
@@ -145,7 +145,7 @@ public class DemoTests {
         }
     }
 
-    public void deploy_success() {
+    public void migrate_success() {
         try (
             var sourceClusterContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
             var targetClusterContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
@@ -163,12 +163,12 @@ public class DemoTests {
             assertThat(configure.result.code, equalTo(SuccessExitCode));
 
             // Evaluate the migration status
-            var evaluate = meta.deploy().execute();
+            var evaluate = meta.migrate().execute();
 
-            assertThat(evaluate.deployed.indexes.list, containsInAnyOrder(expectedIndexes));
-            assertThat(evaluate.deployed.aliases.list, containsInAnyOrder("logs-all"));
+            assertThat(evaluate.migrated.indexes.list, containsInAnyOrder(expectedIndexes));
+            assertThat(evaluate.migrated.aliases.list, containsInAnyOrder("logs-all"));
             var expectedTotalDeployedItems = expectedIndexes.size() + 1 /* alias: logs-all*/;
-            assertThat(evaluate.deployed.list, hasSize(expectedTotalDeployedItems));
+            assertThat(evaluate.migrated.list, hasSize(expectedTotalDeployedItems));
 
             var indexMappingRemovalTransformer = evaluate.transformations.list.stream()
                 .filter(t -> t.name.equals("IndexMappingTypeRemoval"))

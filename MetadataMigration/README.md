@@ -16,7 +16,7 @@ graph LR
    subgraph "Metadata migration tool"
       A[Evaluate] --> B[Configure]
       B --> A
-      A --> |No issues found| D[Deploy]
+      A --> |No issues found| D[Migrate]
     end
     D --> E[Verification]
     E -.-> F([Start Data Migration])
@@ -28,7 +28,7 @@ By inspecting the source cluster and the target cluster, the metadata tooling wi
 ### Configure
 By inspecting the source and the items it contains some options can be automatically configured.  As some items require manually intervention to what metadata items should be migrated or how to resolve different kinds of conflicts updating the configuration narrows down this scope.
 
-### Deploy
+### Migrate
 Following the configuration used in the evaluation the target cluster is updated with all of the metadata items. During the deployment there might have been issues these can be better understood by inspecting the output and/or detailed logs.
 
 ### Verification
@@ -211,10 +211,10 @@ Result:
    No migration issues detected
 ```
 
-### Deploy with meta
+### Migrate with meta
 
 ```
-console meta deploy \
+console meta migrate \
    --no-confirmation
 
 Clusters:
@@ -240,7 +240,7 @@ Transformations:
 
 Result:
    No migration issues detected
-   INFO - See full deployment log at `/tmp/meta_deploy_1720710618.log`
+   INFO - See full migration log at `/tmp/meta_migrate_1720710618.log`
 
 ```
 
