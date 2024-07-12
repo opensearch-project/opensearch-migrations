@@ -1,12 +1,12 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import lombok.EqualsAndHashCode;
-
 import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import lombok.EqualsAndHashCode;
 
 /**
  * The underlying case-insensitive headers map allows for headers to be stored as a multimap,
@@ -17,7 +17,7 @@ import java.util.stream.Collectors;
  * or splitting.  If more control is required, callers should use the multimap interfaces.
  */
 @EqualsAndHashCode(callSuper = false)
-public class ListKeyAdaptingCaseInsensitiveHeadersMap extends AbstractMap<String,Object> {
+public class ListKeyAdaptingCaseInsensitiveHeadersMap extends AbstractMap<String, Object> {
     protected final StrictCaseInsensitiveHttpHeadersMap strictHeadersMap;
 
     public ListKeyAdaptingCaseInsensitiveHeadersMap(StrictCaseInsensitiveHttpHeadersMap mapToWrap) {
@@ -41,8 +41,8 @@ public class ListKeyAdaptingCaseInsensitiveHeadersMap extends AbstractMap<String
                 strList = (List) value;
             } else {
                 strList = (List) ((List) value).stream()
-                        .map(Object::toString)
-                        .collect(Collectors.toCollection(ArrayList::new));
+                    .map(Object::toString)
+                    .collect(Collectors.toCollection(ArrayList::new));
             }
         } else {
             strList = new ArrayList<>(1);
@@ -55,7 +55,6 @@ public class ListKeyAdaptingCaseInsensitiveHeadersMap extends AbstractMap<String
     public List<String> remove(Object key) {
         return strictHeadersMap.remove(key);
     }
-
 
     /**
      * This is just casting the underlying object's entrySet.  An old git commit will show this unrolled,

@@ -4,8 +4,8 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import com.rfs.common.SourceRepo;
 import com.rfs.common.SnapshotRepo;
+import com.rfs.common.SourceRepo;
 
 public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
     private final SourceRepo repo;
@@ -23,9 +23,10 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
     }
 
     public List<SnapshotRepoData_ES_6_8.Index> getIndices() {
-        return getRepoData().indices.entrySet().stream()
-                .map(entry -> SnapshotRepoData_ES_6_8.Index.fromRawIndex(entry.getKey(), entry.getValue()))
-                .collect(Collectors.toList());
+        return getRepoData().indices.entrySet()
+            .stream()
+            .map(entry -> SnapshotRepoData_ES_6_8.Index.fromRawIndex(entry.getKey(), entry.getValue()))
+            .collect(Collectors.toList());
     }
 
     @Override
@@ -51,7 +52,7 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
         List<SnapshotRepo.Snapshot> convertedList = new ArrayList<>(getRepoData().snapshots);
         return convertedList;
     }
-    
+
     @Override
     public String getSnapshotId(String snapshotName) {
         for (SnapshotRepoData_ES_6_8.Snapshot snapshot : getRepoData().snapshots) {

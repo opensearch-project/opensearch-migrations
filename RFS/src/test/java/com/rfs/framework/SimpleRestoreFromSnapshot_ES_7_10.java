@@ -27,44 +27,62 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
 
     private static final Logger logger = LogManager.getLogger(SimpleRestoreFromSnapshot_ES_7_10.class);
 
-    public List<IndexMetadata> extractSnapshotIndexData(final String localPath, final String snapshotName, final Path unpackedShardDataDir) throws Exception {
+    public List<IndexMetadata> extractSnapshotIndexData(
+        final String localPath,
+        final String snapshotName,
+        final Path unpackedShardDataDir
+    ) throws Exception {
         IOUtils.rm(unpackedShardDataDir);
 
         final var repo = new FileSystemRepo(Path.of(localPath));
         SnapshotRepo.Provider snapShotProvider = new SnapshotRepoProvider_ES_7_10(repo);
-        final List<IndexMetadata> indices = snapShotProvider.getIndicesInSnapshot(snapshotName)
-            .stream()
-            .map(index -> {
-                try {
-                    return new IndexMetadataFactory_ES_7_10(snapShotProvider).fromRepo(snapshotName, index.getName());
-                } catch (final Exception e) {
-                    throw new RuntimeException(e);
-                }
-            })
-            .collect(Collectors.toList());
-        
+        final List<IndexMetadata> indices = snapShotProvider.getIndicesInSnapshot(snapshotName).stream().map(index -> {
+            try {
+                return new IndexMetadataFactory_ES_7_10(snapShotProvider).fromRepo(snapshotName, index.getName());
+            } catch (final Exception e) {
+                throw new RuntimeException(e);
+            }
+        }).collect(Collectors.toList());
+
         for (final IndexMetadata index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
-                var shardMetadata = new ShardMetadataFactory_ES_7_10(snapShotProvider).fromRepo(snapshotName, index.getName(), shardId);
+                var shardMetadata = new ShardMetadataFactory_ES_7_10(snapShotProvider).fromRepo(
+                    snapshotName,
+                    index.getName(),
+                    shardId
+                );
                 DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
-                SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(repoAccessor, unpackedShardDataDir, shardMetadata, Integer.MAX_VALUE);
+                SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(
+                    repoAccessor,
+                    unpackedShardDataDir,
+                    shardMetadata,
+                    Integer.MAX_VALUE
+                );
                 unpacker.unpack();
             }
         }
         return indices;
     }
 
-    public void updateTargetCluster(final List<IndexMetadata> indices, final Path unpackedShardDataDir, final OpenSearchClient client) throws Exception {
+    public void updateTargetCluster(
+        final List<IndexMetadata> indices,
+        final Path unpackedShardDataDir,
+        final OpenSearchClient client
+    ) throws Exception {
         for (final IndexMetadata index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
-                final var documents =
-                        new LuceneDocumentsReader(unpackedShardDataDir.resolve(index.getName()).resolve(""+shardId))
-                                .readDocuments();
+                final var documents = new LuceneDocumentsReader(
+                    unpackedShardDataDir.resolve(index.getName()).resolve("" + shardId)
+                ).readDocuments();
 
                 final var finalShardId = shardId;
                 new DocumentReindexer(client).reindex(index.getName(), documents)
                     .doOnError(error -> logger.error("Error during reindexing: " + error))
-                    .doOnSuccess(done -> logger.info("Reindexing completed for index " + index.getName() + ", shard " + finalShardId))
+                    .doOnSuccess(
+                        done -> logger.info(
+                            "Reindexing completed for index " + index.getName() + ", shard " + finalShardId
+                        )
+                    )
                     .block();
             }
         }

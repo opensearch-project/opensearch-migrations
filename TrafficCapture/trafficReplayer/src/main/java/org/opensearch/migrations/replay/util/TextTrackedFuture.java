@@ -1,14 +1,13 @@
 package org.opensearch.migrations.replay.util;
 
-import lombok.NonNull;
-
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
-public class TextTrackedFuture<T>
-        extends TrackedFuture<String, T> {
+import lombok.NonNull;
+
+public class TextTrackedFuture<T> extends TrackedFuture<String, T> {
 
     public TextTrackedFuture(String diagnosticLabel) {
         this(new CompletableFuture<>(), () -> diagnosticLabel);
@@ -26,8 +25,7 @@ public class TextTrackedFuture<T>
         super(future, () -> diagnosticLabel);
     }
 
-    public static <T> TextTrackedFuture<T>
-    failedFuture(Throwable e, Supplier<String> diagnosticSupplier) {
+    public static <T> TextTrackedFuture<T> failedFuture(Throwable e, Supplier<String> diagnosticSupplier) {
         return new TextTrackedFuture<>(CompletableFuture.failedFuture(e), diagnosticSupplier);
     }
 
@@ -35,17 +33,21 @@ public class TextTrackedFuture<T>
         return new TextTrackedFuture<>(CompletableFuture.completedFuture(v), diagnosticSupplier);
     }
 
-    public static <U> TextTrackedFuture<Void>
-    allOf(TrackedFuture<String,U>[] allRemainingWorkArray, Supplier<String> diagnosticSupplier) {
+    public static <U> TextTrackedFuture<Void> allOf(
+        TrackedFuture<String, U>[] allRemainingWorkArray,
+        Supplier<String> diagnosticSupplier
+    ) {
         return allOf(Arrays.stream(allRemainingWorkArray), diagnosticSupplier);
     }
 
-    public static <U> TextTrackedFuture<Void>
-    allOf(Stream<TrackedFuture<String,U>> allRemainingWorkStream, Supplier<String> diagnosticSupplier) {
+    public static <U> TextTrackedFuture<Void> allOf(
+        Stream<TrackedFuture<String, U>> allRemainingWorkStream,
+        Supplier<String> diagnosticSupplier
+    ) {
         return new TextTrackedFuture<>(
-                CompletableFuture.allOf(allRemainingWorkStream
-                        .map(tcf->tcf.future).toArray(CompletableFuture[]::new)),
-                diagnosticSupplier);
+            CompletableFuture.allOf(allRemainingWorkStream.map(tcf -> tcf.future).toArray(CompletableFuture[]::new)),
+            diagnosticSupplier
+        );
 
     }
 }

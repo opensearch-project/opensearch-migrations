@@ -1,15 +1,16 @@
 package org.opensearch.migrations.replay;
 
-import lombok.AllArgsConstructor;
-import lombok.NonNull;
-import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-
 import java.time.Instant;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+
+import lombok.AllArgsConstructor;
+import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class Accumulation {
@@ -17,7 +18,7 @@ public class Accumulation {
     enum State {
         // Ignore all initial READs, the first EOM & the following WRITEs (if they or EOMs exist)
         IGNORING_LAST_REQUEST,
-        // Finished scanning past initial READs.  The next request should be processed,
+        // Finished scanning past initial READs. The next request should be processed,
         // so be on the lookout for the next READ
         WAITING_FOR_NEXT_READ_CHUNK,
         ACCUMULATING_READS,
@@ -26,7 +27,8 @@ public class Accumulation {
 
     @AllArgsConstructor
     static class RequestResponsePacketPairWithCallback {
-        @NonNull RequestResponsePacketPair pair;
+        @NonNull
+        RequestResponsePacketPair pair;
         private Consumer<RequestResponsePacketPair> fullDataContinuation = null;
 
         void setFullDataContinuation(Consumer<RequestResponsePacketPair> v) {
@@ -48,22 +50,29 @@ public class Accumulation {
     private boolean hasBeenExpired;
 
     public Accumulation(ITrafficStreamKey key, TrafficStream ts) {
-        this(key, ts.getPriorRequestsReceived()+(ts.hasLastObservationWasUnterminatedRead()?1:0),
-                ts.getLastObservationWasUnterminatedRead());
+        this(
+            key,
+            ts.getPriorRequestsReceived() + (ts.hasLastObservationWasUnterminatedRead() ? 1 : 0),
+            ts.getLastObservationWasUnterminatedRead()
+        );
     }
 
     public Accumulation(@NonNull ITrafficStreamKey trafficChannelKey, int startingSourceRequestIndex) {
         this(trafficChannelKey, startingSourceRequestIndex, false);
     }
 
-    public Accumulation(@NonNull ITrafficStreamKey trafficChannelKey,
-                        int startingSourceRequestIndex, boolean dropObservationsLeftoverFromPrevious) {
+    public Accumulation(
+        @NonNull ITrafficStreamKey trafficChannelKey,
+        int startingSourceRequestIndex,
+        boolean dropObservationsLeftoverFromPrevious
+    ) {
         this.trafficChannelKey = trafficChannelKey;
         numberOfResets = new AtomicInteger();
         this.newestPacketTimestampInMillis = new AtomicLong(0);
         this.startingSourceRequestIndex = startingSourceRequestIndex;
-        this.state =
-                dropObservationsLeftoverFromPrevious ? State.IGNORING_LAST_REQUEST : State.WAITING_FOR_NEXT_READ_CHUNK;
+        this.state = dropObservationsLeftoverFromPrevious
+            ? State.IGNORING_LAST_REQUEST
+            : State.WAITING_FOR_NEXT_READ_CHUNK;
     }
 
     public boolean hasBeenExpired() {
@@ -74,13 +83,19 @@ public class Accumulation {
         hasBeenExpired = true;
     }
 
-    public RequestResponsePacketPair getOrCreateTransactionPair(ITrafficStreamKey forTrafficStreamKey,
-                                                                Instant originTimestamp) {
+    public RequestResponsePacketPair getOrCreateTransactionPair(
+        ITrafficStreamKey forTrafficStreamKey,
+        Instant originTimestamp
+    ) {
         if (rrPairWithCallback != null) {
             return rrPairWithCallback.pair;
         }
-        var rrPair = new RequestResponsePacketPair(forTrafficStreamKey, originTimestamp,
-                startingSourceRequestIndex, getIndexOfCurrentRequest());
+        var rrPair = new RequestResponsePacketPair(
+            forTrafficStreamKey,
+            originTimestamp,
+            startingSourceRequestIndex,
+            getIndexOfCurrentRequest()
+        );
         this.rrPairWithCallback = new RequestResponsePacketPairWithCallback(rrPair, null);
         return rrPair;
     }

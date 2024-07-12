@@ -1,25 +1,5 @@
 package org.opensearch.migrations.replay.e2etests;
 
-import com.google.common.base.Strings;
-import lombok.AllArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.Assertions;
-import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
-import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
-import org.opensearch.migrations.replay.TimeShifter;
-import org.opensearch.migrations.replay.TrafficReplayer;
-import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
-import org.opensearch.migrations.replay.TransformationLoader;
-import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
-import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
-import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
-import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
-import org.opensearch.migrations.tracing.TestContext;
-import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
-import org.slf4j.event.Level;
-import org.testcontainers.shaded.org.apache.commons.io.output.NullOutputStream;
-
-import javax.net.ssl.SSLException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -34,6 +14,27 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import javax.net.ssl.SSLException;
+
+import com.google.common.base.Strings;
+import org.junit.jupiter.api.Assertions;
+
+import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
+import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
+import org.opensearch.migrations.replay.TimeShifter;
+import org.opensearch.migrations.replay.TrafficReplayer;
+import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
+import org.opensearch.migrations.replay.TransformationLoader;
+import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
+import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
+import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
+import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
+import org.opensearch.migrations.tracing.TestContext;
+import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
+
+import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.slf4j.event.Level;
 
 @Slf4j
 public class TrafficReplayerRunner {
@@ -45,45 +46,54 @@ public class TrafficReplayerRunner {
 
     private TrafficReplayerRunner() {}
 
-    public static void runReplayer(int numExpectedRequests,
-                                   URI endpoint,
-                                   Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
-                                   Supplier<TestContext> rootContextSupplier,
-                                   Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory)
-            throws Throwable {
-        runReplayer(numExpectedRequests, endpoint, tupleListenerSupplier, rootContextSupplier, trafficSourceFactory,
-                new TimeShifter(10 * 1000));
+    public static void runReplayer(
+        int numExpectedRequests,
+        URI endpoint,
+        Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
+        Supplier<TestContext> rootContextSupplier,
+        Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory
+    ) throws Throwable {
+        runReplayer(
+            numExpectedRequests,
+            endpoint,
+            tupleListenerSupplier,
+            rootContextSupplier,
+            trafficSourceFactory,
+            new TimeShifter(10 * 1000)
+        );
     }
 
-    public static void runReplayer(int numExpectedRequests,
-                                   URI endpoint,
-                                   Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
-                                   Supplier<TestContext> rootContextSupplier,
-                                   Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory,
-                                   TimeShifter timeShifter)
-            throws Throwable
-    {
-        runReplayer(numExpectedRequests,
-                (rootContext, targetConnectionPoolPrefix) -> {
-                    try {
-                        return new RootReplayerConstructorExtensions(rootContext, endpoint,
-                                new StaticAuthTransformerFactory("TEST"),
-                                new TransformationLoader().getTransformerFactoryLoader(endpoint.getHost()),
-                                RootReplayerConstructorExtensions.makeClientConnectionPool(endpoint, targetConnectionPoolPrefix));
-                    } catch (SSLException e) {
-                        throw new RuntimeException(e);
-                    }
-                },
-                tupleListenerSupplier, rootContextSupplier, trafficSourceFactory, timeShifter);
+    public static void runReplayer(
+        int numExpectedRequests,
+        URI endpoint,
+        Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
+        Supplier<TestContext> rootContextSupplier,
+        Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory,
+        TimeShifter timeShifter
+    ) throws Throwable {
+        runReplayer(numExpectedRequests, (rootContext, targetConnectionPoolPrefix) -> {
+            try {
+                return new RootReplayerConstructorExtensions(
+                    rootContext,
+                    endpoint,
+                    new StaticAuthTransformerFactory("TEST"),
+                    new TransformationLoader().getTransformerFactoryLoader(endpoint.getHost()),
+                    RootReplayerConstructorExtensions.makeClientConnectionPool(endpoint, targetConnectionPoolPrefix)
+                );
+            } catch (SSLException e) {
+                throw new RuntimeException(e);
+            }
+        }, tupleListenerSupplier, rootContextSupplier, trafficSourceFactory, timeShifter);
     }
 
-    public static void runReplayer(int numExpectedRequests,
-                                   BiFunction<IRootReplayerContext, String, TrafficReplayerTopLevel> trafficReplayerFactory,
-                                   Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
-                                   Supplier<TestContext> rootContextSupplier,
-                                   Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory,
-                                   TimeShifter timeShifter)
-            throws Throwable {
+    public static void runReplayer(
+        int numExpectedRequests,
+        BiFunction<IRootReplayerContext, String, TrafficReplayerTopLevel> trafficReplayerFactory,
+        Supplier<Consumer<SourceTargetCaptureTuple>> tupleListenerSupplier,
+        Supplier<TestContext> rootContextSupplier,
+        Function<TestContext, ISimpleTrafficCaptureSource> trafficSourceFactory,
+        TimeShifter timeShifter
+    ) throws Throwable {
         boolean skipFinally = false;
         AtomicInteger runNumberRef = new AtomicInteger();
         var totalUniqueEverReceived = new AtomicInteger();
@@ -96,13 +106,16 @@ public class TrafficReplayerRunner {
             int runNumber = runNumberRef.get();
             var counter = new AtomicInteger();
             var tupleReceiver = tupleListenerSupplier.get();
-            String targetConnectionPoolPrefix = TrafficReplayerTopLevel.TARGET_CONNECTION_POOL_NAME + " run: " + runNumber;
-            try (var rootContext = rootContextSupplier.get();
-                var trafficReplayer = trafficReplayerFactory.apply(rootContext, targetConnectionPoolPrefix)) {
-                runTrafficReplayer(trafficReplayer, ()->trafficSourceFactory.apply(rootContext),
-                        (t) -> {
+            String targetConnectionPoolPrefix = TrafficReplayerTopLevel.TARGET_CONNECTION_POOL_NAME
+                + " run: "
+                + runNumber;
+            try (
+                var rootContext = rootContextSupplier.get();
+                var trafficReplayer = trafficReplayerFactory.apply(rootContext, targetConnectionPoolPrefix)
+            ) {
+                runTrafficReplayer(trafficReplayer, () -> trafficSourceFactory.apply(rootContext), (t) -> {
                     if (runNumber != runNumberRef.get()) {
-                        // for an old replayer.  I'm not sure why shutdown isn't blocking until all threads are dead,
+                        // for an old replayer. I'm not sure why shutdown isn't blocking until all threads are dead,
                         // but that behavior only impacts this test as far as I can tell.
                         return;
                     }
@@ -110,35 +123,41 @@ public class TrafficReplayerRunner {
                     var key = t.getRequestKey();
                     ISourceTrafficChannelKey tsk = key.getTrafficStreamKey();
                     var keyString = tsk.getConnectionId() + "_" + key.getSourceRequestIndex();
-                    var prevKeyString = tsk.getConnectionId() + "_" + (key.getSourceRequestIndex()-1);
+                    var prevKeyString = tsk.getConnectionId() + "_" + (key.getSourceRequestIndex() - 1);
                     tupleReceiver.accept(t);
-                    Assertions.assertFalse(Optional.ofNullable(completelyHandledItems.get(prevKeyString))
-                            .map(prevT->t.sourcePair.equals(prevT.sourcePair)).orElse(false));
-                    var totalUnique = null != completelyHandledItems.put(keyString, t) ?
-                            totalUniqueEverReceived.get() :
-                            totalUniqueEverReceived.incrementAndGet();
+                    Assertions.assertFalse(
+                        Optional.ofNullable(completelyHandledItems.get(prevKeyString))
+                            .map(prevT -> t.sourcePair.equals(prevT.sourcePair))
+                            .orElse(false)
+                    );
+                    var totalUnique = null != completelyHandledItems.put(keyString, t)
+                        ? totalUniqueEverReceived.get()
+                        : totalUniqueEverReceived.incrementAndGet();
 
                     var c = counter.incrementAndGet();
-                    log.info("counter="+c+" totalUnique="+totalUnique+" runNum="+runNumber+" key="+key);
+                    log.info("counter=" + c + " totalUnique=" + totalUnique + " runNum=" + runNumber + " key=" + key);
                 }, timeShifter);
                 // if this finished running without an exception, we need to stop the loop
                 break;
             } catch (TrafficReplayer.TerminationException e) {
                 log.atLevel(e.originalCause instanceof FabricatedErrorToKillTheReplayer ? Level.INFO : Level.ERROR)
-                        .setCause(e.originalCause)
-                        .setMessage(()->"broke out of the replayer, with this shutdown reason")
-                        .log();
+                    .setCause(e.originalCause)
+                    .setMessage(() -> "broke out of the replayer, with this shutdown reason")
+                    .log();
                 log.atLevel(e.immediateCause == null ? Level.INFO : Level.ERROR)
-                        .setCause(e.immediateCause)
-                        .setMessage(()->"broke out of the replayer, with the shutdown cause=" + e.originalCause +
-                                " and this immediate reason")
-                        .log();
+                    .setCause(e.immediateCause)
+                    .setMessage(
+                        () -> "broke out of the replayer, with the shutdown cause="
+                            + e.originalCause
+                            + " and this immediate reason"
+                    )
+                    .log();
                 FabricatedErrorToKillTheReplayer killSignalError =
-                        e.originalCause instanceof FabricatedErrorToKillTheReplayer
-                                ? (FabricatedErrorToKillTheReplayer) e.originalCause
-                                : (e.immediateCause instanceof FabricatedErrorToKillTheReplayer
-                                ? (FabricatedErrorToKillTheReplayer) e.immediateCause
-                                : null);
+                    e.originalCause instanceof FabricatedErrorToKillTheReplayer
+                        ? (FabricatedErrorToKillTheReplayer) e.originalCause
+                        : (e.immediateCause instanceof FabricatedErrorToKillTheReplayer
+                            ? (FabricatedErrorToKillTheReplayer) e.immediateCause
+                            : null);
                 if (killSignalError == null) {
                     skipFinally = true;
                     throw e.immediateCause;
@@ -151,49 +170,70 @@ public class TrafficReplayerRunner {
             } finally {
                 if (!skipFinally) {
                     waitForWorkerThreadsToStop(targetConnectionPoolPrefix);
-                    log.info("Upon appending.... counter=" + counter.get() + " totalUnique=" +
-                            totalUniqueEverReceived.get() + " runNumber=" + runNumber + "\n" +
-                            completelyHandledItems.keySet().stream().sorted().collect(Collectors.joining("\n")));
+                    log.info(
+                        "Upon appending.... counter="
+                            + counter.get()
+                            + " totalUnique="
+                            + totalUniqueEverReceived.get()
+                            + " runNumber="
+                            + runNumber
+                            + "\n"
+                            + completelyHandledItems.keySet().stream().sorted().collect(Collectors.joining("\n"))
+                    );
                     log.info(Strings.repeat("\n", 20));
                     receivedPerRun.add(counter.get());
                     totalUniqueEverReceivedSizeAfterEachRun.add(totalUniqueEverReceived.get());
                 }
             }
         }
-        log.atInfo().setMessage(()->"completely received request keys=\n{}")
-                .addArgument(completelyHandledItems.keySet().stream().sorted().collect(Collectors.joining("\n")))
-                .log();
+        log.atInfo()
+            .setMessage(() -> "completely received request keys=\n{}")
+            .addArgument(completelyHandledItems.keySet().stream().sorted().collect(Collectors.joining("\n")))
+            .log();
         var skippedPerRun = IntStream.range(0, receivedPerRun.size())
-                .map(i->totalUniqueEverReceivedSizeAfterEachRun.get(i)-receivedPerRun.get(i)).toArray();
-        log.atInfo().setMessage(()->"Summary: (run #, uniqueSoFar, receivedThisRun, skipped)\n" +
-                        IntStream.range(0, receivedPerRun.size()).mapToObj(i->
-                                        new StringJoiner(", ")
-                                                .add(""+i)
-                                                .add(""+totalUniqueEverReceivedSizeAfterEachRun.get(i))
-                                                .add(""+receivedPerRun.get(i))
-                                                .add(""+skippedPerRun[i]).toString())
-                                .collect(Collectors.joining("\n")))
-                .log();
-        var skippedPerRunDiffs = IntStream.range(0, receivedPerRun.size()-1)
-                .map(i->(skippedPerRun[i]<=skippedPerRun[i+1]) ? 1 : 0)
-                .toArray();
+            .map(i -> totalUniqueEverReceivedSizeAfterEachRun.get(i) - receivedPerRun.get(i))
+            .toArray();
+        log.atInfo()
+            .setMessage(
+                () -> "Summary: (run #, uniqueSoFar, receivedThisRun, skipped)\n"
+                    + IntStream.range(0, receivedPerRun.size())
+                        .mapToObj(
+                            i -> new StringJoiner(", ").add("" + i)
+                                .add("" + totalUniqueEverReceivedSizeAfterEachRun.get(i))
+                                .add("" + receivedPerRun.get(i))
+                                .add("" + skippedPerRun[i])
+                                .toString()
+                        )
+                        .collect(Collectors.joining("\n"))
+            )
+            .log();
+        var skippedPerRunDiffs = IntStream.range(0, receivedPerRun.size() - 1)
+            .map(i -> (skippedPerRun[i] <= skippedPerRun[i + 1]) ? 1 : 0)
+            .toArray();
         var expectedSkipArray = new int[skippedPerRunDiffs.length];
         Arrays.fill(expectedSkipArray, 1);
         // this isn't the best way to make sure that commits are increasing.
         // They are for specific patterns, but not all of them.
         // TODO - export the whole table of results & let callers determine how to check that commits are moving along
-        //Assertions.assertArrayEquals(expectedSkipArray, skippedPerRunDiffs);
+        // Assertions.assertArrayEquals(expectedSkipArray, skippedPerRunDiffs);
         Assertions.assertEquals(numExpectedRequests, totalUniqueEverReceived.get());
     }
 
-    private static void runTrafficReplayer(TrafficReplayerTopLevel trafficReplayer,
-                                           Supplier<ISimpleTrafficCaptureSource> captureSourceSupplier,
-                                           Consumer<SourceTargetCaptureTuple> tupleReceiver,
-                                           TimeShifter timeShifter) throws Exception {
+    private static void runTrafficReplayer(
+        TrafficReplayerTopLevel trafficReplayer,
+        Supplier<ISimpleTrafficCaptureSource> captureSourceSupplier,
+        Consumer<SourceTargetCaptureTuple> tupleReceiver,
+        TimeShifter timeShifter
+    ) throws Exception {
         log.info("Starting a new replayer and running it");
         try (var trafficSource = new BlockingTrafficSource(captureSourceSupplier.get(), Duration.ofMinutes(2))) {
-            trafficReplayer.setupRunAndWaitForReplayWithShutdownChecks(Duration.ofSeconds(70), Duration.ofSeconds(30),
-                trafficSource, timeShifter, tupleReceiver);
+            trafficReplayer.setupRunAndWaitForReplayWithShutdownChecks(
+                Duration.ofSeconds(70),
+                Duration.ofSeconds(30),
+                trafficSource,
+                timeShifter,
+                tupleReceiver
+            );
         }
     }
 
@@ -208,15 +248,15 @@ public class TrafficReplayerRunner {
             } else {
                 log.trace("Found a client connection pool - waiting briefly and retrying.");
                 Thread.sleep(sleepMs);
-                sleepMs = Math.max(MAX_SLEEP_MS, sleepMs*2);
+                sleepMs = Math.max(MAX_SLEEP_MS, sleepMs * 2);
             }
         }
     }
 
     private static boolean foundClientPoolThread(String targetConnectionPoolName, ThreadGroup group) {
-        Thread[] threads = new Thread[group.activeCount()*2];
+        Thread[] threads = new Thread[group.activeCount() * 2];
         var numThreads = group.enumerate(threads);
-        for (int i=0; i<numThreads; ++i) {
+        for (int i = 0; i < numThreads; ++i) {
             if (threads[i].getName().startsWith(targetConnectionPoolName)) {
                 return true;
             }
@@ -225,7 +265,7 @@ public class TrafficReplayerRunner {
         int numGroups = group.activeGroupCount();
         ThreadGroup[] groups = new ThreadGroup[numGroups * 2];
         numGroups = group.enumerate(groups, false);
-        for (int i=0; i<numGroups; ++i) {
+        for (int i = 0; i < numGroups; ++i) {
             if (foundClientPoolThread(targetConnectionPoolName, groups[i])) {
                 return true;
             }
@@ -237,8 +277,11 @@ public class TrafficReplayerRunner {
         var rootThreadGroup = Thread.currentThread().getThreadGroup();
         while (true) {
             var tmp = rootThreadGroup.getParent();
-            if (tmp != null) { rootThreadGroup = tmp; }
-            else { return rootThreadGroup; }
+            if (tmp != null) {
+                rootThreadGroup = tmp;
+            } else {
+                return rootThreadGroup;
+            }
         }
     }
 

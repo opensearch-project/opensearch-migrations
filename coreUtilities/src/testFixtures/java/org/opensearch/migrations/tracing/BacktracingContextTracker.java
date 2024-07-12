@@ -1,16 +1,15 @@
 package org.opensearch.migrations.tracing;
 
-import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
-
 import java.util.Map;
 import java.util.WeakHashMap;
 import java.util.stream.Collectors;
 
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
+
 @Slf4j
 public class BacktracingContextTracker implements IContextTracker, AutoCloseable {
-    private static class ExceptionForStackTracingOnly extends Exception {
-    }
+    private static class ExceptionForStackTracingOnly extends Exception {}
 
     @Getter
     public static class CallDetails {
@@ -22,8 +21,7 @@ public class BacktracingContextTracker implements IContextTracker, AutoCloseable
         }
     }
 
-    private final Map<IScopedInstrumentationAttributes, CallDetails> scopedContextToCallDetails =
-            new WeakHashMap<>();
+    private final Map<IScopedInstrumentationAttributes, CallDetails> scopedContextToCallDetails = new WeakHashMap<>();
     private final Object lockObject = new Object();
     private boolean isClosed;
 
@@ -36,8 +34,11 @@ public class BacktracingContextTracker implements IContextTracker, AutoCloseable
             if (priorValue != null) {
                 var priorKey = scopedContextToCallDetails.entrySet().stream().findFirst().get().getKey();
                 if (priorKey.equals(ctx)) {
-                    log.atError().setMessage(()->"Trying to re-add the same context (" + ctx +
-                            ") back into this context tracker").log();
+                    log.atError()
+                        .setMessage(
+                            () -> "Trying to re-add the same context (" + ctx + ") back into this context tracker"
+                        )
+                        .log();
                 }
             }
             assert priorValue == null;
@@ -64,11 +65,12 @@ public class BacktracingContextTracker implements IContextTracker, AutoCloseable
 
     public Map<IScopedInstrumentationAttributes, CallDetails> getAllRemainingActiveScopes() {
         synchronized (lockObject) {
-            return scopedContextToCallDetails.entrySet().stream()
-                    // filter away items that were closed but not cleared yet (since it's a weak map)
-                    .filter(kvp -> kvp.getValue().closeStackException == null)
-                    // make a copy since we're in a synchronized block
-                    .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+            return scopedContextToCallDetails.entrySet()
+                .stream()
+                // filter away items that were closed but not cleared yet (since it's a weak map)
+                .filter(kvp -> kvp.getValue().closeStackException == null)
+                // make a copy since we're in a synchronized block
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
         }
     }
 

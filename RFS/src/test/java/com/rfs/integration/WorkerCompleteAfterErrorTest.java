@@ -13,10 +13,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class WorkerCompleteAfterErrorTest {
 
-
     @ParameterizedTest(name = "Injected failure on {0} step")
     @EnumSource(InjectedFailure.class)
-    public void SingleWorkerFailure(final InjectedFailure failure){
+    public void SingleWorkerFailure(final InjectedFailure failure) {
         // Setup
         setupCms();
         setupMockSource();
@@ -38,7 +37,7 @@ public class WorkerCompleteAfterErrorTest {
 
     @ParameterizedTest(name = "Injected failure on {0} step")
     @EnumSource(InjectedFailure.class)
-    public void ResumeAfterWorkerFailure(){
+    public void ResumeAfterWorkerFailure() {
         // Setup
         setupCms();
         setupMockSource();
@@ -60,7 +59,7 @@ public class WorkerCompleteAfterErrorTest {
     }
 
     @Test
-    public void DisjointedAllWorkerFailure(){
+    public void DisjointedAllWorkerFailure() {
         // Setup
         setupCms();
         setupMockSource();
@@ -87,29 +86,29 @@ public class WorkerCompleteAfterErrorTest {
 
     private void setupMockSource() {
         // PSUEDO: Setup mock source cluster
-        //   - Mock snapshot workflow
-        //   - Mock index templates
-        //   - Mock indices
-        //   - Mock documents
+        // - Mock snapshot workflow
+        // - Mock index templates
+        // - Mock indices
+        // - Mock documents
     }
 
     private void setupMockTarget() {
         // PSUEDO: Setup mock migration target
-        //   - Mock OpenSearch client
+        // - Mock OpenSearch client
     }
 
     public void createWorker() {
         // PSUEDO: Creates a worker
-        //   - Worker behavior tweaked for shorter leases / faster retries so tests can run quickly
-        //   - Workers themselve runs in a thread and are return CompletableFuture<Void>
-        //      Future will include exception if thrown from the worker
+        // - Worker behavior tweaked for shorter leases / faster retries so tests can run quickly
+        // - Workers themselve runs in a thread and are return CompletableFuture<Void>
+        // Future will include exception if thrown from the worker
     }
 
     private void verifyTargetMigrated() {
         // PSUEDO: Verify migration target
-        //   - Verify all index templates attempted at least once
-        //   - Verify all indices attempted at least once
-        //   - Verify all documents attempted at least once
+        // - Verify all index templates attempted at least once
+        // - Verify all indices attempted at least once
+        // - Verify all documents attempted at least once
         // E.g. verify(targetClient, atLeastOnce()).createIndexTemplate("{index-template-name}", any())
     }
 

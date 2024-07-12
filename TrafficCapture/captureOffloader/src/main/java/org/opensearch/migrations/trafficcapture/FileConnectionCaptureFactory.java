@@ -1,10 +1,5 @@
 package org.opensearch.migrations.trafficcapture;
 
-import lombok.AllArgsConstructor;
-import lombok.Lombok;
-import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
-
 import java.io.FileNotFoundException;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -14,6 +9,12 @@ import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.BiFunction;
 
+import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
+
+import lombok.AllArgsConstructor;
+import lombok.Lombok;
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * Reference implementation of a TrafficStream protobuf-encoded sink.
  * TrafficStreams are dumped to individual files that are named according to the TrafficStream id.
@@ -21,14 +22,17 @@ import java.util.function.BiFunction;
  * @deprecated - This class is NOT meant to be used for production.
  */
 @Slf4j
-@Deprecated(since="0.1", forRemoval = false)
+@Deprecated(since = "0.1", forRemoval = false)
 public class FileConnectionCaptureFactory implements IConnectionCaptureFactory<Void> {
     private final BiFunction<String, Integer, FileOutputStream> outputStreamCreator;
     private String nodeId;
     private final int bufferSize;
 
-    public FileConnectionCaptureFactory(String nodeId, int bufferSize,
-                                        BiFunction<String, Integer, FileOutputStream> outputStreamCreator) {
+    public FileConnectionCaptureFactory(
+        String nodeId,
+        int bufferSize,
+        BiFunction<String, Integer, FileOutputStream> outputStreamCreator
+    ) {
         this.nodeId = nodeId;
         this.outputStreamCreator = outputStreamCreator;
         this.bufferSize = bufferSize;
@@ -59,11 +63,11 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory<V
         }
 
         @Override
-        public CompletableFuture<Void>
-        kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder, int index) {
+        public CompletableFuture<Void> kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder, int index) {
             if (!(outputStreamHolder instanceof CodedOutputStreamAndByteBufferWrapper)) {
-                throw new IllegalArgumentException("Unknown outputStreamHolder sent back to StreamManager: " +
-                        outputStreamHolder);
+                throw new IllegalArgumentException(
+                    "Unknown outputStreamHolder sent back to StreamManager: " + outputStreamHolder
+                );
             }
             var osh = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
             return CompletableFuture.runAsync(() -> {
@@ -73,11 +77,13 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory<V
                     byte[] filledBytes = Arrays.copyOfRange(bb.array(), 0, bb.position());
                     fs.write(filledBytes);
                     fs.flush();
-                    log.warn("NOT removing the CodedOutputStream from the WeakHashMap, which is a memory leak.  Doing this until the system knows when to properly flush buffers");
+                    log.warn(
+                        "NOT removing the CodedOutputStream from the WeakHashMap, which is a memory leak.  Doing this until the system knows when to properly flush buffers"
+                    );
                 } catch (IOException e) {
                     throw Lombok.sneakyThrow(e);
                 }
-            }).thenApply(v->null);
+            }).thenApply(v -> null);
         }
     }
 

@@ -1,17 +1,18 @@
 package org.opensearch.migrations.replay.datahandlers;
 
-import lombok.EqualsAndHashCode;
-import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.transform.IHttpMessage;
-import org.opensearch.migrations.replay.datahandlers.http.StrictCaseInsensitiveHttpHeadersMap;
-import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
-
 import java.util.AbstractMap;
 import java.util.AbstractSet;
 import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
+
+import org.opensearch.migrations.replay.datahandlers.http.StrictCaseInsensitiveHttpHeadersMap;
+import org.opensearch.migrations.transform.IHttpMessage;
+import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
+
+import lombok.EqualsAndHashCode;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * This is a trivial map implementation that can only store one key-value pair, "inlinedJsonBody"
@@ -29,13 +30,15 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
 
     public PayloadAccessFaultingMap(StrictCaseInsensitiveHttpHeadersMap headers) {
         isJson = Optional.ofNullable(headers.get(IHttpMessage.CONTENT_TYPE))
-                .map(list->list.stream()
-                        .anyMatch(s->s.startsWith(IHttpMessage.APPLICATION_JSON))).orElse(false);
+            .map(list -> list.stream().anyMatch(s -> s.startsWith(IHttpMessage.APPLICATION_JSON)))
+            .orElse(false);
     }
 
     @Override
     public Object get(Object key) {
-        if (!JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY.equals(key) || !isJson) { return null; }
+        if (!JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY.equals(key) || !isJson) {
+            return null;
+        }
         if (onlyValue == null) {
             throw PayloadNotLoadedException.getInstance();
         } else {
@@ -53,6 +56,7 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
                 public Iterator<Entry<String, Object>> iterator() {
                     return new Iterator<>() {
                         private int count;
+
                         @Override
                         public boolean hasNext() {
                             return count == 0 && isJson;
@@ -63,7 +67,10 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
                             if (isJson && count == 0) {
                                 ++count;
                                 if (onlyValue != null) {
-                                    return new SimpleEntry<>(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, onlyValue);
+                                    return new SimpleEntry<>(
+                                        JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY,
+                                        onlyValue
+                                    );
                                 } else {
                                     throw PayloadNotLoadedException.getInstance();
                                 }
@@ -84,7 +91,9 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
 
     @Override
     public Object put(String key, Object value) {
-        if (!JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY.equals(key)) { return null; }
+        if (!JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY.equals(key)) {
+            return null;
+        }
         Object old = onlyValue;
         onlyValue = value;
         return old;

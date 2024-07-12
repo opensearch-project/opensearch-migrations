@@ -1,10 +1,11 @@
 package org.opensearch.migrations.replay.netty;
 
+import org.opensearch.migrations.replay.AggregatedRawResponse;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.AggregatedRawResponse;
 
 @Slf4j
 public class BacksideSnifferHandler extends ChannelInboundHandlerAdapter {

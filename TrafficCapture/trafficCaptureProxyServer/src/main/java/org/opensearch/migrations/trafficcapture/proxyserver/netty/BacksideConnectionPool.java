@@ -1,7 +1,10 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
-import io.netty.channel.socket.nio.NioSocketChannel;
-import org.slf4j.event.Level;
+import java.net.URI;
+import java.time.Duration;
+import java.util.concurrent.TimeUnit;
+import javax.net.ssl.SSLEngine;
+
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelFuture;
@@ -9,15 +12,12 @@ import io.netty.channel.ChannelFutureListener;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.DefaultChannelPromise;
 import io.netty.channel.EventLoop;
+import io.netty.channel.socket.nio.NioSocketChannel;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.util.concurrent.FastThreadLocal;
 import lombok.extern.slf4j.Slf4j;
-
-import javax.net.ssl.SSLEngine;
-import java.net.URI;
-import java.time.Duration;
-import java.util.concurrent.TimeUnit;
+import org.slf4j.event.Level;
 
 @Slf4j
 public class BacksideConnectionPool {
@@ -27,8 +27,12 @@ public class BacksideConnectionPool {
     private final Duration inactivityTimeout;
     private final int poolSize;
 
-    public BacksideConnectionPool(URI backsideUri, SslContext backsideSslContext,
-                                  int poolSize, Duration inactivityTimeout) {
+    public BacksideConnectionPool(
+        URI backsideUri,
+        SslContext backsideSslContext,
+        int poolSize,
+        Duration inactivityTimeout
+    ) {
         this.backsideUri = backsideUri;
         this.backsideSslContext = backsideSslContext;
         this.connectionCacheForEachThread = new FastThreadLocal<>();
@@ -43,18 +47,19 @@ public class BacksideConnectionPool {
         return getExpiringWarmChannelPool(eventLoop).getAvailableOrNewItem();
     }
 
-    private ExpiringSubstitutableItemPool<ChannelFuture, Void>
-    getExpiringWarmChannelPool(EventLoop eventLoop) {
+    private ExpiringSubstitutableItemPool<ChannelFuture, Void> getExpiringWarmChannelPool(EventLoop eventLoop) {
         var thisContextsConnectionCache = connectionCacheForEachThread.get();
         if (thisContextsConnectionCache == null) {
-            thisContextsConnectionCache =
-                    new ExpiringSubstitutableItemPool<ChannelFuture, Void>(inactivityTimeout,
-                            eventLoop,
-                            () -> buildConnectionFuture(eventLoop),
-                            x->x.channel().close(), poolSize, Duration.ZERO);
+            thisContextsConnectionCache = new ExpiringSubstitutableItemPool<ChannelFuture, Void>(
+                inactivityTimeout,
+                eventLoop,
+                () -> buildConnectionFuture(eventLoop),
+                x -> x.channel().close(),
+                poolSize,
+                Duration.ZERO
+            );
             if (log.isInfoEnabled()) {
-                logProgressAtInterval(Level.INFO, eventLoop,
-                        thisContextsConnectionCache, Duration.ofSeconds(30));
+                logProgressAtInterval(Level.INFO, eventLoop, thisContextsConnectionCache, Duration.ofSeconds(30));
             }
             connectionCacheForEachThread.set(thisContextsConnectionCache);
         }
@@ -62,20 +67,27 @@ public class BacksideConnectionPool {
         return thisContextsConnectionCache;
     }
 
-    private void logProgressAtInterval(Level logLevel, EventLoop eventLoop,
-                                       ExpiringSubstitutableItemPool<ChannelFuture, Void> channelPoolMap,
-                                       Duration frequency) {
-        eventLoop.scheduleAtFixedRate(() -> log.atLevel(logLevel).log(channelPoolMap.getStats().toString()),
-                frequency.toMillis(), frequency.toMillis(), TimeUnit.MILLISECONDS);
+    private void logProgressAtInterval(
+        Level logLevel,
+        EventLoop eventLoop,
+        ExpiringSubstitutableItemPool<ChannelFuture, Void> channelPoolMap,
+        Duration frequency
+    ) {
+        eventLoop.scheduleAtFixedRate(
+            () -> log.atLevel(logLevel).log(channelPoolMap.getStats().toString()),
+            frequency.toMillis(),
+            frequency.toMillis(),
+            TimeUnit.MILLISECONDS
+        );
     }
 
     private ChannelFuture buildConnectionFuture(EventLoop eventLoop) {
         // Start the connection attempt.
         Bootstrap b = new Bootstrap();
         b.group(eventLoop)
-                .channel(NioSocketChannel.class)
-                .handler(new ChannelDuplexHandler())
-                .option(ChannelOption.AUTO_READ, false);
+            .channel(NioSocketChannel.class)
+            .handler(new ChannelDuplexHandler())
+            .option(ChannelOption.AUTO_READ, false);
         var f = b.connect(backsideUri.getHost(), backsideUri.getPort());
         var rval = new DefaultChannelPromise(f.channel());
         f.addListener((ChannelFutureListener) connectFuture -> {
@@ -86,7 +98,7 @@ public class BacksideConnectionPool {
                     var pipeline = connectFuture.channel().pipeline();
                     SSLEngine sslEngine = backsideSslContext.newEngine(connectFuture.channel().alloc());
                     sslEngine.setUseClientMode(true);
-                    var sslHandler =  new SslHandler(sslEngine);
+                    var sslHandler = new SslHandler(sslEngine);
                     pipeline.addFirst("ssl", sslHandler);
                     sslHandler.handshakeFuture().addListener(handshakeFuture -> {
                         if (handshakeFuture.isSuccess()) {

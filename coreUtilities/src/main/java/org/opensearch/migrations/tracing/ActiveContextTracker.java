@@ -12,9 +12,10 @@ public class ActiveContextTracker implements IContextTracker {
     }
 
     static ConcurrentSkipListSet<IScopedInstrumentationAttributes> makeScopeSkipList() {
-        return new ConcurrentSkipListSet<>(Comparator
-                .comparingLong(IWithStartTimeAndAttributes::getStartTimeNano)
-                .thenComparingInt(System::identityHashCode));
+        return new ConcurrentSkipListSet<>(
+            Comparator.comparingLong(IWithStartTimeAndAttributes::getStartTimeNano)
+                .thenComparingInt(System::identityHashCode)
+        );
     }
 
     @Override

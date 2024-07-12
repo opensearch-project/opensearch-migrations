@@ -1,8 +1,9 @@
 package org.opensearch.migrations.replay.datahandlers;
 
+import org.opensearch.migrations.replay.util.TrackedFuture;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import org.opensearch.migrations.replay.util.TrackedFuture;
 
 /**
  * This class consumes arrays of bytes or ByteBufs, potentially asynchronously,
@@ -10,7 +11,7 @@ import org.opensearch.migrations.replay.util.TrackedFuture;
  */
 public interface IPacketConsumer {
 
-    default TrackedFuture<String,Void> consumeBytes(byte[] nextRequestPacket) {
+    default TrackedFuture<String, Void> consumeBytes(byte[] nextRequestPacket) {
         var bb = Unpooled.wrappedBuffer(nextRequestPacket).retain();
         var rval = consumeBytes(bb);
         bb.release();

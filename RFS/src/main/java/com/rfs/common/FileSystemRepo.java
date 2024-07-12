@@ -17,7 +17,7 @@ public class FileSystemRepo implements SourceRepo {
         Pattern pattern = Pattern.compile("^index-(\\d+)$");
         Path highestVersionedFile = null;
         int highestVersion = -1;
-        
+
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(repoRootDir)) {
             for (Path entry : stream) {
                 if (Files.isRegularFile(entry)) {
@@ -57,7 +57,7 @@ public class FileSystemRepo implements SourceRepo {
 
     @Override
     public Path getGlobalMetadataFilePath(String snapshotId) {
-        return getRepoRootDir().resolve("meta-" + snapshotId + ".dat");        
+        return getRepoRootDir().resolve("meta-" + snapshotId + ".dat");
     }
 
     @Override
@@ -72,7 +72,10 @@ public class FileSystemRepo implements SourceRepo {
 
     @Override
     public Path getShardDirPath(String indexId, int shardId) {
-        String shardDirPath = getRepoRootDir().resolve("indices").resolve(indexId).resolve(String.valueOf(shardId)).toString();
+        String shardDirPath = getRepoRootDir().resolve("indices")
+            .resolve(indexId)
+            .resolve(String.valueOf(shardId))
+            .toString();
         return Path.of(shardDirPath);
     }
 

@@ -1,11 +1,10 @@
 package com.rfs.transformers;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.models.GlobalMetadata;
 import com.rfs.models.IndexMetadata;
 import com.rfs.version_os_2_11.GlobalMetadataData_OS_2_11;
@@ -20,7 +19,7 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
     }
 
     @Override
-    public GlobalMetadata transformGlobalMetadata(GlobalMetadata metaData){
+    public GlobalMetadata transformGlobalMetadata(GlobalMetadata metaData) {
         ObjectNode root = metaData.toObjectNode().deepCopy();
 
         // Transform the legacy templates
@@ -52,7 +51,8 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
 
                 logger.info("Transforming template: " + templateName);
                 logger.debug("Original template: " + template.toString());
-                TransformFunctions.removeIntermediateIndexSettingsLevel(templateSubRoot); // run before fixNumberOfReplicas
+                TransformFunctions.removeIntermediateIndexSettingsLevel(templateSubRoot); // run before
+                                                                                          // fixNumberOfReplicas
                 TransformFunctions.fixReplicasForDimensionality(templateSubRoot, awarenessAttributeDimensionality);
                 logger.debug("Transformed template: " + template.toString());
                 indexTemplateValuesRoot.set(templateName, template);
@@ -85,11 +85,11 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
     }
 
     @Override
-    public IndexMetadata transformIndexMetadata(IndexMetadata indexData){
+    public IndexMetadata transformIndexMetadata(IndexMetadata indexData) {
         logger.debug("Original Object: " + indexData.rawJson().toString());
         var copy = indexData.deepCopy();
         var newRoot = copy.rawJson();
-        
+
         TransformFunctions.removeIntermediateMappingsLevels(newRoot);
 
         newRoot.set("settings", TransformFunctions.convertFlatSettingsToTree((ObjectNode) newRoot.get("settings")));

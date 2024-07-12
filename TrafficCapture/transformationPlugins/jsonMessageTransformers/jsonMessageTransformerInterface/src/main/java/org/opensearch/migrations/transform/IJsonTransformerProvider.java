@@ -17,5 +17,7 @@ public interface IJsonTransformerProvider {
      * Friendly name that can be used as a key to identify transformer providers.
      * @return
      */
-    default @NonNull String getName() { return this.getClass().getSimpleName(); }
+    default @NonNull String getName() {
+        return this.getClass().getSimpleName();
+    }
 }

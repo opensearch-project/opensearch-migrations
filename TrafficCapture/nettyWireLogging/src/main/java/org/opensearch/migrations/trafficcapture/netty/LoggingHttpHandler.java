@@ -1,5 +1,13 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
+import java.io.IOException;
+import java.time.Instant;
+
+import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
+import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
+import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
+import org.opensearch.migrations.trafficcapture.netty.tracing.IWireCaptureContexts;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelDuplexHandler;
 import io.netty.channel.ChannelHandlerContext;
@@ -19,13 +27,6 @@ import lombok.Getter;
 import lombok.Lombok;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.trafficcapture.IChannelConnectionCaptureSerializer;
-import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
-import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
-import org.opensearch.migrations.trafficcapture.netty.tracing.IWireCaptureContexts;
-
-import java.io.IOException;
-import java.time.Instant;
 
 @Slf4j
 public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
@@ -34,6 +35,7 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         static final byte CAPTURE = 0;
         static final byte IGNORE_REQUEST = 1;
         static final byte IGNORE_RESPONSE = 2;
+
         private CaptureIgnoreState() {}
     }
 
@@ -55,13 +57,15 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             }
         }
     }
-    
+
     static class SimpleHttpRequestDecoder extends HttpRequestDecoder {
         private final PassThruHttpHeaders.HttpHeadersToPreserve headersToPreserve;
         private final CaptureState captureState;
 
-        public SimpleHttpRequestDecoder(@NonNull PassThruHttpHeaders.HttpHeadersToPreserve headersToPreserve,
-                                        CaptureState captureState) {
+        public SimpleHttpRequestDecoder(
+            @NonNull PassThruHttpHeaders.HttpHeadersToPreserve headersToPreserve,
+            CaptureState captureState
+        ) {
             this.headersToPreserve = headersToPreserve;
             this.captureState = captureState;
         }
@@ -73,9 +77,11 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
          */
         @Override
         public HttpMessage createMessage(String[] initialLine) throws Exception {
-            return new DefaultHttpRequest(HttpVersion.valueOf(initialLine[2]),
-                    HttpMethod.valueOf(initialLine[0]), initialLine[1]
-                    , new PassThruHttpHeaders(headersToPreserve)
+            return new DefaultHttpRequest(
+                HttpVersion.valueOf(initialLine[2]),
+                HttpMethod.valueOf(initialLine[0]),
+                initialLine[1],
+                new PassThruHttpHeaders(headersToPreserve)
             );
         }
 
@@ -87,14 +93,14 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
             super.channelRead(ctx, msg);
         }
     }
-    
+
     static class SimpleDecodedHttpRequestHandler extends ChannelInboundHandlerAdapter {
         @Getter
         private HttpRequest currentRequest;
         final RequestCapturePredicate requestCapturePredicate;
         boolean haveParsedFullRequest;
         final CaptureState captureState;
-        
+
         SimpleDecodedHttpRequestHandler(RequestCapturePredicate requestCapturePredicate, CaptureState captureState) {
             this.requestCapturePredicate = requestCapturePredicate;
             this.currentRequest = null;
@@ -106,10 +112,11 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
             if (msg instanceof HttpRequest) {
                 currentRequest = (HttpRequest) msg;
-                captureState.setShouldCaptureForRequest(RequestCapturePredicate.CaptureDirective.CAPTURE ==
-                        requestCapturePredicate.apply((HttpRequest) msg));
+                captureState.setShouldCaptureForRequest(
+                    RequestCapturePredicate.CaptureDirective.CAPTURE == requestCapturePredicate.apply((HttpRequest) msg)
+                );
             } else if (msg instanceof HttpContent) {
-                ((HttpContent)msg).release();
+                ((HttpContent) msg).release();
                 if (msg instanceof LastHttpContent) {
                     haveParsedFullRequest = true;
                 }
@@ -132,18 +139,21 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
 
     protected IWireCaptureContexts.IHttpMessageContext messageContext;
 
-    public LoggingHttpHandler(@NonNull IRootWireLoggingContext rootContext, String nodeId, String channelKey,
-                              @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
-                              @NonNull RequestCapturePredicate httpHeadersCapturePredicate)
-    throws IOException {
+    public LoggingHttpHandler(
+        @NonNull IRootWireLoggingContext rootContext,
+        String nodeId,
+        String channelKey,
+        @NonNull IConnectionCaptureFactory<T> trafficOffloaderFactory,
+        @NonNull RequestCapturePredicate httpHeadersCapturePredicate
+    ) throws IOException {
         var parentContext = rootContext.createConnectionContext(channelKey, nodeId);
         this.messageContext = parentContext.createInitialRequestContext();
 
         this.trafficOffloader = trafficOffloaderFactory.createOffloader(parentContext);
         var captureState = new CaptureState();
         httpDecoderChannel = new EmbeddedChannel(
-                new SimpleHttpRequestDecoder(httpHeadersCapturePredicate.getHeadersRequiredForMatcher(), captureState),
-                new SimpleDecodedHttpRequestHandler(httpHeadersCapturePredicate, captureState)
+            new SimpleHttpRequestDecoder(httpHeadersCapturePredicate.getHeadersRequiredForMatcher(), captureState),
+            new SimpleDecodedHttpRequestHandler(httpHeadersCapturePredicate, captureState)
         );
     }
 
@@ -201,8 +211,12 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
      * @param shouldCapture false if the current request has been determined to be ignorable
      * @param httpRequest the request that has just been fully received (excluding its body)
      */
-    protected void channelFinishedReadingAnHttpMessage(ChannelHandlerContext ctx, Object msg, boolean shouldCapture,
-                                                       HttpRequest httpRequest) throws Exception {
+    protected void channelFinishedReadingAnHttpMessage(
+        ChannelHandlerContext ctx,
+        Object msg,
+        boolean shouldCapture,
+        HttpRequest httpRequest
+    ) throws Exception {
         messageContext = messageContext.createWaitingForResponseContext();
         super.channelRead(ctx, msg);
     }
@@ -233,7 +247,6 @@ public class LoggingHttpHandler<T> extends ChannelDuplexHandler {
         }
 
         requestContext.onBytesRead(bb.readableBytes());
-
 
         if (requestParsingHandler.haveParsedFullRequest) {
             requestContext.onFullyParsedRequest();

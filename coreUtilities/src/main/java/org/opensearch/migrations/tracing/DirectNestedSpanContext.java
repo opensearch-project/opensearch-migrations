@@ -1,11 +1,9 @@
 package org.opensearch.migrations.tracing;
 
-public abstract class DirectNestedSpanContext<S extends IInstrumentConstructor,
-                                              T extends IScopedInstrumentationAttributes & IHasRootInstrumentationScope<S>,
-                                              L>
-        extends BaseNestedSpanContext<S, T>
-        implements IWithTypedEnclosingScope<L>
-{
+public abstract class DirectNestedSpanContext<
+    S extends IInstrumentConstructor,
+    T extends IScopedInstrumentationAttributes & IHasRootInstrumentationScope<S>,
+    L> extends BaseNestedSpanContext<S, T> implements IWithTypedEnclosingScope<L> {
     protected DirectNestedSpanContext(T parent) {
         super(parent.getRootInstrumentationScope(), parent);
     }
