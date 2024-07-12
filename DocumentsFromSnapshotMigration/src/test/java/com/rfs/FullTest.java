@@ -3,13 +3,11 @@ package com.rfs;
 import com.rfs.cms.ApacheHttpClient;
 import com.rfs.cms.OpenSearchWorkCoordinator;
 import com.rfs.cms.LeaseExpireTrigger;
-import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.FileSystemSnapshotCreator;
-import com.rfs.common.GlobalMetadata;
 import com.rfs.common.IndexMetadata;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
@@ -22,11 +20,13 @@ import com.rfs.framework.SearchClusterContainer;
 import com.rfs.http.SearchClusterRequests;
 import com.rfs.framework.PreloadedSearchClusterContainer;
 import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
-import com.rfs.version_es_7_10.GlobalMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.IndexMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.worker.DocumentsRunner;
+import io.opentelemetry.sdk.metrics.data.LongPointData;
+import io.opentelemetry.sdk.metrics.data.MetricData;
+import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -43,7 +43,6 @@ import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 import org.opensearch.testcontainers.OpensearchContainer;
-import org.slf4j.event.Level;
 import reactor.core.publisher.Flux;
 
 import java.net.URI;
@@ -52,9 +51,8 @@ import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.List;
-import java.util.Objects;
-import java.util.Optional;
 import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
@@ -84,7 +82,7 @@ public class FullTest extends SourceTestBase {
     public static Stream<Arguments> makeDocumentMigrationArgs() {
         List<Object[]> sourceImageArgs = SOURCE_IMAGES.stream().map(name -> makeParamsForBase(name)).collect(Collectors.toList());
         var targetImageNames = TARGET_IMAGES.stream().map(SearchClusterContainer.Version::getImageName).collect(Collectors.toList());
-        var numWorkersList = List.of(40);
+        var numWorkersList = List.of( 1, 3, 40);
         return sourceImageArgs.stream()
                 .flatMap(sourceParams->
                         targetImageNames.stream().flatMap(targetImage->
@@ -133,7 +131,7 @@ public class FullTest extends SourceTestBase {
                 var sourceRepo = new FileSystemRepo(tempDir);
                 migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, INDEX_ALLOWLIST, testMetadataMigrationContext);
 
-                var workerFutures = new ArrayList<CompletableFuture<Void>>();
+                var workerFutures = new ArrayList<CompletableFuture<Integer>>();
                 var runCounter = new AtomicInteger();
                 final var clockJitter = new Random(1);
 
@@ -145,23 +143,23 @@ public class FullTest extends SourceTestBase {
                 }
                 var thrownException = Assertions.assertThrows(ExecutionException.class, () ->
                         CompletableFuture.allOf(workerFutures.toArray(CompletableFuture[]::new)).get());
-                var exceptionResults =
-                        workerFutures.stream().map(cf -> {
+                var numTotalRuns =
+                        workerFutures.stream().mapToInt(cf -> {
                             try {
-                                return cf.handle((v, t) ->
-                                        Optional.ofNullable(t).map(Throwable::getCause).orElse(null))
-                                        .get();
-                            } catch (Exception e) {
+                                return cf.get();
+                            } catch (ExecutionException e) {
+                                var child = e.getCause();
+                                if (child instanceof ExpectedMigrationWorkTerminationException) {
+                                    return ((ExpectedMigrationWorkTerminationException) child).numRuns;
+                                } else {
+                                    throw Lombok.sneakyThrow(child);
+                                }
+                            } catch (InterruptedException e) {
                                 throw Lombok.sneakyThrow(e);
                             }
-                        }).filter(Objects::nonNull).collect(Collectors.toList());
-                exceptionResults.forEach(e ->
-                        log.atLevel(e instanceof RfsMigrateDocuments.NoWorkLeftException ? Level.INFO : Level.ERROR)
-                                .setMessage(() -> "First exception for run").setCause(thrownException.getCause()).log());
-                exceptionResults.forEach(e -> Assertions.assertInstanceOf(RfsMigrateDocuments.NoWorkLeftException.class, e));
+                        }).sum();
 
-                // for now, lets make sure that we got all of the
-                Assertions.assertInstanceOf(RfsMigrateDocuments.NoWorkLeftException.class, thrownException.getCause(),
+                Assertions.assertInstanceOf(ExpectedMigrationWorkTerminationException.class, thrownException.getCause(),
                         "expected at least one worker to notice that all work was completed.");
                 checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer, testDocMigrationContext);
                 var totalCompletedWorkRuns = runCounter.get();
@@ -169,7 +167,7 @@ public class FullTest extends SourceTestBase {
                         "Expected to make more runs (" + totalCompletedWorkRuns + ") than the number of workers " +
                                 "(" + numWorkers + ").  Increase the number of shards so that there is more work to do.");
 
-                verifyWorkMetrics(testDocMigrationContext, numWorkers);
+                verifyWorkMetrics(testDocMigrationContext, numWorkers, numTotalRuns);
             } finally {
                 deleteTree(tempDir);
             }
@@ -178,24 +176,38 @@ public class FullTest extends SourceTestBase {
         }
     }
 
-    private void verifyWorkMetrics(DocumentMigrationTestContext rootContext, int numWorkers) {
+    private void verifyWorkMetrics(DocumentMigrationTestContext rootContext, int numWorkers, int numRuns) {
         var workMetrics = rootContext.getWorkCoordinationContext().inMemoryInstrumentationBundle.getFinishedMetrics();
         var migrationMetrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
 
-        log.atInfo().setMessage(() -> "workMetrics: " + workMetrics).log();
-        log.atInfo().setMessage(() -> "migrationMetrics: " + migrationMetrics).log();
+        verifyCoordinatorBehavior(workMetrics, numRuns);
+        verifyWorkItemCounts(migrationMetrics, workMetrics);
+    }
 
-        long shardCount = migrationMetrics.stream().filter(md->md.getName().startsWith("addShardWorkItem"))
-                .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue();
+    void assertLessThan(long a, long b) {
+        Assertions.assertTrue(a < b, "expected " + a + " to be < " + b);
+    }
+
+    private void verifyCoordinatorBehavior(Collection<MetricData> metrics, int numRuns) {
+        assertLessThan(getMetricValueOrZero(metrics, "workCoordinationInitializationRetries"), numRuns);
+        assertLessThan(getMetricValueOrZero(metrics, "noNextWorkAvailableCount"), numRuns);
+    }
+
+    private static long getMetricValueOrZero(Collection<MetricData> metrics, String s) {
+        return metrics.stream().filter(md->md.getName().equals(s))
+                .reduce((a,b)->b)
+                .flatMap(md->md.getLongSumData().getPoints().stream().reduce((a,b)->b).map(LongPointData::getValue))
+                .orElse(0L);
+    }
+
+    private static void verifyWorkItemCounts(Collection<MetricData> migrationMetrics, Collection<MetricData> workMetrics) {
+        long shardCount = getMetricValueOrZero(migrationMetrics, "addShardWorkItemCount");
         Assertions.assertTrue(shardCount > 0);
-        long numWorkItemsCreated = workMetrics.stream().filter(md->md.getName().startsWith("createUnassignedWorkCount"))
-                .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue();
+        long numWorkItemsCreated = getMetricValueOrZero(workMetrics, "createUnassignedWorkCount");
         Assertions.assertEquals(numWorkItemsCreated, shardCount);
-        long numItemsAssigned = workMetrics.stream().filter(md->md.getName().startsWith("nextWorkAssigned"))
-                .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue();
+        long numItemsAssigned = getMetricValueOrZero(workMetrics, "nextWorkAssignedCount");
         Assertions.assertEquals(numItemsAssigned, shardCount);
-        long numCompleted = workMetrics.stream().filter(md->md.getName().startsWith("completeWorkCount"))
-                .reduce((a,b)->b).get().getLongSumData().getPoints().stream().reduce((a,b)->b).get().getValue();
+        long numCompleted = getMetricValueOrZero(workMetrics, "completeWorkCount");
         Assertions.assertEquals(numCompleted, shardCount+1);
     }
 
@@ -214,27 +226,32 @@ public class FullTest extends SourceTestBase {
         MatcherAssert.assertThat(targetMap, Matchers.equalTo(sourceMap));
     }
 
-    @SneakyThrows
-    private Void migrateDocumentsSequentially(FileSystemRepo sourceRepo,
+    @AllArgsConstructor
+    private static class ExpectedMigrationWorkTerminationException extends RuntimeException {
+        public final RfsMigrateDocuments.NoWorkLeftException exception;
+        public final int numRuns;
+    }
+
+    private int migrateDocumentsSequentially(FileSystemRepo sourceRepo,
                                               String snapshotName,
                                               List<String> indexAllowlist,
                                               String targetAddress,
                                               AtomicInteger runCounter,
                                               Random clockJitter,
                                               DocumentMigrationTestContext testContext) {
-        for (int runNumber=0; ; ++runNumber) {
+        for (int runNumber=1; ; ++runNumber) {
             try {
                 var workResult = migrateDocumentsWithOneWorker(sourceRepo, snapshotName, indexAllowlist, targetAddress,
                         clockJitter, testContext);
                 if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
-                    return null;
+                    return runNumber;
                 } else {
                     runCounter.incrementAndGet();
                 }
             } catch (RfsMigrateDocuments.NoWorkLeftException e) {
                 log.info("No work at all was found.  " +
                         "Presuming that work was complete and that all worker processes should terminate");
-                throw e;
+                throw new ExpectedMigrationWorkTerminationException(e, runNumber);
             } catch (Exception e) {
                 log.atError().setCause(e).setMessage(()->"Caught an exception, " +
                         "but just going to run again with this worker to simulate task/container recycling").log();

@@ -7,6 +7,7 @@ import lombok.NonNull;
 import lombok.ToString;
 
 import java.io.IOException;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.function.Supplier;
@@ -25,6 +26,8 @@ import java.util.function.Supplier;
  * unassigned, followed by workers grabbing (leasing) items from that pool and completing them.
  */
 public interface IWorkCoordinator extends AutoCloseable {
+
+    Clock getClock();
 
     /**
      * Initialize any external and internal state so that the subsequent calls will work appropriately.

@@ -4,10 +4,13 @@ package com.rfs.cms;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rfs.framework.SearchClusterContainer;
+import io.opentelemetry.sdk.metrics.data.LongPointData;
+import io.opentelemetry.sdk.metrics.data.MetricData;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 
@@ -16,8 +19,10 @@ import java.net.URI;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
@@ -39,13 +44,13 @@ import java.util.function.Supplier;
 @Slf4j
 public class WorkCoordinatorTest {
 
-    final static SearchClusterContainer container = new SearchClusterContainer(SearchClusterContainer.OS_V1_3_16);
     public static final String DUMMY_FINISHED_DOC_ID = "dummy_finished_doc";
-    private static Supplier<ApacheHttpClient> httpClientSupplier;
 
+    final SearchClusterContainer container = new SearchClusterContainer(SearchClusterContainer.OS_V1_3_16);
+    private Supplier<ApacheHttpClient> httpClientSupplier;
 
-    @BeforeAll
-    static void setupOpenSearchContainer() throws Exception {
+    @BeforeEach
+    void setupOpenSearchContainer() throws Exception {
         var testContext = WorkCoordinationTestContext.factory().noOtelTracking();
         // Start the container. This step might take some time...
         container.start();
@@ -56,62 +61,8 @@ public class WorkCoordinatorTest {
         }
     }
 
-    @Test
-    void testCreateOrUpdateOrReturnAsIsRequest() throws Exception {
-        var objMapper = new ObjectMapper();
-        var docId = "A";
-//
-//        var response1 = workCoordinator.createOrUpdateLeaseForWorkItem(docId, Duration.ofSeconds(2));
-//        Assertions.assertEquals("created", response1.get("result").textValue());
-//        var doc1 = client.execute(workCoordinator.makeGetRequest(docId), r -> {
-//            return objMapper.readTree(r.getEntity().getContent());
-//        });
-//        Assertions.assertEquals(1, doc1.get("_source").get("numAttempts").longValue());
-//        var response2 = client.execute(
-//                workCoordinator.makeUpdateRequest(docId, "node_1", Instant.now(), 2),
-//                r -> {
-//                    Assertions.assertEquals(HttpStatus.SC_OK, r.getCode());
-//                    return objMapper.readTree(r.getEntity().getContent());
-//                });
-//        var doc2 = client.execute(workCoordinator.makeGetRequest(docId), r -> {
-//            return objMapper.readTree(r.getEntity().getContent());
-//        });
-//        Assertions.assertEquals("noop", response2.get("result").textValue(),
-//                "response that came back was unexpected - document == " + objMapper.writeValueAsString(doc2));
-//        Assertions.assertEquals(1, doc2.get("_source").get("numAttempts").longValue());
-//
-//        Thread.sleep(2500);
-//
-//        var response3 = client.execute(
-//                workCoordinator.makeUpdateRequest(docId, "node_1", Instant.now(), 2),
-//                r -> {
-//                    Assertions.assertEquals(HttpStatus.SC_OK, r.getCode());
-//                    return objMapper.readTree(r.getEntity().getContent());
-//                });
-//        Assertions.assertEquals("updated", response3.get("result").textValue());
-//        var doc3 = client.execute(workCoordinator.makeGetRequest(docId), r -> {
-//            return objMapper.readTree(r.getEntity().getContent());
-//        });
-//        Assertions.assertEquals(2, doc3.get("_source").get("numAttempts").longValue());
-//        Assertions.assertTrue(
-//                doc2.get("_source").get("expiration").longValue() <
-//                        doc3.get("_source").get("expiration").longValue());
-//
-//        var response4 = client.execute(
-//                workCoordinator.makeCompletionRequest(docId, "node_1", Instant.now()), r -> {
-//                    Assertions.assertEquals(HttpStatus.SC_OK, r.getCode());
-//                    return objMapper.readTree(r.getEntity().getContent());
-//                });
-//        var doc4 = client.execute(workCoordinator.makeGetRequest(docId), r -> {
-//            return objMapper.readTree(r.getEntity().getContent());
-//        });
-//        Assertions.assertEquals("updated", response4.get("result").textValue());
-//        Assertions.assertTrue(doc4.get("_source").get("completedAt").longValue() > 0);
-//        log.info("doc4="+doc4);
-    }
-
     @SneakyThrows
-    private static JsonNode searchForExpiredDocs(long expirationEpochSeconds) {
+    private JsonNode searchForExpiredDocs(long expirationEpochSeconds) {
         final var body = "{" +
                 OpenSearchWorkCoordinator.QUERY_INCOMPLETE_EXPIRED_ITEMS_STR.replace(
                         OpenSearchWorkCoordinator.OLD_EXPIRATION_THRESHOLD_TEMPLATE, ""+expirationEpochSeconds) +
@@ -125,11 +76,53 @@ public class WorkCoordinatorTest {
         return objectMapper.readTree(response.getPayloadStream()).path("hits");
     }
 
+    private long getMetricValueOrZero(Collection<MetricData> metrics, String s) {
+        return metrics.stream().filter(md->md.getName().startsWith(s))
+                .reduce((a,b)->b)
+                .flatMap(md->md.getLongSumData().getPoints().stream().reduce((a,b)->b).map(LongPointData::getValue))
+                .orElse(0L);
+    }
+
+    @Test
+    public void testAcquireLeaseHasNoUnnecessaryConflicts() throws Exception {
+        log.error("Hello");
+        var testContext = WorkCoordinationTestContext.factory().withAllTracking();
+        final var NUM_DOCS = 100;
+        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
+                3600, "docCreatorWorker")) {
+            Assertions.assertFalse(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));
+            for (var i = 0; i < NUM_DOCS; ++i) {
+                final var docId = "R" + i;
+                workCoordinator.createUnassignedWorkItem(docId, testContext::createUnassignedWorkContext);
+            }
+            Assertions.assertTrue(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));
+        }
+
+        final var seenWorkerItems = new ConcurrentHashMap<String, String>();
+        final var expiration = Duration.ofSeconds(60);
+        for (int i = 0; i < NUM_DOCS; ++i) {
+            var label = "" + i;
+            getWorkItemAndVerify(testContext, label, seenWorkerItems, expiration, false,false);
+        }
+        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
+                3600, "finalPass")) {
+            var rval = workCoordinator.acquireNextWorkItem(expiration, testContext::createAcquireNextItemContext);
+            Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, rval);
+        }
+        var metrics = testContext.inMemoryInstrumentationBundle.getFinishedMetrics();
+        Assertions.assertEquals(1, getMetricValueOrZero(metrics, "noNextWorkAvailableCount"));
+        Assertions.assertEquals(0, getMetricValueOrZero(metrics, "acquireNextWorkItemRetries"));
+        Assertions.assertEquals(NUM_DOCS, getMetricValueOrZero(metrics, "nextWorkAssignedCount"));
+
+        Assertions.assertEquals(NUM_DOCS, seenWorkerItems.size());
+    }
+
     @Test
     public void testAcquireLeaseForQuery() throws Exception {
-        var testContext = WorkCoordinationTestContext.factory().noOtelTracking();
+        var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         final var NUM_DOCS = 40;
         final var MAX_RUNS = 2;
+        var executorService = Executors.newFixedThreadPool(NUM_DOCS);
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
                 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));
@@ -148,7 +141,8 @@ public class WorkCoordinatorTest {
             for (int i = 0; i < NUM_DOCS; ++i) {
                 var label = run + "-" + i;
                 allFutures.add(CompletableFuture.supplyAsync(() ->
-                        getWorkItemAndVerify(testContext, label, seenWorkerItems, expiration, markAsComplete)));
+                        getWorkItemAndVerify(testContext, label, seenWorkerItems, expiration, true, markAsComplete),
+                        executorService));
             }
             CompletableFuture.allOf(allFutures.toArray(CompletableFuture[]::new)).join();
             Assertions.assertEquals(NUM_DOCS, seenWorkerItems.size());
@@ -170,21 +164,27 @@ public class WorkCoordinatorTest {
                 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));
         }
+        var metrics = testContext.inMemoryInstrumentationBundle.getFinishedMetrics();
+        Assertions.assertNotEquals(0, getMetricValueOrZero(metrics, "acquireNextWorkItemRetries"));
     }
 
     static AtomicInteger nonce = new AtomicInteger();
     @SneakyThrows
-    private static String getWorkItemAndVerify(WorkCoordinationTestContext testContext,
-                                               String workerSuffix,
-                                               ConcurrentHashMap<String, String> seenWorkerItems,
-                                               Duration expirationWindow,
-                                               boolean markCompleted) {
+    private String getWorkItemAndVerify(WorkCoordinationTestContext testContext,
+                                        String workerSuffix,
+                                        ConcurrentHashMap<String, String> seenWorkerItems,
+                                        Duration expirationWindow,
+                                        boolean placeFinishedDoc,
+                                        boolean markCompleted) {
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
                 3600, "firstPass_"+ workerSuffix)) {
             var doneId = DUMMY_FINISHED_DOC_ID + "_" + nonce.incrementAndGet();
-            workCoordinator.createOrUpdateLeaseForDocument(doneId, 1);
-            workCoordinator.completeWorkItem(doneId, testContext::createCompleteWorkContext);
+            if (placeFinishedDoc) {
+                workCoordinator.createOrUpdateLeaseForDocument(doneId, 1);
+                workCoordinator.completeWorkItem(doneId, testContext::createCompleteWorkContext);
+            }
 
+            final var oldNow = workCoordinator.getClock().instant(); //
             return workCoordinator.acquireNextWorkItem(expirationWindow, testContext::createAcquireNextItemContext)
                     .visit(new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<>() {
                         @Override
@@ -204,8 +204,9 @@ public class WorkCoordinatorTest {
                             log.atInfo().setMessage(()->"Next work item picked=" + workItem).log();
                             Assertions.assertNotNull(workItem);
                             Assertions.assertNotNull(workItem.workItemId);
-                            Assertions.assertTrue(workItem.leaseExpirationTime.isAfter(Instant.now()));
-                            seenWorkerItems.put(workItem.workItemId, workItem.workItemId);
+                            Assertions.assertTrue(workItem.leaseExpirationTime.isAfter(oldNow));
+                            var oldVal = seenWorkerItems.put(workItem.workItemId, workItem.workItemId);
+                            Assertions.assertNull(oldVal);
 
                             if (markCompleted) {
                                 workCoordinator.completeWorkItem(workItem.workItemId,

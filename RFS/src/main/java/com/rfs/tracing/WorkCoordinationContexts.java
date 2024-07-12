@@ -3,6 +3,7 @@ package com.rfs.tracing;
 import com.rfs.cms.OpenSearchWorkCoordinator;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.Meter;
+import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NonNull;
 import org.opensearch.migrations.tracing.BaseSpanContext;
@@ -12,14 +13,26 @@ import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     private WorkCoordinationContexts() {}
 
+    @AllArgsConstructor
+    public static class RetryLabels {
+        CommonScopedMetricInstruments.ScopeLabels scopeLabels;
+        public final String retry;
+        public final String failure;
+    }
+
+    private static RetryLabels autoLabels(String activityName) {
+        return new RetryLabels(CommonScopedMetricInstruments.fromActivityName(activityName),
+                activityName + "Retries", activityName + "Failures");
+    }
+
     public static class RetryMetricInstruments extends CommonScopedMetricInstruments {
         public final LongCounter retryCounter;
         public final LongCounter failureCounter;
 
-        private RetryMetricInstruments(Meter meter, String activityName) {
-            super(meter, activityName);
-            retryCounter = meter.counterBuilder(MetricNames.COORDINATION_INITIALIZATION_RETRIES).build();
-            failureCounter = meter.counterBuilder(MetricNames.COORDINATION_FAILURE).build();
+        private RetryMetricInstruments(Meter meter, RetryLabels retryLabels) {
+            super(meter, retryLabels.scopeLabels);
+            retryCounter = meter.counterBuilder(retryLabels.retry).build();
+            failureCounter = meter.counterBuilder(retryLabels.failure).build();
         }
     }
 
@@ -65,7 +78,7 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
 
         public static class MetricInstruments extends RetryMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, autoLabels(activityName));
             }
         }
 
@@ -102,7 +115,7 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
 
         public static class MetricInstruments extends RetryMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, autoLabels(activityName));
             }
         }
 
@@ -183,7 +196,7 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
 
         public static class MetricInstruments extends RetryMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, autoLabels(activityName));
             }
         }
 
@@ -220,7 +233,7 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
 
         public static class MetricInstruments extends RetryMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, autoLabels(activityName));
             }
         }
 
@@ -267,7 +280,7 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
             public final LongCounter driftError;
 
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, autoLabels(activityName));
                 assignedCounter = meter.counterBuilder(MetricNames.NEXT_WORK_ASSIGNED).build();
                 nothingAvailableCounter = meter.counterBuilder(MetricNames.NO_NEXT_WORK_AVAILABLE).build();
                 recoverableClockError = meter.counterBuilder(MetricNames.RECOVERABLE_CLOCK_ERROR).build();
@@ -335,7 +348,7 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
 
         public static class MetricInstruments extends RetryMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityName);
+                super(meter, autoLabels(activityName));
             }
         }
 

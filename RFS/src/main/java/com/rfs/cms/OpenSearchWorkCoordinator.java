@@ -15,6 +15,7 @@ import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -62,6 +63,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     private final AbstractedHttpClient httpClient;
     private final String workerId;
     private final ObjectMapper objectMapper;
+    @Getter
     private final Clock clock;
 
     public OpenSearchWorkCoordinator(AbstractedHttpClient httpClient, long tolerableClientServerClockDifferenceSeconds,
@@ -417,7 +419,6 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 "}";
 
         final var timestampEpochSeconds = clock.instant().toEpochMilli() / 1000;
-        final var expirationWindowEpochSeconds = timestampEpochSeconds + expirationWindowSeconds;
         final var body = queryUpdateTemplate
                 .replace(SCRIPT_VERSION_TEMPLATE, "poc")
                 .replace(WORKER_ID_TEMPLATE, workerId)

@@ -42,7 +42,7 @@ public class DocumentMigrationContexts extends IDocumentMigrationContexts {
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
 
-                super(meter, activityNameForTheCountMetric(activityName));
+                super(meter, fromActivityName(activityName));
             }
         }
 
@@ -85,7 +85,7 @@ public class DocumentMigrationContexts extends IDocumentMigrationContexts {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityNameForTheCountMetric(activityName));
+                super(meter, fromActivityName(activityName));
             }
         }
 
@@ -124,7 +124,7 @@ public class DocumentMigrationContexts extends IDocumentMigrationContexts {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
-                super(meter, activityNameForTheCountMetric(activityName));
+                super(meter, fromActivityName(activityName));
             }
         }
 
