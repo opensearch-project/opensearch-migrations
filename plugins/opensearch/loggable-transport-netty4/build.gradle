@@ -41,7 +41,7 @@ opensearchplugin {
 }
 
 dependencies {
-  api project(":TrafficCapture:modules:transport-netty4')
+  api project(":TrafficCapture:modules:transport-netty4")
 }
 
 restResources {
