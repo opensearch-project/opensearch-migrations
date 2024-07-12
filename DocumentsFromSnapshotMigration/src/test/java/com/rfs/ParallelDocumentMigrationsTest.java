@@ -38,6 +38,7 @@ import org.opensearch.testcontainers.OpensearchContainer;
 
 import com.rfs.cms.ApacheHttpClient;
 import com.rfs.cms.LeaseExpireTrigger;
+import com.rfs.cms.OpenSearchWorkCoordinator;
 import com.rfs.common.ConnectionDetails;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;

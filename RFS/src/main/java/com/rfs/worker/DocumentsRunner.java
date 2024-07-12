@@ -16,6 +16,8 @@ import com.rfs.cms.ScopedWorkCoordinator;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.RfsException;
+import com.rfs.common.SnapshotShardUnpacker;
+import com.rfs.models.ShardMetadata;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;

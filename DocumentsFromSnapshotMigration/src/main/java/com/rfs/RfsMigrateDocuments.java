@@ -44,6 +44,7 @@ import com.rfs.version_es_7_10.IndexMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.worker.DocumentsRunner;
+import com.rfs.worker.ShardWorkPreparer;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
