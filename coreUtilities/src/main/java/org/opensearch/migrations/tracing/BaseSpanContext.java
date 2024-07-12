@@ -1,17 +1,21 @@
 package org.opensearch.migrations.tracing;
 
-import io.opentelemetry.api.common.AttributeKey;
-import io.opentelemetry.api.common.AttributesBuilder;
-import io.opentelemetry.api.trace.Span;
-import lombok.Getter;
-import lombok.NonNull;
-
 import java.time.Instant;
 import java.util.Optional;
 import java.util.stream.Stream;
 
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.common.AttributesBuilder;
+import io.opentelemetry.api.trace.Span;
+
+import lombok.Getter;
+import lombok.NonNull;
+
 public abstract class BaseSpanContext<S extends IInstrumentConstructor>
-        implements IScopedInstrumentationAttributes, IHasRootInstrumentationScope<S>, AutoCloseable {
+    implements
+        IScopedInstrumentationAttributes,
+        IHasRootInstrumentationScope<S>,
+        AutoCloseable {
     @Getter
     protected final S rootInstrumentationScope;
     @Getter
@@ -29,8 +33,11 @@ public abstract class BaseSpanContext<S extends IInstrumentConstructor>
         this.rootInstrumentationScope = rootScope;
     }
 
-    protected static <T> AttributesBuilder addAttributeIfPresent(AttributesBuilder attributesBuilder,
-                                                                 AttributeKey<T> key, Optional<T> value) {
+    protected static <T> AttributesBuilder addAttributeIfPresent(
+        AttributesBuilder attributesBuilder,
+        AttributeKey<T> key,
+        Optional<T> value
+    ) {
         return value.map(v -> attributesBuilder.put(key, v)).orElse(attributesBuilder);
     }
 
@@ -43,8 +50,10 @@ public abstract class BaseSpanContext<S extends IInstrumentConstructor>
         initializeSpanWithLinkedSpans(constructor, null);
     }
 
-    protected void initializeSpanWithLinkedSpans(@NonNull IInstrumentConstructor constructor,
-                                                 Stream<Span> linkedSpans) {
+    protected void initializeSpanWithLinkedSpans(
+        @NonNull IInstrumentConstructor constructor,
+        Stream<Span> linkedSpans
+    ) {
         initializeSpan(constructor, rootInstrumentationScope.buildSpan(this, getActivityName(), linkedSpans));
     }
 

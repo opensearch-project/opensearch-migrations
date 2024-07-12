@@ -40,8 +40,8 @@ dependencies {
     implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
     implementation group: 'software.amazon.awssdk.crt', name: 'aws-crt'
 
-    implementation platform('io.projectreactor:reactor-bom:2023.0.5') 
-    implementation 'io.projectreactor.netty:reactor-netty-core' 
+    implementation platform('io.projectreactor:reactor-bom:2023.0.5')
+    implementation 'io.projectreactor.netty:reactor-netty-core'
     implementation 'io.projectreactor.netty:reactor-netty-http'
 
     testImplementation testFixtures(project(path: ':RFS'))

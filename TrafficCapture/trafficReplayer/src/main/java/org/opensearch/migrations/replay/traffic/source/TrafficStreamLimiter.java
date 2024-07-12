@@ -1,17 +1,16 @@
 package org.opensearch.migrations.replay.traffic.source;
 
-import lombok.AllArgsConstructor;
-import lombok.Lombok;
-import lombok.NonNull;
-import lombok.SneakyThrows;
-import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext;
-
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedTransferQueue;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Consumer;
+
+import org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext;
+
+import lombok.AllArgsConstructor;
+import lombok.NonNull;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class TrafficStreamLimiter implements AutoCloseable {
@@ -46,23 +45,35 @@ public class TrafficStreamLimiter implements AutoCloseable {
         try {
             while (!stopped.get()) {
                 workItem = workQueue.take();
-                log.atDebug().setMessage(() -> "liveTrafficStreamCostGate.permits: {} acquiring: {}")
-                        .addArgument(liveTrafficStreamCostGate.availablePermits())
-                        .addArgument(workItem.cost)
-                        .log();
+                log.atDebug()
+                    .setMessage(() -> "liveTrafficStreamCostGate.permits: {} acquiring: {}")
+                    .addArgument(liveTrafficStreamCostGate.availablePermits())
+                    .addArgument(workItem.cost)
+                    .log();
                 liveTrafficStreamCostGate.acquire(workItem.cost);
                 WorkItem finalWorkItem = workItem;
-                log.atDebug().setMessage(() -> "Acquired liveTrafficStreamCostGate (available=" +
-                        liveTrafficStreamCostGate.availablePermits() + ") to process " + finalWorkItem.context).log();
+                log.atDebug()
+                    .setMessage(
+                        () -> "Acquired liveTrafficStreamCostGate (available="
+                            + liveTrafficStreamCostGate.availablePermits()
+                            + ") to process "
+                            + finalWorkItem.context
+                    )
+                    .log();
                 workItem.task.accept(workItem);
                 workItem = null;
             }
         } catch (InterruptedException e) {
             if (!stopped.get()) {
                 WorkItem finalWorkItem = workItem;
-                log.atError().setMessage(()->"consumeFromQueue() was interrupted with " +
-                                (finalWorkItem != null ? "an active task and " : "") +
-                        workQueue.size() + " enqueued items").log();
+                log.atError()
+                    .setMessage(
+                        () -> "consumeFromQueue() was interrupted with "
+                            + (finalWorkItem != null ? "an active task and " : "")
+                            + workQueue.size()
+                            + " enqueued items"
+                    )
+                    .log();
             }
             throw e;
         }
@@ -77,9 +88,16 @@ public class TrafficStreamLimiter implements AutoCloseable {
 
     public void doneProcessing(@NonNull WorkItem workItem) {
         liveTrafficStreamCostGate.release(workItem.cost);
-        log.atDebug().setMessage(()->"released " + workItem.cost +
-                " liveTrafficStreamCostGate.availablePermits=" + liveTrafficStreamCostGate.availablePermits() +
-                " for " + workItem.context).log();
+        log.atDebug()
+            .setMessage(
+                () -> "released "
+                    + workItem.cost
+                    + " liveTrafficStreamCostGate.availablePermits="
+                    + liveTrafficStreamCostGate.availablePermits()
+                    + " for "
+                    + workItem.context
+            )
+            .log();
     }
 
     @Override

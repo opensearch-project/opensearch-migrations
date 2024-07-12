@@ -8,21 +8,24 @@ import java.util.Map;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
-import com.rfs.common.SourceRepo;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotRepo.CantParseRepoFile;
+import com.rfs.common.SourceRepo;
 
 public class SnapshotRepoData_ES_6_8 {
 
     public static SnapshotRepoData_ES_6_8 fromRepoFile(Path filePath) {
         ObjectMapper mapper = new ObjectMapper();
         try {
-            SnapshotRepoData_ES_6_8 data = mapper.readValue(new File(filePath.toString()), SnapshotRepoData_ES_6_8.class);
+            SnapshotRepoData_ES_6_8 data = mapper.readValue(
+                new File(filePath.toString()),
+                SnapshotRepoData_ES_6_8.class
+            );
             data.filePath = filePath;
             return data;
         } catch (IOException e) {
             throw new CantParseRepoFile("Can't read or parse the Repo Metadata file: " + filePath.toString(), e);
-        }        
+        }
     }
 
     public static SnapshotRepoData_ES_6_8 fromRepo(SourceRepo repo) {
@@ -58,7 +61,7 @@ public class SnapshotRepoData_ES_6_8 {
         public List<String> snapshots;
     }
 
-    public static class Index  implements SnapshotRepo.Index {
+    public static class Index implements SnapshotRepo.Index {
         public static Index fromRawIndex(String name, RawIndex rawIndex) {
             Index index = new Index();
             index.name = name;
@@ -87,4 +90,3 @@ public class SnapshotRepoData_ES_6_8 {
         }
     }
 }
-

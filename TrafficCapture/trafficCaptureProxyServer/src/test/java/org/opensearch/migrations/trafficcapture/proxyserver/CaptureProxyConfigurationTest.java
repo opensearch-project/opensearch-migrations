@@ -1,21 +1,24 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
 import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
-import lombok.extern.slf4j.Slf4j;
+
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
+
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.CaptureProxyContainer;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.HttpdContainerTestBase;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.annotations.HttpdContainerTest;
+
+import lombok.extern.slf4j.Slf4j;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @Slf4j
 @HttpdContainerTest
@@ -37,8 +40,10 @@ public class CaptureProxyConfigurationTest {
     }
 
     private static void assertLessThan(long ceiling, long actual) {
-        Assertions.assertTrue(actual < ceiling,
-            () -> "Expected actual value to be less than " + ceiling + " but was " + actual + ".");
+        Assertions.assertTrue(
+            actual < ceiling,
+            () -> "Expected actual value to be less than " + ceiling + " but was " + actual + "."
+        );
     }
 
     @Test
@@ -57,10 +62,11 @@ public class CaptureProxyConfigurationTest {
     }
 
     private Duration assertBasicCalls(String endpoint, int numberOfCalls) {
-        return IntStream.range(0, numberOfCalls).mapToObj(i -> assertBasicCall(endpoint))
-            .reduce(Duration.ZERO, Duration::plus).dividedBy(numberOfCalls);
+        return IntStream.range(0, numberOfCalls)
+            .mapToObj(i -> assertBasicCall(endpoint))
+            .reduce(Duration.ZERO, Duration::plus)
+            .dividedBy(numberOfCalls);
     }
-
 
     private Duration assertBasicCall(String endpoint) {
         try (var client = new SimpleHttpClientForTesting()) {

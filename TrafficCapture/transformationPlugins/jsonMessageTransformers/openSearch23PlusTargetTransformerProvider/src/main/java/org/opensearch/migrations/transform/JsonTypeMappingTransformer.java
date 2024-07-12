@@ -1,6 +1,5 @@
 package org.opensearch.migrations.transform;
 
-
 import java.util.Map;
 import java.util.regex.Pattern;
 
@@ -13,24 +12,24 @@ public class JsonTypeMappingTransformer implements IJsonTransformer {
      * This is used to match a URI of the form /INDEX/TYPE/foo... so that it can be
      * transformed into /INDEX/foo...
      */
-    static final Pattern TYPED_OPERATION_URI_PATTERN_WITH_SIDE_CAPTURES =
-            Pattern.compile("^(\\/[^\\/]*)\\/[^\\/]*(\\/[^\\/]*)$");
+    static final Pattern TYPED_OPERATION_URI_PATTERN_WITH_SIDE_CAPTURES = Pattern.compile(
+        "^(\\/[^\\/]*)\\/[^\\/]*(\\/[^\\/]*)$"
+    );
 
     /**
      * This is used to match a URI of the form /foo...
      */
-    static final Pattern SINGLE_LEVEL_OPERATION_PATTERN_WITH_CAPTURE =
-            Pattern.compile("^(\\/[^\\/]*)$");
+    static final Pattern SINGLE_LEVEL_OPERATION_PATTERN_WITH_CAPTURE = Pattern.compile("^(\\/[^\\/]*)$");
     public static final String SEARCH_URI_COMPONENT = "/_search";
     public static final String DOC_URI_COMPONENT = "/_doc";
     public static final String MAPPINGS_KEYNAME = "mappings";
 
     @Override
-    public Map<String,Object> transformJson(Map<String,Object> incomingJson) {
+    public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
         return transformHttpMessage(incomingJson);
     }
 
-    private Map<String,Object> transformHttpMessage(Map<String, Object> httpMsg) {
+    private Map<String, Object> transformHttpMessage(Map<String, Object> httpMsg) {
         var incomingMethod = httpMsg.get(JsonKeysForHttpMessage.METHOD_KEY);
         if ("GET".equals(incomingMethod)) {
             processGet(httpMsg);
@@ -57,15 +56,17 @@ public class JsonTypeMappingTransformer implements IJsonTransformer {
         if (matchedTriple.matches()) {
             // TODO: Add support for multiple type mappings per index (something possible with
             // versions before ES7)
-            httpMsg.put(JsonKeysForHttpMessage.URI_KEY,
-                    matchedTriple.group(1) + DOC_URI_COMPONENT + matchedTriple.group(2));
+            httpMsg.put(
+                JsonKeysForHttpMessage.URI_KEY,
+                matchedTriple.group(1) + DOC_URI_COMPONENT + matchedTriple.group(2)
+            );
             return;
         }
         var matchedSingle = SINGLE_LEVEL_OPERATION_PATTERN_WITH_CAPTURE.matcher(uriStr);
         if (matchedSingle.matches()) {
-            var topPayloadElement =
-                    (Map<String, Object>) ((Map<String, Object>) httpMsg.get(JsonKeysForHttpMessage.PAYLOAD_KEY))
-                            .get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY);
+            var topPayloadElement = (Map<String, Object>) ((Map<String, Object>) httpMsg.get(
+                JsonKeysForHttpMessage.PAYLOAD_KEY
+            )).get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY);
             var mappingsValue = (Map<String, Object>) topPayloadElement.get(MAPPINGS_KEYNAME);
             if (mappingsValue != null) {
                 exciseMappingsType(topPayloadElement, mappingsValue);

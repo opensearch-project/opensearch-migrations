@@ -12,5 +12,6 @@ public interface IContextTracker {
      */
     default void onContextClosed(IScopedInstrumentationAttributes newScopedContext) {}
 
-    IContextTracker DO_NOTHING_TRACKER = new IContextTracker() {};
+    IContextTracker DO_NOTHING_TRACKER = new IContextTracker() {
+    };
 }
