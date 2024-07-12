@@ -1,12 +1,14 @@
 package org.opensearch.migrations.replay.tracing;
 
 import io.opentelemetry.api.OpenTelemetry;
-import lombok.Getter;
+
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.traffic.source.InputStreamOfTraffic;
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
+
+import lombok.Getter;
 
 @Getter
 public class RootReplayerContext extends RootOtelContext implements IRootReplayerContext {
@@ -80,16 +82,18 @@ public class RootReplayerContext extends RootOtelContext implements IRootReplaye
         return new KafkaConsumerContexts.CommitScopeContext(this, null);
     }
 
-    public IReplayContexts.ITrafficStreamsLifecycleContext
-    createTrafficStreamContextForStreamSource(IReplayContexts.IChannelKeyContext channelCtx,
-                                              ITrafficStreamKey tsk) {
+    public IReplayContexts.ITrafficStreamsLifecycleContext createTrafficStreamContextForStreamSource(
+        IReplayContexts.IChannelKeyContext channelCtx,
+        ITrafficStreamKey tsk
+    ) {
         return new InputStreamOfTraffic.IOSTrafficStreamContext(this, channelCtx, tsk);
     }
 
-    public IReplayContexts.IKafkaRecordContext
-    createTrafficStreamContextForKafkaSource(IReplayContexts.IChannelKeyContext channelCtx,
-                                             String recordId,
-                                             int kafkaRecordSize) {
+    public IReplayContexts.IKafkaRecordContext createTrafficStreamContextForKafkaSource(
+        IReplayContexts.IChannelKeyContext channelCtx,
+        String recordId,
+        int kafkaRecordSize
+    ) {
         return new ReplayContexts.KafkaRecordContext(this, channelCtx, recordId, kafkaRecordSize);
     }
 }

@@ -5,16 +5,16 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.StringJoiner;
 
-import org.opensearch.migrations.replay.util.TrackedFuture;
 import org.opensearch.migrations.replay.util.TextTrackedFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
 
 public class TimeToResponseFulfillmentFutureMap {
-
 
     public static class FutureWorkPoint {
         public final Instant startTime;
         public final TrackedFuture<String, Void> scheduleFuture;
         private final ChannelTaskType channelTaskType;
+
         public FutureWorkPoint(Instant forTime, ChannelTaskType taskType) {
             startTime = forTime;
             scheduleFuture = new TextTrackedFuture<>("scheduled start for " + forTime);
@@ -25,7 +25,7 @@ public class TimeToResponseFulfillmentFutureMap {
     Deque<FutureWorkPoint> timeToRunnableMap = new ArrayDeque<>();
 
     public FutureWorkPoint appendTaskTrigger(Instant start, ChannelTaskType taskType) {
-        assert timeToRunnableMap.stream().map(fwp->fwp.startTime).allMatch(t->!t.isAfter(start));
+        assert timeToRunnableMap.stream().map(fwp -> fwp.startTime).allMatch(t -> !t.isAfter(start));
         var fpp = new FutureWorkPoint(start, taskType);
         timeToRunnableMap.offer(fpp);
         return fpp;
@@ -51,7 +51,7 @@ public class TimeToResponseFulfillmentFutureMap {
         if (timeToRunnableMap.isEmpty()) {
             return false;
         } else {
-            return timeToRunnableMap.stream().anyMatch(fwp->fwp.channelTaskType==ChannelTaskType.TRANSMIT);
+            return timeToRunnableMap.stream().anyMatch(fwp -> fwp.channelTaskType == ChannelTaskType.TRANSMIT);
         }
     }
 
@@ -66,10 +66,9 @@ public class TimeToResponseFulfillmentFutureMap {
         } else if (timeToRunnableMap.size() == 1) {
             return timeToRunnableMap.peekFirst().startTime.toString();
         } else {
-            return new StringJoiner("...")
-                    .add(timeToRunnableMap.peekFirst().startTime.toString())
-                    .add(timeToRunnableMap.peekLast().toString())
-                    .toString();
+            return new StringJoiner("...").add(timeToRunnableMap.peekFirst().startTime.toString())
+                .add(timeToRunnableMap.peekLast().toString())
+                .toString();
         }
     }
 }

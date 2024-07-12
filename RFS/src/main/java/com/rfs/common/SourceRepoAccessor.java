@@ -17,7 +17,7 @@ public abstract class SourceRepoAccessor {
         return repo.getRepoRootDir();
     }
 
-    public InputStream getSnapshotRepoDataFile(){
+    public InputStream getSnapshotRepoDataFile() {
         return load(repo.getSnapshotRepoDataFilePath());
     };
 
@@ -29,23 +29,23 @@ public abstract class SourceRepoAccessor {
         return load(repo.getSnapshotMetadataFilePath(snapshotId));
     }
 
-    public InputStream getIndexMetadataFile(String indexId, String indexFileId){
+    public InputStream getIndexMetadataFile(String indexId, String indexFileId) {
         return load(repo.getIndexMetadataFilePath(indexId, indexFileId));
     }
 
-    public InputStream getShardDir(String indexId, int shardId){
+    public InputStream getShardDir(String indexId, int shardId) {
         return load(repo.getShardDirPath(indexId, shardId));
     }
 
-    public InputStream getShardMetadataFile(String snapshotId, String indexId, int shardId){
+    public InputStream getShardMetadataFile(String snapshotId, String indexId, int shardId) {
         return load(repo.getShardMetadataFilePath(snapshotId, indexId, shardId));
     }
 
-    public InputStream getBlobFile(String indexId, int shardId, String blobName){
+    public InputStream getBlobFile(String indexId, int shardId, String blobName) {
         return load(repo.getBlobFilePath(indexId, shardId, blobName));
     }
-    
-    public void prepBlobFiles(ShardMetadata shardMetadata){
+
+    public void prepBlobFiles(ShardMetadata shardMetadata) {
         repo.prepBlobFiles(shardMetadata);
     }
 

@@ -1,8 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.AbstractMap;
@@ -11,6 +8,9 @@ import java.util.Arrays;
 import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
+
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class AggregatedRawResponse {
@@ -28,10 +28,10 @@ public class AggregatedRawResponse {
     }
 
     public byte[][] getCopyOfPackets() {
-            return responsePackets.stream()
-                    .map(Map.Entry::getValue)
-                    .map(x->Arrays.copyOf(x,x.length))
-                    .toArray(byte[][]::new);
+        return responsePackets.stream()
+            .map(Map.Entry::getValue)
+            .map(x -> Arrays.copyOf(x, x.length))
+            .toArray(byte[][]::new);
     }
 
     public static class Builder {
@@ -45,9 +45,13 @@ public class AggregatedRawResponse {
         }
 
         public AggregatedRawResponse build() {
-            var totalBytes = receiptTimeAndResponsePackets.stream().mapToInt(kvp->kvp.getValue().length).sum();
-            return new AggregatedRawResponse(totalBytes, Duration.between(requestSendTime, Instant.now()),
-                    receiptTimeAndResponsePackets, error);
+            var totalBytes = receiptTimeAndResponsePackets.stream().mapToInt(kvp -> kvp.getValue().length).sum();
+            return new AggregatedRawResponse(
+                totalBytes,
+                Duration.between(requestSendTime, Instant.now()),
+                receiptTimeAndResponsePackets,
+                error
+            );
         }
 
         public AggregatedRawResponse.Builder addResponsePacket(byte[] packet) {
@@ -65,9 +69,12 @@ public class AggregatedRawResponse {
         }
     }
 
-    public AggregatedRawResponse(int responseSizeInBytes, Duration responseDuration,
-                                 ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>> responsePackets,
-                                 Throwable error) {
+    public AggregatedRawResponse(
+        int responseSizeInBytes,
+        Duration responseDuration,
+        ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>> responsePackets,
+        Throwable error
+    ) {
         this.responseSizeInBytes = responseSizeInBytes;
         this.responseDuration = responseDuration;
         this.responsePackets = responsePackets;
@@ -75,7 +82,7 @@ public class AggregatedRawResponse {
     }
 
     Stream<AbstractMap.SimpleEntry<Instant, byte[]>> getReceiptTimeAndResponsePackets() {
-        return Optional.ofNullable(this.responsePackets).map(rp->rp.stream()).orElse(Stream.empty());
+        return Optional.ofNullable(this.responsePackets).map(rp -> rp.stream()).orElse(Stream.empty());
     }
 
     @Override
@@ -83,8 +90,8 @@ public class AggregatedRawResponse {
         final StringBuilder sb = new StringBuilder("IResponseSummary{");
         sb.append("responseSizeInBytes=").append(responseSizeInBytes);
         sb.append(", responseDuration=").append(responseDuration);
-        sb.append(", # of responsePackets=").append("" +
-                (this.responsePackets == null ? "-1" : "" + this.responsePackets.size()));
+        sb.append(", # of responsePackets=")
+            .append("" + (this.responsePackets == null ? "-1" : "" + this.responsePackets.size()));
         addSubclassInfoForToString(sb);
         sb.append('}');
         return sb.toString();

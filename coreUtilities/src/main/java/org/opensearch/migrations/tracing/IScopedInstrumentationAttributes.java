@@ -1,5 +1,7 @@
 package org.opensearch.migrations.tracing;
 
+import java.util.ArrayDeque;
+
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
@@ -9,10 +11,10 @@ import io.opentelemetry.api.metrics.LongHistogram;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.semconv.SemanticAttributes;
-import lombok.NonNull;
+
 import org.opensearch.migrations.Utils;
 
-import java.util.ArrayDeque;
+import lombok.NonNull;
 
 public interface IScopedInstrumentationAttributes extends IWithStartTimeAndAttributes, AutoCloseable {
 
@@ -24,9 +26,11 @@ public interface IScopedInstrumentationAttributes extends IWithStartTimeAndAttri
     @Override
     CommonScopedMetricInstruments getMetrics();
 
-    @NonNull Span getCurrentSpan();
+    @NonNull
+    Span getCurrentSpan();
 
-    @NonNull IContextTracker getContextTracker();
+    @NonNull
+    IContextTracker getContextTracker();
 
     default Attributes getPopulatedSpanAttributes() {
         return getPopulatedSpanAttributesBuilder().build();
@@ -41,7 +45,7 @@ public interface IScopedInstrumentationAttributes extends IWithStartTimeAndAttri
             currentObj = currentObj.getEnclosingScope();
         }
         var builder = stack.stream()
-                .collect(Utils.foldLeft(Attributes.builder(), (b, iia)->iia.fillAttributesForSpansBelow(b)));
+            .collect(Utils.foldLeft(Attributes.builder(), (b, iia) -> iia.fillAttributesForSpansBelow(b)));
         return fillExtraAttributesForThisSpan(builder);
     }
 

@@ -1,15 +1,11 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-
-import eu.rekawek.toxiproxy.Proxy;
-import eu.rekawek.toxiproxy.model.ToxicDirection;
 import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
-import lombok.extern.slf4j.Slf4j;
+
 import org.junit.jupiter.api.AfterAll;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Assertions;
@@ -19,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.function.ThrowingConsumer;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.EnumSource;
+
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.CaptureProxyContainer;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.HttpdContainerTestBase;
@@ -27,6 +24,12 @@ import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.Toxip
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.annotations.HttpdContainerTest;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.annotations.KafkaContainerTest;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.annotations.ToxiproxyContainerTest;
+
+import eu.rekawek.toxiproxy.Proxy;
+import eu.rekawek.toxiproxy.model.ToxicDirection;
+import lombok.extern.slf4j.Slf4j;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @Slf4j
 @KafkaContainerTest
@@ -58,8 +61,10 @@ public class KafkaConfigurationCaptureProxyTest {
     }
 
     private static void assertLessThan(long ceiling, long actual) {
-        Assertions.assertTrue(actual < ceiling,
-            () -> "Expected actual value to be less than " + ceiling + " but was " + actual + ".");
+        Assertions.assertTrue(
+            actual < ceiling,
+            () -> "Expected actual value to be less than " + ceiling + " but was " + actual + "."
+        );
     }
 
     @BeforeEach
@@ -77,8 +82,12 @@ public class KafkaConfigurationCaptureProxyTest {
     @ParameterizedTest
     @EnumSource(FailureMode.class)
     public void testCaptureProxyWithKafkaImpairedBeforeStart(FailureMode failureMode) {
-        try (var captureProxy = new CaptureProxyContainer(toxiproxyTestBase.getProxyUrlHttp(destinationProxy),
-            toxiproxyTestBase.getProxyUrlHttp(kafkaProxy))) {
+        try (
+            var captureProxy = new CaptureProxyContainer(
+                toxiproxyTestBase.getProxyUrlHttp(destinationProxy),
+                toxiproxyTestBase.getProxyUrlHttp(kafkaProxy)
+            )
+        ) {
             failureMode.apply(kafkaProxy);
 
             captureProxy.start();
@@ -92,8 +101,12 @@ public class KafkaConfigurationCaptureProxyTest {
     @ParameterizedTest
     @EnumSource(FailureMode.class)
     public void testCaptureProxyWithKafkaImpairedAfterStart(FailureMode failureMode) {
-        try (var captureProxy = new CaptureProxyContainer(toxiproxyTestBase.getProxyUrlHttp(destinationProxy),
-            toxiproxyTestBase.getProxyUrlHttp(kafkaProxy))) {
+        try (
+            var captureProxy = new CaptureProxyContainer(
+                toxiproxyTestBase.getProxyUrlHttp(destinationProxy),
+                toxiproxyTestBase.getProxyUrlHttp(kafkaProxy)
+            )
+        ) {
             captureProxy.start();
 
             failureMode.apply(kafkaProxy);
@@ -107,8 +120,12 @@ public class KafkaConfigurationCaptureProxyTest {
     @ParameterizedTest
     @EnumSource(FailureMode.class)
     public void testCaptureProxyWithKafkaImpairedDoesNotAffectRequest_proxysRequest(FailureMode failureMode) {
-        try (var captureProxy = new CaptureProxyContainer(toxiproxyTestBase.getProxyUrlHttp(destinationProxy),
-            toxiproxyTestBase.getProxyUrlHttp(kafkaProxy))) {
+        try (
+            var captureProxy = new CaptureProxyContainer(
+                toxiproxyTestBase.getProxyUrlHttp(destinationProxy),
+                toxiproxyTestBase.getProxyUrlHttp(kafkaProxy)
+            )
+        ) {
             captureProxy.start();
             final int numberOfTests = 20;
 
@@ -124,18 +141,29 @@ public class KafkaConfigurationCaptureProxyTest {
 
             long acceptableDifference = Duration.ofMillis(25).toMillis();
 
-            log.info("Baseline Duration: {}ms, Impaired Duration: {}ms", averageBaselineDuration.toMillis(),
-                averageImpairedDuration.toMillis());
+            log.info(
+                "Baseline Duration: {}ms, Impaired Duration: {}ms",
+                averageBaselineDuration.toMillis(),
+                averageImpairedDuration.toMillis()
+            );
 
-            assertEquals(averageBaselineDuration.toMillis(), averageImpairedDuration.toMillis(), acceptableDifference,
-                "The average durations are not close enough");
+            assertEquals(
+                averageBaselineDuration.toMillis(),
+                averageImpairedDuration.toMillis(),
+                acceptableDifference,
+                "The average durations are not close enough"
+            );
         }
     }
 
     @Test
     public void testCaptureProxyLatencyAddition() {
-        try (var captureProxy = new CaptureProxyContainer(toxiproxyTestBase.getProxyUrlHttp(destinationProxy),
-            toxiproxyTestBase.getProxyUrlHttp(kafkaProxy))) {
+        try (
+            var captureProxy = new CaptureProxyContainer(
+                toxiproxyTestBase.getProxyUrlHttp(destinationProxy),
+                toxiproxyTestBase.getProxyUrlHttp(kafkaProxy)
+            )
+        ) {
             captureProxy.start();
             final int numberOfTests = 25;
 
@@ -144,13 +172,17 @@ public class KafkaConfigurationCaptureProxyTest {
 
             var averageRequestDurationWithProxy = assertBasicCalls(captureProxy, numberOfTests);
 
-            var averageNoProxyDuration = assertBasicCalls(toxiproxyTestBase.getProxyUrlHttp(destinationProxy),
-                numberOfTests);
+            var averageNoProxyDuration = assertBasicCalls(
+                toxiproxyTestBase.getProxyUrlHttp(destinationProxy),
+                numberOfTests
+            );
 
             var acceptableProxyLatencyAdd = Duration.ofMillis(25);
 
-            assertLessThan(averageNoProxyDuration.plus(acceptableProxyLatencyAdd).toMillis(),
-                averageRequestDurationWithProxy.toMillis());
+            assertLessThan(
+                averageNoProxyDuration.plus(acceptableProxyLatencyAdd).toMillis(),
+                averageRequestDurationWithProxy.toMillis()
+            );
         }
     }
 
@@ -159,10 +191,11 @@ public class KafkaConfigurationCaptureProxyTest {
     }
 
     private Duration assertBasicCalls(String endpoint, int numberOfCalls) {
-        return IntStream.range(0, numberOfCalls).mapToObj(i -> assertBasicCall(endpoint))
-            .reduce(Duration.ZERO, Duration::plus).dividedBy(numberOfCalls);
+        return IntStream.range(0, numberOfCalls)
+            .mapToObj(i -> assertBasicCall(endpoint))
+            .reduce(Duration.ZERO, Duration::plus)
+            .dividedBy(numberOfCalls);
     }
-
 
     private Duration assertBasicCall(String endpoint) {
         try (var client = new SimpleHttpClientForTesting()) {
@@ -179,24 +212,18 @@ public class KafkaConfigurationCaptureProxyTest {
     }
 
     public enum FailureMode {
-        LATENCY(
-            (proxy) -> proxy.toxics().latency("latency", ToxicDirection.UPSTREAM, 5000)),
-        BANDWIDTH(
-            (proxy) -> proxy.toxics().bandwidth("bandwidth", ToxicDirection.DOWNSTREAM, 1)),
-        TIMEOUT(
-            (proxy) -> proxy.toxics().timeout("timeout", ToxicDirection.UPSTREAM, 5000)),
-        SLICER(
-            (proxy) -> {
-                proxy.toxics().slicer("slicer_down", ToxicDirection.DOWNSTREAM, 1, 1000);
-                proxy.toxics().slicer("slicer_up", ToxicDirection.UPSTREAM, 1, 1000);
-            }),
-        SLOW_CLOSE(
-            (proxy) -> proxy.toxics().slowClose("slow_close", ToxicDirection.UPSTREAM, 5000)),
-        RESET_PEER(
-            (proxy) -> proxy.toxics().resetPeer("reset_peer", ToxicDirection.UPSTREAM, 5000)),
-        LIMIT_DATA(
-            (proxy) -> proxy.toxics().limitData("limit_data", ToxicDirection.UPSTREAM, 10)),
+        LATENCY((proxy) -> proxy.toxics().latency("latency", ToxicDirection.UPSTREAM, 5000)),
+        BANDWIDTH((proxy) -> proxy.toxics().bandwidth("bandwidth", ToxicDirection.DOWNSTREAM, 1)),
+        TIMEOUT((proxy) -> proxy.toxics().timeout("timeout", ToxicDirection.UPSTREAM, 5000)),
+        SLICER((proxy) -> {
+            proxy.toxics().slicer("slicer_down", ToxicDirection.DOWNSTREAM, 1, 1000);
+            proxy.toxics().slicer("slicer_up", ToxicDirection.UPSTREAM, 1, 1000);
+        }),
+        SLOW_CLOSE((proxy) -> proxy.toxics().slowClose("slow_close", ToxicDirection.UPSTREAM, 5000)),
+        RESET_PEER((proxy) -> proxy.toxics().resetPeer("reset_peer", ToxicDirection.UPSTREAM, 5000)),
+        LIMIT_DATA((proxy) -> proxy.toxics().limitData("limit_data", ToxicDirection.UPSTREAM, 10)),
         DISCONNECT(Proxy::disable);
+
         private final ThrowingConsumer<Proxy> failureModeApplier;
 
         FailureMode(ThrowingConsumer<Proxy> applier) {

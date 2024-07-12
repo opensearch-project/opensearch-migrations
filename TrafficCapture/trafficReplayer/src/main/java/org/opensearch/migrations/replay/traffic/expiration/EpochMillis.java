@@ -1,9 +1,9 @@
 package org.opensearch.migrations.replay.traffic.expiration;
 
-import lombok.EqualsAndHashCode;
-
 import java.time.Instant;
 import java.util.function.BiPredicate;
+
+import lombok.EqualsAndHashCode;
 
 @EqualsAndHashCode
 class EpochMillis implements Comparable<EpochMillis> {

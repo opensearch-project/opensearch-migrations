@@ -11,12 +11,10 @@ public abstract class CanApplyResult {
     public final static CanApplyResult NO = new No();
 
     /** Yes, the transformation can be applied */
-    public static final class Yes extends CanApplyResult {
-    }
+    public static final class Yes extends CanApplyResult {}
 
     /** No, the transformation cannot be applied */
-    public static final class No extends CanApplyResult {
-    }
+    public static final class No extends CanApplyResult {}
 
     /** While the transformation matches the scenario but there is an issue that would prevent it from being applied corrrectly */
     @RequiredArgsConstructor

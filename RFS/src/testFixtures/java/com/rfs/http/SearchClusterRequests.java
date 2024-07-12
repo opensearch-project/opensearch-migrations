@@ -1,14 +1,13 @@
 package com.rfs.http;
 
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.rfs.common.RestClient;
 
+import com.rfs.common.RestClient;
 import lombok.SneakyThrows;
 
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -19,7 +18,7 @@ public class SearchClusterRequests {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @SneakyThrows
-    public Map<String,Integer> getMapOfIndexAndDocCount(final RestClient client) {
+    public Map<String, Integer> getMapOfIndexAndDocCount(final RestClient client) {
         var catIndicesResponse = client.get("_cat/indices?format=json");
         assertThat(catIndicesResponse.code, equalTo(200));
 
@@ -36,20 +35,19 @@ public class SearchClusterRequests {
          * 
          * See https://github.com/elastic/elasticsearch/issues/25868#issuecomment-317990140
          */
-        var mapOfIndexAndDocCount = interestingIndices.stream()
-            .collect(Collectors.toMap(i -> i, i -> {
-                try {
-                    var response = client.get(i + "/_count");
-                    var countFromResponse = mapper.readTree(response.body).get("count").asInt();
-                    return countFromResponse;
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            })); 
+        var mapOfIndexAndDocCount = interestingIndices.stream().collect(Collectors.toMap(i -> i, i -> {
+            try {
+                var response = client.get(i + "/_count");
+                var countFromResponse = mapper.readTree(response.body).get("count").asInt();
+                return countFromResponse;
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }));
 
         return mapOfIndexAndDocCount;
     }
-    
+
     public List<String> filterToInterestingIndices(final List<String> indices) {
         return indices.stream()
             .filter(index -> !index.startsWith("."))

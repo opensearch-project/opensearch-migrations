@@ -1,14 +1,15 @@
 package org.opensearch.migrations.replay.tracing;
 
+import java.time.Instant;
+
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributesBuilder;
+
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
-
-import java.time.Instant;
 
 public abstract class IReplayContexts {
 
@@ -33,6 +34,7 @@ public abstract class IReplayContexts {
 
     public static class MetricNames {
         private MetricNames() {}
+
         public static final String KAFKA_RECORD_READ = "kafkaRecordsRead";
         public static final String KAFKA_BYTES_READ = "kafkaBytesRead";
         public static final String TRAFFIC_STREAMS_READ = "trafficStreamsRead";
@@ -64,12 +66,12 @@ public abstract class IReplayContexts {
         public static final String TUPLE_COMPARISON = "tupleComparison";
     }
 
-    public interface IAccumulationScope extends IScopedInstrumentationAttributes {
-    }
+    public interface IAccumulationScope extends IScopedInstrumentationAttributes {}
 
     public interface IChannelKeyContext
-            extends IAccumulationScope,
-                    org.opensearch.migrations.tracing.commoncontexts.IConnectionContext {
+        extends
+            IAccumulationScope,
+            org.opensearch.migrations.tracing.commoncontexts.IConnectionContext {
         String ACTIVITY_NAME = ActivityNames.CHANNEL;
 
         @Override
@@ -103,10 +105,7 @@ public abstract class IReplayContexts {
         }
     }
 
-    public interface IKafkaRecordContext
-            extends IAccumulationScope,
-                    IWithTypedEnclosingScope<IChannelKeyContext>
-    {
+    public interface IKafkaRecordContext extends IAccumulationScope, IWithTypedEnclosingScope<IChannelKeyContext> {
         String ACTIVITY_NAME = ActivityNames.RECORD_LIFETIME;
 
         @Override
@@ -120,16 +119,16 @@ public abstract class IReplayContexts {
 
         @Override
         default AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
-            return IAccumulationScope.super.fillAttributesForSpansBelow(
-                    builder.put(RECORD_ID_KEY, getRecordId()));
+            return IAccumulationScope.super.fillAttributesForSpansBelow(builder.put(RECORD_ID_KEY, getRecordId()));
         }
 
         ITrafficStreamsLifecycleContext createTrafficLifecyleContext(ITrafficStreamKey tsk);
     }
 
     public interface ITrafficStreamsLifecycleContext
-            extends IAccumulationScope,
-                    IWithTypedEnclosingScope<IChannelKeyContext> {
+        extends
+            IAccumulationScope,
+            IWithTypedEnclosingScope<IChannelKeyContext> {
         String ACTIVITY_NAME = ActivityNames.TRAFFIC_STREAM_LIFETIME;
 
         @Override
@@ -149,14 +148,17 @@ public abstract class IReplayContexts {
             return getChannelKeyContext().getChannelKey();
         }
 
-        IReplayerHttpTransactionContext createHttpTransactionContext(UniqueReplayerRequestKey requestKey,
-                                                                     Instant sourceTimestamp);
+        IReplayerHttpTransactionContext createHttpTransactionContext(
+            UniqueReplayerRequestKey requestKey,
+            Instant sourceTimestamp
+        );
     }
 
     public interface IReplayerHttpTransactionContext
-            extends org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext,
-                    IAccumulationScope,
-                    IWithTypedEnclosingScope<IChannelKeyContext> {
+        extends
+            org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext,
+            IAccumulationScope,
+            IWithTypedEnclosingScope<IChannelKeyContext> {
         AttributeKey<Long> REPLAYER_REQUEST_INDEX_KEY = AttributeKey.longKey("replayerRequestIndex");
 
         String ACTIVITY_NAME = ActivityNames.HTTP_TRANSACTION;
@@ -190,8 +192,9 @@ public abstract class IReplayContexts {
 
         @Override
         default AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
-            return org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext.super.fillAttributesForSpansBelow(builder)
-                    .put(REPLAYER_REQUEST_INDEX_KEY, replayerRequestIndex());
+            return org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext.super.fillAttributesForSpansBelow(
+                builder
+            ).put(REPLAYER_REQUEST_INDEX_KEY, replayerRequestIndex());
         }
 
         IRequestAccumulationContext createRequestAccumulationContext();
@@ -208,8 +211,9 @@ public abstract class IReplayContexts {
     }
 
     public interface IRequestAccumulationContext
-            extends IAccumulationScope,
-                    IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
+        extends
+            IAccumulationScope,
+            IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         String ACTIVITY_NAME = ActivityNames.ACCUMULATING_REQUEST;
 
         @Override
@@ -219,8 +223,9 @@ public abstract class IReplayContexts {
     }
 
     public interface IResponseAccumulationContext
-            extends IAccumulationScope,
-                    IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
+        extends
+            IAccumulationScope,
+            IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         String ACTIVITY_NAME = ActivityNames.ACCUMULATING_RESPONSE;
 
         @Override
@@ -230,8 +235,9 @@ public abstract class IReplayContexts {
     }
 
     public interface IRequestTransformationContext
-            extends IAccumulationScope,
-                    IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
+        extends
+            IAccumulationScope,
+            IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         String ACTIVITY_NAME = ActivityNames.TRANSFORMATION;
 
         @Override
@@ -269,8 +275,9 @@ public abstract class IReplayContexts {
     }
 
     public interface IScheduledContext
-            extends IAccumulationScope,
-                    IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
+        extends
+            IAccumulationScope,
+            IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         String ACTIVITY_NAME = ActivityNames.SCHEDULED;
 
         @Override
@@ -280,8 +287,9 @@ public abstract class IReplayContexts {
     }
 
     public interface ITargetRequestContext
-            extends IAccumulationScope,
-                    IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
+        extends
+            IAccumulationScope,
+            IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         String ACTIVITY_NAME = ActivityNames.TARGET_TRANSACTION;
 
         @Override
@@ -301,8 +309,9 @@ public abstract class IReplayContexts {
     }
 
     public interface IRequestSendingContext
-            extends IAccumulationScope,
-                    IWithTypedEnclosingScope<ITargetRequestContext> {
+        extends
+            IAccumulationScope,
+            IWithTypedEnclosingScope<ITargetRequestContext> {
         String ACTIVITY_NAME = ActivityNames.REQUEST_SENDING;
 
         @Override
@@ -312,8 +321,9 @@ public abstract class IReplayContexts {
     }
 
     public interface IWaitingForHttpResponseContext
-            extends IAccumulationScope,
-                    IWithTypedEnclosingScope<ITargetRequestContext> {
+        extends
+            IAccumulationScope,
+            IWithTypedEnclosingScope<ITargetRequestContext> {
         String ACTIVITY_NAME = ActivityNames.WAITING_FOR_RESPONSE;
 
         @Override
@@ -323,8 +333,9 @@ public abstract class IReplayContexts {
     }
 
     public interface IReceivingHttpResponseContext
-            extends IAccumulationScope,
-                    IWithTypedEnclosingScope<ITargetRequestContext> {
+        extends
+            IAccumulationScope,
+            IWithTypedEnclosingScope<ITargetRequestContext> {
         String ACTIVITY_NAME = ActivityNames.RECEIVING_RESPONSE;
 
         @Override
@@ -334,8 +345,9 @@ public abstract class IReplayContexts {
     }
 
     public interface ITupleHandlingContext
-            extends IAccumulationScope,
-                    IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
+        extends
+            IAccumulationScope,
+            IWithTypedEnclosingScope<IReplayerHttpTransactionContext> {
         String ACTIVITY_NAME = ActivityNames.TUPLE_COMPARISON;
         AttributeKey<Long> SOURCE_STATUS_CODE_KEY = AttributeKey.longKey("sourceStatusCode");
         AttributeKey<Long> TARGET_STATUS_CODE_KEY = AttributeKey.longKey("targetStatusCode");

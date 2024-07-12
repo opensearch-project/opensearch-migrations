@@ -7,7 +7,9 @@ import com.beust.jcommander.ParameterException;
  * An enumerated type used to refer to the software versions of the source and target clusters.
  */
 public enum ClusterVersion {
-    ES_6_8, ES_7_10, OS_2_11;
+    ES_6_8,
+    ES_7_10,
+    OS_2_11;
 
     public static class ArgsConverter implements IStringConverter<ClusterVersion> {
         @Override
@@ -27,13 +29,13 @@ public enum ClusterVersion {
 
     public static ClusterVersion fromInt(int versionId) {
         String versionString = Integer.toString(versionId);
-        if (versionString.startsWith("608")){
+        if (versionString.startsWith("608")) {
             return ES_6_8;
-        } else if (versionString.startsWith("710")){
+        } else if (versionString.startsWith("710")) {
             return ES_7_10;
         }
         // temp bypass for 717 to 710
-        else if (versionString.startsWith("717")){
+        else if (versionString.startsWith("717")) {
             return ES_7_10;
         } else {
             throw new IllegalArgumentException("Invalid version: " + versionId);

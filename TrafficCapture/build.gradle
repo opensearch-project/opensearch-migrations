@@ -101,4 +101,3 @@ jacocoTestReport {
         html.destination file("${buildDir}/reports/jacoco/test/html")
     }
 }
-

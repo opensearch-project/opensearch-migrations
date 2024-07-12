@@ -1,8 +1,7 @@
 package com.rfs.worker;
 
-import lombok.extern.slf4j.Slf4j;
-
 import com.rfs.common.SnapshotCreator;
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class SnapshotRunner {
@@ -33,6 +32,5 @@ public class SnapshotRunner {
         snapshotCreator.createSnapshot();
         log.info("Snapshot in progress...");
     }
-
 
 }

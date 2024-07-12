@@ -1,19 +1,5 @@
 package org.opensearch.migrations.replay.datahandlers;
 
-import com.fasterxml.jackson.core.JsonEncoding;
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.ByteBufAllocator;
-import io.netty.buffer.CompositeByteBuf;
-import lombok.Getter;
-import lombok.Lombok;
-import lombok.SneakyThrows;
-import lombok.extern.slf4j.Slf4j;
-
 import java.io.IOException;
 import java.io.OutputStream;
 import java.util.ArrayDeque;
@@ -21,8 +7,22 @@ import java.util.Arrays;
 import java.util.Deque;
 import java.util.Iterator;
 import java.util.Map;
-import java.util.Stack;
 import java.util.function.Supplier;
+
+import com.fasterxml.jackson.core.JsonEncoding;
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
+import io.netty.buffer.CompositeByteBuf;
+import lombok.Getter;
+import lombok.Lombok;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * This class writes a JSON object to a series of ByteBufs using Jackson's JsonGenerator.
@@ -40,12 +40,15 @@ public class JsonEmitter implements AutoCloseable {
         public final ByteBuf partialSerializedContents;
         public final Supplier<PartialOutputAndContinuation> nextSupplier;
 
-        public PartialOutputAndContinuation(ByteBuf partialSerializedContents,
-                                            Supplier<PartialOutputAndContinuation> nextSupplier) {
+        public PartialOutputAndContinuation(
+            ByteBuf partialSerializedContents,
+            Supplier<PartialOutputAndContinuation> nextSupplier
+        ) {
             this.partialSerializedContents = partialSerializedContents;
             this.nextSupplier = nextSupplier;
         }
     }
+
     @Getter
     private static class FragmentSupplier {
         public final Supplier<FragmentSupplier> supplier;
@@ -54,6 +57,7 @@ public class JsonEmitter implements AutoCloseable {
             this.supplier = supplier;
         }
     }
+
     private static class LevelContext<T> {
         public final Iterator<T> iterator;
         public final Runnable onPopContinuation;
@@ -145,7 +149,7 @@ public class JsonEmitter implements AutoCloseable {
      * @throws IOException
      */
     public PartialOutputAndContinuation getChunkAndContinuations(Object object, int minBytes) throws IOException {
-        log.trace("getChunkAndContinuations(..., "+minBytes+")");
+        log.trace("getChunkAndContinuations(..., " + minBytes + ")");
         return getChunkAndContinuationsHelper(walkTreeWithContinuations(object), minBytes);
     }
 
@@ -164,15 +168,18 @@ public class JsonEmitter implements AutoCloseable {
      * @param minBytes
      * @return
      */
-    private PartialOutputAndContinuation getChunkAndContinuationsHelper(FragmentSupplier nextFragmentSupplier,
-                                                                        int minBytes) {
+    private PartialOutputAndContinuation getChunkAndContinuationsHelper(
+        FragmentSupplier nextFragmentSupplier,
+        int minBytes
+    ) {
         var compositeByteBuf = outputStream.compositeByteBuf;
-        if (compositeByteBuf.numComponents() > NUM_SEGMENT_THRESHOLD ||
-                compositeByteBuf.readableBytes() > minBytes) {
+        if (compositeByteBuf.numComponents() > NUM_SEGMENT_THRESHOLD || compositeByteBuf.readableBytes() > minBytes) {
             var byteBuf = outputStream.recycleByteBufRetained();
             log.debug("getChunkAndContinuationsHelper->" + byteBuf.readableBytes() + " bytes + continuation");
-            return new PartialOutputAndContinuation(byteBuf,
-                    () -> getChunkAndContinuationsHelper(nextFragmentSupplier, minBytes));
+            return new PartialOutputAndContinuation(
+                byteBuf,
+                () -> getChunkAndContinuationsHelper(nextFragmentSupplier, minBytes)
+            );
         }
         if (nextFragmentSupplier == null) {
             try {
@@ -184,8 +191,11 @@ public class JsonEmitter implements AutoCloseable {
             log.debug("getChunkAndContinuationsHelper->" + byteBuf.readableBytes() + " bytes + null");
             return new PartialOutputAndContinuation(byteBuf, null);
         }
-        log.trace("getChunkAndContinuationsHelper->recursing with " + outputStream.compositeByteBuf.readableBytes() +
-                " written bytes buffered");
+        log.trace(
+            "getChunkAndContinuationsHelper->recursing with "
+                + outputStream.compositeByteBuf.readableBytes()
+                + " written bytes buffered"
+        );
         return getChunkAndContinuationsHelper(nextFragmentSupplier.supplier.get(), minBytes);
     }
 
@@ -222,14 +232,14 @@ public class JsonEmitter implements AutoCloseable {
      * @return
      */
     private FragmentSupplier walkTreeWithContinuations(Object o) {
-        log.trace("walkTree... "+o);
+        log.trace("walkTree... " + o);
         if (o instanceof Map.Entry) {
-            var kvp = (Map.Entry<String,Object>) o;
+            var kvp = (Map.Entry<String, Object>) o;
             writeFieldName(kvp.getKey());
             return walkTreeWithContinuations(kvp.getValue());
         } else if (o instanceof Map) {
             writeStartObject();
-            push(((Map<String,Object>) o).entrySet().iterator(), this::writeEndObject);
+            push(((Map<String, Object>) o).entrySet().iterator(), this::writeEndObject);
         } else if (o instanceof ObjectNode) {
             writeStartObject();
             push(((ObjectNode) o).fields(), this::writeEndObject);
@@ -264,7 +274,6 @@ public class JsonEmitter implements AutoCloseable {
     private void writeStartObject() {
         jsonGenerator.writeStartObject();
     }
-
 
     @SneakyThrows
     private void writeFieldName(String fieldName) {

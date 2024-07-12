@@ -1,10 +1,5 @@
 package org.opensearch.migrations.transform;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.SneakyThrows;
-import lombok.extern.slf4j.Slf4j;
-
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -13,11 +8,17 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
+
 @Slf4j
 public class JsonJoltTransformBuilder {
 
     private static String getSubstitutionTemplate(int i) {
-        return "%%SUBSTITION_" + (i+1) + "%%";
+        return "%%SUBSTITION_" + (i + 1) + "%%";
     }
 
     public enum CANNED_OPERATION {
@@ -26,6 +27,7 @@ public class JsonJoltTransformBuilder {
         PASS_THRU("passThru");
 
         private final String joltOperationTransformName;
+
         CANNED_OPERATION(String s) {
             joltOperationTransformName = s;
         }
@@ -49,6 +51,7 @@ public class JsonJoltTransformBuilder {
             this.value = s;
             this.numberOfTemplateSubstitutions = numberOfTemplateSubstitutions;
         }
+
         OPERATION(String s) {
             this(s, 0);
         }
@@ -62,10 +65,11 @@ public class JsonJoltTransformBuilder {
     /**
      * Visibility increased for testing
      */
-    static final TypeReference<LinkedHashMap<String, Object>> TYPE_REFERENCE_FOR_MAP_TYPE = new TypeReference<>() {};
+    static final TypeReference<LinkedHashMap<String, Object>> TYPE_REFERENCE_FOR_MAP_TYPE = new TypeReference<>() {
+    };
 
     ObjectMapper mapper = new ObjectMapper();
-    List<Map<String,Object>> chainedSpec = new ArrayList<>();
+    List<Map<String, Object>> chainedSpec = new ArrayList<>();
 
     public Map<String, Object> loadResourceAsJson(String path) throws IOException {
         return loadResourceAsJson(mapper, path);
@@ -83,13 +87,13 @@ public class JsonJoltTransformBuilder {
     }
 
     @SneakyThrows
-    private Map<String, Object> getOperationWithSubstitutions(OPERATION operation, String...substitutions) {
+    private Map<String, Object> getOperationWithSubstitutions(OPERATION operation, String... substitutions) {
         var path = "/jolt/operations/" + operation.value + ".jolt.template";
         assert substitutions.length == operation.numberOfTemplateSubstitutions;
         try (InputStream inputStream = JsonJoltTransformBuilder.class.getResourceAsStream(path)) {
             var contentBytes = inputStream.readAllBytes();
             var contentsStr = new String(contentBytes, StandardCharsets.UTF_8);
-            for (int i=0; i<substitutions.length; ++i) {
+            for (int i = 0; i < substitutions.length; ++i) {
                 contentsStr = contentsStr.replaceAll(getSubstitutionTemplate(i), substitutions[i]);
             }
             return mapper.readValue(contentsStr, TYPE_REFERENCE_FOR_MAP_TYPE);

@@ -1,14 +1,15 @@
 package org.opensearch.migrations.replay.kafka;
 
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
+import java.util.StringJoiner;
+import java.util.function.Function;
+
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
-import java.util.StringJoiner;
-import java.util.function.Function;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
 
 @EqualsAndHashCode(callSuper = true)
 @Getter
@@ -17,14 +18,21 @@ class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKeyAndContext i
     private final int partition;
     private final long offset;
 
-    TrafficStreamKeyWithKafkaRecordId(Function<ITrafficStreamKey, IReplayContexts.IKafkaRecordContext> contextFactory,
-                                      TrafficStream trafficStream, KafkaCommitOffsetData ok) {
+    TrafficStreamKeyWithKafkaRecordId(
+        Function<ITrafficStreamKey, IReplayContexts.IKafkaRecordContext> contextFactory,
+        TrafficStream trafficStream,
+        KafkaCommitOffsetData ok
+    ) {
         this(contextFactory, trafficStream, ok.getGeneration(), ok.getPartition(), ok.getOffset());
     }
 
-    TrafficStreamKeyWithKafkaRecordId(Function<ITrafficStreamKey, IReplayContexts.IKafkaRecordContext> contextFactory,
-                                      TrafficStream trafficStream,
-                                      int generation, int partition, long offset) {
+    TrafficStreamKeyWithKafkaRecordId(
+        Function<ITrafficStreamKey, IReplayContexts.IKafkaRecordContext> contextFactory,
+        TrafficStream trafficStream,
+        int generation,
+        int partition,
+        long offset
+    ) {
         super(trafficStream);
         this.generation = generation;
         this.partition = partition;
@@ -35,10 +43,9 @@ class TrafficStreamKeyWithKafkaRecordId extends PojoTrafficStreamKeyAndContext i
 
     @Override
     public String toString() {
-        return new StringJoiner("|")
-                .add(super.toString())
-                .add("partition=" + partition)
-                .add("offset=" + offset)
-                .toString();
+        return new StringJoiner("|").add(super.toString())
+            .add("partition=" + partition)
+            .add("offset=" + offset)
+            .toString();
     }
 }

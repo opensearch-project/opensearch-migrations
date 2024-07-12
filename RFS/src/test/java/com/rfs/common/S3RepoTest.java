@@ -5,24 +5,22 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.concurrent.CompletableFuture;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.extension.ExtendWith;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 
-import org.mockito.Mockito;
 import org.mockito.Mock;
+import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
-
 import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
-
 
 @ExtendWith(MockitoExtension.class)
 public class S3RepoTest {
@@ -34,7 +32,6 @@ public class S3RepoTest {
     private S3Uri testRepoUri = new S3Uri("s3://bucket-name/directory");
     private String testRepoFileName = "index-2";
     private S3Uri testRepoFileUri = new S3Uri(testRepoUri.uri + "/" + testRepoFileName);
-    
 
     class TestableS3Repo extends S3Repo {
         public TestableS3Repo(Path s3LocalDir, S3Uri s3RepoUri, String s3Region, S3AsyncClient s3Client) {
@@ -61,7 +58,8 @@ public class S3RepoTest {
     void setUp() {
         GetObjectResponse mockResponse = GetObjectResponse.builder().build();
         CompletableFuture<GetObjectResponse> noopFuture = CompletableFuture.completedFuture(mockResponse);
-        lenient().when(mockS3Client.getObject(any(GetObjectRequest.class), any(AsyncResponseTransformer.class))).thenReturn(noopFuture);
+        lenient().when(mockS3Client.getObject(any(GetObjectRequest.class), any(AsyncResponseTransformer.class)))
+            .thenReturn(noopFuture);
 
         testRepo = Mockito.spy(new TestableS3Repo(testDir, testRepoUri, testRegion, mockS3Client));
     }
@@ -97,7 +95,6 @@ public class S3RepoTest {
 
         verify(mockS3Client).getObject(eq(expectedRequest), any(AsyncResponseTransformer.class));
     }
-
 
     @Test
     void GetGlobalMetadataFilePath_AsExpected() throws IOException {

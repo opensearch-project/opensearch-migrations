@@ -1,17 +1,20 @@
 package org.opensearch.migrations.trafficcapture;
 
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.net.SocketAddress;
+import java.nio.ByteBuffer;
+import java.nio.channels.GatheringByteChannel;
+import java.time.Instant;
+import java.util.concurrent.CompletableFuture;
+import java.util.stream.IntStream;
+
 import com.google.protobuf.ByteOutput;
 import com.google.protobuf.CodedOutputStream;
 import com.google.protobuf.Descriptors;
 import com.google.protobuf.Timestamp;
 import com.google.protobuf.WireFormat;
-import io.netty.buffer.ByteBuf;
 
-import java.io.UncheckedIOException;
-import java.nio.channels.GatheringByteChannel;
-import java.util.stream.IntStream;
-import lombok.NonNull;
-import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
@@ -24,11 +27,9 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.trafficcapture.protos.WriteSegmentObservation;
 
-import java.io.IOException;
-import java.net.SocketAddress;
-import java.nio.ByteBuffer;
-import java.time.Instant;
-import java.util.concurrent.CompletableFuture;
+import io.netty.buffer.ByteBuf;
+import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * This class serves as a generic serializer. Its primary function is to take ByteBuffer data,
@@ -83,12 +84,14 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     private final String connectionIdString;
     private CodedOutputStreamHolder currentCodedOutputStreamHolderOrNull;
 
-    public StreamChannelConnectionCaptureSerializer(String nodeId, String connectionId,
-                                                    @NonNull StreamLifecycleManager<T> streamLifecycleManager) {
+    public StreamChannelConnectionCaptureSerializer(
+        String nodeId,
+        String connectionId,
+        @NonNull StreamLifecycleManager<T> streamLifecycleManager
+    ) {
         this.streamManager = streamLifecycleManager;
-        assert (nodeId == null ? 0 : CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, nodeId)) +
-                CodedOutputStream.computeStringSize(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionId)
-                <= MAX_ID_SIZE;
+        assert (nodeId == null ? 0 : CodedOutputStream.computeStringSize(TrafficStream.NODEID_FIELD_NUMBER, nodeId))
+            + CodedOutputStream.computeStringSize(TrafficStream.CONNECTIONID_FIELD_NUMBER, connectionId) <= MAX_ID_SIZE;
         this.connectionIdString = connectionId;
         this.nodeIdString = nodeId;
     }
@@ -105,8 +108,10 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         if (streamHasBeenClosed) {
             // In an abundance of caution, flip the state back to basically act like a whole new
             // stream is being setup
-            log.error("This serializer was already marked as closed previously.  State is being reset to match " +
-                    "a new serializer, but this signals a serious issue in the usage of this serializer.");
+            log.error(
+                "This serializer was already marked as closed previously.  State is being reset to match "
+                    + "a new serializer, but this signals a serious issue in the usage of this serializer."
+            );
             readObservationsAreWaitingForEom = false;
             eomsSoFar = 0;
             numFlushesSoFar = 0;
@@ -129,8 +134,10 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
                 currentCodedOutputStream.writeInt32(TrafficStream.PRIORREQUESTSRECEIVED_FIELD_NUMBER, eomsSoFar);
             }
             if (readObservationsAreWaitingForEom) {
-                currentCodedOutputStream.writeBool(TrafficStream.LASTOBSERVATIONWASUNTERMINATEDREAD_FIELD_NUMBER,
-                        readObservationsAreWaitingForEom);
+                currentCodedOutputStream.writeBool(
+                    TrafficStream.LASTOBSERVATIONWASUNTERMINATEDREAD_FIELD_NUMBER,
+                    readObservationsAreWaitingForEom
+                );
             }
             return currentCodedOutputStreamHolderOrNull;
         }
@@ -138,8 +145,14 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
 
     public int currentOutputStreamWriteableSpaceLeft() throws IOException {
         // Writeable bytes is the space left minus the space needed to complete the next flush
-        var maxFieldTagNumberToBeWrittenUponStreamFlush = Math.max(TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER, TrafficStream.NUMBER_FIELD_NUMBER);
-        var spaceNeededForRecordCreationDuringNextFlush = CodedOutputStream.computeInt32Size(maxFieldTagNumberToBeWrittenUponStreamFlush, numFlushesSoFar + 1);
+        var maxFieldTagNumberToBeWrittenUponStreamFlush = Math.max(
+            TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER,
+            TrafficStream.NUMBER_FIELD_NUMBER
+        );
+        var spaceNeededForRecordCreationDuringNextFlush = CodedOutputStream.computeInt32Size(
+            maxFieldTagNumberToBeWrittenUponStreamFlush,
+            numFlushesSoFar + 1
+        );
         var outputStreamSpaceLeft = getOrCreateCodedOutputStreamHolder().getOutputStreamSpaceLeft();
         return outputStreamSpaceLeft == -1 ? -1 : outputStreamSpaceLeft - spaceNeededForRecordCreationDuringNextFlush;
     }
@@ -164,15 +177,18 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         return CompletableFuture.completedFuture(null);
     }
 
-
     private void writeTrafficStreamTag(int fieldNumber) throws IOException {
-        getOrCreateCodedOutputStream().writeTag(fieldNumber,
-                getWireTypeForFieldIndex(TrafficStream.getDescriptor(), fieldNumber));
+        getOrCreateCodedOutputStream().writeTag(
+            fieldNumber,
+            getWireTypeForFieldIndex(TrafficStream.getDescriptor(), fieldNumber)
+        );
     }
 
     private void writeObservationTag(int fieldNumber) throws IOException {
-        getOrCreateCodedOutputStream().writeTag(fieldNumber,
-                getWireTypeForFieldIndex(TrafficObservation.getDescriptor(), fieldNumber));
+        getOrCreateCodedOutputStream().writeTag(
+            fieldNumber,
+            getWireTypeForFieldIndex(TrafficObservation.getDescriptor(), fieldNumber)
+        );
     }
 
     /**
@@ -180,13 +196,23 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
      * CodedOutputStream and flushing if space does not exist. This should be called before writing any observation to
      * the TrafficStream.
      */
-    private void beginSubstreamObservation(Instant timestamp, int captureTagFieldNumber, int captureTagLengthAndContentSize) throws IOException {
+    private void beginSubstreamObservation(
+        Instant timestamp,
+        int captureTagFieldNumber,
+        int captureTagLengthAndContentSize
+    ) throws IOException {
         final var tsContentSize = CodedOutputStreamSizeUtil.getSizeOfTimestamp(timestamp);
         final var tsTagSize = CodedOutputStream.computeInt32Size(TrafficObservation.TS_FIELD_NUMBER, tsContentSize);
         final var captureTagNoLengthSize = CodedOutputStream.computeTagSize(captureTagFieldNumber);
-        final var observationContentSize = tsTagSize + tsContentSize + captureTagNoLengthSize + captureTagLengthAndContentSize;
+        final var observationContentSize = tsTagSize + tsContentSize + captureTagNoLengthSize
+            + captureTagLengthAndContentSize;
         // Ensure space is available before starting an observation
-        flushIfNeeded(CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(observationContentSize, numFlushesSoFar + 1));
+        flushIfNeeded(
+            CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(
+                observationContentSize,
+                numFlushesSoFar + 1
+            )
+        );
         // e.g. 2 {
         writeTrafficStreamTag(TrafficStream.SUBSTREAM_FIELD_NUMBER);
         // Write observation content length
@@ -220,13 +246,16 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
      *         and thus an additional space on the return value would require two additional space to write.
      */
     public static int computeMaxLengthDelimitedFieldSizeForSpace(int totalAvailableSpace, int requestedFieldSize) {
-        // A pessimistic calculation space required for the length field due to not accounting for the space of the length field itself.
-        // This may yield a length space one byte greater than optimal, potentially leaving at most one length delimited byte
+        // A pessimistic calculation space required for the length field due to not accounting for the space of the
+        // length field itself.
+        // This may yield a length space one byte greater than optimal, potentially leaving at most one length delimited
+        // byte
         // which the availableSpace has space for.
         final int pessimisticLengthFieldSpace = CodedOutputStream.computeUInt32SizeNoTag(totalAvailableSpace);
         int maxWriteBytesSpace = totalAvailableSpace - pessimisticLengthFieldSpace;
         return Math.min(maxWriteBytesSpace, requestedFieldSize);
     }
+
     private void readByteBufIntoCurrentStream(int fieldNum, ByteBuf buf) throws IOException {
         var codedOutputStream = getOrCreateCodedOutputStream();
         final int bufReadableLength = buf.readableBytes();
@@ -240,12 +269,13 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
             codedOutputStream.writeTag(fieldNum, WireFormat.WIRETYPE_LENGTH_DELIMITED);
             codedOutputStream.writeUInt32NoTag(bufReadableLength);
             buf.readBytes(new ByteOutputGatheringByteChannel(codedOutputStream), bufReadableLength);
-            assert buf.readableBytes() == 0 : "Expected buf bytes read but instead left " + buf.readableBytes() + " unread.";
+            assert buf.readableBytes() == 0 : "Expected buf bytes read but instead left "
+                + buf.readableBytes()
+                + " unread.";
         } else {
             codedOutputStream.writeUInt32NoTag(0);
         }
     }
-
 
     private void writeByteStringToCurrentStream(int fieldNum, String str) throws IOException {
         if (str.length() > 0) {
@@ -273,13 +303,15 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         }
         try {
             CodedOutputStream currentStream = getOrCreateCodedOutputStream();
-            var fieldNum = isFinal ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER : TrafficStream.NUMBER_FIELD_NUMBER;
+            var fieldNum = isFinal
+                ? TrafficStream.NUMBEROFTHISLASTCHUNK_FIELD_NUMBER
+                : TrafficStream.NUMBER_FIELD_NUMBER;
             // e.g. 3: 1
             currentStream.writeInt32(fieldNum, ++numFlushesSoFar);
             log.trace("Flushing the current CodedOutputStream for {}.{}", connectionIdString, numFlushesSoFar);
             currentStream.flush();
-            assert currentStream == currentCodedOutputStreamHolderOrNull.getOutputStream() : "Expected the stream that " +
-                    "is being finalized to be the same stream contained by currentCodedOutputStreamHolderOrNull";
+            assert currentStream == currentCodedOutputStreamHolderOrNull.getOutputStream() : "Expected the stream that "
+                + "is being finalized to be the same stream contained by currentCodedOutputStreamHolderOrNull";
             return streamManager.closeStream(currentCodedOutputStreamHolderOrNull, numFlushesSoFar);
         } finally {
             currentCodedOutputStreamHolderOrNull = null;
@@ -292,8 +324,10 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     @Override
     public void cancelCaptureForCurrentRequest(Instant timestamp) throws IOException {
         beginSubstreamObservation(timestamp, TrafficObservation.REQUESTDROPPED_FIELD_NUMBER, 1);
-        getOrCreateCodedOutputStream().writeMessage(TrafficObservation.REQUESTDROPPED_FIELD_NUMBER,
-                RequestIntentionallyDropped.getDefaultInstance());
+        getOrCreateCodedOutputStream().writeMessage(
+            TrafficObservation.REQUESTDROPPED_FIELD_NUMBER,
+            RequestIntentionallyDropped.getDefaultInstance()
+        );
         this.readObservationsAreWaitingForEom = false;
         this.firstLineByteLength = -1;
         this.headersByteLength = -1;
@@ -301,33 +335,35 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
 
     @Override
     public void addBindEvent(Instant timestamp, SocketAddress addr) throws IOException {
-        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
+        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addConnectEvent(Instant timestamp, SocketAddress remote, SocketAddress local) throws IOException {
-        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
+        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addDisconnectEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
+        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addCloseEvent(Instant timestamp) throws IOException {
         beginSubstreamObservation(timestamp, TrafficObservation.CLOSE_FIELD_NUMBER, 1);
-        getOrCreateCodedOutputStream().writeMessage(TrafficObservation.CLOSE_FIELD_NUMBER,
-                CloseObservation.getDefaultInstance());
+        getOrCreateCodedOutputStream().writeMessage(
+            TrafficObservation.CLOSE_FIELD_NUMBER,
+            CloseObservation.getDefaultInstance()
+        );
     }
 
     @Override
     public void addDeregisterEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
+        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
     }
 
-    private void addStringMessage(int captureFieldNumber, int dataFieldNumber,
-                                  Instant timestamp, @NonNull String str) throws IOException {
+    private void addStringMessage(int captureFieldNumber, int dataFieldNumber, Instant timestamp, @NonNull String str)
+        throws IOException {
         int dataSize = 0;
         int lengthSize = 1;
         if (str.length() > 0) {
@@ -343,24 +379,30 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         writeByteStringToCurrentStream(dataFieldNumber, str);
     }
 
-    private void addDataMessage(int captureFieldNumber, int dataFieldNumber, Instant timestamp, ByteBuf buf) throws IOException {
+    private void addDataMessage(int captureFieldNumber, int dataFieldNumber, Instant timestamp, ByteBuf buf)
+        throws IOException {
         int segmentFieldNumber;
         int segmentDataFieldNumber;
         if (captureFieldNumber == TrafficObservation.READ_FIELD_NUMBER) {
             segmentFieldNumber = TrafficObservation.READSEGMENT_FIELD_NUMBER;
             segmentDataFieldNumber = ReadSegmentObservation.DATA_FIELD_NUMBER;
-        }
-        else {
+        } else {
             segmentFieldNumber = TrafficObservation.WRITESEGMENT_FIELD_NUMBER;
             segmentDataFieldNumber = WriteSegmentObservation.DATA_FIELD_NUMBER;
         }
 
         // The message bytes here are not optimizing for space and instead are calculated on the worst case estimate of
-        // the potentially required bytes for simplicity. This could leave ~5 bytes of unused space in the CodedOutputStream
-        // when considering the case of a message that does not need segments or for the case of a smaller segment created
+        // the potentially required bytes for simplicity. This could leave ~5 bytes of unused space in the
+        // CodedOutputStream
+        // when considering the case of a message that does not need segments or for the case of a smaller segment
+        // created
         // from a much larger message
-        final int messageAndOverheadBytesLeft = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(timestamp,
-            segmentFieldNumber, segmentDataFieldNumber, buf);
+        final int messageAndOverheadBytesLeft = CodedOutputStreamSizeUtil.maxBytesNeededForASegmentedObservation(
+            timestamp,
+            segmentFieldNumber,
+            segmentDataFieldNumber,
+            buf
+        );
         final int dataSize = CodedOutputStreamSizeUtil.computeByteBufRemainingSizeNoTag(buf);
         final int trafficStreamOverhead = messageAndOverheadBytesLeft - dataSize;
 
@@ -371,15 +413,19 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         var spaceLeft = currentOutputStreamWriteableSpaceLeft();
 
         var bufToRead = buf.duplicate();
-        // If our message is empty or can fit in the current CodedOutputStream no chunking is needed, and we can continue
+        // If our message is empty or can fit in the current CodedOutputStream no chunking is needed, and we can
+        // continue
         if (bufToRead.readableBytes() == 0 || spaceLeft == -1 || messageAndOverheadBytesLeft <= spaceLeft) {
             int minExpectedSpaceAfterObservation = spaceLeft - messageAndOverheadBytesLeft;
             addSubstreamMessage(captureFieldNumber, dataFieldNumber, timestamp, bufToRead);
             observationSizeSanityCheck(minExpectedSpaceAfterObservation, captureFieldNumber);
         } else {
-            while(bufToRead.readableBytes() > 0) {
+            while (bufToRead.readableBytes() > 0) {
                 spaceLeft = currentOutputStreamWriteableSpaceLeft();
-                var bytesToRead = computeMaxLengthDelimitedFieldSizeForSpace(spaceLeft - trafficStreamOverhead, bufToRead.readableBytes());
+                var bytesToRead = computeMaxLengthDelimitedFieldSizeForSpace(
+                    spaceLeft - trafficStreamOverhead,
+                    bufToRead.readableBytes()
+                );
                 if (bytesToRead <= 0) {
                     throw new IllegalStateException("Stream space is not allowing forward progress on byteBuf reading");
                 }
@@ -393,8 +439,14 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         }
     }
 
-    private void addSubstreamMessage(int captureFieldNumber, int dataFieldNumber, int dataCountFieldNumber, int dataCount,
-        Instant timestamp, ByteBuf byteBuf) throws IOException {
+    private void addSubstreamMessage(
+        int captureFieldNumber,
+        int dataFieldNumber,
+        int dataCountFieldNumber,
+        int dataCount,
+        Instant timestamp,
+        ByteBuf byteBuf
+    ) throws IOException {
         int dataBytesSize = 0;
         int dataTagSize = 0;
         int dataSize = dataBytesSize + dataTagSize;
@@ -421,14 +473,14 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         }
         // Write data field
         readByteBufIntoCurrentStream(dataFieldNumber, byteBuf);
-        if (captureFieldNumber == TrafficObservation.READ_FIELD_NUMBER ||
-                captureFieldNumber == TrafficObservation.READSEGMENT_FIELD_NUMBER) {
+        if (captureFieldNumber == TrafficObservation.READ_FIELD_NUMBER
+            || captureFieldNumber == TrafficObservation.READSEGMENT_FIELD_NUMBER) {
             this.readObservationsAreWaitingForEom = true;
         }
     }
 
-    private void addSubstreamMessage(int captureFieldNumber, int dataFieldNumber, Instant timestamp,
-        ByteBuf byteBuf) throws IOException {
+    private void addSubstreamMessage(int captureFieldNumber, int dataFieldNumber, Instant timestamp, ByteBuf byteBuf)
+        throws IOException {
         addSubstreamMessage(captureFieldNumber, dataFieldNumber, 0, 0, timestamp, byteBuf);
     }
 
@@ -444,54 +496,57 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
 
     @Override
     public void addFlushEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
+        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addChannelRegisteredEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
+        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addChannelUnregisteredEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
+        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addChannelActiveEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
+        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addChannelInactiveEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
+        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addChannelReadEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
+        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addChannelReadCompleteEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
+        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addUserEventTriggeredEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
+        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addChannelWritabilityChangedEvent(Instant timestamp) throws IOException {
-        // not implemented for this serializer.  The v1.0 version of the replayer will ignore this type of observation
+        // not implemented for this serializer. The v1.0 version of the replayer will ignore this type of observation
     }
 
     @Override
     public void addExceptionCaughtEvent(Instant timestamp, Throwable t) throws IOException {
-        addStringMessage(TrafficObservation.CONNECTIONEXCEPTION_FIELD_NUMBER,
-                ConnectionExceptionObservation.MESSAGE_FIELD_NUMBER,
-                timestamp, t.getMessage());
+        addStringMessage(
+            TrafficObservation.CONNECTIONEXCEPTION_FIELD_NUMBER,
+            ConnectionExceptionObservation.MESSAGE_FIELD_NUMBER,
+            timestamp,
+            t.getMessage()
+        );
     }
 
     @Override
@@ -505,8 +560,7 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     }
 
     @Override
-    public void commitEndOfHttpMessageIndicator(Instant timestamp)
-            throws IOException {
+    public void commitEndOfHttpMessageIndicator(Instant timestamp) throws IOException {
         writeEndOfHttpMessage(timestamp);
         this.readObservationsAreWaitingForEom = false;
         ++this.eomsSoFar;
@@ -515,28 +569,48 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
     }
 
     private void writeEndOfHttpMessage(Instant timestamp) throws IOException {
-        int eomPairSize = CodedOutputStream.computeInt32Size(EndOfMessageIndication.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength) +
-                CodedOutputStream.computeInt32Size(EndOfMessageIndication.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
+        int eomPairSize = CodedOutputStream.computeInt32Size(
+            EndOfMessageIndication.FIRSTLINEBYTELENGTH_FIELD_NUMBER,
+            firstLineByteLength
+        ) + CodedOutputStream.computeInt32Size(
+            EndOfMessageIndication.HEADERSBYTELENGTH_FIELD_NUMBER,
+            headersByteLength
+        );
         int eomDataSize = eomPairSize + CodedOutputStream.computeInt32SizeNoTag(eomPairSize);
         beginSubstreamObservation(timestamp, TrafficObservation.ENDOFMESSAGEINDICATOR_FIELD_NUMBER, eomDataSize);
         // e.g. 15 {
         writeObservationTag(TrafficObservation.ENDOFMESSAGEINDICATOR_FIELD_NUMBER);
         getOrCreateCodedOutputStream().writeUInt32NoTag(eomPairSize);
-        getOrCreateCodedOutputStream().writeInt32(EndOfMessageIndication.FIRSTLINEBYTELENGTH_FIELD_NUMBER, firstLineByteLength);
-        getOrCreateCodedOutputStream().writeInt32(EndOfMessageIndication.HEADERSBYTELENGTH_FIELD_NUMBER, headersByteLength);
+        getOrCreateCodedOutputStream().writeInt32(
+            EndOfMessageIndication.FIRSTLINEBYTELENGTH_FIELD_NUMBER,
+            firstLineByteLength
+        );
+        getOrCreateCodedOutputStream().writeInt32(
+            EndOfMessageIndication.HEADERSBYTELENGTH_FIELD_NUMBER,
+            headersByteLength
+        );
     }
 
     private void writeEndOfSegmentMessage(Instant timestamp) throws IOException {
         beginSubstreamObservation(timestamp, TrafficObservation.SEGMENTEND_FIELD_NUMBER, 1);
-        getOrCreateCodedOutputStream().writeMessage(TrafficObservation.SEGMENTEND_FIELD_NUMBER, EndOfSegmentsIndication.getDefaultInstance());
+        getOrCreateCodedOutputStream().writeMessage(
+            TrafficObservation.SEGMENTEND_FIELD_NUMBER,
+            EndOfSegmentsIndication.getDefaultInstance()
+        );
     }
 
     private void observationSizeSanityCheck(int minExpectedSpaceAfterObservation, int fieldNumber) throws IOException {
         int actualRemainingSpace = currentOutputStreamWriteableSpaceLeft();
-        if (actualRemainingSpace != -1 && (actualRemainingSpace < minExpectedSpaceAfterObservation || minExpectedSpaceAfterObservation < 0)) {
-            log.warn("Writing a substream (capture type: {}) for Traffic Stream: {} left {} bytes in the CodedOutputStream but we calculated " +
-                    "at least {} bytes remaining, this should be investigated", fieldNumber, connectionIdString + "." + (numFlushesSoFar + 1),
-                actualRemainingSpace, minExpectedSpaceAfterObservation);
+        if (actualRemainingSpace != -1
+            && (actualRemainingSpace < minExpectedSpaceAfterObservation || minExpectedSpaceAfterObservation < 0)) {
+            log.warn(
+                "Writing a substream (capture type: {}) for Traffic Stream: {} left {} bytes in the CodedOutputStream but we calculated "
+                    + "at least {} bytes remaining, this should be investigated",
+                fieldNumber,
+                connectionIdString + "." + (numFlushesSoFar + 1),
+                actualRemainingSpace,
+                minExpectedSpaceAfterObservation
+            );
         }
     }
 
@@ -556,15 +630,13 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
 
         @Override
         public long write(ByteBuffer[] srcs, int offset, int length) throws UncheckedIOException {
-            return IntStream.range(offset, offset + length)
-                .mapToLong(i -> {
-                    try {
-                        return write(srcs[i]);
-                    } catch (IOException e) {
-                        throw new UncheckedIOException(e);
-                    }
-                })
-                .sum();
+            return IntStream.range(offset, offset + length).mapToLong(i -> {
+                try {
+                    return write(srcs[i]);
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            }).sum();
         }
 
         @Override
@@ -578,7 +650,6 @@ public class StreamChannelConnectionCaptureSerializer<T> implements IChannelConn
         }
 
         @Override
-        public void close() {
-        }
+        public void close() {}
     }
 }

@@ -1,11 +1,11 @@
 package org.opensearch.migrations.tracing;
 
+import java.util.Optional;
+
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributesBuilder;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-
-import java.util.Optional;
 
 class IInstrumentationAttributesTest {
 
@@ -34,13 +34,12 @@ class IInstrumentationAttributesTest {
 
         @Override
         public AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
-            return super.fillAttributesForSpansBelow(builder)
-                    .put(OVERRIDE_KEY, "a-toBeOverridden")
-                    .put(UNIQUE_KEY, "a-toStay");
+            return super.fillAttributesForSpansBelow(builder).put(OVERRIDE_KEY, "a-toBeOverridden")
+                .put(UNIQUE_KEY, "a-toStay");
         }
     }
 
-    private static class BContext extends BaseNestedSpanContext<RootOtelContext, AContext>{
+    private static class BContext extends BaseNestedSpanContext<RootOtelContext, AContext> {
         protected BContext(RootOtelContext rootScope, AContext enclosingScope) {
             super(rootScope, enclosingScope);
         }
@@ -57,8 +56,7 @@ class IInstrumentationAttributesTest {
 
         @Override
         public AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
-            return super.fillAttributesForSpansBelow(builder)
-                    .put(OVERRIDE_KEY, "b");
+            return super.fillAttributesForSpansBelow(builder).put(OVERRIDE_KEY, "b");
         }
     }
 
@@ -68,11 +66,11 @@ class IInstrumentationAttributesTest {
         var aCtx = new AContext(rootCtx);
         var bCtx = new BContext(rootCtx, aCtx);
 
-        Optional.ofNullable(aCtx.getPopulatedSpanAttributes()).ifPresent(attrs-> {
-                    Assertions.assertEquals("a-toBeOverridden", attrs.get(OVERRIDE_KEY));
-                    Assertions.assertEquals("a-toStay", attrs.get(UNIQUE_KEY));
-                });
-        Optional.ofNullable(bCtx.getPopulatedSpanAttributes()).ifPresent(attrs-> {
+        Optional.ofNullable(aCtx.getPopulatedSpanAttributes()).ifPresent(attrs -> {
+            Assertions.assertEquals("a-toBeOverridden", attrs.get(OVERRIDE_KEY));
+            Assertions.assertEquals("a-toStay", attrs.get(UNIQUE_KEY));
+        });
+        Optional.ofNullable(bCtx.getPopulatedSpanAttributes()).ifPresent(attrs -> {
             Assertions.assertEquals("b", attrs.get(OVERRIDE_KEY));
             Assertions.assertEquals("a-toStay", attrs.get(UNIQUE_KEY));
         });

@@ -1,10 +1,10 @@
 package org.opensearch.migrations.trafficcapture;
 
-import com.beust.jcommander.JCommander;
-import com.beust.jcommander.Parameter;
-import com.beust.jcommander.ParameterException;
+import java.io.File;
 import java.io.IOException;
-import lombok.AllArgsConstructor;
+import java.util.Arrays;
+import java.util.Optional;
+
 import org.apache.jmeter.assertions.ResponseAssertion;
 import org.apache.jmeter.control.LoopController;
 import org.apache.jmeter.engine.StandardJMeterEngine;
@@ -19,26 +19,23 @@ import org.apache.jmeter.timers.ConstantTimer;
 import org.apache.jmeter.util.JMeterUtils;
 import org.apache.jorphan.collections.HashTree;
 import org.apache.jorphan.collections.ListedHashTree;
-import org.jetbrains.annotations.NotNull;
 
-import java.io.File;
-import java.util.Arrays;
-import java.util.Optional;
+import com.beust.jcommander.JCommander;
+import com.beust.jcommander.Parameter;
+import com.beust.jcommander.ParameterException;
+import lombok.AllArgsConstructor;
+import org.jetbrains.annotations.NotNull;
 
 public class JMeterLoadTest {
 
     static class Parameters {
-        @Parameter(required = true,
-                names = {"-p", "--port"},
-                description = "Port number")
+        @Parameter(required = true, names = { "-p", "--port" }, description = "Port number")
         int backsidePort;
-        @Parameter(required = true,
-                names = {"-s", "--server-name"},
-                description = "Server name")
+        @Parameter(required = true, names = { "-s", "--server-name" }, description = "Server name")
         String domainName;
-        @Parameter(required = false,
-                names = {"-r", "--protocol"},
-                description = "Protocol used. HTTP or HTTPS. Default = HTTPS")
+        @Parameter(required = false, names = {
+            "-r",
+            "--protocol" }, description = "Protocol used. HTTP or HTTPS. Default = HTTPS")
         String protocol = "HTTPS";
     }
 
@@ -50,7 +47,7 @@ public class JMeterLoadTest {
             return p;
         } catch (ParameterException e) {
             System.err.println(e.getMessage());
-            System.err.println("Got args: "+ String.join("; ", args));
+            System.err.println("Got args: " + String.join("; ", args));
             jCommander.usage();
             return null;
         }
@@ -64,7 +61,7 @@ public class JMeterLoadTest {
         File jmeterProperties = new File(home, "jmeter.properties");
         if (!jmeterProperties.exists()) {
             try {
-                System.out.println("Couldn't find a provided jmeter.properties file, creating a new one." );
+                System.out.println("Couldn't find a provided jmeter.properties file, creating a new one.");
                 jmeterProperties.createNewFile();
             } catch (IOException e) {
                 System.out.println("Error creating jmeter.properties file: " + e.getMessage());
@@ -73,44 +70,68 @@ public class JMeterLoadTest {
         JMeterUtils.loadJMeterProperties(jmeterProperties.getPath());
 
         String outputFileName = null;
-        //outputFileName = "results.jtl";
-        ListedHashTree hashTree = createTestPlan(params.protocol, params.domainName, params.backsidePort, 1000, 8, 1,
-                false, outputFileName);
+        // outputFileName = "results.jtl";
+        ListedHashTree hashTree = createTestPlan(
+            params.protocol,
+            params.domainName,
+            params.backsidePort,
+            1000,
+            8,
+            1,
+            false,
+            outputFileName
+        );
 
         jmeter.configure(hashTree);
         jmeter.run();
     }
 
     @NotNull
-    private static ListedHashTree createTestPlan(String protocol, String domain, int port, int loopCount, int workerThreadCount,
-                                                 int summaryUpdateFrequencySeconds, boolean verifyResponse,
-                                                 String logOutputFileName) {
+    private static ListedHashTree createTestPlan(
+        String protocol,
+        String domain,
+        int port,
+        int loopCount,
+        int workerThreadCount,
+        int summaryUpdateFrequencySeconds,
+        boolean verifyResponse,
+        String logOutputFileName
+    ) {
         ListedHashTree hashTree = new ListedHashTree();
 
         TestPlan testPlan = new TestPlan("Test Plan");
         testPlan.setProperty(TestElement.TEST_CLASS, TestPlan.class.getName());
 
-        FileReference[] files = new FileReference[]{
-                new FileReference("100.txt", 't', 100, true),
-                new FileReference("1K.txt", 's', 1000, true),
-                new FileReference("10K.txt", 'm', 1000 * 10, true),
-                new FileReference("100K.txt", 'L', 1000 * 100, false),
-                new FileReference("1M.txt", 'X', 1000 * 1000, false),
-                //new FileReference("10M.txt", 'H', 1000 * 1000 * 10, false)
+        FileReference[] files = new FileReference[] {
+            new FileReference("100.txt", 't', 100, true),
+            new FileReference("1K.txt", 's', 1000, true),
+            new FileReference("10K.txt", 'm', 1000 * 10, true),
+            new FileReference("100K.txt", 'L', 1000 * 100, false),
+            new FileReference("1M.txt", 'X', 1000 * 1000, false),
+            // new FileReference("10M.txt", 'H', 1000 * 1000 * 10, false)
         };
-
 
         hashTree.add(testPlan);
         hashTree.add(testPlan, createTimer());
         {
-            var threadGroupHashTree = hashTree.add(testPlan, createThreadGroup("FireAndForgetGroup",
-                    loopCount, workerThreadCount, 1));
-            Arrays.stream(files).forEach(fr -> threadGroupHashTree.add(createHttpSampler(protocol, domain, port, fr, "GET", verifyResponse)));
+            var threadGroupHashTree = hashTree.add(
+                testPlan,
+                createThreadGroup("FireAndForgetGroup", loopCount, workerThreadCount, 1)
+            );
+            Arrays.stream(files)
+                .forEach(
+                    fr -> threadGroupHashTree.add(createHttpSampler(protocol, domain, port, fr, "GET", verifyResponse))
+                );
         }
         {
-            var threadGroupHashTree = hashTree.add(testPlan, createThreadGroup("TransactionGroup",
-                    loopCount, workerThreadCount, 1));
-            Arrays.stream(files).forEach(fr -> threadGroupHashTree.add(createHttpSampler(protocol, domain, port, fr, "POST", verifyResponse)));
+            var threadGroupHashTree = hashTree.add(
+                testPlan,
+                createThreadGroup("TransactionGroup", loopCount, workerThreadCount, 1)
+            );
+            Arrays.stream(files)
+                .forEach(
+                    fr -> threadGroupHashTree.add(createHttpSampler(protocol, domain, port, fr, "POST", verifyResponse))
+                );
         }
         hashTree.add(testPlan, createResultCollector(logOutputFileName, summaryUpdateFrequencySeconds));
         return hashTree;
@@ -127,7 +148,7 @@ public class JMeterLoadTest {
 
         ResultCollector resultCollector = new ResultCollector(summarizer);
         resultCollector.setProperty(TestElement.TEST_CLASS, ResultCollector.class.getName());
-        Optional.ofNullable(resultsOutputFile).ifPresent(f->resultCollector.setFilename(f));
+        Optional.ofNullable(resultsOutputFile).ifPresent(f -> resultCollector.setFilename(f));
         return resultCollector;
     }
 
@@ -157,7 +178,14 @@ public class JMeterLoadTest {
     }
 
     @NotNull
-    private static HashTree createHttpSampler(String protocol, String domain, int port, FileReference fr, String method, boolean verifyResponse) {
+    private static HashTree createHttpSampler(
+        String protocol,
+        String domain,
+        int port,
+        FileReference fr,
+        String method,
+        boolean verifyResponse
+    ) {
         HTTPSampler httpSampler = new HTTPSampler();
         httpSampler.setProperty(TestElement.TEST_CLASS, HTTPSampler.class.getName());
         httpSampler.setName(method + " Sampler");
@@ -168,11 +196,13 @@ public class JMeterLoadTest {
         httpSampler.setPath(fr.filename);
         var hashTree = new ListedHashTree();
         hashTree.add(httpSampler)
-                .add(Arrays.stream(new Object[]{
+            .add(
+                Arrays.stream(
+                    new Object[] {
                         fr.verifyResponse && verifyResponse ? createResponseAssertion(fr.testChar, fr.count) : null,
-                        createExtractor()
-                }).filter(o->o!=null).toArray())
-        ;
+                        createExtractor() }
+                ).filter(o -> o != null).toArray()
+            );
         return hashTree;
     }
 

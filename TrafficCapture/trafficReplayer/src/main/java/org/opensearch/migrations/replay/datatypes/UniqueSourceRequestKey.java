@@ -12,8 +12,8 @@ public abstract class UniqueSourceRequestKey {
         if (this == o) return true;
         if (o == null || getClass() != o.getClass()) return false;
         UniqueSourceRequestKey that = (UniqueSourceRequestKey) o;
-        return getSourceRequestIndex() == that.getSourceRequestIndex() &&
-                Objects.equal(getTrafficStreamKey(), that.getTrafficStreamKey());
+        return getSourceRequestIndex() == that.getSourceRequestIndex()
+            && Objects.equal(getTrafficStreamKey(), that.getTrafficStreamKey());
     }
 
     @Override

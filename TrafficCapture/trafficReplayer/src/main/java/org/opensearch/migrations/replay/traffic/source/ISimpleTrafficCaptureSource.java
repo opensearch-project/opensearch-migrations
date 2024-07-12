@@ -1,4 +1,3 @@
 package org.opensearch.migrations.replay.traffic.source;
 
-public interface ISimpleTrafficCaptureSource extends ITrafficCaptureSource {
-}
+public interface ISimpleTrafficCaptureSource extends ITrafficCaptureSource {}

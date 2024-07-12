@@ -13,7 +13,7 @@ public interface IHttpMessage {
 
     String protocol();
 
-    Map<String,Object> headersMap();
+    Map<String, Object> headersMap();
 
     default String getFirstHeader(String key) {
         var all = getAllMatchingHeaders(key);

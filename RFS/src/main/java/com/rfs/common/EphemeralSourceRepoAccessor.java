@@ -9,7 +9,6 @@ import java.nio.file.Path;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-
 /*
  * Provides access to the underlying files in the source repo and deletes the files after the Stream is closed.  This
  * is useful/interesting in the case where the files are large/numerous and you can easily re-acquire them - such as
@@ -19,6 +18,7 @@ import org.apache.logging.log4j.Logger;
  */
 public class EphemeralSourceRepoAccessor extends SourceRepoAccessor {
     private static final Logger logger = LogManager.getLogger(EphemeralSourceRepoAccessor.class);
+
     public EphemeralSourceRepoAccessor(SourceRepo repo) {
         super(repo);
     }
