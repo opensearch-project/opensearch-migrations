@@ -3,6 +3,7 @@ package com.rfs;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import com.beust.jcommander.ParametersDelegate;
 
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -11,8 +12,6 @@ import java.util.List;
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.ConnectionDetails;
 import com.rfs.common.FileSystemRepo;
-import com.rfs.common.GlobalMetadata;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Repo;
 import com.rfs.common.S3Uri;
@@ -20,6 +19,8 @@ import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SourceRepo;
 import com.rfs.common.TryHandlePhaseFailure;
 import com.rfs.tracing.BaseRootRfsContext;
+import com.rfs.models.GlobalMetadata;
+import com.rfs.models.IndexMetadata;
 import com.rfs.transformers.TransformFunctions;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_es_7_10.GlobalMetadataFactory_ES_7_10;
@@ -55,17 +56,8 @@ public class MetadataMigration {
         @Parameter(names = {"--s3-region"}, description = "The AWS Region the S3 bucket is in, like: us-east-2", required = false)
         public String s3Region;
 
-        @Parameter(names = {"--target-host"}, description = "The target host and port (e.g. http://localhost:9200)", required = true)
-        public String targetHost;
-
-        @Parameter(names = {"--target-username"}, description = "Optional.  The target username; if not provided, will assume no auth on target", required = false)
-        public String targetUser = null;
-
-        @Parameter(names = {"--target-password"}, description = "Optional.  The target password; if not provided, will assume no auth on target", required = false)
-        public String targetPass = null;
-
-        @Parameter(names = {"--target-insecure"}, description = "Allow untrusted SSL certificates for target", required = false)
-        public boolean targetInsecure = false;
+        @ParametersDelegate
+        public ConnectionDetails.TargetArgs targetArgs;
 
         @Parameter(names = {"--index-allowlist"}, description = ("Optional.  List of index names to migrate"
             + " (e.g. 'logs_2024_01, logs_2024_02').  Default: all non-system indices (e.g. those not starting with '.')"), required = false)
@@ -120,16 +112,12 @@ public class MetadataMigration {
         final Path s3LocalDirPath = arguments.s3LocalDirPath != null ? Paths.get(arguments.s3LocalDirPath) : null;
         final String s3RepoUri = arguments.s3RepoUri;
         final String s3Region = arguments.s3Region;
-        final String targetHost = arguments.targetHost;
-        final String targetUser = arguments.targetUser;
-        final String targetPass = arguments.targetPass;
         final List<String> indexAllowlist = arguments.indexAllowlist;
-        final boolean targetInsecure = arguments.targetInsecure;
         final List<String> indexTemplateAllowlist = arguments.indexTemplateAllowlist;
         final List<String> componentTemplateAllowlist = arguments.componentTemplateAllowlist;
         final int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
 
-        final ConnectionDetails targetConnection = new ConnectionDetails(targetHost, targetUser, targetPass, targetInsecure);
+        final ConnectionDetails targetConnection = new ConnectionDetails(arguments.targetArgs);
 
 
         TryHandlePhaseFailure.executeWithTryCatch(() -> {

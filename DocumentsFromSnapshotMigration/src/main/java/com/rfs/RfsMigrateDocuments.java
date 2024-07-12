@@ -27,14 +27,14 @@ import com.rfs.worker.ShardWorkPreparer;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Uri;
-import com.rfs.common.ShardMetadata;
 import com.rfs.common.S3Repo;
 import com.rfs.common.SourceRepo;
 import com.rfs.common.TryHandlePhaseFailure;
+import com.rfs.models.IndexMetadata;
+import com.rfs.models.ShardMetadata;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
@@ -174,7 +174,7 @@ public class RfsMigrateDocuments {
 
 
         try (var processManager = new LeaseExpireTrigger(workItemId->{
-            log.error("Terminating RunRfsWorker because the lease has expired for " + workItemId);
+            log.error("Terminating RfsMigrateDocuments because the lease has expired for " + workItemId);
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC())) {
             var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(arguments.targetHost)),

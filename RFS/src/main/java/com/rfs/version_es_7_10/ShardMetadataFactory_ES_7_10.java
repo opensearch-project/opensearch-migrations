@@ -9,15 +9,15 @@ import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 
 import lombok.RequiredArgsConstructor;
 
-import com.rfs.common.ShardMetadata;
 import com.rfs.common.SnapshotRepo;
+import com.rfs.models.ShardMetadata;
 
 @RequiredArgsConstructor
 public class ShardMetadataFactory_ES_7_10 implements ShardMetadata.Factory {
     protected final SnapshotRepo.Provider repoDataProvider;
     
     @Override
-    public ShardMetadata.Data fromJsonNode(JsonNode root, String indexId, String indexName, int shardId) {
+    public ShardMetadata fromJsonNode(JsonNode root, String indexId, String indexName, int shardId) {
         ObjectMapper objectMapper = new ObjectMapper();
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         SimpleModule module = new SimpleModule();

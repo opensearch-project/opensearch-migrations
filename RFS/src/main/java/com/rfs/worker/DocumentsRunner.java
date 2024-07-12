@@ -18,8 +18,8 @@ import lombok.extern.slf4j.Slf4j;
 
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.LuceneDocumentsReader;
-import com.rfs.common.ShardMetadata;
 import com.rfs.common.SnapshotShardUnpacker;
+import com.rfs.models.ShardMetadata;
 import org.apache.lucene.document.Document;
 import reactor.core.publisher.Flux;
 
@@ -29,7 +29,7 @@ public class DocumentsRunner {
 
     private final ScopedWorkCoordinator workCoordinator;
     private final Duration maxInitialLeaseDuration;
-    private final BiFunction<String,Integer,ShardMetadata.Data> shardMetadataFactory;
+    private final BiFunction<String,Integer,ShardMetadata> shardMetadataFactory;
     private final SnapshotShardUnpacker.Factory unpackerFactory;
     private final Function<Path,LuceneDocumentsReader> readerFactory;
     private final DocumentReindexer reindexer;
@@ -83,7 +83,7 @@ public class DocumentsRunner {
     private void doDocumentsMigration(IndexAndShard indexAndShard,
                                       IDocumentMigrationContexts.IDocumentReindexContext context) {
         log.info("Migrating docs for " + indexAndShard);
-        ShardMetadata.Data shardMetadata = shardMetadataFactory.apply(indexAndShard.indexName, indexAndShard.shard);
+        ShardMetadata shardMetadata = shardMetadataFactory.apply(indexAndShard.indexName, indexAndShard.shard);
 
         var unpacker = unpackerFactory.create(shardMetadata);
         var reader = readerFactory.apply(unpacker.unpack());

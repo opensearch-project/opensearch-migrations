@@ -3,7 +3,7 @@ package com.rfs.worker;
 import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.ScopedWorkCoordinator;
 import com.rfs.common.FilterScheme;
-import com.rfs.common.IndexMetadata;
+import com.rfs.models.IndexMetadata;
 import com.rfs.common.SnapshotRepo;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import org.opensearch.migrations.reindexer.tracing.IRootDocumentMigrationContext;
@@ -96,7 +96,7 @@ public class ShardWorkPreparer {
         repoDataProvider.getIndicesInSnapshot(snapshotName).stream()
             .filter(FilterScheme.filterIndicesByAllowList(indexAllowlist, logger))
             .forEach(index -> {
-                IndexMetadata.Data indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
+                IndexMetadata indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
                 log.info("Index " + indexMetadata.getName() + " has " + indexMetadata.getNumberOfShards() + " shards");
                 IntStream.range(0, indexMetadata.getNumberOfShards()).forEach(shardId -> {
                     log.info("Creating Documents Work Item for index: " + indexMetadata.getName() + ", shard: " + shardId);

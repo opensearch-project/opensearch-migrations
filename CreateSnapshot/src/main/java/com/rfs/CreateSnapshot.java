@@ -3,12 +3,14 @@ package com.rfs;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import com.beust.jcommander.ParametersDelegate;
 
 import com.rfs.tracing.BaseRootRfsContext;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
+import com.rfs.common.ConnectionDetails;
 import com.rfs.common.FileSystemSnapshotCreator;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3SnapshotCreator;
@@ -47,22 +49,8 @@ public class CreateSnapshot {
         )
         public String s3Region;
 
-        @Parameter(names = {"--source-host"},
-                required = true,
-                description = "The source host and port (e.g. http://localhost:9200)")
-        public String sourceHost;
-
-        @Parameter(names = {"--source-username"},
-                description = "Optional.  The source username; if not provided, will assume no auth on source")
-        public String sourceUser = null;
-
-        @Parameter(names = {"--source-password"},
-                description = "Optional.  The source password; if not provided, will assume no auth on source")
-        public String sourcePass = null;
-
-        @Parameter(names = {"--source-insecure"},
-                description = "Allow untrusted SSL certificates for source")
-        public boolean sourceInsecure = false;
+        @ParametersDelegate
+        public ConnectionDetails.SourceArgs sourceArgs;
 
         @Parameter(names = {"--no-wait"}, description = "Optional.  If provided, the snapshot runner will not wait for completion")
         public boolean noWait = false;
@@ -115,7 +103,7 @@ public class CreateSnapshot {
                         rootContext.createSnapshotCreateContext())
                         : new S3SnapshotCreator(arguments.snapshotName, c, arguments.s3RepoUri, arguments.s3Region,
                         arguments.maxSnapshotRateMBPerNode, rootContext.createSnapshotCreateContext())),
-                new OpenSearchClient(arguments.sourceHost, arguments.sourceUser, arguments.sourcePass, arguments.sourceInsecure),
+                new OpenSearchClient(new ConnectionDetails(arguments.sourceArgs)),
                 arguments.noWait
         );
     }

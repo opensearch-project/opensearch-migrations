@@ -116,7 +116,7 @@ public class PreloadedDataContainerOrchestrator {
     }
 
     private String getImageName() {
-        return PRELOADED_IMAGE_BASE_NAME + baseSourceVersion.prettyName;
+        return PRELOADED_IMAGE_BASE_NAME + baseSourceVersion.prettyName.replace(" ", "_").toLowerCase();
     }
 
     private static DockerClient createDockerClient() {

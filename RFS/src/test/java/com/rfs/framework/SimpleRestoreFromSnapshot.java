@@ -4,8 +4,8 @@ import java.nio.file.Path;
 import java.util.List;
 
 import com.rfs.common.ConnectionDetails;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.OpenSearchClient;
+import com.rfs.models.IndexMetadata;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
 public interface SimpleRestoreFromSnapshot {
@@ -33,10 +33,10 @@ public interface SimpleRestoreFromSnapshot {
         updateTargetCluster(indices, unpackedShardDataDir, targetClusterClient, context);
     }
 
-    public List<IndexMetadata.Data> extractSnapshotIndexData(final String localPath, final String snapshotName,
+    public List<IndexMetadata> extractSnapshotIndexData(final String localPath, final String snapshotName,
                                                              final Path unpackedShardDataDir) throws Exception;
 
-    public void updateTargetCluster(final List<IndexMetadata.Data> indices, final Path unpackedShardDataDir,
+    public void updateTargetCluster(final List<IndexMetadata> indices, final Path unpackedShardDataDir,
                                     final OpenSearchClient client, IDocumentMigrationContexts.IDocumentReindexContext context)
             throws Exception;
 

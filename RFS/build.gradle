@@ -1,7 +1,6 @@
 plugins {
     id 'application'
     id 'java'
-    id 'jacoco'
     id 'io.freefair.lombok' version '8.6'
     id 'java-test-fixtures'
 }
@@ -21,8 +20,8 @@ ext {
 
 dependencies {
     implementation project(":commonDependencyVersionConstraints")
-
     implementation project(':coreUtilities')
+    implementation project(':transformation')
 
     implementation group: 'com.beust', name: 'jcommander'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
@@ -84,38 +83,6 @@ dependencies {
     testFixturesImplementation group: 'org.testcontainers', name: 'testcontainers'
 
     testFixturesImplementation group: 'org.hamcrest', name: 'hamcrest'
-}
-
-task createSnapshot (type: JavaExec) {
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.rfs.RfsCreateSnapshot'
-}
-
-task migrateMetadata (type: JavaExec) {
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.rfs.RfsMigrateMetadata'
-}
-
-task migrateDocuments (type: JavaExec) {
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.rfs.RfsMigrateDocuments'
-}
-
-// Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
-tasks.register('copyDependencies', Sync) {
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-
-    from configurations.runtimeClasspath
-    into "${buildDir}/dependencies"
-}
-
-jacocoTestReport {
-    reports {
-        xml.required = true
-        xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
-        html.required = true
-        html.destination file("${buildDir}/reports/jacoco/test/html")
-    }
 }
 
 test {

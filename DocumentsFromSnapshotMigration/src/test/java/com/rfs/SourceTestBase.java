@@ -1,12 +1,12 @@
 package com.rfs;
 
 import com.rfs.common.ClusterVersion;
-import com.rfs.common.GlobalMetadata;
-import com.rfs.common.IndexMetadata;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SourceRepo;
 import com.rfs.framework.SearchClusterContainer;
+import com.rfs.models.GlobalMetadata;
+import com.rfs.models.IndexMetadata;
 import com.rfs.transformers.TransformFunctions;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_es_7_10.GlobalMetadataFactory_ES_7_10;

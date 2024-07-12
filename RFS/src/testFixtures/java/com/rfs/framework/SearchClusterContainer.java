@@ -18,59 +18,52 @@ import org.testcontainers.utility.DockerImageName;
  */
 @Slf4j
 public class SearchClusterContainer extends GenericContainer<SearchClusterContainer> {
-    public static final String CLUSTER_SNAPSHOT_DIR = "/usr/share/elasticsearch/snapshots";
+    public static final String CLUSTER_SNAPSHOT_DIR = "/tmp/snapshots";
     public static final Version ES_V7_10_2 =
-            new ElasticsearchVersion("docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2", "7.10.2");
+            new ElasticsearchVersion("docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2", "ES 7.10.2");
     public static final Version ES_V7_17 =
-            new ElasticsearchVersion("docker.elastic.co/elasticsearch/elasticsearch:7.17.22", "7.17.22");
+            new ElasticsearchVersion("docker.elastic.co/elasticsearch/elasticsearch:7.17.22", "ES 7.17.22");
+    public static final Version ES_V6_8_23 =
+            new ElasticsearchVersion("docker.elastic.co/elasticsearch/elasticsearch:6.8.23", "ES 6.8.23");
 
     public static final Version OS_V1_3_16 =
-            new OpenSearchVersion("opensearchproject/opensearch:1.3.16", "1.3.16");
+            new OpenSearchVersion("opensearchproject/opensearch:1.3.16", "OS 1.3.16");
     public static final Version OS_V2_14_0 =
-            new OpenSearchVersion("opensearchproject/opensearch:2.14.0", "2.14.0");
+            new OpenSearchVersion("opensearchproject/opensearch:2.14.0", "OS 2.14.0");
 
-    protected static Map<String, String> DEFAULT_ES_LAUNCH_ENV_VARIABLES = Map.of(
-                    "discovery.type", "single-node",
-                    "path.repo", CLUSTER_SNAPSHOT_DIR);
-
-    protected static Map<String, String> DEFAULT_OS_LAUNCH_ENV_VARIABLES = Map.of(
+    private enum INITIALIZATION_FLAVOR {
+        ELASTICSEARCH(Map.of(
             "discovery.type", "single-node",
-            "plugins.security.disabled", "true",
-            "OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^");
+            "path.repo", CLUSTER_SNAPSHOT_DIR)),
+        OPENSEARCH(new ImmutableMap.Builder<String, String>()
+            .putAll(ELASTICSEARCH.getEnvVariables())
+            .put("plugins.security.disabled", "true")
+            .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
+            .build());
+
+        @Getter
+        public final Map<String, String> envVariables;
+        INITIALIZATION_FLAVOR(Map<String, String> envVariables) {
+            this.envVariables = envVariables;
+        }
+    }
 
     private final Version version;
 
     @SuppressWarnings("resource")
     public SearchClusterContainer(final Version version) {
-        this(version, getDefaultMap(version.initializationType));
-    }
-
-    private static Map<String, String> getDefaultMap(INITIALIZATION_FLAVOR initializationType) {
-        switch (initializationType) {
-            case ELASTICSEARCH:
-                return DEFAULT_ES_LAUNCH_ENV_VARIABLES;
-            case OPENSEARCH:
-                return DEFAULT_OS_LAUNCH_ENV_VARIABLES;
-            default:
-                throw new IllegalArgumentException("Unknown initialization flavor: " + initializationType);
-        }
-    }
-
-    public SearchClusterContainer(final Version version, Map<String, String> environmentVariables) {
         super(DockerImageName.parse(version.imageName));
         this.withExposedPorts(9200, 9300)
-                .withEnv(environmentVariables)
+                .withEnv(version.getInitializationType().getEnvVariables())
                 .waitingFor(Wait.forHttp("/")
                         .forPort(9200)
                         .forStatusCode(200)
                         .withStartupTimeout(Duration.ofMinutes(1)));
 
         this.version = version;
-
     }
 
     public void copySnapshotData(final String directory) {
-        log.info("Copy stuff was called");
         try {
             // Execute command to list all files in the directory
             final var result = this.execInContainer("sh", "-c", "find " + CLUSTER_SNAPSHOT_DIR + " -type f");
@@ -95,7 +88,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     }
 
     public void start() {
-        log.info("Starting ElasticsearchContainer version:" + version.prettyName);
+        log.info("Starting container version:" + version.prettyName);
         super.start();
     }
 
@@ -107,21 +100,17 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
     @Override
     public void close() {
-        log.info("Stopping ElasticsearchContainer version:" + version.prettyName);
+        log.info("Stopping container version:" + version.prettyName);
         log.debug("Instance logs:\n" + this.getLogs());
         this.stop();
     }
 
-    public enum INITIALIZATION_FLAVOR {
-        ELASTICSEARCH,
-        OPENSEARCH
-    }
-
     @EqualsAndHashCode
-    @ToString
     @Getter
+    @ToString(onlyExplicitlyIncluded = true, includeFieldNames = false)
     public static class Version {
         final String imageName;
+        @ToString.Include
         final String prettyName;
         final INITIALIZATION_FLAVOR initializationType;
 
