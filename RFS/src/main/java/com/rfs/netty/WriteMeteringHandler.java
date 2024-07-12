@@ -1,14 +1,13 @@
 package com.rfs.netty;
 
+import java.util.function.IntConsumer;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelOutboundHandlerAdapter;
 import io.netty.channel.ChannelPromise;
 import io.netty.handler.codec.http.HttpContent;
 import lombok.AllArgsConstructor;
-
-import java.util.function.IntConsumer;
-
 
 /**
  * TODO - this is a copy from the replayer project.  Both copies should be folded into a shared package in

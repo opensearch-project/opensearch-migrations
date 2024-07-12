@@ -1,13 +1,13 @@
 package com.rfs.framework.tracing;
 
-import lombok.AllArgsConstructor;
-import lombok.Lombok;
-import lombok.SneakyThrows;
+import java.util.function.BiFunction;
+
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 
-import java.lang.reflect.InvocationTargetException;
-import java.util.function.BiFunction;
+import lombok.AllArgsConstructor;
+import lombok.Lombok;
+import lombok.SneakyThrows;
 
 @AllArgsConstructor
 public class TrackingTestContextFactory<T> extends TrackingTestContextCreator {
@@ -17,10 +17,10 @@ public class TrackingTestContextFactory<T> extends TrackingTestContextCreator {
     @SneakyThrows
     public static <U> TrackingTestContextFactory<U> factoryViaCtor(Class<U> c) {
         try {
-            return new TrackingTestContextFactory<U>((a,b) -> {
+            return new TrackingTestContextFactory<U>((a, b) -> {
                 try {
                     return c.getDeclaredConstructor(InMemoryInstrumentationBundle.class, IContextTracker.class)
-                            .newInstance(a,b);
+                        .newInstance(a, b);
                 } catch (Exception e) {
                     throw Lombok.sneakyThrow(e);
                 }

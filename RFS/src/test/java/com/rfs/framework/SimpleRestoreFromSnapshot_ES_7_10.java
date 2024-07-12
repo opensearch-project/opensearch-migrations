@@ -4,10 +4,11 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.util.IOUtils;
+
+import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
@@ -66,10 +67,12 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
     }
 
     @Override
-    public void updateTargetCluster(final List<IndexMetadata> indices,
-                                    final Path unpackedShardDataDir,
-                                    final OpenSearchClient client,
-                                    IDocumentMigrationContexts.IDocumentReindexContext context) {
+    public void updateTargetCluster(
+        final List<IndexMetadata> indices,
+        final Path unpackedShardDataDir,
+        final OpenSearchClient client,
+        IDocumentMigrationContexts.IDocumentReindexContext context
+    ) {
         for (final IndexMetadata index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
                 final var documents = new LuceneDocumentsReader(

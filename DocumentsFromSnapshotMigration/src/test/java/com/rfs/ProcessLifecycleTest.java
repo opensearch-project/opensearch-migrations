@@ -1,24 +1,5 @@
 package com.rfs;
 
-import com.rfs.common.FileSystemRepo;
-import com.rfs.common.FileSystemSnapshotCreator;
-import com.rfs.common.OpenSearchClient;
-import com.rfs.framework.PreloadedSearchClusterContainer;
-import com.rfs.framework.SearchClusterContainer;
-import eu.rekawek.toxiproxy.ToxiproxyClient;
-import eu.rekawek.toxiproxy.model.ToxicDirection;
-import lombok.extern.slf4j.Slf4j;
-import org.jetbrains.annotations.NotNull;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
-import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
-import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
-import org.opensearch.testcontainers.OpensearchContainer;
-import org.testcontainers.containers.Network;
-import org.testcontainers.containers.ToxiproxyContainer;
-
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
@@ -29,6 +10,27 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+
+import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
+import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.testcontainers.OpensearchContainer;
+
+import com.rfs.common.FileSystemRepo;
+import com.rfs.common.FileSystemSnapshotCreator;
+import com.rfs.common.OpenSearchClient;
+import com.rfs.framework.PreloadedSearchClusterContainer;
+import com.rfs.framework.SearchClusterContainer;
+import eu.rekawek.toxiproxy.ToxiproxyClient;
+import eu.rekawek.toxiproxy.model.ToxicDirection;
+import lombok.extern.slf4j.Slf4j;
+import org.jetbrains.annotations.NotNull;
+import org.testcontainers.containers.Network;
+import org.testcontainers.containers.ToxiproxyContainer;
 
 /**
  * TODO - the code in this test was lifted from FullTest.java (now named ParallelDocumentMigrationsTest.java).
@@ -53,17 +55,17 @@ public class ProcessLifecycleTest extends SourceTestBase {
 
     @ParameterizedTest
     @CsvSource(value = {
-            // This test will go through a proxy that doesn't add any defects and the process will use defaults
-            // so that it successfully runs to completion on a small dataset in a short amount of time
-            "NEVER, 0",
-            // This test is dependent on the toxiproxy being disabled before Migrate Documents is called.
-            // The Document Migration process will throw an exception immediately, which will cause an exit.
-            "AT_STARTUP, 1",
-            // This test is dependent upon the max lease duration that is passed to the command line.  It's set
-            // to such a short value (1s), that no document migration will exit in that amount of time.  For good
-            // measure though, the toxiproxy also adds latency to the requests to make it impossible for the
-            // migration to complete w/in that 1s.
-            "WITH_DELAYS, 2"})
+        // This test will go through a proxy that doesn't add any defects and the process will use defaults
+        // so that it successfully runs to completion on a small dataset in a short amount of time
+        "NEVER, 0",
+        // This test is dependent on the toxiproxy being disabled before Migrate Documents is called.
+        // The Document Migration process will throw an exception immediately, which will cause an exit.
+        "AT_STARTUP, 1",
+        // This test is dependent upon the max lease duration that is passed to the command line. It's set
+        // to such a short value (1s), that no document migration will exit in that amount of time. For good
+        // measure though, the toxiproxy also adds latency to the requests to make it impossible for the
+        // migration to complete w/in that 1s.
+        "WITH_DELAYS, 2" })
     public void testProcessExitsAsExpected(String failAfterString, int expectedExitCode) throws Exception {
         final var failHow = FailHow.valueOf(failAfterString);
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
@@ -74,40 +76,45 @@ public class ProcessLifecycleTest extends SourceTestBase {
         var generatorImage = (String) sourceImageArgs[1];
         var generatorArgs = (String[]) sourceImageArgs[2];
         var targetImageName = SearchClusterContainer.OS_V2_14_0.getImageName();
-        
+
         var tempDirSnapshot = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
         var tempDirLucene = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
 
-        try (var network = Network.newNetwork();
-             var esSourceContainer = new PreloadedSearchClusterContainer(baseSourceImageVersion,
-                SOURCE_SERVER_ALIAS, generatorImage, generatorArgs);
-             var osTargetContainer = new OpensearchContainer<>(targetImageName)
-                     .withExposedPorts(OPENSEARCH_PORT)
-                     .withNetwork(network)
-                     .withNetworkAliases(TARGET_DOCKER_HOSTNAME);
-             var proxyContainer = new ToxiproxyContainer(TOXIPROXY_IMAGE_NAME)
-                     .withNetwork(network)) {
+        try (
+            var network = Network.newNetwork();
+            var esSourceContainer = new PreloadedSearchClusterContainer(
+                baseSourceImageVersion,
+                SOURCE_SERVER_ALIAS,
+                generatorImage,
+                generatorArgs
+            );
+            var osTargetContainer = new OpensearchContainer<>(targetImageName).withExposedPorts(OPENSEARCH_PORT)
+                .withNetwork(network)
+                .withNetworkAliases(TARGET_DOCKER_HOSTNAME);
+            var proxyContainer = new ToxiproxyContainer(TOXIPROXY_IMAGE_NAME).withNetwork(network)
+        ) {
 
-            CompletableFuture.allOf(
-                            CompletableFuture.supplyAsync(() -> {
-                                esSourceContainer.start();
-                                return null;
-                            }),
-                            CompletableFuture.supplyAsync(() -> {
-                                osTargetContainer.start();
-                                return null;
-                            }),
-                            CompletableFuture.supplyAsync(() -> {
-                                proxyContainer.start();
-                                return null;
-                            }))
-                    .join();
+            CompletableFuture.allOf(CompletableFuture.supplyAsync(() -> {
+                esSourceContainer.start();
+                return null;
+            }), CompletableFuture.supplyAsync(() -> {
+                osTargetContainer.start();
+                return null;
+            }), CompletableFuture.supplyAsync(() -> {
+                proxyContainer.start();
+                return null;
+            })).join();
 
             CreateSnapshot.run(
-                    c -> new FileSystemSnapshotCreator(SNAPSHOT_NAME, c, SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
-                            testSnapshotContext.createSnapshotCreateContext()),
-                    new OpenSearchClient(esSourceContainer.getUrl(), null),
-                    false);
+                c -> new FileSystemSnapshotCreator(
+                    SNAPSHOT_NAME,
+                    c,
+                    SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
+                    testSnapshotContext.createSnapshotCreateContext()
+                ),
+                new OpenSearchClient(esSourceContainer.getUrl(), null),
+                false
+            );
             esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
             migrateMetadata(osTargetContainer, tempDirSnapshot, testMetadataMigrationContext);
@@ -116,28 +123,37 @@ public class ProcessLifecycleTest extends SourceTestBase {
             log.atInfo().setMessage("Process exited with code: " + actualExitCode).log();
 
             // Check if the exit code is as expected
-            Assertions.assertEquals(expectedExitCode, actualExitCode, "The program did not exit with the expected status code.");
+            Assertions.assertEquals(
+                expectedExitCode,
+                actualExitCode,
+                "The program did not exit with the expected status code."
+            );
         } finally {
             deleteTree(tempDirSnapshot);
             deleteTree(tempDirLucene);
         }
     }
 
-    private static void migrateMetadata(OpensearchContainer targetContainer,
-                                        Path tempDirSnapshot,
-                                        MetadataMigrationTestContext testMetadataMigrationContext) {
-        String targetAddress = "http://" + targetContainer.getHost() + ":" + targetContainer.getMappedPort(OPENSEARCH_PORT);
+    private static void migrateMetadata(
+        OpensearchContainer targetContainer,
+        Path tempDirSnapshot,
+        MetadataMigrationTestContext testMetadataMigrationContext
+    ) {
+        String targetAddress = "http://"
+            + targetContainer.getHost()
+            + ":"
+            + targetContainer.getMappedPort(OPENSEARCH_PORT);
         var targetClient = new OpenSearchClient(targetAddress, null);
         var sourceRepo = new FileSystemRepo(tempDirSnapshot);
         migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, INDEX_ALLOWLIST, testMetadataMigrationContext);
     }
 
-    private static int runProcessAgainstToxicTarget(Path tempDirSnapshot,
-                                                    Path tempDirLucene,
-                                                    ToxiproxyContainer proxyContainer,
-                                                    FailHow failHow)
-            throws IOException, InterruptedException
-    {
+    private static int runProcessAgainstToxicTarget(
+        Path tempDirSnapshot,
+        Path tempDirLucene,
+        ToxiproxyContainer proxyContainer,
+        FailHow failHow
+    ) throws IOException, InterruptedException {
         String targetAddress = setupProxyAndGetAddress(proxyContainer, failHow);
 
         int timeoutSeconds = 90;
@@ -159,12 +175,18 @@ public class ProcessLifecycleTest extends SourceTestBase {
     }
 
     @NotNull
-    private static String setupProxyAndGetAddress(ToxiproxyContainer proxyContainer, FailHow failHow) throws IOException {
+    private static String setupProxyAndGetAddress(ToxiproxyContainer proxyContainer, FailHow failHow)
+        throws IOException {
         var toxiproxyClient = new ToxiproxyClient(proxyContainer.getHost(), proxyContainer.getControlPort());
-        var proxy = toxiproxyClient.createProxy("proxy",
-                "0.0.0.0:" + TOXIPROXY_PORT,
-                TARGET_DOCKER_HOSTNAME + ":" + OPENSEARCH_PORT);
-        String targetAddress = "http://" + proxyContainer.getHost() + ":" + proxyContainer.getMappedPort(TOXIPROXY_PORT);
+        var proxy = toxiproxyClient.createProxy(
+            "proxy",
+            "0.0.0.0:" + TOXIPROXY_PORT,
+            TARGET_DOCKER_HOSTNAME + ":" + OPENSEARCH_PORT
+        );
+        String targetAddress = "http://"
+            + proxyContainer.getHost()
+            + ":"
+            + proxyContainer.getMappedPort(TOXIPROXY_PORT);
         if (failHow == FailHow.AT_STARTUP) {
             proxy.disable();
         } else if (failHow == FailHow.WITH_DELAYS) {
@@ -174,24 +196,37 @@ public class ProcessLifecycleTest extends SourceTestBase {
     }
 
     @NotNull
-    private static ProcessBuilder setupProcess(Path tempDirSnapshot, Path tempDirLucene, String targetAddress, FailHow failHow) {
+    private static ProcessBuilder setupProcess(
+        Path tempDirSnapshot,
+        Path tempDirLucene,
+        String targetAddress,
+        FailHow failHow
+    ) {
         String classpath = System.getProperty("java.class.path");
         String javaHome = System.getProperty("java.home");
         String javaExecutable = javaHome + File.separator + "bin" + File.separator + "java";
 
         String[] args = {
-                "--snapshot-name", SNAPSHOT_NAME,
-                "--snapshot-local-dir", tempDirSnapshot.toString(),
-                "--lucene-dir", tempDirLucene.toString(),
-                "--target-host", targetAddress,
-                "--index-allowlist", "geonames",
-                "--max-initial-lease-duration", failHow == FailHow.NEVER ? "PT10M" : "PT1S"
-        };
+            "--snapshot-name",
+            SNAPSHOT_NAME,
+            "--snapshot-local-dir",
+            tempDirSnapshot.toString(),
+            "--lucene-dir",
+            tempDirLucene.toString(),
+            "--target-host",
+            targetAddress,
+            "--index-allowlist",
+            "geonames",
+            "--max-initial-lease-duration",
+            failHow == FailHow.NEVER ? "PT10M" : "PT1S" };
 
         // Kick off the doc migration process
         log.atInfo().setMessage("Running RfsMigrateDocuments with args: " + Arrays.toString(args)).log();
         ProcessBuilder processBuilder = new ProcessBuilder(
-                javaExecutable, "-cp", classpath, "com.rfs.RfsMigrateDocuments"
+            javaExecutable,
+            "-cp",
+            classpath,
+            "com.rfs.RfsMigrateDocuments"
         );
         processBuilder.command().addAll(Arrays.asList(args));
         processBuilder.redirectErrorStream(true);
@@ -216,7 +251,9 @@ public class ProcessLifecycleTest extends SourceTestBase {
                     return;
                 }
                 String finalLine = line;
-                log.atInfo().setMessage(() -> "from sub-process [" + process.toHandle().pid() + "]: " + finalLine).log();
+                log.atInfo()
+                    .setMessage(() -> "from sub-process [" + process.toHandle().pid() + "]: " + finalLine)
+                    .log();
             }
         });
 

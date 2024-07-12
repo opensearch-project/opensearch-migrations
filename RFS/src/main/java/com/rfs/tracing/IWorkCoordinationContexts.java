@@ -1,7 +1,8 @@
 package com.rfs.tracing;
 
-import com.rfs.cms.OpenSearchWorkCoordinator;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
+
+import com.rfs.cms.OpenSearchWorkCoordinator;
 
 public abstract class IWorkCoordinationContexts {
 
@@ -14,8 +15,7 @@ public abstract class IWorkCoordinationContexts {
         public static final String COMPLETE_WORK = "completeWork";
         public static final String ACQUIRE_NEXT_WORK = "acquireNextWorkItem";
 
-        private ActivityNames() {
-        }
+        private ActivityNames() {}
     }
 
     public static class MetricNames {
@@ -24,12 +24,12 @@ public abstract class IWorkCoordinationContexts {
         public static final String RECOVERABLE_CLOCK_ERROR = "recoverableClockErrorCount";
         public static final String DRIFT_ERROR = "fatalDriftErrorCount";
 
-        private MetricNames() {
-        }
+        private MetricNames() {}
     }
 
     public interface IRetryableActivityContext extends IScopedInstrumentationAttributes {
         void recordRetry();
+
         void recordFailure();
     }
 
@@ -43,6 +43,7 @@ public abstract class IWorkCoordinationContexts {
 
     public interface IPendingWorkItemsContext extends IScopedInstrumentationAttributes {
         String ACTIVITY_NAME = ActivityNames.PENDING_WORK_CHECK;
+
         IRefreshContext getRefreshContext();
     }
 
@@ -58,20 +59,27 @@ public abstract class IWorkCoordinationContexts {
 
     public interface IAcquireNextWorkItemContext extends IBaseAcquireWorkContext {
         String ACTIVITY_NAME = ActivityNames.ACQUIRE_NEXT_WORK;
+
         IRefreshContext getRefreshContext();
+
         void recordAssigned();
+
         void recordNothingAvailable();
+
         void recordRecoverableClockError();
+
         void recordFailure(OpenSearchWorkCoordinator.PotentialClockDriftDetectedException e);
     }
 
     public interface ICompleteWorkItemContext extends IRetryableActivityContext {
         String ACTIVITY_NAME = ActivityNames.COMPLETE_WORK;
+
         IRefreshContext getRefreshContext();
     }
 
     public interface IScopedWorkContext<C extends IBaseAcquireWorkContext> extends IScopedInstrumentationAttributes {
         C createOpeningContext();
+
         ICompleteWorkItemContext createCloseContet();
     }
 }

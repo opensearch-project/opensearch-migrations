@@ -4,6 +4,12 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 
+import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
+import org.opensearch.migrations.tracing.ActiveContextTracker;
+import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
+import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.RootOtelContext;
+
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
@@ -17,7 +23,6 @@ import com.rfs.common.S3Uri;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SourceRepo;
 import com.rfs.common.TryHandlePhaseFailure;
-import com.rfs.tracing.BaseRootRfsContext;
 import com.rfs.models.GlobalMetadata;
 import com.rfs.models.IndexMetadata;
 import com.rfs.transformers.TransformFunctions;
@@ -30,11 +35,6 @@ import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 import com.rfs.worker.IndexRunner;
 import com.rfs.worker.MetadataRunner;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
-import org.opensearch.migrations.tracing.ActiveContextTracker;
-import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
-import org.opensearch.migrations.tracing.CompositeContextTracker;
-import org.opensearch.migrations.tracing.RootOtelContext;
 
 @Slf4j
 public class MetadataMigration {
@@ -62,7 +62,7 @@ public class MetadataMigration {
         @ParametersDelegate
         public ConnectionDetails.TargetArgs targetArgs;
 
-        @Parameter(names = {"--index-allowlist"}, description = ("Optional.  List of index names to migrate"
+        @Parameter(names = { "--index-allowlist" }, description = ("Optional.  List of index names to migrate"
             + " (e.g. 'logs_2024_01, logs_2024_02').  Default: all non-system indices (e.g. those not starting with '.')"), required = false)
         public List<String> indexAllowlist = List.of();
 
@@ -82,11 +82,9 @@ public class MetadataMigration {
                 + " This can be useful for migrating to targets which use zonal deployments and require additional replicas to meet zone requirements.  Default: 0"), required = false)
         public int minNumberOfReplicas = 0;
 
-        @Parameter(required = false,
-                names = {"--otel-collector-endpoint"},
-                arity = 1,
-                description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be" +
-                        "forwarded. If no value is provided, metrics will not be forwarded.")
+        @Parameter(required = false, names = {
+            "--otel-collector-endpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
+                + "forwarded. If no value is provided, metrics will not be forwarded.")
         String otelCollectorEndpoint;
     }
 
@@ -96,8 +94,9 @@ public class MetadataMigration {
         JCommander.newBuilder().addObject(arguments).build().parse(args);
 
         var rootContext = new RootMetadataMigrationContext(
-                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "rfs"),
-                new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType()));
+            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "rfs"),
+            new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
+        );
 
         if (arguments.fileSystemRepoPath == null && arguments.s3RepoUri == null) {
             throw new ParameterException("Either file-system-repo-path or s3-repo-uri must be set");
@@ -132,16 +131,30 @@ public class MetadataMigration {
                 : S3Repo.create(s3LocalDirPath, new S3Uri(s3RepoUri), s3Region);
             final SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
             final GlobalMetadata.Factory metadataFactory = new GlobalMetadataFactory_ES_7_10(repoDataProvider);
-            final GlobalMetadataCreator_OS_2_11 metadataCreator =
-                    new GlobalMetadataCreator_OS_2_11(targetClient, List.of(), componentTemplateAllowlist,
-                            indexTemplateAllowlist, rootContext.createMetadataMigrationContext());
-            final Transformer transformer = TransformFunctions.getTransformer(ClusterVersion.ES_7_10, ClusterVersion.OS_2_11, awarenessDimensionality);
+            final GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(
+                targetClient,
+                List.of(),
+                componentTemplateAllowlist,
+                indexTemplateAllowlist,
+                rootContext.createMetadataMigrationContext()
+            );
+            final Transformer transformer = TransformFunctions.getTransformer(
+                ClusterVersion.ES_7_10,
+                ClusterVersion.OS_2_11,
+                awarenessDimensionality
+            );
             new MetadataRunner(snapshotName, metadataFactory, metadataCreator, transformer).migrateMetadata();
 
             final IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
             final IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
-            new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer, indexAllowlist,
-                    rootContext.createIndexContext()).migrateIndices();
+            new IndexRunner(
+                snapshotName,
+                indexMetadataFactory,
+                indexCreator,
+                transformer,
+                indexAllowlist,
+                rootContext.createIndexContext()
+            ).migrateIndices();
         });
     }
 }

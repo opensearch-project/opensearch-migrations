@@ -1,9 +1,11 @@
 package org.opensearch.migrations.snapshot.creation.tracing;
 
+import io.opentelemetry.api.OpenTelemetry;
+
+import org.opensearch.migrations.tracing.IContextTracker;
+
 import com.rfs.tracing.BaseRootRfsContext;
 import com.rfs.tracing.IRfsContexts;
-import io.opentelemetry.api.OpenTelemetry;
-import org.opensearch.migrations.tracing.IContextTracker;
 
 public class RootSnapshotContext extends BaseRootRfsContext implements IRootSnapshotContext {
     public static final String SCOPE_NAME = "createSnapshot";

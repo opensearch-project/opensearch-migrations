@@ -1,6 +1,7 @@
 package com.rfs.tracing;
 
 import io.opentelemetry.api.OpenTelemetry;
+
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.RootOtelContext;
@@ -29,7 +30,6 @@ public class RootWorkCoordinationContext extends RootOtelContext {
         acquireNextWorkMetrics = WorkCoordinationContexts.AcquireNextWorkItemContext.makeMetrics(meter);
     }
 
-
     public IWorkCoordinationContexts.IInitializeCoordinatorStateContext createCoordinationInitializationStateContext() {
         return new WorkCoordinationContexts.InitializeCoordinatorStateContext(this);
     }
@@ -37,30 +37,34 @@ public class RootWorkCoordinationContext extends RootOtelContext {
     public IWorkCoordinationContexts.IPendingWorkItemsContext createItemsPendingContext() {
         return new WorkCoordinationContexts.PendingItems(this);
     }
+
     public IWorkCoordinationContexts.ICreateUnassignedWorkItemContext createUnassignedWorkContext() {
         return createUnassignedWorkContext(null);
     }
 
-    public IWorkCoordinationContexts.ICreateUnassignedWorkItemContext
-    createUnassignedWorkContext(IScopedInstrumentationAttributes enclosingScope) {
+    public IWorkCoordinationContexts.ICreateUnassignedWorkItemContext createUnassignedWorkContext(
+        IScopedInstrumentationAttributes enclosingScope
+    ) {
         return new WorkCoordinationContexts.CreateUnassignedWorkItemContext(this, enclosingScope);
     }
+
     public IWorkCoordinationContexts.IAcquireSpecificWorkContext createAcquireSpecificItemContext() {
         return createAcquireSpecificItemContext(null);
     }
 
-    public IWorkCoordinationContexts.IAcquireSpecificWorkContext
-    createAcquireSpecificItemContext(IScopedInstrumentationAttributes enclosingScope) {
+    public IWorkCoordinationContexts.IAcquireSpecificWorkContext createAcquireSpecificItemContext(
+        IScopedInstrumentationAttributes enclosingScope
+    ) {
         return new WorkCoordinationContexts.AcquireSpecificWorkContext(this, enclosingScope);
     }
 
-    public IWorkCoordinationContexts.IAcquireNextWorkItemContext
-    createAcquireNextItemContext() {
+    public IWorkCoordinationContexts.IAcquireNextWorkItemContext createAcquireNextItemContext() {
         return createAcquireNextItemContext(null);
     }
 
-    public IWorkCoordinationContexts.IAcquireNextWorkItemContext
-    createAcquireNextItemContext(IScopedInstrumentationAttributes enclosingScope) {
+    public IWorkCoordinationContexts.IAcquireNextWorkItemContext createAcquireNextItemContext(
+        IScopedInstrumentationAttributes enclosingScope
+    ) {
         return new WorkCoordinationContexts.AcquireNextWorkItemContext(this, enclosingScope);
     }
 
@@ -68,8 +72,9 @@ public class RootWorkCoordinationContext extends RootOtelContext {
         return createCompleteWorkContext(null);
     }
 
-    public IWorkCoordinationContexts.ICompleteWorkItemContext
-    createCompleteWorkContext(IScopedInstrumentationAttributes enclosingScope) {
+    public IWorkCoordinationContexts.ICompleteWorkItemContext createCompleteWorkContext(
+        IScopedInstrumentationAttributes enclosingScope
+    ) {
         return new WorkCoordinationContexts.CompleteWorkItemContext(this, enclosingScope);
     }
 }

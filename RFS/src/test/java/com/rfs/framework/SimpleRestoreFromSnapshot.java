@@ -3,10 +3,11 @@ package com.rfs.framework;
 import java.nio.file.Path;
 import java.util.List;
 
+import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
+
 import com.rfs.common.ConnectionDetails;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.models.IndexMetadata;
-import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
 public interface SimpleRestoreFromSnapshot {
 
@@ -15,8 +16,10 @@ public interface SimpleRestoreFromSnapshot {
         return new SimpleRestoreFromSnapshot_ES_7_10();
     }
 
-    public default void fullMigrationViaLocalSnapshot(final String targetClusterUrl,
-                                                      IDocumentMigrationContexts.IDocumentReindexContext context) throws Exception {
+    public default void fullMigrationViaLocalSnapshot(
+        final String targetClusterUrl,
+        IDocumentMigrationContexts.IDocumentReindexContext context
+    ) throws Exception {
         // TODO: Dynamically create / clean these up during tests
         final var tempSnapshotName = "";
         final var compressedSnapshotDirectory = "";
@@ -37,11 +40,17 @@ public interface SimpleRestoreFromSnapshot {
         updateTargetCluster(indices, unpackedShardDataDir, targetClusterClient, context);
     }
 
-    public List<IndexMetadata> extractSnapshotIndexData(final String localPath, final String snapshotName,
-                                                             final Path unpackedShardDataDir) throws Exception;
+    public List<IndexMetadata> extractSnapshotIndexData(
+        final String localPath,
+        final String snapshotName,
+        final Path unpackedShardDataDir
+    ) throws Exception;
 
-    public void updateTargetCluster(final List<IndexMetadata> indices, final Path unpackedShardDataDir,
-                                    final OpenSearchClient client, IDocumentMigrationContexts.IDocumentReindexContext context)
-            throws Exception;
+    public void updateTargetCluster(
+        final List<IndexMetadata> indices,
+        final Path unpackedShardDataDir,
+        final OpenSearchClient client,
+        IDocumentMigrationContexts.IDocumentReindexContext context
+    ) throws Exception;
 
 }

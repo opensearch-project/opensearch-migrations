@@ -1,13 +1,12 @@
 package org.opensearch.migrations.reindexer.tracing;
 
-import com.rfs.framework.tracing.TrackingTestContextCreator;
-import com.rfs.framework.tracing.TrackingTestContextFactory;
-import com.rfs.tracing.IRfsContexts;
-import com.rfs.tracing.RfsContexts;
-import com.rfs.tracing.RootWorkCoordinationContext;
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
+
+import com.rfs.framework.tracing.TrackingTestContextFactory;
+import com.rfs.tracing.IRfsContexts;
+import com.rfs.tracing.RfsContexts;
 
 public class DocumentMigrationTestContext extends RootDocumentMigrationContext {
     public final InMemoryInstrumentationBundle inMemoryInstrumentationBundle;
@@ -17,17 +16,21 @@ public class DocumentMigrationTestContext extends RootDocumentMigrationContext {
         return (WorkCoordinationTestContext) super.getWorkCoordinationContext();
     }
 
-    public DocumentMigrationTestContext(InMemoryInstrumentationBundle inMemoryInstrumentationBundle,
-                                        IContextTracker contextTracker,
-                                        WorkCoordinationTestContext workCoordinationContext) {
+    public DocumentMigrationTestContext(
+        InMemoryInstrumentationBundle inMemoryInstrumentationBundle,
+        IContextTracker contextTracker,
+        WorkCoordinationTestContext workCoordinationContext
+    ) {
         super(inMemoryInstrumentationBundle.openTelemetrySdk, contextTracker, workCoordinationContext);
         this.inMemoryInstrumentationBundle = inMemoryInstrumentationBundle;
     }
 
-    public static TrackingTestContextFactory<DocumentMigrationTestContext>
-    factory(WorkCoordinationTestContext rootWorkCoordinationContext) {
-        return new TrackingTestContextFactory<>((a, b) ->
-                new DocumentMigrationTestContext(a, b, rootWorkCoordinationContext));
+    public static TrackingTestContextFactory<DocumentMigrationTestContext> factory(
+        WorkCoordinationTestContext rootWorkCoordinationContext
+    ) {
+        return new TrackingTestContextFactory<>(
+            (a, b) -> new DocumentMigrationTestContext(a, b, rootWorkCoordinationContext)
+        );
     }
 
     public IRfsContexts.IRequestContext createUnboundRequestContext() {

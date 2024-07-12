@@ -1,6 +1,7 @@
 package com.rfs.tracing;
 
 import io.opentelemetry.api.OpenTelemetry;
+
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
 

@@ -1,14 +1,14 @@
 package org.opensearch.migrations.reindexer.tracing;
 
-import com.rfs.tracing.BaseRootRfsContext;
-import com.rfs.tracing.RootWorkCoordinationContext;
 import io.opentelemetry.api.OpenTelemetry;
-import lombok.Getter;
+
 import org.opensearch.migrations.tracing.IContextTracker;
 
-public class RootDocumentMigrationContext
-        extends BaseRootRfsContext
-        implements IRootDocumentMigrationContext {
+import com.rfs.tracing.BaseRootRfsContext;
+import com.rfs.tracing.RootWorkCoordinationContext;
+import lombok.Getter;
+
+public class RootDocumentMigrationContext extends BaseRootRfsContext implements IRootDocumentMigrationContext {
     public static final String SCOPE_NAME = "snapshotDocumentReindex";
 
     @Getter
@@ -17,8 +17,11 @@ public class RootDocumentMigrationContext
     public final DocumentMigrationContexts.ShardSetupAttemptContext.MetricInstruments shardSetupMetrics;
     public final DocumentMigrationContexts.AddShardWorkItemContext.MetricInstruments addShardWorkItemMetrics;
 
-    public RootDocumentMigrationContext(OpenTelemetry sdk, IContextTracker contextTracker,
-                                        RootWorkCoordinationContext workCoordinationContext) {
+    public RootDocumentMigrationContext(
+        OpenTelemetry sdk,
+        IContextTracker contextTracker,
+        RootWorkCoordinationContext workCoordinationContext
+    ) {
         super(sdk, contextTracker);
         var meter = this.getMeterProvider().get(SCOPE_NAME);
         this.workCoordinationContext = workCoordinationContext;

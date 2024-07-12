@@ -1,23 +1,8 @@
 package com.rfs.cms;
 
-
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.rfs.framework.SearchClusterContainer;
-import io.opentelemetry.sdk.metrics.data.LongPointData;
-import io.opentelemetry.sdk.metrics.data.MetricData;
-import lombok.SneakyThrows;
-import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
-
 import java.io.IOException;
 import java.net.URI;
 import java.time.Duration;
-import java.time.Instant;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
@@ -26,14 +11,17 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
+import io.opentelemetry.sdk.metrics.data.LongPointData;
+import io.opentelemetry.sdk.metrics.data.MetricData;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import org.opensearch.testcontainers.OpensearchContainer;
+import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 
+import com.rfs.framework.SearchClusterContainer;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
@@ -66,20 +54,23 @@ public class WorkCoordinatorTest {
         // Start the container. This step might take some time...
         container.start();
         httpClientSupplier = () -> new ApacheHttpClient(URI.create(container.getUrl()));
-        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
-                2, "testWorker")) {
+        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 2, "testWorker")) {
             workCoordinator.setup(testContext::createCoordinationInitializationStateContext);
         }
     }
 
     @SneakyThrows
     private JsonNode searchForExpiredDocs(long expirationEpochSeconds) {
-        final var body = "{" +
-                OpenSearchWorkCoordinator.QUERY_INCOMPLETE_EXPIRED_ITEMS_STR.replace(
-                        OpenSearchWorkCoordinator.OLD_EXPIRATION_THRESHOLD_TEMPLATE, ""+expirationEpochSeconds) +
-                "}";
-        log.atInfo().setMessage(()->"Searching with... " + body).log();
-        var response = httpClientSupplier.get().makeJsonRequest(AbstractedHttpClient.GET_METHOD,
+        final var body = "{"
+            + OpenSearchWorkCoordinator.QUERY_INCOMPLETE_EXPIRED_ITEMS_STR.replace(
+                OpenSearchWorkCoordinator.OLD_EXPIRATION_THRESHOLD_TEMPLATE,
+                "" + expirationEpochSeconds
+            )
+            + "}";
+        log.atInfo().setMessage(() -> "Searching with... " + body).log();
+        var response = httpClientSupplier.get()
+            .makeJsonRequest(
+                AbstractedHttpClient.GET_METHOD,
                 OpenSearchWorkCoordinator.INDEX_NAME + "/_search",
                 null,
                 body
@@ -90,10 +81,11 @@ public class WorkCoordinatorTest {
     }
 
     private long getMetricValueOrZero(Collection<MetricData> metrics, String s) {
-        return metrics.stream().filter(md->md.getName().startsWith(s))
-                .reduce((a,b)->b)
-                .flatMap(md->md.getLongSumData().getPoints().stream().reduce((a,b)->b).map(LongPointData::getValue))
-                .orElse(0L);
+        return metrics.stream()
+            .filter(md -> md.getName().startsWith(s))
+            .reduce((a, b) -> b)
+            .flatMap(md -> md.getLongSumData().getPoints().stream().reduce((a, b) -> b).map(LongPointData::getValue))
+            .orElse(0L);
     }
 
     @Test
@@ -101,8 +93,7 @@ public class WorkCoordinatorTest {
         log.error("Hello");
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         final var NUM_DOCS = 100;
-        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
-                3600, "docCreatorWorker")) {
+        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));
             for (var i = 0; i < NUM_DOCS; ++i) {
                 final var docId = "R" + i;
@@ -115,10 +106,9 @@ public class WorkCoordinatorTest {
         final var expiration = Duration.ofSeconds(60);
         for (int i = 0; i < NUM_DOCS; ++i) {
             var label = "" + i;
-            getWorkItemAndVerify(testContext, label, seenWorkerItems, expiration, false,false);
+            getWorkItemAndVerify(testContext, label, seenWorkerItems, expiration, false, false);
         }
-        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
-                3600, "finalPass")) {
+        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "finalPass")) {
             var rval = workCoordinator.acquireNextWorkItem(expiration, testContext::createAcquireNextItemContext);
             Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, rval);
         }
@@ -136,8 +126,7 @@ public class WorkCoordinatorTest {
         final var NUM_DOCS = 40;
         final var MAX_RUNS = 2;
         var executorService = Executors.newFixedThreadPool(NUM_DOCS);
-        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
-                3600, "docCreatorWorker")) {
+        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));
             for (var i = 0; i < NUM_DOCS; ++i) {
                 final var docId = "R" + i;
@@ -153,18 +142,31 @@ public class WorkCoordinatorTest {
             var markAsComplete = run + 1 == MAX_RUNS;
             for (int i = 0; i < NUM_DOCS; ++i) {
                 var label = run + "-" + i;
-                allFutures.add(CompletableFuture.supplyAsync(() ->
-                        getWorkItemAndVerify(testContext, label, seenWorkerItems, expiration, true, markAsComplete),
-                        executorService));
+                allFutures.add(
+                    CompletableFuture.supplyAsync(
+                        () -> getWorkItemAndVerify(
+                            testContext,
+                            label,
+                            seenWorkerItems,
+                            expiration,
+                            true,
+                            markAsComplete
+                        ),
+                        executorService
+                    )
+                );
             }
             CompletableFuture.allOf(allFutures.toArray(CompletableFuture[]::new)).join();
             Assertions.assertEquals(NUM_DOCS, seenWorkerItems.size());
 
-            try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
-                    3600, "firstPass_NONE")) {
-                var nextWorkItem = workCoordinator.acquireNextWorkItem(Duration.ofSeconds(2),
-                        testContext::createAcquireNextItemContext);
-                log.atInfo().setMessage(()->"Next work item picked=" + nextWorkItem).log();
+            try (
+                var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "firstPass_NONE")
+            ) {
+                var nextWorkItem = workCoordinator.acquireNextWorkItem(
+                    Duration.ofSeconds(2),
+                    testContext::createAcquireNextItemContext
+                );
+                log.atInfo().setMessage(() -> "Next work item picked=" + nextWorkItem).log();
                 Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, nextWorkItem);
             } catch (OpenSearchWorkCoordinator.PotentialClockDriftDetectedException e) {
                 log.atError()
@@ -178,8 +180,7 @@ public class WorkCoordinatorTest {
 
             Thread.sleep(expiration.multipliedBy(2).toMillis());
         }
-        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
-                3600, "docCreatorWorker")) {
+        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));
         }
         var metrics = testContext.inMemoryInstrumentationBundle.getFinishedMetrics();
@@ -189,14 +190,21 @@ public class WorkCoordinatorTest {
     static AtomicInteger nonce = new AtomicInteger();
 
     @SneakyThrows
-    private String getWorkItemAndVerify(WorkCoordinationTestContext testContext,
-                                        String workerSuffix,
-                                        ConcurrentHashMap<String, String> seenWorkerItems,
-                                        Duration expirationWindow,
-                                        boolean placeFinishedDoc,
-                                        boolean markCompleted) {
-        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(),
-                3600, "firstPass_"+ workerSuffix)) {
+    private String getWorkItemAndVerify(
+        WorkCoordinationTestContext testContext,
+        String workerSuffix,
+        ConcurrentHashMap<String, String> seenWorkerItems,
+        Duration expirationWindow,
+        boolean placeFinishedDoc,
+        boolean markCompleted
+    ) {
+        try (
+            var workCoordinator = new OpenSearchWorkCoordinator(
+                httpClientSupplier.get(),
+                3600,
+                "firstPass_" + workerSuffix
+            )
+        ) {
             var doneId = DUMMY_FINISHED_DOC_ID + "_" + nonce.incrementAndGet();
             if (placeFinishedDoc) {
                 workCoordinator.createOrUpdateLeaseForDocument(doneId, 1);
@@ -205,33 +213,32 @@ public class WorkCoordinatorTest {
 
             final var oldNow = workCoordinator.getClock().instant(); //
             return workCoordinator.acquireNextWorkItem(expirationWindow, testContext::createAcquireNextItemContext)
-                    .visit(new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<>() {
-                        @Override
-                        public String onAlreadyCompleted() throws IOException {
-                            throw new IllegalStateException();
-                        }
+                .visit(new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<>() {
+                    @Override
+                    public String onAlreadyCompleted() throws IOException {
+                        throw new IllegalStateException();
+                    }
 
                     @Override
                     public String onNoAvailableWorkToBeDone() throws IOException {
                         throw new IllegalStateException();
                     }
 
-                        @Override
-                        public String onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem)
-                                throws IOException, InterruptedException
-                        {
-                            log.atInfo().setMessage(()->"Next work item picked=" + workItem).log();
-                            Assertions.assertNotNull(workItem);
-                            Assertions.assertNotNull(workItem.workItemId);
-                            Assertions.assertTrue(workItem.leaseExpirationTime.isAfter(oldNow));
-                            var oldVal = seenWorkerItems.put(workItem.workItemId, workItem.workItemId);
-                            Assertions.assertNull(oldVal);
+                    @Override
+                    public String onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException,
+                        InterruptedException {
+                        log.atInfo().setMessage(() -> "Next work item picked=" + workItem).log();
+                        Assertions.assertNotNull(workItem);
+                        Assertions.assertNotNull(workItem.workItemId);
+                        Assertions.assertTrue(workItem.leaseExpirationTime.isAfter(oldNow));
+                        var oldVal = seenWorkerItems.put(workItem.workItemId, workItem.workItemId);
+                        Assertions.assertNull(oldVal);
 
-                            if (markCompleted) {
-                                workCoordinator.completeWorkItem(workItem.workItemId,
-                                        testContext::createCompleteWorkContext);
-                            }
-                            return workItem.workItemId;
+                        if (markCompleted) {
+                            workCoordinator.completeWorkItem(
+                                workItem.workItemId,
+                                testContext::createCompleteWorkContext
+                            );
                         }
                         return workItem.workItemId;
                     }

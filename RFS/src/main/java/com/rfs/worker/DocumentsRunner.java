@@ -9,13 +9,13 @@ import java.util.function.Supplier;
 
 import org.apache.lucene.document.Document;
 
+import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
+
 import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.ScopedWorkCoordinator;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.RfsException;
-import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
-import com.rfs.tracing.IWorkCoordinationContexts;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
@@ -27,7 +27,7 @@ public class DocumentsRunner {
 
     private final ScopedWorkCoordinator workCoordinator;
     private final Duration maxInitialLeaseDuration;
-    private final BiFunction<String,Integer,ShardMetadata> shardMetadataFactory;
+    private final BiFunction<String, Integer, ShardMetadata> shardMetadataFactory;
     private final SnapshotShardUnpacker.Factory unpackerFactory;
     private final Function<Path, LuceneDocumentsReader> readerFactory;
     private final DocumentReindexer reindexer;
@@ -41,34 +41,33 @@ public class DocumentsRunner {
      * @return true if it did work, false if there was no available work at this time.
      * @throws IOException
      */
-    public CompletionStatus
-    migrateNextShard(Supplier<IDocumentMigrationContexts.IDocumentReindexContext> contextSupplier)
-            throws IOException, InterruptedException {
+    public CompletionStatus migrateNextShard(
+        Supplier<IDocumentMigrationContexts.IDocumentReindexContext> contextSupplier
+    ) throws IOException, InterruptedException {
         try (var context = contextSupplier.get()) {
             return workCoordinator.ensurePhaseCompletion(wc -> {
-                        try {
-                            return wc.acquireNextWorkItem(maxInitialLeaseDuration, context::createOpeningContext);
-                        } catch (Exception e) {
-                            throw Lombok.sneakyThrow(e);
-                        }
-                    },
-                    new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<>() {
-                        @Override
-                        public CompletionStatus onAlreadyCompleted() throws IOException {
-                            return CompletionStatus.NOTHING_DONE;
-                        }
+                try {
+                    return wc.acquireNextWorkItem(maxInitialLeaseDuration, context::createOpeningContext);
+                } catch (Exception e) {
+                    throw Lombok.sneakyThrow(e);
+                }
+            }, new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<>() {
+                @Override
+                public CompletionStatus onAlreadyCompleted() throws IOException {
+                    return CompletionStatus.NOTHING_DONE;
+                }
 
-                        @Override
-                        public CompletionStatus onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) {
-                            doDocumentsMigration(IndexAndShard.valueFromWorkItemString(workItem.getWorkItemId()), context);
-                            return CompletionStatus.WORK_COMPLETED;
-                        }
+                @Override
+                public CompletionStatus onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) {
+                    doDocumentsMigration(IndexAndShard.valueFromWorkItemString(workItem.getWorkItemId()), context);
+                    return CompletionStatus.WORK_COMPLETED;
+                }
 
-                        @Override
-                        public CompletionStatus onNoAvailableWorkToBeDone() throws IOException {
-                            return CompletionStatus.NOTHING_DONE;
-                        }
-                    }, context::createCloseContet);
+                @Override
+                public CompletionStatus onNoAvailableWorkToBeDone() throws IOException {
+                    return CompletionStatus.NOTHING_DONE;
+                }
+            }, context::createCloseContet);
         }
     }
 
@@ -84,8 +83,10 @@ public class DocumentsRunner {
         }
     }
 
-    private void doDocumentsMigration(IndexAndShard indexAndShard,
-                                      IDocumentMigrationContexts.IDocumentReindexContext context) {
+    private void doDocumentsMigration(
+        IndexAndShard indexAndShard,
+        IDocumentMigrationContexts.IDocumentReindexContext context
+    ) {
         log.info("Migrating docs for " + indexAndShard);
         ShardMetadata shardMetadata = shardMetadataFactory.apply(indexAndShard.indexName, indexAndShard.shard);
 
@@ -94,12 +95,19 @@ public class DocumentsRunner {
         Flux<Document> documents = reader.readDocuments();
 
         reindexer.reindex(shardMetadata.getIndexName(), documents, context)
-                .doOnError(error -> log.error("Error during reindexing: " + error))
-                .doOnSuccess(done -> log.atInfo()
-                        .setMessage(()->"Reindexing completed for Index " + shardMetadata.getIndexName() +
-                                ", Shard " + shardMetadata.getShardId()).log())
-                // Wait for the reindexing to complete before proceeding
-                .block();
+            .doOnError(error -> log.error("Error during reindexing: " + error))
+            .doOnSuccess(
+                done -> log.atInfo()
+                    .setMessage(
+                        () -> "Reindexing completed for Index "
+                            + shardMetadata.getIndexName()
+                            + ", Shard "
+                            + shardMetadata.getShardId()
+                    )
+                    .log()
+            )
+            // Wait for the reindexing to complete before proceeding
+            .block();
         log.info("Docs migrated");
     }
 }

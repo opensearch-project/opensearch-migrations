@@ -1,7 +1,8 @@
 package org.opensearch.migrations.metadata.tracing;
 
-import com.rfs.tracing.IRfsContexts;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
+
+import com.rfs.tracing.IRfsContexts;
 
 public abstract class IMetadataMigrationContexts {
 
@@ -35,6 +36,5 @@ public abstract class IMetadataMigrationContexts {
     public static class MetricNames {
         private MetricNames() {}
     }
-
 
 }

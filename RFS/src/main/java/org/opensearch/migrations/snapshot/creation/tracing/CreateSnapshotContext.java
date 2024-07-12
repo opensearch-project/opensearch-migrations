@@ -1,17 +1,18 @@
 package org.opensearch.migrations.snapshot.creation.tracing;
 
-import com.rfs.tracing.BaseRootRfsContext;
-import com.rfs.tracing.IRfsContexts;
-import com.rfs.tracing.RfsContexts;
 import io.opentelemetry.api.metrics.Meter;
-import lombok.NonNull;
+
 import org.opensearch.migrations.tracing.BaseSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
-public class CreateSnapshotContext
-        extends BaseSpanContext<RootSnapshotContext>
-        implements IRfsContexts.ICreateSnapshotContext {
+import com.rfs.tracing.IRfsContexts;
+import com.rfs.tracing.RfsContexts;
+import lombok.NonNull;
+
+public class CreateSnapshotContext extends BaseSpanContext<RootSnapshotContext>
+    implements
+        IRfsContexts.ICreateSnapshotContext {
 
     protected CreateSnapshotContext(RootSnapshotContext rootScope) {
         super(rootScope);

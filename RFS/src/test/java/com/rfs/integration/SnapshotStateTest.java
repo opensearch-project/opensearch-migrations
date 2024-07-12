@@ -1,17 +1,18 @@
 package com.rfs.integration;
 
-import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
+import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
+import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
+
 import com.rfs.common.OpenSearchClient;
 import com.rfs.framework.ClusterOperations;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.framework.SimpleRestoreFromSnapshot_ES_7_10;
-import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 import reactor.core.publisher.Mono;
 
 import static org.hamcrest.CoreMatchers.allOf;

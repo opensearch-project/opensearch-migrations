@@ -1,18 +1,20 @@
 package org.opensearch.migrations.metadata.tracing;
 
-import com.rfs.tracing.IRfsContexts;
-import com.rfs.tracing.RfsContexts;
 import io.opentelemetry.api.metrics.Meter;
-import lombok.NonNull;
+
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.BaseSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
+import com.rfs.tracing.IRfsContexts;
+import com.rfs.tracing.RfsContexts;
+import lombok.NonNull;
+
 public class MetadataMigrationContexts {
-    public static class ClusterMetadataContext
-            extends BaseSpanContext<RootMetadataMigrationContext>
-            implements IMetadataMigrationContexts.IClusterMetadataContext {
+    public static class ClusterMetadataContext extends BaseSpanContext<RootMetadataMigrationContext>
+        implements
+            IMetadataMigrationContexts.IClusterMetadataContext {
 
         protected ClusterMetadataContext(RootMetadataMigrationContext rootScope) {
             super(rootScope);
@@ -20,7 +22,9 @@ public class MetadataMigrationContexts {
         }
 
         @Override
-        public String getActivityName() { return ACTIVITY_NAME; }
+        public String getActivityName() {
+            return ACTIVITY_NAME;
+        }
 
         @Override
         public IScopedInstrumentationAttributes getEnclosingScope() {
@@ -49,29 +53,39 @@ public class MetadataMigrationContexts {
 
         @Override
         public IRfsContexts.ICheckedIdempotentPutRequestContext createComponentTemplateContext() {
-            return new RfsContexts.CheckedIdempotentPutRequestContext(rootInstrumentationScope, this,
-                    "createComponentTemplateContext");
+            return new RfsContexts.CheckedIdempotentPutRequestContext(
+                rootInstrumentationScope,
+                this,
+                "createComponentTemplateContext"
+            );
         }
 
         @Override
         public IRfsContexts.ICheckedIdempotentPutRequestContext createMigrateTemplateContext() {
-            return new RfsContexts.CheckedIdempotentPutRequestContext(rootInstrumentationScope, this,
-                    "createGetSnapshotContext");
+            return new RfsContexts.CheckedIdempotentPutRequestContext(
+                rootInstrumentationScope,
+                this,
+                "createGetSnapshotContext"
+            );
         }
     }
 
-    public static class MigrateTemplateContext
-            extends BaseNestedSpanContext<RootMetadataMigrationContext, IMetadataMigrationContexts.IClusterMetadataContext>
-            implements IMetadataMigrationContexts.ITemplateContext {
+    public static class MigrateTemplateContext extends BaseNestedSpanContext<
+        RootMetadataMigrationContext,
+        IMetadataMigrationContexts.IClusterMetadataContext> implements IMetadataMigrationContexts.ITemplateContext {
 
-        protected MigrateTemplateContext(RootMetadataMigrationContext rootScope,
-                                         IMetadataMigrationContexts.IClusterMetadataContext enclosingScope) {
+        protected MigrateTemplateContext(
+            RootMetadataMigrationContext rootScope,
+            IMetadataMigrationContexts.IClusterMetadataContext enclosingScope
+        ) {
             super(rootScope, enclosingScope);
             initializeSpan(rootScope);
         }
 
         @Override
-        public String getActivityName() { return ACTIVITY_NAME; }
+        public String getActivityName() {
+            return ACTIVITY_NAME;
+        }
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
@@ -90,20 +104,18 @@ public class MetadataMigrationContexts {
 
         @Override
         public IRfsContexts.IRequestContext createCheckRequestContext() {
-            return new RfsContexts.GenericRequestContext(rootInstrumentationScope, this,
-                    "createCheckRequestContext");
+            return new RfsContexts.GenericRequestContext(rootInstrumentationScope, this, "createCheckRequestContext");
         }
 
         @Override
         public IRfsContexts.IRequestContext createPutContext() {
-            return new RfsContexts.GenericRequestContext(rootInstrumentationScope, this,
-                    "createPutContext");
+            return new RfsContexts.GenericRequestContext(rootInstrumentationScope, this, "createPutContext");
         }
     }
 
-    public static class CreateIndexContext
-            extends BaseSpanContext<RootMetadataMigrationContext>
-            implements IMetadataMigrationContexts.ICreateIndexContext {
+    public static class CreateIndexContext extends BaseSpanContext<RootMetadataMigrationContext>
+        implements
+            IMetadataMigrationContexts.ICreateIndexContext {
 
         protected CreateIndexContext(RootMetadataMigrationContext rootScope) {
             super(rootScope);
@@ -111,7 +123,9 @@ public class MetadataMigrationContexts {
         }
 
         @Override
-        public String getActivityName() { return ACTIVITY_NAME; }
+        public String getActivityName() {
+            return ACTIVITY_NAME;
+        }
 
         @Override
         public IScopedInstrumentationAttributes getEnclosingScope() {
@@ -135,14 +149,20 @@ public class MetadataMigrationContexts {
 
         @Override
         public IRfsContexts.IRequestContext createCheckRequestContext() {
-            return new RfsContexts.GenericRequestContext(rootInstrumentationScope, this,
-                    "CreateIndexContext.createCheckRequestContext");
+            return new RfsContexts.GenericRequestContext(
+                rootInstrumentationScope,
+                this,
+                "CreateIndexContext.createCheckRequestContext"
+            );
         }
 
         @Override
         public IRfsContexts.IRequestContext createPutContext() {
-            return new RfsContexts.GenericRequestContext(rootInstrumentationScope, this,
-                    "CreateIndexContext.createPutContext");
+            return new RfsContexts.GenericRequestContext(
+                rootInstrumentationScope,
+                this,
+                "CreateIndexContext.createPutContext"
+            );
         }
     }
 }

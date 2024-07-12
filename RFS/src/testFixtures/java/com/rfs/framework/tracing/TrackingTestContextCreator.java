@@ -1,17 +1,21 @@
 package com.rfs.framework.tracing;
 
+import java.util.function.BiFunction;
+
 import org.opensearch.migrations.tracing.BacktracingContextTracker;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.tracing.LoggingContextTracer;
 
-import java.util.function.BiFunction;
-
 public class TrackingTestContextCreator {
 
-    public static <T> T withTracking(boolean tracing, boolean metrics, boolean consoleLogging,
-                                     BiFunction<InMemoryInstrumentationBundle, IContextTracker, T> ctor) {
+    public static <T> T withTracking(
+        boolean tracing,
+        boolean metrics,
+        boolean consoleLogging,
+        BiFunction<InMemoryInstrumentationBundle, IContextTracker, T> ctor
+    ) {
         IContextTracker tracker = new BacktracingContextTracker();
         if (consoleLogging) {
             tracker = new CompositeContextTracker(tracker, new LoggingContextTracer());

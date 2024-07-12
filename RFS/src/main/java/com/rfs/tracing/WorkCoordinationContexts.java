@@ -1,14 +1,16 @@
 package com.rfs.tracing;
 
-import com.rfs.cms.OpenSearchWorkCoordinator;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.Meter;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NonNull;
+
 import org.opensearch.migrations.tracing.BaseSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
+
+import com.rfs.cms.OpenSearchWorkCoordinator;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NonNull;
 
 public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     private WorkCoordinationContexts() {}
@@ -21,8 +23,11 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     }
 
     private static RetryLabels autoLabels(String activityName) {
-        return new RetryLabels(CommonScopedMetricInstruments.fromActivityName(activityName),
-                activityName + "Retries", activityName + "Failures");
+        return new RetryLabels(
+            CommonScopedMetricInstruments.fromActivityName(activityName),
+            activityName + "Retries",
+            activityName + "Failures"
+        );
     }
 
     public static class RetryMetricInstruments extends CommonScopedMetricInstruments {
@@ -37,35 +42,38 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     }
 
     public interface RetryableActivityContextMetricMixin<T extends RetryMetricInstruments>
-            extends IRetryableActivityContext
-    {
+        extends
+            IRetryableActivityContext {
         T getRetryMetrics();
+
         default T getMetrics() {
             return getRetryMetrics();
         }
+
         default void recordRetry() {
-            meterIncrementEvent (getRetryMetrics().retryCounter);
+            meterIncrementEvent(getRetryMetrics().retryCounter);
         }
+
         default void recordFailure() {
-            meterIncrementEvent (getRetryMetrics().failureCounter);
+            meterIncrementEvent(getRetryMetrics().failureCounter);
         }
     }
 
     @Getter
-    public static class InitializeCoordinatorStateContext
-            extends BaseSpanContext<RootWorkCoordinationContext>
-            implements IInitializeCoordinatorStateContext,
-            RetryableActivityContextMetricMixin<InitializeCoordinatorStateContext.MetricInstruments>
-    {
+    public static class InitializeCoordinatorStateContext extends BaseSpanContext<RootWorkCoordinationContext>
+        implements
+            IInitializeCoordinatorStateContext,
+            RetryableActivityContextMetricMixin<InitializeCoordinatorStateContext.MetricInstruments> {
         final IScopedInstrumentationAttributes enclosingScope;
 
         InitializeCoordinatorStateContext(RootWorkCoordinationContext rootScope) {
             this(rootScope, null);
         }
 
-        InitializeCoordinatorStateContext(RootWorkCoordinationContext rootScope,
-                                          IScopedInstrumentationAttributes enclosingScope)
-        {
+        InitializeCoordinatorStateContext(
+            RootWorkCoordinationContext rootScope,
+            IScopedInstrumentationAttributes enclosingScope
+        ) {
             super(rootScope);
             this.enclosingScope = enclosingScope;
             initializeSpan(rootScope);
@@ -93,16 +101,16 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     }
 
     @Getter
-    public static class CreateUnassignedWorkItemContext
-            extends BaseSpanContext<RootWorkCoordinationContext>
-            implements ICreateUnassignedWorkItemContext,
-            RetryableActivityContextMetricMixin<CreateUnassignedWorkItemContext.MetricInstruments>
-    {
+    public static class CreateUnassignedWorkItemContext extends BaseSpanContext<RootWorkCoordinationContext>
+        implements
+            ICreateUnassignedWorkItemContext,
+            RetryableActivityContextMetricMixin<CreateUnassignedWorkItemContext.MetricInstruments> {
         final IScopedInstrumentationAttributes enclosingScope;
 
-        CreateUnassignedWorkItemContext(RootWorkCoordinationContext rootScope,
-                                          IScopedInstrumentationAttributes enclosingScope)
-        {
+        CreateUnassignedWorkItemContext(
+            RootWorkCoordinationContext rootScope,
+            IScopedInstrumentationAttributes enclosingScope
+        ) {
             super(rootScope);
             this.enclosingScope = enclosingScope;
             initializeSpan(rootScope);
@@ -130,19 +138,16 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     }
 
     @Getter
-    public static class PendingItems
-            extends BaseSpanContext<RootWorkCoordinationContext>
-            implements IPendingWorkItemsContext
-    {
+    public static class PendingItems extends BaseSpanContext<RootWorkCoordinationContext>
+        implements
+            IPendingWorkItemsContext {
         final IScopedInstrumentationAttributes enclosingScope;
 
         PendingItems(RootWorkCoordinationContext rootScope) {
             this(rootScope, null);
         }
 
-        PendingItems(RootWorkCoordinationContext rootScope,
-                     IScopedInstrumentationAttributes enclosingScope)
-        {
+        PendingItems(RootWorkCoordinationContext rootScope, IScopedInstrumentationAttributes enclosingScope) {
             super(rootScope);
             this.enclosingScope = enclosingScope;
             initializeSpan(rootScope);
@@ -175,24 +180,25 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     }
 
     @Getter
-    public static class Refresh
-            extends BaseSpanContext<RootWorkCoordinationContext>
-            implements IRefreshContext, RetryableActivityContextMetricMixin<Refresh.MetricInstruments>
-    {
+    public static class Refresh extends BaseSpanContext<RootWorkCoordinationContext>
+        implements
+            IRefreshContext,
+            RetryableActivityContextMetricMixin<Refresh.MetricInstruments> {
         final IScopedInstrumentationAttributes enclosingScope;
 
         Refresh(RootWorkCoordinationContext rootScope) {
             this(rootScope, null);
         }
 
-        Refresh(RootWorkCoordinationContext rootScope, IScopedInstrumentationAttributes enclosingScope)
-        {
+        Refresh(RootWorkCoordinationContext rootScope, IScopedInstrumentationAttributes enclosingScope) {
             super(rootScope);
             this.enclosingScope = enclosingScope;
             initializeSpan(rootScope);
         }
 
-        public String getActivityName() { return ACTIVITY_NAME; }
+        public String getActivityName() {
+            return ACTIVITY_NAME;
+        }
 
         public static class MetricInstruments extends RetryMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
@@ -211,16 +217,16 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     }
 
     @Getter
-    public static class AcquireSpecificWorkContext
-            extends BaseSpanContext<RootWorkCoordinationContext>
-            implements IAcquireSpecificWorkContext,
-            RetryableActivityContextMetricMixin<AcquireSpecificWorkContext.MetricInstruments>
-    {
+    public static class AcquireSpecificWorkContext extends BaseSpanContext<RootWorkCoordinationContext>
+        implements
+            IAcquireSpecificWorkContext,
+            RetryableActivityContextMetricMixin<AcquireSpecificWorkContext.MetricInstruments> {
         final IScopedInstrumentationAttributes enclosingScope;
 
-        AcquireSpecificWorkContext(RootWorkCoordinationContext rootScope,
-                                   IScopedInstrumentationAttributes enclosingScope)
-        {
+        AcquireSpecificWorkContext(
+            RootWorkCoordinationContext rootScope,
+            IScopedInstrumentationAttributes enclosingScope
+        ) {
             super(rootScope);
             this.enclosingScope = enclosingScope;
             initializeSpan(rootScope);
@@ -248,16 +254,16 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     }
 
     @Getter
-    public static class AcquireNextWorkItemContext
-            extends BaseSpanContext<RootWorkCoordinationContext>
-            implements IAcquireNextWorkItemContext,
-            RetryableActivityContextMetricMixin<AcquireNextWorkItemContext.MetricInstruments>
-    {
+    public static class AcquireNextWorkItemContext extends BaseSpanContext<RootWorkCoordinationContext>
+        implements
+            IAcquireNextWorkItemContext,
+            RetryableActivityContextMetricMixin<AcquireNextWorkItemContext.MetricInstruments> {
         final IScopedInstrumentationAttributes enclosingScope;
 
-        AcquireNextWorkItemContext(RootWorkCoordinationContext rootScope,
-                                IScopedInstrumentationAttributes enclosingScope)
-        {
+        AcquireNextWorkItemContext(
+            RootWorkCoordinationContext rootScope,
+            IScopedInstrumentationAttributes enclosingScope
+        ) {
             super(rootScope);
             this.enclosingScope = enclosingScope;
             initializeSpan(rootScope);
@@ -297,7 +303,6 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
             return getRootInstrumentationScope().acquireNextWorkMetrics;
         }
 
-
         @Override
         public void recordAssigned() {
             meterIncrementEvent(getRetryMetrics().assignedCounter);
@@ -321,16 +326,16 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     }
 
     @Getter
-    public static class CompleteWorkItemContext
-            extends BaseSpanContext<RootWorkCoordinationContext>
-            implements ICompleteWorkItemContext,
-            RetryableActivityContextMetricMixin<CompleteWorkItemContext.MetricInstruments>
-    {
+    public static class CompleteWorkItemContext extends BaseSpanContext<RootWorkCoordinationContext>
+        implements
+            ICompleteWorkItemContext,
+            RetryableActivityContextMetricMixin<CompleteWorkItemContext.MetricInstruments> {
         final IScopedInstrumentationAttributes enclosingScope;
 
-        CompleteWorkItemContext(RootWorkCoordinationContext rootScope,
-                                IScopedInstrumentationAttributes enclosingScope)
-        {
+        CompleteWorkItemContext(
+            RootWorkCoordinationContext rootScope,
+            IScopedInstrumentationAttributes enclosingScope
+        ) {
             super(rootScope);
             this.enclosingScope = enclosingScope;
             initializeSpan(rootScope);

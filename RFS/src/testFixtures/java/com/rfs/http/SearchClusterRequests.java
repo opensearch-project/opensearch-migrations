@@ -7,9 +7,10 @@ import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
+import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
+
 import com.rfs.common.RestClient;
 import lombok.SneakyThrows;
-import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.equalTo;
@@ -24,7 +25,7 @@ public class SearchClusterRequests {
     }
 
     @SneakyThrows
-    public Map<String,Integer> getMapOfIndexAndDocCount(final RestClient client) {
+    public Map<String, Integer> getMapOfIndexAndDocCount(final RestClient client) {
         var catIndicesResponse = client.get("_cat/indices?format=json", context.createUnboundRequestContext());
         assertThat(catIndicesResponse.code, equalTo(200));
 
@@ -41,16 +42,15 @@ public class SearchClusterRequests {
          * 
          * See https://github.com/elastic/elasticsearch/issues/25868#issuecomment-317990140
          */
-        var mapOfIndexAndDocCount = interestingIndices.stream()
-            .collect(Collectors.toMap(i -> i, i -> {
-                try {
-                    var response = client.get(i + "/_count", context.createUnboundRequestContext());
-                    var countFromResponse = mapper.readTree(response.body).get("count").asInt();
-                    return countFromResponse;
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
-            })); 
+        var mapOfIndexAndDocCount = interestingIndices.stream().collect(Collectors.toMap(i -> i, i -> {
+            try {
+                var response = client.get(i + "/_count", context.createUnboundRequestContext());
+                var countFromResponse = mapper.readTree(response.body).get("count").asInt();
+                return countFromResponse;
+            } catch (Exception e) {
+                throw new RuntimeException(e);
+            }
+        }));
 
         return mapOfIndexAndDocCount;
     }

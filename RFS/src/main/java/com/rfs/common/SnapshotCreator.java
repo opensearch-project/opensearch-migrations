@@ -6,9 +6,10 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.rfs.tracing.IRfsContexts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
+
+import com.rfs.tracing.IRfsContexts;
 
 public abstract class SnapshotCreator {
     private static final Logger logger = LogManager.getLogger(SnapshotCreator.class);
@@ -21,8 +22,7 @@ public abstract class SnapshotCreator {
     private final IRfsContexts.ICreateSnapshotContext context;
     private final String snapshotName;
 
-    public SnapshotCreator(String snapshotName, OpenSearchClient client,
-                           IRfsContexts.ICreateSnapshotContext context) {
+    public SnapshotCreator(String snapshotName, OpenSearchClient client, IRfsContexts.ICreateSnapshotContext context) {
         this.snapshotName = snapshotName;
         this.client = client;
         this.context = context;

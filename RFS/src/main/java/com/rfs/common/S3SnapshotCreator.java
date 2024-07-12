@@ -2,6 +2,7 @@ package com.rfs.common;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import com.rfs.tracing.IRfsContexts;
 
 public class S3SnapshotCreator extends SnapshotCreator {
@@ -11,13 +12,24 @@ public class S3SnapshotCreator extends SnapshotCreator {
     private final String s3Region;
     private final Integer maxSnapshotRateMBPerNode;
 
-    public S3SnapshotCreator(String snapshotName, OpenSearchClient client, String s3Uri, String s3Region,
-                             IRfsContexts.ICreateSnapshotContext context) {
+    public S3SnapshotCreator(
+        String snapshotName,
+        OpenSearchClient client,
+        String s3Uri,
+        String s3Region,
+        IRfsContexts.ICreateSnapshotContext context
+    ) {
         this(snapshotName, client, s3Uri, s3Region, null, context);
     }
 
-    public S3SnapshotCreator(String snapshotName, OpenSearchClient client, String s3Uri, String s3Region,
-                Integer maxSnapshotRateMBPerNode, IRfsContexts.ICreateSnapshotContext context) {
+    public S3SnapshotCreator(
+        String snapshotName,
+        OpenSearchClient client,
+        String s3Uri,
+        String s3Region,
+        Integer maxSnapshotRateMBPerNode,
+        IRfsContexts.ICreateSnapshotContext context
+    ) {
         super(snapshotName, client, context);
         this.s3Uri = s3Uri;
         this.s3Region = s3Region;

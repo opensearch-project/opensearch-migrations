@@ -1,16 +1,16 @@
 package com.rfs.cms;
 
-import com.rfs.tracing.IWorkCoordinationContexts;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.NonNull;
-import lombok.ToString;
-
 import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.function.Supplier;
+
+import com.rfs.tracing.IWorkCoordinationContexts;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NonNull;
+import lombok.ToString;
 
 /**
  * Multiple workers can create an instance of this class to coordinate what work each of them
@@ -38,7 +38,7 @@ public interface IWorkCoordinator extends AutoCloseable {
      * @throws InterruptedException
      */
     void setup(Supplier<IWorkCoordinationContexts.IInitializeCoordinatorStateContext> contextSupplier)
-            throws IOException, InterruptedException;
+        throws IOException, InterruptedException;
 
     /**
      * @param workItemId - the name of the document/resource to create.
@@ -46,9 +46,10 @@ public interface IWorkCoordinator extends AutoCloseable {
      * @return true if the document was created and false if it was already present
      * @throws IOException if the document was not successfully create for any other reason
      */
-    boolean createUnassignedWorkItem(String workItemId,
-                                     Supplier<IWorkCoordinationContexts.ICreateUnassignedWorkItemContext> contextSupplier)
-            throws IOException;
+    boolean createUnassignedWorkItem(
+        String workItemId,
+        Supplier<IWorkCoordinationContexts.ICreateUnassignedWorkItemContext> contextSupplier
+    ) throws IOException;
 
     /**
      * @param workItemId the item that the caller is trying to take ownership of
@@ -60,10 +61,12 @@ public interface IWorkCoordinator extends AutoCloseable {
      * @throws IOException if there was an error resolving the lease ownership
      * @throws LeaseLockHeldElsewhereException if the lease is owned by another process
      */
-    @NonNull WorkAcquisitionOutcome
-    createOrUpdateLeaseForWorkItem(String workItemId, Duration leaseDuration,
-                                   Supplier<IWorkCoordinationContexts.IAcquireSpecificWorkContext> contextSupplier)
-            throws IOException;
+    @NonNull
+    WorkAcquisitionOutcome createOrUpdateLeaseForWorkItem(
+        String workItemId,
+        Duration leaseDuration,
+        Supplier<IWorkCoordinationContexts.IAcquireSpecificWorkContext> contextSupplier
+    ) throws IOException;
 
     /**
      * Scan the created work items that have not yet had leases acquired and have not yet finished.
@@ -78,10 +81,10 @@ public interface IWorkCoordinator extends AutoCloseable {
      * @throws IOException
      * @throws InterruptedException
      */
-    WorkAcquisitionOutcome
-    acquireNextWorkItem(Duration leaseDuration,
-                        Supplier<IWorkCoordinationContexts.IAcquireNextWorkItemContext> contextSupplier)
-            throws IOException, InterruptedException;
+    WorkAcquisitionOutcome acquireNextWorkItem(
+        Duration leaseDuration,
+        Supplier<IWorkCoordinationContexts.IAcquireNextWorkItemContext> contextSupplier
+    ) throws IOException, InterruptedException;
 
     /**
      * Mark the work item as completed.  After this succeeds, the work item will never be leased out
@@ -89,9 +92,10 @@ public interface IWorkCoordinator extends AutoCloseable {
      * @param workItemId
      * @throws IOException
      */
-    void completeWorkItem(String workItemId,
-                          Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier)
-            throws IOException, InterruptedException;
+    void completeWorkItem(
+        String workItemId,
+        Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
+    ) throws IOException, InterruptedException;
 
     /**
      * @return the number of items that are not yet complete.  This will include items with and without claimed leases.
@@ -99,7 +103,7 @@ public interface IWorkCoordinator extends AutoCloseable {
      * @throws InterruptedException
      */
     int numWorkItemsArePending(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
-            throws IOException, InterruptedException;
+        throws IOException, InterruptedException;
 
     /**
      * @return true if there are any work items that are not yet complete.
@@ -107,8 +111,7 @@ public interface IWorkCoordinator extends AutoCloseable {
      * @throws InterruptedException
      */
     boolean workItemsArePending(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
-            throws IOException, InterruptedException;
-
+        throws IOException, InterruptedException;
 
     /**
      * Used as a discriminated union of different outputs that can be returned from acquiring a lease.

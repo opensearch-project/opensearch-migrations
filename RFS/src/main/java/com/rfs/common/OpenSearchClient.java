@@ -6,17 +6,13 @@ import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-import lombok.NonNull;
-import com.rfs.tracing.IRfsContexts;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.rfs.tracing.IRfsContexts;
 import lombok.NonNull;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
@@ -49,8 +45,11 @@ public class OpenSearchClient {
      * Create a legacy template if it does not already exist.  Returns an Optional; if the template was created, it
      * will be the created object and empty otherwise.
      */
-    public Optional<ObjectNode> createLegacyTemplate(String templateName, ObjectNode settings,
-                                        IRfsContexts.ICheckedIdempotentPutRequestContext context) {
+    public Optional<ObjectNode> createLegacyTemplate(
+        String templateName,
+        ObjectNode settings,
+        IRfsContexts.ICheckedIdempotentPutRequestContext context
+    ) {
         String targetPath = "_template/" + templateName;
         return createObjectIdempotent(targetPath, settings, context);
     }
@@ -59,8 +58,11 @@ public class OpenSearchClient {
      * Create a component template if it does not already exist.  Returns an Optional; if the template was created, it
      * will be the created object and empty otherwise.
      */
-    public Optional<ObjectNode> createComponentTemplate(String templateName, ObjectNode settings,
-                                           IRfsContexts.ICheckedIdempotentPutRequestContext context) {
+    public Optional<ObjectNode> createComponentTemplate(
+        String templateName,
+        ObjectNode settings,
+        IRfsContexts.ICheckedIdempotentPutRequestContext context
+    ) {
         String targetPath = "_component_template/" + templateName;
         return createObjectIdempotent(targetPath, settings, context);
     }
@@ -69,8 +71,11 @@ public class OpenSearchClient {
      * Create an index template if it does not already exist.  Returns an Optional; if the template was created, it
      * will be the created object and empty otherwise.
      */
-    public Optional<ObjectNode> createIndexTemplate(String templateName, ObjectNode settings,
-                                       IRfsContexts.ICheckedIdempotentPutRequestContext context) {
+    public Optional<ObjectNode> createIndexTemplate(
+        String templateName,
+        ObjectNode settings,
+        IRfsContexts.ICheckedIdempotentPutRequestContext context
+    ) {
         String targetPath = "_index_template/" + templateName;
         return createObjectIdempotent(targetPath, settings, context);
     }
@@ -79,30 +84,36 @@ public class OpenSearchClient {
      * Create an index if it does not already exist.  Returns an Optional; if the index was created, it
      * will be the created object and empty otherwise.
      */
-    public Optional<ObjectNode> createIndex(String indexName, ObjectNode settings,
-                               IRfsContexts.ICheckedIdempotentPutRequestContext context) {
+    public Optional<ObjectNode> createIndex(
+        String indexName,
+        ObjectNode settings,
+        IRfsContexts.ICheckedIdempotentPutRequestContext context
+    ) {
         String targetPath = indexName;
         return createObjectIdempotent(targetPath, settings, context);
     }
 
-    private Optional<ObjectNode> createObjectIdempotent(String objectPath, ObjectNode settings,
-                                           IRfsContexts.ICheckedIdempotentPutRequestContext context) {
+    private Optional<ObjectNode> createObjectIdempotent(
+        String objectPath,
+        ObjectNode settings,
+        IRfsContexts.ICheckedIdempotentPutRequestContext context
+    ) {
         RestClient.Response response = client.getAsync(objectPath, context.createCheckRequestContext())
-        .flatMap(resp -> {
-            if (resp.code == HttpURLConnection.HTTP_NOT_FOUND || resp.code == HttpURLConnection.HTTP_OK) {
-                return Mono.just(resp);
-            } else {
-                String errorMessage = ("Could not create object: "
-                    + objectPath
-                    + ". Response Code: "
-                    + resp.code
-                    + ", Response Message: "
-                    + resp.message
-                    + ", Response Body: "
-                    + resp.body);
-                return Mono.error(new OperationFailed(errorMessage, resp));
-            }
-        })
+            .flatMap(resp -> {
+                if (resp.code == HttpURLConnection.HTTP_NOT_FOUND || resp.code == HttpURLConnection.HTTP_OK) {
+                    return Mono.just(resp);
+                } else {
+                    String errorMessage = ("Could not create object: "
+                        + objectPath
+                        + ". Response Code: "
+                        + resp.code
+                        + ", Response Message: "
+                        + resp.message
+                        + ", Response Body: "
+                        + resp.body);
+                    return Mono.error(new OperationFailed(errorMessage, resp));
+                }
+            })
             .doOnError(e -> logger.error(e.getMessage()))
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
@@ -118,19 +129,27 @@ public class OpenSearchClient {
     /*
      * Attempts to register a snapshot repository; no-op if the repo already exists.
      */
-    public void registerSnapshotRepo(String repoName, ObjectNode settings,
-                                     IRfsContexts.ICreateSnapshotContext context) {
+    public void registerSnapshotRepo(
+        String repoName,
+        ObjectNode settings,
+        IRfsContexts.ICreateSnapshotContext context
+    ) {
         String targetPath = "_snapshot/" + repoName;
-        client.putAsync(targetPath, settings.toString(), context.createRegisterRequest())
-            .flatMap(resp -> {
-                if (resp.code == HttpURLConnection.HTTP_OK) {
-                    return Mono.just(resp);
-                } else {
-                    String errorMessage = ("Could not register snapshot repo: " + targetPath + ". Response Code: " + resp.code
-                        + ", Response Message: " + resp.message + ", Response Body: " + resp.body);
-                    return Mono.error(new OperationFailed(errorMessage, resp));
-                }
-            })
+        client.putAsync(targetPath, settings.toString(), context.createRegisterRequest()).flatMap(resp -> {
+            if (resp.code == HttpURLConnection.HTTP_OK) {
+                return Mono.just(resp);
+            } else {
+                String errorMessage = ("Could not register snapshot repo: "
+                    + targetPath
+                    + ". Response Code: "
+                    + resp.code
+                    + ", Response Message: "
+                    + resp.message
+                    + ", Response Body: "
+                    + resp.body);
+                return Mono.error(new OperationFailed(errorMessage, resp));
+            }
+        })
             .doOnError(e -> logger.error(e.getMessage()))
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
@@ -139,19 +158,28 @@ public class OpenSearchClient {
     /*
      * Attempts to create a snapshot; no-op if the snapshot already exists.
      */
-    public void createSnapshot(String repoName, String snapshotName, ObjectNode settings,
-                               IRfsContexts.ICreateSnapshotContext context) {
+    public void createSnapshot(
+        String repoName,
+        String snapshotName,
+        ObjectNode settings,
+        IRfsContexts.ICreateSnapshotContext context
+    ) {
         String targetPath = "_snapshot/" + repoName + "/" + snapshotName;
-        client.putAsync(targetPath, settings.toString(), context.createSnapshotContext())
-            .flatMap(resp -> {
-                if (resp.code == HttpURLConnection.HTTP_OK) {
-                    return Mono.just(resp);
-                } else {
-                    String errorMessage = ("Could not create snapshot: " + targetPath + ". Response Code: " + resp.code
-                        + ", Response Message: " + resp.message + ", Response Body: " + resp.body);
-                    return Mono.error(new OperationFailed(errorMessage, resp));
-                }
-            })
+        client.putAsync(targetPath, settings.toString(), context.createSnapshotContext()).flatMap(resp -> {
+            if (resp.code == HttpURLConnection.HTTP_OK) {
+                return Mono.just(resp);
+            } else {
+                String errorMessage = ("Could not create snapshot: "
+                    + targetPath
+                    + ". Response Code: "
+                    + resp.code
+                    + ", Response Message: "
+                    + resp.message
+                    + ", Response Body: "
+                    + resp.body);
+                return Mono.error(new OperationFailed(errorMessage, resp));
+            }
+        })
             .doOnError(e -> logger.error(e.getMessage()))
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
@@ -161,18 +189,25 @@ public class OpenSearchClient {
      * Get the status of a snapshot.  Returns an Optional; if the snapshot was found, it will be the snapshot status
      * and empty otherwise.
      */
-    public Optional<ObjectNode> getSnapshotStatus(String repoName, String snapshotName,
-                                                  IRfsContexts.ICreateSnapshotContext context) {
+    public Optional<ObjectNode> getSnapshotStatus(
+        String repoName,
+        String snapshotName,
+        IRfsContexts.ICreateSnapshotContext context
+    ) {
         String targetPath = "_snapshot/" + repoName + "/" + snapshotName;
-        RestClient.Response response = client.getAsync(targetPath, context.createGetSnapshotContext())
-            .flatMap(resp -> {
-                if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_NOT_FOUND) {
-                    return Mono.just(resp);
-                } else {
-                    String errorMessage = "Could get status of snapshot: " + targetPath + ". Response Code: " + resp.code + ", Response Body: " + resp.body;
-                    return Mono.error(new OperationFailed(errorMessage, resp));
-                }
-            })
+        RestClient.Response response = client.getAsync(targetPath, context.createGetSnapshotContext()).flatMap(resp -> {
+            if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_NOT_FOUND) {
+                return Mono.just(resp);
+            } else {
+                String errorMessage = "Could get status of snapshot: "
+                    + targetPath
+                    + ". Response Code: "
+                    + resp.code
+                    + ", Response Body: "
+                    + resp.body;
+                return Mono.error(new OperationFailed(errorMessage, resp));
+            }
+        })
             .doOnError(e -> logger.error(e.getMessage()))
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();

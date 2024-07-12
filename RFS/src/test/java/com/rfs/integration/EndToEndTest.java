@@ -10,6 +10,9 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ArgumentsSource;
 
+import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
+import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.FileSystemSnapshotCreator;
@@ -26,10 +29,6 @@ import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 import com.rfs.worker.IndexRunner;
 import com.rfs.worker.MetadataRunner;
 import com.rfs.worker.SnapshotRunner;
-import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
-import org.opensearch.migrations.snapshot.creation.tracing.CreateSnapshotContext;
-import org.opensearch.migrations.snapshot.creation.tracing.RootSnapshotContext;
-import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -49,8 +48,10 @@ public class EndToEndTest {
     public void migrateFrom_ES_v6_8(final SearchClusterContainer.Version targetVersion) throws Exception {
         var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
         var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();
-        try (final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23);
-            final var targetCluster = new SearchClusterContainer(targetVersion)) {
+        try (
+            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23);
+            final var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
             // Setup
             // Start the clusters for testing
             var bothClustersStarted = CompletableFuture.allOf(
@@ -70,8 +71,12 @@ public class EndToEndTest {
             // Take a snapshot
             var snapshotName = "my_snap";
             var sourceClient = new OpenSearchClient(sourceCluster.getUrl(), null, null, true);
-            var snapshotCreator = new FileSystemSnapshotCreator(snapshotName, sourceClient, SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
-                    snapshotContext.createSnapshotCreateContext());
+            var snapshotCreator = new FileSystemSnapshotCreator(
+                snapshotName,
+                sourceClient,
+                SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
+                snapshotContext.createSnapshotCreateContext()
+            );
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
             sourceCluster.copySnapshotData(localDirectory.toString());
 
@@ -80,7 +85,13 @@ public class EndToEndTest {
 
             var repoDataProvider = new SnapshotRepoProvider_ES_6_8(sourceRepo);
             var metadataFactory = new GlobalMetadataFactory_ES_6_8(repoDataProvider);
-            var metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, null, null, null, metadataContext.createMetadataMigrationContext());
+            var metadataCreator = new GlobalMetadataCreator_OS_2_11(
+                targetClient,
+                null,
+                null,
+                null,
+                metadataContext.createMetadataMigrationContext()
+            );
             var transformer = TransformFunctions.getTransformer(ClusterVersion.ES_6_8, ClusterVersion.OS_2_11, 1);
             // Action
             // Migrate metadata
@@ -100,8 +111,15 @@ public class EndToEndTest {
             // Migrate indices
             var indexMetadataFactory = new IndexMetadataFactory_ES_6_8(repoDataProvider);
             var indexCreator = new IndexCreator_OS_2_11(targetClient);
-            new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer, List.of(), metadataContext.createIndexContext()).migrateIndices();
-            
+            new IndexRunner(
+                snapshotName,
+                indexMetadataFactory,
+                indexCreator,
+                transformer,
+                List.of(),
+                metadataContext.createIndexContext()
+            ).migrateIndices();
+
             res = targetClusterOperations.get("/barstool");
             assertThat(res.getValue(), res.getKey(), equalTo(200));
 

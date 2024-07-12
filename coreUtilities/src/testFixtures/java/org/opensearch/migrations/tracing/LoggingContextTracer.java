@@ -6,14 +6,11 @@ import lombok.extern.slf4j.Slf4j;
 public class LoggingContextTracer implements IContextTracker {
 
     private static final String CREATED_MESSAGE = "<< Start: {}";
-    private static final String CLOSED_MESSAGE  = ">> Close: {} {}";
+    private static final String CLOSED_MESSAGE = ">> Close: {} {}";
 
     @Override
     public void onContextCreated(final IScopedInstrumentationAttributes context) {
-        log.atDebug()
-            .setMessage(CREATED_MESSAGE)
-            .addArgument(context.getActivityName())
-            .log();
+        log.atDebug().setMessage(CREATED_MESSAGE).addArgument(context.getActivityName()).log();
     }
 
     @Override

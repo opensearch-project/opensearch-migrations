@@ -3,12 +3,13 @@ package com.rfs.worker;
 import java.util.List;
 import java.util.function.BiConsumer;
 
+import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts;
+
 import com.rfs.common.FilterScheme;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.models.IndexMetadata;
 import com.rfs.transformers.Transformer;
 import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
-import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts;
 
 @Slf4j
 @AllArgsConstructor
@@ -37,8 +38,9 @@ public class IndexRunner {
                 var indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
                 var transformedRoot = transformer.transformIndexMetadata(indexMetadata);
                 var resultOp = indexCreator.create(transformedRoot, index.getName(), indexMetadata.getId(), context);
-                resultOp.ifPresentOrElse(value -> log.info("Index " + index.getName() + " created successfully"),
-                        () -> log.info("Index " + index.getName() + " already existed; no work required")
+                resultOp.ifPresentOrElse(
+                    value -> log.info("Index " + index.getName() + " created successfully"),
+                    () -> log.info("Index " + index.getName() + " already existed; no work required")
                 );
             })
             .count(); // Force the stream to execute
