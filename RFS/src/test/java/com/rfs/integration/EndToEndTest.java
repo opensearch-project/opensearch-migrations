@@ -122,7 +122,7 @@ public class EndToEndTest {
         // Setup
         // PSEUDO: Create a source cluster running ES 6.8
 
-        migrateFrom_ES_v7_X(null);
+        migrateFrom_ES_v7_X(null, null);
     }
 
     @ParameterizedTest(name = "Target OpenSearch {0}")
@@ -132,10 +132,10 @@ public class EndToEndTest {
         // Setup
         // PSEUDO: Create a source cluster running ES 6.8
 
-        migrateFrom_ES_v7_X(null);
+        migrateFrom_ES_v7_X(null, null);
     }
 
-    private void migrateFrom_ES_v7_X(final SearchClusterContainer sourceCluster) {
+    private void migrateFrom_ES_v7_X(final SearchClusterContainer sourceCluster, final SearchClusterContainer targetCluster) {
         // PSEUDO: Create 2 index templates on the cluster, see https://www.elastic.co/guide/en/elasticsearch/reference/7.17/index-templates.html
         //    - logs-*
         //    - data-rolling
