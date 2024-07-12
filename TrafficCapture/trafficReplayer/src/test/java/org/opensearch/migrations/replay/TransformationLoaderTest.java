@@ -1,17 +1,18 @@
 package org.opensearch.migrations.replay;
 
+import java.util.Map;
+
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import java.util.Map;
-
 public class TransformationLoaderTest {
     private static final ObjectMapper mapper = new ObjectMapper();
 
-    private static Map<String,Object> parseAsMap(String contents) throws Exception {
-        return mapper.readValue(contents.getBytes(), new TypeReference<>() {});
+    private static Map<String, Object> parseAsMap(String contents) throws Exception {
+        return mapper.readValue(contents.getBytes(), new TypeReference<>() {
+        });
     }
 
     @Test
@@ -30,8 +31,11 @@ public class TransformationLoaderTest {
 
     @Test
     public void testThatSimpleNoopTransformerLoads() throws Exception {
-        var noopTransformer = new TransformationLoader()
-                .getTransformerFactoryLoader("localhost", null, "NoopTransformerProvider");
+        var noopTransformer = new TransformationLoader().getTransformerFactoryLoader(
+            "localhost",
+            null,
+            "NoopTransformerProvider"
+        );
         var origDoc = parseAsMap(SampleContents.loadSampleJsonRequestAsString());
         var output = noopTransformer.transformJson(origDoc);
         Assertions.assertEquals(mapper.writeValueAsString(origDoc), mapper.writeValueAsString(output));
@@ -39,39 +43,41 @@ public class TransformationLoaderTest {
 
     @Test
     public void testMisconfiguration() throws Exception {
-        Assertions.assertThrows(IllegalArgumentException.class, () -> new TransformationLoader()
-                .getTransformerFactoryLoader("localhost", null, "Not right"));
+        Assertions.assertThrows(
+            IllegalArgumentException.class,
+            () -> new TransformationLoader().getTransformerFactoryLoader("localhost", null, "Not right")
+        );
     }
 
     @Test
     public void testThatNoConfigMeansNoThrow() throws Exception {
-        var transformer = Assertions.assertDoesNotThrow(()->new TransformationLoader()
-                .getTransformerFactoryLoader("localhost"));
+        var transformer = Assertions.assertDoesNotThrow(
+            () -> new TransformationLoader().getTransformerFactoryLoader("localhost")
+        );
         Assertions.assertNotNull(transformer);
         var origDoc = parseAsMap(SampleContents.loadSampleJsonRequestAsString());
         Assertions.assertNotNull(transformer.transformJson(origDoc));
     }
 
-    final String TEST_INPUT_REQUEST = "{\n" +
-            "  \"method\": \"PUT\",\n" +
-            "  \"URI\": \"/oldStyleIndex\",\n" +
-            "  \"headers\": {\n" +
-            "    \"host\": \"127.0.0.1\"\n" +
-            "  },\n"+
-            "  \"payload\": {\n}\n" +
-            "}\n";
+    final String TEST_INPUT_REQUEST = "{\n"
+        + "  \"method\": \"PUT\",\n"
+        + "  \"URI\": \"/oldStyleIndex\",\n"
+        + "  \"headers\": {\n"
+        + "    \"host\": \"127.0.0.1\"\n"
+        + "  },\n"
+        + "  \"payload\": {\n}\n"
+        + "}\n";
 
     @Test
     public void testUserAgentAppends() throws Exception {
-        var userAgentTransformer = new TransformationLoader()
-                .getTransformerFactoryLoader("localhost", "tester", null);
+        var userAgentTransformer = new TransformationLoader().getTransformerFactoryLoader("localhost", "tester", null);
 
         var origDoc = parseAsMap(TEST_INPUT_REQUEST);
         var origDocStr = mapper.writeValueAsString(origDoc);
         var pass1 = userAgentTransformer.transformJson(origDoc);
         var pass1DocStr = mapper.writeValueAsString(origDoc);
         var pass2 = userAgentTransformer.transformJson(pass1);
-        var finalUserAgentInHeaders = ((Map<String,Object>)pass2.get("headers")).get("user-agent");
+        var finalUserAgentInHeaders = ((Map<String, Object>) pass2.get("headers")).get("user-agent");
         Assertions.assertEquals("tester; tester", finalUserAgentInHeaders);
     }
 }

@@ -1,12 +1,12 @@
 package org.opensearch.migrations.replay;
 
+import java.nio.charset.Charset;
+import java.util.Base64;
+
 import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
-
-import java.nio.charset.Charset;
-import java.util.Base64;
 
 @Slf4j
 public class AWSAuthService implements AutoCloseable {

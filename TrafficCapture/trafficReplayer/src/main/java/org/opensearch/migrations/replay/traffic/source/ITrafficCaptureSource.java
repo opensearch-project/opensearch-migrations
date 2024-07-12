@@ -1,8 +1,5 @@
 package org.opensearch.migrations.replay.traffic.source;
 
-import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
-
 import java.io.IOException;
 import java.time.Instant;
 import java.util.List;
@@ -10,14 +7,21 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
+
 public interface ITrafficCaptureSource extends AutoCloseable {
 
     enum CommitResult {
-        IMMEDIATE, AFTER_NEXT_READ, BLOCKED_BY_OTHER_COMMITS, IGNORED
+        IMMEDIATE,
+        AFTER_NEXT_READ,
+        BLOCKED_BY_OTHER_COMMITS,
+        IGNORED
     }
 
-    CompletableFuture<List<ITrafficStreamWithKey>>
-    readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier);
+    CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+        Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
+    );
 
     CommitResult commitTrafficStream(ITrafficStreamKey trafficStreamKey) throws IOException;
 
@@ -34,5 +38,7 @@ public interface ITrafficCaptureSource extends AutoCloseable {
      * active.  Empty indicates that touch() does not need to be called to keep the
      * source active.
      */
-    default Optional<Instant> getNextRequiredTouch() { return Optional.empty(); }
+    default Optional<Instant> getNextRequiredTouch() {
+        return Optional.empty();
+    }
 }

@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.util.Map;
 
 import com.google.common.collect.ImmutableMap;
+
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
@@ -32,17 +33,17 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             new OpenSearchVersion("opensearchproject/opensearch:2.14.0", "OS 2.14.0");
 
     private enum INITIALIZATION_FLAVOR {
-        ELASTICSEARCH(Map.of(
-            "discovery.type", "single-node",
-            "path.repo", CLUSTER_SNAPSHOT_DIR)),
-        OPENSEARCH(new ImmutableMap.Builder<String, String>()
-            .putAll(ELASTICSEARCH.getEnvVariables())
-            .put("plugins.security.disabled", "true")
-            .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
-            .build());
+        ELASTICSEARCH(Map.of("discovery.type", "single-node", "path.repo", CLUSTER_SNAPSHOT_DIR)),
+        OPENSEARCH(
+            new ImmutableMap.Builder<String, String>().putAll(ELASTICSEARCH.getEnvVariables())
+                .put("plugins.security.disabled", "true")
+                .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
+                .build()
+        );
 
         @Getter
         public final Map<String, String> envVariables;
+
         INITIALIZATION_FLAVOR(Map<String, String> envVariables) {
             this.envVariables = envVariables;
         }
@@ -54,11 +55,8 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public SearchClusterContainer(final Version version) {
         super(DockerImageName.parse(version.imageName));
         this.withExposedPorts(9200, 9300)
-                .withEnv(version.getInitializationType().getEnvVariables())
-                .waitingFor(Wait.forHttp("/")
-                        .forPort(9200)
-                        .forStatusCode(200)
-                        .withStartupTimeout(Duration.ofMinutes(1)));
+            .withEnv(version.getInitializationType().getEnvVariables())
+            .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(1)));
 
         this.version = version;
     }

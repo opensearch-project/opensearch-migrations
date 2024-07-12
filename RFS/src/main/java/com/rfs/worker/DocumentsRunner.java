@@ -7,20 +7,18 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import org.apache.lucene.document.Document;
+
 import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.ScopedWorkCoordinator;
+import com.rfs.common.DocumentReindexer;
+import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.RfsException;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import com.rfs.tracing.IWorkCoordinationContexts;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
-
-import com.rfs.common.DocumentReindexer;
-import com.rfs.common.LuceneDocumentsReader;
-import com.rfs.common.SnapshotShardUnpacker;
-import com.rfs.models.ShardMetadata;
-import org.apache.lucene.document.Document;
 import reactor.core.publisher.Flux;
 
 @Slf4j
@@ -31,7 +29,7 @@ public class DocumentsRunner {
     private final Duration maxInitialLeaseDuration;
     private final BiFunction<String,Integer,ShardMetadata> shardMetadataFactory;
     private final SnapshotShardUnpacker.Factory unpackerFactory;
-    private final Function<Path,LuceneDocumentsReader> readerFactory;
+    private final Function<Path, LuceneDocumentsReader> readerFactory;
     private final DocumentReindexer reindexer;
 
     public enum CompletionStatus {
@@ -76,7 +74,13 @@ public class DocumentsRunner {
 
     public static class ShardTooLargeException extends RfsException {
         public ShardTooLargeException(long shardSizeBytes, long maxShardSize) {
-            super("The shard size of " + shardSizeBytes + " bytes exceeds the maximum shard size of " + maxShardSize + " bytes");
+            super(
+                "The shard size of "
+                    + shardSizeBytes
+                    + " bytes exceeds the maximum shard size of "
+                    + maxShardSize
+                    + " bytes"
+            );
         }
     }
 

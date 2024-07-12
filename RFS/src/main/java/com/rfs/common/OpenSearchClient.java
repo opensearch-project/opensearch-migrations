@@ -14,7 +14,10 @@ import org.apache.logging.log4j.Logger;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
 
+import lombok.NonNull;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
@@ -89,14 +92,20 @@ public class OpenSearchClient {
             if (resp.code == HttpURLConnection.HTTP_NOT_FOUND || resp.code == HttpURLConnection.HTTP_OK) {
                 return Mono.just(resp);
             } else {
-                String errorMessage = ("Could not create object: " + objectPath + ". Response Code: " + resp.code
-                    + ", Response Message: " + resp.message + ", Response Body: " + resp.body);
+                String errorMessage = ("Could not create object: "
+                    + objectPath
+                    + ". Response Code: "
+                    + resp.code
+                    + ", Response Message: "
+                    + resp.message
+                    + ", Response Body: "
+                    + resp.body);
                 return Mono.error(new OperationFailed(errorMessage, resp));
             }
         })
-        .doOnError(e -> logger.error(e.getMessage()))
-        .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
-        .block();
+            .doOnError(e -> logger.error(e.getMessage()))
+            .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
+            .block();
 
         if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
             client.put(objectPath, settings.toString(), context.createCheckRequestContext());
@@ -178,7 +187,10 @@ public class OpenSearchClient {
         } else if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
             return Optional.empty();
         } else {
-            String errorMessage = "Should not have gotten here while parsing response for: _snapshot/" + repoName + "/" + snapshotName;
+            String errorMessage = "Should not have gotten here while parsing response for: _snapshot/"
+                + repoName
+                + "/"
+                + snapshotName;
             throw new OperationFailed(errorMessage, response);
         }
     }
@@ -214,7 +226,7 @@ public class OpenSearchClient {
 
         public boolean hasFailedOperations() {
             // The OpenSearch Bulk API response body is JSON and contains a top-level "errors" field that indicates
-            // whether any of the individual operations in the bulk request failed.  Rather than marshalling the entire
+            // whether any of the individual operations in the bulk request failed. Rather than marshalling the entire
             // response as JSON, just check for the string value.
 
             String regexPattern = "\"errors\"\\s*:\\s*true";

@@ -1,14 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.channel.embedded.EmbeddedChannel;
-import io.netty.handler.codec.http.FullHttpRequest;
-import io.netty.handler.codec.http.FullHttpResponse;
-import io.netty.handler.codec.http.HttpClientCodec;
-import io.netty.handler.codec.http.HttpContentDecompressor;
-import io.netty.handler.codec.http.HttpMessage;
-import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.HttpServerCodec;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
@@ -19,10 +10,21 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
-import lombok.SneakyThrows;
-import lombok.extern.slf4j.Slf4j;
+
 import org.opensearch.migrations.replay.util.NettyUtils;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.FullHttpResponse;
+import io.netty.handler.codec.http.HttpClientCodec;
+import io.netty.handler.codec.http.HttpContentDecompressor;
+import io.netty.handler.codec.http.HttpMessage;
+import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpServerCodec;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class HttpByteBufFormatter {
@@ -31,11 +33,13 @@ public class HttpByteBufFormatter {
     public static final String LF_LINE_DELIMITER = "\n";
     private static final String DEFAULT_LINE_DELIMITER = CRLF_LINE_DELIMITER;
 
-    private static final ThreadLocal<Optional<PacketPrintFormat>> printStyle =
-            ThreadLocal.withInitial(Optional::empty);
+    private static final ThreadLocal<Optional<PacketPrintFormat>> printStyle = ThreadLocal.withInitial(Optional::empty);
 
     public enum PacketPrintFormat {
-        TRUNCATED, FULL_BYTES, PARSED_HTTP, PARSED_HTTP_SORTED_HEADERS
+        TRUNCATED,
+        FULL_BYTES,
+        PARSED_HTTP,
+        PARSED_HTTP_SORTED_HEADERS
     }
 
     public static <T> T setPrintStyleForCallable(PacketPrintFormat packetPrintFormat, Callable<T> r) throws Exception {
@@ -57,7 +61,10 @@ public class HttpByteBufFormatter {
         return setPrintStyleForCallable(packetPrintFormat, (supplier::get));
     }
 
-    public enum HttpMessageType { REQUEST, RESPONSE }
+    public enum HttpMessageType {
+        REQUEST,
+        RESPONSE
+    }
 
     public static String httpPacketBytesToString(HttpMessageType msgType, List<byte[]> byteArrStream) {
         return httpPacketBytesToString(msgType, byteArrStream, DEFAULT_LINE_DELIMITER);
@@ -75,26 +82,32 @@ public class HttpByteBufFormatter {
         }
     }
 
-    public static String httpPacketBufsToString(HttpMessageType msgType, Stream<ByteBuf> byteBufStream, String lineDelimiter) {
+    public static String httpPacketBufsToString(
+        HttpMessageType msgType,
+        Stream<ByteBuf> byteBufStream,
+        String lineDelimiter
+    ) {
         switch (printStyle.get().orElse(PacketPrintFormat.TRUNCATED)) {
             case TRUNCATED:
                 return httpPacketBufsToString(byteBufStream, Utils.MAX_BYTES_SHOWN_FOR_TO_STRING);
             case FULL_BYTES:
                 return httpPacketBufsToString(byteBufStream, Long.MAX_VALUE);
             case PARSED_HTTP:
-                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, false,
-                    lineDelimiter);
+                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, false, lineDelimiter);
             case PARSED_HTTP_SORTED_HEADERS:
-                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, true,
-                    lineDelimiter);
+                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, true, lineDelimiter);
             default:
                 throw new IllegalStateException("Unknown PacketPrintFormat: " + printStyle.get());
         }
     }
 
-    public static String httpPacketsToPrettyPrintedString(HttpMessageType msgType, Stream<ByteBuf> byteBufStream,
-        boolean sortHeaders, String lineDelimiter) {
-        try(var messageHolder = RefSafeHolder.create(parseHttpMessageFromBufs(msgType, byteBufStream))) {
+    public static String httpPacketsToPrettyPrintedString(
+        HttpMessageType msgType,
+        Stream<ByteBuf> byteBufStream,
+        boolean sortHeaders,
+        String lineDelimiter
+    ) {
+        try (var messageHolder = RefSafeHolder.create(parseHttpMessageFromBufs(msgType, byteBufStream))) {
             final HttpMessage httpMessage = messageHolder.get();
             if (httpMessage != null) {
                 if (httpMessage instanceof FullHttpRequest) {
@@ -102,8 +115,13 @@ public class HttpByteBufFormatter {
                 } else if (httpMessage instanceof FullHttpResponse) {
                     return prettyPrintNettyResponse((FullHttpResponse) httpMessage, sortHeaders, lineDelimiter);
                 } else {
-                    throw new IllegalStateException("Embedded channel with an HttpObjectAggregator returned an " +
-                                                    "unexpected object of type " + httpMessage.getClass() + ": " + httpMessage);
+                    throw new IllegalStateException(
+                        "Embedded channel with an HttpObjectAggregator returned an "
+                            + "unexpected object of type "
+                            + httpMessage.getClass()
+                            + ": "
+                            + httpMessage
+                    );
                 }
             } else {
                 return "[NULL]";
@@ -144,9 +162,9 @@ public class HttpByteBufFormatter {
      */
     public static HttpMessage parseHttpMessageFromBufs(HttpMessageType msgType, Stream<ByteBuf> byteBufStream) {
         EmbeddedChannel channel = new EmbeddedChannel(
-                msgType == HttpMessageType.REQUEST ? new HttpServerCodec() : new HttpClientCodec(),
-                new HttpContentDecompressor(),
-                new HttpObjectAggregator(Utils.MAX_PAYLOAD_BYTES_TO_PRINT)  // Set max content length if needed
+            msgType == HttpMessageType.REQUEST ? new HttpServerCodec() : new HttpClientCodec(),
+            new HttpContentDecompressor(),
+            new HttpObjectAggregator(Utils.MAX_PAYLOAD_BYTES_TO_PRINT)  // Set max content length if needed
         );
         try {
             byteBufStream.forEachOrdered(b -> channel.writeInbound(b.retainedDuplicate()));
@@ -171,7 +189,8 @@ public class HttpByteBufFormatter {
         return byteBufStream.map(originalByteBuf -> {
             var bb = originalByteBuf.duplicate();
             var length = bb.readableBytes();
-            var str = IntStream.range(0, length).map(idx -> bb.readByte())
+            var str = IntStream.range(0, length)
+                .map(idx -> bb.readByte())
                 .limit(maxBytesToShow)
                 .mapToObj(b -> "" + (char) b)
                 .collect(Collectors.joining());

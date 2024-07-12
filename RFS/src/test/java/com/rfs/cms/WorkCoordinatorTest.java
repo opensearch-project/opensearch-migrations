@@ -26,6 +26,17 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
+
+import org.opensearch.testcontainers.OpensearchContainer;
+
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * The contract here is that the first request in will acquire a lease for the duration that was requested.
  *
@@ -70,7 +81,9 @@ public class WorkCoordinatorTest {
         log.atInfo().setMessage(()->"Searching with... " + body).log();
         var response = httpClientSupplier.get().makeJsonRequest(AbstractedHttpClient.GET_METHOD,
                 OpenSearchWorkCoordinator.INDEX_NAME + "/_search",
-                null, body);
+                null,
+                body
+            );
 
         var objectMapper = new ObjectMapper();
         return objectMapper.readTree(response.getPayloadStream()).path("hits");
@@ -154,8 +167,13 @@ public class WorkCoordinatorTest {
                 log.atInfo().setMessage(()->"Next work item picked=" + nextWorkItem).log();
                 Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, nextWorkItem);
             } catch (OpenSearchWorkCoordinator.PotentialClockDriftDetectedException e) {
-                log.atError().setCause(e).setMessage(()->"Unexpected clock drift error.  Got response: "
-                +searchForExpiredDocs(e.getTimestampEpochSeconds())).log();
+                log.atError()
+                    .setCause(e)
+                    .setMessage(
+                        () -> "Unexpected clock drift error.  Got response: "
+                            + searchForExpiredDocs(e.getTimestampEpochSeconds())
+                    )
+                    .log();
             }
 
             Thread.sleep(expiration.multipliedBy(2).toMillis());
@@ -169,6 +187,7 @@ public class WorkCoordinatorTest {
     }
 
     static AtomicInteger nonce = new AtomicInteger();
+
     @SneakyThrows
     private String getWorkItemAndVerify(WorkCoordinationTestContext testContext,
                                         String workerSuffix,
@@ -192,10 +211,10 @@ public class WorkCoordinatorTest {
                             throw new IllegalStateException();
                         }
 
-                        @Override
-                        public String onNoAvailableWorkToBeDone() throws IOException {
-                            throw new IllegalStateException();
-                        }
+                    @Override
+                    public String onNoAvailableWorkToBeDone() throws IOException {
+                        throw new IllegalStateException();
+                    }
 
                         @Override
                         public String onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem)
@@ -214,10 +233,17 @@ public class WorkCoordinatorTest {
                             }
                             return workItem.workItemId;
                         }
-                    });
+                        return workItem.workItemId;
+                    }
+                });
         } catch (OpenSearchWorkCoordinator.PotentialClockDriftDetectedException e) {
-            log.atError().setCause(e).setMessage(()->"Unexpected clock drift error.  Got response: "
-                    +searchForExpiredDocs(e.getTimestampEpochSeconds())).log();
+            log.atError()
+                .setCause(e)
+                .setMessage(
+                    () -> "Unexpected clock drift error.  Got response: "
+                        + searchForExpiredDocs(e.getTimestampEpochSeconds())
+                )
+                .log();
             throw e;
         }
     }

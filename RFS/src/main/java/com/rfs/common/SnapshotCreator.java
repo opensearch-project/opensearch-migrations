@@ -1,5 +1,7 @@
 package com.rfs.common;
 
+import java.util.Optional;
+
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -7,8 +9,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.tracing.IRfsContexts;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
-import java.util.Optional;
 
 public abstract class SnapshotCreator {
     private static final Logger logger = LogManager.getLogger(SnapshotCreator.class);
@@ -85,7 +85,7 @@ public abstract class SnapshotCreator {
         JsonNode responseJson = response.get();
         JsonNode firstSnapshot = responseJson.path("snapshots").get(0);
         JsonNode stateNode = firstSnapshot.path("state");
-        String state = stateNode.asText();        
+        String state = stateNode.asText();
 
         if (state.equals("SUCCESS")) {
             return true;

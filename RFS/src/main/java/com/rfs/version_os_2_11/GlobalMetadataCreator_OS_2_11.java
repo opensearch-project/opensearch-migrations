@@ -3,10 +3,10 @@ package com.rfs.version_os_2_11;
 import java.util.ArrayList;
 import java.util.List;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.common.OpenSearchClient;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts;
 import com.rfs.models.GlobalMetadata;
@@ -41,11 +41,15 @@ public class GlobalMetadataCreator_OS_2_11 {
         createIndexTemplates(globalMetadata, client, indexTemplateAllowlist);
     }
 
-    protected void createLegacyTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> templateAllowlist) {
+    protected void createLegacyTemplates(
+        GlobalMetadataData_OS_2_11 globalMetadata,
+        OpenSearchClient client,
+        List<String> templateAllowlist
+    ) {
         logger.info("Setting Legacy Templates...");
         ObjectNode templates = globalMetadata.getTemplates();
 
-        if (templates == null){
+        if (templates == null) {
             logger.info("No Legacy Templates in Snapshot");
             return;
         }
@@ -79,11 +83,15 @@ public class GlobalMetadataCreator_OS_2_11 {
         }
     }
 
-    protected void createComponentTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> templateAllowlist) {
+    protected void createComponentTemplates(
+        GlobalMetadataData_OS_2_11 globalMetadata,
+        OpenSearchClient client,
+        List<String> templateAllowlist
+    ) {
         logger.info("Setting Component Templates...");
         ObjectNode templates = globalMetadata.getComponentTemplates();
 
-        if (templates == null){
+        if (templates == null) {
             logger.info("No Component Templates in Snapshot");
             return;
         }
@@ -118,11 +126,15 @@ public class GlobalMetadataCreator_OS_2_11 {
         }
     }
 
-    protected void createIndexTemplates(GlobalMetadataData_OS_2_11 globalMetadata, OpenSearchClient client, List<String> templateAllowlist) {
+    protected void createIndexTemplates(
+        GlobalMetadataData_OS_2_11 globalMetadata,
+        OpenSearchClient client,
+        List<String> templateAllowlist
+    ) {
         logger.info("Setting Index Templates...");
         ObjectNode templates = globalMetadata.getIndexTemplates();
 
-        if (templates == null){
+        if (templates == null) {
             logger.info("No Index Templates in Snapshot");
             return;
         }

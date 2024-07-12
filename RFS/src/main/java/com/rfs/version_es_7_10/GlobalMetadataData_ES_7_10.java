@@ -1,6 +1,7 @@
 package com.rfs.version_es_7_10;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import com.rfs.models.GlobalMetadata;
 
 public class GlobalMetadataData_ES_7_10 implements GlobalMetadata {

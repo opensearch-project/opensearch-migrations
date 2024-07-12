@@ -1,14 +1,13 @@
 package com.rfs.http;
 
-
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.rfs.common.RestClient;
 
+import com.rfs.common.RestClient;
 import lombok.SneakyThrows;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
@@ -55,7 +54,7 @@ public class SearchClusterRequests {
 
         return mapOfIndexAndDocCount;
     }
-    
+
     public List<String> filterToInterestingIndices(final List<String> indices) {
         return indices.stream()
             .filter(index -> !index.startsWith("."))

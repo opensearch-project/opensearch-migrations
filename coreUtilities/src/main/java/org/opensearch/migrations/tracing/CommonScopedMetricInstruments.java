@@ -10,6 +10,11 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.DoubleStream;
 
+import io.opentelemetry.api.metrics.DoubleHistogram;
+import io.opentelemetry.api.metrics.LongCounter;
+import io.opentelemetry.api.metrics.Meter;
+
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class CommonScopedMetricInstruments extends CommonMetricInstruments {
@@ -78,12 +83,15 @@ public class CommonScopedMetricInstruments extends CommonMetricInstruments {
         return getExponentialBucketsBetween(firstBucketSize, lastBucketCeiling, 2.0);
     }
 
-    private static List<Double> getExponentialBucketsBetween(double firstBucketSize, double lastBucketCeiling,
-                                                             double rate) {
+    private static List<Double> getExponentialBucketsBetween(
+        double firstBucketSize,
+        double lastBucketCeiling,
+        double rate
+    ) {
         if (firstBucketSize <= 0) {
             throw new IllegalArgumentException("firstBucketSize value " + firstBucketSize + " must be > 0");
         }
-        double[] bucketBoundary = new double[]{firstBucketSize};
+        double[] bucketBoundary = new double[] { firstBucketSize };
         return DoubleStream.generate(() -> {
             var tmp = bucketBoundary[0];
             bucketBoundary[0] *= rate;

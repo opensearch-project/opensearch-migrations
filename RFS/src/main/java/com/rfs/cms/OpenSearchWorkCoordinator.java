@@ -20,6 +20,15 @@ import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.Lombok;
+import lombok.NonNull;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
+
 @Slf4j
 public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String INDEX_NAME = ".migrations_working_state";
@@ -42,22 +51,28 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String COMPLETED_AT_FIELD_NAME = "completedAt";
     public static final String SOURCE_FIELD_NAME = "_source";
 
-    public static final String QUERY_INCOMPLETE_EXPIRED_ITEMS_STR = "    \"query\": {\n" +
-            "      \"bool\": {" +
-            "        \"must\": [" +
-            "          {" +
-            "            \"range\": {" +
-            "              \"" + EXPIRATION_FIELD_NAME + "\": { \"lt\": " + OLD_EXPIRATION_THRESHOLD_TEMPLATE + " }" +
-            "            }" +
-            "          }" +
-            "        ]," +
-            "        \"must_not\": [" +
-            "          { \"exists\":" +
-            "            { \"field\": \"" + COMPLETED_AT_FIELD_NAME + "\"}" +
-            "          }" +
-            "        ]" +
-            "      }" +
-            "    }";
+    public static final String QUERY_INCOMPLETE_EXPIRED_ITEMS_STR = "    \"query\": {\n"
+        + "      \"bool\": {"
+        + "        \"must\": ["
+        + "          {"
+        + "            \"range\": {"
+        + "              \""
+        + EXPIRATION_FIELD_NAME
+        + "\": { \"lt\": "
+        + OLD_EXPIRATION_THRESHOLD_TEMPLATE
+        + " }"
+        + "            }"
+        + "          }"
+        + "        ],"
+        + "        \"must_not\": ["
+        + "          { \"exists\":"
+        + "            { \"field\": \""
+        + COMPLETED_AT_FIELD_NAME
+        + "\"}"
+        + "          }"
+        + "        ]"
+        + "      }"
+        + "    }";
 
     private final long tolerableClientServerClockDifferenceSeconds;
     private final AbstractedHttpClient httpClient;
@@ -66,13 +81,20 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     @Getter
     private final Clock clock;
 
-    public OpenSearchWorkCoordinator(AbstractedHttpClient httpClient, long tolerableClientServerClockDifferenceSeconds,
-                                     String workerId) {
+    public OpenSearchWorkCoordinator(
+        AbstractedHttpClient httpClient,
+        long tolerableClientServerClockDifferenceSeconds,
+        String workerId
+    ) {
         this(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, Clock.systemUTC());
     }
 
-    public OpenSearchWorkCoordinator(AbstractedHttpClient httpClient, long tolerableClientServerClockDifferenceSeconds,
-                                     String workerId, Clock clock) {
+    public OpenSearchWorkCoordinator(
+        AbstractedHttpClient httpClient,
+        long tolerableClientServerClockDifferenceSeconds,
+        String workerId,
+        Clock clock
+    ) {
         this.tolerableClientServerClockDifferenceSeconds = tolerableClientServerClockDifferenceSeconds;
         this.httpClient = httpClient;
         this.workerId = workerId;
@@ -148,76 +170,123 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     }
 
     enum DocumentModificationResult {
-        IGNORED, CREATED, UPDATED;
+        IGNORED,
+        CREATED,
+        UPDATED;
+
         static DocumentModificationResult parse(String s) {
             switch (Optional.ofNullable(s).orElse("")/*let default handle this*/) {
-                case "noop": return DocumentModificationResult.IGNORED;
-                case "created": return DocumentModificationResult.CREATED;
-                case UPDATED_COUNT_FIELD_NAME: return DocumentModificationResult.UPDATED;
+                case "noop":
+                    return DocumentModificationResult.IGNORED;
+                case "created":
+                    return DocumentModificationResult.CREATED;
+                case UPDATED_COUNT_FIELD_NAME:
+                    return DocumentModificationResult.UPDATED;
                 default:
                     throw new IllegalArgumentException("Unknown result " + s);
             }
         }
     }
 
-    AbstractedHttpClient.AbstractHttpResponse createOrUpdateLeaseForDocument(String workItemId,
-                                                                             long expirationWindowSeconds)
-            throws IOException {
+    AbstractedHttpClient.AbstractHttpResponse createOrUpdateLeaseForDocument(
+        String workItemId,
+        long expirationWindowSeconds
+    ) throws IOException {
         // the notion of 'now' isn't supported with painless scripts
         // https://www.elastic.co/guide/en/elasticsearch/painless/current/painless-datetime.html#_datetime_now
-        final var upsertLeaseBodyTemplate = "{\n" +
-                "  \"scripted_upsert\": true,\n" +
-                "  \"upsert\": {\n" +
-                "    \"scriptVersion\": \"" + SCRIPT_VERSION_TEMPLATE + "\",\n" +
-                "    \"" + EXPIRATION_FIELD_NAME + "\": 0,\n" +
-                "    \"creatorId\": \"" + WORKER_ID_TEMPLATE + "\",\n" +
-                "    \"numAttempts\": 0\n" +
-                "  },\n" +
-                "  \"script\": {\n" +
-                "    \"lang\": \"painless\",\n" +
-                "    \"params\": { \n" +
-                "      \"clientTimestamp\": " + CLIENT_TIMESTAMP_TEMPLATE + ",\n" +
-                "      \"expirationWindow\": " + EXPIRATION_WINDOW_TEMPLATE + ",\n" +
-                "      \"workerId\": \"" + WORKER_ID_TEMPLATE + "\"\n" +
-                "    },\n" +
-                "    \"source\": \"" +
-                "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {" +
-                "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx.source.scriptVersion);" +
-                "      } " +
-                "      long serverTimeSeconds = System.currentTimeMillis() / 1000;" +
-                "      if (Math.abs(params.clientTimestamp - serverTimeSeconds) > {CLOCK_DEVIATION_SECONDS_THRESHOLD}) {" +
-                "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");" +
-                "      }" +
-                "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);" +
-                "      if (params.expirationWindow > 0 && " +                 // don't obtain a lease lock
-                "          ctx._source." + COMPLETED_AT_FIELD_NAME + " == null) {" +              // already done
-                "        if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " == params.workerId && " +
-                "            ctx._source." + EXPIRATION_FIELD_NAME + " > serverTimeSeconds) {" + // count as an update to force the caller to lookup the expiration time, but no need to modify it
-                "          ctx.op = \\\"update\\\";" +
-                "        } else if (ctx._source." + EXPIRATION_FIELD_NAME + " < serverTimeSeconds && " + // is expired
-                "                   ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +      // sanity check
-                "          ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;" +
-                "          ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;" +
-                "          ctx._source.numAttempts += 1;" +
-                "        } else {" +
-                "          ctx.op = \\\"noop\\\";" +
-                "        }" +
-                "      } else if (params.expirationWindow != 0) {" +
-                "        ctx.op = \\\"noop\\\";" +
-                "      }" +
-                "\"\n" +
-                "  }\n" + // close script
-                "}"; // close top-level
+        final var upsertLeaseBodyTemplate = "{\n"
+            + "  \"scripted_upsert\": true,\n"
+            + "  \"upsert\": {\n"
+            + "    \"scriptVersion\": \""
+            + SCRIPT_VERSION_TEMPLATE
+            + "\",\n"
+            + "    \""
+            + EXPIRATION_FIELD_NAME
+            + "\": 0,\n"
+            + "    \"creatorId\": \""
+            + WORKER_ID_TEMPLATE
+            + "\",\n"
+            + "    \"numAttempts\": 0\n"
+            + "  },\n"
+            + "  \"script\": {\n"
+            + "    \"lang\": \"painless\",\n"
+            + "    \"params\": { \n"
+            + "      \"clientTimestamp\": "
+            + CLIENT_TIMESTAMP_TEMPLATE
+            + ",\n"
+            + "      \"expirationWindow\": "
+            + EXPIRATION_WINDOW_TEMPLATE
+            + ",\n"
+            + "      \"workerId\": \""
+            + WORKER_ID_TEMPLATE
+            + "\"\n"
+            + "    },\n"
+            + "    \"source\": \""
+            + "      if (ctx._source.scriptVersion != \\\""
+            + SCRIPT_VERSION_TEMPLATE
+            + "\\\") {"
+            + "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx.source.scriptVersion);"
+            + "      } "
+            + "      long serverTimeSeconds = System.currentTimeMillis() / 1000;"
+            + "      if (Math.abs(params.clientTimestamp - serverTimeSeconds) > {CLOCK_DEVIATION_SECONDS_THRESHOLD}) {"
+            + "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");"
+            + "      }"
+            + "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);"
+            + "      if (params.expirationWindow > 0 && "
+            +                 // don't obtain a lease lock
+            "          ctx._source."
+            + COMPLETED_AT_FIELD_NAME
+            + " == null) {"
+            +              // already done
+            "        if (ctx._source."
+            + LEASE_HOLDER_ID_FIELD_NAME
+            + " == params.workerId && "
+            + "            ctx._source."
+            + EXPIRATION_FIELD_NAME
+            + " > serverTimeSeconds) {"
+            + // count as an update to force the caller to lookup the expiration time, but no need to modify it
+            "          ctx.op = \\\"update\\\";"
+            + "        } else if (ctx._source."
+            + EXPIRATION_FIELD_NAME
+            + " < serverTimeSeconds && "
+            + // is expired
+            "                   ctx._source."
+            + EXPIRATION_FIELD_NAME
+            + " < newExpiration) {"
+            +      // sanity check
+            "          ctx._source."
+            + EXPIRATION_FIELD_NAME
+            + " = newExpiration;"
+            + "          ctx._source."
+            + LEASE_HOLDER_ID_FIELD_NAME
+            + " = params.workerId;"
+            + "          ctx._source.numAttempts += 1;"
+            + "        } else {"
+            + "          ctx.op = \\\"noop\\\";"
+            + "        }"
+            + "      } else if (params.expirationWindow != 0) {"
+            + "        ctx.op = \\\"noop\\\";"
+            + "      }"
+            + "\"\n"
+            + "  }\n"
+            + // close script
+            "}"; // close top-level
 
-        var body = upsertLeaseBodyTemplate
-                .replace(SCRIPT_VERSION_TEMPLATE, "poc")
-                .replace(WORKER_ID_TEMPLATE, workerId)
-                .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().toEpochMilli() / 1000))
-                .replace(EXPIRATION_WINDOW_TEMPLATE, Long.toString(expirationWindowSeconds))
-                .replace(CLOCK_DEVIATION_SECONDS_THRESHOLD_TEMPLATE, Long.toString(tolerableClientServerClockDifferenceSeconds));
+        var body = upsertLeaseBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, "poc")
+            .replace(WORKER_ID_TEMPLATE, workerId)
+            .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().toEpochMilli() / 1000))
+            .replace(EXPIRATION_WINDOW_TEMPLATE, Long.toString(expirationWindowSeconds))
+            .replace(
+                CLOCK_DEVIATION_SECONDS_THRESHOLD_TEMPLATE,
+                Long.toString(tolerableClientServerClockDifferenceSeconds)
+            );
 
-        return httpClient.makeJsonRequest(AbstractedHttpClient.POST_METHOD, INDEX_NAME + "/_update/" + workItemId,
-                null, body);
+        return httpClient.makeJsonRequest(
+            AbstractedHttpClient.POST_METHOD,
+            INDEX_NAME + "/_update/" + workItemId,
+            null,
+            body
+        );
     }
 
     DocumentModificationResult getResult(AbstractedHttpClient.AbstractHttpResponse response) throws IOException {
@@ -381,42 +450,64 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     UpdateResult assignOneWorkItem(long expirationWindowSeconds) throws IOException {
         // the random_score reduces the number of version conflicts from ~1200 for 40 concurrent requests
         // to acquire 40 units of work to around 800
-        final var queryUpdateTemplate = "{\n" +
-                "\"query\": {" +
-                "  \"function_score\": {\n" +
-                QUERY_INCOMPLETE_EXPIRED_ITEMS_STR + "," +
-                "    \"random_score\": {},\n" +
-                "    \"boost_mode\": \"replace\"\n" + // Try to avoid the workers fighting for the same work items
-                "  }" +
-                "}," +
-                "\"size\": 1,\n" +
-                "\"script\": {" +
-                "  \"params\": { \n" +
-                "    \"clientTimestamp\": " + CLIENT_TIMESTAMP_TEMPLATE + ",\n" +
-                "    \"expirationWindow\": " + EXPIRATION_WINDOW_TEMPLATE + ",\n" +
-                "    \"workerId\": \"" + WORKER_ID_TEMPLATE + "\",\n" +
-                "    \"counter\": 0\n" +
-                "  },\n" +
-                "  \"source\": \"" +
-                "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {" +
-                "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx.source.scriptVersion);" +
-                "      } " +
-                "      long serverTimeSeconds = System.currentTimeMillis() / 1000;" +
-                "      if (Math.abs(params.clientTimestamp - serverTimeSeconds) > {CLOCK_DEVIATION_SECONDS_THRESHOLD}) {" +
-                "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");" +
-                "      }" +
-                "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);" +
-                "      if (ctx._source." + EXPIRATION_FIELD_NAME + " < serverTimeSeconds && " + // is expired
-                "          ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +      // sanity check
-                "        ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;" +
-                "        ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;" +
-                "        ctx._source.numAttempts += 1;" +
-                "      } else {" +
-                "        ctx.op = \\\"noop\\\";" +
-                "      }" +
-                "\" " +  // end of source script contents
-                "}" +    // end of script block
-                "}";
+        final var queryUpdateTemplate = "{\n"
+            + "\"query\": {"
+            + "  \"function_score\": {\n"
+            + QUERY_INCOMPLETE_EXPIRED_ITEMS_STR
+            + ","
+            + "    \"random_score\": {},\n"
+            + "    \"boost_mode\": \"replace\"\n"
+            + // Try to avoid the workers fighting for the same work items
+            "  }"
+            + "},"
+            + "\"size\": 1,\n"
+            + "\"script\": {"
+            + "  \"params\": { \n"
+            + "    \"clientTimestamp\": "
+            + CLIENT_TIMESTAMP_TEMPLATE
+            + ",\n"
+            + "    \"expirationWindow\": "
+            + EXPIRATION_WINDOW_TEMPLATE
+            + ",\n"
+            + "    \"workerId\": \""
+            + WORKER_ID_TEMPLATE
+            + "\",\n"
+            + "    \"counter\": 0\n"
+            + "  },\n"
+            + "  \"source\": \""
+            + "      if (ctx._source.scriptVersion != \\\""
+            + SCRIPT_VERSION_TEMPLATE
+            + "\\\") {"
+            + "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx.source.scriptVersion);"
+            + "      } "
+            + "      long serverTimeSeconds = System.currentTimeMillis() / 1000;"
+            + "      if (Math.abs(params.clientTimestamp - serverTimeSeconds) > {CLOCK_DEVIATION_SECONDS_THRESHOLD}) {"
+            + "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");"
+            + "      }"
+            + "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);"
+            + "      if (ctx._source."
+            + EXPIRATION_FIELD_NAME
+            + " < serverTimeSeconds && "
+            + // is expired
+            "          ctx._source."
+            + EXPIRATION_FIELD_NAME
+            + " < newExpiration) {"
+            +      // sanity check
+            "        ctx._source."
+            + EXPIRATION_FIELD_NAME
+            + " = newExpiration;"
+            + "        ctx._source."
+            + LEASE_HOLDER_ID_FIELD_NAME
+            + " = params.workerId;"
+            + "        ctx._source.numAttempts += 1;"
+            + "      } else {"
+            + "        ctx.op = \\\"noop\\\";"
+            + "      }"
+            + "\" "
+            +  // end of source script contents
+            "}"
+            +    // end of script block
+            "}";
 
         final var timestampEpochSeconds = clock.instant().toEpochMilli() / 1000;
         final var body = queryUpdateTemplate
@@ -427,8 +518,12 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 .replace(EXPIRATION_WINDOW_TEMPLATE, Long.toString(expirationWindowSeconds))
                 .replace(CLOCK_DEVIATION_SECONDS_THRESHOLD_TEMPLATE, Long.toString(tolerableClientServerClockDifferenceSeconds));
 
-        var response = httpClient.makeJsonRequest(AbstractedHttpClient.POST_METHOD, INDEX_NAME + "/_update_by_query?refresh=true&max_docs=1",
-                null, body);
+        var response = httpClient.makeJsonRequest(
+            AbstractedHttpClient.POST_METHOD,
+            INDEX_NAME + "/_update_by_query?refresh=true&max_docs=1",
+            null,
+            body
+        );
         if (response.getStatusCode() == 409) {
             return UpdateResult.VERSION_CONFLICT;
         }
@@ -443,33 +538,45 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         } else if (resultTree.path("total").longValue() == 0) {
             return UpdateResult.NOTHING_TO_ACQUIRE;
         } else if (noops > 0) {
-            throw new PotentialClockDriftDetectedException("Found " + noops +
-                    " noop values in response with no successful updates", timestampEpochSeconds);
+            throw new PotentialClockDriftDetectedException(
+                "Found " + noops + " noop values in response with no successful updates",
+                timestampEpochSeconds
+            );
         } else {
             throw new IllegalStateException("Unexpected response for update: " + resultTree);
         }
     }
 
     private WorkItemAndDuration getAssignedWorkItem() throws IOException {
-        final var queryWorkersAssignedItemsTemplate = "{\n" +
-                "  \"query\": {\n" +
-                "    \"bool\": {" +
-                "      \"must\": [" +
-                "        {" +
-                "          \"term\": { \"" + LEASE_HOLDER_ID_FIELD_NAME + "\": \"" + WORKER_ID_TEMPLATE + "\"}\n" +
-                "        }" +
-                "      ]," +
-                "      \"must_not\": [" +
-                "        {" +
-                "          \"exists\": { \"field\": \"" + COMPLETED_AT_FIELD_NAME + "\"}\n" +
-                "        }" +
-                "      ]" +
-                "    }" +
-                "  }" +
-                "}";
+        final var queryWorkersAssignedItemsTemplate = "{\n"
+            + "  \"query\": {\n"
+            + "    \"bool\": {"
+            + "      \"must\": ["
+            + "        {"
+            + "          \"term\": { \""
+            + LEASE_HOLDER_ID_FIELD_NAME
+            + "\": \""
+            + WORKER_ID_TEMPLATE
+            + "\"}\n"
+            + "        }"
+            + "      ],"
+            + "      \"must_not\": ["
+            + "        {"
+            + "          \"exists\": { \"field\": \""
+            + COMPLETED_AT_FIELD_NAME
+            + "\"}\n"
+            + "        }"
+            + "      ]"
+            + "    }"
+            + "  }"
+            + "}";
         final var body = queryWorkersAssignedItemsTemplate.replace(WORKER_ID_TEMPLATE, workerId);
-        var response = httpClient.makeJsonRequest(AbstractedHttpClient.POST_METHOD,  INDEX_NAME + "/_search",
-                null, body);
+        var response = httpClient.makeJsonRequest(
+            AbstractedHttpClient.POST_METHOD,
+            INDEX_NAME + "/_search",
+            null,
+            body
+        );
 
         final var resultHitsUpper = objectMapper.readTree(response.getPayloadStream()).path("hits");
         if (resultHitsUpper.isMissingNode()) {
@@ -478,8 +585,9 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
         final var numDocs = resultHitsUpper.path("total").path("value").longValue();
         if (numDocs != 1) {
-            throw new IllegalStateException("The query for the assigned work document returned " + numDocs +
-                    " instead of one item");
+            throw new IllegalStateException(
+                "The query for the assigned work document returned " + numDocs + " instead of one item"
+            );
         }
         var resultHitInner = resultHitsUpper.path("hits").path(0);
         var expiration = resultHitInner.path(SOURCE_FIELD_NAME).path(EXPIRATION_FIELD_NAME).longValue();

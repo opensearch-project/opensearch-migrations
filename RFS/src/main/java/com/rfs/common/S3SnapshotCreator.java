@@ -68,5 +68,5 @@ public class S3SnapshotCreator extends SnapshotCreator {
             return rawBasePath;
         }
     }
-    
+
 }

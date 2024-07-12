@@ -121,7 +121,9 @@ public interface IWorkCoordinator extends AutoCloseable {
 
     interface WorkAcquisitionOutcomeVisitor<T> {
         T onAlreadyCompleted() throws IOException;
+
         T onNoAvailableWorkToBeDone() throws IOException;
+
         T onAcquiredWork(WorkItemAndDuration workItem) throws IOException, InterruptedException;
     }
 
@@ -129,7 +131,8 @@ public interface IWorkCoordinator extends AutoCloseable {
      * This represents that a work item was already completed.
      */
     class AlreadyCompleted implements WorkAcquisitionOutcome {
-        @Override public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException {
+        @Override
+        public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException {
             return v.onAlreadyCompleted();
         }
     }
@@ -144,11 +147,12 @@ public interface IWorkCoordinator extends AutoCloseable {
             return v.onNoAvailableWorkToBeDone();
         }
     }
+
     /**
      * This represents when the lease wasn't acquired because another process already owned the
      * lease.
      */
-    class LeaseLockHeldElsewhereException extends RuntimeException { }
+    class LeaseLockHeldElsewhereException extends RuntimeException {}
 
     /**
      * What's the id of the work item (which is determined by calls to createUnassignedWorkItem or
@@ -162,7 +166,9 @@ public interface IWorkCoordinator extends AutoCloseable {
     class WorkItemAndDuration implements WorkAcquisitionOutcome {
         final String workItemId;
         final Instant leaseExpirationTime;
-        @Override public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException, InterruptedException {
+
+        @Override
+        public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException, InterruptedException {
             return v.onAcquiredWork(this);
         }
     }

@@ -1,12 +1,5 @@
 package org.opensearch.migrations.transform;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.google.common.io.CharStreams;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
-
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.nio.ByteBuffer;
@@ -14,16 +7,23 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import com.google.common.io.CharStreams;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
+
 public class TypeMappingsExcisionTest {
 
-    static final TypeReference<LinkedHashMap<String, Object>> TYPE_REFERENCE_FOR_MAP_TYPE = new TypeReference<>(){};
+    static final TypeReference<LinkedHashMap<String, Object>> TYPE_REFERENCE_FOR_MAP_TYPE = new TypeReference<>() {
+    };
 
     static ObjectMapper objectMapper = new ObjectMapper();
 
-
     static InputStream getInputStreamForTypeMappingResource(String resourceName) {
-        return TypeMappingsExcisionTest.class.getResourceAsStream("/sampleJsonDocuments/typeMappings/" +
-                resourceName);
+        return TypeMappingsExcisionTest.class.getResourceAsStream("/sampleJsonDocuments/typeMappings/" + resourceName);
     }
 
     @Test
@@ -44,16 +44,19 @@ public class TypeMappingsExcisionTest {
         transformAndVerifyResult(json, "get_query_output.txt");
     }
 
-    private static Map<String,Object> parseJsonFromResourceName(String resourceName) throws Exception {
+    private static Map<String, Object> parseJsonFromResourceName(String resourceName) throws Exception {
         var jsonAccumulator = new JsonAccumulator();
-        try (var resourceStream = getInputStreamForTypeMappingResource(resourceName);
-             var isr = new InputStreamReader(resourceStream, StandardCharsets.UTF_8)) {
+        try (
+            var resourceStream = getInputStreamForTypeMappingResource(resourceName);
+            var isr = new InputStreamReader(resourceStream, StandardCharsets.UTF_8)
+        ) {
             var expectedBytes = CharStreams.toString(isr).getBytes(StandardCharsets.UTF_8);
-            return (Map<String,Object>) jsonAccumulator.consumeByteBuffer(ByteBuffer.wrap(expectedBytes));
+            return (Map<String, Object>) jsonAccumulator.consumeByteBuffer(ByteBuffer.wrap(expectedBytes));
         }
     }
 
-    private static void transformAndVerifyResult(Map<String,Object> json, String expectedValueSource) throws Exception {
+    private static void transformAndVerifyResult(Map<String, Object> json, String expectedValueSource)
+        throws Exception {
         var jsonTransformer = getJsonTransformer();
         json = jsonTransformer.transformJson(json);
         var jsonAsStr = objectMapper.writeValueAsString(json);

@@ -1,7 +1,44 @@
 package com.rfs;
 
+import java.io.BufferedReader;
+import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
+import java.net.URI;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Comparator;
+import java.util.List;
+import java.util.Objects;
+import java.util.Optional;
+import java.util.Random;
+import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.UnaryOperator;
+import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
+import org.apache.lucene.document.Document;
+import org.hamcrest.MatcherAssert;
+import org.hamcrest.Matchers;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
+
+import org.opensearch.testcontainers.OpensearchContainer;
+
 import com.rfs.cms.ApacheHttpClient;
-import com.rfs.cms.OpenSearchWorkCoordinator;
 import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.common.ConnectionDetails;
 import com.rfs.common.DefaultSourceRepoAccessor;
@@ -14,9 +51,9 @@ import com.rfs.common.RestClient;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
+import com.rfs.framework.PreloadedSearchClusterContainer;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.http.SearchClusterRequests;
-import com.rfs.framework.PreloadedSearchClusterContainer;
 import com.rfs.models.GlobalMetadata;
 import com.rfs.models.IndexMetadata;
 import com.rfs.models.ShardMetadata;
@@ -254,8 +291,13 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                         "Presuming that work was complete and that all worker processes should terminate");
                 throw new ExpectedMigrationWorkTerminationException(e, runNumber);
             } catch (Exception e) {
-                log.atError().setCause(e).setMessage(()->"Caught an exception, " +
-                        "but just going to run again with this worker to simulate task/container recycling").log();
+                log.atError()
+                    .setCause(e)
+                    .setMessage(
+                        () -> "Caught an exception, "
+                            + "but just going to run again with this worker to simulate task/container recycling"
+                    )
+                    .log();
             }
         }
     }
@@ -274,7 +316,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         }
     }
 
-    static class LeasePastError extends Error { }
+    static class LeasePastError extends Error {}
 
     @SneakyThrows
     private DocumentsRunner.CompletionStatus migrateDocumentsWithOneWorker(SourceRepo sourceRepo,
@@ -287,7 +329,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
     {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
         var shouldThrow = new AtomicBoolean();
-        try (var processManager = new LeaseExpireTrigger(workItemId->{
+        try (var processManager = new LeaseExpireTrigger(workItemId -> {
             log.atDebug().setMessage("Lease expired for " + workItemId + " making next document get throw").log();
             shouldThrow.set(true);
         })) {
@@ -299,15 +341,18 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
             };
 
             DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
-            SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(repoAccessor,
-                    tempDir, ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES);
+            SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(
+                repoAccessor,
+                tempDir,
+                ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES
+            );
 
             SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
             IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
             ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
             final int ms_window = 1000;
-            final var nextClockShift = (int)(clockJitter.nextDouble() * ms_window)-(ms_window/2);
-            log.info("nextClockShift="+nextClockShift);
+            final var nextClockShift = (int) (clockJitter.nextDouble() * ms_window) - (ms_window / 2);
+            log.info("nextClockShift=" + nextClockShift);
 
             return RfsMigrateDocuments.run(path -> new FilteredLuceneDocumentsReader(path, terminatingDocumentFilter),
                     new DocumentReindexer(new OpenSearchClient(targetAddress, null)),

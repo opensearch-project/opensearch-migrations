@@ -4,6 +4,8 @@ import java.net.URI;
 
 public interface HttpRequestFirstLine {
     String verb();
+
     URI path();
+
     String version();
 }

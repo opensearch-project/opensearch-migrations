@@ -18,7 +18,6 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
     private Channel outboundChannel;
     private BacksideConnectionPool backsideConnectionPool;
 
-
     /**
      * Create a handler that sets the autorelease flag
      */
@@ -47,19 +46,20 @@ public class FrontsideHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(final ChannelHandlerContext ctx, Object msg) {
-        log.debug("frontend handler[" + this.outboundChannel + "] read: "+msg);
+        log.debug("frontend handler[" + this.outboundChannel + "] read: " + msg);
         if (outboundChannel.isActive()) {
             log.debug("Writing data to backside handler " + outboundChannel);
-            outboundChannel.writeAndFlush(msg)
-                    .addListener((ChannelFutureListener) future -> {
-                        if (future.isSuccess()) {
-                            ctx.channel().read(); // kickoff another read for the frontside
-                        } else {
-                            log.debug("closing outbound channel because WRITE future was not successful due to: ",
-                                    future.cause());
-                            future.channel().close(); // close the backside
-                        }
-                    });
+            outboundChannel.writeAndFlush(msg).addListener((ChannelFutureListener) future -> {
+                if (future.isSuccess()) {
+                    ctx.channel().read(); // kickoff another read for the frontside
+                } else {
+                    log.debug(
+                        "closing outbound channel because WRITE future was not successful due to: ",
+                        future.cause()
+                    );
+                    future.channel().close(); // close the backside
+                }
+            });
             outboundChannel.config().setAutoRead(true);
         } else { // if the outbound channel has died, so be it... let this frontside finish with its call naturally
             log.warn("Output channel (" + outboundChannel + ") is NOT active");

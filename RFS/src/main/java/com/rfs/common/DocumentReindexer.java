@@ -8,6 +8,8 @@ import lombok.RequiredArgsConstructor;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.document.Document;
+
+import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
@@ -22,8 +24,8 @@ public class DocumentReindexer {
                                      Flux<Document> documentStream,
                                      IDocumentMigrationContexts.IDocumentReindexContext context) {
 
-        return documentStream
-            .map(this::convertDocumentToBulkSection)  // Convert each Document to part of a bulk operation
+        return documentStream.map(this::convertDocumentToBulkSection)  // Convert each Document to part of a bulk
+                                                                       // operation
             .buffer(MAX_BATCH_SIZE) // Collect until you hit the batch size
             .doOnNext(bulk -> logger.info("{} documents in current bulk request", bulk.size()))
             .map(this::convertToBulkRequestBody)  // Assemble the bulk request body from the parts

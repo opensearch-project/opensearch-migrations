@@ -5,5 +5,6 @@ import java.time.Instant;
 
 public interface BufferedFlowController {
     void stopReadsPast(Instant pointInTime);
+
     Duration getBufferTimeWindow();
 }

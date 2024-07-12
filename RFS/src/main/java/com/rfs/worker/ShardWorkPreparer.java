@@ -17,6 +17,15 @@ import java.util.List;
 import java.util.function.BiConsumer;
 import java.util.stream.IntStream;
 
+import com.rfs.cms.IWorkCoordinator;
+import com.rfs.cms.ScopedWorkCoordinator;
+import com.rfs.common.FilterScheme;
+import com.rfs.common.SnapshotRepo;
+import com.rfs.models.IndexMetadata;
+import lombok.Lombok;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
+
 /**
  * This class adds workitemes (leasable mutexes) via the WorkCoordinator so that future
  * runs of the DocumentsRunner can pick one of those items and migrate the documents for
@@ -93,7 +102,8 @@ public class ShardWorkPreparer {
                 log.info("Index " + indexName + " rejected by allowlist");
             }
         };
-        repoDataProvider.getIndicesInSnapshot(snapshotName).stream()
+        repoDataProvider.getIndicesInSnapshot(snapshotName)
+            .stream()
             .filter(FilterScheme.filterIndicesByAllowList(indexAllowlist, logger))
             .forEach(index -> {
                 IndexMetadata indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());

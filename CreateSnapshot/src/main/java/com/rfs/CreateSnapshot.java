@@ -1,5 +1,7 @@
 package com.rfs;
 
+import java.util.function.Function;
+
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
@@ -28,36 +30,30 @@ import java.util.function.Function;
 @Slf4j
 public class CreateSnapshot {
     public static class Args {
-        @Parameter(names = {"--snapshot-name"},
-                required = true,
-                description = "The name of the snapshot to migrate")
+        @Parameter(names = { "--snapshot-name" }, required = true, description = "The name of the snapshot to migrate")
         public String snapshotName;
 
-        @Parameter(names = {"--file-system-repo-path"},
-                required = false,
-                description = "The full path to the snapshot repo on the file system.")
+        @Parameter(names = {
+            "--file-system-repo-path" }, required = false, description = "The full path to the snapshot repo on the file system.")
         public String fileSystemRepoPath;
 
-        @Parameter(names = {"--s3-repo-uri"},
-                required = false,
-                description = "The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2")
+        @Parameter(names = {
+            "--s3-repo-uri" }, required = false, description = "The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2")
         public String s3RepoUri;
 
-        @Parameter(names = {"--s3-region"},
-                required = false,
-                description = "The AWS Region the S3 bucket is in, like: us-east-2"
-        )
+        @Parameter(names = {
+            "--s3-region" }, required = false, description = "The AWS Region the S3 bucket is in, like: us-east-2")
         public String s3Region;
 
         @ParametersDelegate
         public ConnectionDetails.SourceArgs sourceArgs;
 
-        @Parameter(names = {"--no-wait"}, description = "Optional.  If provided, the snapshot runner will not wait for completion")
+        @Parameter(names = {
+            "--no-wait" }, description = "Optional.  If provided, the snapshot runner will not wait for completion")
         public boolean noWait = false;
 
-        @Parameter(names = {"--max-snapshot-rate-mb-per-node"},
-                required = false,
-                description = "The maximum snapshot rate in megabytes per second per node")
+        @Parameter(names = {
+            "--max-snapshot-rate-mb-per-node" }, required = false, description = "The maximum snapshot rate in megabytes per second per node")
         public Integer maxSnapshotRateMBPerNode;
 
         @Parameter(required = false,
@@ -78,10 +74,7 @@ public class CreateSnapshot {
     public static void main(String[] args) throws Exception {
         // Grab out args
         Args arguments = new Args();
-        JCommander.newBuilder()
-                .addObject(arguments)
-                .build()
-                .parse(args);
+        JCommander.newBuilder().addObject(arguments).build().parse(args);
 
         var rootContext = new RootSnapshotContext(
                 RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "rfs"),
@@ -108,8 +101,11 @@ public class CreateSnapshot {
         );
     }
 
-    public static void run(Function<OpenSearchClient, SnapshotCreator> snapshotCreatorFactory,
-                           OpenSearchClient openSearchClient, boolean noWait) throws Exception {
+    public static void run(
+        Function<OpenSearchClient, SnapshotCreator> snapshotCreatorFactory,
+        OpenSearchClient openSearchClient,
+        boolean noWait
+    ) throws Exception {
         TryHandlePhaseFailure.executeWithTryCatch(() -> {
             if (noWait) {
                 SnapshotRunner.run(snapshotCreatorFactory.apply(openSearchClient));
@@ -119,5 +115,3 @@ public class CreateSnapshot {
         });
     }
 }
-
-

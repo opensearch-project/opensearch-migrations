@@ -1,11 +1,13 @@
 package org.opensearch.migrations.trafficcapture;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import java.nio.charset.StandardCharsets;
+import java.time.Instant;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-import java.time.Instant;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 
 class CodedOutputStreamSizeUtilTest {
 
@@ -14,12 +16,12 @@ class CodedOutputStreamSizeUtilTest {
         // Timestamp with only seconds (no explicit nanoseconds)
         Instant timestampSecondsOnly = Instant.parse("2024-01-01T00:00:00Z");
         int sizeSecondsOnly = CodedOutputStreamSizeUtil.getSizeOfTimestamp(timestampSecondsOnly);
-        Assertions.assertEquals( 6, sizeSecondsOnly);
+        Assertions.assertEquals(6, sizeSecondsOnly);
 
         // Timestamp with both seconds and nanoseconds
         Instant timestampWithNanos = Instant.parse("2024-12-31T23:59:59.123456789Z");
         int sizeWithNanos = CodedOutputStreamSizeUtil.getSizeOfTimestamp(timestampWithNanos);
-        Assertions.assertEquals( 11, sizeWithNanos);
+        Assertions.assertEquals(11, sizeWithNanos);
     }
 
     @Test
@@ -54,7 +56,6 @@ class CodedOutputStreamSizeUtilTest {
         Assertions.assertEquals(1000004, result);
     }
 
-
     @Test
     void test_computeByteBufRemainingSize_ByteBufAtCapacity() {
         ByteBuf buf = Unpooled.buffer(4);
@@ -75,7 +76,10 @@ class CodedOutputStreamSizeUtilTest {
         int observationContentSize = 50;
         int numberOfTrafficStreamsSoFar = 10;
 
-        int result = CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(observationContentSize, numberOfTrafficStreamsSoFar);
+        int result = CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(
+            observationContentSize,
+            numberOfTrafficStreamsSoFar
+        );
         Assertions.assertEquals(54, result);
     }
 
@@ -84,7 +88,10 @@ class CodedOutputStreamSizeUtilTest {
         int observationContentSize = 0;
         int numberOfTrafficStreamsSoFar = 0;
 
-        int result = CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(observationContentSize, numberOfTrafficStreamsSoFar);
+        int result = CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(
+            observationContentSize,
+            numberOfTrafficStreamsSoFar
+        );
         Assertions.assertEquals(4, result);
     }
 
@@ -93,11 +100,14 @@ class CodedOutputStreamSizeUtilTest {
         int observationContentSize = 20;
 
         // Test with increasing indices to verify scaling of index size
-        int[] indices = new int[]{1, 1000, 100000};
-        int[] expectedResults = new int[]{24, 25, 26};
+        int[] indices = new int[] { 1, 1000, 100000 };
+        int[] expectedResults = new int[] { 24, 25, 26 };
 
         for (int i = 0; i < indices.length; i++) {
-            int result = CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(observationContentSize, indices[i]);
+            int result = CodedOutputStreamSizeUtil.bytesNeededForObservationAndClosingIndex(
+                observationContentSize,
+                indices[i]
+            );
             Assertions.assertEquals(expectedResults[i], result);
         }
     }

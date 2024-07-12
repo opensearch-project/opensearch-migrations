@@ -1,14 +1,15 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
+import java.util.function.Function;
+
 import io.netty.handler.codec.http.HttpRequest;
 import lombok.Getter;
-
-import java.util.function.Function;
 
 public class RequestCapturePredicate implements Function<HttpRequest, RequestCapturePredicate.CaptureDirective> {
 
     public enum CaptureDirective {
-        CAPTURE, DROP
+        CAPTURE,
+        DROP
     }
 
     @Getter
