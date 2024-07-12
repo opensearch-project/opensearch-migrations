@@ -145,7 +145,7 @@ public class RfsMigrateDocuments {
 
 
         try (var processManager = new LeaseExpireTrigger(workItemId->{
-            log.error("Terminating RunRfsWorker because its lease has expired for " + workItemId);
+            log.error("Terminating RfsMigrateDocuments because its lease has expired for " + workItemId);
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC())) {
             var workCoordinator = new OpenSearchWorkCoordinator(new ApacheHttpClient(new URI(arguments.targetHost)),
