@@ -1,13 +1,16 @@
 package com.rfs.common;
 
-import com.beust.jcommander.IStringConverter;
-import com.beust.jcommander.ParameterException;
+import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LoggerContext;
 import org.apache.logging.log4j.core.config.Configuration;
-import org.apache.logging.log4j.Level;
+
+import com.beust.jcommander.IStringConverter;
+import com.beust.jcommander.ParameterException;
 
 public class Logging {
+    private Logging() {}
+
     public static void setLevel(Level level) {
         LoggerContext ctx = (LoggerContext) LogManager.getContext(false);
         Configuration config = ctx.getConfiguration();

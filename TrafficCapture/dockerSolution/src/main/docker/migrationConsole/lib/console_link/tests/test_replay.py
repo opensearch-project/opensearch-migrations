@@ -1,11 +1,14 @@
+import json
 import pathlib
 
 import pytest
+import yaml
 
-from console_link.environment import get_replayer
+import console_link.middleware.replay as replay_
+from console_link.models.ecs_service import ECSService
+from console_link.models.factories import get_replayer
 from console_link.models.replayer_base import Replayer
 from console_link.models.replayer_ecs import ECSReplayer
-from console_link.models.ecs_service import ECSService
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 AWS_REGION = "us-east-1"
@@ -85,3 +88,31 @@ def test_replayer_scale_sets_ecs_desired_count(mocker):
 
     assert isinstance(replayer, ECSReplayer)
     mock.assert_called_once_with(replayer.ecs_client, 5)
+
+
+def test_replayer_describe_no_json():
+    config = {
+        "ecs": {
+            "cluster_name": "migration-aws-integ-ecs-cluster",
+            "service_name": "migration-aws-integ-traffic-replayer-default"
+        },
+        "scale": 3
+    }
+    replayer = get_replayer(config)
+    success, output = replay_.describe(replayer, as_json=False)
+    assert success
+    assert output == yaml.safe_dump(config)
+
+
+def test_replayer_describe_as_json():
+    config = {
+        "ecs": {
+            "cluster_name": "migration-aws-integ-ecs-cluster",
+            "service_name": "migration-aws-integ-traffic-replayer-default"
+        },
+        "scale": 3
+    }
+    replayer = get_replayer(config)
+    success, output = replay_.describe(replayer, as_json=True)
+    assert success
+    assert json.loads(output) == config

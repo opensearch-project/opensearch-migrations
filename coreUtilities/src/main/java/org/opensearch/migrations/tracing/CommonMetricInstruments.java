@@ -7,7 +7,6 @@ public class CommonMetricInstruments {
     final LongCounter exceptionCounter;
 
     public CommonMetricInstruments(Meter meter, String activityName) {
-        exceptionCounter = meter
-                .counterBuilder(activityName + "ExceptionCount").build();
+        exceptionCounter = meter.counterBuilder(activityName + "ExceptionCount").build();
     }
 }

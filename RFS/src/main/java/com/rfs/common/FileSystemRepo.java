@@ -17,7 +17,7 @@ public class FileSystemRepo implements SourceRepo {
         Pattern pattern = Pattern.compile("^index-(\\d+)$");
         Path highestVersionedFile = null;
         int highestVersion = -1;
-        
+
         try (DirectoryStream<Path> stream = Files.newDirectoryStream(repoRootDir)) {
             for (Path entry : stream) {
                 if (Files.isRegularFile(entry)) {
@@ -57,40 +57,37 @@ public class FileSystemRepo implements SourceRepo {
 
     @Override
     public Path getGlobalMetadataFilePath(String snapshotId) {
-        String filePath = getRepoRootDir().toString() + "/meta-" + snapshotId + ".dat";
-        return Path.of(filePath);
+        return getRepoRootDir().resolve("meta-" + snapshotId + ".dat");
     }
 
     @Override
     public Path getSnapshotMetadataFilePath(String snapshotId) {
-        String filePath = getRepoRootDir().toString() + "/snap-" + snapshotId + ".dat";
-        return Path.of(filePath);
+        return getRepoRootDir().resolve("snap-" + snapshotId + ".dat");
     }
 
     @Override
     public Path getIndexMetadataFilePath(String indexId, String indexFileId) {
-        String filePath = getRepoRootDir().toString() + "/indices/" + indexId + "/meta-" + indexFileId + ".dat";
-        return Path.of(filePath);
+        return getRepoRootDir().resolve("indices").resolve(indexId).resolve("meta-" + indexFileId + ".dat");
     }
 
     @Override
     public Path getShardDirPath(String indexId, int shardId) {
-        String shardDirPath = getRepoRootDir().toString() + "/indices/" + indexId + "/" + shardId;
+        String shardDirPath = getRepoRootDir().resolve("indices")
+            .resolve(indexId)
+            .resolve(String.valueOf(shardId))
+            .toString();
         return Path.of(shardDirPath);
     }
 
     @Override
     public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) {
-        Path shardDirPath = getShardDirPath(indexId, shardId);
-        Path filePath = shardDirPath.resolve("snap-" + snapshotId + ".dat");
-        return filePath;
+        return getShardDirPath(indexId, shardId).resolve("snap-" + snapshotId + ".dat");
     }
 
     @Override
     public Path getBlobFilePath(String indexId, int shardId, String blobName) {
         Path shardDirPath = getShardDirPath(indexId, shardId);
-        Path filePath = shardDirPath.resolve(blobName);
-        return filePath;
+        return shardDirPath.resolve(blobName);
     }
 
     @Override

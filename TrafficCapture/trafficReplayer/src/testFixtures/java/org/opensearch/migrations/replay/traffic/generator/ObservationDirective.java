@@ -10,15 +10,19 @@ public class ObservationDirective {
     public static ObservationDirective read(int i) {
         return new ObservationDirective(OffloaderCommandType.Read, i);
     }
+
     public static ObservationDirective eom() {
         return new ObservationDirective(OffloaderCommandType.EndOfMessage, 0);
     }
+
     public static ObservationDirective cancelOffload() {
         return new ObservationDirective(OffloaderCommandType.DropRequest, 0);
     }
+
     public static ObservationDirective write(int i) {
         return new ObservationDirective(OffloaderCommandType.Write, i);
     }
+
     public static ObservationDirective flush() {
         return new ObservationDirective(OffloaderCommandType.Flush, 0);
     }

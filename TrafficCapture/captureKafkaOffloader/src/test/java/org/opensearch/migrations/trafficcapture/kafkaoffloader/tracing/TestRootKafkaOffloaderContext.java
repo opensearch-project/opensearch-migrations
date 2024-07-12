@@ -1,14 +1,16 @@
 package org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing;
 
-import io.opentelemetry.sdk.testing.exporter.InMemoryMetricExporter;
-import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
-import lombok.Getter;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.tracing.RootOtelContext;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
 import org.opensearch.migrations.trafficcapture.tracing.IRootOffloaderContext;
 
-public class TestRootKafkaOffloaderContext extends RootOtelContext implements IRootOffloaderContext, IRootKafkaOffloaderContext {
+import lombok.Getter;
+
+public class TestRootKafkaOffloaderContext extends RootOtelContext
+    implements
+        IRootOffloaderContext,
+        IRootKafkaOffloaderContext {
     @Getter
     public final KafkaRecordContext.MetricInstruments kafkaOffloadingInstruments;
     @Getter
@@ -29,8 +31,11 @@ public class TestRootKafkaOffloaderContext extends RootOtelContext implements IR
     }
 
     public TestRootKafkaOffloaderContext(InMemoryInstrumentationBundle inMemoryInstrumentationBundle) {
-        super("tests", DO_NOTHING_TRACKER, inMemoryInstrumentationBundle == null ? null :
-                inMemoryInstrumentationBundle.openTelemetrySdk);
+        super(
+            "tests",
+            DO_NOTHING_TRACKER,
+            inMemoryInstrumentationBundle == null ? null : inMemoryInstrumentationBundle.openTelemetrySdk
+        );
         this.inMemoryInstrumentationBundle = inMemoryInstrumentationBundle;
         final var meter = getMeterProvider().get("test");
         this.kafkaOffloadingInstruments = KafkaRecordContext.makeMetrics(meter);

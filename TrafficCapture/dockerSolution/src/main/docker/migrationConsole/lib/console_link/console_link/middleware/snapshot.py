@@ -11,7 +11,7 @@ def create(snapshot: Snapshot, *args, **kwargs) -> CommandResult:
         return snapshot.create(*args, **kwargs)
     except Exception as e:
         logger.error(f"Failure running create snapshot: {e}")
-        return CommandResult(status=False, message=f"Failure running create snapshot: {e}")
+        return CommandResult(success=False, value=f"Failure running create snapshot: {e}")
 
 
 def status(snapshot: Snapshot, *args, **kwargs) -> CommandResult:

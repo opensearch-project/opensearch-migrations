@@ -11,5 +11,5 @@ import org.opensearch.migrations.replay.util.TrackedFuture;
  */
 public interface IPacketFinalizingConsumer<R> extends IPacketConsumer {
 
-    TrackedFuture<String,R> finalizeRequest();
+    TrackedFuture<String, R> finalizeRequest();
 }

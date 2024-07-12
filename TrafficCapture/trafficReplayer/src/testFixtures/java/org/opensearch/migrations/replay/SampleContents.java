@@ -10,8 +10,7 @@ public class SampleContents {
     private SampleContents() {}
 
     public static String loadSampleJsonRequestAsString() throws IOException {
-        try (var inputStream =
-                 SampleContents.class.getResourceAsStream(SAMPLE_REQUEST_MESSAGE_JSON_RESOURCE_NAME)) {
+        try (var inputStream = SampleContents.class.getResourceAsStream(SAMPLE_REQUEST_MESSAGE_JSON_RESOURCE_NAME)) {
             return new String(inputStream.readAllBytes(), StandardCharsets.UTF_8);
         }
     }

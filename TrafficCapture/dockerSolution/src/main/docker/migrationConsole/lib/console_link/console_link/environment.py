@@ -1,39 +1,20 @@
 import logging
-from typing import Optional, Dict
+from typing import Optional
+from console_link.models.factories import get_replayer, get_backfill, get_kafka, get_snapshot, \
+    get_metrics_source
 from console_link.models.cluster import Cluster
 from console_link.models.metrics_source import MetricsSource
-from console_link.logic.metrics import get_metrics_source
-from console_link.logic.backfill import get_backfill
 from console_link.models.backfill_base import Backfill
-from console_link.models.snapshot import FileSystemSnapshot, Snapshot, S3Snapshot
+from console_link.models.snapshot import Snapshot
 from console_link.models.replayer_base import Replayer
-from console_link.models.replayer_ecs import ECSReplayer
-from console_link.models.replayer_docker import DockerReplayer
-from console_link.models.kafka import Kafka, MSK, StandardKafka
+from console_link.models.kafka import Kafka
+
 import yaml
 from cerberus import Validator
 
 from console_link.models.metadata import Metadata
 
 logger = logging.getLogger(__name__)
-
-
-def get_snapshot(config: Dict, source_cluster: Cluster):
-    if 'fs' in config:
-        return FileSystemSnapshot(config, source_cluster)
-    return S3Snapshot(config, source_cluster)
-
-
-def get_replayer(config: Dict):
-    if 'ecs' in config:
-        return ECSReplayer(config)
-    return DockerReplayer(config)
-
-
-def get_kafka(config: Dict):
-    if 'msk' in config:
-        return MSK(config)
-    return StandardKafka(config)
 
 
 SCHEMA = {

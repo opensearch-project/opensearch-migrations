@@ -1,13 +1,13 @@
 package com.rfs.cms;
 
+import java.io.IOException;
+import java.time.Duration;
+import java.time.Instant;
+
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.ToString;
-
-import java.io.IOException;
-import java.time.Duration;
-import java.time.Instant;
 
 /**
  * Multiple workers can create an instance of this class to coordinate what work each of them
@@ -52,8 +52,8 @@ public interface IWorkCoordinator extends AutoCloseable {
      * @throws IOException if there was an error resolving the lease ownership
      * @throws LeaseLockHeldElsewhereException if the lease is owned by another process
      */
-    @NonNull WorkAcquisitionOutcome createOrUpdateLeaseForWorkItem(String workItemId, Duration leaseDuration)
-            throws IOException;
+    @NonNull
+    WorkAcquisitionOutcome createOrUpdateLeaseForWorkItem(String workItemId, Duration leaseDuration) throws IOException;
 
     /**
      * Scan the created work items that have not yet had leases acquired and have not yet finished.
@@ -92,9 +92,6 @@ public interface IWorkCoordinator extends AutoCloseable {
      */
     boolean workItemsArePending() throws IOException, InterruptedException;
 
-
-
-
     /**
      * Used as a discriminated union of different outputs that can be returned from acquiring a lease.
      * Exceptions are too difficult/unsafe to deal with when going across lambdas and lambdas seem
@@ -106,7 +103,9 @@ public interface IWorkCoordinator extends AutoCloseable {
 
     interface WorkAcquisitionOutcomeVisitor<T> {
         T onAlreadyCompleted() throws IOException;
+
         T onNoAvailableWorkToBeDone() throws IOException;
+
         T onAcquiredWork(WorkItemAndDuration workItem) throws IOException, InterruptedException;
     }
 
@@ -114,7 +113,8 @@ public interface IWorkCoordinator extends AutoCloseable {
      * This represents that a work item was already completed.
      */
     class AlreadyCompleted implements WorkAcquisitionOutcome {
-        @Override public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException {
+        @Override
+        public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException {
             return v.onAlreadyCompleted();
         }
     }
@@ -129,11 +129,12 @@ public interface IWorkCoordinator extends AutoCloseable {
             return v.onNoAvailableWorkToBeDone();
         }
     }
+
     /**
      * This represents when the lease wasn't acquired because another process already owned the
      * lease.
      */
-    class LeaseLockHeldElsewhereException extends RuntimeException { }
+    class LeaseLockHeldElsewhereException extends RuntimeException {}
 
     /**
      * What's the id of the work item (which is determined by calls to createUnassignedWorkItem or
@@ -147,7 +148,9 @@ public interface IWorkCoordinator extends AutoCloseable {
     class WorkItemAndDuration implements WorkAcquisitionOutcome {
         final String workItemId;
         final Instant leaseExpirationTime;
-        @Override public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException, InterruptedException {
+
+        @Override
+        public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException, InterruptedException {
             return v.onAcquiredWork(this);
         }
     }

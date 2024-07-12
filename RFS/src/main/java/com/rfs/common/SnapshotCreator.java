@@ -1,13 +1,13 @@
 package com.rfs.common;
 
+import java.util.Optional;
+
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
-
-import java.util.Optional;
 
 public abstract class SnapshotCreator {
     private static final Logger logger = LogManager.getLogger(SnapshotCreator.class);
@@ -57,9 +57,9 @@ public abstract class SnapshotCreator {
         // Create the snapshot; idempotent operation
         try {
             client.createSnapshot(getRepoName(), snapshotName, body);
-            logger.info("Snapshot " + snapshotName + " creation initiated");
+            logger.info("Snapshot {} creation initiated", snapshotName);
         } catch (Exception e) {
-            logger.error("Snapshot " + snapshotName + " creation failed", e);
+            logger.error("Snapshot {} creation failed", snapshotName, e);
             throw new SnapshotCreationFailed(snapshotName);
         }
     }
@@ -74,21 +74,21 @@ public abstract class SnapshotCreator {
         }
 
         if (response.isEmpty()) {
-            logger.error("Snapshot " + snapshotName + " does not exist");
+            logger.error("Snapshot {} does not exist", snapshotName);
             throw new SnapshotDoesNotExist(snapshotName);
         }
 
         JsonNode responseJson = response.get();
         JsonNode firstSnapshot = responseJson.path("snapshots").get(0);
         JsonNode stateNode = firstSnapshot.path("state");
-        String state = stateNode.asText();        
+        String state = stateNode.asText();
 
         if (state.equals("SUCCESS")) {
             return true;
         } else if (state.equals("IN_PROGRESS")) {
             return false;
         } else {
-            logger.error("Snapshot " + snapshotName + " has failed with state " + state);
+            logger.error("Snapshot {} has failed with state {}", snapshotName, state);
             throw new SnapshotCreationFailed(snapshotName);
         }
     }

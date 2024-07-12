@@ -1,14 +1,15 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+import java.util.ArrayList;
+import java.util.List;
+
+import org.opensearch.migrations.transform.IAuthTransformer;
+
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.transform.IAuthTransformer;
-
-import java.util.ArrayList;
-import java.util.List;
 
 @Slf4j
 public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
@@ -30,7 +31,7 @@ public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
             var httpContent = (HttpContent) msg;
             httpContentsBuffer.add(httpContent);
             signer.consumeNextPayloadPart(httpContent.content().nioBuffer());
-            if  (msg instanceof LastHttpContent) {
+            if (msg instanceof LastHttpContent) {
                 signer.finalizeSignature(httpMessage);
                 flushDownstream(ctx);
             }
@@ -41,7 +42,7 @@ public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
 
     private boolean flushDownstream(ChannelHandlerContext ctx) {
         boolean messageFlushed = httpMessage != null || !httpContentsBuffer.isEmpty();
-        if(httpMessage != null) {
+        if (httpMessage != null) {
             ctx.fireChannelRead(httpMessage);
             httpMessage = null;
         }
@@ -54,8 +55,12 @@ public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
     public void handlerRemoved(ChannelHandlerContext ctx) throws Exception {
         boolean messageFlushed = flushDownstream(ctx);
         if (messageFlushed) {
-            log.atWarn().setMessage(() -> "Failed to sign message due to handler removed"
-                                          + " before the end of the http contents were received").log();
+            log.atWarn()
+                .setMessage(
+                    () -> "Failed to sign message due to handler removed"
+                        + " before the end of the http contents were received"
+                )
+                .log();
         }
         super.handlerRemoved(ctx);
     }
@@ -64,8 +69,12 @@ public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
     public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
         boolean messageFlushed = flushDownstream(ctx);
         if (messageFlushed) {
-            log.atWarn().setMessage(() -> "Failed to sign message due to channel unregistered"
-                                          + " before the end of the http contents were received").log();
+            log.atWarn()
+                .setMessage(
+                    () -> "Failed to sign message due to channel unregistered"
+                        + " before the end of the http contents were received"
+                )
+                .log();
         }
         super.channelUnregistered(ctx);
     }

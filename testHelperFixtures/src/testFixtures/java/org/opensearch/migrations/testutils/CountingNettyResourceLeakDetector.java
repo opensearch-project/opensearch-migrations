@@ -1,13 +1,13 @@
 package org.opensearch.migrations.testutils;
 
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
+
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.util.ResourceLeakDetector;
 import io.netty.util.ResourceLeakDetectorFactory;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.extern.slf4j.Slf4j;
-
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * This class doesn't do too much over the stock ResourceLeakDetector, but it does help
@@ -23,7 +23,9 @@ public class CountingNettyResourceLeakDetector<T> extends ResourceLeakDetector<T
      * Do everything necessary to turn leak detection on with the highest sensitivity.
      */
     public static void activate() {
-        ResourceLeakDetectorFactory.setResourceLeakDetectorFactory(new CountingNettyResourceLeakDetector.MyResourceLeakDetectorFactory());
+        ResourceLeakDetectorFactory.setResourceLeakDetectorFactory(
+            new CountingNettyResourceLeakDetector.MyResourceLeakDetectorFactory()
+        );
         ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
         numLeaksFoundAtomic.set(0);
     }
@@ -44,7 +46,11 @@ public class CountingNettyResourceLeakDetector<T> extends ResourceLeakDetector<T
         }
 
         @Override
-        public <T> ResourceLeakDetector<T> newResourceLeakDetector(Class<T> resource, int samplingInterval, long maxActive) {
+        public <T> ResourceLeakDetector<T> newResourceLeakDetector(
+            Class<T> resource,
+            int samplingInterval,
+            long maxActive
+        ) {
             return new CountingNettyResourceLeakDetector<>(resource, samplingInterval);
         }
     }
@@ -77,7 +83,7 @@ public class CountingNettyResourceLeakDetector<T> extends ResourceLeakDetector<T
 
     private static void setupMonitoringLogger() {
         var eventExecutor = new NioEventLoopGroup(1, new DefaultThreadFactory("leakMonitor"));
-        eventExecutor.scheduleAtFixedRate(()->{
+        eventExecutor.scheduleAtFixedRate(() -> {
             System.gc();
             System.runFinalization();
             var numLeaks = numLeaksFoundAtomic.get();

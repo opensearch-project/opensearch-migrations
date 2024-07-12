@@ -1,15 +1,15 @@
 package org.opensearch.migrations.replay.util;
 
-import io.netty.util.AbstractReferenceCounted;
-import io.netty.util.ReferenceCounted;
-
-import java.util.function.Predicate;
-import org.junit.jupiter.api.Test;
-
 import java.util.ArrayList;
 import java.util.List;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import org.junit.jupiter.api.Test;
+
+import io.netty.util.AbstractReferenceCounted;
+import io.netty.util.ReferenceCounted;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -18,12 +18,17 @@ class RefSafeStreamUtilsTest {
     @Test
     void refSafeMap_shouldMapAndReleaseResources() {
         Stream<String> inputStream = Stream.of("a", "b", "c");
-        
+
         List<TestReferenceCounted> result;
-        try (Stream<TestReferenceCounted> mappedStream = RefSafeStreamUtils.refSafeMap(inputStream, TestReferenceCounted::new)) {
+        try (
+            Stream<TestReferenceCounted> mappedStream = RefSafeStreamUtils.refSafeMap(
+                inputStream,
+                TestReferenceCounted::new
+            )
+        ) {
             result = mappedStream.collect(Collectors.toList());
         }
-        
+
         assertEquals(3, result.size());
         assertTrue(result.stream().allMatch(TestReferenceCounted::isReleased));
     }
@@ -33,15 +38,11 @@ class RefSafeStreamUtilsTest {
         Stream<String> inputStream = Stream.of("a", "b", "c");
 
         List<TestReferenceCounted> refCountedObjects = new ArrayList<>();
-        List<String> result = RefSafeStreamUtils.refSafeTransform(
-                inputStream,
-                value -> {
-                    TestReferenceCounted refCounted = new TestReferenceCounted(value);
-                    refCountedObjects.add(refCounted);
-                    return refCounted;
-                },
-                stream -> stream.map(TestReferenceCounted::getValue).collect(Collectors.toList())
-        );
+        List<String> result = RefSafeStreamUtils.refSafeTransform(inputStream, value -> {
+            TestReferenceCounted refCounted = new TestReferenceCounted(value);
+            refCountedObjects.add(refCounted);
+            return refCounted;
+        }, stream -> stream.map(TestReferenceCounted::getValue).collect(Collectors.toList()));
 
         assertEquals(List.of("a", "b", "c"), result);
         assertTrue(refCountedObjects.stream().allMatch(TestReferenceCounted::isReleased));
@@ -50,20 +51,18 @@ class RefSafeStreamUtilsTest {
     @Test
     void refSafeMap_shouldHandleExceptionDuringMapping() {
         List<String> inputStreamConsumedObjects = new ArrayList<>();
-        Stream<String> inputStream = Stream.of("a", "b", "c", "d", "e")
-            .peek(inputStreamConsumedObjects::add);
+        Stream<String> inputStream = Stream.of("a", "b", "c", "d", "e").peek(inputStreamConsumedObjects::add);
 
         List<TestReferenceCounted> refCountedObjects = new ArrayList<>();
         assertThrows(RuntimeException.class, () -> {
-            try (Stream<TestReferenceCounted> mappedStream = RefSafeStreamUtils.refSafeMap(inputStream,
-                value -> {
-                    if (value.equals("d")) {
-                        throw new RuntimeException("Simulated exception");
-                    }
-                    TestReferenceCounted refCounted = new TestReferenceCounted(value);
-                    refCountedObjects.add(refCounted);
-                    return refCounted;
-                })) {
+            try (Stream<TestReferenceCounted> mappedStream = RefSafeStreamUtils.refSafeMap(inputStream, value -> {
+                if (value.equals("d")) {
+                    throw new RuntimeException("Simulated exception");
+                }
+                TestReferenceCounted refCounted = new TestReferenceCounted(value);
+                refCountedObjects.add(refCounted);
+                return refCounted;
+            })) {
                 try {
                     mappedStream.collect(Collectors.toList());
                 } finally {

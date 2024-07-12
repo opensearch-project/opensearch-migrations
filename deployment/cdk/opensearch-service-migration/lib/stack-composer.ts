@@ -215,7 +215,6 @@ export class StackComposer {
         const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotServiceEnabled = this.getContextForType('reindexFromSnapshotServiceEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotExtraArgs = this.getContextForType('reindexFromSnapshotExtraArgs', 'string', defaultValues, contextJSON)
-        const albEnabled = this.getContextForType('albEnabled', 'boolean', defaultValues, contextJSON);
         const albAcmCertArn = this.getContextForType('albAcmCertArn', 'string', defaultValues, contextJSON);
 
         const requiredFields: { [key: string]: any; } = {"stage":stage, "domainName":domainName}
@@ -271,10 +270,12 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 addOnMigrationDeployId: addOnMigrationDeployId,
-                albEnabled: albEnabled,
                 albAcmCertArn: albAcmCertArn,
                 elasticsearchServiceEnabled,
                 captureProxyESServiceEnabled,
+                captureProxyServiceEnabled,
+                targetClusterProxyServiceEnabled,
+                migrationAPIEnabled,
                 sourceClusterEndpoint: sourceClusterEndpoint,
                 env: props.env
             })
@@ -557,6 +558,7 @@ export class StackComposer {
                 fetchMigrationEnabled: fetchMigrationEnabled,
                 migrationConsoleEnableOSI: migrationConsoleEnableOSI,
                 migrationAPIEnabled: migrationAPIEnabled,
+                targetGroups: [networkStack.albMigrationConsoleTG],
                 servicesYaml: servicesYaml,
                 migrationAPIAllowedHosts: migrationAPIAllowedHosts,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,

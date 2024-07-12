@@ -1,18 +1,19 @@
 package org.opensearch.migrations.replay.datatypes;
 
+import java.io.IOException;
+import java.util.function.Supplier;
+
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.util.OnlineRadixSorter;
+import org.opensearch.migrations.replay.util.TextTrackedFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
+
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.util.TrackedFuture;
-import org.opensearch.migrations.replay.util.OnlineRadixSorter;
-import org.opensearch.migrations.replay.util.TextTrackedFuture;
-
-import java.io.IOException;
-import java.util.function.Supplier;
 
 /**
  * This class contains everything that is needed to replay packets to a specific channel.
@@ -42,10 +43,11 @@ public class ConnectionReplaySession {
     private final IReplayContexts.IChannelKeyContext channelKeyContext;
 
     @SneakyThrows
-    public ConnectionReplaySession(EventLoop eventLoop, IReplayContexts.IChannelKeyContext channelKeyContext,
-                                   Supplier<TrackedFuture<String, ChannelFuture>>
-                                           channelFutureFutureFactory)
-    {
+    public ConnectionReplaySession(
+        EventLoop eventLoop,
+        IReplayContexts.IChannelKeyContext channelKeyContext,
+        Supplier<TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory
+    ) {
         this.eventLoop = eventLoop;
         this.channelKeyContext = channelKeyContext;
         this.scheduleSequencer = new OnlineRadixSorter(0);
@@ -53,10 +55,10 @@ public class ConnectionReplaySession {
         this.channelFutureFutureFactory = channelFutureFutureFactory;
     }
 
-    public TrackedFuture<String, ChannelFuture>
-    getFutureThatReturnsChannelFutureInAnyState(boolean requireActiveChannel) {
-        TextTrackedFuture<ChannelFuture> eventLoopFuture =
-                new TextTrackedFuture<>("procuring a connection");
+    public TrackedFuture<String, ChannelFuture> getFutureThatReturnsChannelFutureInAnyState(
+        boolean requireActiveChannel
+    ) {
+        TextTrackedFuture<ChannelFuture> eventLoopFuture = new TextTrackedFuture<>("procuring a connection");
         eventLoop.submit(() -> {
             if (!requireActiveChannel || (cachedChannel != null && cachedChannel.channel().isActive())) {
                 eventLoopFuture.future.complete(cachedChannel);
@@ -67,23 +69,29 @@ public class ConnectionReplaySession {
         return eventLoopFuture;
     }
 
-    private void createNewChannelFuture(boolean requireActiveChannel,
-                                       TextTrackedFuture<ChannelFuture> eventLoopFuture) {
+    private void createNewChannelFuture(
+        boolean requireActiveChannel,
+        TextTrackedFuture<ChannelFuture> eventLoopFuture
+    ) {
         createNewChannelFuture(requireActiveChannel, MAX_CHANNEL_CREATE_RETRIES, eventLoopFuture);
     }
 
-    private void createNewChannelFuture(boolean requireActiveChannel, int retries,
-                                        TextTrackedFuture<ChannelFuture> eventLoopFuture)
-    {
-        channelFutureFutureFactory.get().future.whenComplete((v,t)-> {
+    private void createNewChannelFuture(
+        boolean requireActiveChannel,
+        int retries,
+        TextTrackedFuture<ChannelFuture> eventLoopFuture
+    ) {
+        channelFutureFutureFactory.get().future.whenComplete((v, t) -> {
             if (requireActiveChannel && retries > 0 && (t == null || exceptionIsRetryable(t))) {
                 if (t != null || !v.channel().isActive()) {
                     if (t != null) {
                         channelKeyContext.addCaughtException(t);
-                        log.atWarn().setMessage(() -> "Caught exception while trying to get an active channel")
-                                .setCause(t).log();
+                        log.atWarn()
+                            .setMessage(() -> "Caught exception while trying to get an active channel")
+                            .setCause(t)
+                            .log();
                     }
-                    createNewChannelFuture(requireActiveChannel, retries-1, eventLoopFuture);
+                    createNewChannelFuture(requireActiveChannel, retries - 1, eventLoopFuture);
                 } else {
                     cachedChannel = v;
                     eventLoopFuture.future.complete(v);

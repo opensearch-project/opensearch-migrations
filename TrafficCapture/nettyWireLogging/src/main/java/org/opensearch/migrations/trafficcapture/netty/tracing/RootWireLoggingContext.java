@@ -1,9 +1,11 @@
 package org.opensearch.migrations.trafficcapture.netty.tracing;
 
 import io.opentelemetry.api.OpenTelemetry;
-import lombok.Getter;
+
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
+
+import lombok.Getter;
 
 @Getter
 public class RootWireLoggingContext extends RootOtelContext implements IRootWireLoggingContext {

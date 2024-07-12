@@ -1,8 +1,13 @@
 package com.rfs.cms;
 
-import lombok.Getter;
-import lombok.Lombok;
-import lombok.extern.slf4j.Slf4j;
+import java.io.IOException;
+import java.net.URI;
+import java.util.AbstractMap;
+import java.util.Arrays;
+import java.util.Map;
+import java.util.Optional;
+import java.util.stream.Stream;
+
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpHead;
@@ -15,13 +20,9 @@ import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 
-import java.io.IOException;
-import java.net.URI;
-import java.util.AbstractMap;
-import java.util.Arrays;
-import java.util.Map;
-import java.util.Optional;
-import java.util.stream.Stream;
+import lombok.Getter;
+import lombok.Lombok;
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class ApacheHttpClient implements AbstractedHttpClient {
@@ -54,23 +55,22 @@ public class ApacheHttpClient implements AbstractedHttpClient {
     }
 
     @Override
-    public AbstractHttpResponse makeRequest(String method, String path,
-                                            Map<String, String> headers, String payload) throws IOException {
+    public AbstractHttpResponse makeRequest(String method, String path, Map<String, String> headers, String payload)
+        throws IOException {
         var request = makeRequestBase(baseUri, method, path);
-        headers.entrySet().forEach(kvp->request.setHeader(kvp.getKey(), kvp.getValue()));
+        headers.entrySet().forEach(kvp -> request.setHeader(kvp.getKey(), kvp.getValue()));
         if (payload != null) {
             request.setEntity(new StringEntity(payload));
         }
         return client.execute(request, fr -> new AbstractHttpResponse() {
             @Getter
-            final byte[] payloadBytes = Optional.ofNullable(fr.getEntity())
-                    .map(e-> {
-                        try {
-                            return e.getContent().readAllBytes();
-                        } catch (IOException ex) {
-                            throw Lombok.sneakyThrow(ex);
-                        }
-                    }).orElse(null);
+            final byte[] payloadBytes = Optional.ofNullable(fr.getEntity()).map(e -> {
+                try {
+                    return e.getContent().readAllBytes();
+                } catch (IOException ex) {
+                    throw Lombok.sneakyThrow(ex);
+                }
+            }).orElse(null);
 
             @Override
             public String getStatusText() {
@@ -85,7 +85,7 @@ public class ApacheHttpClient implements AbstractedHttpClient {
             @Override
             public Stream<Map.Entry<String, String>> getHeaders() {
                 return Arrays.stream(fr.getHeaders())
-                        .map(h -> new AbstractMap.SimpleEntry<>(h.getName(), h.getValue()));
+                    .map(h -> new AbstractMap.SimpleEntry<>(h.getName(), h.getValue()));
             }
         });
     }

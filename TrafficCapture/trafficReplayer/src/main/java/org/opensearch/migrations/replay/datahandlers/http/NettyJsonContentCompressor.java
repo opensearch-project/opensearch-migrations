@@ -1,16 +1,16 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+import java.io.BufferedOutputStream;
+import java.io.IOException;
+import java.io.OutputStream;
+import java.util.zip.GZIPOutputStream;
+
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.DefaultHttpContent;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.extern.slf4j.Slf4j;
-
-import java.io.BufferedOutputStream;
-import java.io.IOException;
-import java.io.OutputStream;
-import java.util.zip.GZIPOutputStream;
 
 @Slf4j
 public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
@@ -26,12 +26,12 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
 
         @Override
         public void write(int b) throws IOException {
-            write(new byte[]{(byte) b}, 0, 1);
+            write(new byte[] { (byte) b }, 0, 1);
         }
 
         @Override
         public void write(byte[] buff, int offset, int len) {
-            var byteBuf = ctx.alloc().buffer(len-offset);
+            var byteBuf = ctx.alloc().buffer(len - offset);
             byteBuf.writeBytes(buff, offset, len);
             ctx.fireChannelRead(new DefaultHttpContent(byteBuf));
         }
@@ -50,8 +50,9 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         if (msg instanceof HttpJsonMessageWithFaultingPayload) {
-            var contentEncoding =
-                    ((HttpJsonMessageWithFaultingPayload) msg).headers().asStrictMap().get("content-encoding");
+            var contentEncoding = ((HttpJsonMessageWithFaultingPayload) msg).headers()
+                .asStrictMap()
+                .get("content-encoding");
             if (contentEncoding != null && contentEncoding.contains(CONTENT_ENCODING_GZIP_VALUE)) {
                 activateCompressorComponents(ctx);
             }
@@ -59,20 +60,20 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
             if (compressorStream != null) {
                 var contentBuf = ((HttpContent) msg).content();
                 try {
-                  contentBuf.readBytes(compressorStream, contentBuf.readableBytes());
-                  if (msg instanceof LastHttpContent) {
-                      closeStream();
-                      ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
-                  }
-                  return; // fireChannelRead will be fired on the compressed contents via the compressorStream.
+                    contentBuf.readBytes(compressorStream, contentBuf.readableBytes());
+                    if (msg instanceof LastHttpContent) {
+                        closeStream();
+                        ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
+                    }
+                    return; // fireChannelRead will be fired on the compressed contents via the compressorStream.
                 } finally {
-                  contentBuf.release();
+                    contentBuf.release();
                 }
-           } else {
-                assert (bufferedOutputStream == null && passDownstreamOutputStream == null) :
-                "Expected contents with data to be passed through the compression stream before it was closed OR " +
-                        "to be passed-through without compression, but this object was used for compression and " +
-                        "has since been closed.";
+            } else {
+                assert (bufferedOutputStream == null && passDownstreamOutputStream == null)
+                    : "Expected contents with data to be passed through the compression stream before it was closed OR "
+                        + "to be passed-through without compression, but this object was used for compression and "
+                        + "has since been closed.";
             }
         }
         super.channelRead(ctx, msg);

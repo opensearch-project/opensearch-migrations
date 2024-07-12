@@ -7,5 +7,5 @@ public class OpenSearchWorkItem {
     public OpenSearchWorkItem(String indexName, String documentId) {
         this.indexName = indexName;
         this.documentId = documentId;
-    }    
+    }
 }

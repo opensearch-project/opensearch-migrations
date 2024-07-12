@@ -1,9 +1,13 @@
-from typing import NamedTuple, Any
+from typing import Generic, TypeVar
+from dataclasses import dataclass
+
+T = TypeVar('T')
 
 
-class CommandResult(NamedTuple):
+@dataclass
+class CommandResult(Generic[T]):
     success: bool
-    value: Any
+    value: T | Exception | None
 
     def display(self) -> str:
         if self.value:

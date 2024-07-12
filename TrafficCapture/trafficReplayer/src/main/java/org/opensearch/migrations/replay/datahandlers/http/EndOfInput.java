@@ -6,4 +6,4 @@ package org.opensearch.migrations.replay.datahandlers.http;
  * is closed.  It allows the NettySendByteBufsToPacketHandlerHandler class to determine
  * whether all the contents were received or if there was an error in-flight.
  */
-public class EndOfInput { }
+public class EndOfInput {}

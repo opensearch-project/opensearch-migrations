@@ -1,6 +1,7 @@
 package org.opensearch.migrations.trafficcapture;
 
 import com.google.protobuf.CodedOutputStream;
+
 import lombok.NonNull;
 
 public interface CodedOutputStreamHolder {
@@ -27,5 +28,6 @@ public interface CodedOutputStreamHolder {
         return (limit != -1) ? limit - getOutputStream().getTotalBytesWritten() : -1;
     }
 
-    @NonNull CodedOutputStream getOutputStream();
+    @NonNull
+    CodedOutputStream getOutputStream();
 }

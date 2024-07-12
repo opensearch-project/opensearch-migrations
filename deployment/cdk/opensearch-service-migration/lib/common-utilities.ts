@@ -200,9 +200,15 @@ export function getMigrationStringParameterName(props: MigrationSSMConfig): stri
 }
 
 export enum MigrationSSMParameter {
-    ALB_MIGRATION_URL = 'albMigrationUrl',
+    MIGRATION_API_URL = 'albMigrationApiUrl',
+    MIGRATION_API_URL_ALIAS = 'albMigrationApiUrlAlias',
+    SOURCE_PROXY_URL = 'albSourceProxyUrl',
+    SOURCE_PROXY_URL_ALIAS = 'albSourceProxyUrlAlias',
+    TARGET_PROXY_URL = 'albTargetProxyUrl',
+    TARGET_PROXY_URL_ALIAS = 'albTargetProxyUrlAlias',
+    MIGRATION_LISTENER_URL = 'albMigrationListenerUrl',
+    MIGRATION_LISTENER_URL_ALIAS = 'albMigrationListenerUrlAlias',
     ARTIFACT_S3_ARN = 'artifactS3Arn',
-    CLOUD_MAP_NAMESPACE_ID = 'cloudMapNamespaceId',
     FETCH_MIGRATION_COMMAND = 'fetchMigrationCommand',
     FETCH_MIGRATION_TASK_DEF_ARN = 'fetchMigrationTaskDefArn',
     FETCH_MIGRATION_TASK_EXEC_ROLE_ARN = 'fetchMigrationTaskExecRoleArn',

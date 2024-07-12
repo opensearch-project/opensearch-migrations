@@ -1,25 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelHandlerContext;
-import io.netty.channel.SimpleChannelInboundHandler;
-import io.netty.channel.embedded.EmbeddedChannel;
-import io.netty.handler.codec.http.DefaultHttpHeaders;
-import io.netty.handler.codec.http.FullHttpRequest;
-import io.netty.handler.codec.http.HttpContentDecompressor;
-import io.netty.handler.codec.http.HttpObjectAggregator;
-import io.netty.handler.codec.http.HttpRequestDecoder;
-import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.Assertions;
-import org.opensearch.migrations.Utils;
-import org.opensearch.migrations.replay.datahandlers.IPacketConsumer;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
-import org.opensearch.migrations.replay.util.TrackedFuture;
-import org.opensearch.migrations.tracing.TestContext;
-import org.opensearch.migrations.transform.IAuthTransformerFactory;
-import org.opensearch.migrations.transform.IJsonTransformer;
-
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
@@ -34,6 +14,27 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.IntFunction;
 
+import org.junit.jupiter.api.Assertions;
+
+import org.opensearch.migrations.Utils;
+import org.opensearch.migrations.replay.datahandlers.IPacketConsumer;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
+import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.tracing.TestContext;
+import org.opensearch.migrations.transform.IAuthTransformerFactory;
+import org.opensearch.migrations.transform.IJsonTransformer;
+
+import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.SimpleChannelInboundHandler;
+import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.handler.codec.http.DefaultHttpHeaders;
+import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.HttpContentDecompressor;
+import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpRequestDecoder;
+import lombok.extern.slf4j.Slf4j;
+
 @Slf4j
 public class TestUtils {
 
@@ -43,8 +44,10 @@ public class TestUtils {
         return resolveReferenceString(referenceStringBuilder, List.of());
     }
 
-    static String resolveReferenceString(StringBuilder referenceStringBuilder,
-                                         Collection<AbstractMap.SimpleEntry<String,String>> replacementMappings) {
+    static String resolveReferenceString(
+        StringBuilder referenceStringBuilder,
+        Collection<AbstractMap.SimpleEntry<String, String>> replacementMappings
+    ) {
         for (var kvp : replacementMappings) {
             var idx = referenceStringBuilder.indexOf(kvp.getKey());
             referenceStringBuilder.replace(idx, idx + kvp.getKey().length(), kvp.getValue());
@@ -54,57 +57,74 @@ public class TestUtils {
 
     static String makeRandomString(Random r, int maxStringSize) {
         return r.ints(r.nextInt(maxStringSize), 'A', 'Z')
-                .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
-                .toString();
+            .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
+            .toString();
     }
 
-    static TrackedFuture<String,Void> writeStringToBoth(String s, StringBuilder referenceStringBuilder,
-                                                        IPacketConsumer transformingHandler) {
-        log.info("Sending string to transformer: "+s);
+    static TrackedFuture<String, Void> writeStringToBoth(
+        String s,
+        StringBuilder referenceStringBuilder,
+        IPacketConsumer transformingHandler
+    ) {
+        log.info("Sending string to transformer: " + s);
         referenceStringBuilder.append(s);
         var bytes = s.getBytes(StandardCharsets.UTF_8);
         return transformingHandler.consumeBytes(bytes);
     }
 
-    static TrackedFuture<String,Void> chainedWriteHeadersAndDualWritePayloadParts(IPacketConsumer packetConsumer,
-                                                                                  List<String> stringParts,
-                                                                                  StringBuilder referenceStringAccumulator,
-                                                                                  String headers) {
-        return stringParts.stream().collect(
-                Utils.foldLeft(packetConsumer.consumeBytes(headers.getBytes(StandardCharsets.UTF_8)),
-                        (cf, s) -> cf.thenCompose(v -> writeStringToBoth(s, referenceStringAccumulator, packetConsumer),
-                        ()->"TestUtils.chainedWriteHeadersAndDualWritePayloadParts")));
+    static TrackedFuture<String, Void> chainedWriteHeadersAndDualWritePayloadParts(
+        IPacketConsumer packetConsumer,
+        List<String> stringParts,
+        StringBuilder referenceStringAccumulator,
+        String headers
+    ) {
+        return stringParts.stream()
+            .collect(
+                Utils.foldLeft(
+                    packetConsumer.consumeBytes(headers.getBytes(StandardCharsets.UTF_8)),
+                    (cf, s) -> cf.thenCompose(
+                        v -> writeStringToBoth(s, referenceStringAccumulator, packetConsumer),
+                        () -> "TestUtils.chainedWriteHeadersAndDualWritePayloadParts"
+                    )
+                )
+            );
     }
 
-    public static TrackedFuture<String,Void>
-    chainedDualWriteHeaderAndPayloadParts(IPacketConsumer packetConsumer,
-                                          List<String> stringParts,
-                                          StringBuilder referenceStringAccumulator,
-                                          IntFunction<String> headersGenerator) {
+    public static TrackedFuture<String, Void> chainedDualWriteHeaderAndPayloadParts(
+        IPacketConsumer packetConsumer,
+        List<String> stringParts,
+        StringBuilder referenceStringAccumulator,
+        IntFunction<String> headersGenerator
+    ) {
         var contentLength = stringParts.stream().mapToInt(String::length).sum();
         String headers = headersGenerator.apply(contentLength) + "\r\n";
         referenceStringAccumulator.append(headers);
-        return chainedWriteHeadersAndDualWritePayloadParts(packetConsumer, stringParts, referenceStringAccumulator, headers);
+        return chainedWriteHeadersAndDualWritePayloadParts(
+            packetConsumer,
+            stringParts,
+            referenceStringAccumulator,
+            headers
+        );
     }
 
-    public static void verifyCapturedResponseMatchesExpectedPayload(byte[] bytesCaptured,
-                                                             DefaultHttpHeaders expectedRequestHeaders,
-                                                             String expectedPayloadString)
-            throws IOException
-    {
+    public static void verifyCapturedResponseMatchesExpectedPayload(
+        byte[] bytesCaptured,
+        DefaultHttpHeaders expectedRequestHeaders,
+        String expectedPayloadString
+    ) throws IOException {
         log.warn("\n\nBeginning verification pipeline\n\n");
 
         AtomicReference<FullHttpRequest> fullHttpRequestAtomicReference = new AtomicReference<>();
         EmbeddedChannel unpackVerifier = new EmbeddedChannel(
-                new HttpRequestDecoder(),
-                new HttpContentDecompressor(),
-                new HttpObjectAggregator(bytesCaptured.length*2),
-                new SimpleChannelInboundHandler<FullHttpRequest>() {
-                    @Override
-                    protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest msg) throws Exception {
-                        fullHttpRequestAtomicReference.set(msg.retainedDuplicate());
-                    }
+            new HttpRequestDecoder(),
+            new HttpContentDecompressor(),
+            new HttpObjectAggregator(bytesCaptured.length * 2),
+            new SimpleChannelInboundHandler<FullHttpRequest>() {
+                @Override
+                protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest msg) throws Exception {
+                    fullHttpRequestAtomicReference.set(msg.retainedDuplicate());
                 }
+            }
         );
         unpackVerifier.writeInbound(Unpooled.wrappedBuffer(bytesCaptured));
         Assertions.assertNotNull(fullHttpRequestAtomicReference.get());
@@ -119,54 +139,77 @@ public class TestUtils {
         return fullRequest.content().toString(StandardCharsets.UTF_8);
     }
 
-    static void runPipelineAndValidate(TestContext rootContext,
-                                       IAuthTransformerFactory authTransformer,
-                                       String extraHeaders,
-                                       List<String> stringParts,
-                                       DefaultHttpHeaders expectedRequestHeaders,
-                                       Function<StringBuilder, String> expectedOutputGenerator)
-            throws IOException, ExecutionException, InterruptedException {
-        runPipelineAndValidate(rootContext, x -> x,
-                authTransformer, extraHeaders, stringParts, expectedRequestHeaders, expectedOutputGenerator);
+    static void runPipelineAndValidate(
+        TestContext rootContext,
+        IAuthTransformerFactory authTransformer,
+        String extraHeaders,
+        List<String> stringParts,
+        DefaultHttpHeaders expectedRequestHeaders,
+        Function<StringBuilder, String> expectedOutputGenerator
+    ) throws IOException, ExecutionException, InterruptedException {
+        runPipelineAndValidate(
+            rootContext,
+            x -> x,
+            authTransformer,
+            extraHeaders,
+            stringParts,
+            expectedRequestHeaders,
+            expectedOutputGenerator
+        );
     }
 
-    static void runPipelineAndValidate(TestContext rootContext,
-                                       IJsonTransformer transformer,
-                                       IAuthTransformerFactory authTransformer,
-                                       String extraHeaders,
-                                       List<String> stringParts,
-                                       DefaultHttpHeaders expectedRequestHeaders,
-                                       Function<StringBuilder, String> expectedOutputGenerator)
-            throws IOException, ExecutionException, InterruptedException
-    {
-        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100),
-                new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), null));
-        var transformingHandler = new HttpJsonTransformingConsumer<>(transformer, authTransformer, testPacketCapture,
-                rootContext.getTestConnectionRequestContext("TEST_CONNECTION", 0));
+    static void runPipelineAndValidate(
+        TestContext rootContext,
+        IJsonTransformer transformer,
+        IAuthTransformerFactory authTransformer,
+        String extraHeaders,
+        List<String> stringParts,
+        DefaultHttpHeaders expectedRequestHeaders,
+        Function<StringBuilder, String> expectedOutputGenerator
+    ) throws IOException, ExecutionException, InterruptedException {
+        var testPacketCapture = new TestCapturePacketToHttpHandler(
+            Duration.ofMillis(100),
+            new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), null)
+        );
+        var transformingHandler = new HttpJsonTransformingConsumer<>(
+            transformer,
+            authTransformer,
+            testPacketCapture,
+            rootContext.getTestConnectionRequestContext("TEST_CONNECTION", 0)
+        );
 
         var contentLength = stringParts.stream().mapToInt(String::length).sum();
-        var headerString = "GET / HTTP/1.1\r\n" +
-                "host: localhost\r\n" +
-                (extraHeaders == null ? "" : extraHeaders) +
-                "content-length: " + contentLength + "\r\n\r\n";
+        var headerString = "GET / HTTP/1.1\r\n"
+            + "host: localhost\r\n"
+            + (extraHeaders == null ? "" : extraHeaders)
+            + "content-length: "
+            + contentLength
+            + "\r\n\r\n";
         var referenceStringBuilder = new StringBuilder();
-        var allConsumesFuture = chainedWriteHeadersAndDualWritePayloadParts(transformingHandler,
-                        stringParts, referenceStringBuilder, headerString);
+        var allConsumesFuture = chainedWriteHeadersAndDualWritePayloadParts(
+            transformingHandler,
+            stringParts,
+            referenceStringBuilder,
+            headerString
+        );
 
         var innermostFinalizeCallCount = new AtomicInteger();
-        var finalizationFuture =
-                allConsumesFuture.thenCompose(v -> transformingHandler.finalizeRequest(),
-                        ()->"PayloadRepackingTest.runPipelineAndValidate.allConsumeFuture");
-        finalizationFuture.map(f->f.whenComplete((aggregatedRawResponse, t) -> {
-                    Assertions.assertNull(t);
-                    Assertions.assertNotNull(aggregatedRawResponse);
-                    // do nothing but check connectivity between the layers in the bottom most handler
-                    innermostFinalizeCallCount.incrementAndGet();
-                }), ()->"PayloadRepackingTest.runPipelineAndValidate.assertCheck")
-                .get();
+        var finalizationFuture = allConsumesFuture.thenCompose(
+            v -> transformingHandler.finalizeRequest(),
+            () -> "PayloadRepackingTest.runPipelineAndValidate.allConsumeFuture"
+        );
+        finalizationFuture.map(f -> f.whenComplete((aggregatedRawResponse, t) -> {
+            Assertions.assertNull(t);
+            Assertions.assertNotNull(aggregatedRawResponse);
+            // do nothing but check connectivity between the layers in the bottom most handler
+            innermostFinalizeCallCount.incrementAndGet();
+        }), () -> "PayloadRepackingTest.runPipelineAndValidate.assertCheck").get();
 
-        verifyCapturedResponseMatchesExpectedPayload(testPacketCapture.getBytesCaptured(),
-                expectedRequestHeaders, expectedOutputGenerator.apply(referenceStringBuilder));
+        verifyCapturedResponseMatchesExpectedPayload(
+            testPacketCapture.getBytesCaptured(),
+            expectedRequestHeaders,
+            expectedOutputGenerator.apply(referenceStringBuilder)
+        );
         Assertions.assertEquals(1, innermostFinalizeCallCount.get());
     }
 }

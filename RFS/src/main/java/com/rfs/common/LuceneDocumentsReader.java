@@ -2,7 +2,7 @@ package com.rfs.common;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import lombok.extern.slf4j.Slf4j;
+
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexReader;
@@ -11,6 +11,7 @@ import org.apache.lucene.util.BytesRef;
 
 import lombok.Lombok;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 
 @RequiredArgsConstructor
@@ -20,28 +21,25 @@ public class LuceneDocumentsReader {
     protected final Path indexDirectoryPath;
 
     public Flux<Document> readDocuments() {
-        return Flux.using(
-                () -> openIndexReader(indexDirectoryPath),
-                reader -> {
-                    log.info(reader.maxDoc() + " documents found in the current Lucene index");
+        return Flux.using(() -> openIndexReader(indexDirectoryPath), reader -> {
+            log.info(reader.maxDoc() + " documents found in the current Lucene index");
 
-                    return Flux.range(0, reader.maxDoc()) // Extract all the Documents in the IndexReader
-                            .handle((i, sink) -> {
-                                Document doc = getDocument(reader, i);
-                                if (doc != null) { // Skip malformed docs
-                                    sink.next(doc);
-                                }
-                            }).cast(Document.class);
-                },
-                reader -> { // Close the IndexReader when done
-                    try {
-                        reader.close();
-                    } catch (IOException e) {
-                        log.error("Failed to close IndexReader", e);
-                        throw Lombok.sneakyThrow(e);
+            return Flux.range(0, reader.maxDoc()) // Extract all the Documents in the IndexReader
+                .handle((i, sink) -> {
+                    Document doc = getDocument(reader, i);
+                    if (doc != null) { // Skip malformed docs
+                        sink.next(doc);
                     }
-                }
-        );
+                })
+                .cast(Document.class);
+        }, reader -> { // Close the IndexReader when done
+            try {
+                reader.close();
+            } catch (IOException e) {
+                log.error("Failed to close IndexReader", e);
+                throw Lombok.sneakyThrow(e);
+            }
+        });
     }
 
     protected IndexReader openIndexReader(Path indexDirectoryPath) throws IOException {
@@ -51,7 +49,7 @@ public class LuceneDocumentsReader {
     protected Document getDocument(IndexReader reader, int docId) {
         try {
             Document document = reader.document(docId);
-            BytesRef source_bytes = document.getBinaryValue("_source");
+            BytesRef sourceBytes = document.getBinaryValue("_source");
             String id;
             try {
                 id = Uid.decodeId(document.getBinaryValue("_id").bytes);
@@ -62,7 +60,7 @@ public class LuceneDocumentsReader {
                 log.error(errorMessage.toString());
                 return null; // Skip documents with missing id
             }
-            if (source_bytes == null || source_bytes.bytes.length == 0) {
+            if (sourceBytes == null || sourceBytes.bytes.length == 0) {
                 log.warn("Document " + id + " is deleted or doesn't have the _source field enabled");
                 return null;  // Skip these too
             }

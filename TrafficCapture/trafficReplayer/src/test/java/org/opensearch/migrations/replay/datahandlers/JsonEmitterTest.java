@@ -1,16 +1,18 @@
 package org.opensearch.migrations.replay.datahandlers;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import io.netty.buffer.ByteBufAllocator;
-import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-
 import java.io.IOException;
 import java.io.StringReader;
 import java.io.StringWriter;
 import java.nio.charset.StandardCharsets;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+
+import io.netty.buffer.ByteBufAllocator;
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @WrapWithNettyLeakDetection
@@ -35,8 +37,9 @@ public class JsonEmitterTest {
                 pac = pac.nextSupplier.get();
             }
             writer.flush();
-            var streamedToStringRoundTripped =
-                    mapper.writeValueAsString(mapper.readTree(new StringReader(writer.toString())));
+            var streamedToStringRoundTripped = mapper.writeValueAsString(
+                mapper.readTree(new StringReader(writer.toString()))
+            );
             var originalRoundTripped = mapper.writeValueAsString(originalTree);
             Assertions.assertEquals(originalRoundTripped, streamedToStringRoundTripped);
         }

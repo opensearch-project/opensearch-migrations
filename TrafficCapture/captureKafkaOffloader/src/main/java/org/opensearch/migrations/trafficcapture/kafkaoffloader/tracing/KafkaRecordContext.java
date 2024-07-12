@@ -3,16 +3,18 @@ package org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.metrics.Meter;
-import lombok.Getter;
-import lombok.NonNull;
+
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 
-public class KafkaRecordContext extends
-        BaseNestedSpanContext<IRootKafkaOffloaderContext, IConnectionContext>
-        implements IScopedInstrumentationAttributes {
+import lombok.Getter;
+import lombok.NonNull;
+
+public class KafkaRecordContext extends BaseNestedSpanContext<IRootKafkaOffloaderContext, IConnectionContext>
+    implements
+        IScopedInstrumentationAttributes {
     public static final String ACTIVITY_NAME = "kafkaCommit";
 
     static final AttributeKey<String> TOPIC_ATTR = AttributeKey.stringKey("topic");
@@ -24,8 +26,13 @@ public class KafkaRecordContext extends
     @Getter
     public final String recordId;
 
-    public KafkaRecordContext(IRootKafkaOffloaderContext rootScope, IConnectionContext enclosingScope,
-                              String topic, String recordId, int recordSize) {
+    public KafkaRecordContext(
+        IRootKafkaOffloaderContext rootScope,
+        IConnectionContext enclosingScope,
+        String topic,
+        String recordId,
+        int recordSize
+    ) {
         super(rootScope, enclosingScope);
         this.topic = topic;
         this.recordId = recordId;
@@ -49,12 +56,13 @@ public class KafkaRecordContext extends
     }
 
     @Override
-    public String getActivityName() { return "stream_flush_called"; }
+    public String getActivityName() {
+        return "stream_flush_called";
+    }
 
     @Override
     public AttributesBuilder fillAttributesForSpansBelow(AttributesBuilder builder) {
-        return super.fillAttributesForSpansBelow(builder)
-                .put(TOPIC_ATTR, getTopic())
-                .put(RECORD_ID_ATTR, getRecordId());
+        return super.fillAttributesForSpansBelow(builder).put(TOPIC_ATTR, getTopic())
+            .put(RECORD_ID_ATTR, getRecordId());
     }
 }

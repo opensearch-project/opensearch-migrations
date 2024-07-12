@@ -1,18 +1,19 @@
 package org.opensearch.migrations.replay;
 
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
-import lombok.Lombok;
-import lombok.Setter;
-import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.datatypes.RawPackets;
-
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.stream.Stream;
+
+import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.util.NettyUtils;
+
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.Lombok;
+import lombok.Setter;
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @EqualsAndHashCode(exclude = "currentSegmentBytes")
@@ -22,6 +23,7 @@ public class HttpMessageAndTimestamp {
         public Request(Instant firstPacketTimestamp) {
             super(firstPacketTimestamp);
         }
+
         @Override
         public String toString() {
             return super.format(Optional.of(HttpByteBufFormatter.HttpMessageType.REQUEST));
@@ -32,6 +34,7 @@ public class HttpMessageAndTimestamp {
         public Response(Instant firstPacketTimestamp) {
             super(firstPacketTimestamp);
         }
+
         @Override
         public String toString() {
             return super.format(Optional.of(HttpByteBufFormatter.HttpMessageType.REQUEST));
@@ -66,9 +69,13 @@ public class HttpMessageAndTimestamp {
 
     public String format(Optional<HttpByteBufFormatter.HttpMessageType> messageTypeOp) {
         try (var bufStream = NettyUtils.createRefCntNeutralCloseableByteBufStream(packetBytes)) {
-            var packetBytesAsStr = messageTypeOp.map(mt-> HttpByteBufFormatter.httpPacketBytesToString(mt, packetBytes,
-                    HttpByteBufFormatter.LF_LINE_DELIMITER))
-                .orElseGet(()-> HttpByteBufFormatter.httpPacketBufsToString(bufStream, Utils.MAX_PAYLOAD_BYTES_TO_PRINT));
+            var packetBytesAsStr = messageTypeOp.map(
+                mt -> HttpByteBufFormatter.httpPacketBytesToString(
+                    mt,
+                    packetBytes,
+                    HttpByteBufFormatter.LF_LINE_DELIMITER
+                )
+            ).orElseGet(() -> HttpByteBufFormatter.httpPacketBufsToString(bufStream, Utils.MAX_PAYLOAD_BYTES_TO_PRINT));
             final StringBuilder sb = new StringBuilder("HttpMessageAndTimestamp{");
             sb.append("firstPacketTimestamp=").append(firstPacketTimestamp);
             sb.append(", lastPacketTimestamp=").append(lastPacketTimestamp);

@@ -1,17 +1,17 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.testcontainers;
 
-import eu.rekawek.toxiproxy.Proxy;
-import eu.rekawek.toxiproxy.ToxiproxyClient;
 import java.io.IOException;
 import java.util.HashSet;
 import java.util.concurrent.ConcurrentSkipListSet;
+
+import eu.rekawek.toxiproxy.Proxy;
+import eu.rekawek.toxiproxy.ToxiproxyClient;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.ToxiproxyContainer;
 
 public class ToxiproxyContainerTestBase extends TestContainerTestBase<ToxiproxyContainer> {
 
-    private static final ToxiproxyContainer toxiproxy = new ToxiproxyContainer(
-        "ghcr.io/shopify/toxiproxy:latest")
+    private static final ToxiproxyContainer toxiproxy = new ToxiproxyContainer("ghcr.io/shopify/toxiproxy:latest")
         .withAccessToHost(true);
 
     final ConcurrentSkipListSet<Integer> toxiproxyUnusedExposedPorts = new ConcurrentSkipListSet<>();
@@ -51,16 +51,24 @@ public class ToxiproxyContainerTestBase extends TestContainerTestBase<ToxiproxyC
 
     public Proxy getProxy(GenericContainer<?> container) {
         var containerPort = container.getFirstMappedPort();
-        final ToxiproxyClient toxiproxyClient = new ToxiproxyClient(toxiproxy.getHost(),
-            getContainer().getControlPort());
+        final ToxiproxyClient toxiproxyClient = new ToxiproxyClient(
+            toxiproxy.getHost(),
+            getContainer().getControlPort()
+        );
         org.testcontainers.Testcontainers.exposeHostPorts(containerPort);
         try {
-            var containerName = (container.getDockerImageName() + "_" + container.getContainerName() + "_"
-                                 + Thread.currentThread().getId()).replaceAll("[^a-zA-Z0-9_]+", "_");
+            var containerName = (container.getDockerImageName()
+                + "_"
+                + container.getContainerName()
+                + "_"
+                + Thread.currentThread().getId()).replaceAll("[^a-zA-Z0-9_]+", "_");
             synchronized (toxiproxyUnusedExposedPorts) {
                 var proxyPort = toxiproxyUnusedExposedPorts.first();
-                var proxy = toxiproxyClient.createProxy(containerName, "0.0.0.0:" + proxyPort,
-                    "host.testcontainers.internal" + ":" + containerPort);
+                var proxy = toxiproxyClient.createProxy(
+                    containerName,
+                    "0.0.0.0:" + proxyPort,
+                    "host.testcontainers.internal" + ":" + containerPort
+                );
                 toxiproxyUnusedExposedPorts.remove(proxyPort);
                 proxy.enable();
                 return proxy;

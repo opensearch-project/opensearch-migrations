@@ -3,13 +3,13 @@ package com.rfs.common;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
+import java.util.Optional;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import com.rfs.models.ShardFileInfo;
 import com.rfs.models.ShardMetadata;
-
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.regions.Region;
@@ -22,9 +22,6 @@ import software.amazon.awssdk.transfer.s3.S3TransferManager;
 import software.amazon.awssdk.transfer.s3.model.CompletedDirectoryDownload;
 import software.amazon.awssdk.transfer.s3.model.DirectoryDownload;
 import software.amazon.awssdk.transfer.s3.model.DownloadDirectoryRequest;
-
-import java.util.Comparator;
-import java.util.Optional;
 
 public class S3Repo implements SourceRepo {
     private static final Logger logger = LogManager.getLogger(S3Repo.class);
@@ -47,19 +44,19 @@ public class S3Repo implements SourceRepo {
 
     protected S3Uri findRepoFileUri() {
         ListObjectsV2Request listRequest = ListObjectsV2Request.builder()
-                .bucket(s3RepoUri.bucketName)
-                .prefix(s3RepoUri.key)
-                .build();
+            .bucket(s3RepoUri.bucketName)
+            .prefix(s3RepoUri.key)
+            .build();
 
         ListObjectsV2Response listResponse = s3Client.listObjectsV2(listRequest).join();
 
-        Optional<S3Object> highestVersionedIndexFile = listResponse.contents().stream()
-                .filter(s3Object -> s3Object.key().matches(".*index-\\d+$")) // Regex to match index files
-                .max(Comparator.comparingInt(s3Object -> extractVersion(s3Object.key())));
+        Optional<S3Object> highestVersionedIndexFile = listResponse.contents()
+            .stream()
+            .filter(s3Object -> s3Object.key().matches(".*index-\\d+$")) // Regex to match index files
+            .max(Comparator.comparingInt(s3Object -> extractVersion(s3Object.key())));
 
-        String rawUri = highestVersionedIndexFile
-                .map(s3Object -> "s3://" + s3RepoUri.bucketName + "/" + s3Object.key())
-                .orElse("");
+        String rawUri = highestVersionedIndexFile.map(s3Object -> "s3://" + s3RepoUri.bucketName + "/" + s3Object.key())
+            .orElse("");
         return new S3Uri(rawUri);
     }
 
@@ -79,35 +76,32 @@ public class S3Repo implements SourceRepo {
         ensureS3LocalDirectoryExists(localPath.getParent());
 
         if (doesFileExistLocally(localPath)) {
-            logger.debug("File already exists locally: " + localPath);
+            logger.debug("File already exists locally: {}", localPath);
             return;
         }
 
-        logger.info("Downloading file from S3: " + s3Uri.uri + " to " + localPath);
-        GetObjectRequest getObjectRequest = GetObjectRequest.builder()
-                .bucket(s3Uri.bucketName)
-                .key(s3Uri.key)
-                .build();
+        logger.info("Downloading file from S3: {} to {}", s3Uri.uri, localPath);
+        GetObjectRequest getObjectRequest = GetObjectRequest.builder().bucket(s3Uri.bucketName).key(s3Uri.key).build();
 
         s3Client.getObject(getObjectRequest, AsyncResponseTransformer.toFile(localPath)).join();
     }
 
     public static S3Repo create(Path s3LocalDir, S3Uri s3Uri, String s3Region) {
         S3AsyncClient s3Client = S3AsyncClient.crtBuilder()
-                                                   .credentialsProvider(DefaultCredentialsProvider.create())
-                                                   .region(Region.of(s3Region))
-                                                   .retryConfiguration(r -> r.numRetries(3))
-                                                   .targetThroughputInGbps(S3_TARGET_THROUGHPUT_GIBPS)
-                                                   .maxNativeMemoryLimitInBytes(S3_MAX_MEMORY_BYTES)
-                                                   .minimumPartSizeInBytes(S3_MINIMUM_PART_SIZE_BYTES)
-                                                   .build();
+            .credentialsProvider(DefaultCredentialsProvider.create())
+            .region(Region.of(s3Region))
+            .retryConfiguration(r -> r.numRetries(3))
+            .targetThroughputInGbps(S3_TARGET_THROUGHPUT_GIBPS)
+            .maxNativeMemoryLimitInBytes(S3_MAX_MEMORY_BYTES)
+            .minimumPartSizeInBytes(S3_MINIMUM_PART_SIZE_BYTES)
+            .build();
 
         return new S3Repo(s3LocalDir, s3Uri, s3Region, s3Client);
     }
 
     public S3Repo(Path s3LocalDir, S3Uri s3Uri, String s3Region, S3AsyncClient s3Client) {
         this.s3LocalDir = s3LocalDir;
-        this.s3RepoUri = s3Uri;        
+        this.s3RepoUri = s3Uri;
         this.s3Region = s3Region;
         this.s3Client = s3Client;
     }
@@ -120,12 +114,12 @@ public class S3Repo implements SourceRepo {
     @Override
     public Path getSnapshotRepoDataFilePath() {
         S3Uri repoFileS3Uri = findRepoFileUri();
-        
+
         String relativeFileS3Uri = repoFileS3Uri.uri.substring(s3RepoUri.uri.length() + 1);
 
         Path localFilePath = s3LocalDir.resolve(relativeFileS3Uri);
         ensureFileExistsLocally(repoFileS3Uri, localFilePath);
-        
+
         return localFilePath;
     }
 
@@ -184,13 +178,23 @@ public class S3Repo implements SourceRepo {
     @Override
     public void prepBlobFiles(ShardMetadata shardMetadata) {
         S3TransferManager transferManager = S3TransferManager.builder().s3Client(s3Client).build();
-        
+
         Path shardDirPath = getShardDirPath(shardMetadata.getIndexId(), shardMetadata.getShardId());
-        ensureS3LocalDirectoryExists(shardDirPath);        
+        ensureS3LocalDirectoryExists(shardDirPath);
 
-        String blobFilesS3Prefix = s3RepoUri.key + "indices/" + shardMetadata.getIndexId() + "/" + shardMetadata.getShardId() + "/";
+        String blobFilesS3Prefix = s3RepoUri.key
+            + "indices/"
+            + shardMetadata.getIndexId()
+            + "/"
+            + shardMetadata.getShardId()
+            + "/";
 
-        logger.info("Downloading blob files from S3: s3://" + s3RepoUri.bucketName + "/" + blobFilesS3Prefix + " to " + shardDirPath);
+        logger.info(
+            "Downloading blob files from S3: s3://%s/%s to %s",
+            s3RepoUri.bucketName,
+            blobFilesS3Prefix,
+            shardDirPath
+        );
         DirectoryDownload directoryDownload = transferManager.downloadDirectory(
             DownloadDirectoryRequest.builder()
                 .destination(shardDirPath)

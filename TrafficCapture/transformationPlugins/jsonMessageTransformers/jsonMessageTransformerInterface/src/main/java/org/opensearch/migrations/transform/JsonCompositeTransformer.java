@@ -12,9 +12,9 @@ public class JsonCompositeTransformer implements IJsonTransformer {
     }
 
     @Override
-    public Map<String,Object> transformJson(Map<String,Object> incomingJson) {
+    public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
         var lastOutput = new AtomicReference<>(incomingJson);
-        jsonTransformerList.forEach(t->lastOutput.set(t.transformJson(lastOutput.get())));
+        jsonTransformerList.forEach(t -> lastOutput.set(t.transformJson(lastOutput.get())));
         return lastOutput.get();
     }
 

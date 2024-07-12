@@ -1,13 +1,14 @@
 package org.opensearch.migrations.replay;
 
-import lombok.Lombok;
-import org.opensearch.migrations.testutils.HttpRequestFirstLine;
-import org.opensearch.migrations.testutils.SimpleHttpResponse;
-
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.Random;
+
+import org.opensearch.migrations.testutils.HttpRequestFirstLine;
+import org.opensearch.migrations.testutils.SimpleHttpResponse;
+
+import lombok.Lombok;
 
 public class TestHttpServerContext {
 
@@ -22,13 +23,15 @@ public class TestHttpServerContext {
     }
 
     static String getRequestString(int i) {
-        return String.format("GET %s HTTP/1.1\r\n" +
-                        "Connection: Keep-Alive\r\n" +
-                        "Host: localhost\r\n" +
-                        "User-Agent: UnitTest\r\n" +
-                        "Connection: Keep-Alive\r\n" +
-                        "\r\n",
-                getUriForIthRequest(i));
+        return String.format(
+            "GET %s HTTP/1.1\r\n"
+                + "Connection: Keep-Alive\r\n"
+                + "Host: localhost\r\n"
+                + "User-Agent: UnitTest\r\n"
+                + "Connection: Keep-Alive\r\n"
+                + "\r\n",
+            getUriForIthRequest(i)
+        );
     }
 
     public static SimpleHttpResponse makeResponse(Random rand, HttpRequestFirstLine firstLine) {
@@ -45,9 +48,13 @@ public class TestHttpServerContext {
         String body = SERVER_RESPONSE_BODY_PREFIX + r.path();
         var payloadBytes = body.getBytes(StandardCharsets.UTF_8);
         var headers = Map.of(
-                "Content-Type", "text/plain",
-                "Funtime", "checkIt!",
-                "Content-Length", ""+payloadBytes.length);
+            "Content-Type",
+            "text/plain",
+            "Funtime",
+            "checkIt!",
+            "Content-Length",
+            "" + payloadBytes.length
+        );
         return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
     }
 }

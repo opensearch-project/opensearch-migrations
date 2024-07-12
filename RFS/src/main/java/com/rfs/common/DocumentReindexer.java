@@ -3,10 +3,11 @@ package com.rfs.common;
 import java.time.Duration;
 import java.util.List;
 
-import lombok.RequiredArgsConstructor;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.document.Document;
+
+import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
@@ -19,15 +20,16 @@ public class DocumentReindexer {
 
     public Mono<Void> reindex(String indexName, Flux<Document> documentStream) {
 
-        return documentStream
-            .map(this::convertDocumentToBulkSection)  // Convert each Document to part of a bulk operation
+        return documentStream.map(this::convertDocumentToBulkSection)  // Convert each Document to part of a bulk
+                                                                       // operation
             .buffer(MAX_BATCH_SIZE) // Collect until you hit the batch size
-            .doOnNext(bulk -> logger.info(bulk.size() + " documents in current bulk request"))
+            .doOnNext(bulk -> logger.info("{} documents in current bulk request", bulk.size()))
             .map(this::convertToBulkRequestBody)  // Assemble the bulk request body from the parts
-            .flatMap(bulkJson -> client.sendBulkRequest(indexName, bulkJson) // Send the request
-                .doOnSuccess(unused -> logger.debug("Batch succeeded"))
-                .doOnError(error -> logger.error("Batch failed", error))
-                .onErrorResume(e -> Mono.empty()) // Prevent the error from stopping the entire stream
+            .flatMap(
+                bulkJson -> client.sendBulkRequest(indexName, bulkJson) // Send the request
+                    .doOnSuccess(unused -> logger.debug("Batch succeeded"))
+                    .doOnError(error -> logger.error("Batch failed", error))
+                    .onErrorResume(e -> Mono.empty()) // Prevent the error from stopping the entire stream
             )
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(5)))
             .doOnComplete(() -> logger.debug("All batches processed"))
@@ -50,9 +52,9 @@ public class DocumentReindexer {
         return builder.toString();
     }
 
-    public void refreshAllDocuments(ConnectionDetails targetConnection) throws Exception {
+    public void refreshAllDocuments(ConnectionDetails targetConnection) {
         // Send the request
-        OpenSearchClient client = new OpenSearchClient(targetConnection);
-        client.refresh();
+        OpenSearchClient refreshClient = new OpenSearchClient(targetConnection);
+        refreshClient.refresh();
     }
 }

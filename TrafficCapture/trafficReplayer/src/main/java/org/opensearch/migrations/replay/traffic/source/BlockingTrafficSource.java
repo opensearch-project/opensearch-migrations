@@ -1,16 +1,5 @@
 package org.opensearch.migrations.replay.traffic.source;
 
-import com.google.protobuf.Timestamp;
-import io.netty.util.concurrent.DefaultThreadFactory;
-import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.Utils;
-import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
-import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
-import org.slf4j.event.Level;
-
 import java.io.IOException;
 import java.time.Duration;
 import java.time.Instant;
@@ -24,6 +13,19 @@ import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
+
+import com.google.protobuf.Timestamp;
+
+import org.opensearch.migrations.replay.Utils;
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
+import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
+
+import io.netty.util.concurrent.DefaultThreadFactory;
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
+import org.slf4j.event.Level;
 
 /**
  * The BlockingTrafficSource class implements ITrafficCaptureSource and wraps another instance.
@@ -58,9 +60,11 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         this.lastTimestampSecondsRef = new AtomicReference<>(Instant.EPOCH);
         this.bufferTimeWindow = bufferTimeWindow;
         this.readGate = new Semaphore(0);
-        this.executorForBlockingActivity =
-                Executors.newSingleThreadExecutor(new DefaultThreadFactory(
-                        "BlockingTrafficSource-executorForBlockingActivity-"+System.identityHashCode(this)));
+        this.executorForBlockingActivity = Executors.newSingleThreadExecutor(
+            new DefaultThreadFactory(
+                "BlockingTrafficSource-executorForBlockingActivity-" + System.identityHashCode(this)
+            )
+        );
     }
 
     /**
@@ -74,16 +78,26 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         var newValue = Utils.setIfLater(stopReadingAtRef, prospectiveBarrier);
         if (newValue.equals(prospectiveBarrier)) {
             log.atLevel(Level.TRACE)
-                    .setMessage(() -> "Releasing the block on readNextTrafficStreamChunk and set" +
-                            " the new stopReadingAtRef=" + newValue).log();
-            // No reason to signal more than one reader.  We don't support concurrent reads with the current contract
+                .setMessage(
+                    () -> "Releasing the block on readNextTrafficStreamChunk and set"
+                        + " the new stopReadingAtRef="
+                        + newValue
+                )
+                .log();
+            // No reason to signal more than one reader. We don't support concurrent reads with the current contract
             readGate.drainPermits();
             readGate.release();
         } else {
             log.atTrace()
-                    .setMessage(() -> "stopReadsPast: " + pointInTime + " [buffer=" + prospectiveBarrier +
-                            "] didn't move the cursor because the value was already at " + newValue
-                    ).log();
+                .setMessage(
+                    () -> "stopReadsPast: "
+                        + pointInTime
+                        + " [buffer="
+                        + prospectiveBarrier
+                        + "] didn't move the cursor because the value was already at "
+                        + newValue
+                )
+                .log();
         }
     }
 
@@ -91,31 +105,35 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
      * Reads the next chunk that is available before the current stopReading barrier.  However,
      * that barrier isn't meant to be a tight barrier with immediate effect.
      */
-    public CompletableFuture<List<ITrafficStreamWithKey>>
-    readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> readChunkContextSupplier) {
+    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+        Supplier<ITrafficSourceContexts.IReadChunkContext> readChunkContextSupplier
+    ) {
         var readContext = readChunkContextSupplier.get();
         log.debug("BlockingTrafficSource::readNext");
-        var trafficStreamListFuture = CompletableFuture
-                .supplyAsync(() -> blockIfNeeded(readContext), executorForBlockingActivity)
-                .thenCompose(v -> {
-                    log.trace("BlockingTrafficSource::composing");
-                    return underlyingSource.readNextTrafficStreamChunk(()->readContext);
-                })
-                .whenComplete((v,t)->readContext.close());
+        var trafficStreamListFuture = CompletableFuture.supplyAsync(
+            () -> blockIfNeeded(readContext),
+            executorForBlockingActivity
+        ).thenCompose(v -> {
+            log.trace("BlockingTrafficSource::composing");
+            return underlyingSource.readNextTrafficStreamChunk(() -> readContext);
+        }).whenComplete((v, t) -> readContext.close());
         return trafficStreamListFuture.whenComplete((v, t) -> {
             if (t != null) {
                 return;
             }
             var maxLocallyObservedTimestamp = v.stream()
-                    .flatMap(tswk -> tswk.getStream().getSubStreamList().stream())
-                    .map(TrafficObservation::getTs)
-                    .max(Comparator.comparingLong(Timestamp::getSeconds)
-                            .thenComparingInt(Timestamp::getNanos))
-                    .map(TrafficStreamUtils::instantFromProtoTimestamp)
-                    .orElse(Instant.EPOCH);
+                .flatMap(tswk -> tswk.getStream().getSubStreamList().stream())
+                .map(TrafficObservation::getTs)
+                .max(Comparator.comparingLong(Timestamp::getSeconds).thenComparingInt(Timestamp::getNanos))
+                .map(TrafficStreamUtils::instantFromProtoTimestamp)
+                .orElse(Instant.EPOCH);
             Utils.setIfLater(lastTimestampSecondsRef, maxLocallyObservedTimestamp);
-            log.atTrace().setMessage(() -> "end of readNextTrafficStreamChunk trigger...lastTimestampSecondsRef="
-                    + lastTimestampSecondsRef.get()).log();
+            log.atTrace()
+                .setMessage(
+                    () -> "end of readNextTrafficStreamChunk trigger...lastTimestampSecondsRef="
+                        + lastTimestampSecondsRef.get()
+                )
+                .log();
         });
     }
 
@@ -127,19 +145,25 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
      * @return
      */
     private Void blockIfNeeded(ITrafficSourceContexts.IReadChunkContext readContext) {
-        if (stopReadingAtRef.get().equals(Instant.EPOCH)) { return null; }
-        log.atTrace().setMessage(() -> "stopReadingAtRef=" + stopReadingAtRef +
-                " lastTimestampSecondsRef=" + lastTimestampSecondsRef).log();
+        if (stopReadingAtRef.get().equals(Instant.EPOCH)) {
+            return null;
+        }
+        log.atTrace()
+            .setMessage(
+                () -> "stopReadingAtRef=" + stopReadingAtRef + " lastTimestampSecondsRef=" + lastTimestampSecondsRef
+            )
+            .log();
         ITrafficSourceContexts.IBackPressureBlockContext blockContext = null;
         while (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())) {
             if (blockContext == null) {
                 blockContext = readContext.createBackPressureContext();
             }
             try {
-                log.atTrace().setMessage("blocking until signaled to read the next chunk last={} stop={}")
-                        .addArgument(lastTimestampSecondsRef.get())
-                        .addArgument(stopReadingAtRef.get())
-                        .log();
+                log.atTrace()
+                    .setMessage("blocking until signaled to read the next chunk last={} stop={}")
+                    .addArgument(lastTimestampSecondsRef.get())
+                    .addArgument(stopReadingAtRef.get())
+                    .log();
                 var nextTouchOp = underlyingSource.getNextRequiredTouch();
                 if (nextTouchOp.isEmpty()) {
                     log.trace("acquiring readGate semaphore (w/out timeout)");
@@ -150,14 +174,25 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                     var nextInstant = nextTouchOp.get();
                     final var nowTime = Instant.now();
                     var waitIntervalMs = Duration.between(nowTime, nextInstant).toMillis();
-                    log.atDebug().setMessage(() -> "Next touch at " + nextInstant +
-                            " ... in " + waitIntervalMs + "ms (now=" + nowTime + ")").log();
+                    log.atDebug()
+                        .setMessage(
+                            () -> "Next touch at "
+                                + nextInstant
+                                + " ... in "
+                                + waitIntervalMs
+                                + "ms (now="
+                                + nowTime
+                                + ")"
+                        )
+                        .log();
                     if (waitIntervalMs <= 0) {
                         underlyingSource.touch(blockContext);
                     } else {
                         // if this doesn't succeed, we'll loop around & likely do a touch, then loop around again.
                         // if it DOES succeed, we'll loop around and make sure that there's not another reason to stop
-                        log.atTrace().setMessage(() -> "acquiring readGate semaphore with timeout=" + waitIntervalMs).log();
+                        log.atTrace()
+                            .setMessage(() -> "acquiring readGate semaphore with timeout=" + waitIntervalMs)
+                            .log();
                         try (var waitContext = blockContext.createWaitForSignalContext()) {
                             readGate.tryAcquire(waitIntervalMs, TimeUnit.MILLISECONDS);
                         }
@@ -194,11 +229,12 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
 
     @Override
     public String toString() {
-        return new StringJoiner(", ", BlockingTrafficSource.class.getSimpleName() + "[", "]")
-                .add("bufferTimeWindow=" + bufferTimeWindow)
-                .add("lastTimestampSecondsRef=" + lastTimestampSecondsRef)
-                .add("stopReadingAtRef=" + stopReadingAtRef)
-                .add("readGate=" + readGate)
-                .toString();
+        return new StringJoiner(", ", BlockingTrafficSource.class.getSimpleName() + "[", "]").add(
+            "bufferTimeWindow=" + bufferTimeWindow
+        )
+            .add("lastTimestampSecondsRef=" + lastTimestampSecondsRef)
+            .add("stopReadingAtRef=" + stopReadingAtRef)
+            .add("readGate=" + readGate)
+            .toString();
     }
 }

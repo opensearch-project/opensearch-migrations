@@ -14,7 +14,13 @@ public class S3SnapshotCreator extends SnapshotCreator {
         this(snapshotName, client, s3Uri, s3Region, null);
     }
 
-    public S3SnapshotCreator(String snapshotName, OpenSearchClient client, String s3Uri, String s3Region, Integer maxSnapshotRateMBPerNode) {
+    public S3SnapshotCreator(
+        String snapshotName,
+        OpenSearchClient client,
+        String s3Uri,
+        String s3Region,
+        Integer maxSnapshotRateMBPerNode
+    ) {
         super(snapshotName, client);
         this.s3Uri = s3Uri;
         this.s3Region = s3Region;
@@ -65,5 +71,5 @@ public class S3SnapshotCreator extends SnapshotCreator {
             return rawBasePath;
         }
     }
-    
+
 }

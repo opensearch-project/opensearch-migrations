@@ -1,8 +1,8 @@
 package org.opensearch.migrations.replay.util;
 
-import lombok.extern.slf4j.Slf4j;
-
 import java.util.function.ToIntFunction;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * This class is a convenience wrapper for OnlineRadixSorter where the items will intrinsically
@@ -22,8 +22,12 @@ public class OnlineRadixSorterForIntegratedKeys<T> extends OnlineRadixSorter {
     }
 
     public TrackedFuture<String, Void> add(T item, Runnable sortedItemVisitor) {
-        return super.addFutureForWork(radixResolver.applyAsInt(item), signalFuture->signalFuture.map(
-                f->f.whenComplete((v,t)->sortedItemVisitor.run()),
-                ()->"OnlineRadixSorterForIntegratedKeys.addFutureForWork"));
+        return super.addFutureForWork(
+            radixResolver.applyAsInt(item),
+            signalFuture -> signalFuture.map(
+                f -> f.whenComplete((v, t) -> sortedItemVisitor.run()),
+                () -> "OnlineRadixSorterForIntegratedKeys.addFutureForWork"
+            )
+        );
     }
 }

@@ -1,19 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import com.google.protobuf.ByteString;
-import com.google.protobuf.CodedOutputStream;
-import com.google.protobuf.Timestamp;
-import lombok.extern.slf4j.Slf4j;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-import org.apache.kafka.clients.consumer.MockConsumer;
-import org.apache.kafka.clients.consumer.OffsetResetStrategy;
-import org.apache.kafka.common.TopicPartition;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.nio.charset.StandardCharsets;
@@ -26,6 +12,22 @@ import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+import com.google.protobuf.ByteString;
+import com.google.protobuf.CodedOutputStream;
+import com.google.protobuf.Timestamp;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
+import org.apache.kafka.clients.consumer.MockConsumer;
+import org.apache.kafka.clients.consumer.OffsetResetStrategy;
+import org.apache.kafka.common.TopicPartition;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
+
+import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
+import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+
+import lombok.extern.slf4j.Slf4j;
+
 @Slf4j
 class KafkaPrinterTest {
     final static String FAKE_READ_PACKET_DATA = "abcdefgh\n";
@@ -34,20 +36,22 @@ class KafkaPrinterTest {
     public static final int NUM_PROTOBUF_OBJECTS = 10;
 
     private static TrafficStream makeTrafficStream(Instant t, String payload, int numReads) {
-        var fixedTimestamp = Timestamp.newBuilder()
-                .setSeconds(t.getEpochSecond())
-                .setNanos(t.getNano())
-                .build();
+        var fixedTimestamp = Timestamp.newBuilder().setSeconds(t.getEpochSecond()).setNanos(t.getNano()).build();
         var builder = TrafficStream.newBuilder()
-                .setConnectionId("testConnectionId")
-                .setNodeId("testNodeId")
-                .setNumberOfThisLastChunk(1);
+            .setConnectionId("testConnectionId")
+            .setNodeId("testNodeId")
+            .setNumberOfThisLastChunk(1);
         for (int i = 0; i < numReads; ++i) {
-            builder = builder.addSubStream(TrafficObservation.newBuilder().setTs(fixedTimestamp)
-                    .setRead(ReadObservation.newBuilder()
+            builder = builder.addSubStream(
+                TrafficObservation.newBuilder()
+                    .setTs(fixedTimestamp)
+                    .setRead(
+                        ReadObservation.newBuilder()
                             .setData(ByteString.copyFrom(payload.getBytes(StandardCharsets.UTF_8)))
-                            .build())
-                    .build());
+                            .build()
+                    )
+                    .build()
+            );
         }
         return builder.build();
     }
@@ -69,7 +73,11 @@ class KafkaPrinterTest {
 
         @Override
         public void accept(Stream<ConsumerRecord<String, byte[]>> stream) {
-            underlyingConsumer.accept(stream.map(msg->{log.trace("read msg"); count++; return msg;}));
+            underlyingConsumer.accept(stream.map(msg -> {
+                log.trace("read msg");
+                count++;
+                return msg;
+            }));
         }
     }
 
@@ -105,13 +113,17 @@ class KafkaPrinterTest {
         var numTrafficStreamsPartition0 = 30;
         var numTrafficStreamsPartition1 = 20;
         var numTrafficStreamsPartition2 = 0;
-        var totalTrafficStreams = numTrafficStreamsPartition0 + numTrafficStreamsPartition1 + numTrafficStreamsPartition2;
+        var totalTrafficStreams = numTrafficStreamsPartition0 + numTrafficStreamsPartition1
+            + numTrafficStreamsPartition2;
         var recordLimitPartition0 = 17;
         var recordLimitPartition1 = 8;
         var recordLimitPartition2 = 0;
         var totalLimitTrafficStreams = recordLimitPartition0 + recordLimitPartition1 + recordLimitPartition2;
 
-        var kafkaConsumer = makeKafkaConsumer(Map.of(0, numTrafficStreamsPartition0, 1, numTrafficStreamsPartition1, 2, numTrafficStreamsPartition2), () -> random.nextInt(NUM_READ_ITEMS_BOUND));
+        var kafkaConsumer = makeKafkaConsumer(
+            Map.of(0, numTrafficStreamsPartition0, 1, numTrafficStreamsPartition1, 2, numTrafficStreamsPartition2),
+            () -> random.nextInt(NUM_READ_ITEMS_BOUND)
+        );
         var partitionLimits = new HashMap<TopicPartition, KafkaPrinter.PartitionTracker>();
         TopicPartition partition0 = new TopicPartition(TEST_TOPIC_NAME, 0);
         TopicPartition partition1 = new TopicPartition(TEST_TOPIC_NAME, 1);
@@ -126,13 +138,19 @@ class KafkaPrinterTest {
         validateNumberOfTrafficStreamsEmitted(totalLimitTrafficStreams, delimitedOutputBytes);
     }
 
-    private byte[] getOutputFromConsumer(org.apache.kafka.clients.consumer.Consumer<String,byte[]> kafkaConsumer,
-                                         int expectedMessageCount, Map<TopicPartition, KafkaPrinter.PartitionTracker> capturedRecords)
-            throws Exception
-    {
+    private byte[] getOutputFromConsumer(
+        org.apache.kafka.clients.consumer.Consumer<String, byte[]> kafkaConsumer,
+        int expectedMessageCount,
+        Map<TopicPartition, KafkaPrinter.PartitionTracker> capturedRecords
+    ) throws Exception {
         try (var baos = new ByteArrayOutputStream()) {
-            var wrappedConsumer = new CountingConsumer(KafkaPrinter.getDelimitedProtoBufOutputter(capturedRecords, Map.of(0,
-                CodedOutputStream.newInstance(baos)), false));
+            var wrappedConsumer = new CountingConsumer(
+                KafkaPrinter.getDelimitedProtoBufOutputter(
+                    capturedRecords,
+                    Map.of(0, CodedOutputStream.newInstance(baos)),
+                    false
+                )
+            );
             while (wrappedConsumer.count < expectedMessageCount) {
                 KafkaPrinter.processNextChunkOfKafkaEvents(kafkaConsumer, wrappedConsumer);
             }
@@ -141,7 +159,7 @@ class KafkaPrinterTest {
     }
 
     private void validateNumberOfTrafficStreamsEmitted(int expectedNumProtobufObjects, byte[] delimitedOutputBytes)
-            throws Exception {
+        throws Exception {
         int count = 0;
         try (var bais = new ByteArrayInputStream(delimitedOutputBytes)) {
             while (true) {
@@ -156,13 +174,13 @@ class KafkaPrinterTest {
         }
     }
 
-    private org.apache.kafka.clients.consumer.Consumer<String, byte[]>
-    makeKafkaConsumer(Map<Integer, Integer> partitionIdToNumTrafficStreams, Supplier<Integer> numReadGenerator)
-            throws Exception
-    {
+    private org.apache.kafka.clients.consumer.Consumer<String, byte[]> makeKafkaConsumer(
+        Map<Integer, Integer> partitionIdToNumTrafficStreams,
+        Supplier<Integer> numReadGenerator
+    ) throws Exception {
         var mockConsumer = new MockConsumer(OffsetResetStrategy.EARLIEST);
         var tpList = new ArrayList<TopicPartition>();
-        var offsetMap = new HashMap<TopicPartition, Long> ();
+        var offsetMap = new HashMap<TopicPartition, Long>();
         for (int partitionId : partitionIdToNumTrafficStreams.keySet()) {
             var topicPartition = new TopicPartition(TEST_TOPIC_NAME, partitionId);
             tpList.add(topicPartition);
@@ -170,7 +188,7 @@ class KafkaPrinterTest {
         }
         mockConsumer.assign(tpList);
         mockConsumer.updateBeginningOffsets(offsetMap);
-        for (Map.Entry<Integer,Integer> partitionEntry : partitionIdToNumTrafficStreams.entrySet()) {
+        for (Map.Entry<Integer, Integer> partitionEntry : partitionIdToNumTrafficStreams.entrySet()) {
             var partitionId = partitionEntry.getKey();
             var numTrafficStreams = partitionEntry.getValue();
             for (int i = 0; i < numTrafficStreams; ++i) {
