@@ -36,6 +36,9 @@ Before starting data migration the target cluster can be inspected by running qu
 
 ## Walkthrough
 
+> [!IMPORTANT]  
+> These features for metadata migration are in development.  This walk through is to help set expectations about what is delivered, but isn't a final design.
+
 ### Basic source cluster inspection
 
 #### Configure meta to connect to the source cluster
