@@ -6,13 +6,13 @@
         </Console>
     </Appenders>
     <Loggers>
-        <Root level="debug">
+        <Root level="INFO">
             <AppenderRef ref="Console"/>
         </Root>
-        <Logger name="org.apache.hc.client5.http.wire" level="debug" additivity="false">
+        <Logger name="org.apache.hc.client5.http.wire" level="INFO" additivity="false">
             <AppenderRef ref="Console"/>
         </Logger>
-        <Logger name="org.apache.hc.core5.http.wire" level="debug" additivity="false">
+        <Logger name="org.apache.hc.core5.http.wire" level="INFO" additivity="false">
             <AppenderRef ref="Console"/>
         </Logger>
         <Logger name="org.testcontainers" level="INFO"/>
