@@ -101,7 +101,6 @@ dependencies {
 
     // make sure that this is compatible with the testcontainers version
     api group: 'org.opensearch', name: 'opensearch-testcontainers', version: '2.0.1'
-    api group: 'org.testcontainers', name: 'toxiproxy', version: '1.19.8'
 
     def mockito = '5.11.0'
     api group: 'org.mockito', name:'mockito-core', version: mockito

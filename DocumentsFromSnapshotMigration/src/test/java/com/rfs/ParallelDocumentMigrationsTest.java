@@ -66,8 +66,7 @@ import java.util.stream.Stream;
 
 @Tag("longTest")
 @Slf4j
-public class FullTest extends SourceTestBase {
-    public static final String GENERATOR_BASE_IMAGE = "migrations/elasticsearch_client_test_console:latest";
+public class ParallelDocumentMigrationsTest extends SourceTestBase {
     final static long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
     final static List<SearchClusterContainer.Version> SOURCE_IMAGES = List.of(
         SearchClusterContainer.ES_V7_10_2,

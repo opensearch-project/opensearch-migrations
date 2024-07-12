@@ -168,18 +168,7 @@ public class RfsMigrateDocuments {
 
         validateArgs(arguments);
 
-        var compositeContextTracker =
-                new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType());
-        var rootWorkCoordinationContext = new RootWorkCoordinationContext(
-                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint,
-                        "docMigrationCoordination"),
-                compositeContextTracker);
-        var rootDocumentContext = new RootDocumentMigrationContext(
-                RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint,
-                        "docMigration"),
-                compositeContextTracker,
-                rootWorkCoordinationContext);
-
+        var rootDocumentContext = makeRootContext(arguments);
         var luceneDirPath = Paths.get(arguments.luceneDir);
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
@@ -221,6 +210,15 @@ public class RfsMigrateDocuments {
                         shardMetadataFactory, unpackerFactory, arguments.maxShardSizeBytes, rootDocumentContext);
             });
         }
+    }
+
+    private static RootDocumentMigrationContext makeRootContext(Args arguments) {
+        var compositeContextTracker =
+                new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType());
+        var otelSdk = RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint,
+                "docMigration");
+        var workContext = new RootWorkCoordinationContext(otelSdk, compositeContextTracker);
+        return new RootDocumentMigrationContext(otelSdk, compositeContextTracker, workContext);
     }
 
     public static DocumentsRunner.CompletionStatus run(Function<Path,LuceneDocumentsReader> readerFactory,

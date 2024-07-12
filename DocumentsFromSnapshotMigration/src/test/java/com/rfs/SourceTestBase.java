@@ -26,12 +26,13 @@ import java.util.Comparator;
 import java.util.List;
 
 public class SourceTestBase {
+    public static final String GENERATOR_BASE_IMAGE = "migrations/elasticsearch_client_test_console:latest";
     public static final String SOURCE_SERVER_ALIAS = "source";
 
     protected static Object[] makeParamsForBase(SearchClusterContainer.Version baseSourceImage) {
         return new Object[]{
                 baseSourceImage,
-                FullTest.GENERATOR_BASE_IMAGE,
+                GENERATOR_BASE_IMAGE,
                 new String[]{"/root/runTestBenchmarks.sh", "--endpoint", "http://" + SOURCE_SERVER_ALIAS + ":9200/"}
         };
     }
