@@ -5,10 +5,18 @@ import java.net.URI;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
+import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
 import java.util.function.Function;
 
+import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
+import org.opensearch.migrations.tracing.ActiveContextTracker;
+import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
+import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.RootOtelContext;
+
+import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
@@ -30,6 +38,7 @@ import com.rfs.common.SourceRepo;
 import com.rfs.common.TryHandlePhaseFailure;
 import com.rfs.models.IndexMetadata;
 import com.rfs.models.ShardMetadata;
+import com.rfs.tracing.RootWorkCoordinationContext;
 import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
 import com.rfs.version_es_7_10.IndexMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
@@ -40,8 +49,15 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class RfsMigrateDocuments {
-    public static final int PROCESS_TIMED_OUT = 1;
+    public static final int PROCESS_TIMED_OUT = 2;
     public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
+
+    public static class DurationConverter implements IStringConverter<Duration> {
+        @Override
+        public Duration convert(String value) {
+            return Duration.parse(value);
+        }
+    }
 
     public static class Args {
         @Parameter(names = { "--snapshot-name" }, required = true, description = "The name of the snapshot to migrate")
@@ -91,6 +107,16 @@ public class RfsMigrateDocuments {
             "--max-shard-size-bytes" }, description = ("Optional. The maximum shard size, in bytes, to allow when"
                 + " performing the document migration.  Useful for preventing disk overflow.  Default: 50 * 1024 * 1024 * 1024 (50 GB)"), required = false)
         public long maxShardSizeBytes = 50 * 1024 * 1024 * 1024L;
+        @Parameter(names = { "--max-initial-lease-duration" }, description = ("Optional. The maximum time that the "
+            + "first attempt to migrate a shard's documents should take.  If a process takes longer than this "
+            + "the process will terminate, allowing another process to attempt the migration, but with double the "
+            + "amount of time than the last time.  Default: PT10M"), required = false, converter = DurationConverter.class)
+        public Duration maxInitialLeaseDuration = Duration.ofMinutes(10);
+
+        @Parameter(required = false, names = {
+            "--otel-collector-endpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
+                + "forwarded. If no value is provided, metrics will not be forwarded.")
+        String otelCollectorEndpoint;
     }
 
     public static class NoWorkLeftException extends Exception {
@@ -130,11 +156,12 @@ public class RfsMigrateDocuments {
 
         validateArgs(arguments);
 
+        var rootDocumentContext = makeRootContext(arguments);
         var luceneDirPath = Paths.get(arguments.luceneDir);
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
         try (var processManager = new LeaseExpireTrigger(workItemId -> {
-            log.error("Terminating RfsMigrateDocuments because its lease has expired for " + workItemId);
+            log.error("Terminating RfsMigrateDocuments because the lease has expired for " + workItemId);
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC())) {
             var workCoordinator = new OpenSearchWorkCoordinator(
@@ -179,50 +206,76 @@ public class RfsMigrateDocuments {
                     LuceneDocumentsReader::new,
                     reindexer,
                     workCoordinator,
+                    arguments.maxInitialLeaseDuration,
                     processManager,
                     indexMetadataFactory,
                     arguments.snapshotName,
                     arguments.indexAllowlist,
                     shardMetadataFactory,
                     unpackerFactory,
-                    arguments.maxShardSizeBytes
+                    arguments.maxShardSizeBytes,
+                    rootDocumentContext
                 );
             });
         }
+    }
+
+    private static RootDocumentMigrationContext makeRootContext(Args arguments) {
+        var compositeContextTracker = new CompositeContextTracker(
+            new ActiveContextTracker(),
+            new ActiveContextTrackerByActivityType()
+        );
+        var otelSdk = RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(
+            arguments.otelCollectorEndpoint,
+            "docMigration"
+        );
+        var workContext = new RootWorkCoordinationContext(otelSdk, compositeContextTracker);
+        return new RootDocumentMigrationContext(otelSdk, compositeContextTracker, workContext);
     }
 
     public static DocumentsRunner.CompletionStatus run(
         Function<Path, LuceneDocumentsReader> readerFactory,
         DocumentReindexer reindexer,
         IWorkCoordinator workCoordinator,
+        Duration maxInitialLeaseDuration,
         LeaseExpireTrigger leaseExpireTrigger,
         IndexMetadata.Factory indexMetadataFactory,
         String snapshotName,
         List<String> indexAllowlist,
         ShardMetadata.Factory shardMetadataFactory,
         SnapshotShardUnpacker.Factory unpackerFactory,
-        long maxShardSizeBytes
+        long maxShardSizeBytes,
+        RootDocumentMigrationContext rootDocumentContext
     ) throws IOException, InterruptedException, NoWorkLeftException {
         var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
-        confirmShardPrepIsComplete(indexMetadataFactory, snapshotName, indexAllowlist, scopedWorkCoordinator);
-        if (!workCoordinator.workItemsArePending()) {
+        confirmShardPrepIsComplete(
+            indexMetadataFactory,
+            snapshotName,
+            indexAllowlist,
+            scopedWorkCoordinator,
+            rootDocumentContext
+        );
+        if (!workCoordinator.workItemsArePending(
+            rootDocumentContext.getWorkCoordinationContext()::createItemsPendingContext
+        )) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
         }
-        return new DocumentsRunner(scopedWorkCoordinator, (name, shard) -> {
+        return new DocumentsRunner(scopedWorkCoordinator, maxInitialLeaseDuration, (name, shard) -> {
             var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, name, shard);
             log.info("Shard size: " + shardMetadata.getTotalSizeBytes());
             if (shardMetadata.getTotalSizeBytes() > maxShardSizeBytes) {
                 throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), maxShardSizeBytes);
             }
             return shardMetadata;
-        }, unpackerFactory, readerFactory, reindexer).migrateNextShard();
+        }, unpackerFactory, readerFactory, reindexer).migrateNextShard(rootDocumentContext::createReindexContext);
     }
 
     private static void confirmShardPrepIsComplete(
         IndexMetadata.Factory indexMetadataFactory,
         String snapshotName,
         List<String> indexAllowlist,
-        ScopedWorkCoordinator scopedWorkCoordinator
+        ScopedWorkCoordinator scopedWorkCoordinator,
+        RootDocumentMigrationContext rootContext
     ) throws IOException, InterruptedException {
         // assume that the shard setup work will be done quickly, much faster than its lease in most cases.
         // in cases where that isn't true, doing random backoff across the fleet should guarantee that eventually,
@@ -230,7 +283,13 @@ public class RfsMigrateDocuments {
         long lockRenegotiationMillis = 1000;
         for (int shardSetupAttemptNumber = 0;; ++shardSetupAttemptNumber) {
             try {
-                new ShardWorkPreparer().run(scopedWorkCoordinator, indexMetadataFactory, snapshotName, indexAllowlist);
+                new ShardWorkPreparer().run(
+                    scopedWorkCoordinator,
+                    indexMetadataFactory,
+                    snapshotName,
+                    indexAllowlist,
+                    rootContext
+                );
                 return;
             } catch (IWorkCoordinator.LeaseLockHeldElsewhereException e) {
                 long finalLockRenegotiationMillis = lockRenegotiationMillis;

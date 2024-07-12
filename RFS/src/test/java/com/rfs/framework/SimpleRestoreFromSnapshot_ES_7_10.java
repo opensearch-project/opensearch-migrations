@@ -8,6 +8,8 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.util.IOUtils;
 
+import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
+
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
@@ -64,11 +66,13 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
         return indices;
     }
 
+    @Override
     public void updateTargetCluster(
         final List<IndexMetadata> indices,
         final Path unpackedShardDataDir,
-        final OpenSearchClient client
-    ) throws Exception {
+        final OpenSearchClient client,
+        IDocumentMigrationContexts.IDocumentReindexContext context
+    ) {
         for (final IndexMetadata index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
                 final var documents = new LuceneDocumentsReader(
@@ -76,7 +80,7 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
                 ).readDocuments();
 
                 final var finalShardId = shardId;
-                new DocumentReindexer(client).reindex(index.getName(), documents)
+                new DocumentReindexer(client).reindex(index.getName(), documents, context)
                     .doOnError(error -> logger.error("Error during reindexing: " + error))
                     .doOnSuccess(
                         done -> logger.info(

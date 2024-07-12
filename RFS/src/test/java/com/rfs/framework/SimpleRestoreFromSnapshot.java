@@ -3,6 +3,8 @@ package com.rfs.framework;
 import java.nio.file.Path;
 import java.util.List;
 
+import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
+
 import com.rfs.common.ConnectionDetails;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.models.IndexMetadata;
@@ -14,7 +16,10 @@ public interface SimpleRestoreFromSnapshot {
         return new SimpleRestoreFromSnapshot_ES_7_10();
     }
 
-    public default void fullMigrationViaLocalSnapshot(final String targetClusterUrl) throws Exception {
+    public default void fullMigrationViaLocalSnapshot(
+        final String targetClusterUrl,
+        IDocumentMigrationContexts.IDocumentReindexContext context
+    ) throws Exception {
         // TODO: Dynamically create / clean these up during tests
         final var tempSnapshotName = "";
         final var compressedSnapshotDirectory = "";
@@ -32,7 +37,7 @@ public interface SimpleRestoreFromSnapshot {
         // - Indices
         // - Documents
 
-        updateTargetCluster(indices, unpackedShardDataDir, targetClusterClient);
+        updateTargetCluster(indices, unpackedShardDataDir, targetClusterClient, context);
     }
 
     public List<IndexMetadata> extractSnapshotIndexData(
@@ -44,7 +49,8 @@ public interface SimpleRestoreFromSnapshot {
     public void updateTargetCluster(
         final List<IndexMetadata> indices,
         final Path unpackedShardDataDir,
-        final OpenSearchClient client
+        final OpenSearchClient client,
+        IDocumentMigrationContexts.IDocumentReindexContext context
     ) throws Exception;
 
 }

@@ -44,6 +44,13 @@ dependencies {
     implementation 'io.projectreactor.netty:reactor-netty-core'
     implementation 'io.projectreactor.netty:reactor-netty-http'
 
+    implementation group: 'software.amazon.awssdk', name: 's3'
+    implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
+    implementation group: 'software.amazon.awssdk.crt', name: 'aws-crt'
+
+    testImplementation 'com.github.docker-java:docker-java-core:3.3.6'
+    testImplementation 'com.github.docker-java:docker-java-transport-httpclient5:3.3.6'
+
     testImplementation testFixtures(project(path: ':RFS'))
     testImplementation group: 'io.projectreactor', name: 'reactor-test'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
@@ -56,11 +63,20 @@ dependencies {
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
 
     // Integration tests
-    testImplementation group: 'org.opensearch', name: 'opensearch-testcontainers'
+    testImplementation testFixtures(project(path: ':testHelperFixtures'))
+    testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation group: 'org.testcontainers', name: 'testcontainers'
     testImplementation group: 'org.hamcrest', name: 'hamcrest'
+    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
+    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
+    // why are these under implementation with the above comment for integ tests?
+    implementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
 
     testFixturesImplementation project(":commonDependencyVersionConstraints")
+    testFixturesImplementation testFixtures(project(":coreUtilities"))
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java'
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java-core'
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java-transport-httpclient5'

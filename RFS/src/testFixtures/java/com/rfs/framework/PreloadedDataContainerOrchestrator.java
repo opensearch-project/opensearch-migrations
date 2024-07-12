@@ -42,7 +42,7 @@ import org.testcontainers.containers.Network;
  */
 @Slf4j
 public class PreloadedDataContainerOrchestrator {
-    public static String PRELOADED_IMAGE_BASE_NAME = "migrations/preloaded_source_";
+    public static String PRELOADED_IMAGE_BASE_NAME = "org/opensearch/migrations/preloaded_source_";
     public static int PULL_TIMEOUT_SECONDS = 600;
 
     @EqualsAndHashCode
@@ -104,11 +104,22 @@ public class PreloadedDataContainerOrchestrator {
 
     private int getHashCodeOfImagesAndArgs(DockerClient dockerClient, boolean pullIfUnavailable)
         throws InterruptedException {
-        return Objects.hash(
-            getImageId(dockerClient, baseSourceVersion.imageName, pullIfUnavailable),
-            getImageId(dockerClient, dataLoaderImageName, pullIfUnavailable),
-            generatorContainerArgs
-        );
+        var sourceImageId = getImageId(dockerClient, baseSourceVersion.imageName, pullIfUnavailable);
+        var dataLoaderImageId = getImageId(dockerClient, dataLoaderImageName, pullIfUnavailable);
+        var rval = Objects.hash(sourceImageId, dataLoaderImageId, Arrays.hashCode(generatorContainerArgs));
+        log.atInfo()
+            .setMessage(
+                "sourceImageId="
+                    + sourceImageId
+                    + " dataLoaderImageId="
+                    + dataLoaderImageId
+                    + " args="
+                    + Arrays.stream(generatorContainerArgs).collect(Collectors.joining())
+                    + " hash: "
+                    + rval
+            )
+            .log();
+        return rval;
     }
 
     private String getImageName() {

@@ -7,6 +7,8 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import org.apache.lucene.document.Document;
 
+import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
+
 import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -18,7 +20,11 @@ public class DocumentReindexer {
     private static final int MAX_BATCH_SIZE = 1000; // Arbitrarily chosen
     protected final OpenSearchClient client;
 
-    public Mono<Void> reindex(String indexName, Flux<Document> documentStream) {
+    public Mono<Void> reindex(
+        String indexName,
+        Flux<Document> documentStream,
+        IDocumentMigrationContexts.IDocumentReindexContext context
+    ) {
 
         return documentStream.map(this::convertDocumentToBulkSection)  // Convert each Document to part of a bulk
                                                                        // operation
@@ -26,7 +32,7 @@ public class DocumentReindexer {
             .doOnNext(bulk -> logger.info("{} documents in current bulk request", bulk.size()))
             .map(this::convertToBulkRequestBody)  // Assemble the bulk request body from the parts
             .flatMap(
-                bulkJson -> client.sendBulkRequest(indexName, bulkJson) // Send the request
+                bulkJson -> client.sendBulkRequest(indexName, bulkJson, context.createBulkRequest()) // Send the request
                     .doOnSuccess(unused -> logger.debug("Batch succeeded"))
                     .doOnError(error -> logger.error("Batch failed", error))
                     .onErrorResume(e -> Mono.empty()) // Prevent the error from stopping the entire stream
@@ -52,9 +58,11 @@ public class DocumentReindexer {
         return builder.toString();
     }
 
-    public void refreshAllDocuments(ConnectionDetails targetConnection) {
+    public void refreshAllDocuments(
+        ConnectionDetails targetConnection,
+        IDocumentMigrationContexts.IDocumentReindexContext context
+    ) {
         // Send the request
-        OpenSearchClient refreshClient = new OpenSearchClient(targetConnection);
-        refreshClient.refresh();
+        new OpenSearchClient(targetConnection).refresh(context.createRefreshContext());
     }
 }

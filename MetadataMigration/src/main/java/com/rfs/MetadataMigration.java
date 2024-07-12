@@ -4,6 +4,12 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 
+import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
+import org.opensearch.migrations.tracing.ActiveContextTracker;
+import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
+import org.opensearch.migrations.tracing.CompositeContextTracker;
+import org.opensearch.migrations.tracing.RootOtelContext;
+
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
@@ -75,12 +81,22 @@ public class MetadataMigration {
             "--min-replicas" }, description = ("Optional.  The minimum number of replicas configured for migrated indices on the target."
                 + " This can be useful for migrating to targets which use zonal deployments and require additional replicas to meet zone requirements.  Default: 0"), required = false)
         public int minNumberOfReplicas = 0;
+
+        @Parameter(required = false, names = {
+            "--otel-collector-endpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
+                + "forwarded. If no value is provided, metrics will not be forwarded.")
+        String otelCollectorEndpoint;
     }
 
     public static void main(String[] args) throws Exception {
         // Grab out args
         Args arguments = new Args();
         JCommander.newBuilder().addObject(arguments).build().parse(args);
+
+        var rootContext = new RootMetadataMigrationContext(
+            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "rfs"),
+            new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
+        );
 
         if (arguments.fileSystemRepoPath == null && arguments.s3RepoUri == null) {
             throw new ParameterException("Either file-system-repo-path or s3-repo-uri must be set");
@@ -119,7 +135,8 @@ public class MetadataMigration {
                 targetClient,
                 List.of(),
                 componentTemplateAllowlist,
-                indexTemplateAllowlist
+                indexTemplateAllowlist,
+                rootContext.createMetadataMigrationContext()
             );
             final Transformer transformer = TransformFunctions.getTransformer(
                 ClusterVersion.ES_7_10,
@@ -130,8 +147,14 @@ public class MetadataMigration {
 
             final IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
             final IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
-            new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer, indexAllowlist)
-                .migrateIndices();
+            new IndexRunner(
+                snapshotName,
+                indexMetadataFactory,
+                indexCreator,
+                transformer,
+                indexAllowlist,
+                rootContext.createIndexContext()
+            ).migrateIndices();
         });
     }
 }

@@ -3,6 +3,8 @@ package com.rfs.worker;
 import java.util.List;
 import java.util.function.BiConsumer;
 
+import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts;
+
 import com.rfs.common.FilterScheme;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.models.IndexMetadata;
@@ -20,6 +22,7 @@ public class IndexRunner {
     private final IndexCreator_OS_2_11 indexCreator;
     private final Transformer transformer;
     private final List<String> indexAllowlist;
+    private final IMetadataMigrationContexts.ICreateIndexContext context;
 
     public void migrateIndices() {
         SnapshotRepo.Provider repoDataProvider = metadataFactory.getRepoDataProvider();
@@ -36,7 +39,7 @@ public class IndexRunner {
             .peek(index -> {
                 var indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
                 var transformedRoot = transformer.transformIndexMetadata(indexMetadata);
-                var resultOp = indexCreator.create(transformedRoot, index.getName(), indexMetadata.getId());
+                var resultOp = indexCreator.create(transformedRoot, index.getName(), indexMetadata.getId(), context);
                 resultOp.ifPresentOrElse(
                     value -> log.info("Index " + index.getName() + " created successfully"),
                     () -> log.info("Index " + index.getName() + " already existed; no work required")

@@ -121,6 +121,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             this.prettyName = prettyName;
             this.initializationType = initializationType;
         }
+
     }
 
     public static class ElasticsearchVersion extends Version {

@@ -6,7 +6,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
 import io.opentelemetry.api.OpenTelemetry;
-import io.opentelemetry.api.metrics.Meter;
 import io.opentelemetry.api.metrics.MeterProvider;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.api.trace.SpanBuilder;
@@ -31,8 +30,6 @@ import lombok.extern.slf4j.Slf4j;
 public class RootOtelContext implements IRootOtelContext {
     private final OpenTelemetry openTelemetryImpl;
     private final String scopeName;
-    @Getter
-    private final MetricInstruments metrics;
     @Getter
     private final IContextTracker contextTracker;
 
@@ -112,29 +109,18 @@ public class RootOtelContext implements IRootOtelContext {
         contextTracker.onContextClosed(newScopedContext);
     }
 
-    public static class MetricInstruments extends CommonMetricInstruments {
-        public MetricInstruments(Meter meter, String activityName) {
-            super(meter, activityName);
-        }
+    @Override
+    public CommonMetricInstruments getMetrics() {
+        return null;
     }
 
     public RootOtelContext(String scopeName, IContextTracker contextTracker) {
         this(scopeName, contextTracker, null);
     }
 
-    public RootOtelContext(
-        String scopeName,
-        IContextTracker contextTracker,
-        String collectorEndpoint,
-        String serviceName
-    ) {
-        this(scopeName, contextTracker, initializeOpenTelemetryWithCollectorOrAsNoop(collectorEndpoint, serviceName));
-    }
-
     public RootOtelContext(String scopeName, IContextTracker contextTracker, OpenTelemetry sdk) {
         openTelemetryImpl = sdk != null ? sdk : initializeOpenTelemetryWithCollectorOrAsNoop(null, null);
         this.scopeName = scopeName;
-        this.metrics = new MetricInstruments(this.getMeterProvider().get(scopeName), "root");
         this.contextTracker = contextTracker;
     }
 

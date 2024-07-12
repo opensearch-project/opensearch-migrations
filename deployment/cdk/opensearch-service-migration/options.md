@@ -42,7 +42,6 @@ These tables list all CDK context configuration values a user can specify for th
 | Name                              | Type    | Example                                               | Description                                                                                                                                                  |
 |-----------------------------------|---------|-------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | reindexFromSnapshotServiceEnabled | boolean | true                                                  | Create resources for deploying and configuring the RFS ECS service                                                                                           |
-| reindexFromSnapshotExtraArgs      | string  | "--log-level warn"                                    | Extra arguments to provide to the RFS command. This includes all parameters supported by [RFS](../../../DocumentsFromSnapshotMigration/src/main/java/com/rfs/RfsMigrateDocuments.java). |
 | sourceClusterEndpoint             | string  | `"https://source-cluster.elb.us-east-1.endpoint.com"` | The endpoint for the source cluster from which RFS will take a snapshot                                                                                      |
 
 ### OpenSearch Domain Options
