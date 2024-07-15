@@ -10,6 +10,9 @@ import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ArgumentsSource;
 
+import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
+import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+
 import com.rfs.common.ClusterVersion;
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.FileSystemSnapshotCreator;
@@ -18,9 +21,9 @@ import com.rfs.framework.ClusterOperations;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.framework.SimpleRestoreFromSnapshot;
 import com.rfs.transformers.TransformFunctions;
-import com.rfs.version_es_6_8.SnapshotRepoProvider_ES_6_8;
 import com.rfs.version_es_6_8.GlobalMetadataFactory_ES_6_8;
 import com.rfs.version_es_6_8.IndexMetadataFactory_ES_6_8;
+import com.rfs.version_es_6_8.SnapshotRepoProvider_ES_6_8;
 import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
 import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 import com.rfs.worker.IndexRunner;
@@ -43,13 +46,18 @@ public class EndToEndTest {
     @ParameterizedTest(name = "Target OpenSearch {0}")
     @ArgumentsSource(SupportedTargetCluster.class)
     public void migrateFrom_ES_v6_8(final SearchClusterContainer.Version targetVersion) throws Exception {
-        try (final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23);
-            final var targetCluster = new SearchClusterContainer(targetVersion)) {
+        var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
+        var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();
+        try (
+            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23);
+            final var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
             // Setup
             // Start the clusters for testing
             var bothClustersStarted = CompletableFuture.allOf(
                 CompletableFuture.runAsync(() -> sourceCluster.start()),
-                CompletableFuture.runAsync(() -> targetCluster.start()));
+                CompletableFuture.runAsync(() -> targetCluster.start())
+            );
             bothClustersStarted.join();
 
             // Setup
@@ -63,7 +71,12 @@ public class EndToEndTest {
             // Take a snapshot
             var snapshotName = "my_snap";
             var sourceClient = new OpenSearchClient(sourceCluster.getUrl(), null, null, true);
-            var snapshotCreator = new FileSystemSnapshotCreator(snapshotName, sourceClient, SearchClusterContainer.CLUSTER_SNAPSHOT_DIR);
+            var snapshotCreator = new FileSystemSnapshotCreator(
+                snapshotName,
+                sourceClient,
+                SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
+                snapshotContext.createSnapshotCreateContext()
+            );
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
             sourceCluster.copySnapshotData(localDirectory.toString());
 
@@ -72,7 +85,13 @@ public class EndToEndTest {
 
             var repoDataProvider = new SnapshotRepoProvider_ES_6_8(sourceRepo);
             var metadataFactory = new GlobalMetadataFactory_ES_6_8(repoDataProvider);
-            var metadataCreator = new GlobalMetadataCreator_OS_2_11(targetClient, null, null, null);
+            var metadataCreator = new GlobalMetadataCreator_OS_2_11(
+                targetClient,
+                null,
+                null,
+                null,
+                metadataContext.createMetadataMigrationContext()
+            );
             var transformer = TransformFunctions.getTransformer(ClusterVersion.ES_6_8, ClusterVersion.OS_2_11, 1);
             // Action
             // Migrate metadata
@@ -92,8 +111,15 @@ public class EndToEndTest {
             // Migrate indices
             var indexMetadataFactory = new IndexMetadataFactory_ES_6_8(repoDataProvider);
             var indexCreator = new IndexCreator_OS_2_11(targetClient);
-            new IndexRunner(snapshotName, indexMetadataFactory, indexCreator, transformer, List.of()).migrateIndices();
-            
+            new IndexRunner(
+                snapshotName,
+                indexMetadataFactory,
+                indexCreator,
+                transformer,
+                List.of(),
+                metadataContext.createIndexContext()
+            ).migrateIndices();
+
             res = targetClusterOperations.get("/barstool");
             assertThat(res.getValue(), res.getKey(), equalTo(200));
 
@@ -101,16 +127,17 @@ public class EndToEndTest {
             // PSEUDOMigrate documents
             // PSEUDO: Verify creation of 2 index templates on the cluster
             // PSEUDO: Verify creation of 5 indices on the cluster
-            //    - logs-01-2345
-            //    - logs-12-3456
-            //    - data-rolling
-            //    - playground
-            //    - playground2
+            // - logs-01-2345
+            // - logs-12-3456
+            // - data-rolling
+            // - playground
+            // - playground2
             // PSEUDO: Verify documents
 
             // PSEUDO: Additional validation:
             if (SearchClusterContainer.OS_V2_14_0.equals(targetVersion)) {
-                //   - Mapping type parameter is removed https://opensearch.org/docs/latest/breaking-changes/#remove-mapping-types-parameter
+                // - Mapping type parameter is removed
+                // https://opensearch.org/docs/latest/breaking-changes/#remove-mapping-types-parameter
             }
         }
     }
@@ -136,21 +163,22 @@ public class EndToEndTest {
     }
 
     private void migrateFrom_ES_v7_X(final SearchClusterContainer sourceCluster) {
-        // PSEUDO: Create 2 index templates on the cluster, see https://www.elastic.co/guide/en/elasticsearch/reference/7.17/index-templates.html
-        //    - logs-*
-        //    - data-rolling
+        // PSEUDO: Create 2 index templates on the cluster, see
+        // https://www.elastic.co/guide/en/elasticsearch/reference/7.17/index-templates.html
+        // - logs-*
+        // - data-rolling
         // PSEUDO: Create 5 indices on the cluster
-        //    - logs-01-2345
-        //    - logs-12-3456
-        //    - data-rolling
-        //    - playground
-        //    - playground2
+        // - logs-01-2345
+        // - logs-12-3456
+        // - data-rolling
+        // - playground
+        // - playground2
         // PSEUDO: Add documents
-        //    - 19x http-data docs into logs-01-2345
-        //    - 23x http-data docs into logs-12-3456
-        //    - 29x data-rolling
-        //    - 5x geonames docs into playground
-        //    - 7x geopoint into playground2
+        // - 19x http-data docs into logs-01-2345
+        // - 23x http-data docs into logs-12-3456
+        // - 29x data-rolling
+        // - 5x geonames docs into playground
+        // - 7x geopoint into playground2
 
         // PSEUDO: Create a target cluster running OS 2.X (Where x is the latest released version)
 
@@ -163,15 +191,15 @@ public class EndToEndTest {
 
         // PSEUDO: Verify creation of 2 index templates on the clustqer
         // PSEUDO: Verify creation of 5 indices on the cluster
-        //    - logs-01-2345
-        //    - logs-12-3456
-        //    - data-rolling
-        //    - playground
-        //    - playground2
+        // - logs-01-2345
+        // - logs-12-3456
+        // - data-rolling
+        // - playground
+        // - playground2
         // PSEUDO: Verify documents
 
         // PSEUDO: Additional validation:
-        //   - Mapping type parameter is removed
+        // - Mapping type parameter is removed
         //
     }
 }

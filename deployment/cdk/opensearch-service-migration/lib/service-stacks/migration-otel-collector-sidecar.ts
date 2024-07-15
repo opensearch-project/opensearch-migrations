@@ -16,6 +16,9 @@ export class OtelCollectorSidecar {
     public static OTEL_CONTAINER_PORT = 4317;
     public static OTEL_CONTAINER_HEALTHCHECK_PORT = 13133;
 
+    static getOtelLocalhostEndpoint() {
+        return "http://localhost:" + OtelCollectorSidecar.OTEL_CONTAINER_PORT;
+    }
 
     static addOtelCollectorContainer(taskDefinition: TaskDefinition, logGroupPrefix: string) {
         const otelCollectorPort: PortMapping = {

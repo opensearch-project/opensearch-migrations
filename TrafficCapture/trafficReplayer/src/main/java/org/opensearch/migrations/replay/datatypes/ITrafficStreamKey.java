@@ -1,10 +1,12 @@
 package org.opensearch.migrations.replay.datatypes;
 
-import lombok.NonNull;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+
+import lombok.NonNull;
 
 public interface ITrafficStreamKey extends ISourceTrafficChannelKey {
     int getTrafficStreamIndex();
 
-    @NonNull IReplayContexts.ITrafficStreamsLifecycleContext getTrafficStreamsContext();
+    @NonNull
+    IReplayContexts.ITrafficStreamsLifecycleContext getTrafficStreamsContext();
 }

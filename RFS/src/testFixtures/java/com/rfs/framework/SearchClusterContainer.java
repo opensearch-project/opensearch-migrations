@@ -5,6 +5,7 @@ import java.time.Duration;
 import java.util.Map;
 
 import com.google.common.collect.ImmutableMap;
+
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
@@ -19,30 +20,34 @@ import org.testcontainers.utility.DockerImageName;
 @Slf4j
 public class SearchClusterContainer extends GenericContainer<SearchClusterContainer> {
     public static final String CLUSTER_SNAPSHOT_DIR = "/tmp/snapshots";
-    public static final Version ES_V7_10_2 =
-            new ElasticsearchVersion("docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2", "ES 7.10.2");
-    public static final Version ES_V7_17 =
-            new ElasticsearchVersion("docker.elastic.co/elasticsearch/elasticsearch:7.17.22", "ES 7.17.22");
-    public static final Version ES_V6_8_23 =
-            new ElasticsearchVersion("docker.elastic.co/elasticsearch/elasticsearch:6.8.23", "ES 6.8.23");
-    
-    public static final Version OS_V1_3_16 =
-            new OpenSearchVersion("opensearchproject/opensearch:1.3.16", "OS 1.3.16");
-    public static final Version OS_V2_14_0 =
-            new OpenSearchVersion("opensearchproject/opensearch:2.14.0", "OS 2.14.0");
+    public static final Version ES_V7_10_2 = new ElasticsearchVersion(
+        "docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2",
+        "ES 7.10.2"
+    );
+    public static final Version ES_V7_17 = new ElasticsearchVersion(
+        "docker.elastic.co/elasticsearch/elasticsearch:7.17.22",
+        "ES 7.17.22"
+    );
+    public static final Version ES_V6_8_23 = new ElasticsearchVersion(
+        "docker.elastic.co/elasticsearch/elasticsearch:6.8.23",
+        "ES 6.8.23"
+    );
+
+    public static final Version OS_V1_3_16 = new OpenSearchVersion("opensearchproject/opensearch:1.3.16", "OS 1.3.16");
+    public static final Version OS_V2_14_0 = new OpenSearchVersion("opensearchproject/opensearch:2.14.0", "OS 2.14.0");
 
     private enum INITIALIZATION_FLAVOR {
-        ELASTICSEARCH(Map.of(
-            "discovery.type", "single-node",
-            "path.repo", CLUSTER_SNAPSHOT_DIR)),
-        OPENSEARCH(new ImmutableMap.Builder<String, String>()
-            .putAll(ELASTICSEARCH.getEnvVariables())
-            .put("plugins.security.disabled", "true")
-            .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
-            .build());
+        ELASTICSEARCH(Map.of("discovery.type", "single-node", "path.repo", CLUSTER_SNAPSHOT_DIR)),
+        OPENSEARCH(
+            new ImmutableMap.Builder<String, String>().putAll(ELASTICSEARCH.getEnvVariables())
+                .put("plugins.security.disabled", "true")
+                .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
+                .build()
+        );
 
         @Getter
         public final Map<String, String> envVariables;
+
         INITIALIZATION_FLAVOR(Map<String, String> envVariables) {
             this.envVariables = envVariables;
         }
@@ -54,11 +59,8 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public SearchClusterContainer(final Version version) {
         super(DockerImageName.parse(version.imageName));
         this.withExposedPorts(9200, 9300)
-                .withEnv(version.getInitializationType().getEnvVariables())
-                .waitingFor(Wait.forHttp("/")
-                        .forPort(9200)
-                        .forStatusCode(200)
-                        .withStartupTimeout(Duration.ofMinutes(1)));
+            .withEnv(version.getInitializationType().getEnvVariables())
+            .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(1)));
 
         this.version = version;
     }
@@ -119,6 +121,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             this.prettyName = prettyName;
             this.initializationType = initializationType;
         }
+
     }
 
     public static class ElasticsearchVersion extends Version {

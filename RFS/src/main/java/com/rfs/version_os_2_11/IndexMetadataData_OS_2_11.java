@@ -1,6 +1,7 @@
 package com.rfs.version_os_2_11;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import com.rfs.models.IndexMetadata;
 
 public class IndexMetadataData_OS_2_11 implements IndexMetadata {
@@ -37,7 +38,7 @@ public class IndexMetadataData_OS_2_11 implements IndexMetadata {
     @Override
     public int getNumberOfShards() {
         return this.getSettings().get("number_of_shards").asInt();
-    }   
+    }
 
     @Override
     public ObjectNode getSettings() {
@@ -48,6 +49,7 @@ public class IndexMetadataData_OS_2_11 implements IndexMetadata {
     public ObjectNode rawJson() {
         return root;
     }
+
     @Override
     public IndexMetadata deepCopy() {
         return new IndexMetadataData_OS_2_11(root.deepCopy(), indexId, indexName);

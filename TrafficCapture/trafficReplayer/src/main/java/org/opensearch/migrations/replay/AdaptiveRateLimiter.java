@@ -1,14 +1,15 @@
 package org.opensearch.migrations.replay;
 
+import java.time.Duration;
+import java.util.function.Supplier;
+
+import org.opensearch.migrations.replay.util.TrackedFuture;
+
 import io.github.resilience4j.core.IntervalFunction;
 import io.github.resilience4j.ratelimiter.RateLimiter;
 import io.github.resilience4j.ratelimiter.RateLimiterConfig;
 import io.github.resilience4j.retry.Retry;
 import io.github.resilience4j.retry.RetryConfig;
-import org.opensearch.migrations.replay.util.TrackedFuture;
-
-import java.time.Duration;
-import java.util.function.Supplier;
 
 /**
  * This class is a placeholder now, but a place for the rest of the codebase to centralize its
@@ -20,20 +21,19 @@ import java.util.function.Supplier;
  * For now though, this class is just meant as a starting point
  * @param <T>
  */
-public class AdaptiveRateLimiter<D,T> {
+public class AdaptiveRateLimiter<D, T> {
 
-    public TrackedFuture<D,T>
-    get(Supplier<TrackedFuture<D,T>> producer) {
-        var intervalFunction = IntervalFunction.ofExponentialBackoff(Duration.ofMillis(1),2,Duration.ofSeconds(1));
+    public TrackedFuture<D, T> get(Supplier<TrackedFuture<D, T>> producer) {
+        var intervalFunction = IntervalFunction.ofExponentialBackoff(Duration.ofMillis(1), 2, Duration.ofSeconds(1));
         RetryConfig retryConfig = RetryConfig.custom()
-                .maxAttempts(Integer.MAX_VALUE)
-                .intervalFunction(intervalFunction)
-                .build();
+            .maxAttempts(Integer.MAX_VALUE)
+            .intervalFunction(intervalFunction)
+            .build();
         var rateLimiterConfig = RateLimiterConfig.custom()
-                .timeoutDuration(Duration.ofSeconds(1))
-                .limitRefreshPeriod(Duration.ofSeconds(1))
-                .limitForPeriod(10)  // adjust this dynamically based on your needs
-                .build();
+            .timeoutDuration(Duration.ofSeconds(1))
+            .limitRefreshPeriod(Duration.ofSeconds(1))
+            .limitForPeriod(10)  // adjust this dynamically based on your needs
+            .build();
 
         Retry.of("Retry_" + System.identityHashCode(producer), retryConfig);
         var rateLimiter = RateLimiter.of("RateLimiter_" + System.identityHashCode(producer), rateLimiterConfig);

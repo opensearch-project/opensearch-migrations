@@ -1,11 +1,11 @@
 package org.opensearch.migrations.replay.datatypes;
 
-import lombok.EqualsAndHashCode;
 import org.opensearch.migrations.replay.util.TrafficChannelKeyFormatter;
 
+import lombok.EqualsAndHashCode;
+
 @EqualsAndHashCode()
-public abstract class PojoTrafficStreamKey extends ISourceTrafficChannelKey.PojoImpl
-        implements ITrafficStreamKey {
+public abstract class PojoTrafficStreamKey extends ISourceTrafficChannelKey.PojoImpl implements ITrafficStreamKey {
     protected final int trafficStreamIndex;
 
     protected PojoTrafficStreamKey(String nodeId, String connectionId, int index) {

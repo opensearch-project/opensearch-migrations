@@ -4,6 +4,7 @@ import java.io.IOException;
 
 public interface IAuthTransformerFactory extends AutoCloseable {
     IAuthTransformer getAuthTransformer(IHttpMessage httpMessage);
+
     default void close() throws IOException {}
 
     class NullAuthTransformerFactory implements IAuthTransformerFactory {

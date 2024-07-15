@@ -1,6 +1,9 @@
 package com.rfs.common;
 
-import static org.mockito.Mockito.*;
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
@@ -9,13 +12,11 @@ import org.apache.lucene.document.StringField;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.Test;
+
 import reactor.core.publisher.Flux;
 import reactor.test.StepVerifier;
 
-import java.io.IOException;
-import java.nio.file.Paths;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Path;
+import static org.mockito.Mockito.*;
 
 class TestLuceneDocumentsReader extends LuceneDocumentsReader {
     public TestLuceneDocumentsReader(Path luceneFilesBasePath) {
@@ -48,7 +49,7 @@ class TestLuceneDocumentsReader extends LuceneDocumentsReader {
         doc3.add(new StoredField("_source", new BytesRef("source3")));
 
         Document doc4 = new Document(); // Doc w/ no fields
-        
+
         Document doc5 = new Document(); // Doc w/ missing _source
         doc5.add(new StringField("_id", new BytesRef(encodeUtf8Id("id5")), Field.Store.YES));
 
@@ -69,32 +70,21 @@ public class LuceneDocumentsReaderTest {
     @Test
     void ReadDocuments_AsExpected() {
         // Use the TestLuceneDocumentsReader to get the mocked documents
-        Flux<Document> documents =
-                new TestLuceneDocumentsReader(Paths.get("/fake/path/testIndex/0")).readDocuments();
+        Flux<Document> documents = new TestLuceneDocumentsReader(Paths.get("/fake/path/testIndex/0")).readDocuments();
 
         // Verify that the results are as expected
-        StepVerifier.create(documents)
-            .expectNextMatches(doc -> {
-                String testId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
-                String testSource = doc.getBinaryValue("_source").utf8ToString();
-                return "id1".equals(testId) && "source1".equals(testSource);
-            })
-            .expectNextMatches(doc -> {
-                String testId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
-                String testSource = doc.getBinaryValue("_source").utf8ToString();
-                return "id2".equals(testId) && "source2".equals(testSource);
-            })
-            .expectNextMatches(doc -> {
-                String testId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
-                String testSource = doc.getBinaryValue("_source").utf8ToString();
-                return "id3".equals(testId) && "source3".equals(testSource);
-            })
-            .expectComplete()
-            .verify();
+        StepVerifier.create(documents).expectNextMatches(doc -> {
+            String testId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
+            String testSource = doc.getBinaryValue("_source").utf8ToString();
+            return "id1".equals(testId) && "source1".equals(testSource);
+        }).expectNextMatches(doc -> {
+            String testId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
+            String testSource = doc.getBinaryValue("_source").utf8ToString();
+            return "id2".equals(testId) && "source2".equals(testSource);
+        }).expectNextMatches(doc -> {
+            String testId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
+            String testSource = doc.getBinaryValue("_source").utf8ToString();
+            return "id3".equals(testId) && "source3".equals(testSource);
+        }).expectComplete().verify();
     }
 }
-
-
-
-
-

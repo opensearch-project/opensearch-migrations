@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.io.InputStream;
 
 import com.rfs.models.ShardFileInfo;
-import com.rfs.models.ShardMetadata;
 
 /**
  * Taken from Elasticsearch 6.8, combining the SlicedInputStream and PartSliceStream classes with our special sauce

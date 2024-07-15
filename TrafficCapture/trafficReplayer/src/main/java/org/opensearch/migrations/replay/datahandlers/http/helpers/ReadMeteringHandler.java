@@ -1,12 +1,12 @@
 package org.opensearch.migrations.replay.datahandlers.http.helpers;
 
+import java.util.function.IntConsumer;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
 import lombok.AllArgsConstructor;
-
-import java.util.function.IntConsumer;
 
 @AllArgsConstructor
 public class ReadMeteringHandler extends ChannelInboundHandlerAdapter {

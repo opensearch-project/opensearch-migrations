@@ -14,7 +14,7 @@ public class JsonJoltTransformerProvider implements IJsonTransformerProvider {
     @Override
     public IJsonTransformer createTransformer(Object jsonConfig) {
         var builder = JsonJoltTransformer.newBuilder();
-        var configs = new ArrayList<Map<String,Object>>();
+        var configs = new ArrayList<Map<String, Object>>();
         try {
             if (jsonConfig instanceof Map) {
                 configs.add((Map<String, Object>) jsonConfig);
@@ -36,7 +36,7 @@ public class JsonJoltTransformerProvider implements IJsonTransformerProvider {
                     var cannedOperation = getCannedOperationOrThrow(cannedValueStr);
                     builder.addCannedOperation(cannedOperation);
                 } else if (scriptValue != null) {
-                    builder.addOperationObject((Map<String,Object>)scriptValue);
+                    builder.addOperationObject((Map<String, Object>) scriptValue);
                 } else {
                     throw new IllegalArgumentException(getConfigUsageStr());
                 }
@@ -56,15 +56,17 @@ public class JsonJoltTransformerProvider implements IJsonTransformerProvider {
     }
 
     private String getConfigUsageStr() {
-        return this.getClass().getName() + " expects the incoming configuration " +
-                "to be a Map<String,Object> or a List<Map<String,Object>>.  " +
-                "Each of the Maps should have one key-value, either \"canned\" or \"script\".  " +
-                "Canned values should be a string that specifies the name of the pre-built transformation to use " +
-                Arrays.stream(JsonJoltTransformBuilder.CANNED_OPERATION.values())
-                        .map(e->e.toString()).collect(Collectors.joining(",")) +
-                ".  " +
-                "Script values should be a fully-formed inlined Jolt transformation in json form.  " +
-                "All of the values (canned or inlined) within a configuration will be concatenated " +
-                "into one chained Jolt transformation.";
+        return this.getClass().getName()
+            + " expects the incoming configuration "
+            + "to be a Map<String,Object> or a List<Map<String,Object>>.  "
+            + "Each of the Maps should have one key-value, either \"canned\" or \"script\".  "
+            + "Canned values should be a string that specifies the name of the pre-built transformation to use "
+            + Arrays.stream(JsonJoltTransformBuilder.CANNED_OPERATION.values())
+                .map(e -> e.toString())
+                .collect(Collectors.joining(","))
+            + ".  "
+            + "Script values should be a fully-formed inlined Jolt transformation in json form.  "
+            + "All of the values (canned or inlined) within a configuration will be concatenated "
+            + "into one chained Jolt transformation.";
     }
 }

@@ -1,13 +1,13 @@
 package org.opensearch.migrations.replay.traffic.expiration;
 
-import lombok.EqualsAndHashCode;
-import lombok.extern.slf4j.Slf4j;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentSkipListMap;
+
+import lombok.EqualsAndHashCode;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * This is a sequence of (concurrent) hashmaps segmented by time.  Each element in the sequence is
@@ -16,8 +16,7 @@ import java.util.concurrent.ConcurrentSkipListMap;
  */
 @Slf4j
 @EqualsAndHashCode(callSuper = true)
-class ExpiringKeyQueue extends
-        ConcurrentSkipListMap<EpochMillis, ConcurrentHashMap<String, Boolean>> {
+class ExpiringKeyQueue extends ConcurrentSkipListMap<EpochMillis, ConcurrentHashMap<String, Boolean>> {
     private final Duration granularity;
     private final String partitionId;
 
@@ -45,21 +44,18 @@ class ExpiringKeyQueue extends
      * @param timestamp
      * @return
      */
-    ConcurrentHashMap<String, Boolean> getHashSetForTimestamp(EpochMillis timestamp,
-                                                              Runnable onNewBucketCreated) {
-        return Optional.ofNullable(this.floorEntry(timestamp))
-                .map(kvp -> {
-                    var shiftedKey = kvp.getKey().toInstant().plus(granularity);
-                    if (timestamp.test(shiftedKey, (newTimestamp, computedFloor) -> newTimestamp >= computedFloor)) {
-                        try {
-                            return createNewSlot(timestamp, kvp.getKey());
-                        } finally {
-                            onNewBucketCreated.run();
-                        }
-                    }
-                    return kvp.getValue();
-                })
-                .orElse(null); // floorEntry could be null if the entry was too old
+    ConcurrentHashMap<String, Boolean> getHashSetForTimestamp(EpochMillis timestamp, Runnable onNewBucketCreated) {
+        return Optional.ofNullable(this.floorEntry(timestamp)).map(kvp -> {
+            var shiftedKey = kvp.getKey().toInstant().plus(granularity);
+            if (timestamp.test(shiftedKey, (newTimestamp, computedFloor) -> newTimestamp >= computedFloor)) {
+                try {
+                    return createNewSlot(timestamp, kvp.getKey());
+                } finally {
+                    onNewBucketCreated.run();
+                }
+            }
+            return kvp.getValue();
+        }).orElse(null); // floorEntry could be null if the entry was too old
     }
 
     /**
@@ -81,30 +77,34 @@ class ExpiringKeyQueue extends
         return priorMap == null ? newMap : priorMap;
     }
 
-    void expireOldSlots(AccumulatorMap connectionAccumulatorMap,
-                        BehavioralPolicy behavioralPolicy,
-                        Duration minimumGuaranteedLifetime,
-                        EpochMillis largestCurrentObservedTimestamp) {
-        var startOfWindow =
-                new EpochMillis(largestCurrentObservedTimestamp.toInstant().minus(minimumGuaranteedLifetime));
-        for (var kvp = firstEntry();
-             kvp.getKey().test(startOfWindow, (first, windowStart) -> first < windowStart);
-             kvp = firstEntry()) {
+    void expireOldSlots(
+        AccumulatorMap connectionAccumulatorMap,
+        BehavioralPolicy behavioralPolicy,
+        Duration minimumGuaranteedLifetime,
+        EpochMillis largestCurrentObservedTimestamp
+    ) {
+        var startOfWindow = new EpochMillis(
+            largestCurrentObservedTimestamp.toInstant().minus(minimumGuaranteedLifetime)
+        );
+        for (var kvp = firstEntry(); kvp.getKey()
+            .test(startOfWindow, (first, windowStart) -> first < windowStart); kvp = firstEntry()) {
             expireItemsBefore(connectionAccumulatorMap, behavioralPolicy, kvp.getValue(), startOfWindow);
             remove(kvp.getKey());
         }
     }
 
-    private void expireItemsBefore(AccumulatorMap connectionAccumulatorMap,
-                                   BehavioralPolicy behavioralPolicy,
-                                   ConcurrentHashMap<String, Boolean> keyMap,
-                                   EpochMillis earlierTimesToPreserve) {
+    private void expireItemsBefore(
+        AccumulatorMap connectionAccumulatorMap,
+        BehavioralPolicy behavioralPolicy,
+        ConcurrentHashMap<String, Boolean> keyMap,
+        EpochMillis earlierTimesToPreserve
+    ) {
         log.debug("Expiring entries before " + earlierTimesToPreserve);
         for (var connectionId : keyMap.keySet()) {
             var key = new ScopedConnectionIdKey(partitionId, connectionId);
             var accumulation = connectionAccumulatorMap.get(key);
-            if (accumulation != null &&
-                    accumulation.getNewestPacketTimestampInMillisReference().get() < earlierTimesToPreserve.millis) {
+            if (accumulation != null
+                && accumulation.getNewestPacketTimestampInMillisReference().get() < earlierTimesToPreserve.millis) {
                 var priorValue = connectionAccumulatorMap.remove(key);
                 if (priorValue != null) {
                     priorValue.expire();

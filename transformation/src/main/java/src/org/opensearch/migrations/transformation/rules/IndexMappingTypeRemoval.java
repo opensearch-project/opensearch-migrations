@@ -2,12 +2,12 @@ package org.opensearch.migrations.transformation.rules;
 
 import java.util.Map.Entry;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import org.opensearch.migrations.transformation.CanApplyResult;
 import org.opensearch.migrations.transformation.CanApplyResult.Unsupported;
 import org.opensearch.migrations.transformation.TransformationRule;
 import org.opensearch.migrations.transformation.entity.Index;
-
-import com.fasterxml.jackson.databind.node.ObjectNode;
 
 /**
  * Supports transformation of the Index Mapping types that were changed from mutliple types to a single type between ES 6 to ES 7

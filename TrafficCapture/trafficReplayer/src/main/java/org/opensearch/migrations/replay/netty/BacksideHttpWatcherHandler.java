@@ -1,14 +1,15 @@
 package org.opensearch.migrations.replay.netty;
 
+import java.util.function.Consumer;
+
+import org.opensearch.migrations.replay.AggregatedRawResponse;
+
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.HttpObject;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.AggregatedRawResponse;
-
-import java.util.function.Consumer;
 
 @Slf4j
 public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<HttpObject> {
@@ -56,7 +57,9 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Http
     }
 
     private void triggerResponseCallbackAndRemoveCallback() {
-        log.atTrace().setMessage(()->"triggerResponseCallbackAndRemoveCallback, callback="+this.responseCallback).log();
+        log.atTrace()
+            .setMessage(() -> "triggerResponseCallbackAndRemoveCallback, callback=" + this.responseCallback)
+            .log();
         doneReadingRequest = true;
         if (this.responseCallback != null) {
             // this method may be re-entrant upon calling the callback, so make sure that we don't loop

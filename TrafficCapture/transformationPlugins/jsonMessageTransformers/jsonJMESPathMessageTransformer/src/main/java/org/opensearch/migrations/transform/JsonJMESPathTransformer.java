@@ -1,12 +1,10 @@
 package org.opensearch.migrations.transform;
 
+import java.util.Map;
 
 import io.burt.jmespath.BaseRuntime;
 import io.burt.jmespath.Expression;
 import lombok.extern.slf4j.Slf4j;
-
-import java.util.Map;
-
 
 @Slf4j
 public class JsonJMESPathTransformer implements IJsonTransformer {
@@ -18,9 +16,9 @@ public class JsonJMESPathTransformer implements IJsonTransformer {
     }
 
     @Override
-    public Map<String,Object> transformJson(Map<String,Object> incomingJson) {
+    public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
         var output = expression.search(incomingJson);
-        log.info("output="+output);
-        return (Map<String,Object>) output;
+        log.info("output=" + output);
+        return (Map<String, Object>) output;
     }
 }

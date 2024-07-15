@@ -1,7 +1,6 @@
 plugins {
     id 'application'
     id 'java'
-    id 'jacoco'
     id 'io.freefair.lombok' version '8.6'
     id 'java-test-fixtures'
 }
@@ -41,9 +40,16 @@ dependencies {
     implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
     implementation group: 'software.amazon.awssdk.crt', name: 'aws-crt'
 
-    implementation platform('io.projectreactor:reactor-bom:2023.0.5') 
-    implementation 'io.projectreactor.netty:reactor-netty-core' 
+    implementation platform('io.projectreactor:reactor-bom:2023.0.5')
+    implementation 'io.projectreactor.netty:reactor-netty-core'
     implementation 'io.projectreactor.netty:reactor-netty-http'
+
+    implementation group: 'software.amazon.awssdk', name: 's3'
+    implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
+    implementation group: 'software.amazon.awssdk.crt', name: 'aws-crt'
+
+    testImplementation 'com.github.docker-java:docker-java-core:3.3.6'
+    testImplementation 'com.github.docker-java:docker-java-transport-httpclient5:3.3.6'
 
     testImplementation testFixtures(project(path: ':RFS'))
     testImplementation group: 'io.projectreactor', name: 'reactor-test'
@@ -57,58 +63,26 @@ dependencies {
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
 
     // Integration tests
-    testImplementation group: 'org.opensearch', name: 'opensearch-testcontainers'
+    testImplementation testFixtures(project(path: ':testHelperFixtures'))
+    testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation group: 'org.testcontainers', name: 'testcontainers'
     testImplementation group: 'org.hamcrest', name: 'hamcrest'
+    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
+    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
+    // why are these under implementation with the above comment for integ tests?
+    implementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
 
     testFixturesImplementation project(":commonDependencyVersionConstraints")
+    testFixturesImplementation testFixtures(project(":coreUtilities"))
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java'
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java-core'
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java-transport-httpclient5'
     testFixturesImplementation group: 'org.testcontainers', name: 'testcontainers'
 
     testFixturesImplementation group: 'org.hamcrest', name: 'hamcrest'
-}
-
-application {
-    mainClassName = 'com.rfs.ReindexFromSnapshot'
-}
-
-task runRfsWorker (type: JavaExec) {
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.rfs.RunRfsWorker'
-}
-
-task createSnapshot (type: JavaExec) {
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.rfs.RfsCreateSnapshot'
-}
-
-task migrateMetadata (type: JavaExec) {
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.rfs.RfsMigrateMetadata'
-}
-
-task migrateDocuments (type: JavaExec) {
-    classpath = sourceSets.main.runtimeClasspath
-    mainClass = 'com.rfs.RfsMigrateDocuments'
-}
-
-// Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
-tasks.register('copyDependencies', Sync) {
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-
-    from configurations.runtimeClasspath
-    into "${buildDir}/dependencies"
-}
-
-jacocoTestReport {
-    reports {
-        xml.required = true
-        xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
-        html.required = true
-        html.destination file("${buildDir}/reports/jacoco/test/html")
-    }
 }
 
 test {

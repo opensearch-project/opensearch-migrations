@@ -69,12 +69,14 @@ export class S3SnapshotYaml {
 
 export class SnapshotYaml {
     snapshot_name: string = '';
+    otel_endpoint: string = '';
     s3?: S3SnapshotYaml;
     fs?: FileSystemSnapshotYaml;
 
     toDict() {
         return {
             snapshot_name: this.snapshot_name,
+            otel_endpoint: this.otel_endpoint,
             // This conditinally includes the s3 and fs parameters if they're defined,
             // but does not add the keys otherwise
             ...(this.s3 && { s3: this.s3 }),
@@ -88,6 +90,7 @@ export class SnapshotYaml {
 export class MetadataMigrationYaml {
     from_snapshot: null = null;
     min_replicas: number = 1;
+    otel_endpoint: string = '';
 }
 
 export class MSKYaml {

@@ -7,5 +7,5 @@ import java.util.Map;
  * JSON object.  Any changes to datastructures, nesting, order, etc should be intentional.
  */
 public interface IJsonTransformer {
-    Map<String,Object> transformJson(Map<String,Object> incomingJson);
+    Map<String, Object> transformJson(Map<String, Object> incomingJson);
 }

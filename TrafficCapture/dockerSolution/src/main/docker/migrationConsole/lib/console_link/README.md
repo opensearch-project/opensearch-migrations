@@ -1,22 +1,24 @@
 # Console_link Library
-- [Console\_link Library](#console_link-library)
-  - [Services.yaml spec](#servicesyaml-spec)
+
+- [Services.yaml spec](#servicesyaml-spec)
     - [Cluster](#cluster)
     - [Metrics Source](#metrics-source)
     - [Backfill](#backfill)
-      - [Reindex From Snapshot](#reindex-from-snapshot)
-      - [OpenSearch Ingestion](#opensearch-ingestion)
-  - [Usage](#usage)
+        - [Reindex From Snapshot](#reindex-from-snapshot)
+        - [OpenSearch Ingestion](#opensearch-ingestion)
+    - [Snapshot](#snapshot)
+    - [Metadata Migration](#metadata-migration)
+    - [Replay](#replay)
+    - [Kafka](#kafka)
+- [Usage](#usage)
     - [Library](#library)
     - [CLI](#cli)
-      - [Global Options](#global-options)
-      - [Objects](#objects)
-      - [Commands \& options](#commands--options)
-  - [Development](#development)
+        - [Global Options](#global-options)
+        - [Objects](#objects)
+        - [Commands \& options](#commands--options)
+- [Development](#development)
     - [Unit Tests](#unit-tests)
     - [Coverage](#coverage)
-
-
 
 The console link library is designed to provide a unified interface for the many possible backend services involved in a migration. The interface can be used by multiple frontends--a CLI app and a web API, for instance.
 
@@ -28,8 +30,12 @@ Currently, the supported services are:
 
 - `source_cluster`: Source cluster details
 - `target_cluster`: Target cluster details
-- `metrics_source`: Metrics source details
 - `backfill`: Backfill migration details
+- `snapshot`: Details for snapshot source/creation for backfill
+- `metadata_migration`: Metadata migration source/config details
+- `kafka`: Connection info for the Kafka cluster used in capture-replay
+- `replay`: Replayer deployment and config details
+- `metrics_source`: Metrics source details
 
 For example:
 
@@ -61,8 +67,22 @@ backfill:
         log_group_name: "/aws/vendedlogs/osi-aws-integ-default"
         tags:
             - "migration_deployment=1.0.6"
+replay:
+  ecs:
+    cluster-name: "migrations-dev-cluster"
+    service-name: "migrations-dev-replayer-service"
+snapshot:
+  snapshot_name: "snapshot_2023_01_01"
+  s3:
+      repo_uri: "s3://my-snapshot-bucket"
+      aws_region: "us-east-2"
+metadata_migration:
+  from_snapshot:
+  min_replicas: 0
+kafka:
+  broker_endpoints: "kafka:9092"
+  standard:
 ```
-
 
 ## Services.yaml spec
 
@@ -106,8 +126,7 @@ Most of the parameters for these two are the same, with some additional ones spe
 - `reindex_from_snapshot`
     - `snapshot_repo`: optional, path to the snapshot repo. If not provided, ???
     - `snapshot_name`: optional, name of the snapshot to use as the source. If not provided, ???
-    - `scale`: optional int, number of instances to enable when `backfill start` is run. In the future, this will be modifiable during the run
-    with `backfill scale X`. Default is 1.
+    - `scale`: optional int, number of instances to enable when `backfill start` is run. While running, this is modifiable with `backfill scale X`. Default is 1.
 
 There is also a block that specifies the deployment type. Exactly one of the following blocks must be present:
 
@@ -150,6 +169,61 @@ backfill:
     - `index_regex_selection`: optional, list of index inclusion regex strings for selecting indices to migrate
     - `log_group_name`: optional, name of existing CloudWatch log group to use for OSI logs
     - `tags`: optional, list of tags to apply to OSI pipeline
+
+### Snapshot
+
+The snapshot configuration specifies a local filesystem or an s3 snapshot that will be created by the `snapshot create` command, and (if not overridden) used as the source for the `metadata migrate` command. In a docker migration, it may also be used as the source for backfill via reindex-from-snapshot. If metadata migration and reindex-from-snapshot are not being used, this block is optional.
+
+- `snapshot_name`: required, name of the snapshot
+
+Exactly one of the following blocks must be present:
+
+- `s3`:
+    - `repo_uri`: required, `s3://` path to where the snapshot repo exists or should be created (the bucket must already exist, and the repo needs to be configured on the source cluster)
+    - `aws_region`: required, region for the s3 bucket
+
+- `fs`:
+    - `repo_path`: required, path to where the repo exists or should be created on the filesystem (the repo needs to be configured on the source cluster).
+
+### Metadata Migration
+
+The metadata migration moves indices, components, and templates from a snapshot to the target cluster. In the future, there may be a `from_live_cluster` option, but currently all metadata migration must originate from a snapshot. A snapshot can be created via `console snapshot create` or can be pre-existing. The snapshot details are independently defineable, so if a special case is necessary, a snapshot could theoretically be created and used for document, but metadata migration could operate from a separate, pre-existing snapshot. This block is optional if metadata migration isn't being used as part of the migration.
+
+- `min_replicas`: optional, an integer value for the number of replicas to create. The default value is 0.
+- `index_allowlist`: optional, a list of index names. If this key is provided, only the named indices will be migrated. If the field is not provided, all non-system indices will be migrated.
+- `index_template_allowlist`: optional, a list of index template names. If this key is provided, only the named templates will be migrated. If the field is not provided, all templates will be migrated.
+- `component_template_allowlist`: optional, a list of component template names. If this key is provided, only the named component templates will be migrated. If the field is not provided, all component templates will be migrated.
+- `from_snapshot`: required. As mentioned above, `from_snapshot` is the only allowable source for a metadata migration at this point. This key must be present, but if it's value is null/empty, the snapshot details will be pulled from the top-level `snapshot` object. If a `snapshot` object does not exist, this block must be populated.
+    - `snapshot_name`: required, as described in the Snapshot section
+    - `s3` or `fs` block: exactly one must be present, as described in the Snapshot section
+    - `local_dir`: optional, specifies a location on the local filesystem for s3 snpashot files to be downloaded to. If not specified, a temp directory will be created and used.
+
+### Replay
+
+If capture and replay is included in the migration, the replay block defines where it is deployed and some run config details.
+
+- `scale`: optional int, number of instances to enable when `replay start` is run. While running, this is modifiable with `replay scale X`. Default is 1.
+
+Exactly one of the following blocks must be present:
+
+- `docker`:
+    - `socket`: optional, path to mounted docker socket, defaults to `/var/run/docker.sock`
+
+- `ecs`:
+    - `cluster_name`: required, name of the ECS cluster containing the replayer service
+    - `service_name`: required, name of the ECS replayer service
+    - `aws_region`:  optional. if not provided, the usual rules are followed for determining aws region. (`AWS_DEFAULT_REGION`, `~/.aws/config`, etc.)
+
+### Kafka
+
+A Kafka cluster is used in the capture and replay stage of the migration to store recorded requests and responses before they're replayed. While it's not necessary for a user to directly interact with the Kafka cluster in most cases, there are a handful of commands that can be helpful for checking on the status or resetting state that are exposed by the Console CLI.
+
+- `broker_endpoints`: required, comma-separated list of kafaka broker endpoints
+
+Exactly one of the following keys must be present, but both are nullable (they don't have or need any additional parameters).
+
+- `msk`: the Kafka instance is deployed as AWS Managed Service Kafka
+- `standard`: the Kafka instance is deployed as a standard Kafka cluster (e.g. on Docker)
 
 ## Usage
 

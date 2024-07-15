@@ -31,25 +31,29 @@ public class SequentialSpanCompressingReducer {
 
     private boolean lastWasSpan() {
         var len = accumulatedText.length();
-        return len > 0 && accumulatedText.charAt(len-1) == RUN_CHARACTER;
+        return len > 0 && accumulatedText.charAt(len - 1) == RUN_CHARACTER;
     }
 
     public SequentialSpanCompressingReducer addNext(int b) {
-        if (last+shift == b) {
+        if (last + shift == b) {
             if (lastWasSpan()) {
-                return new SequentialSpanCompressingReducer(shift, b,
-                        accumulatedText);
+                return new SequentialSpanCompressingReducer(shift, b, accumulatedText);
             } else {
-                return new SequentialSpanCompressingReducer(shift, b,
-                        accumulatedText.append(RUN_CHARACTER));
+                return new SequentialSpanCompressingReducer(shift, b, accumulatedText.append(RUN_CHARACTER));
             }
         } else {
             if (lastWasSpan()) {
-                return new SequentialSpanCompressingReducer(shift, b,
-                        accumulatedText.append(last).append(",").append(b));
+                return new SequentialSpanCompressingReducer(
+                    shift,
+                    b,
+                    accumulatedText.append(last).append(",").append(b)
+                );
             } else {
-                return new SequentialSpanCompressingReducer(shift, b,
-                        accumulatedText.append(last == IGNORED_SENTINEL_VALUE ? "" : ",").append(b));
+                return new SequentialSpanCompressingReducer(
+                    shift,
+                    b,
+                    accumulatedText.append(last == IGNORED_SENTINEL_VALUE ? "" : ",").append(b)
+                );
             }
         }
     }

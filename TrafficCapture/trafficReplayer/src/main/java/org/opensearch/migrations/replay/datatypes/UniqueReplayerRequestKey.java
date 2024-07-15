@@ -10,8 +10,11 @@ public class UniqueReplayerRequestKey extends UniqueSourceRequestKey {
     @Getter
     public final int replayerRequestIndex;
 
-    public UniqueReplayerRequestKey(ITrafficStreamKey streamKey, int sourceOffsetAtStartOfAccumulation,
-                                    int replayerIndex) {
+    public UniqueReplayerRequestKey(
+        ITrafficStreamKey streamKey,
+        int sourceOffsetAtStartOfAccumulation,
+        int replayerIndex
+    ) {
         this.trafficStreamKey = streamKey;
         this.sourceRequestIndexSessionIdentifier = sourceOffsetAtStartOfAccumulation;
         this.replayerRequestIndex = replayerIndex;
@@ -36,14 +39,15 @@ public class UniqueReplayerRequestKey extends UniqueSourceRequestKey {
         // may be from different TrafficStreams and therefore might have had a different starting index.
         //
         // So the idea with showing that index is to just give a hint about how far back the history of
-        // the current TrafficStreams go for this stretch of Observations.  This offset value is the
+        // the current TrafficStreams go for this stretch of Observations. This offset value is the
         // value from the very first TrafficStream that was calculated when the very first Accumulation
-        // was being initialized.  The value itself is derived on that first observed TrafficStream as
+        // was being initialized. The value itself is derived on that first observed TrafficStream as
         // `stream.getPriorRequestsReceived()+(stream.hasLastObservationWasUnterminatedRead()?1:0)`
         //
         // That code currently resides in CapturedTrafficToHttpTransactionAccumulator.
-        return trafficStreamKey + "." + getSourceRequestIndex() +
-                (sourceRequestIndexSessionIdentifier == 0 ? "" :
-                        "(offset: "+ sourceRequestIndexSessionIdentifier +")");
+        return trafficStreamKey
+            + "."
+            + getSourceRequestIndex()
+            + (sourceRequestIndexSessionIdentifier == 0 ? "" : "(offset: " + sourceRequestIndexSessionIdentifier + ")");
     }
 }

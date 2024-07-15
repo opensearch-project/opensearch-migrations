@@ -1,16 +1,16 @@
 package org.opensearch.migrations.testutils;
 
-import com.sun.net.httpserver.HttpServer;
-import com.sun.net.httpserver.HttpsConfigurator;
-import com.sun.net.httpserver.HttpsParameters;
-import com.sun.net.httpserver.HttpsServer;
-import lombok.Lombok;
-
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+
+import com.sun.net.httpserver.HttpServer;
+import com.sun.net.httpserver.HttpsConfigurator;
+import com.sun.net.httpserver.HttpsParameters;
+import com.sun.net.httpserver.HttpsServer;
+import lombok.Lombok;
 
 /**
  * This class brings up an HTTP(s) server with its constructor that returns responses
@@ -24,9 +24,10 @@ public class SimpleHttpServer implements AutoCloseable {
     protected final HttpServer httpServer;
     public final boolean useTls;
 
-    public static SimpleHttpServer makeServer(boolean useTls,
-                                              Function<HttpRequestFirstLine, SimpleHttpResponse> makeContext)
-            throws PortFinder.ExceededMaxPortAssigmentAttemptException {
+    public static SimpleHttpServer makeServer(
+        boolean useTls,
+        Function<HttpRequestFirstLine, SimpleHttpResponse> makeContext
+    ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         var testServerRef = new AtomicReference<SimpleHttpServer>();
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
             try {
@@ -65,8 +66,7 @@ public class SimpleHttpServer implements AutoCloseable {
         }
     }
 
-    private static HttpsServer createSecureServer(InetSocketAddress address)
-            throws Exception {
+    private static HttpsServer createSecureServer(InetSocketAddress address) throws Exception {
         var httpsServer = HttpsServer.create(address, SOCKET_BACKLOG_SIZE);
         var sslContext = SelfSignedSSLContextBuilder.getSSLContext();
         httpsServer.setHttpsConfigurator(new HttpsConfigurator(sslContext) {
@@ -94,17 +94,19 @@ public class SimpleHttpServer implements AutoCloseable {
      * @return the port upon successfully binding the server
      */
     public SimpleHttpServer(
-            boolean useTls, int port,
-            Function<HttpRequestFirstLine, SimpleHttpResponse> uriToContentMapper) throws Exception {
+        boolean useTls,
+        int port,
+        Function<HttpRequestFirstLine, SimpleHttpResponse> uriToContentMapper
+    ) throws Exception {
         var addr = new InetSocketAddress(LOCALHOST, port);
         this.useTls = useTls;
-        httpServer = useTls ? createSecureServer(addr) :
-                HttpServer.create(addr, 0);
+        httpServer = useTls ? createSecureServer(addr) : HttpServer.create(addr, 0);
         httpServer.createContext("/", httpExchange -> {
-            var requestToMatch =
-                    new PojoHttpRequestFirstLine(httpExchange.getRequestMethod(),
-                            httpExchange.getRequestURI(),
-                            httpExchange.getProtocol());
+            var requestToMatch = new PojoHttpRequestFirstLine(
+                httpExchange.getRequestMethod(),
+                httpExchange.getRequestURI(),
+                httpExchange.getProtocol()
+            );
             var headersAndPayload = uriToContentMapper.apply(requestToMatch);
             var responseHeaders = httpExchange.getResponseHeaders();
             for (var kvp : headersAndPayload.headers.entrySet()) {
@@ -126,7 +128,7 @@ public class SimpleHttpServer implements AutoCloseable {
 
     public URI localhostEndpoint() {
         try {
-            return new URI((useTls ? "https" : "http"), null, LOCALHOST, port(),"/",null, null);
+            return new URI((useTls ? "https" : "http"), null, LOCALHOST, port(), "/", null, null);
         } catch (URISyntaxException e) {
             throw new IllegalArgumentException("Error building URI", e);
         }

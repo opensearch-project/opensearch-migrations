@@ -1,7 +1,6 @@
 plugins {
     id 'application'
     id 'java'
-    id 'jacoco'
     id 'io.freefair.lombok' version '8.6'
     id "com.avast.gradle.docker-compose" version "0.17.4"
     id 'com.bmuschko.docker-remote-api'
@@ -32,7 +31,9 @@ dependencies {
     implementation platform('io.projectreactor:reactor-bom:2023.0.5')
     testImplementation platform('io.projectreactor:reactor-bom:2023.0.5')
 
+    implementation project(":coreUtilities")
     implementation project(":RFS")
+
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     implementation group: 'com.beust', name: 'jcommander'
@@ -47,6 +48,7 @@ dependencies {
 
 
     testImplementation testFixtures(project(":RFS"))
+    testImplementation testFixtures(project(":coreUtilities"))
     testImplementation project(":CreateSnapshot")
     testImplementation project(":MetadataMigration")
     testImplementation group: 'org.apache.lucene', name: 'lucene-core'
@@ -55,6 +57,7 @@ dependencies {
     testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-params'
     testImplementation group: 'org.opensearch', name: 'opensearch-testcontainers'
     testImplementation group: 'org.testcontainers', name: 'testcontainers'
+    testImplementation group: 'org.testcontainers', name: 'toxiproxy'
 
     testImplementation platform('io.projectreactor:reactor-bom:2023.0.5')
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
@@ -68,14 +71,6 @@ application {
 // Cleanup additional docker build directory
 clean.doFirst {
     delete project.file("./docker/build")
-}
-
-// Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
-tasks.register('copyDependencies', Sync) {
-    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-
-    from configurations.runtimeClasspath
-    into "${buildDir}/dependencies"
 }
 
 task copyDockerRuntimeJars (type: Sync) {
@@ -167,12 +162,6 @@ task slowTest(type: Test) {
     }
 }
 
-jacocoTestReport {
+tasks.named('jacocoTestReport').configure {
     dependsOn slowTest
-    reports {
-        xml.required = true
-        xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")
-        html.required = true
-        html.destination file("${buildDir}/reports/jacoco/test/html")
-    }
 }

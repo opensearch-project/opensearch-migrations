@@ -1,16 +1,17 @@
 package org.opensearch.migrations.replay.util;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.datatypes.FutureTransformer;
-import org.opensearch.migrations.utils.SequentialSpanCompressingReducer;
-
 import java.util.Optional;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.IntStream;
+
+import org.opensearch.migrations.replay.datatypes.FutureTransformer;
+import org.opensearch.migrations.utils.SequentialSpanCompressingReducer;
+
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * This provides a simple implementation to sort incoming elements that are ordered by a sequence
@@ -36,22 +37,23 @@ public class OnlineRadixSorter {
     @AllArgsConstructor
     @Getter
     private static class IndexedWork {
-        private final TrackedFuture<String,Void> signalingToStartFuture;
-        private TrackedFuture<String,? extends Object> workCompletedFuture;
-        private final TrackedFuture<String,Void> signalWorkCompletedFuture;
+        private final TrackedFuture<String, Void> signalingToStartFuture;
+        private TrackedFuture<String, ? extends Object> workCompletedFuture;
+        private final TrackedFuture<String, Void> signalWorkCompletedFuture;
 
-        public <T> TrackedFuture<String,T>
-        addWorkFuture(FutureTransformer<T> processor, int index) {
+        public <T> TrackedFuture<String, T> addWorkFuture(FutureTransformer<T> processor, int index) {
             var rval = processor.apply(signalingToStartFuture)
-                    .propagateCompletionToDependentFuture(signalWorkCompletedFuture, (processedCf, dependentCf) ->
-                                    dependentCf.complete(null),
-                            ()->"Caller-task completion for idx=" + index);
+                .propagateCompletionToDependentFuture(
+                    signalWorkCompletedFuture,
+                    (processedCf, dependentCf) -> dependentCf.complete(null),
+                    () -> "Caller-task completion for idx=" + index
+                );
             workCompletedFuture = rval;
             return rval;
         }
     }
 
-    private final SortedMap<Integer,IndexedWork> items;
+    private final SortedMap<Integer, IndexedWork> items;
     int currentOffset;
 
     public OnlineRadixSorter(int startingOffset) {
@@ -71,32 +73,39 @@ public class OnlineRadixSorter {
      * @param processor
      * @return
      */
-    public <T> TrackedFuture<String,T>
-    addFutureForWork(final int index, FutureTransformer<T> processor) {
+    public <T> TrackedFuture<String, T> addFutureForWork(final int index, FutureTransformer<T> processor) {
         var workItem = items.get(index);
         if (workItem == null) {
             if (index < currentOffset) {
-                throw new IllegalArgumentException("index (" + index + ")" +
-                        " must be > last processed item (" + currentOffset + ")");
+                throw new IllegalArgumentException(
+                    "index (" + index + ")" + " must be > last processed item (" + currentOffset + ")"
+                );
             }
-            for (int nextKey = Math.max(currentOffset, items.isEmpty() ? Integer.MIN_VALUE : items.lastKey()+1);
-                 nextKey<=index;
-                 ++nextKey) {
+            for (int nextKey = Math.max(
+                currentOffset,
+                items.isEmpty() ? Integer.MIN_VALUE : items.lastKey() + 1
+            ); nextKey <= index; ++nextKey) {
                 int finalNextKey = nextKey;
-                var signalFuture = items.isEmpty() ?
-                        new TextTrackedFuture<Void>(
-                                CompletableFuture.completedFuture(null),
-                                "unlinked signaling future for slot #" + finalNextKey) :
-                        items.get(finalNextKey-1).signalWorkCompletedFuture
-                                .thenAccept(v-> {},
-                                        ()->"Kickoff for slot #" + finalNextKey);
-                workItem = new IndexedWork(signalFuture, null,
-                        new TextTrackedFuture<Void>(()->"Work to finish for slot #" + finalNextKey +
-                                " is awaiting [" + getAwaitingText() + "]"));
-                workItem.signalWorkCompletedFuture.whenComplete((v,t)->{
+                var signalFuture = items.isEmpty()
+                    ? new TextTrackedFuture<Void>(
+                        CompletableFuture.completedFuture(null),
+                        "unlinked signaling future for slot #" + finalNextKey
+                    )
+                    : items.get(finalNextKey - 1).signalWorkCompletedFuture.thenAccept(
+                        v -> {},
+                        () -> "Kickoff for slot #" + finalNextKey
+                    );
+                workItem = new IndexedWork(
+                    signalFuture,
+                    null,
+                    new TextTrackedFuture<Void>(
+                        () -> "Work to finish for slot #" + finalNextKey + " is awaiting [" + getAwaitingText() + "]"
+                    )
+                );
+                workItem.signalWorkCompletedFuture.whenComplete((v, t) -> {
                     ++currentOffset;
                     items.remove(finalNextKey);
-                    }, ()->"cleaning up spent work for idx #" + finalNextKey);
+                }, () -> "cleaning up spent work for idx #" + finalNextKey);
                 items.put(nextKey, workItem);
             }
         }
@@ -105,16 +114,21 @@ public class OnlineRadixSorter {
 
     public String getAwaitingText() {
         final var upTo = items.lastKey();
-        return "slotsOutstanding: >" + (upTo) + "," +
-                IntStream.range(0, upTo-currentOffset)
-                        .map(i->upTo-i-1)
-                        .filter(i->Optional.ofNullable(items.get(i))
-                                .flatMap(wi->Optional.ofNullable(wi.workCompletedFuture))
-                                .isEmpty())
-                        .boxed()
-                        .reduce(new SequentialSpanCompressingReducer(-1), SequentialSpanCompressingReducer::addNext,
-                                (c, d) -> { throw new IllegalStateException("parallel streams aren't allowed"); })
-                        .getFinalAccumulation();
+        return "slotsOutstanding: >"
+            + (upTo)
+            + ","
+            + IntStream.range(0, upTo - currentOffset)
+                .map(i -> upTo - i - 1)
+                .filter(
+                    i -> Optional.ofNullable(items.get(i))
+                        .flatMap(wi -> Optional.ofNullable(wi.workCompletedFuture))
+                        .isEmpty()
+                )
+                .boxed()
+                .reduce(new SequentialSpanCompressingReducer(-1), SequentialSpanCompressingReducer::addNext, (c, d) -> {
+                    throw new IllegalStateException("parallel streams aren't allowed");
+                })
+                .getFinalAccumulation();
     }
 
     @Override
@@ -127,13 +141,19 @@ public class OnlineRadixSorter {
         return sb.toString();
     }
 
-    public boolean hasPending() { return !items.isEmpty(); }
+    public boolean hasPending() {
+        return !items.isEmpty();
+    }
 
     public long numPending() {
         return items.size();
     }
 
-    public boolean isEmpty() { return items.isEmpty(); }
+    public boolean isEmpty() {
+        return items.isEmpty();
+    }
 
-    public int size() { return items.size(); }
+    public int size() {
+        return items.size();
+    }
 }
