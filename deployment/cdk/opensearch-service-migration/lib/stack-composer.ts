@@ -566,6 +566,7 @@ export class StackComposer {
                 stage: stage,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
+                otelCollectorEnabled,
                 env: props.env
             })
             // To enable the Migration Console to make requests to other service endpoints with services,
