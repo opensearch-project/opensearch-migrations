@@ -22,11 +22,11 @@ snapshot:
   snapshot_name: "snapshot_2023_01_01"
   fs:
     repo_path: "/snapshot/test-console"
-  otel_endpoint: "otel-collector:4317"
+  otel_endpoint: "http://otel-collector:4317"
 metadata_migration:
   from_snapshot:
   min_replicas: 0
-  otel_endpoint: "otel-collector:4317"
+  otel_endpoint: "http://otel-collector:4317"
 kafka:
   broker_endpoints: "kafka:9092"
   standard: ""

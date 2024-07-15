@@ -17,7 +17,7 @@ export class OtelCollectorSidecar {
     public static OTEL_CONTAINER_HEALTHCHECK_PORT = 13133;
 
     static getOtelLocalhostEndpoint() {
-        return "localhost:" + OtelCollectorSidecar.OTEL_CONTAINER_PORT;
+        return "http://localhost:" + OtelCollectorSidecar.OTEL_CONTAINER_PORT;
     }
 
     static addOtelCollectorContainer(taskDefinition: TaskDefinition, logGroupPrefix: string) {

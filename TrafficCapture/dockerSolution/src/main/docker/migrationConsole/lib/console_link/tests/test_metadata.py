@@ -151,7 +151,7 @@ def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
                 "aws_region": "us-east-1"
             },
         },
-        "otel_endpoint": "otel:1111",
+        "otel_endpoint": "http://otel:1111",
     }
     target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     metadata = Metadata(config, target, None)
@@ -181,7 +181,7 @@ def test_metadata_with_fs_snapshot_makes_correct_subprocess_call(mocker):
                 "repo_path": "path/to/repo"
             },
         },
-        "otel_endpoint": "otel:1111",
+        "otel_endpoint": "http://otel:1111",
     }
     target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     metadata = Metadata(config, target, None)
@@ -235,7 +235,7 @@ def test_metadata_with_allowlists_makes_correct_subprocess_call(mocker):
                 "repo_path": "path/to/repo"
             },
         },
-        "otel_endpoint": "otel:1111",
+        "otel_endpoint": "http://otel:1111",
         "index_allowlist": ["index1", "index2"],
         "index_template_allowlist": ["index_template1", "index_template2"],
         "component_template_allowlist": ["component_template1", "component_template2"]

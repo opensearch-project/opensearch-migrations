@@ -196,7 +196,7 @@ def test_get_snpashot_fails_for_config_with_fs_and_s3():
 def test_fs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
     config = {
         "snapshot": {
-            "otel_endpoint": "otel:1111",
+            "otel_endpoint": "http://otel:1111",
             "snapshot_name": "reindex_from_snapshot",
             "fs": {
                 "repo_path": "/path/for/snapshot/repo"
@@ -221,7 +221,7 @@ def test_fs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
 def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
     config = {
         "snapshot": {
-            "otel_endpoint": "otel:1111",
+            "otel_endpoint": "http://otel:1111",
             "snapshot_name": "reindex_from_snapshot",
             "s3": {
                 "repo_uri": "s3://my-bucket",
