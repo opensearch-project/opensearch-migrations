@@ -188,6 +188,7 @@ jobs:
 
   all-ci-checks-pass:
     needs:
+      - style-check
       - cdk-tests
       - gradle-tests
       - link-checker
