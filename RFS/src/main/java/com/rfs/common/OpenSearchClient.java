@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.rfs.common.RestClient.Response;
 import com.rfs.tracing.IRfsContexts;
 import lombok.NonNull;
 import reactor.core.publisher.Mono;
@@ -98,7 +99,7 @@ public class OpenSearchClient {
         ObjectNode settings,
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
-        RestClient.Response response = client.getAsync(objectPath, context.createCheckRequestContext())
+        RestClient.Response getResponse = client.getAsync(objectPath, context.createCheckRequestContext())
             .flatMap(resp -> {
                 if (resp.code == HttpURLConnection.HTTP_NOT_FOUND || resp.code == HttpURLConnection.HTTP_OK) {
                     return Mono.just(resp);
@@ -118,8 +119,27 @@ public class OpenSearchClient {
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
 
-        if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
-            client.put(objectPath, settings.toString(), context.createCheckRequestContext());
+        if (getResponse.code == HttpURLConnection.HTTP_NOT_FOUND) {
+            client.putAsync(objectPath, settings.toString(), context.createCheckRequestContext())
+                .flatMap(resp -> {
+                    if (resp.code == HttpURLConnection.HTTP_OK) {
+                        return Mono.just(resp);
+                    } else {
+                        String errorMessage = ("Could not create object: "
+                            + objectPath
+                            + ". Response Code: "
+                            + resp.code
+                            + ", Response Message: "
+                            + resp.message
+                            + ", Response Body: "
+                            + resp.body);
+                        return Mono.error(new OperationFailed(errorMessage, resp));
+                    }
+                })
+                .doOnError(e -> logger.error(e.getMessage()))
+                .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
+                .block();
+
             return Optional.of(settings);
         }
         // The only response code that can end up here is HTTP_OK, which means the object already existed

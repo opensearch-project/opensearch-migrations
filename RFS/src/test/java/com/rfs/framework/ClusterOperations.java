@@ -36,9 +36,7 @@ public class ClusterOperations {
         final var repositoryJson = "{\n"
             + "  \"type\": \"fs\",\n"
             + "  \"settings\": {\n"
-            + "    \"location\": \""
-            + repoPath
-            + "\",\n"
+            + "    \"location\": \"" + repoPath + "\",\n"
             + "    \"compress\": false\n"
             + "  }\n"
             + "}";
@@ -82,9 +80,7 @@ public class ClusterOperations {
 
     public void takeSnapshot(final String snapshotName, final String indexPattern) throws IOException {
         final var snapshotJson = "{\n"
-            + "  \"indices\": \""
-            + indexPattern
-            + "\",\n"
+            + "  \"indices\": \"" + indexPattern + "\",\n"
             + "  \"ignore_unavailable\": true,\n"
             + "  \"include_global_state\": true\n"
             + "}";
@@ -101,7 +97,7 @@ public class ClusterOperations {
     }
 
     /**
-     * Creates a ES6 legacy template, intended for use on only ES 6 clusters
+     * Creates an ES6 legacy template, intended for use on only ES 6 clusters
      */
     @SneakyThrows
     public void createES6LegacyTemplate(final String templateName, final String pattern) throws IOException {
@@ -133,11 +129,73 @@ public class ClusterOperations {
             "  }\r\n" + //
             "}";
 
-        final var createRepoRequest = new HttpPut(clusterUrl + "/_template/" + templateName);
+        final var createRepoRequest = new HttpPut(this.clusterUrl + "/_template/" + templateName);
         createRepoRequest.setEntity(new StringEntity(templateJson));
         createRepoRequest.setHeader("Content-Type", "application/json");
 
         try (var response = httpClient.execute(createRepoRequest)) {
+            assertThat(
+                EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8),
+                response.getCode(),
+                equalTo(200)
+            );
+        }
+    }
+
+    /**
+     * Creates an ES7 legacy template, intended for use on only ES 7.8+ clusters
+     */
+    @SneakyThrows
+    public void createES7Templates(
+        final String componentTemplateName,
+        final String indexTemplateName,
+        final String fieldName,
+        final String indexPattern
+    ) throws IOException {
+        final var componentTemplateJson = "{"
+            + "\"template\": {"
+            + "    \"settings\": {"
+            + "        \"number_of_shards\": 1,"
+            + "        \"number_of_replicas\": 1"
+            + "    },"
+            + "    \"mappings\": {"
+            + "        \"properties\": {"
+            + "            \"" + fieldName + "\": {"
+            + "                \"type\": \"text\""
+            + "            }"
+            + "        }"
+            + "    }"
+            + "},"
+            + "\"version\": 1"
+            + "}";
+
+
+        final var compTempUrl = clusterUrl + "/_component_template/" + componentTemplateName;
+        final var createCompTempRequest = new HttpPut(compTempUrl);
+        createCompTempRequest.setEntity(new StringEntity(componentTemplateJson));
+        createCompTempRequest.setHeader("Content-Type", "application/json");
+
+        try (var response = httpClient.execute(createCompTempRequest)) {
+            assertThat(
+                EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8),
+                response.getCode(),
+                equalTo(200)
+            );
+        }
+
+        final var indexTemplateJson = "{"
+            + "\"index_patterns\": [\"" + indexPattern + "\"],"
+            + "\"composed_of\": [\"" + componentTemplateName + "\"],"
+            + "\"priority\": 1,"
+            + "\"version\": 1"
+            + "}";
+
+        final var indexTempUrl = clusterUrl + "/_index_template/" + indexTemplateName;
+        final var createIndexTempRequest = new HttpPut(indexTempUrl);
+        createIndexTempRequest.setEntity(new StringEntity(indexTemplateJson));
+        createIndexTempRequest.setHeader("Content-Type", "application/json");
+
+        try (var response = httpClient.execute(createIndexTempRequest)) {
             assertThat(
                 EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8),
                 response.getCode(),

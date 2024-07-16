@@ -53,6 +53,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         }
     }
 
+    @Getter
     private final Version version;
 
     @SuppressWarnings("resource")

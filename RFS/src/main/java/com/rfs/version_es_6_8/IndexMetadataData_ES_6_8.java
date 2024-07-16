@@ -38,8 +38,7 @@ public class IndexMetadataData_ES_6_8 implements IndexMetadata {
             return mappings;
         }
 
-        ArrayNode mappingsArray = (ArrayNode) root.get("mappings");
-        ObjectNode mappingsNode = TransformFunctions.getMappingsFromBeneathIntermediate(mappingsArray);
+        ObjectNode mappingsNode = (ObjectNode) root.get("mappings");
         mappings = mappingsNode;
 
         return mappings;
