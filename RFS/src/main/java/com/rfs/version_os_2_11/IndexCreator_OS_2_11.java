@@ -37,7 +37,6 @@ public class IndexCreator_OS_2_11 {
         // Assemble the request body
         ObjectNode body = mapper.createObjectNode();
         body.set("aliases", indexMetadata.getAliases());
-        // Working around for missing OS_1_3 definition
         body.set("mappings", index.getMappings());
         body.set("settings", settings);
 

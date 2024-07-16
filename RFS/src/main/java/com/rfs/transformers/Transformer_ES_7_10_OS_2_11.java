@@ -97,6 +97,6 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
         TransformFunctions.fixReplicasForDimensionality(newRoot, awarenessAttributeDimensionality);
 
         logger.debug("Transformed Object: " + newRoot.toString());
-        return indexData;
+        return copy;
     }
 }
