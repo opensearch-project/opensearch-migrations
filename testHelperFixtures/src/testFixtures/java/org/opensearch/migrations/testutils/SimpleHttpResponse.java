@@ -1,8 +1,8 @@
 package org.opensearch.migrations.testutils;
 
-import lombok.AllArgsConstructor;
-
 import java.util.Map;
+
+import lombok.AllArgsConstructor;
 
 /**
  * Basic components of an HTTP response.

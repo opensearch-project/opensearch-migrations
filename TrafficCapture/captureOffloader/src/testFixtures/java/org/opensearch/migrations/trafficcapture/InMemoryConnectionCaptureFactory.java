@@ -1,16 +1,18 @@
 package org.opensearch.migrations.trafficcapture;
 
-import com.google.protobuf.InvalidProtocolBufferException;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
-import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
-
 import java.io.IOException;
 import java.util.Arrays;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.stream.Stream;
+
+import com.google.protobuf.InvalidProtocolBufferException;
+
+import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
+import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
+
+import lombok.AllArgsConstructor;
+import lombok.Getter;
 
 public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFactory<Void> {
 
@@ -43,17 +45,16 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
         @Override
         protected CompletableFuture<Void> kickoffCloseStream(CodedOutputStreamHolder outputStreamHolder, int index) {
             if (!(outputStreamHolder instanceof CodedOutputStreamAndByteBufferWrapper)) {
-                throw new IllegalArgumentException("Unknown outputStreamHolder sent back to StreamManager: " +
-                        outputStreamHolder);
+                throw new IllegalArgumentException(
+                    "Unknown outputStreamHolder sent back to StreamManager: " + outputStreamHolder
+                );
             }
             var osh = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
             return CompletableFuture.runAsync(() -> {
                 var bb = osh.getByteBuffer();
                 byte[] filledBytes = Arrays.copyOfRange(bb.array(), 0, bb.position());
                 recordedStreams.add(new RecordedTrafficStream(filledBytes));
-            })
-                    .whenComplete((v,t)->onCaptureClosedCallback.run())
-                    .thenApply(x->null);
+            }).whenComplete((v, t) -> onCaptureClosedCallback.run()).thenApply(x -> null);
         }
     }
 
@@ -64,13 +65,12 @@ public class InMemoryConnectionCaptureFactory implements IConnectionCaptureFacto
     }
 
     public Stream<TrafficStream> getRecordedTrafficStreamsStream() {
-        return recordedStreams.stream()
-                .map(rts-> {
-                    try {
-                        return TrafficStream.parseFrom(rts.data);
-                    } catch (InvalidProtocolBufferException e) {
-                        throw new IllegalStateException(e);
-                    }
-                });
+        return recordedStreams.stream().map(rts -> {
+            try {
+                return TrafficStream.parseFrom(rts.data);
+            } catch (InvalidProtocolBufferException e) {
+                throw new IllegalStateException(e);
+            }
+        });
     }
 }

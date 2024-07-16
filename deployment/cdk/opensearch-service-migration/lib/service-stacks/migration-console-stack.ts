@@ -16,6 +16,7 @@ import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {Fn, RemovalPolicy} from "aws-cdk-lib";
 import {MetadataMigrationYaml, ServicesYaml} from "../migration-services-yaml";
 import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
+import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
 
 export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationsSolutionVersion: string,
@@ -28,6 +29,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationAPIAllowedHosts?: string,
     readonly targetGroups: ELBTargetGroup[],
     readonly servicesYaml: ServicesYaml,
+    readonly otelCollectorEnabled?: boolean,
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
@@ -261,6 +263,16 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             'no_auth': ''
         }
         servicesYaml.metadata_migration = new MetadataMigrationYaml();
+        if (props.otelCollectorEnabled) {
+            const otelSidecarEndpoint = OtelCollectorSidecar.getOtelLocalhostEndpoint();
+            if (servicesYaml.metadata_migration) {
+                servicesYaml.metadata_migration.otel_endpoint = otelSidecarEndpoint;
+            }
+            if (servicesYaml.snapshot) {
+                servicesYaml.snapshot.otel_endpoint = otelSidecarEndpoint;
+            }
+        }
+
         createMigrationStringParameter(this, servicesYaml.stringify(), {
             ...props,
             parameter: MigrationSSMParameter.SERVICES_YAML_FILE,

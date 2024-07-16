@@ -1,9 +1,10 @@
 package org.opensearch.migrations.trafficcapture.netty;
 
-import lombok.Getter;
-import lombok.extern.slf4j.Slf4j;
 import org.opensearch.migrations.trafficcapture.netty.tracing.WireCaptureContexts;
 import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
+
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * This is a helper class so that we can emit metrics and traces for when we're

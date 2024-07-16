@@ -1,8 +1,5 @@
 package com.rfs.models;
 
-import org.apache.lucene.codecs.CodecUtil;
-import org.opensearch.migrations.transformation.entity.Index;
-
 import java.io.ByteArrayInputStream;
 import java.io.FileInputStream;
 import java.io.InputStream;
@@ -10,8 +7,11 @@ import java.nio.file.Path;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
+import org.apache.lucene.codecs.CodecUtil;
+
+import org.opensearch.migrations.transformation.entity.Index;
+
 import com.rfs.common.ByteArrayIndexInput;
 import com.rfs.common.RfsException;
 import com.rfs.common.SnapshotRepo;
@@ -24,11 +24,17 @@ public interface IndexMetadata extends Index {
     * See: https://github.com/elastic/elasticsearch/blob/v6.8.23/server/src/main/java/org/elasticsearch/cluster/metadata/IndexMetaData.java#L1284
     */
     public JsonNode getAliases();
+
     public String getId();
+
     public JsonNode getMappings();
+
     public String getName();
+
     public int getNumberOfShards();
+
     public JsonNode getSettings();
+
     public IndexMetadata deepCopy();
 
     /**
@@ -37,10 +43,12 @@ public interface IndexMetadata extends Index {
     public static interface Factory {
         private JsonNode getJsonNode(String indexId, String indexFileId, SmileFactory smileFactory) {
             Path filePath = getRepoDataProvider().getRepo().getIndexMetadataFilePath(indexId, indexFileId);
-    
+
             try (InputStream fis = new FileInputStream(filePath.toFile())) {
-                // Don't fully understand what the value of this code is, but it progresses the stream so we need to do it
-                // See: https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/repositories/blobstore/ChecksumBlobStoreFormat.java#L100
+                // Don't fully understand what the value of this code is, but it progresses the stream so we need to do
+                // it
+                // See:
+                // https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/repositories/blobstore/ChecksumBlobStoreFormat.java#L100
                 byte[] bytes = fis.readAllBytes();
                 ByteArrayIndexInput indexInput = new ByteArrayIndexInput("index-metadata", bytes);
                 CodecUtil.checksumEntireFile(indexInput);
@@ -59,7 +67,7 @@ public interface IndexMetadata extends Index {
             SmileFactory smileFactory = getSmileFactory();
             String indexId = getRepoDataProvider().getIndexId(indexName);
             String indexFileId = getIndexFileId(snapshotName, indexName);
-            JsonNode root = getJsonNode(indexId, indexFileId, smileFactory);            
+            JsonNode root = getJsonNode(indexId, indexFileId, smileFactory);
             return fromJsonNode(root, indexId, indexName);
         }
 

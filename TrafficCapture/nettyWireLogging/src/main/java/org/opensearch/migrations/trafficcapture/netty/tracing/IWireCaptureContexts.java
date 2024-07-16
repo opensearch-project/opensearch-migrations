@@ -8,6 +8,7 @@ public abstract class IWireCaptureContexts {
 
     public static class ActivityNames {
         private ActivityNames() {}
+
         public static final String BLOCKED = "blocked";
         public static final String GATHERING_REQUEST = "gatheringRequest";
         public static final String WAITING_FOR_RESPONSE = "waitingForResponse";
@@ -16,6 +17,7 @@ public abstract class IWireCaptureContexts {
 
     public static class MetricNames {
         private MetricNames() {}
+
         public static final String UNREGISTERED = "unregistered";
         public static final String REMOVED = "removed";
 
@@ -27,7 +29,8 @@ public abstract class IWireCaptureContexts {
     }
 
     public interface ICapturingConnectionContext
-            extends org.opensearch.migrations.tracing.commoncontexts.IConnectionContext {
+        extends
+            org.opensearch.migrations.tracing.commoncontexts.IConnectionContext {
         IHttpMessageContext createInitialRequestContext();
 
         void onUnregistered();
@@ -36,10 +39,10 @@ public abstract class IWireCaptureContexts {
     }
 
     public interface IHttpMessageContext
-            extends IHttpTransactionContext,
-                    IWithStartTimeAndAttributes,
-                    IWithTypedEnclosingScope<ICapturingConnectionContext>
-    {
+        extends
+            IHttpTransactionContext,
+            IWithStartTimeAndAttributes,
+            IWithTypedEnclosingScope<ICapturingConnectionContext> {
         IBlockingContext createBlockingContext();
 
         IWaitingForResponseContext createWaitingForResponseContext();

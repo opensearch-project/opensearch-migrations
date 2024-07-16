@@ -1,10 +1,5 @@
 package org.opensearch.migrations.replay.datahandlers;
 
-import com.fasterxml.jackson.core.JsonFactory;
-import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.async.ByteBufferFeeder;
-import lombok.extern.slf4j.Slf4j;
-
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.util.ArrayDeque;
@@ -12,7 +7,12 @@ import java.util.ArrayList;
 import java.util.Deque;
 import java.util.LinkedHashMap;
 import java.util.Map;
-import java.util.Stack;
+
+import com.fasterxml.jackson.core.JsonFactory;
+import com.fasterxml.jackson.core.JsonParser;
+import com.fasterxml.jackson.core.async.ByteBufferFeeder;
+
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Consume data, building the json object tree as it goes.  This returns null until the top-level
@@ -49,7 +49,7 @@ public class JsonAccumulator {
      */
     public Object consumeByteBuffer(ByteBuffer byteBuffer) throws IOException {
         ByteBufferFeeder feeder = (ByteBufferFeeder) parser.getNonBlockingInputFeeder();
-        log.trace("Consuming bytes: "+byteBuffer.toString());
+        log.trace("Consuming bytes: " + byteBuffer.toString());
         feeder.feedInput(byteBuffer);
 
         while (!parser.isClosed()) {
@@ -59,7 +59,7 @@ public class JsonAccumulator {
                 break;
             }
 
-            log.trace(this+" ... adding token="+token);
+            log.trace(this + " ... adding token=" + token);
             switch (token) {
                 case FIELD_NAME:
                     jsonObjectStack.push(parser.getText());
@@ -110,7 +110,7 @@ public class JsonAccumulator {
                     return null;
                 case VALUE_EMBEDDED_OBJECT:
                 default:
-                    throw new IllegalStateException("Unexpected value type: "+token);
+                    throw new IllegalStateException("Unexpected value type: " + token);
             }
         }
         return null;
@@ -133,11 +133,10 @@ public class JsonAccumulator {
 
     @Override
     public String toString() {
-        var jsonStackString = ""+jsonObjectStack.size();
+        var jsonStackString = "" + jsonObjectStack.size();
         final StringBuilder sb = new StringBuilder("JsonAccumulator{");
         sb.append(", jsonObjectStack=").append(jsonStackString);
         sb.append('}');
         return sb.toString();
     }
 }
-

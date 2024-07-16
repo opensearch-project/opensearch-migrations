@@ -31,7 +31,9 @@ dependencies {
     implementation platform('io.projectreactor:reactor-bom:2023.0.5')
     testImplementation platform('io.projectreactor:reactor-bom:2023.0.5')
 
+    implementation project(":coreUtilities")
     implementation project(":RFS")
+
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     implementation group: 'com.beust', name: 'jcommander'
@@ -46,6 +48,7 @@ dependencies {
 
 
     testImplementation testFixtures(project(":RFS"))
+    testImplementation testFixtures(project(":coreUtilities"))
     testImplementation project(":CreateSnapshot")
     testImplementation project(":MetadataMigration")
     testImplementation group: 'org.apache.lucene', name: 'lucene-core'
@@ -54,6 +57,7 @@ dependencies {
     testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-params'
     testImplementation group: 'org.opensearch', name: 'opensearch-testcontainers'
     testImplementation group: 'org.testcontainers', name: 'testcontainers'
+    testImplementation group: 'org.testcontainers', name: 'toxiproxy'
 
     testImplementation platform('io.projectreactor:reactor-bom:2023.0.5')
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'

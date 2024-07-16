@@ -1,9 +1,11 @@
 package com.rfs.cms;
 
+import java.io.IOException;
+import java.util.function.Supplier;
+
+import com.rfs.tracing.IWorkCoordinationContexts;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-
-import java.io.IOException;
 
 @Slf4j
 public class ScopedWorkCoordinator {
@@ -17,13 +19,15 @@ public class ScopedWorkCoordinator {
     }
 
     public interface WorkItemGetter {
-        @NonNull IWorkCoordinator.WorkAcquisitionOutcome tryAcquire(IWorkCoordinator wc);
+        @NonNull
+        IWorkCoordinator.WorkAcquisitionOutcome tryAcquire(IWorkCoordinator wc);
     }
 
-    public <T> T ensurePhaseCompletion(WorkItemGetter workItemIdSupplier,
-                                       IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T> visitor)
-            throws IOException, InterruptedException
-    {
+    public <T> T ensurePhaseCompletion(
+        WorkItemGetter workItemIdSupplier,
+        IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T> visitor,
+        Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
+    ) throws IOException, InterruptedException {
         var acquisitionResult = workItemIdSupplier.tryAcquire(workCoordinator);
         return acquisitionResult.visit(new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T>() {
             @Override
@@ -37,13 +41,12 @@ public class ScopedWorkCoordinator {
             }
 
             @Override
-            public T onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem)
-                    throws IOException, InterruptedException
-            {
+            public T onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException,
+                InterruptedException {
                 var workItemId = workItem.getWorkItemId();
                 leaseExpireTrigger.registerExpiration(workItem.workItemId, workItem.leaseExpirationTime);
                 var rval = visitor.onAcquiredWork(workItem);
-                workCoordinator.completeWorkItem(workItemId);
+                workCoordinator.completeWorkItem(workItemId, contextSupplier);
                 leaseExpireTrigger.markWorkAsCompleted(workItemId);
                 return rval;
             }

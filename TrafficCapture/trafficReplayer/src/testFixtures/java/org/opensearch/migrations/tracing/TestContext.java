@@ -1,13 +1,13 @@
 package org.opensearch.migrations.tracing;
 
+import java.time.Instant;
+
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.ChannelContextManager;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
-
-import java.time.Instant;
 
 public class TestContext extends RootReplayerContext implements AutoCloseable {
 
@@ -46,34 +46,38 @@ public class TestContext extends RootReplayerContext implements AutoCloseable {
 
     @Override
     public void close() {
-//        Assertions.assertEquals("", contextTracker.getAllRemainingActiveScopes().entrySet().stream()
-//                .map(kvp->kvp.getKey().toString()).collect(Collectors.joining()));
+        // Assertions.assertEquals("", contextTracker.getAllRemainingActiveScopes().entrySet().stream()
+        // .map(kvp->kvp.getKey().toString()).collect(Collectors.joining()));
         getBacktracingContextTracker().close();
         inMemoryInstrumentationBundle.close();
     }
 
-
-    public final IReplayContexts.IReplayerHttpTransactionContext
-    getTestConnectionRequestContext(int replayerIdx) {
+    public final IReplayContexts.IReplayerHttpTransactionContext getTestConnectionRequestContext(int replayerIdx) {
         return getTestConnectionRequestContext(DEFAULT_TEST_CONNECTION, replayerIdx);
     }
 
-    public IReplayContexts.IReplayerHttpTransactionContext
-    getTestConnectionRequestContext(String connectionId, int replayerIdx) {
+    public IReplayContexts.IReplayerHttpTransactionContext getTestConnectionRequestContext(
+        String connectionId,
+        int replayerIdx
+    ) {
         var rk = new UniqueReplayerRequestKey(
-                PojoTrafficStreamKeyAndContext.build(TEST_NODE_ID, connectionId, 0,
-                        this::createTrafficStreamContextForTest),
-                0, replayerIdx);
+            PojoTrafficStreamKeyAndContext.build(
+                TEST_NODE_ID,
+                connectionId,
+                0,
+                this::createTrafficStreamContextForTest
+            ),
+            0,
+            replayerIdx
+        );
         return rk.trafficStreamKey.getTrafficStreamsContext().createHttpTransactionContext(rk, Instant.EPOCH);
     }
 
-    public IReplayContexts.ITupleHandlingContext
-    getTestTupleContext() {
+    public IReplayContexts.ITupleHandlingContext getTestTupleContext() {
         return getTestTupleContext(DEFAULT_TEST_CONNECTION, 1);
     }
 
-    public IReplayContexts.ITupleHandlingContext
-    getTestTupleContext(String connectionId, int replayerIdx) {
+    public IReplayContexts.ITupleHandlingContext getTestTupleContext(String connectionId, int replayerIdx) {
         return getTestConnectionRequestContext(connectionId, replayerIdx).createTupleContext();
     }
 }

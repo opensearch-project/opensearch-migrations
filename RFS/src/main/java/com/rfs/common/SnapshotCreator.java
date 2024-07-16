@@ -1,5 +1,7 @@
 package com.rfs.common;
 
+import java.util.Optional;
+
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -7,7 +9,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import java.util.Optional;
+import com.rfs.tracing.IRfsContexts;
 
 public abstract class SnapshotCreator {
     private static final Logger logger = LogManager.getLogger(SnapshotCreator.class);
@@ -17,11 +19,13 @@ public abstract class SnapshotCreator {
     }
 
     private final OpenSearchClient client;
+    private final IRfsContexts.ICreateSnapshotContext context;
     private final String snapshotName;
 
-    public SnapshotCreator(String snapshotName, OpenSearchClient client) {
+    public SnapshotCreator(String snapshotName, OpenSearchClient client, IRfsContexts.ICreateSnapshotContext context) {
         this.snapshotName = snapshotName;
         this.client = client;
+        this.context = context;
     }
 
     abstract ObjectNode getRequestBodyForRegisterRepo();
@@ -39,7 +43,7 @@ public abstract class SnapshotCreator {
 
         // Register the repo; it's fine if it already exists
         try {
-            client.registerSnapshotRepo(getRepoName(), settings);
+            client.registerSnapshotRepo(getRepoName(), settings, context);
             logger.info("Snapshot repo registration successful");
         } catch (Exception e) {
             logger.error("Snapshot repo registration failed", e);
@@ -56,7 +60,7 @@ public abstract class SnapshotCreator {
 
         // Create the snapshot; idempotent operation
         try {
-            client.createSnapshot(getRepoName(), snapshotName, body);
+            client.createSnapshot(getRepoName(), snapshotName, body, context);
             logger.info("Snapshot {} creation initiated", snapshotName);
         } catch (Exception e) {
             logger.error("Snapshot {} creation failed", snapshotName, e);
@@ -67,7 +71,7 @@ public abstract class SnapshotCreator {
     public boolean isSnapshotFinished() {
         Optional<ObjectNode> response;
         try {
-            response = client.getSnapshotStatus(getRepoName(), snapshotName);
+            response = client.getSnapshotStatus(getRepoName(), snapshotName, context);
         } catch (Exception e) {
             logger.error("Failed to get snapshot status", e);
             throw new SnapshotStatusCheckFailed(snapshotName);
@@ -81,7 +85,7 @@ public abstract class SnapshotCreator {
         JsonNode responseJson = response.get();
         JsonNode firstSnapshot = responseJson.path("snapshots").get(0);
         JsonNode stateNode = firstSnapshot.path("state");
-        String state = stateNode.asText();        
+        String state = stateNode.asText();
 
         if (state.equals("SUCCESS")) {
             return true;

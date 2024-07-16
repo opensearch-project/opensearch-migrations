@@ -1,5 +1,9 @@
 package com.rfs.framework;
 
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.util.Map;
+
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPut;
@@ -9,11 +13,6 @@ import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.io.entity.StringEntity;
 
 import lombok.SneakyThrows;
-
-import java.io.IOException;
-import java.nio.charset.StandardCharsets;
-import java.util.Map;
-import java.util.Map.Entry;
 
 import static org.hamcrest.CoreMatchers.anyOf;
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -34,13 +33,15 @@ public class ClusterOperations {
 
     public void createSnapshotRepository(final String repoPath) throws IOException {
         // Create snapshot repository
-        final var repositoryJson = "{\n" +
-        "  \"type\": \"fs\",\n" +
-        "  \"settings\": {\n" +
-        "    \"location\": \"" + repoPath + "\",\n" +
-        "    \"compress\": false\n" +
-        "  }\n" +
-        "}";
+        final var repositoryJson = "{\n"
+            + "  \"type\": \"fs\",\n"
+            + "  \"settings\": {\n"
+            + "    \"location\": \""
+            + repoPath
+            + "\",\n"
+            + "    \"compress\": false\n"
+            + "  }\n"
+            + "}";
 
         final var createRepoRequest = new HttpPut(clusterUrl + "/_snapshot/test-repo");
         createRepoRequest.setEntity(new StringEntity(repositoryJson));
@@ -80,13 +81,17 @@ public class ClusterOperations {
     }
 
     public void takeSnapshot(final String snapshotName, final String indexPattern) throws IOException {
-        final var snapshotJson = "{\n" +
-                "  \"indices\": \"" + indexPattern + "\",\n" +
-                "  \"ignore_unavailable\": true,\n" +
-                "  \"include_global_state\": true\n" +
-                "}";
+        final var snapshotJson = "{\n"
+            + "  \"indices\": \""
+            + indexPattern
+            + "\",\n"
+            + "  \"ignore_unavailable\": true,\n"
+            + "  \"include_global_state\": true\n"
+            + "}";
 
-        final var createSnapshotRequest = new HttpPut(clusterUrl + "/_snapshot/test-repo/" + snapshotName + "?wait_for_completion=true");
+        final var createSnapshotRequest = new HttpPut(
+            clusterUrl + "/_snapshot/test-repo/" + snapshotName + "?wait_for_completion=true"
+        );
         createSnapshotRequest.setEntity(new StringEntity(snapshotJson));
         createSnapshotRequest.setHeader("Content-Type", "application/json");
 
@@ -96,12 +101,11 @@ public class ClusterOperations {
     }
 
     /**
-     * Creates a ES6 legacy template, intended for use on only ES 6 clusters
+     * Creates an ES6 legacy template, intended for use on only ES 6 clusters
      */
     @SneakyThrows
     public void createES6LegacyTemplate(final String templateName, final String pattern) throws IOException {
-        final var templateJson =
-            "{\r\n" + //
+        final var templateJson = "{\r\n" + //
             "  \"index_patterns\": [\r\n" + //
             "    \"" + pattern + "\"\r\n" + //
             "  ],\r\n" + //
@@ -127,14 +131,85 @@ public class ClusterOperations {
             "      }\r\n" + //
             "    }\r\n" + //
             "  }\r\n" + //
-            "}";    
+            "}";
 
-        final var createRepoRequest = new HttpPut(clusterUrl + "/_template/" + templateName);
+        final var createRepoRequest = new HttpPut(this.clusterUrl + "/_template/" + templateName);
         createRepoRequest.setEntity(new StringEntity(templateJson));
         createRepoRequest.setHeader("Content-Type", "application/json");
 
         try (var response = httpClient.execute(createRepoRequest)) {
-            assertThat(EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8), response.getCode(), equalTo(200));
+            assertThat(
+                EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8),
+                response.getCode(),
+                equalTo(200)
+            );
+        }
+    }
+
+    /**
+     * Creates an ES7 legacy template, intended for use on only ES 7.8+ clusters
+     */
+    @SneakyThrows
+    public void createES7Templates(
+        final String componentTemplateName,
+        final String indexTemplateName,
+        final String fieldName,
+        final String indexPattern
+    ) throws IOException {
+        final var componentTemplateJson = "{"
+            + "\"template\": {"
+            + "    \"settings\": {"
+            + "        \"number_of_shards\": 1,"
+            + "        \"number_of_replicas\": 1"
+            + "    },"
+            + "    \"mappings\": {"
+            + "        \"properties\": {"
+            + "            \""
+            + fieldName
+            + "\": {"
+            + "                \"type\": \"text\""
+            + "            }"
+            + "        }"
+            + "    }"
+            + "},"
+            + "\"version\": 1"
+            + "}";
+
+        final var compTempUrl = clusterUrl + "/_component_template/" + componentTemplateName;
+        final var createCompTempRequest = new HttpPut(compTempUrl);
+        createCompTempRequest.setEntity(new StringEntity(componentTemplateJson));
+        createCompTempRequest.setHeader("Content-Type", "application/json");
+
+        try (var response = httpClient.execute(createCompTempRequest)) {
+            assertThat(
+                EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8),
+                response.getCode(),
+                equalTo(200)
+            );
+        }
+
+        final var indexTemplateJson = "{"
+            + "\"index_patterns\": [\""
+            + indexPattern
+            + "\"],"
+            + "\"composed_of\": [\""
+            + componentTemplateName
+            + "\"],"
+            + "\"priority\": 1,"
+            + "\"version\": 1"
+            + "}";
+
+        final var indexTempUrl = clusterUrl + "/_index_template/" + indexTemplateName;
+        final var createIndexTempRequest = new HttpPut(indexTempUrl);
+        createIndexTempRequest.setEntity(new StringEntity(indexTemplateJson));
+        createIndexTempRequest.setHeader("Content-Type", "application/json");
+
+        try (var response = httpClient.execute(createIndexTempRequest)) {
+            assertThat(
+                EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8),
+                response.getCode(),
+                equalTo(200)
+            );
         }
     }
 }

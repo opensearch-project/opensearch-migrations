@@ -1,9 +1,9 @@
 package com.rfs.common;
 
-import org.apache.lucene.store.IndexInput;
-
 import java.io.EOFException;
 import java.io.IOException;
+
+import org.apache.lucene.store.IndexInput;
 
 /**
  * This class was originally in the Lucene project, but was removed in version 8.0.0.  The Elastic codebase has its own
@@ -47,7 +47,7 @@ public class ByteArrayIndexInput extends IndexInput {
         } else if (l > length) {
             throw new EOFException("seek past EOF");
         }
-        pos = (int)l;
+        pos = (int) l;
     }
 
     @Override
@@ -58,10 +58,20 @@ public class ByteArrayIndexInput extends IndexInput {
     @Override
     public IndexInput slice(String sliceDescription, long offset, long length) throws IOException {
         if (offset >= 0L && length >= 0L && offset + length <= this.length) {
-            return new ByteArrayIndexInput(sliceDescription, bytes, this.offset + (int)offset, (int)length);
+            return new ByteArrayIndexInput(sliceDescription, bytes, this.offset + (int) offset, (int) length);
         } else {
-            throw new IllegalArgumentException("slice() " + sliceDescription + " out of bounds: offset=" + offset
-                    + ",length=" + length + ",fileLength=" + this.length + ": " + this);
+            throw new IllegalArgumentException(
+                "slice() "
+                    + sliceDescription
+                    + " out of bounds: offset="
+                    + offset
+                    + ",length="
+                    + length
+                    + ",fileLength="
+                    + this.length
+                    + ": "
+                    + this
+            );
         }
     }
 

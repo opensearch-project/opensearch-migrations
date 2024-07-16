@@ -1,10 +1,11 @@
 package org.opensearch.migrations.replay.tracing;
 
-import lombok.Getter;
-import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+
+import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
+
+import lombok.Getter;
 
 public class ChannelContextManager implements Function<ITrafficStreamKey, IReplayContexts.IChannelKeyContext> {
     @Getter
@@ -47,8 +48,10 @@ public class ChannelContextManager implements Function<ITrafficStreamKey, IRepla
     }
 
     public IReplayContexts.IChannelKeyContext retainOrCreateContext(ITrafficStreamKey tsk) {
-        return connectionToChannelContextMap.computeIfAbsent(tsk.getConnectionId(),
-                k -> new RefCountedContext(globalContext.createChannelContext(tsk))).retain();
+        return connectionToChannelContextMap.computeIfAbsent(
+            tsk.getConnectionId(),
+            k -> new RefCountedContext(globalContext.createChannelContext(tsk))
+        ).retain();
     }
 
     public IReplayContexts.IChannelKeyContext releaseContextFor(IReplayContexts.IChannelKeyContext ctx) {

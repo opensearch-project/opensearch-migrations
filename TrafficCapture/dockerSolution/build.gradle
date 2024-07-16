@@ -120,7 +120,7 @@ task buildDockerImages {
     dependsOn buildDockerImage_migrationConsole
     dependsOn buildDockerImage_otelCollector
     dependsOn buildDockerImage_grafana
-    
+
     dependsOn buildDockerImage_trafficCaptureProxyServer
     dependsOn buildDockerImage_trafficReplayer
 }

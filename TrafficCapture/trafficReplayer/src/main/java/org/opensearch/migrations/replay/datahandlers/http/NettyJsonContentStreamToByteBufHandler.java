@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+import java.nio.charset.StandardCharsets;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
@@ -7,8 +9,6 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
-
-import java.nio.charset.StandardCharsets;
 
 /**
  * This class is meant to be situated within a netty pipeline (see @RequestPipelineOrchestrator)
@@ -37,7 +37,8 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
     public static final String CONTENT_LENGTH_HEADER_NAME = "Content-Length";
 
     enum MODE {
-        CHUNKED, FIXED
+        CHUNKED,
+        FIXED
     }
 
     MODE streamMode = MODE.CHUNKED;
@@ -82,10 +83,10 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
 
     private void handleReadJsonMessageObject(ChannelHandlerContext ctx, HttpJsonMessageWithFaultingPayload msg) {
         bufferedJsonMessage = msg;
-        var transferEncoding =
-                bufferedJsonMessage.headers().asStrictMap().get("transfer-encoding");
-        streamMode = (transferEncoding != null && transferEncoding.contains(TRANSFER_ENCODING_CHUNKED_VALUE)) ?
-                MODE.CHUNKED : MODE.FIXED;
+        var transferEncoding = bufferedJsonMessage.headers().asStrictMap().get("transfer-encoding");
+        streamMode = (transferEncoding != null && transferEncoding.contains(TRANSFER_ENCODING_CHUNKED_VALUE))
+            ? MODE.CHUNKED
+            : MODE.FIXED;
         if (streamMode == MODE.CHUNKED) {
             bufferedJsonMessage.headers().asStrictMap().remove(CONTENT_LENGTH_HEADER_NAME);
             ctx.fireChannelRead(bufferedJsonMessage);
@@ -95,8 +96,9 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
     }
 
     private void handleAsChunked(ChannelHandlerContext ctx, ByteBuf dataByteBuf) {
-        var chunkSizePreamble = (Integer.toHexString(dataByteBuf.readableBytes()) + "\r\n")
-                .getBytes(StandardCharsets.UTF_8);
+        var chunkSizePreamble = (Integer.toHexString(dataByteBuf.readableBytes()) + "\r\n").getBytes(
+            StandardCharsets.UTF_8
+        );
         var compositeWrappedData = ctx.alloc().compositeBuffer(2);
         compositeWrappedData.addComponents(true, Unpooled.wrappedBuffer(chunkSizePreamble));
         compositeWrappedData.addComponents(true, dataByteBuf);

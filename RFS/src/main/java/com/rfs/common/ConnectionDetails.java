@@ -4,7 +4,6 @@ import java.net.URI;
 import java.net.URISyntaxException;
 
 import com.beust.jcommander.Parameter;
-
 import lombok.Getter;
 
 /**
@@ -45,11 +44,11 @@ public class ConnectionDetails {
         // If the username is provided, the password must be as well, and vice versa
         if ((username == null && password != null) || (username != null && password == null)) {
             throw new IllegalArgumentException("Both username and password must be provided, or neither");
-        } else if (username != null){
+        } else if (username != null) {
             this.authType = AuthType.BASIC;
         } else {
             this.authType = AuthType.NONE;
-        }        
+        }
 
         this.username = username;
         this.password = password;
@@ -76,43 +75,54 @@ public class ConnectionDetails {
             } else {
                 throw new IllegalArgumentException("Invalid protocol");
             }
-        }        
+        }
     }
 
     public static interface Params {
         String getHost();
+
         String getUsername();
+
         String getPassword();
+
         boolean isInsecure();
     }
 
     @Getter
     public static class TargetArgs implements Params {
-        @Parameter(names = {"--target-host"}, description = "The target host and port (e.g. http://localhost:9200)", required = true)
+        @Parameter(names = {
+            "--target-host" }, description = "The target host and port (e.g. http://localhost:9200)", required = true)
         public String host;
 
-        @Parameter(names = {"--target-username"}, description = "Optional.  The target username; if not provided, will assume no auth on target", required = false)
+        @Parameter(names = {
+            "--target-username" }, description = "Optional.  The target username; if not provided, will assume no auth on target", required = false)
         public String username = null;
 
-        @Parameter(names = {"--target-password"}, description = "Optional.  The target password; if not provided, will assume no auth on target", required = false)
+        @Parameter(names = {
+            "--target-password" }, description = "Optional.  The target password; if not provided, will assume no auth on target", required = false)
         public String password = null;
 
-        @Parameter(names = {"--target-insecure"}, description = "Allow untrusted SSL certificates for target", required = false)
+        @Parameter(names = {
+            "--target-insecure" }, description = "Allow untrusted SSL certificates for target", required = false)
         public boolean insecure = false;
     }
 
     @Getter
     public static class SourceArgs implements Params {
-        @Parameter(names = {"--source-host"}, description = "The source host and port (e.g. http://localhost:9200)", required = false)
+        @Parameter(names = {
+            "--source-host" }, description = "The source host and port (e.g. http://localhost:9200)", required = false)
         public String host = null;
 
-        @Parameter(names = {"--source-username"}, description = "The source username; if not provided, will assume no auth on source", required = false)
+        @Parameter(names = {
+            "--source-username" }, description = "The source username; if not provided, will assume no auth on source", required = false)
         public String username = null;
 
-        @Parameter(names = {"--source-password"}, description = "The source password; if not provided, will assume no auth on source", required = false)
+        @Parameter(names = {
+            "--source-password" }, description = "The source password; if not provided, will assume no auth on source", required = false)
         public String password = null;
 
-        @Parameter(names = {"--source-insecure"}, description = "Allow untrusted SSL certificates for source", required = false)
+        @Parameter(names = {
+            "--source-insecure" }, description = "Allow untrusted SSL certificates for source", required = false)
         public boolean insecure = false;
     }
 }

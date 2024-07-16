@@ -97,10 +97,7 @@ curl 'http://localhost:19200/_cat/indices?v'
 curl 'http://localhost:29200/_cat/indices?v'
 ```
 
-To kick off RFS:
-```shell
-docker exec -it rfs-compose-reindex-from-snapshot-1 sh -c "/rfs-app/runJavaWithClasspath.sh com.rfs.ReindexFromSnapshot --snapshot-name test-snapshot --snapshot-local-repo-dir /snapshots --min-replicas 0 --lucene-dir '/lucene' --source-host http://elasticsearchsource:9200 --target-host http://opensearchtarget:9200 --source-version es_7_10 --target-version os_2_11"
-```
+TODO 
 
 #### Providing AWS permissions for S3 snapshot creation
 

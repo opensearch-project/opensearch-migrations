@@ -1,6 +1,7 @@
 package com.rfs.version_os_2_11;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
+
 import com.rfs.models.GlobalMetadata;
 
 public class GlobalMetadataData_OS_2_11 implements GlobalMetadata {
@@ -22,8 +23,7 @@ public class GlobalMetadataData_OS_2_11 implements GlobalMetadata {
     public ObjectNode getIndexTemplates() {
         if (root.get("index_template") != null) {
             return (ObjectNode) root.get("index_template").get("index_template");
-        }
-        else {
+        } else {
             return null;
         }
     }
@@ -31,8 +31,7 @@ public class GlobalMetadataData_OS_2_11 implements GlobalMetadata {
     public ObjectNode getComponentTemplates() {
         if (root.get("component_template") != null) {
             return (ObjectNode) root.get("component_template").get("component_template");
-        }
-        else {
+        } else {
             return null;
         }
     }

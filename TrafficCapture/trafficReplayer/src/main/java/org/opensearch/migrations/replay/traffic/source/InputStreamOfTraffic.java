@@ -1,7 +1,13 @@
 package org.opensearch.migrations.replay.traffic.source;
 
-import lombok.Lombok;
-import lombok.extern.slf4j.Slf4j;
+import java.io.EOFException;
+import java.io.IOException;
+import java.io.InputStream;
+import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
+
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamAndKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
@@ -12,13 +18,8 @@ import org.opensearch.migrations.replay.tracing.ReplayContexts;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
-import java.io.EOFException;
-import java.io.IOException;
-import java.io.InputStream;
-import java.util.List;
-import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.function.Supplier;
+import lombok.Lombok;
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
@@ -32,9 +33,11 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
     }
 
     public static final class IOSTrafficStreamContext extends ReplayContexts.TrafficStreamLifecycleContext {
-        public IOSTrafficStreamContext(RootReplayerContext rootReplayerContext,
-                                       IReplayContexts.IChannelKeyContext enclosingScope,
-                                       ITrafficStreamKey trafficStreamKey) {
+        public IOSTrafficStreamContext(
+            RootReplayerContext rootReplayerContext,
+            IReplayContexts.IChannelKeyContext enclosingScope,
+            ITrafficStreamKey trafficStreamKey
+        ) {
             super(rootReplayerContext, enclosingScope, trafficStreamKey);
         }
     }
@@ -44,8 +47,9 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
      * EOFException if the input has been exhausted.
      */
     @Override
-    public CompletableFuture<List<ITrafficStreamWithKey>>
-    readNextTrafficStreamChunk(Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier) {
+    public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
+        Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
+    ) {
         return CompletableFuture.supplyAsync(() -> {
             var builder = TrafficStream.newBuilder();
             try {
@@ -58,13 +62,14 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
             var ts = builder.build();
             trafficStreamsRead.incrementAndGet();
             log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.get(), ts);
-            return List.<ITrafficStreamWithKey>of(new PojoTrafficStreamAndKey(ts,
-                    PojoTrafficStreamKeyAndContext.build(ts, tsk-> {
-                        var channelCtx = channelContextManager.retainOrCreateContext(tsk);
-                        return channelContextManager.getGlobalContext()
-                                .createTrafficStreamContextForStreamSource(channelCtx, tsk);
-                    })));
-        }).exceptionally(e->{
+            return List.<ITrafficStreamWithKey>of(
+                new PojoTrafficStreamAndKey(ts, PojoTrafficStreamKeyAndContext.build(ts, tsk -> {
+                    var channelCtx = channelContextManager.retainOrCreateContext(tsk);
+                    return channelContextManager.getGlobalContext()
+                        .createTrafficStreamContextForStreamSource(channelCtx, tsk);
+                }))
+            );
+        }).exceptionally(e -> {
             var ecf = new CompletableFuture<List<ITrafficStreamWithKey>>();
             ecf.completeExceptionally(e.getCause());
             return ecf.join();

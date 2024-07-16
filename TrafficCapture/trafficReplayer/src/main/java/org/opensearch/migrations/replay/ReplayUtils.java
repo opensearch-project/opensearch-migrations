@@ -1,13 +1,13 @@
 package org.opensearch.migrations.replay;
 
-import io.netty.buffer.ByteBuf;
-
 import java.io.ByteArrayInputStream;
 import java.io.SequenceInputStream;
 import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import io.netty.buffer.ByteBuf;
 
 public class ReplayUtils {
     private ReplayUtils() {}
@@ -17,7 +17,7 @@ public class ReplayUtils {
     }
 
     public static SequenceInputStream byteBufsToInputStream(Stream<ByteBuf> byteBufStream) {
-        return byteArraysToInputStream(byteBufStream.map(bb->{
+        return byteArraysToInputStream(byteBufStream.map(bb -> {
             byte[] asBytes = new byte[bb.readableBytes()];
             bb.duplicate().readBytes(asBytes);
             return asBytes;
@@ -25,7 +25,8 @@ public class ReplayUtils {
     }
 
     public static SequenceInputStream byteArraysToInputStream(Stream<byte[]> data) {
-        return new SequenceInputStream(Collections.enumeration(
-                data.map(ByteArrayInputStream::new).collect(Collectors.toList())));
+        return new SequenceInputStream(
+            Collections.enumeration(data.map(ByteArrayInputStream::new).collect(Collectors.toList()))
+        );
     }
 }

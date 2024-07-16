@@ -1,13 +1,13 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import lombok.EqualsAndHashCode;
-
 import java.util.AbstractMap;
 import java.util.AbstractSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Set;
+
+import lombok.EqualsAndHashCode;
 
 /**
  * This implements an ordered map of headers. The order is the same as the order that the keys were
@@ -16,7 +16,7 @@ import java.util.Set;
  * (or header names) case insensitive.
  */
 @EqualsAndHashCode(callSuper = false)
-public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String,List<String>> {
+public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String, List<String>> {
     protected LinkedHashMap<String, SimpleEntry<String, List<String>>> lowerCaseToUpperCaseAndValueMap;
 
     public StrictCaseInsensitiveHttpHeadersMap() {
@@ -33,8 +33,7 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String,List
     @Override
     public List<String> put(String incomingKey, List<String> value) {
         var normalizedKey = incomingKey.toLowerCase();
-        SimpleEntry<String,List<String>> oldEntry =
-                lowerCaseToUpperCaseAndValueMap.get(normalizedKey);
+        SimpleEntry<String, List<String>> oldEntry = lowerCaseToUpperCaseAndValueMap.get(normalizedKey);
         var newValue = new SimpleEntry<>(oldEntry == null ? incomingKey : oldEntry.getKey(), value);
         lowerCaseToUpperCaseAndValueMap.put(normalizedKey, newValue);
         return oldEntry == null ? null : oldEntry.getValue();
@@ -42,7 +41,7 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String,List
 
     @Override
     public List<String> remove(Object key) {
-        var origKeyAndVal = lowerCaseToUpperCaseAndValueMap.remove(((String)key).toLowerCase());
+        var origKeyAndVal = lowerCaseToUpperCaseAndValueMap.remove(((String) key).toLowerCase());
         return origKeyAndVal == null ? null : origKeyAndVal.getValue();
     }
 
@@ -52,8 +51,8 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String,List
             @Override
             public Iterator<Entry<String, List<String>>> iterator() {
                 return new Iterator<Entry<String, List<String>>>() {
-                    Iterator<Entry<String,SimpleEntry<String,List<String>>>> backingIterator =
-                            lowerCaseToUpperCaseAndValueMap.entrySet().iterator();
+                    Iterator<Entry<String, SimpleEntry<String, List<String>>>> backingIterator =
+                        lowerCaseToUpperCaseAndValueMap.entrySet().iterator();
 
                     @Override
                     public boolean hasNext() {

@@ -1,7 +1,5 @@
 package com.rfs.cms;
 
-import io.netty.util.concurrent.DefaultThreadFactory;
-
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
@@ -10,6 +8,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+
+import io.netty.util.concurrent.DefaultThreadFactory;
 
 /**
  * This class takes an expiration time and guarantees that the process will NOT run past that expiration
@@ -27,8 +27,10 @@ public class LeaseExpireTrigger implements AutoCloseable {
     }
 
     public LeaseExpireTrigger(Consumer<String> onLeaseExpired, Clock currentTimeSupplier) {
-        scheduledExecutorService = Executors.newScheduledThreadPool(1,
-                new DefaultThreadFactory("leaseWatchingProcessKillerThread"));
+        scheduledExecutorService = Executors.newScheduledThreadPool(
+            1,
+            new DefaultThreadFactory("leaseWatchingProcessKillerThread")
+        );
         this.workItemToLeaseMap = new ConcurrentHashMap<>();
         this.onLeaseExpired = onLeaseExpired;
         this.currentTimeSupplier = currentTimeSupplier;
@@ -37,11 +39,11 @@ public class LeaseExpireTrigger implements AutoCloseable {
     public void registerExpiration(String workItemId, Instant killTime) {
         workItemToLeaseMap.put(workItemId, killTime);
         final var killDuration = Duration.between(currentTimeSupplier.instant(), killTime);
-        scheduledExecutorService.schedule(()->{
+        scheduledExecutorService.schedule(() -> {
             if (workItemToLeaseMap.containsKey(workItemId)) {
                 onLeaseExpired.accept(workItemId);
             }
-        }, killDuration.toSeconds(), TimeUnit.SECONDS);
+        }, killDuration.toMillis(), TimeUnit.MILLISECONDS);
     }
 
     public void markWorkAsCompleted(String workItemId) {

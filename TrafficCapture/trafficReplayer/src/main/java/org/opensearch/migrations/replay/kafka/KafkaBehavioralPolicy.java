@@ -1,8 +1,9 @@
 package org.opensearch.migrations.replay.kafka;
 
 import com.google.protobuf.InvalidProtocolBufferException;
-import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
+
+import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class KafkaBehavioralPolicy {
@@ -16,8 +17,10 @@ public class KafkaBehavioralPolicy {
      * @param e The exception encountered when parsing the record
      * @return Null if no exception should be thrown, otherwise provide the exception that will be thrown by the calling class
      */
-    public RuntimeException onInvalidKafkaRecord(ConsumerRecord<String, byte[]> kafkaRecord,
-                                                 InvalidProtocolBufferException e) {
+    public RuntimeException onInvalidKafkaRecord(
+        ConsumerRecord<String, byte[]> kafkaRecord,
+        InvalidProtocolBufferException e
+    ) {
         log.error("Unable to parse incoming traffic stream with record id: {} from error: ", kafkaRecord.key(), e);
         return null;
     }

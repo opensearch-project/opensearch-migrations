@@ -1,13 +1,5 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
-import io.netty.channel.EventLoop;
-import io.netty.util.concurrent.Future;
-import io.netty.util.concurrent.GenericFutureListener;
-import lombok.Getter;
-import lombok.NonNull;
-import lombok.SneakyThrows;
-import lombok.extern.slf4j.Slf4j;
-
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayDeque;
@@ -19,6 +11,13 @@ import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 
+import io.netty.channel.EventLoop;
+import io.netty.util.concurrent.Future;
+import io.netty.util.concurrent.GenericFutureListener;
+import lombok.Getter;
+import lombok.NonNull;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * This class maintains N items for S seconds.  After S seconds, items are expired as per the
@@ -34,6 +33,7 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
     private static class Entry<F> {
         Instant timestamp;
         F future;
+
         public Entry(F future) {
             timestamp = Instant.now();
             this.future = future;
@@ -41,13 +41,11 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
 
         @Override
         public String toString() {
-            return "Entry{" + "timestamp=" + timestamp +
-                    ", value=" + future +
-                    '}';
+            return "Entry{" + "timestamp=" + timestamp + ", value=" + future + '}';
         }
     }
 
-    public static class PoolClosedException extends RuntimeException { }
+    public static class PoolClosedException extends RuntimeException {}
 
     public static class Stats {
         @Getter
@@ -65,12 +63,14 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
 
         public Stats() {}
 
-        public Stats(long nItemsCreated,
-                     long nItemsExpired,
-                     long nHotGets,
-                     long nColdGets,
-                     Duration totalDurationBuildingItems,
-                     Duration totalWaitTimeForCallers) {
+        public Stats(
+            long nItemsCreated,
+            long nItemsExpired,
+            long nHotGets,
+            long nColdGets,
+            Duration totalDurationBuildingItems,
+            Duration totalWaitTimeForCallers
+        ) {
             this.nItemsCreated = nItemsCreated;
             this.nItemsExpired = nItemsExpired;
             this.nHotGets = nHotGets;
@@ -80,24 +80,29 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
         }
 
         public Stats(Stats o) {
-            this(o.nItemsCreated, o.nItemsExpired, o.nHotGets, o.nColdGets,
-                    o.totalDurationBuildingItems, o.totalWaitTimeForCallers);
+            this(
+                o.nItemsCreated,
+                o.nItemsExpired,
+                o.nHotGets,
+                o.nColdGets,
+                o.totalDurationBuildingItems,
+                o.totalWaitTimeForCallers
+            );
         }
 
         @Override
         public String toString() {
-            return new StringJoiner(", ", Stats.class.getSimpleName() + "[", "]")
-                    .add("nItemsCreated=" + nItemsCreated)
-                    .add("nHotGets=" + nHotGets)
-                    .add("nColdGets=" + nColdGets)
-                    .add("nExpiredItems=" + nItemsExpired)
-                    .add("avgDurationBuildingItems=" + averageBuildTime())
-                    .add("avgWaitTimeForCallers=" + averageWaitTime())
-                    .toString();
+            return new StringJoiner(", ", Stats.class.getSimpleName() + "[", "]").add("nItemsCreated=" + nItemsCreated)
+                .add("nHotGets=" + nHotGets)
+                .add("nColdGets=" + nColdGets)
+                .add("nExpiredItems=" + nItemsExpired)
+                .add("avgDurationBuildingItems=" + averageBuildTime())
+                .add("avgWaitTimeForCallers=" + averageWaitTime())
+                .toString();
         }
 
         public long getTotalGets() {
-            return nHotGets+nColdGets;
+            return nHotGets + nColdGets;
         }
 
         public Duration averageWaitTime() {
@@ -118,7 +123,8 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
             totalDurationBuildingItems = totalDurationBuildingItems.plus(delta);
             nItemsCreated++;
         }
-        private  void addWaitTime(Duration delta) {
+
+        private void addWaitTime(Duration delta) {
             totalWaitTimeForCallers = totalWaitTimeForCallers.plus(delta);
         }
 
@@ -153,19 +159,24 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
     private final Stats stats;
     private int poolSize;
 
-    public ExpiringSubstitutableItemPool(@NonNull Duration inactivityTimeout,
-                                         @NonNull EventLoop eventLoop,
-                                         @NonNull Supplier<F> itemSupplier,
-                                         @NonNull Consumer<F> onExpirationConsumer,
-                                         int numItemsToLoad, @NonNull Duration initialItemLoadInterval) {
+    public ExpiringSubstitutableItemPool(
+        @NonNull Duration inactivityTimeout,
+        @NonNull EventLoop eventLoop,
+        @NonNull Supplier<F> itemSupplier,
+        @NonNull Consumer<F> onExpirationConsumer,
+        int numItemsToLoad,
+        @NonNull Duration initialItemLoadInterval
+    ) {
         this(inactivityTimeout, eventLoop, itemSupplier, onExpirationConsumer);
         increaseCapacityWithSchedule(numItemsToLoad, initialItemLoadInterval);
     }
 
-    public ExpiringSubstitutableItemPool(@NonNull Duration inactivityTimeout,
-                                         @NonNull EventLoop eventLoop,
-                                         @NonNull Supplier<F> itemSupplier,
-                                         @NonNull Consumer<F> onExpirationConsumer) {
+    public ExpiringSubstitutableItemPool(
+        @NonNull Duration inactivityTimeout,
+        @NonNull EventLoop eventLoop,
+        @NonNull Supplier<F> itemSupplier,
+        @NonNull Consumer<F> onExpirationConsumer
+    ) {
         assert inactivityTimeout.multipliedBy(-1).isNegative() : "inactivityTimeout must be > 0";
         this.inProgressItems = new LinkedHashSet<>();
         this.readyItems = new ArrayDeque<>();
@@ -181,8 +192,7 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
         };
         // store this as a field so that we can remove the listener once the inProgress item has been
         // shifted to the readyItems
-        this.shuffleInProgressToReady =
-        f -> {
+        this.shuffleInProgressToReady = f -> {
             inProgressItems.remove(f);
             if (f.isSuccess()) {
                 readyItems.add(new Entry<>(f));
@@ -199,12 +209,13 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
     public Stats getStats() {
         // make a copy on the original thread making changes, which will be up to date at the time of capture and
         // immutable for future accessors, making it thread-safe
-        var copiedStats = eventLoop.submit(()->{
-            log.atTrace().setMessage(()->"copying stats ("+System.identityHashCode(stats)+")="+stats).log();
+        var copiedStats = eventLoop.submit(() -> {
+            log.atTrace().setMessage(() -> "copying stats (" + System.identityHashCode(stats) + ")=" + stats).log();
             return new Stats(stats);
         }).get();
         log.atTrace()
-                .setMessage(()->"Got copied value of (" + System.identityHashCode(copiedStats) + ")="+copiedStats).log();
+            .setMessage(() -> "Got copied value of (" + System.identityHashCode(copiedStats) + ")=" + copiedStats)
+            .log();
         return copiedStats;
     }
 
@@ -224,9 +235,9 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
         }
         var startTime = Instant.now();
         {
-            log.trace("getAvailableOrNewItem: readyItems.size()="+readyItems.size());
+            log.trace("getAvailableOrNewItem: readyItems.size()=" + readyItems.size());
             var item = readyItems.poll();
-            log.trace("getAvailableOrNewItem: item="+item + " remaining readyItems.size()="+readyItems.size());
+            log.trace("getAvailableOrNewItem: item=" + item + " remaining readyItems.size()=" + readyItems.size());
             if (item != null) {
                 stats.addHotGet();
                 beginLoadingNewItemIfNecessary();
@@ -235,11 +246,12 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
             }
         }
 
-        BiFunction<F,String,F> durationTrackingDecoratedItem =
-                (itemsFuture, label) -> (F) itemsFuture.addListener(f->{
-                    stats.addWaitTime(Duration.between(startTime, Instant.now()));
-                    log.trace(label + "returning value="+ f.get()+" from future " + itemsFuture);
-                });
+        BiFunction<F, String, F> durationTrackingDecoratedItem = (itemsFuture, label) -> (F) itemsFuture.addListener(
+            f -> {
+                stats.addWaitTime(Duration.between(startTime, Instant.now()));
+                log.trace(label + "returning value=" + f.get() + " from future " + itemsFuture);
+            }
+        );
         stats.addColdGet();
         var inProgressIt = inProgressItems.iterator();
 
@@ -254,10 +266,10 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
     }
 
     private void scheduleItemLoadsRecurse(int itemsToLoad, Duration gapBetweenLoads) {
-        eventLoop.schedule(()-> {
+        eventLoop.schedule(() -> {
             beginLoadingNewItemIfNecessary();
             if (itemsToLoad >= 0) {
-                scheduleItemLoadsRecurse(itemsToLoad-1, gapBetweenLoads);
+                scheduleItemLoadsRecurse(itemsToLoad - 1, gapBetweenLoads);
             }
         }, gapBetweenLoads.toMillis(), TimeUnit.MILLISECONDS);
     }
@@ -279,10 +291,10 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
             } else {
                 stats.addExpiredItem();
                 var removedItem = readyItems.poll();
-                assert removedItem == oldestItem : "expected the set of readyItems to be ordered chronologically, " +
-                        "so with a fixed item timeout, nothing should ever be able to cut back in time.  " +
-                        "Secondly, a concurrent mutation of any sort while in this function " +
-                        "should have been impossible since we're only modifying this object through a shared eventloop";
+                assert removedItem == oldestItem : "expected the set of readyItems to be ordered chronologically, "
+                    + "so with a fixed item timeout, nothing should ever be able to cut back in time.  "
+                    + "Secondly, a concurrent mutation of any sort while in this function "
+                    + "should have been impossible since we're only modifying this object through a shared eventloop";
                 log.debug("Removing " + removedItem);
                 onExpirationConsumer.accept(removedItem.future);
                 beginLoadingNewItemIfNecessary();

@@ -1,15 +1,17 @@
 package org.opensearch.migrations.replay;
 
+import java.util.function.Consumer;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;
 import software.amazon.awssdk.services.secretsmanager.model.GetSecretValueResponse;
-
-import java.util.function.Consumer;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
@@ -35,6 +37,5 @@ public class AWSAuthServiceTest {
         String header = awsAuthService.getBasicAuthHeaderFromSecret(testUsername, testSecretId);
         Assertions.assertEquals(expectedResult, header);
     }
-
 
 }
