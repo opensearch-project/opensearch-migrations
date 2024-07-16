@@ -4,17 +4,21 @@
 // 2. There is a still a manual step needed on the EC2 source load balancer to replace its security group rule which allows all traffic (0.0.0.0/0) to
 //    allow traffic for the relevant service security group. This needs a better story around accepting user security groups in our Migration CDK.
 
+parameters {
+    string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
+    string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
+    string(name: 'STAGE', defaultValue: 'rfs-integ', description: 'Stage name for deployment environment')
+    string(name: 'VPC_ID', description: 'VPC to place AWS resource in')
+}
+
 def sourceContextId = 'source-single-node-ec2'
 def migrationContextId = 'migration-rfs'
-def gitUrl = 'https://github.com/opensearch-project/opensearch-migrations.git'
-def gitBranch = 'main'
-def stageId = 'rfs-integ'
 def source_cdk_context = """
     {
       "source-single-node-ec2": {
         "suffix": "ec2-source-<STAGE>",
         "networkStackSuffix": "ec2-source-<STAGE>",
-        "vpcId": "$vpcId",
+        "vpcId": "$VPC_ID",
         "distVersion": "7.10.2",
         "distributionUrl": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz",
         "captureProxyEnabled": false,
@@ -35,7 +39,7 @@ def migration_cdk_context = """
     {
       "migration-rfs": {
         "stage": "<STAGE>",
-        "vpcId": "$vpcId",
+        "vpcId": "$VPC_ID",
         "engineVersion": "OS_2.11",
         "domainName": "os-cluster-<STAGE>",
         "dataNodeCount": 2,
@@ -50,17 +54,17 @@ def migration_cdk_context = """
     }
 """
 
-library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
+library identifier: "migrations-lib@${GIT_BRANCH}", retriever: modernSCM(
         [$class: 'GitSCMSource',
-         remote: "${gitUrl}"])
+         remote: "${GIT_REPO_URL}"])
 
 defaultIntegPipeline(
         sourceContext: source_cdk_context,
         migrationContext: migration_cdk_context,
         sourceContextId: sourceContextId,
         migrationContextId: migrationContextId,
-        gitUrl: gitUrl,
-        gitBranch: gitBranch,
-        stageId: stageId,
+        gitUrl: GIT_REPO_URL,
+        gitBranch: GIT_BRANCH,
+        stageId: STAGE,
         skipCaptureProxyOnNodeSetup: true
 )
