@@ -36,7 +36,9 @@ public class ClusterOperations {
         final var repositoryJson = "{\n"
             + "  \"type\": \"fs\",\n"
             + "  \"settings\": {\n"
-            + "    \"location\": \"" + repoPath + "\",\n"
+            + "    \"location\": \""
+            + repoPath
+            + "\",\n"
             + "    \"compress\": false\n"
             + "  }\n"
             + "}";
@@ -80,7 +82,9 @@ public class ClusterOperations {
 
     public void takeSnapshot(final String snapshotName, final String indexPattern) throws IOException {
         final var snapshotJson = "{\n"
-            + "  \"indices\": \"" + indexPattern + "\",\n"
+            + "  \"indices\": \""
+            + indexPattern
+            + "\",\n"
             + "  \"ignore_unavailable\": true,\n"
             + "  \"include_global_state\": true\n"
             + "}";
@@ -160,7 +164,9 @@ public class ClusterOperations {
             + "    },"
             + "    \"mappings\": {"
             + "        \"properties\": {"
-            + "            \"" + fieldName + "\": {"
+            + "            \""
+            + fieldName
+            + "\": {"
             + "                \"type\": \"text\""
             + "            }"
             + "        }"
@@ -168,7 +174,6 @@ public class ClusterOperations {
             + "},"
             + "\"version\": 1"
             + "}";
-
 
         final var compTempUrl = clusterUrl + "/_component_template/" + componentTemplateName;
         final var createCompTempRequest = new HttpPut(compTempUrl);
@@ -184,8 +189,12 @@ public class ClusterOperations {
         }
 
         final var indexTemplateJson = "{"
-            + "\"index_patterns\": [\"" + indexPattern + "\"],"
-            + "\"composed_of\": [\"" + componentTemplateName + "\"],"
+            + "\"index_patterns\": [\""
+            + indexPattern
+            + "\"],"
+            + "\"composed_of\": [\""
+            + componentTemplateName
+            + "\"],"
             + "\"priority\": 1,"
             + "\"version\": 1"
             + "}";

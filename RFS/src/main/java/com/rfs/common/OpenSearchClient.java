@@ -12,7 +12,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import com.rfs.common.RestClient.Response;
 import com.rfs.tracing.IRfsContexts;
 import lombok.NonNull;
 import reactor.core.publisher.Mono;
@@ -120,22 +119,21 @@ public class OpenSearchClient {
             .block();
 
         if (getResponse.code == HttpURLConnection.HTTP_NOT_FOUND) {
-            client.putAsync(objectPath, settings.toString(), context.createCheckRequestContext())
-                .flatMap(resp -> {
-                    if (resp.code == HttpURLConnection.HTTP_OK) {
-                        return Mono.just(resp);
-                    } else {
-                        String errorMessage = ("Could not create object: "
-                            + objectPath
-                            + ". Response Code: "
-                            + resp.code
-                            + ", Response Message: "
-                            + resp.message
-                            + ", Response Body: "
-                            + resp.body);
-                        return Mono.error(new OperationFailed(errorMessage, resp));
-                    }
-                })
+            client.putAsync(objectPath, settings.toString(), context.createCheckRequestContext()).flatMap(resp -> {
+                if (resp.code == HttpURLConnection.HTTP_OK) {
+                    return Mono.just(resp);
+                } else {
+                    String errorMessage = ("Could not create object: "
+                        + objectPath
+                        + ". Response Code: "
+                        + resp.code
+                        + ", Response Message: "
+                        + resp.message
+                        + ", Response Body: "
+                        + resp.body);
+                    return Mono.error(new OperationFailed(errorMessage, resp));
+                }
+            })
                 .doOnError(e -> logger.error(e.getMessage()))
                 .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
                 .block();

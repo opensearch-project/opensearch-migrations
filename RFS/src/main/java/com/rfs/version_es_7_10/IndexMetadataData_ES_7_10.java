@@ -1,6 +1,5 @@
 package com.rfs.version_es_7_10;
 
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import com.rfs.models.IndexMetadata;

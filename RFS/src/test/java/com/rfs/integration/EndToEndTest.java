@@ -5,7 +5,6 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import org.hamcrest.Matchers;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ArgumentsSource;
@@ -32,7 +31,6 @@ import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 import com.rfs.worker.IndexRunner;
 import com.rfs.worker.MetadataRunner;
 import com.rfs.worker.SnapshotRunner;
-
 import lombok.SneakyThrows;
 
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -170,7 +168,10 @@ public class EndToEndTest {
     }
 
     @SneakyThrows
-    private void migrateFrom_ES_v7_X(final SearchClusterContainer sourceCluster, final SearchClusterContainer targetCluster) {
+    private void migrateFrom_ES_v7_X(
+        final SearchClusterContainer sourceCluster,
+        final SearchClusterContainer targetCluster
+    ) {
 
         var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
         var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();
