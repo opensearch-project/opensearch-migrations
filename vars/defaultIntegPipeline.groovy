@@ -67,7 +67,13 @@ def call(Map config = [:]) {
                                 } else {
                                     sh 'sudo usermod -aG docker $USER'
                                     sh 'sudo newgrp docker'
-                                    def baseCommand = "sudo ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' --migration-context-file './$migration_context_file_name' --source-context-id $source_context_id --migration-context-id $migration_context_id --stage ${params.STAGE} --migrations-git-url ${params.GIT_REPO_URL} --migrations-git-branch ${params.GIT_BRANCH}"
+                                    def baseCommand = "sudo ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' " +
+                                            "--migration-context-file './$migration_context_file_name' " +
+                                            "--source-context-id $source_context_id " +
+                                            "--migration-context-id $migration_context_id " +
+                                            "--stage ${params.STAGE} " +
+                                            "--migrations-git-url ${params.GIT_REPO_URL} " +
+                                            "--migrations-git-branch ${params.GIT_BRANCH}"
                                     if (skipCaptureProxyOnNodeSetup) {
                                         baseCommand += " --skip-capture-proxy"
                                     }
@@ -92,8 +98,13 @@ def call(Map config = [:]) {
                                     def uniqueId = "integ_min_${time}_${currentBuild.number}"
                                     def test_dir = "/root/lib/integ_test/integ_test"
                                     def test_result_file = "${test_dir}/reports/${uniqueId}/report.xml"
-                                    def command = "pytest --log-file=${test_dir}/reports/${uniqueId}/pytest.log --junitxml=${test_result_file} ${test_dir}/replayer_tests.py --unique_id ${uniqueId} -s"
-                                    sh "sudo ./awsRunIntegTests.sh --command '${command}' --test-result-file ${test_result_file} --stage ${params.STAGE}"
+                                    def command = "pytest --log-file=${test_dir}/reports/${uniqueId}/pytest.log " +
+                                            "--junitxml=${test_result_file} ${test_dir}/replayer_tests.py " +
+                                            "--unique_id ${uniqueId} " +
+                                            "-s"
+                                    sh "sudo ./awsRunIntegTests.sh --command '${command}' " +
+                                            "--test-result-file ${test_result_file} " +
+                                            "--stage ${params.STAGE}"
                                 }
                             }
                         }
