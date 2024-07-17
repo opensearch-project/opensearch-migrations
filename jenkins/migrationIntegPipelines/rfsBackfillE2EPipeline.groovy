@@ -6,8 +6,8 @@
 
 def sourceContextId = 'source-single-node-ec2'
 def migrationContextId = 'migration-rfs'
-def gitBranch = binding.hasVariable('GIT_BRANCH') ? GIT_BRANCH : 'main'
-def gitUrl = binding.hasVariable('GIT_REPO_URL') ? GIT_REPO_URL : 'https://github.com/opensearch-project/opensearch-migrations.git'
+def gitBranch = binding.hasVariable('GIT_BRANCH') ? GIT_BRANCH : 'jenkins-bug-fixes'
+def gitUrl = binding.hasVariable('GIT_REPO_URL') ? GIT_REPO_URL : 'https://github.com/lewijacn/opensearch-migrations.git'
 def vpcId = binding.hasVariable('VPC_ID') ? VPC_ID : 'vpc-00000000'
 def source_cdk_context = """
     {
