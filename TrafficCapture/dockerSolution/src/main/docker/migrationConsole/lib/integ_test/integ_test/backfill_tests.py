@@ -56,10 +56,14 @@ def setup_backfill(request):
     status_result: CommandResult = snapshot.status()
     if status_result.success:
         snapshot.delete()
-    snapshot.create(wait=True)
-    metadata.migrate()
-    backfill.start()
-    backfill.scale(units=10)
+    snapshot_result: CommandResult = snapshot.create(wait=True)
+    assert snapshot_result.success
+    metadata_result: CommandResult = metadata.migrate()
+    assert metadata_result.success
+    backfill_start_result: CommandResult = backfill.start()
+    assert backfill_start_result.success
+    backfill_scale_result: CommandResult = backfill.scale(units=10)
+    assert backfill_scale_result.success
 
 
 @pytest.fixture(scope="session", autouse=True)
@@ -104,4 +108,4 @@ class BackfillTests(unittest.TestCase):
 
         # Confirm documents on target after backfill
         check_doc_counts_match(cluster=target_cluster, expected_index_details=EXPECTED_BENCHMARK_DOCS,
-                               max_attempts=40, delay=30.0, test_case=self)
+                               max_attempts=30, delay=30.0, test_case=self)

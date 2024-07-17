@@ -105,7 +105,7 @@ class S3Snapshot(Snapshot):
             command.extend(["--max-snapshot-rate-mb-per-node",
                             str(max_snapshot_rate_mb_per_node)])
         if self.otel_endpoint:
-            command.extend(["--otelCollectorEndpoint", self.otel_endpoint])
+            command.extend(["--otel-collector-endpoint", self.otel_endpoint])
 
         logger.info(f"Creating snapshot with command: {' '.join(command)}")
         try:

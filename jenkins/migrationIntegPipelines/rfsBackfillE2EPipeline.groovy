@@ -10,7 +10,7 @@ def migrationContextId = 'migration-rfs'
 // all future runs should use the specified parameters
 def gitBranch = params.GIT_BRANCH ?: 'main'
 def gitUrl = params.GIT_REPO_URL ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
-def vpcId = params.VPC_ID ?: 'vpc-00000000'
+def vpcId = params.VPC_ID
 def source_cdk_context = """
     {
       "source-single-node-ec2": {
