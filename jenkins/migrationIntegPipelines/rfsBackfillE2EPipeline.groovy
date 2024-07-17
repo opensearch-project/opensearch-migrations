@@ -6,12 +6,15 @@
 
 def sourceContextId = 'source-single-node-ec2'
 def migrationContextId = 'migration-rfs'
+def gitBranch = GIT_BRANCH ?: 'main'
+def gitUrl = GIT_REPO_URL ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
+def vpcId = VPC_ID ?: 'vpc-00000000'
 def source_cdk_context = """
     {
       "source-single-node-ec2": {
         "suffix": "ec2-source-<STAGE>",
         "networkStackSuffix": "ec2-source-<STAGE>",
-        "vpcId": "$VPC_ID",
+        "vpcId": "$vpcId",
         "distVersion": "7.10.2",
         "distributionUrl": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-7.10.2-linux-x86_64.tar.gz",
         "captureProxyEnabled": false,
@@ -32,7 +35,7 @@ def migration_cdk_context = """
     {
       "migration-rfs": {
         "stage": "<STAGE>",
-        "vpcId": "$VPC_ID",
+        "vpcId": "$vpcId",
         "engineVersion": "OS_2.11",
         "domainName": "os-cluster-<STAGE>",
         "dataNodeCount": 2,
@@ -47,9 +50,9 @@ def migration_cdk_context = """
     }
 """
 
-library identifier: "migrations-lib@${GIT_BRANCH}", retriever: modernSCM(
+library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
         [$class: 'GitSCMSource',
-         remote: "${GIT_REPO_URL}"])
+         remote: "${gitUrl}"])
 
 defaultIntegPipeline(
         sourceContext: source_cdk_context,
