@@ -6,12 +6,11 @@
 
 def sourceContextId = 'source-single-node-ec2'
 def migrationContextId = 'migration-rfs'
-def gitBranch = binding.hasVariable('GIT_BRANCH') ? GIT_BRANCH : 'jenkins-bug-fixes'
-def gitUrl = binding.hasVariable('GIT_REPO_URL') ? GIT_REPO_URL : 'https://github.com/lewijacn/opensearch-migrations.git'
-def vpcId = binding.hasVariable('VPC_ID') ? VPC_ID : 'vpc-00000000'
-echo gitBranch
-echo gitUrl
-echo vpcId
+// These default values should only be used on the initial Jenkins run in order to load parameter options into the UI,
+// all future runs should use the specified parameters
+def gitBranch = params.GIT_BRANCH ?: 'main'
+def gitUrl = params.GIT_REPO_URL ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
+def vpcId = params.VPC_ID ?: 'vpc-00000000'
 def source_cdk_context = """
     {
       "source-single-node-ec2": {
