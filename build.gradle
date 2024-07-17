@@ -36,7 +36,7 @@ subprojects {
     spotless {
         java {
             target "**/*.java"
-            targetExclude '**/build/**'
+            targetExclude '**/build/**', ".gradle/**"
             importOrder(
                 'java|javax',
                 'io.opentelemetry|com.google|com.fasterxml|org.apache|org.hamcrest|org.junit',
@@ -47,7 +47,6 @@ subprojects {
             indentWithSpaces()
             endWithNewline()
             removeUnusedImports()
-            eclipse().configFile rootProject.file('formatter.xml')
         }
     }
 
