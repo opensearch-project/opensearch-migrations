@@ -6,9 +6,11 @@
 
 def sourceContextId = 'source-single-node-ec2'
 def migrationContextId = 'migration-default'
-def gitUrl = 'https://github.com/opensearch-project/opensearch-migrations.git'
-def gitBranch = 'main'
-def stageId = 'aws-integ'
+// These default values should only be used on the initial Jenkins run in order to load parameter options into the UI,
+// all future runs should use the specified parameters
+def gitBranch = params.GIT_BRANCH ?: 'main'
+def gitUrl = params.GIT_REPO_URL ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
+def vpcId = params.VPC_ID ?: 'vpc-00000000'
 def source_cdk_context = """
     {
       "source-single-node-ec2": {
@@ -65,7 +67,7 @@ defaultIntegPipeline(
         migrationContextId: migrationContextId,
         gitUrl: gitUrl,
         gitBranch: gitBranch,
-        stageId: stageId
+        defaultStageId: 'aws-integ',
         //deployStep: {
         //    echo 'Custom Test Step'
         //}

@@ -6,9 +6,11 @@
 
 def sourceContextId = 'source-single-node-ec2'
 def migrationContextId = 'migration-rfs'
-def gitUrl = 'https://github.com/opensearch-project/opensearch-migrations.git'
-def gitBranch = 'main'
-def stageId = 'rfs-integ'
+// These default values should only be used on the initial Jenkins run in order to load parameter options into the UI,
+// all future runs should use the specified parameters
+def gitBranch = params.GIT_BRANCH ?: 'main'
+def gitUrl = params.GIT_REPO_URL ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
+def vpcId = params.VPC_ID ?: 'vpc-00000000'
 def source_cdk_context = """
     {
       "source-single-node-ec2": {
@@ -59,7 +61,19 @@ defaultIntegPipeline(
         migrationContext: migration_cdk_context,
         sourceContextId: sourceContextId,
         migrationContextId: migrationContextId,
-        gitUrl: gitUrl,
-        gitBranch: gitBranch,
-        stageId: stageId
+        defaultStageId: 'rfs-integ',
+        skipCaptureProxyOnNodeSetup: true,
+        integTestStep: {
+            def time = new Date().getTime()
+            def uniqueId = "integ_min_${time}_${currentBuild.number}"
+            def test_dir = "/root/lib/integ_test/integ_test"
+            def test_result_file = "${test_dir}/reports/${uniqueId}/report.xml"
+            def command = "pytest --log-file=${test_dir}/reports/${uniqueId}/pytest.log " +
+                    "--junitxml=${test_result_file} ${test_dir}/backfill_tests.py " +
+                    "--unique_id ${uniqueId} " +
+                    "-s"
+            sh "sudo ./awsRunIntegTests.sh --command '${command}' " +
+                    "--test-result-file ${test_result_file} " +
+                    "--stage ${params.STAGE}"
+        }
 )
