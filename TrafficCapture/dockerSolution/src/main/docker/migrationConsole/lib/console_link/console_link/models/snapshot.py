@@ -149,7 +149,7 @@ class FileSystemSnapshot(Snapshot):
         if self.source_cluster.allow_insecure:
             command.append("--source-insecure")
         if self.otel_endpoint:
-            command.extend(["--otelCollectorEndpoint", self.otel_endpoint])
+            command.extend(["--otel-collector-endpoint", self.otel_endpoint])
 
         logger.info(f"Creating snapshot with command: {' '.join(command)}")
         try:
