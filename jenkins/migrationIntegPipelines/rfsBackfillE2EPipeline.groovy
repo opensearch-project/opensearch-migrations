@@ -1,15 +1,8 @@
 // Note:
-// 1. We are using an existing common VPC that we provide through a 'vpcId' parameter on the pipeline for now until we move
+// 1. We are using an existing common VPC that we provide through a 'VPC_ID' parameter on the pipeline for now until we move
 //    to a proper Jenkins accounts and can create a setup without public subnets as well as request an extension to allow more than 5 VPCs per region
 // 2. There is a still a manual step needed on the EC2 source load balancer to replace its security group rule which allows all traffic (0.0.0.0/0) to
 //    allow traffic for the relevant service security group. This needs a better story around accepting user security groups in our Migration CDK.
-
-parameters {
-    string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
-    string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
-    string(name: 'STAGE', defaultValue: 'rfs-integ', description: 'Stage name for deployment environment')
-    string(name: 'VPC_ID', description: 'VPC to place AWS resource in')
-}
 
 def sourceContextId = 'source-single-node-ec2'
 def migrationContextId = 'migration-rfs'
@@ -63,8 +56,6 @@ defaultIntegPipeline(
         migrationContext: migration_cdk_context,
         sourceContextId: sourceContextId,
         migrationContextId: migrationContextId,
-        gitUrl: GIT_REPO_URL,
-        gitBranch: GIT_BRANCH,
-        stageId: STAGE,
+        defaultStageId: 'rfs-integ',
         skipCaptureProxyOnNodeSetup: true
 )
