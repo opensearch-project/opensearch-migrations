@@ -9,6 +9,9 @@ def migrationContextId = 'migration-rfs'
 def gitBranch = binding.hasVariable('GIT_BRANCH') ? GIT_BRANCH : 'jenkins-bug-fixes'
 def gitUrl = binding.hasVariable('GIT_REPO_URL') ? GIT_REPO_URL : 'https://github.com/lewijacn/opensearch-migrations.git'
 def vpcId = binding.hasVariable('VPC_ID') ? VPC_ID : 'vpc-00000000'
+echo gitBranch
+echo gitUrl
+echo vpcId
 def source_cdk_context = """
     {
       "source-single-node-ec2": {
