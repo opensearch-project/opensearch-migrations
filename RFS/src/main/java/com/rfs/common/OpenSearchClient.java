@@ -118,7 +118,8 @@ public class OpenSearchClient {
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
 
-        if (getResponse.code == HttpURLConnection.HTTP_NOT_FOUND) {
+        boolean objectDoesNotExist = getResponse.code == HttpURLConnection.HTTP_NOT_FOUND;
+        if (objectDoesNotExist) {
             client.putAsync(objectPath, settings.toString(), context.createCheckRequestContext()).flatMap(resp -> {
                 if (resp.code == HttpURLConnection.HTTP_OK) {
                     return Mono.just(resp);

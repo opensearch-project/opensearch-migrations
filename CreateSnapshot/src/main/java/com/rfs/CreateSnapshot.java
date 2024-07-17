@@ -42,7 +42,7 @@ public class CreateSnapshot {
         public String s3Region;
 
         @ParametersDelegate
-        public ConnectionDetails.SourceArgs sourceArgs;
+        public ConnectionDetails.SourceArgs sourceArgs = new ConnectionDetails.SourceArgs();
 
         @Parameter(names = {
             "--no-wait" }, description = "Optional.  If provided, the snapshot runner will not wait for completion")
