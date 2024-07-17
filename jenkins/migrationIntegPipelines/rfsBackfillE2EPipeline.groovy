@@ -6,9 +6,9 @@
 
 def sourceContextId = 'source-single-node-ec2'
 def migrationContextId = 'migration-rfs'
-def gitBranch = GIT_BRANCH ?: 'main'
-def gitUrl = GIT_REPO_URL ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
-def vpcId = VPC_ID ?: 'vpc-00000000'
+def gitBranch = binding.hasVariable('GIT_BRANCH') ? GIT_BRANCH : 'main'
+def gitUrl = binding.hasVariable('GIT_REPO_URL') ? GIT_REPO_URL : 'https://github.com/opensearch-project/opensearch-migrations.git'
+def vpcId = binding.hasVariable('VPC_ID') ? VPC_ID : 'vpc-00000000'
 def source_cdk_context = """
     {
       "source-single-node-ec2": {
