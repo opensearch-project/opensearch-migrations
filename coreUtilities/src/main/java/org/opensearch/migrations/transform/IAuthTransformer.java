@@ -2,8 +2,6 @@ package org.opensearch.migrations.transform;
 
 import java.nio.ByteBuffer;
 
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
-
 public interface IAuthTransformer {
     enum ContextForAuthHeader {
         HEADERS,

@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.datahandlers.http;
+package org.opensearch.migrations.transform;
 
 import java.util.AbstractMap;
 import java.util.ArrayList;
@@ -18,7 +18,7 @@ import lombok.EqualsAndHashCode;
  */
 @EqualsAndHashCode(callSuper = false)
 public class ListKeyAdaptingCaseInsensitiveHeadersMap extends AbstractMap<String, Object> {
-    protected final StrictCaseInsensitiveHttpHeadersMap strictHeadersMap;
+    public final StrictCaseInsensitiveHttpHeadersMap strictHeadersMap;
 
     public ListKeyAdaptingCaseInsensitiveHeadersMap(StrictCaseInsensitiveHttpHeadersMap mapToWrap) {
         strictHeadersMap = mapToWrap;

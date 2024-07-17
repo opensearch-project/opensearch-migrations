@@ -24,6 +24,7 @@ dependencies {
 
     implementation project(':TrafficCapture:captureProtobufs')
     implementation project(':coreUtilities')
+    implementation project(':awsCoreUtilities')
 
     implementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     runtimeOnly project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')

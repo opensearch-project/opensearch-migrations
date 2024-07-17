@@ -39,9 +39,9 @@ over the constructed JSON document.
 Since payloads can be arbitrarily complex (compression, chunking), and may not be subject to any changes via the
 transformation rules, the HttpJsonTransformer creates the channel pipeline *only* to parse the HTTP headers. The
 transformation is run on this partial, in-construction
-[HttpJsonMessageWithFaultablePayload](./src/main/java/org/opensearch/migrations/replay/datahandlers/http/HttpJsonMessageWithFaultingPayload.java)
+[HttpJsonMessageWithFaultablePayload](../../coreUtilities/src/main/java/org/opensearch/migrations/transform/HttpJsonMessageWithFaultingPayload.java)
 message. When the transformation (or any other code), attempts to access the payload contents, it will throw a
-[PayloadNotLoadedException](./src/main/java/org/opensearch/migrations/replay/datahandlers/PayloadNotLoadedException.java)
+[PayloadNotLoadedException](../../coreUtilities/src/main/java/org/opensearch/migrations/transform/PayloadNotLoadedException.java)
 exception. That exception triggers the HttpJsonTransformer to add channel handlers to the pipeline to parse the HTTP
 content stream into JSON, transform it, and to repackage it as the HTTP headers indicate, observing the content-encoding
 (gzip, etc) and transfer-encoding (chunked)/content-length values. Fixed length streams will be used by default, with
@@ -82,7 +82,7 @@ of the TrafficReplayer to support a diverse set of needs.
 
 The input to the transformer will be an HTTP message represented as a json-like `Map<String,Object>` with
 top-level key-value pairs defined in
-[JsonKeysForHttpMessage.java](../transformationPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/JsonKeysForHttpMessage.java).
+[JsonKeysForHttpMessage.java](../../coreUtilities/src/main/java/org/opensearch/migrations/transform/JsonKeysForHttpMessage.java).
 Only bodies that are json-formatted will be accessible, and they will be accessible as a fully-parsed Map (at 
 the keypath `'payload'->'inlinedJsonBody'`).  Transformers have the option to rewrite none, or any of the keys and
 values within the original message.  The transformer can return either the original message or a completely new message.

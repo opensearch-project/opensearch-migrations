@@ -11,10 +11,12 @@ import org.junit.jupiter.api.Test;
 
 import org.opensearch.migrations.replay.GenerateRandomNestedJsonObject;
 import org.opensearch.migrations.replay.ReplayUtils;
-import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.transform.HttpJsonMessageWithFaultingPayload;
 import org.opensearch.migrations.transform.IHttpMessage;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
+import org.opensearch.migrations.transform.PayloadAccessFaultingMap;
+import org.opensearch.migrations.transform.StrictCaseInsensitiveHttpHeadersMap;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;

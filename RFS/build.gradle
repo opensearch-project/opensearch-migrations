@@ -47,6 +47,8 @@ dependencies {
     implementation group: 'software.amazon.awssdk', name: 's3'
     implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
     implementation group: 'software.amazon.awssdk.crt', name: 'aws-crt'
+    implementation group: 'software.amazon.awssdk', name: 'auth'
+    implementation group: 'software.amazon.awssdk', name: 'sdk-core'
 
     testImplementation 'com.github.docker-java:docker-java-core:3.3.6'
     testImplementation 'com.github.docker-java:docker-java-transport-httpclient5:3.3.6'

@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.datahandlers.http;
+package org.opensearch.migrations.transform;
 
 import java.util.AbstractMap;
 import java.util.ArrayList;
@@ -7,9 +7,7 @@ import java.util.List;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
-@WrapWithNettyLeakDetection(disableLeakChecks = true)
 class ListKeyAdaptingCaseInsensitiveHeadersMapTest {
 
     private static final String COOKIE = "cookie";

@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+import org.opensearch.migrations.transform.HttpJsonMessageWithFaultingPayload;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
 import io.netty.channel.ChannelHandlerContext;

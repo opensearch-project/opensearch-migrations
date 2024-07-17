@@ -1,6 +1,5 @@
 package org.opensearch.migrations.transform;
 
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
 
 public class RemovingAuthTransformerFactory implements IAuthTransformerFactory {
 

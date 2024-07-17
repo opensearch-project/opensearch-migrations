@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay.datahandlers.http;
 
 import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.transform.HttpJsonMessageWithFaultingPayload;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 import io.netty.channel.ChannelHandlerContext;

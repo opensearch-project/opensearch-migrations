@@ -2,6 +2,8 @@ package org.opensearch.migrations.replay.datahandlers.http;
 
 import java.nio.charset.StandardCharsets;
 
+import org.opensearch.migrations.transform.HttpJsonMessageWithFaultingPayload;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;

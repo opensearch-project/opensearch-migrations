@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay.datahandlers.http;
 import java.util.ArrayList;
 import java.util.List;
 
+import org.opensearch.migrations.transform.HttpJsonMessageWithFaultingPayload;
 import org.opensearch.migrations.transform.IAuthTransformer;
 
 import io.netty.channel.ChannelHandlerContext;

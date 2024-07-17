@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.util.Map;
 
 import org.opensearch.migrations.replay.datahandlers.JsonEmitter;
+import org.opensearch.migrations.transform.HttpJsonMessageWithFaultingPayload;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 import io.netty.channel.ChannelHandlerContext;

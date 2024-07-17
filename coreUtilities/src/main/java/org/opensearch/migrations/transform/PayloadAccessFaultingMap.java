@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.datahandlers;
+package org.opensearch.migrations.transform;
 
 import java.util.AbstractMap;
 import java.util.AbstractSet;
@@ -6,10 +6,6 @@ import java.util.Iterator;
 import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
-
-import org.opensearch.migrations.replay.datahandlers.http.StrictCaseInsensitiveHttpHeadersMap;
-import org.opensearch.migrations.transform.IHttpMessage;
-import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 import lombok.EqualsAndHashCode;
 import lombok.extern.slf4j.Slf4j;

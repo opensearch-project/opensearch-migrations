@@ -1,12 +1,8 @@
-package org.opensearch.migrations.replay.datahandlers.http;
+package org.opensearch.migrations.transform;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.Map;
-
-import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
-import org.opensearch.migrations.transform.IHttpMessage;
-import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 public class HttpJsonMessageWithFaultingPayload extends LinkedHashMap<String, Object> implements IHttpMessage {
 

@@ -5,11 +5,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
-import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.transform.HttpJsonMessageWithFaultingPayload;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.ListKeyAdaptingCaseInsensitiveHeadersMap;
+import org.opensearch.migrations.transform.PayloadAccessFaultingMap;
+import org.opensearch.migrations.transform.PayloadNotLoadedException;
+import org.opensearch.migrations.transform.StrictCaseInsensitiveHttpHeadersMap;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
