@@ -168,7 +168,7 @@ def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
         "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
         "--target-insecure",
-        "--otelCollectorEndpoint", config["otel_endpoint"],
+        "--otel-collector-endpoint", config["otel_endpoint"],
     ], stdout=None, stderr=None, text=True, check=True
     )
 
@@ -196,7 +196,7 @@ def test_metadata_with_fs_snapshot_makes_correct_subprocess_call(mocker):
         "--min-replicas", '0',
         "--file-system-repo-path", config["from_snapshot"]["fs"]["repo_path"],
         "--target-insecure",
-        "--otelCollectorEndpoint", config["otel_endpoint"],
+        "--otel-collector-endpoint", config["otel_endpoint"],
     ], stdout=None, stderr=None, text=True, check=True)
 
 
@@ -256,7 +256,7 @@ def test_metadata_with_allowlists_makes_correct_subprocess_call(mocker):
         "--index-allowlist", "index1,index2",
         "--index-template-allowlist", "index_template1,index_template2",
         "--component-template-allowlist", "component_template1,component_template2",
-        "--otelCollectorEndpoint", config["otel_endpoint"],
+        "--otel-collector-endpoint", config["otel_endpoint"],
     ], stdout=None, stderr=None, text=True, check=True
     )
 

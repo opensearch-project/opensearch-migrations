@@ -214,7 +214,7 @@ def test_fs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
-                                  "--otelCollectorEndpoint", config["snapshot"]["otel_endpoint"],
+                                  "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
                                   ], stdout=None, stderr=None, text=True, check=True)
 
 
@@ -241,7 +241,7 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
                                   "--source-host", source.endpoint,
                                   "--source-insecure", "--no-wait",
-                                  "--otelCollectorEndpoint", config["snapshot"]["otel_endpoint"],
+                                  "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
                                   ], stdout=None, stderr=None, text=True, check=True)
 
 
