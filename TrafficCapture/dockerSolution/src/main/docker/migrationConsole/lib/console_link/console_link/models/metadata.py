@@ -175,9 +175,9 @@ class Metadata:
 
         if self._component_template_allowlist:
             command.extend(["--component-template-allowlist", ",".join(self._component_template_allowlist)])
-        
+
         if self._otel_endpoint:
-            command.extend(["--otelCollectorEndpoint", self._otel_endpoint])
+            command.extend(["--otel-collector-endpoint", self._otel_endpoint])
 
         if password_field_index:
             display_command = command[:password_field_index] + ["********"] + command[password_field_index:]

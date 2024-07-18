@@ -60,7 +60,7 @@ public class MetadataMigration {
         public String s3Region;
 
         @ParametersDelegate
-        public ConnectionDetails.TargetArgs targetArgs;
+        public ConnectionDetails.TargetArgs targetArgs = new ConnectionDetails.TargetArgs();
 
         @Parameter(names = { "--index-allowlist" }, description = ("Optional.  List of index names to migrate"
             + " (e.g. 'logs_2024_01, logs_2024_02').  Default: all non-system indices (e.g. those not starting with '.')"), required = false)
