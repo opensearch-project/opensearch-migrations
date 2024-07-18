@@ -38,7 +38,7 @@ void addSubProjects(String path, File dir) {
 }
 
 rootProject.name = 'OpensearchMigrations'
-include 'awsCoreUtilities'
+include 'awsUtilities'
 include 'commonDependencyVersionConstraints'
 include 'coreUtilities'
 include 'transformation'

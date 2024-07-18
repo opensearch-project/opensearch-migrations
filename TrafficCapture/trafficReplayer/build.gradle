@@ -24,7 +24,7 @@ dependencies {
 
     implementation project(':TrafficCapture:captureProtobufs')
     implementation project(':coreUtilities')
-    implementation project(':awsCoreUtilities')
+    implementation project(':awsUtilities')
 
     implementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     runtimeOnly project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
@@ -45,9 +45,8 @@ dependencies {
     implementation group: 'org.slf4j', name: 'slf4j-api'
     implementation group: 'com.lmax', name: 'disruptor'
     implementation group: 'software.amazon.awssdk', name: 'arns'
-    implementation group: 'software.amazon.awssdk', name: 'auth'
-    implementation group: 'software.amazon.awssdk', name: 'sdk-core'
     implementation group: 'software.amazon.awssdk', name: 'secretsmanager'
+    implementation group: 'software.amazon.awssdk', name: 'sdk-core'
     implementation group: 'software.amazon.msk', name: 'aws-msk-iam-auth'
     implementation 'org.apache.commons:commons-compress'
 
