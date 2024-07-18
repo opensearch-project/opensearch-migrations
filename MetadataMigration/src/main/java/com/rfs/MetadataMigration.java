@@ -40,6 +40,9 @@ import lombok.extern.slf4j.Slf4j;
 public class MetadataMigration {
 
     public static class Args {
+        @Parameter(names = {"--help", "-h"}, help = true, description = "Displays information about how to use this tool")
+        private boolean help;
+
         @Parameter(names = { "--snapshot-name" }, description = "The name of the snapshot to migrate", required = true)
         public String snapshotName;
 
@@ -60,7 +63,7 @@ public class MetadataMigration {
         public String s3Region;
 
         @ParametersDelegate
-        public ConnectionDetails.TargetArgs targetArgs;
+        public ConnectionDetails.TargetArgs targetArgs = new ConnectionDetails.TargetArgs();
 
         @Parameter(names = { "--index-allowlist" }, description = ("Optional.  List of index names to migrate"
             + " (e.g. 'logs_2024_01, logs_2024_02').  Default: all non-system indices (e.g. those not starting with '.')"), required = false)
@@ -89,9 +92,14 @@ public class MetadataMigration {
     }
 
     public static void main(String[] args) throws Exception {
-        // Grab out args
         Args arguments = new Args();
-        JCommander.newBuilder().addObject(arguments).build().parse(args);
+        JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
+        jCommander.parse(args);
+
+        if (arguments.help) {
+            jCommander.usage();
+            return;
+        }
 
         var rootContext = new RootMetadataMigrationContext(
             RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "rfs"),
