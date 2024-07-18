@@ -45,11 +45,7 @@ def mock_make_api_call(self, operation_name, kwarg):
     # Rationale -> https://github.com/boto/botocore/blob/develop/botocore/client.py#L810:L816
     if (operation_name == 'CreatePipeline' or operation_name == 'DeletePipeline' or
             operation_name == 'StartPipeline' or operation_name == 'StopPipeline'):
-        return {'Pipeline':
-            [{
-                'PipelineName': PIPELINE_NAME
-            }
-            ]}
+        return {'Pipeline': {'PipelineName': PIPELINE_NAME}}
     # If we don't want to patch the API call
     return orig(self, operation_name, kwarg)
 
