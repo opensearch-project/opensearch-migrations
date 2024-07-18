@@ -18,10 +18,7 @@ From the root directory of the repo, run a CLI command like so:
 ./gradlew DocumentsFromSnapshotMigration:run --args='--snapshot-name reindex-from-snapshot --s3-local-dir /tmp/s3_files --s3-repo-uri s3://your-s3-uri --s3-region us-fake-1 --lucene-dir /tmp/lucene_files --target-host http://hostname:9200'
 ```
 
-In order for this succeed, you'll need to make sure:
-* You have valid AWS Credentials in your key ring (~/.aws/credentials) with permission to operate on the S3 URI specified
-* The S3 URI currently exists, and is in the region you specify
-* There are no other snapshots present in that S3 URI
+In order for this succeed, you'll need to make sure you have valid AWS Credentials in your key ring (~/.aws/credentials) with permission to operate on the S3 URI specified
 
 ### On-Disk Snapshot
 
