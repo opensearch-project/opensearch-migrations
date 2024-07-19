@@ -13,7 +13,7 @@ import org.opensearch.migrations.replay.GenerateRandomNestedJsonObject;
 import org.opensearch.migrations.replay.ReplayUtils;
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-import org.opensearch.migrations.transform.IHttpMessage;
+import org.opensearch.migrations.IHttpMessage;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 import io.netty.buffer.ByteBuf;

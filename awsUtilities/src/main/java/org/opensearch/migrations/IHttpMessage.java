@@ -1,4 +1,4 @@
-package org.opensearch.migrations.transform;
+package org.opensearch.migrations;
 
 import java.util.List;
 import java.util.Map;

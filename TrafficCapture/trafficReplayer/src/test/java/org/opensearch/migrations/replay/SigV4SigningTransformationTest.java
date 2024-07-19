@@ -9,6 +9,7 @@ import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
 
+import org.opensearch.migrations.aws.SigV4Signer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 

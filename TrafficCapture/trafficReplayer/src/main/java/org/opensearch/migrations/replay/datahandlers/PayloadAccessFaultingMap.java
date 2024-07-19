@@ -8,7 +8,7 @@ import java.util.Optional;
 import java.util.Set;
 
 import org.opensearch.migrations.replay.datahandlers.http.StrictCaseInsensitiveHttpHeadersMap;
-import org.opensearch.migrations.transform.IHttpMessage;
+import org.opensearch.migrations.IHttpMessage;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 import lombok.EqualsAndHashCode;

@@ -5,7 +5,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
-import org.opensearch.migrations.transform.IHttpMessage;
+import org.opensearch.migrations.IHttpMessage;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 public class HttpJsonMessageWithFaultingPayload extends LinkedHashMap<String, Object> implements IHttpMessage {
