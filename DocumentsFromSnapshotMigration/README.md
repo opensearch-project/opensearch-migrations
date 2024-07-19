@@ -14,7 +14,7 @@ You can kick off the locally tool using Gradle.
 
 From the root directory of the repo, run a CLI command like so:
 
-```
+```shell
 ./gradlew DocumentsFromSnapshotMigration:run --args='--snapshot-name reindex-from-snapshot --s3-local-dir /tmp/s3_files --s3-repo-uri s3://your-s3-uri --s3-region us-fake-1 --lucene-dir /tmp/lucene_files --target-host http://hostname:9200'
 ```
 
@@ -24,7 +24,7 @@ In order for this succeed, you'll need to make sure you have valid AWS Credentia
 
 From the root directory of the repo, run a CLI command like so:
 
-```
+```shell
 ./gradlew DocumentsFromSnapshotMigration:run --args='--snapshot-name reindex-from-snapshot --snapshot-local-dir /snapshot --lucene-dir /tmp/lucene_files --target-host http://hostname:9200'
 ```
 
@@ -32,7 +32,7 @@ From the root directory of the repo, run a CLI command like so:
 
 If your target cluster has basic auth enabled on it, you can supply those credentials to the tool via the CLI:
 
-```
+```shell
 ./gradlew DocumentsFromSnapshotMigration:run --args='--snapshot-name reindex-from-snapshot --s3-local-dir /tmp/s3_files --s3-repo-uri s3://your-s3-uri --s3-region us-fake-1 --lucene-dir /tmp/lucene_files --target-host http://hostname:9200 --target-username <user> --target-password <pass>'
 ```
 
@@ -42,12 +42,12 @@ In order to migrate documents from the snapshot, RFS first needs to have a local
 
 If you have some shards larger than the hosts running this tool can handle, you can set a maximum shard size as a CLI option.  In this case, the tool will reject shards larger than the specified size.  
 
-```
+```shell
 ./gradlew DocumentsFromSnapshotMigration:run --args='--snapshot-name reindex-from-snapshot --s3-local-dir /tmp/s3_files --s3-repo-uri s3://your-s3-uri --s3-region us-fake-1 --lucene-dir /tmp/lucene_files --target-host http://hostname:9200 --max-shard-size-bytes 50000000000'
 ```
 
 To see the default shard size, use the `--help` CLI option:
 
-```
+```shell
 ./gradlew DocumentsFromSnapshotMigration:run --args='--help'
 ```
