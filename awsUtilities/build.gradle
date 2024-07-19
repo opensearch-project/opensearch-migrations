@@ -39,8 +39,6 @@ dependencies {
     implementation group: 'software.amazon.awssdk', name: 'sdk-core'
 
     testImplementation group: 'org.hamcrest', name: 'hamcrest'
-    testImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
-    testImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
     testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
     testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-params'
 }

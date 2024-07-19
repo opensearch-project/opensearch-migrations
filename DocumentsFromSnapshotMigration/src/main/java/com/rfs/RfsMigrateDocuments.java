@@ -1,7 +1,6 @@
 package com.rfs;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
@@ -20,11 +19,12 @@ import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
-import com.rfs.cms.ApacheHttpClient;
 import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.cms.OpenSearchWorkCoordinator;
+import com.rfs.cms.RestClientWrapperHttpClient;
 import com.rfs.cms.ScopedWorkCoordinator;
+import com.rfs.common.ConnectionDetails;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
@@ -165,7 +165,13 @@ public class RfsMigrateDocuments {
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC())) {
             var workCoordinator = new OpenSearchWorkCoordinator(
-                new ApacheHttpClient(new URI(arguments.targetHost)),
+                new RestClientWrapperHttpClient(
+                    new ConnectionDetails(
+                        arguments.targetHost,
+                        arguments.targetUser,
+                        arguments.targetPass
+                    )
+                ),
                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                 UUID.randomUUID().toString()
             );

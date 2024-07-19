@@ -6,9 +6,9 @@ import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
 import java.util.List;
+import java.util.Map;
 import java.util.stream.Stream;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.TestInstance;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -16,8 +16,8 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import org.opensearch.migrations.transform.HttpJsonMessageWithFaultingPayload;
+import org.opensearch.migrations.transform.IHttpMessage;
 import org.opensearch.migrations.transform.ListKeyAdaptingCaseInsensitiveHeadersMap;
-import org.opensearch.migrations.transform.PayloadAccessFaultingMap;
 import org.opensearch.migrations.transform.StrictCaseInsensitiveHttpHeadersMap;
 
 import lombok.SneakyThrows;
@@ -25,13 +25,10 @@ import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 
-import static org.opensearch.migrations.transform.JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY;
 import static org.junit.jupiter.api.Assertions.*;
 
 @TestInstance(TestInstance.Lifecycle.PER_CLASS)
 public class SigV4SigningTransformationTest {
-
-    private static final ObjectMapper objectMapper = new ObjectMapper();
 
     private static class MockCredentialsProvider implements AwsCredentialsProvider {
         @Override
@@ -72,21 +69,30 @@ public class SigV4SigningTransformationTest {
         ListKeyAdaptingCaseInsensitiveHeadersMap headers = new ListKeyAdaptingCaseInsensitiveHeadersMap(strictHeaders);
         headers.put("host", List.of("localhost"));
         httpMessage.setHeaders(headers);
+        var httpMessage = new IHttpMessage() {
 
-        var payloadAccessFaultingMap = new PayloadAccessFaultingMap(strictHeaders);
-        if (payload != null && !payload.isEmpty()) {
-            try {
-                // Parse the payload string into a JSON object
-                Object jsonPayload = objectMapper.readValue(payload, new TypeReference<Object>() {});
-                payloadAccessFaultingMap.put(INLINED_JSON_BODY_DOCUMENT_KEY, jsonPayload);
-            } catch (Exception e) {
-                // Handle parsing exception
-                throw new RuntimeException("Failed to parse payload as JSON", e);
+            @Override
+            public String method() {
+                return method;
+            }
+
+            @Override
+            public String path() {
+                return path;
+            }
+
+            @Override
+            public String protocol() {
+                return "HTTP/1.1";
+            }
+
+            @Override
+            public Map<String, Object> headersMap() {
+                return Map.of();
             }
         }
-        httpMessage.setPayloadFaultMap(payloadAccessFaultingMap);
 
-        // Apply the signature
+        // Pass the body and headers through the signer
         if (payload != null) {
             signer.consumeNextPayloadPart(StandardCharsets.UTF_8.encode(payload));
         }

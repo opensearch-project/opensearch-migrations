@@ -36,9 +36,9 @@ import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 import org.opensearch.testcontainers.OpensearchContainer;
 
-import com.rfs.cms.ApacheHttpClient;
 import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.cms.OpenSearchWorkCoordinator;
+import com.rfs.cms.RestClientWrapperHttpClient;
 import com.rfs.common.ConnectionDetails;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
@@ -381,9 +381,13 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                 path -> new FilteredLuceneDocumentsReader(path, terminatingDocumentFilter),
                 new DocumentReindexer(new OpenSearchClient(targetAddress, null)),
                 new OpenSearchWorkCoordinator(
-                    new ApacheHttpClient(new URI(targetAddress)),
-                    // new ReactorHttpClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(),
-                    // null, null)),
+                    new RestClientWrapperHttpClient(
+                        new ConnectionDetails(
+                            targetAddress,
+                            null,
+                            null
+                        )
+                    ),
                     TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                     UUID.randomUUID().toString(),
                     Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))

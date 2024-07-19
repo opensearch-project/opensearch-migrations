@@ -14,7 +14,6 @@ import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.transform.HttpJsonMessageWithFaultingPayload;
-import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IHttpMessage;
 
 import lombok.Lombok;
@@ -29,7 +28,7 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.utils.BinaryUtils;
 
 @Slf4j
-public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransformer {
+public class SigV4Signer {
     private static final HashSet<String> AUTH_HEADERS_TO_PULL_WITH_PAYLOAD;
     private static final HashSet<String> AUTH_HEADERS_TO_PULL_NO_PAYLOAD;
 
@@ -64,12 +63,10 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
         this.timestampSupplier = timestampSupplier;
     }
 
-    @Override
     public ContextForAuthHeader transformType() {
         return ContextForAuthHeader.HEADERS_AND_CONTENT_PAYLOAD;
     }
 
-    @Override
     public void consumeNextPayloadPart(ByteBuffer payloadChunk) {
         if (payloadChunk.remaining() <= 0) {
             return;
@@ -84,7 +81,6 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
         messageDigest.update(payloadChunk);
     }
 
-    @Override
     public void finalizeSignature(HttpJsonMessageWithFaultingPayload msg) {
         getSignatureHeadersViaSdk(msg).forEach(kvp -> msg.headers().put(kvp.getKey(), kvp.getValue()));
     }

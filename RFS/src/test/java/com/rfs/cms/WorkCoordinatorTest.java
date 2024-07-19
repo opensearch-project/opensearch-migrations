@@ -11,6 +11,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
+import com.rfs.common.ConnectionDetails;
 import io.opentelemetry.sdk.metrics.data.LongPointData;
 import io.opentelemetry.sdk.metrics.data.MetricData;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -24,6 +25,7 @@ import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestCo
 import com.rfs.framework.SearchClusterContainer;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.testcontainers.shaded.org.checkerframework.checker.units.qual.C;
 
 /**
  * The contract here is that the first request in will acquire a lease for the duration that was requested.
@@ -46,14 +48,17 @@ public class WorkCoordinatorTest {
     public static final String DUMMY_FINISHED_DOC_ID = "dummy_finished_doc";
 
     final SearchClusterContainer container = new SearchClusterContainer(SearchClusterContainer.OS_V1_3_16);
-    private Supplier<ApacheHttpClient> httpClientSupplier;
+    private Supplier<RestClientWrapperHttpClient> httpClientSupplier;
 
     @BeforeEach
     void setupOpenSearchContainer() throws Exception {
         var testContext = WorkCoordinationTestContext.factory().noOtelTracking();
         // Start the container. This step might take some time...
         container.start();
-        httpClientSupplier = () -> new ApacheHttpClient(URI.create(container.getUrl()));
+        httpClientSupplier = () -> new RestClientWrapperHttpClient(new ConnectionDetails(
+            container.getUrl(),
+            null,
+            null));
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 2, "testWorker")) {
             workCoordinator.setup(testContext::createCoordinationInitializationStateContext);
         }
