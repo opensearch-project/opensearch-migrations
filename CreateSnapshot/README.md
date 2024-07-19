@@ -17,7 +17,7 @@ You can kick off the tool locally using Gradle.
 
 From the root directory of the repo, run a CLI command like so:
 
-```
+```shell
 ./gradlew CreateSnapshot:run --args='--snapshot-name reindex-from-snapshot --s3-repo-uri s3://your-s3-uri --s3-region us-fake-1 --source-host http://hostname:9200'
 ```
 
@@ -30,7 +30,7 @@ In order for this succeed, you'll need to make sure:
 
 From the root directory of the repo, run a CLI command like so:
 
-```
+```shell
 ./gradlew CreateSnapshot:run --args='--snapshot-name reindex-from-snapshot --file-system-repo-path /snapshot --source-host http://hostname:9200'
 ```
 
@@ -40,7 +40,7 @@ In order for this to succeed, you must first configure your Elasticsearch source
 
 If your source cluster has basic auth enabled, you can supply those credentials to the tool via the CLI:
 
-```
+```shell
 ./gradlew CreateSnapshot:run --args='--snapshot-name reindex-from-snapshot --s3-repo-uri s3://your-s3-uri --s3-region us-fake-1 --source-host http://hostname:9200 --source-username <user> --source-password <pass>'
 ```
 
@@ -48,6 +48,6 @@ If your source cluster has basic auth enabled, you can supply those credentials 
 
 You can tweak the maximum rate at which the source cluster's nodes will create the snapshot.  The tradeoff here is that increasing the speed at which the snapshot is created also increases the amount of resources the nodes are devoting to that creation instead of serving normal traffic.  If you don't specify a number for this, it will use the default for whatever version of source cluster you're using.  See [the docs for ES 7.10 here](https://www.elastic.co/guide/en/elasticsearch/reference/7.10/put-snapshot-repo-api.html#put-snapshot-repo-api-request-body) for more context.
 
-```
+```shell
 ./gradlew CreateSnapshot:run --args='--snapshot-name reindex-from-snapshot --s3-repo-uri s3://your-s3-uri --s3-region us-fake-1 --source-host http://hostname:9200 --max-snapshot-rate-mb-per-node 100'
 ```
