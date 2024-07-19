@@ -1,16 +1,19 @@
-import os
 from pathlib import Path
 
 import botocore.session
 import pytest
 from botocore.stub import ANY, Stubber
-
-from console_link.models.cluster import AuthMethod
 from console_link.models.osi_utils import (InvalidAuthParameters,
                                            OpenSearchIngestionMigrationProps,
                                            construct_pipeline_config,
                                            create_pipeline_from_env,
-                                           create_pipeline_from_json)
+                                           create_pipeline_from_json,
+                                           delete_pipeline,
+                                           get_assume_role_session,
+                                           start_pipeline,
+                                           stop_pipeline)
+from console_link.models.cluster import AuthMethod
+from moto import mock_aws
 from tests.utils import create_valid_cluster
 
 PIPELINE_TEMPLATE_PATH = f"{Path(__file__).parents[3]}/osiPipelineTemplate.yaml"
@@ -44,8 +47,6 @@ def osi_client_stubber():
 
 
 def test_construct_config_sigv4_source_and_sigv4_target():
-    cwd = os.getcwd()
-    print(cwd)
     generated_config = construct_pipeline_config(
         pipeline_config_file_path=PIPELINE_TEMPLATE_PATH,
         source_endpoint=SOURCE_ENDPOINT,
@@ -138,14 +139,12 @@ def test_valid_json_creates_pipeline(osi_client_stubber):
         "IndexRegexSelections": [INDEX_INCLUSION_RULE_1, INDEX_INCLUSION_RULE_2],
         "LogGroupName": CW_LOG_GROUP_NAME,
         "SourceDataProvider": {
-            "Host": "source.amazonaws.com",
-            "Port": "9200",
+            "Uri": "http://source.amazonaws.com:9200",
             "AuthType": AuthMethod.BASIC_AUTH.name,
             "SecretArn": SECRET_ARN
         },
         "TargetDataProvider": {
-            "Host": "target.amazonaws.com",
-            "Port": "443",
+            "Uri": "https://target.amazonaws.com:443",
             "AuthType": AuthMethod.SIGV4.name
         },
         "VpcSubnetIds": [VPC_SUBNET_1, VPC_SUBNET_2],
@@ -240,3 +239,47 @@ def test_valid_env_creates_pipeline(osi_client_stubber):
                              print_config_only=False)
 
     osi_client_stubber.assert_no_pending_responses()
+
+
+def test_valid_start_pipeline(osi_client_stubber):
+    expected_request_body = {'PipelineName': f'{PIPELINE_NAME}'}
+    osi_client_stubber.add_response("start_pipeline", {}, expected_request_body)
+    osi_client_stubber.activate()
+
+    start_pipeline(osi_client=osi_client_stubber.client, pipeline_name=PIPELINE_NAME)
+
+    osi_client_stubber.assert_no_pending_responses()
+
+
+def test_valid_stop_pipeline(osi_client_stubber):
+    expected_request_body = {'PipelineName': f'{PIPELINE_NAME}'}
+    osi_client_stubber.add_response("stop_pipeline", {}, expected_request_body)
+    osi_client_stubber.activate()
+
+    stop_pipeline(osi_client=osi_client_stubber.client, pipeline_name=PIPELINE_NAME)
+
+    osi_client_stubber.assert_no_pending_responses()
+
+
+def test_valid_delete_pipeline(osi_client_stubber):
+    expected_request_body = {'PipelineName': f'{PIPELINE_NAME}'}
+    osi_client_stubber.add_response("delete_pipeline", {}, expected_request_body)
+    osi_client_stubber.activate()
+
+    delete_pipeline(osi_client=osi_client_stubber.client, pipeline_name=PIPELINE_NAME)
+
+    osi_client_stubber.assert_no_pending_responses()
+
+
+@mock_aws
+def test_valid_get_assume_role_session():
+    session_name = 'unittest-session'
+
+    session = get_assume_role_session(PIPELINE_ROLE_ARN, session_name)
+
+    # Validate the session
+    credentials = session.get_credentials()
+    assert credentials is not None
+    assert isinstance(credentials.access_key, str)
+    assert isinstance(credentials.secret_key, str)
+    assert isinstance(credentials.token, str)

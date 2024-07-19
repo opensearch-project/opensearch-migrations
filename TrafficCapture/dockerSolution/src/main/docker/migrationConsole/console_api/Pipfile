@@ -13,6 +13,8 @@ sqlparse = "==0.5.0"
 pyopenssl = "*"
 
 [dev-packages]
+coverage = "*"
+moto = {version = "*", extras = ["sts"]}
 
 [requires]
 python_version = "3.10"

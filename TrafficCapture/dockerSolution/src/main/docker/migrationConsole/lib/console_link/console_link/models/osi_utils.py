@@ -3,6 +3,7 @@ from console_link.models.cluster import AuthMethod, Cluster
 from pathlib import Path
 from typing import List, Dict, Optional
 from urllib.parse import urlparse
+import boto3
 import logging
 import re
 
@@ -55,6 +56,20 @@ class OpenSearchIngestionMigrationProps:
         tags = config.get('tags')
         if tags:
             self.tags = convert_str_tags_to_dict(tags)
+
+
+def get_assume_role_session(role_arn, session_name) -> boto3.Session:
+    sts_client = boto3.client('sts')
+    response = sts_client.assume_role(RoleArn=role_arn, RoleSessionName=session_name)
+
+    # Create a new session with the assumed role's credentials
+    credentials = response['Credentials']
+    assumed_session = boto3.Session(
+        aws_access_key_id=credentials['AccessKeyId'],
+        aws_secret_access_key=credentials['SecretAccessKey'],
+        aws_session_token=credentials['SessionToken']
+    )
+    return assumed_session
 
 
 # Allowing ability to remove port, as port is currently not supported by OpenSearch Ingestion
@@ -201,6 +216,14 @@ def stop_pipeline(osi_client, pipeline_name: str):
     )
 
 
+def delete_pipeline(osi_client, pipeline_name: str):
+    name = pipeline_name if pipeline_name is not None else DEFAULT_PIPELINE_NAME
+    logger.info(f"Deleting pipeline: {name}")
+    osi_client.delete_pipeline(
+        PipelineName=name
+    )
+
+
 def create_pipeline(osi_client, pipeline_name: str, pipeline_config: str, subnet_ids: List[str],
                     security_group_ids: List[str], cw_log_group_name: str, tags: List[Dict[str, str]]):
     logger.info(f"Creating pipeline: {pipeline_name}")
@@ -278,13 +301,13 @@ def create_pipeline_from_json(osi_client, input_json: Dict, pipeline_template_pa
         remove_source_port = True
     # Ports are not currently allowed for OSI SIGV4 sources or sinks
     source_endpoint_clean = sanitize_endpoint(
-        endpoint=f"https://{source_provider.get('Host')}:{source_provider.get('Port')}",
+        endpoint=source_provider.get('Uri'),
         remove_port=remove_source_port)
     source_auth_secret = source_provider.get('SecretArn')
 
     target_provider = input_json.get('TargetDataProvider')
     # Target endpoints for OSI are not currently allowed a port
-    target_endpoint_clean = sanitize_endpoint(f"https://{target_provider.get('Host')}", False)
+    target_endpoint_clean = sanitize_endpoint(target_provider.get('Uri'), True)
     target_auth_type = AuthMethod[target_provider.get('AuthType')]
 
     pipeline_role_arn = input_json.get('PipelineRoleArn')
