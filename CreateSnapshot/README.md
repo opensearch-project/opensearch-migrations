@@ -11,7 +11,7 @@ There's not much magic involved; the tool will reach out to the host specificed 
 
 ## How to use the tool
 
-You can kick off the locally tool using Gradle.
+You can kick off the tool locally using Gradle.
 
 ### S3 Snapshot
 
@@ -38,10 +38,10 @@ In order for this to succeed, you must first configure your Elasticsearch source
 
 ### Handling Auth
 
-If your source cluster has basic auth enabled on it, you can supply those credentials to the tool via the CLI:
+If your source cluster has basic auth enabled, you can supply those credentials to the tool via the CLI:
 
 ```
-./gradlew CreateSnapshot:run --args='--snapshot-name reindex-from-snapshot --s3-repo-uri s3://your-s3-uri --s3-region us-fake-1 --source-host http://hostname:9200 --source-username DemoUser --source-password DemoPass'
+./gradlew CreateSnapshot:run --args='--snapshot-name reindex-from-snapshot --s3-repo-uri s3://your-s3-uri --s3-region us-fake-1 --source-host http://hostname:9200 --source-username <user> --source-password <pass>'
 ```
 
 ### Snapshot Creation Rate

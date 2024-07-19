@@ -33,7 +33,7 @@ From the root directory of the repo, run a CLI command like so:
 If your target cluster has basic auth enabled on it, you can supply those credentials to the tool via the CLI:
 
 ```
-./gradlew MetadataMigration:run --args='--snapshot-name reindex-from-snapshot --s3-local-dir /tmp/s3_files --s3-repo-uri s3://your-s3-uri --s3-region us-fake-1 --target-host http://hostname:9200 --target-username DemoUser --target-password DemoPass'
+./gradlew MetadataMigration:run --args='--snapshot-name reindex-from-snapshot --s3-local-dir /tmp/s3_files --s3-repo-uri s3://your-s3-uri --s3-region us-fake-1 --target-host http://hostname:9200 --target-username <user> --target-password <pass>'
 ```
 
 ### Allowlisting the templates and indices to migrate
