@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.transform;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -9,6 +9,7 @@ import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
 
+import org.opensearch.migrations.replay.TestUtils;
 import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
@@ -20,7 +21,7 @@ import software.amazon.awssdk.auth.credentials.AwsCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 
 @WrapWithNettyLeakDetection
-public class SigV4SigningTransformationTest extends InstrumentationTest {
+public class SigV4AuthTransformerFactoryTest extends InstrumentationTest {
 
     private static class MockCredentialsProvider implements AwsCredentialsProvider {
         @Override
@@ -38,7 +39,6 @@ public class SigV4SigningTransformationTest extends InstrumentationTest {
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1)
             .mapToObj(i -> TestUtils.makeRandomString(r, 64))
-            .map(o -> (String) o)
             .collect(Collectors.toList());
 
         var mockCredentialsProvider = new MockCredentialsProvider();
