@@ -83,12 +83,12 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
 
     private void handleReadJsonMessageObject(ChannelHandlerContext ctx, HttpJsonMessageWithFaultingPayload msg) {
         bufferedJsonMessage = msg;
-        var transferEncoding = bufferedJsonMessage.headers().asStrictMap().get("transfer-encoding");
+        var transferEncoding = bufferedJsonMessage.headersInternal().asStrictMap().get("transfer-encoding");
         streamMode = (transferEncoding != null && transferEncoding.contains(TRANSFER_ENCODING_CHUNKED_VALUE))
             ? MODE.CHUNKED
             : MODE.FIXED;
         if (streamMode == MODE.CHUNKED) {
-            bufferedJsonMessage.headers().asStrictMap().remove(CONTENT_LENGTH_HEADER_NAME);
+            bufferedJsonMessage.headersInternal().asStrictMap().remove(CONTENT_LENGTH_HEADER_NAME);
             ctx.fireChannelRead(bufferedJsonMessage);
         } else {
             bufferedContents = ctx.alloc().compositeHeapBuffer();
@@ -114,7 +114,7 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
     }
 
     private void finalizeFixedContentStream(ChannelHandlerContext ctx) {
-        bufferedJsonMessage.headers().put(CONTENT_LENGTH_HEADER_NAME, contentBytesReceived);
+        bufferedJsonMessage.headersInternal().put(CONTENT_LENGTH_HEADER_NAME, contentBytesReceived);
         ctx.fireChannelRead(bufferedJsonMessage);
         bufferedJsonMessage = null;
         ctx.fireChannelRead(bufferedContents);

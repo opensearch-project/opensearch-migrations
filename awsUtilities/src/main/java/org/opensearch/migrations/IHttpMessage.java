@@ -13,14 +13,13 @@ public interface IHttpMessage {
 
     String protocol();
 
-    Map<String, Object> headersMap();
+    Map<String, List<String>> headers();
 
     default String getFirstHeader(String key) {
         var all = getAllMatchingHeaders(key);
         return all == null ? null : all.get(0);
     }
-
     default List<String> getAllMatchingHeaders(String key) {
-        return ((List<String>) (headersMap().get(key)));
+        return headers().get(key);
     }
 }

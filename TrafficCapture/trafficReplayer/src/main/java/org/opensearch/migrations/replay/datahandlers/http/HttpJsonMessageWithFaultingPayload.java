@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay.datahandlers.http;
 
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
@@ -48,11 +49,24 @@ public class HttpJsonMessageWithFaultingPayload extends LinkedHashMap<String, Ob
     }
 
     @Override
-    public Map<String, Object> headersMap() {
-        return Collections.unmodifiableMap(headers());
+    public Map<String, List<String>> headers() {
+        Map<String, Object> originalHeaders = this.headersInternal();
+        Map<String, List<String>> convertedHeaders = new LinkedHashMap<>();
+
+        for (Map.Entry<String, Object> entry : originalHeaders.entrySet()) {
+            if (entry.getValue() instanceof List) {
+                @SuppressWarnings("unchecked")
+                List<String> values = (List<String>) entry.getValue();
+                convertedHeaders.put(entry.getKey(), values);
+            } else if (entry.getValue() != null) {
+                convertedHeaders.put(entry.getKey(), Collections.singletonList(entry.getValue().toString()));
+            }
+        }
+
+        return Collections.unmodifiableMap(convertedHeaders);
     }
 
-    public ListKeyAdaptingCaseInsensitiveHeadersMap headers() {
+    public ListKeyAdaptingCaseInsensitiveHeadersMap headersInternal() {
         return (ListKeyAdaptingCaseInsensitiveHeadersMap) this.get(JsonKeysForHttpMessage.HEADERS_KEY);
     }
 

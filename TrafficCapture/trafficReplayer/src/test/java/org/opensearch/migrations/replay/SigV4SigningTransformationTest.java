@@ -9,7 +9,7 @@ import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
 
-import org.opensearch.migrations.aws.SigV4Signer;
+import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 
@@ -58,20 +58,22 @@ public class SigV4SigningTransformationTest extends InstrumentationTest {
         );
         expectedRequestHeaders.add("X-Amz-Date", "19700101T000000Z");
 
-        TestUtils.runPipelineAndValidate(
-            rootContext,
-            msg -> new SigV4Signer(
-                mockCredentialsProvider,
-                "es",
-                "us-east-1",
-                "https",
-                () -> Clock.fixed(Instant.EPOCH, ZoneOffset.UTC)
-            ),
-            null,
-            stringParts,
-            expectedRequestHeaders,
-            referenceStringBuilder -> TestUtils.resolveReferenceString(referenceStringBuilder)
-        );
+        try (var factory = new SigV4AuthTransformerFactory(
+            mockCredentialsProvider,
+            "es",
+            "us-east-1",
+            "https",
+            () -> Clock.fixed(Instant.EPOCH, ZoneOffset.UTC)
+        )) {
+            TestUtils.runPipelineAndValidate(
+                rootContext,
+                factory,
+                null,
+                stringParts,
+                expectedRequestHeaders,
+                TestUtils::resolveReferenceString
+            );
+        }
 
     }
 }

@@ -19,7 +19,7 @@ public class RemovingAuthTransformerFactory implements IAuthTransformerFactory {
 
         @Override
         public void rewriteHeaders(HttpJsonMessageWithFaultingPayload msg) {
-            msg.headers().remove("authorization");
+            msg.headersInternal().remove("authorization");
         }
     }
 }
