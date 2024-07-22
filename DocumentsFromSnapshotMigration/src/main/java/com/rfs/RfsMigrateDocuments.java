@@ -20,11 +20,12 @@ import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
-import com.rfs.cms.ApacheHttpClient;
 import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.cms.OpenSearchWorkCoordinator;
+import com.rfs.cms.ReactorHttpClient;
 import com.rfs.cms.ScopedWorkCoordinator;
+import com.rfs.common.ConnectionDetails;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
@@ -164,12 +165,17 @@ public class RfsMigrateDocuments {
             log.error("Terminating RfsMigrateDocuments because the lease has expired for " + workItemId);
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC())) {
+            ConnectionDetails connectionDetails = new ConnectionDetails(
+                arguments.targetHost,
+                arguments.targetUser,
+                arguments.targetPass,
+                false
+            );
             var workCoordinator = new OpenSearchWorkCoordinator(
-                new ApacheHttpClient(new URI(arguments.targetHost)),
+                new ReactorHttpClient(connectionDetails),
                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                 UUID.randomUUID().toString()
             );
-
             TryHandlePhaseFailure.executeWithTryCatch(() -> {
                 log.info("Running RfsWorker");
 

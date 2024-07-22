@@ -2,6 +2,7 @@ package com.rfs.common;
 
 import java.net.HttpURLConnection;
 import java.time.Duration;
+import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -257,7 +258,7 @@ public class OpenSearchClient {
         String targetPath = indexName + "/_bulk";
 
         return client.postAsync(targetPath, body, context)
-            .map(response -> new BulkResponse(response.code, response.body, response.message))
+            .map(response -> new BulkResponse(response.code, response.body, response.message, response.headers))
             .flatMap(resp -> {
                 if (resp.hasBadStatusCode() || resp.hasFailedOperations()) {
                     logger.error(resp.getFailureMessage());
@@ -274,8 +275,9 @@ public class OpenSearchClient {
     }
 
     public static class BulkResponse extends RestClient.Response {
-        public BulkResponse(int responseCode, String responseBody, String responseMessage) {
-            super(responseCode, responseBody, responseMessage);
+        public BulkResponse(int responseCode, String responseBody, String responseMessage,
+                            Map<String, String> responseHeaders) {
+            super(responseCode, responseBody, responseMessage, responseHeaders);
         }
 
         public boolean hasBadStatusCode() {

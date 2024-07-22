@@ -19,6 +19,7 @@ import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import com.rfs.cms.ReactorHttpClient;
 import io.opentelemetry.sdk.metrics.data.LongPointData;
 import io.opentelemetry.sdk.metrics.data.MetricData;
 import org.apache.lucene.document.Document;
@@ -36,7 +37,6 @@ import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 import org.opensearch.testcontainers.OpensearchContainer;
 
-import com.rfs.cms.ApacheHttpClient;
 import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.cms.OpenSearchWorkCoordinator;
 import com.rfs.common.ConnectionDetails;
@@ -381,9 +381,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                 path -> new FilteredLuceneDocumentsReader(path, terminatingDocumentFilter),
                 new DocumentReindexer(new OpenSearchClient(targetAddress, null)),
                 new OpenSearchWorkCoordinator(
-                    new ApacheHttpClient(new URI(targetAddress)),
-                    // new ReactorHttpClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(),
-                    // null, null)),
+                    new ReactorHttpClient(new ConnectionDetails(targetAddress, null, null)),
                     TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                     UUID.randomUUID().toString(),
                     Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))

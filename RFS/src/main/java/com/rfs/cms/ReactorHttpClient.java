@@ -2,26 +2,22 @@ package com.rfs.cms;
 
 import java.io.IOException;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.Map;
-import java.util.function.BiFunction;
 import java.util.stream.Stream;
 
 import com.rfs.common.ConnectionDetails;
+import com.rfs.common.RestClient;
 import io.netty.handler.codec.http.HttpMethod;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
-import reactor.netty.ByteBufMono;
-import reactor.netty.http.client.HttpClient;
-import reactor.netty.http.client.HttpClientResponse;
 
 @Slf4j
 public class ReactorHttpClient implements AbstractedHttpClient {
 
-    private HttpClient client;
+    private RestClient restClient;
 
     @Getter
     @AllArgsConstructor
@@ -35,65 +31,35 @@ public class ReactorHttpClient implements AbstractedHttpClient {
         public Stream<Map.Entry<String, String>> getHeaders() {
             return headersList.stream();
         }
+
+        @Override
+        public byte[] getPayloadBytes() {
+            return payloadBytes;
+        }
     }
 
     public ReactorHttpClient(ConnectionDetails connectionDetails) {
-        this.client = HttpClient.create().baseUrl(connectionDetails.url).headers(h -> {
-            h.add("Content-Type", "application/json");
-            h.add("User-Agent", "RfsWorker-1.0");
-            if (connectionDetails.authType == ConnectionDetails.AuthType.BASIC) {
-                String credentials = connectionDetails.username + ":" + connectionDetails.password;
-                String encodedCredentials = Base64.getEncoder().encodeToString(credentials.getBytes());
-                h.add("Authorization", "Basic " + encodedCredentials);
-            }
-        });
+        this.restClient = new RestClient(connectionDetails);
     }
 
     @Override
     public AbstractHttpResponse makeRequest(String method, String path, Map<String, String> headers, String payload)
         throws IOException {
-        var requestSender = client.request(HttpMethod.valueOf(method)).uri("/" + path);
-        BiFunction<HttpClientResponse, ByteBufMono, Mono<Response>> responseWrapperFunction = (response, bytes) -> {
-            try {
-                log.info("Received response with status: " + response.status());
-                log.info("Response headers: " + response.responseHeaders().entries());
+        Mono<RestClient.Response> responseMono;
+        HttpMethod httpMethod = HttpMethod.valueOf(method);
+        responseMono = restClient.asyncRequest(httpMethod, path, payload, null);
+        RestClient.Response response = responseMono.block();
 
-                return bytes.asByteArray().map(b -> {
-                    try {
-                        log.info("Making wrapped response with status: " + response.status());
-
-                        return new Response(
-                            new ArrayList<>(response.responseHeaders().entries()),
-                            response.status().reasonPhrase(),
-                            response.status().code(),
-                            b
-                        );
-                    } catch (Exception e) {
-                        log.atError().setCause(e).setMessage("Caught exception").log();
-                        throw e;
-                    }
-                })
-                    .or(
-                        Mono.fromSupplier(
-                            () -> new Response(
-                                new ArrayList<>(response.responseHeaders().entries()),
-                                response.status().reasonPhrase(),
-                                response.status().code(),
-                                null
-                            )
-                        )
-                    );
-            } catch (Exception e) {
-                log.atError().setCause(e).setMessage("Caught exception").log();
-                throw e;
-            }
-        };
-        var monoResponse = payload != null
-            ? requestSender.send(ByteBufMono.fromString(Mono.just(payload))).responseSingle(responseWrapperFunction)
-            : requestSender.responseSingle(responseWrapperFunction);
-        return monoResponse.block();
+        return new Response(
+            new ArrayList<>(response.headers.entrySet()),
+            response.message,
+            response.code,
+            response.body.getBytes()
+        );
     }
 
     @Override
-    public void close() throws Exception {}
+    public void close() throws Exception {
+        // RestClient doesn't have a close method, so this is a no-op
+    }
 }
