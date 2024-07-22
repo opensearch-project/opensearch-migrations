@@ -6,8 +6,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
-import com.rfs.common.ConnectionDetails;
-import com.rfs.common.RestClient;
+import com.rfs.common.http.ConnectionContext;
+import com.rfs.common.http.RestClient;
 import io.netty.handler.codec.http.HttpMethod;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -38,8 +38,8 @@ public class ReactorHttpClient implements AbstractedHttpClient {
         }
     }
 
-    public ReactorHttpClient(ConnectionDetails connectionDetails) {
-        this.restClient = new RestClient(connectionDetails);
+    public ReactorHttpClient(ConnectionContext connectionContext) {
+        this.restClient = new RestClient(connectionContext);
     }
 
     @Override

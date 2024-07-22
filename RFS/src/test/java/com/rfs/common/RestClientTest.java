@@ -31,8 +31,7 @@ class RestClientTest {
     public void testGetEmitsInstrumentation() throws Exception {
         var rootContext = SnapshotTestContext.factory().withAllTracking();
         try (var testServer = SimpleNettyHttpServer.makeServer(false, null, this::makeResponseContext)) {
-            var restClient = new RestClient(new ConnectionDetails("http://localhost:" + testServer.port, null, null),
-                makeSingleConnectionHttpClient());
+            var restClient = new RestClient(new ConnectionContext("http://localhost:" + testServer.port, null, null));
             try (var topScope = rootContext.createSnapshotCreateContext()) {
                 restClient.postAsync("/", "empty", topScope.createSnapshotContext()).block();
                 restClient.getAsync("/", topScope.createGetSnapshotContext()).block();

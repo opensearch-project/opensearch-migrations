@@ -1,6 +1,6 @@
 package com.rfs.common;
 
-import java.util.Base64;
+import java.nio.charset.StandardCharsets;
 import java.util.Map;
 import java.util.function.BiConsumer;
 import javax.net.ssl.SSLEngine;
@@ -9,6 +9,7 @@ import javax.net.ssl.SSLParameters;
 import com.rfs.netty.ReadMeteringHandler;
 import com.rfs.netty.WriteMeteringHandler;
 import com.rfs.tracing.IRfsContexts;
+import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.ssl.SslContext;
@@ -16,7 +17,6 @@ import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
 import lombok.SneakyThrows;
 import reactor.core.publisher.Mono;
-import reactor.netty.ByteBufMono;
 import reactor.netty.Connection;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.http.client.HttpClientRequest;
@@ -37,15 +37,17 @@ public class RestClient {
         }
     }
 
-    public final ConnectionDetails connectionDetails;
+    public final ConnectionContext connectionContext;
     private final HttpClient client;
+    private final AuthTransformer authTransformer;
 
     @SneakyThrows
-    public RestClient(ConnectionDetails connectionDetails) {
-        this.connectionDetails = connectionDetails;
+    public RestClient(ConnectionContext connectionContext) {
+        this.connectionContext = connectionContext;
+        this.authTransformer = connectionContext.getAuthTransformer();
 
         SslProvider sslProvider;
-        if (connectionDetails.insecure) {
+        if (connectionContext.insecure) {
             SslContext sslContext = SslContextBuilder.forClient()
                 .trustManager(InsecureTrustManagerFactory.INSTANCE)
                 .build();
@@ -60,33 +62,33 @@ public class RestClient {
             sslProvider = SslProvider.defaultClientProvider();
         }
 
-        this.client = HttpClient.create().secure(sslProvider).baseUrl(connectionDetails.url).headers(h -> {
+        this.client = HttpClient.create().secure(sslProvider).baseUrl(connectionContext.url).headers(h -> {
             h.add("Content-Type", "application/json");
             h.add("User-Agent", "RfsWorker-1.0");
-            if (connectionDetails.authType == ConnectionDetails.AuthType.BASIC) {
-                String credentials = connectionDetails.username + ":" + connectionDetails.password;
-                String encodedCredentials = Base64.getEncoder().encodeToString(credentials.getBytes());
-                h.add("Authorization", "Basic " + encodedCredentials);
-            }
         });
     }
 
     public Mono<Response> asyncRequest(HttpMethod method, String path, String body, IRfsContexts.IRequestContext context) {
-        return client.doOnRequest(addSizeMetricsHandlers(context))
-            .request(method)
-            .uri("/" + path)
-            .send(body != null ? ByteBufMono.fromString(Mono.just(body)) : Mono.empty())
-            .responseSingle(
-                (response, bytes) -> bytes.asString()
-                    .map(b -> new Response(
-                        response.status().code(),
-                        b,
-                        response.status().reasonPhrase(),
-                        extractHeaders(response.responseHeaders())
-                    ))
-            )
-            .doOnError(t -> context.addTraceException(t, true))
-            .doFinally(r -> context.close());
+        return authTransformer.transform(method.name(), path, Map.of(), Mono.justOrEmpty(body))
+            .flatMap(transformedRequest -> client.doOnRequest(addSizeMetricsHandlers(context))
+                .headers(h -> transformedRequest.headers.forEach(h::add))
+                .request(method)
+                .uri("/" + path)
+                .send(transformedRequest.body
+                    .map(mapBody -> Unpooled.wrappedBuffer(mapBody.getBytes(StandardCharsets.UTF_8)))
+                )
+                .responseSingle(
+                    (response, bytes) -> bytes.asString()
+                        .map(b -> new Response(
+                            response.status().code(),
+                            b,
+                            response.status().reasonPhrase(),
+                            extractHeaders(response.responseHeaders())
+                        ))
+                )
+                .doOnError(t -> context.addTraceException(t, true))
+                .doFinally(r -> context.close())
+            );
     }
 
     private Map<String, String> extractHeaders(HttpHeaders headers) {

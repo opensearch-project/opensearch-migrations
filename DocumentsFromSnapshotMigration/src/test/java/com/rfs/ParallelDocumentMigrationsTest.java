@@ -1,6 +1,5 @@
 package com.rfs;
 
-import java.net.URI;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -39,7 +38,7 @@ import org.opensearch.testcontainers.OpensearchContainer;
 
 import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.cms.OpenSearchWorkCoordinator;
-import com.rfs.common.ConnectionDetails;
+import com.rfs.common.http.ConnectionContext;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
@@ -265,8 +264,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         OpensearchContainer<?> osTargetContainer,
         DocumentMigrationTestContext context
     ) {
-        var targetClient = new RestClient(new ConnectionDetails(osTargetContainer.getHttpHostAddress(), null, null));
-        var sourceClient = new RestClient(new ConnectionDetails(esSourceContainer.getUrl(), null, null));
+        var targetClient = new RestClient(new ConnectionContext(osTargetContainer.getHttpHostAddress(), null, null));
+        var sourceClient = new RestClient(new ConnectionContext(esSourceContainer.getUrl(), null, null));
 
         var requests = new SearchClusterRequests(context);
         var sourceMap = requests.getMapOfIndexAndDocCount(sourceClient);
@@ -381,7 +380,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                 path -> new FilteredLuceneDocumentsReader(path, terminatingDocumentFilter),
                 new DocumentReindexer(new OpenSearchClient(targetAddress, null)),
                 new OpenSearchWorkCoordinator(
-                    new ReactorHttpClient(new ConnectionDetails(targetAddress, null, null)),
+                    new ReactorHttpClient(new ConnectionContext(targetAddress, null, null)),
                     TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                     UUID.randomUUID().toString(),
                     Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))

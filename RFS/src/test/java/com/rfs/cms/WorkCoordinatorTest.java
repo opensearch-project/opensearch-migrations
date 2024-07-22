@@ -20,7 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 
-import com.rfs.common.ConnectionDetails;
+import com.rfs.common.http.ConnectionContext;
 import com.rfs.framework.SearchClusterContainer;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -53,7 +53,7 @@ public class WorkCoordinatorTest {
         var testContext = WorkCoordinationTestContext.factory().noOtelTracking();
         // Start the container. This step might take some time...
         container.start();
-        httpClientSupplier = () -> new ReactorHttpClient(new ConnectionDetails(container.getUrl(), null, null));
+        httpClientSupplier = () -> new ReactorHttpClient(new ConnectionContext(container.getUrl(), null, null));
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 2, "testWorker")) {
             workCoordinator.setup(testContext::createCoordinationInitializationStateContext);
         }

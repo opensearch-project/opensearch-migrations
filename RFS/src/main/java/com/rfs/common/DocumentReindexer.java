@@ -9,6 +9,7 @@ import org.apache.lucene.document.Document;
 
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
+import com.rfs.common.http.ConnectionContext;
 import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -59,7 +60,7 @@ public class DocumentReindexer {
     }
 
     public void refreshAllDocuments(
-        ConnectionDetails targetConnection,
+        ConnectionContext targetConnection,
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
         // Send the request

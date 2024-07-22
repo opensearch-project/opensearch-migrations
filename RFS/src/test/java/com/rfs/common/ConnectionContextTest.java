@@ -6,10 +6,13 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import com.rfs.common.http.ConnectionContext;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 
-public class ConnectionDetailsTest {
+public class ConnectionContextTest {
     static Stream<Arguments> happyPathArgs() {
         return Stream.of(
             Arguments.of(
@@ -17,9 +20,7 @@ public class ConnectionDetailsTest {
                 "username",
                 "pass",
                 "https://localhost:9200",
-                "username",
-                "pass",
-                ConnectionDetails.Protocol.HTTPS,
+                ConnectionContext.Protocol.HTTPS,
                 "localhost",
                 9200
             ),
@@ -28,9 +29,7 @@ public class ConnectionDetailsTest {
                 "username",
                 "pass",
                 "http://localhost:9200",
-                "username",
-                "pass",
-                ConnectionDetails.Protocol.HTTP,
+                ConnectionContext.Protocol.HTTP,
                 "localhost",
                 9200
             ),
@@ -39,9 +38,7 @@ public class ConnectionDetailsTest {
                 null,
                 null,
                 "http://localhost:9200",
-                null,
-                null,
-                ConnectionDetails.Protocol.HTTP,
+                ConnectionContext.Protocol.HTTP,
                 "localhost",
                 9200
             ),
@@ -50,9 +47,7 @@ public class ConnectionDetailsTest {
                 "username",
                 "pass",
                 "http://localhost",
-                "username",
-                "pass",
-                ConnectionDetails.Protocol.HTTP,
+                ConnectionContext.Protocol.HTTP,
                 "localhost",
                 -1
             ),
@@ -61,36 +56,31 @@ public class ConnectionDetailsTest {
                 "username",
                 "pass",
                 "http://localhost:9200/longer/path",
-                "username",
-                "pass",
-                ConnectionDetails.Protocol.HTTP,
+                ConnectionContext.Protocol.HTTP,
                 "localhost",
                 9200
             ),
-            Arguments.of(null, "username", "pass", null, "username", "pass", null, null, -1)
+            Arguments.of(null, "username", "pass", null, null, null, -1)
         );
     }
 
     @ParameterizedTest
     @MethodSource("happyPathArgs")
-    void ConnectionDetails_HappyPath_AsExpected(
+    void ConnectionContext_HappyPath_AsExpected(
         String url,
         String username,
         String password,
         String expectedUrl,
-        String expectedUsername,
-        String expectedPassword,
-        ConnectionDetails.Protocol expectedProtocal,
+        ConnectionContext.Protocol expectedProtocol,
         String expectedHostName,
         int expectedPort
     ) {
-        ConnectionDetails details = new ConnectionDetails(url, username, password);
+        ConnectionContext details = new ConnectionContext(url, username, password);
         assertEquals(expectedUrl, details.url);
-        assertEquals(expectedUsername, details.username);
-        assertEquals(expectedPassword, details.password);
-        assertEquals(expectedProtocal, details.protocol);
+        assertEquals(expectedProtocol, details.protocol);
         assertEquals(expectedHostName, details.hostName);
         assertEquals(expectedPort, details.port);
+        assertNotNull(details.getAuthTransformer());
     }
 
     static Stream<Arguments> unhappyPathArgs() {
@@ -104,12 +94,12 @@ public class ConnectionDetailsTest {
 
     @ParameterizedTest
     @MethodSource("unhappyPathArgs")
-    void ConnectionDetails_UnhappyPath_AsExpected(
+    void ConnectionContext_UnhappyPath_AsExpected(
         String url,
         String username,
         String password,
         Class<Exception> expectedException
     ) {
-        assertThrows(expectedException, () -> new ConnectionDetails(url, username, password));
+        assertThrows(expectedException, () -> new ConnectionContext(url, username, password));
     }
 }

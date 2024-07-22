@@ -12,7 +12,7 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
-import com.rfs.common.ConnectionDetails;
+import com.rfs.common.http.ConnectionContext;
 import com.rfs.common.FileSystemSnapshotCreator;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3SnapshotCreator;
@@ -42,7 +42,7 @@ public class CreateSnapshot {
         public String s3Region;
 
         @ParametersDelegate
-        public ConnectionDetails.SourceArgs sourceArgs = new ConnectionDetails.SourceArgs();
+        public ConnectionContext.SourceArgs sourceArgs = new ConnectionContext.SourceArgs();
 
         @Parameter(names = {
             "--no-wait" }, description = "Optional.  If provided, the snapshot runner will not wait for completion")
@@ -102,7 +102,7 @@ public class CreateSnapshot {
                     arguments.maxSnapshotRateMBPerNode,
                     rootContext.createSnapshotCreateContext()
                 )),
-            new OpenSearchClient(new ConnectionDetails(arguments.sourceArgs)),
+            new OpenSearchClient(new ConnectionContext(arguments.sourceArgs)),
             arguments.noWait
         );
     }

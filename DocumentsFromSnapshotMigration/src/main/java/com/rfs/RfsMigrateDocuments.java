@@ -1,7 +1,6 @@
 package com.rfs;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
@@ -25,7 +24,7 @@ import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.cms.OpenSearchWorkCoordinator;
 import com.rfs.cms.ReactorHttpClient;
 import com.rfs.cms.ScopedWorkCoordinator;
-import com.rfs.common.ConnectionDetails;
+import com.rfs.common.http.ConnectionContext;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
@@ -165,14 +164,14 @@ public class RfsMigrateDocuments {
             log.error("Terminating RfsMigrateDocuments because the lease has expired for " + workItemId);
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC())) {
-            ConnectionDetails connectionDetails = new ConnectionDetails(
+            ConnectionContext connectionContext = new ConnectionContext(
                 arguments.targetHost,
                 arguments.targetUser,
                 arguments.targetPass,
                 false
             );
             var workCoordinator = new OpenSearchWorkCoordinator(
-                new ReactorHttpClient(connectionDetails),
+                new ReactorHttpClient(connectionContext),
                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                 UUID.randomUUID().toString()
             );

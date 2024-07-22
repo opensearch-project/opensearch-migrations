@@ -1,4 +1,4 @@
-package com.rfs.common;
+package com.rfs.common.http;
 
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -7,14 +7,9 @@ import com.beust.jcommander.Parameter;
 import lombok.Getter;
 
 /**
- * Stores the connection details (assuming basic auth) for an Elasticsearch/OpenSearch cluster
+ * Stores the connection context for an Elasticsearch/OpenSearch cluster
  */
-public class ConnectionDetails {
-    public enum AuthType {
-        BASIC,
-        NONE
-    }
-
+public class ConnectionContext {
     public enum Protocol {
         HTTP,
         HTTPS
@@ -24,34 +19,20 @@ public class ConnectionDetails {
     public final Protocol protocol;
     public final String hostName;
     public final int port;
-    public final String username;
-    public final String password;
-    public final AuthType authType;
     public final boolean insecure;
+    private final AuthTransformer authTransformer;
 
-    public ConnectionDetails(Params params) {
+    public ConnectionContext(Params params) {
         this(params.getHost(), params.getUsername(), params.getPassword(), params.isInsecure());
     }
 
-    public ConnectionDetails(String url, String username, String password) {
+    public ConnectionContext(String url, String username, String password) {
         this(url, username, password, false);
     }
 
-    public ConnectionDetails(String url, String username, String password, boolean insecure) {
+    public ConnectionContext(String url, String username, String password, boolean insecure) {
         this.url = url; // http://localhost:9200
         this.insecure = insecure;
-
-        // If the username is provided, the password must be as well, and vice versa
-        if ((username == null && password != null) || (username != null && password == null)) {
-            throw new IllegalArgumentException("Both username and password must be provided, or neither");
-        } else if (username != null) {
-            this.authType = AuthType.BASIC;
-        } else {
-            this.authType = AuthType.NONE;
-        }
-
-        this.username = username;
-        this.password = password;
 
         if (url == null) {
             hostName = null;
@@ -76,6 +57,18 @@ public class ConnectionDetails {
                 throw new IllegalArgumentException("Invalid protocol");
             }
         }
+
+        if (username != null && password != null) {
+            this.authTransformer = AuthTransformer.basicAuth(username, password);
+        } else if (username != null || password != null) {
+            throw new IllegalArgumentException("Both username and password must be provided, or neither");
+        } else {
+            this.authTransformer = AuthTransformer.noAuth();
+        }
+    }
+
+    public AuthTransformer getAuthTransformer() {
+        return this.authTransformer;
     }
 
     public static interface Params {

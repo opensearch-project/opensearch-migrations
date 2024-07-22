@@ -13,6 +13,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.rfs.common.http.ConnectionContext;
+import com.rfs.common.http.RestClient;
 import com.rfs.tracing.IRfsContexts;
 import lombok.NonNull;
 import reactor.core.publisher.Mono;
@@ -26,7 +28,7 @@ public class OpenSearchClient {
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
-    public final ConnectionDetails connectionDetails;
+    public final ConnectionContext connectionContext;
     private final RestClient client;
 
     public OpenSearchClient(@NonNull String url, UsernamePassword p) {
@@ -34,12 +36,12 @@ public class OpenSearchClient {
     }
 
     public OpenSearchClient(@NonNull String url, String username, String password, boolean insecure) {
-        this(new ConnectionDetails(url, username, password, insecure));
+        this(new ConnectionContext(url, username, password, insecure));
     }
 
-    public OpenSearchClient(ConnectionDetails connectionDetails) {
-        this.connectionDetails = connectionDetails;
-        this.client = new RestClient(connectionDetails);
+    public OpenSearchClient(ConnectionContext connectionContext) {
+        this.connectionContext = connectionContext;
+        this.client = new RestClient(connectionContext);
     }
 
     /*
