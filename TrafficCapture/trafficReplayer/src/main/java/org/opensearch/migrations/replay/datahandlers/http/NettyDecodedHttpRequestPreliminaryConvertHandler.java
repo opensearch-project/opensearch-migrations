@@ -179,11 +179,11 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
     private boolean headerFieldsAreIdentical(HttpRequest request, HttpJsonMessageWithFaultingPayload httpJsonMessage) {
         if (!request.uri().equals(httpJsonMessage.path())
             || !request.method().toString().equals(httpJsonMessage.method())
-            || request.headers().names().size() != httpJsonMessage.headersInternal().strictHeadersMap.size()) {
+            || request.headers().names().size() != httpJsonMessage.headers().strictHeadersMap.size()) {
             return false;
         }
         // Depends on header size check above for correctness
-        for (var headerName : httpJsonMessage.headersInternal().keySet()) {
+        for (var headerName : httpJsonMessage.headers().keySet()) {
             if (!headerFieldIsIdentical(headerName, request, httpJsonMessage)) {
                 return false;
             }
@@ -221,7 +221,7 @@ public class NettyDecodedHttpRequestPreliminaryConvertHandler<R> extends Channel
         HttpJsonMessageWithFaultingPayload httpJsonMessage
     ) {
         var originalValue = nullIfEmpty(request.headers().getAll(headerName));
-        var newValue = nullIfEmpty(httpJsonMessage.headersInternal().asStrictMap().get(headerName));
+        var newValue = nullIfEmpty(httpJsonMessage.headers().asStrictMap().get(headerName));
         if (originalValue != null && newValue != null) {
             return originalValue.equals(newValue);
         } else {

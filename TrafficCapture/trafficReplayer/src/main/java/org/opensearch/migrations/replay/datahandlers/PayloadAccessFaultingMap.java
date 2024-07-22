@@ -7,7 +7,6 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.Set;
 
-import org.opensearch.migrations.IHttpMessage;
 import org.opensearch.migrations.replay.datahandlers.http.StrictCaseInsensitiveHttpHeadersMap;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
@@ -29,8 +28,8 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
     private Object onlyValue;
 
     public PayloadAccessFaultingMap(StrictCaseInsensitiveHttpHeadersMap headers) {
-        isJson = Optional.ofNullable(headers.get(IHttpMessage.CONTENT_TYPE))
-            .map(list -> list.stream().anyMatch(s -> s.startsWith(IHttpMessage.APPLICATION_JSON)))
+        isJson = Optional.ofNullable(headers.get("content-type"))
+            .map(list -> list.stream().anyMatch(s -> s.startsWith("application/json")))
             .orElse(false);
     }
 

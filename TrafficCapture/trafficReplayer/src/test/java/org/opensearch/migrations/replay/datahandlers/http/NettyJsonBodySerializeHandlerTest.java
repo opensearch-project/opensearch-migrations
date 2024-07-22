@@ -9,7 +9,6 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-import org.opensearch.migrations.IHttpMessage;
 import org.opensearch.migrations.replay.GenerateRandomNestedJsonObject;
 import org.opensearch.migrations.replay.ReplayUtils;
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
@@ -29,7 +28,7 @@ public class NettyJsonBodySerializeHandlerTest {
         var randomJsonGenerator = new GenerateRandomNestedJsonObject();
         var randomJson = randomJsonGenerator.makeRandomJsonObject(new Random(2), 2, 1);
         var headers = new StrictCaseInsensitiveHttpHeadersMap();
-        headers.put(IHttpMessage.CONTENT_TYPE, List.of(IHttpMessage.APPLICATION_JSON));
+        headers.put("content-type", List.of("application/json"));
         var fullHttpMessageWithJsonBody = new HttpJsonMessageWithFaultingPayload(headers);
         fullHttpMessageWithJsonBody.setPayloadFaultMap(new PayloadAccessFaultingMap(headers));
         fullHttpMessageWithJsonBody.payload().put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, randomJson);

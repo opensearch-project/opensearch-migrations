@@ -32,6 +32,7 @@ public class SigV4Signer {
     private static final HashSet<String> AUTH_HEADERS_TO_PULL_NO_PAYLOAD;
 
     public static final String AMZ_CONTENT_SHA_256 = "x-amz-content-sha256";
+    public static final String CONTENT_TYPE = "content-type";
 
     static {
         AUTH_HEADERS_TO_PULL_NO_PAYLOAD = new HashSet<>(Set.of("authorization", "x-amz-date", "x-amz-security-token"));
@@ -103,7 +104,7 @@ public class SigV4Signer {
             .protocol(protocol)
             .host(msg.getFirstHeader("host"));
 
-        var contentType = msg.getFirstHeader(IHttpMessage.CONTENT_TYPE);
+        var contentType = msg.getFirstHeader(CONTENT_TYPE);
         if (contentType != null) {
             httpRequestBuilder.appendHeader("Content-Type", contentType);
         }

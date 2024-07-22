@@ -50,7 +50,7 @@ public class NettyJsonContentCompressor extends ChannelInboundHandlerAdapter {
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         if (msg instanceof HttpJsonMessageWithFaultingPayload) {
-            var contentEncoding = ((HttpJsonMessageWithFaultingPayload) msg).headersInternal()
+            var contentEncoding = ((HttpJsonMessageWithFaultingPayload) msg).headers()
                 .asStrictMap()
                 .get("content-encoding");
             if (contentEncoding != null && contentEncoding.contains(CONTENT_ENCODING_GZIP_VALUE)) {

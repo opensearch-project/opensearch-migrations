@@ -45,7 +45,6 @@ public class SigV4SigningTransformationTest {
 
     @ParameterizedTest
     @MethodSource("testCases")
-    @SuppressWarnings("unchecked")
     public void testSignatureProperlyApplied(String method, String path, String payload) {
         // Setup
         var mockCredentialsProvider = new MockCredentialsProvider();

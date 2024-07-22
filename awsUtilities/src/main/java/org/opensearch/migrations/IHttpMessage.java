@@ -4,9 +4,6 @@ import java.util.List;
 import java.util.Map;
 
 public interface IHttpMessage {
-    String APPLICATION_JSON = "application/json";
-    String CONTENT_TYPE = "content-type";
-
     String method();
 
     String path();
