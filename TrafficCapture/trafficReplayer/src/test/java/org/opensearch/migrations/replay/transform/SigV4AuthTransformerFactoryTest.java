@@ -10,9 +10,9 @@ import java.util.stream.IntStream;
 import org.junit.jupiter.api.Test;
 
 import org.opensearch.migrations.replay.TestUtils;
-import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.util.ResourceLeakDetector;
