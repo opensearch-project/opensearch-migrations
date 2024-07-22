@@ -22,7 +22,8 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.TransformedPackets;
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
@@ -121,17 +122,18 @@ public abstract class TrafficReplayerCore {
                     .log()
             );
 
-            var allWorkFinishedForTransactionFuture = sendRequestAfterGoingThroughWorkQueue(ctx, request, requestKey)
-                .getDeferredFutureThroughHandle(
-                    (arr, httpRequestException) -> finishedAccumulatingResponseFuture.thenCompose(
-                        rrPair -> TextTrackedFuture.completedFuture(
-                            handleCompletedTransaction(ctx, rrPair, arr, httpRequestException),
-                            () -> "Synchronously committed results"
+            var allWorkFinishedForTransactionFuture =
+                sendRequestAfterGoingThroughWorkQueue(ctx, request, requestKey, finishedAccumulatingResponseFuture)
+                    .getDeferredFutureThroughHandle(
+                        (arr, httpRequestException) -> finishedAccumulatingResponseFuture.thenCompose(
+                            rrPair -> TextTrackedFuture.completedFuture(
+                                handleCompletedTransaction(ctx, rrPair, arr, httpRequestException),
+                                () -> "Synchronously committed results"
+                            ),
+                            () -> "logging summary"
                         ),
-                        () -> "logging summary"
-                    ),
-                    () -> "waiting for accumulation to combine with target response"
-                );
+                        () -> "waiting for accumulation to combine with target response"
+                    );
 
             assert !allWorkFinishedForTransactionFuture.future.isDone();
             log.trace("Adding " + requestKey + " to targetTransactionInProgressMap");
@@ -143,16 +145,16 @@ public abstract class TrafficReplayerCore {
         private TrackedFuture<String, TransformedTargetRequestAndResponse> sendRequestAfterGoingThroughWorkQueue(
             IReplayContexts.IReplayerHttpTransactionContext ctx,
             HttpMessageAndTimestamp request,
-            UniqueReplayerRequestKey requestKey
-        ) {
+            UniqueReplayerRequestKey requestKey,
+            TextTrackedFuture<RequestResponsePacketPair> finishedAccumulatingResponseFuture) {
             var workDequeuedByLimiterFuture = new TextTrackedFuture<TrafficStreamLimiter.WorkItem>(
                 () -> "waiting for " + ctx + " to be queued and run through TrafficStreamLimiter"
             );
             var wi = liveTrafficStreamLimiter.queueWork(1, ctx, workDequeuedByLimiterFuture.future::complete);
             var httpSentRequestFuture = workDequeuedByLimiterFuture.thenCompose(
-                ignored -> transformAndSendRequest(replayEngine, request, ctx),
-                () -> "Waiting to get response from target"
-            )
+                    ignored -> transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx),
+                    () -> "Waiting to get response from target"
+                )
                 .whenComplete(
                     (v, t) -> liveTrafficStreamLimiter.doneProcessing(wi),
                     () -> "releasing work item for the traffic limiter"
@@ -323,7 +325,7 @@ public abstract class TrafficReplayerCore {
             requestResponseTuple = new SourceTargetCaptureTuple(
                 tupleHandlingContext,
                 rrPair,
-                new TransformedPackets(),
+                new ByteBufList(),
                 new ArrayList<>(),
                 HttpRequestTransformationStatus.ERROR,
                 t,
@@ -346,26 +348,65 @@ public abstract class TrafficReplayerCore {
     public TrackedFuture<String, TransformedTargetRequestAndResponse> transformAndSendRequest(
         ReplayEngine replayEngine,
         HttpMessageAndTimestamp request,
+        TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
         IReplayContexts.IReplayerHttpTransactionContext ctx
     ) {
         return transformAndSendRequest(
             inputRequestTransformerFactory,
             replayEngine,
+            finishedAccumulatingResponseFuture,
             ctx,
             request.getFirstPacketTimestamp(),
             request.getLastPacketTimestamp(),
-            request.packetBytes::stream
-        );
+            request.packetBytes::stream);
+    }
+
+    public static RequestSenderOrchestrator.RepeatedAggregatedRawResponseVisitor<AggregatedRawResponse>
+    getNoRetryCheckVisitor() {
+        return (aggResponse, t) ->
+            TextTrackedFuture.completedFuture(
+                new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+                    RequestSenderOrchestrator.RetryDirective.DONE, aggResponse),
+                () -> "Returning a the transformed result in whatever state it was in w/ no retries");
+    }
+
+    static RequestSenderOrchestrator.RepeatedAggregatedRawResponseVisitor<TransformedTargetRequestAndResponse>
+    getRetryCheckVisitor(TransformedOutputAndResult<ByteBufList> transformedResult,
+                         TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture) {
+        return (aggResponse, t) -> {
+            if (t != null) {
+                return TextTrackedFuture.completedFuture(
+                    new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+                        RequestSenderOrchestrator.RetryDirective.RETRY,
+                        new TransformedTargetRequestAndResponse(
+                            transformedResult.transformedOutput,
+                            transformedResult.transformationStatus,
+                            t
+                        )),
+                    () -> "Returning a future to retry a failed exception");
+            } else {
+                return TextTrackedFuture.completedFuture(
+                    new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+                        RequestSenderOrchestrator.RetryDirective.DONE,
+                        new TransformedTargetRequestAndResponse(
+                            transformedResult.transformedOutput,
+                            aggResponse,
+                            transformedResult.transformationStatus,
+                            aggResponse.error
+                        )),
+                    () -> "Returning a future to retry a failed exception");
+            }
+        };
     }
 
     public static TrackedFuture<String, TransformedTargetRequestAndResponse> transformAndSendRequest(
         PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
         ReplayEngine replayEngine,
+        TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
         IReplayContexts.IReplayerHttpTransactionContext ctx,
         @NonNull Instant start,
         @NonNull Instant end,
-        Supplier<Stream<byte[]>> packetsSupplier
-    ) {
+        Supplier<Stream<byte[]>> packetsSupplier) {
         try {
             var transformationCompleteFuture = replayEngine.scheduleTransformationWork(
                 ctx,
@@ -380,34 +421,26 @@ public abstract class TrafficReplayerCore {
             // It might be safer to chain this work directly inside the scheduleWork call above so that the
             // read buffer horizons aren't set after the transformation work finishes, but after the packets
             // are fully handled
+            ;
             return transformationCompleteFuture.thenCompose(
-                transformedResult -> replayEngine.scheduleRequest(
+                transformedRequest -> replayEngine.scheduleRequest(
                     ctx,
                     start,
                     end,
-                    transformedResult.transformedOutput.size(),
-                    transformedResult.transformedOutput.streamRetained()
+                    transformedRequest.transformedOutput.size(),
+                    transformedRequest.transformedOutput,
+                    getRetryCheckVisitor(transformedRequest, finishedAccumulatingResponseFuture)
                 )
                     .map(
                         future -> future.thenApply(
                             t -> new TransformedTargetRequestAndResponse(
-                                transformedResult.transformedOutput,
+                                transformedRequest.transformedOutput,
                                 t,
-                                transformedResult.transformationStatus,
+                                transformedRequest.transformationStatus,
                                 t.error
                             )
                         ),
                         () -> "(if applicable) packaging transformed result into a completed TransformedTargetRequestAndResponse object"
-                    )
-                    .map(
-                        future -> future.exceptionally(
-                            t -> new TransformedTargetRequestAndResponse(
-                                transformedResult.transformedOutput,
-                                transformedResult.transformationStatus,
-                                t
-                            )
-                        ),
-                        () -> "(if applicable) packaging transformed result into a failed TransformedTargetRequestAndResponse object"
                     ),
                 () -> "transitioning transformed packets onto the wire"
             )

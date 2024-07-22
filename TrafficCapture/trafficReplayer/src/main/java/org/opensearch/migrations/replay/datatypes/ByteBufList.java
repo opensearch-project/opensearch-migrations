@@ -7,9 +7,15 @@ import java.util.stream.Stream;
 import io.netty.buffer.ByteBuf;
 import io.netty.util.ReferenceCounted;
 
-public class TransformedPackets implements AutoCloseable {
+public class ByteBufList implements AutoCloseable {
 
     ArrayList<ByteBuf> data = new ArrayList<>();
+
+    public ByteBufList(ByteBuf ...items) {
+        for (var i : items) {
+            add(i);
+        }
+    }
 
     public boolean add(ByteBuf nextRequestPacket) {
         return data.add(nextRequestPacket.retainedDuplicate());
@@ -58,7 +64,7 @@ public class TransformedPackets implements AutoCloseable {
         if (isClosed()) {
             return "CLOSED";
         }
-        return new StringJoiner(", ", TransformedPackets.class.getSimpleName() + "[", "]").add("data=" + data)
+        return new StringJoiner(", ", ByteBufList.class.getSimpleName() + "[", "]").add("data=" + data)
             .toString();
     }
 }

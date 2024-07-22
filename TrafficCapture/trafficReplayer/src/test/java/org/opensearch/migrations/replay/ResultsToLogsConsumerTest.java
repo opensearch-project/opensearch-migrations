@@ -24,7 +24,7 @@ import org.junit.jupiter.api.parallel.ResourceLock;
 
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
-import org.opensearch.migrations.replay.datatypes.TransformedPackets;
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
@@ -291,7 +291,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         var rawResponseData = EXPECTED_RESPONSE_STRING.getBytes(StandardCharsets.UTF_8);
         sourcePair.addResponseData(Instant.EPOCH, rawResponseData);
 
-        var targetRequest = new TransformedPackets();
+        var targetRequest = new ByteBufList();
         targetRequest.add(Unpooled.wrappedBuffer(rawRequestData));
         var targetResponse = new ArrayList<byte[]>();
         targetResponse.add(rawResponseData);

@@ -9,7 +9,7 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.replay.datatypes.TransformedPackets;
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.util.NettyUtils;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
@@ -66,7 +66,7 @@ public class ParsedHttpMessagesAsDicts {
 
     private static Optional<Map<String, Object>> getTargetRequestOp(SourceTargetCaptureTuple tuple) {
         return Optional.ofNullable(tuple.targetRequestData)
-            .map(TransformedPackets::asByteArrayStream)
+            .map(ByteBufList::asByteArrayStream)
             .map(d -> convertRequest(tuple.context, d.collect(Collectors.toList())));
     }
 

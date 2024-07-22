@@ -6,7 +6,7 @@ import java.util.Optional;
 import java.util.StringJoiner;
 
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
-import org.opensearch.migrations.replay.datatypes.TransformedPackets;
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 
@@ -18,7 +18,7 @@ import static org.opensearch.migrations.replay.HttpByteBufFormatter.LF_LINE_DELI
 @Slf4j
 public class SourceTargetCaptureTuple implements AutoCloseable {
     public final RequestResponsePacketPair sourcePair;
-    public final TransformedPackets targetRequestData;
+    public final ByteBufList targetRequestData;
     public final List<byte[]> targetResponseData;
     public final HttpRequestTransformationStatus transformationStatus;
     public final Throwable errorCause;
@@ -28,7 +28,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
     public SourceTargetCaptureTuple(
         @NonNull IReplayContexts.ITupleHandlingContext tupleHandlingContext,
         RequestResponsePacketPair sourcePair,
-        TransformedPackets targetRequestData,
+        ByteBufList targetRequestData,
         List<byte[]> targetResponseData,
         HttpRequestTransformationStatus transformationStatus,
         Throwable errorCause,
@@ -45,7 +45,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
 
     @Override
     public void close() {
-        Optional.ofNullable(targetRequestData).ifPresent(TransformedPackets::close);
+        Optional.ofNullable(targetRequestData).ifPresent(ByteBufList::close);
     }
 
     @Override

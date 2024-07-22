@@ -6,21 +6,21 @@ import java.util.AbstractMap;
 import java.util.ArrayList;
 
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
-import org.opensearch.migrations.replay.datatypes.TransformedPackets;
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
 
 import lombok.Getter;
 import lombok.Setter;
 
 public class TransformedTargetRequestAndResponse extends AggregatedRawResponse {
 
-    protected final TransformedPackets requestPackets;
+    protected final ByteBufList requestPackets;
 
     @Getter
     @Setter
     private HttpRequestTransformationStatus transformationStatus;
 
     public TransformedTargetRequestAndResponse(
-        TransformedPackets requestPackets,
+        ByteBufList requestPackets,
         int responseSizeInBytes,
         Duration responseDuration,
         ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>> responsePackets,
@@ -33,7 +33,7 @@ public class TransformedTargetRequestAndResponse extends AggregatedRawResponse {
     }
 
     public TransformedTargetRequestAndResponse(
-        TransformedPackets requestPackets,
+        ByteBufList requestPackets,
         HttpRequestTransformationStatus transformationStatus,
         Throwable exception
     ) {
@@ -43,7 +43,7 @@ public class TransformedTargetRequestAndResponse extends AggregatedRawResponse {
     }
 
     public TransformedTargetRequestAndResponse(
-        TransformedPackets requestPackets,
+        ByteBufList requestPackets,
         AggregatedRawResponse o,
         HttpRequestTransformationStatus status,
         Throwable exception
