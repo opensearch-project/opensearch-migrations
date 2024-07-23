@@ -297,7 +297,21 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
         final var resultDoc = objectMapper.readTree(response.getPayloadStream());
         var resultStr = resultDoc.path(RESULT_OPENSSEARCH_FIELD_NAME).textValue();
-        return DocumentModificationResult.parse(resultStr);
+        try {
+            return DocumentModificationResult.parse(resultStr);
+        } catch (Exception e) {
+            log.atWarn().setCause(e).setMessage(() -> "Caught exception while parsing the result").log();
+            log.atWarn().setMessage(() -> {
+                        try {
+                            return new String(response.getPayloadBytes(), StandardCharsets.UTF_8);
+                        } catch (Exception e2) {
+                            return "while trying to display response bytes, caught exception: " + e2;
+                        }
+                    }
+                )
+                .log();
+            throw e;
+        }
     }
 
     @Override
