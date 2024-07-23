@@ -9,7 +9,7 @@ public class RemovingAuthTransformerFactory implements IAuthTransformerFactory {
     private RemovingAuthTransformerFactory() {}
 
     @Override
-    public IAuthTransformer getAuthTransformer(IHttpMessage httpMessage) {
+    public IAuthTransformer getAuthTransformer(HttpJsonMessageWithFaultingPayload httpMessage) {
         return RemovingAuthTransformer.instance;
     }
 
