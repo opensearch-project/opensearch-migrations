@@ -12,6 +12,9 @@ Click = "*"
 cerberus = "*"
 awscli = "*"
 
+# Version lock with Dockerfile build from source
+yappi = "1.6.0"
+
 [dev-packages]
 pytest = "*"
 pytest-mock = "*"
@@ -20,4 +23,4 @@ coverage = "*"
 moto = "*"
 
 [requires]
-python_version = "3.10"
+python_version = "3.11"
