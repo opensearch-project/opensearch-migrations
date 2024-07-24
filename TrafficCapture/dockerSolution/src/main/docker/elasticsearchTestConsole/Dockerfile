@@ -40,6 +40,8 @@ ENV PIPENV_DEFAULT_PYTHON_VERSION=3.11
 ENV PIPENV_MAX_DEPTH=1
 
 RUN python3.11 -m pip install pipenv
+WORKDIR /
+RUN python3.11 -m venv .venv
 
 # Install HDF5 and YAPPI Manually for Opensearch Benchmark compatibility with ARM
 ARG HDF5_VERSION=1.14.4

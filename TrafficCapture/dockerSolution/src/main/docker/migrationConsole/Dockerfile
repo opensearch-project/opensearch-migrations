@@ -11,8 +11,8 @@ RUN mkdir /root/kafka-tools/aws
 
 WORKDIR /root/kafka-tools
 # Get kafka distribution and unpack to 'kafka'
-RUN wget -qO- https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz | tar --transform 's!^[^/]*!kafka!' -xvz
-RUN wget -q -O kafka/libs/msk-iam-auth.jar https://github.com/aws/aws-msk-iam-auth/releases/download/v2.0.3/aws-msk-iam-auth-2.0.3-all.jar
+RUN wget -O- https://archive.apache.org/dist/kafka/3.6.0/kafka_2.13-3.6.0.tgz | tar --transform 's!^[^/]*!kafka!' -xvz
+RUN wget -O kafka/libs/msk-iam-auth.jar https://github.com/aws/aws-msk-iam-auth/releases/download/v2.0.3/aws-msk-iam-auth-2.0.3-all.jar
 WORKDIR /root
 
 # Add Traffic Replayer jars for running KafkaPrinter from this container
@@ -52,8 +52,11 @@ RUN pipenv install --deploy --ignore-pipfile
 
 WORKDIR /root
 
-# Ensure bash completion is installed
+# Console setup bash completion and venv for interactive access
 RUN dnf install -y bash-completion
+RUN chmod +x /etc/profile.d/bash_completion.sh && \
+    echo 'source /etc/profile.d/bash_completion.sh' >> ~/.bashrc
+RUN echo 'source /.venv/bin/activate' >> ~/.bashrc
 
 CMD /root/loadServicesFromParameterStore.sh && tail -f /dev/null
 
