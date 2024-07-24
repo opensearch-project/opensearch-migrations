@@ -22,6 +22,24 @@ dependencies {
     implementation group: 'com.beust', name: 'jcommander'
     implementation group: 'org.slf4j', name: 'slf4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+
+    testImplementation testFixtures(project(path: ':RFS'))
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
+    testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
+    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-params'
+    testImplementation group: 'org.mockito', name: 'mockito-core'
+    testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter'
+
+    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
+
+    // Integration tests
+    testImplementation testFixtures(project(path: ':testHelperFixtures'))
+    testImplementation testFixtures(project(path: ':coreUtilities'))
+    testImplementation group: 'org.testcontainers', name: 'testcontainers'
+    testImplementation group: 'org.hamcrest', name: 'hamcrest'
+    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
+    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
 }
 
 application {
@@ -29,5 +47,23 @@ application {
 }
 
 test {
-    useJUnitPlatform()
+    useJUnitPlatform {
+        excludeTags 'longTest'
+    }
+
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+        showExceptions true
+        showCauses true
+        showStackTraces true
+        showStandardStreams = true
+    }
+}
+
+task slowTest(type: Test) {
+    // include longTest
+    jacoco {
+        enabled = true
+    }
 }

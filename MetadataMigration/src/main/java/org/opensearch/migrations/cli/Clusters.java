@@ -14,16 +14,35 @@ public class Clusters {
     }
 
     public String print() {
-        (new Printable().Builder()).level(0).build();
-
-        final var sb = new StringBuilder("Clusters");
-        return sb.toString();
+        return new Printable.Builder()
+            .level(1)
+            .section("Clusters")
+            .build()
+            .prettyPrint();
     }
 
-    @Builder
+    @Builder(builderClassName = "Builder")
     public static class Printable {
+        private static final int LEVEL_SPACER_AMOUNT = 3; 
+        private static final String SPACER = " "; 
+        private static final String SECTION_ENDING = ":"; 
+
         public int level;
         public String section;
         public List<String> entries;
+
+        public String prettyPrint() {
+            var topIntentLevel = SPACER.repeat(level * LEVEL_SPACER_AMOUNT);
+            var sb = new StringBuilder();
+            sb.append(topIntentLevel + section + SECTION_ENDING + System.lineSeparator());
+
+            var lowerIntentLevel = SPACER.repeat((level + 1) * LEVEL_SPACER_AMOUNT);
+            entries.forEach(entry -> {
+                sb.append(lowerIntentLevel + entry + System.lineSeparator());
+            });
+
+
+            return sb.toString();
+        }
     }
 }
