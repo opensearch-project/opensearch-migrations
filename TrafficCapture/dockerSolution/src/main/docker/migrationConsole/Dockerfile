@@ -1,5 +1,11 @@
 FROM migrations/elasticsearch_client_test_console:latest
 
+# Define the virtual environment path
+ENV WORKON_HOME=/
+ENV PIPENV_CUSTOM_VENV_NAME=.venv
+ENV PIPENV_DEFAULT_PYTHON_VERSION=3.11
+ENV PIPENV_MAX_DEPTH=1
+
 RUN mkdir /root/kafka-tools
 RUN mkdir /root/kafka-tools/aws
 
@@ -33,53 +39,16 @@ RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 COPY loadServicesFromParameterStore.sh /root/
 RUN chmod ug+x /root/loadServicesFromParameterStore.sh
 
-# Install HDF5 Manually for Opensearch Benchmark compatibility
-ARG PYTHON_VERSION=3.11
-ARG HDF5_VERSION=1.14.4
-ARG YAPPI_VERSION=1.6.0
-RUN dnf -y install pkg-config \
-        python${PYTHON_VERSION} \
-        git \
-        gcc \
-        gcc-c++ \
-        make \
-        zlib-devel \
-        openssl-devel \
-        diffutils \
-        hostname \
-        tar \
-        wget && \
-    dnf clean all && \
-    rm -rf /var/cache/dnf
-RUN wget -q https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5_${HDF5_VERSION}.tar.gz -O /tmp/hdf5.tar.gz && \
-    mkdir /tmp/hdf5 && \
-    tar -xzf /tmp/hdf5.tar.gz -C /tmp/hdf5 --strip-components=1 && \
-    rm /tmp/hdf5.tar.gz
-WORKDIR /tmp/hdf5
-RUN CFLAGS="-w" ./configure --prefix=/usr/local --disable-tests --disable-tools && \
-    make -j$(nproc) && \
-    make install -j$(nproc) && \
-    rm -rf /tmp/hdf5
-ENV HDF5_DIR=/usr/local
-RUN python${PYTHON_VERSION} -m pip install --no-cache-dir h5py wheel
-RUN wget -q https://github.com/sumerc/yappi/archive/refs/tags/${YAPPI_VERSION}.tar.gz -O /tmp/yappi.tar.gz && \
-    mkdir /tmp/yappi && \
-    tar -xzf /tmp/yappi.tar.gz -C /tmp/yappi --strip-components=1 && \
-    cd /tmp/yappi && \
-    python${PYTHON_VERSION} -m pip install . && \
-    python${PYTHON_VERSION} -m pip install --no-cache-dir yappi && \
-    rm -rf /tmp/yappi /tmp/yappi.tar.gz
 WORKDIR /root
 COPY lib /root/lib
 WORKDIR /root/lib/console_link
-RUN pipenv install --system --deploy --ignore-pipfile --python /usr/bin/python3.11
+RUN pipenv install --deploy --ignore-pipfile
 WORKDIR /root/lib/integ_test
-RUN pipenv install --system --deploy --ignore-pipfile --python /usr/bin/python3.11
-
+RUN pipenv install --deploy --ignore-pipfile
 
 COPY console_api /root/console_api
 WORKDIR /root/console_api
-RUN pipenv install --system --deploy --ignore-pipfile --python /usr/bin/python3.11
+RUN pipenv install --deploy --ignore-pipfile
 
 WORKDIR /root
 
