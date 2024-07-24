@@ -274,7 +274,7 @@ Unit tests can be run from this current `console_link/` by first installing depe
 
 ```shell
 pipenv install --dev
-pipenv run python -m coverage run -m pytest
+pipenv run coverage run -m pytest
 ```
 
 ### Coverage
@@ -282,11 +282,11 @@ pipenv run python -m coverage run -m pytest
 _Code coverage_ metrics can be generated after a unit-test run. A report can either be printed on the command line:
 
 ```shell
-pipenv run python -m coverage report
+pipenv run coverage report
 ```
 
 or generated as HTML:
 
 ```shell
-pipenv run python -m coverage html
+pipenv run coverage html
 ```
