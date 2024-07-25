@@ -5,15 +5,11 @@ name = "pypi"
 
 [packages]
 requests = ">=2.32.3"
-opensearch-benchmark = "*"
 boto3 = "*"
 pyyaml = "*"
 Click = "*"
 cerberus = "*"
 awscli = "*"
-
-# Version lock with Dockerfile build from source
-yappi = "1.6.0"
 
 [dev-packages]
 pytest = "*"

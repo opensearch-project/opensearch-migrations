@@ -42,21 +42,23 @@ RUN chmod ug+x /root/loadServicesFromParameterStore.sh
 WORKDIR /root
 COPY lib /root/lib
 WORKDIR /root/lib/console_link
-RUN pipenv install --deploy --ignore-pipfile
+RUN pipenv install --deploy
 WORKDIR /root/lib/integ_test
-RUN pipenv install --deploy --ignore-pipfile
+RUN pipenv install --deploy
 
 COPY console_api /root/console_api
 WORKDIR /root/console_api
-RUN pipenv install --deploy --ignore-pipfile
+RUN pipenv install --deploy
 
 WORKDIR /root
 
 # Console setup bash completion and venv for interactive access
+RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh
 RUN dnf install -y bash-completion
-RUN chmod +x /etc/profile.d/bash_completion.sh && \
-    echo 'source /etc/profile.d/bash_completion.sh' >> ~/.bashrc
-RUN echo 'source /.venv/bin/activate' >> ~/.bashrc
+RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
+    echo '. /etc/profile.d/venv.sh' >> ~/.bashrc
+# Set ENV to control startup script in /bin/sh mode
+ENV ENV=/root/.bashrc
 
 CMD /root/loadServicesFromParameterStore.sh && tail -f /dev/null
 

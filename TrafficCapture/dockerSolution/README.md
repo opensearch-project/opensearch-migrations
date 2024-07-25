@@ -110,3 +110,12 @@ A problem occurred evaluating project ':trafficCaptureProxyServer'.
          > No locally installed toolchains match (see https://docs.gradle.org/8.0.2/userguide/toolchains.html#sec:auto_detection) and toolchain download repositories have not been configured (see https://docs.gradle.org/8.0.2/userguide/toolchains.html#sub:download_repositories).
 
 ```
+
+## Development
+
+### Updating Pipfile
+
+When updating Pipfiles, run the following command to update all Pipfile.lock in subdirectories
+```bash
+  find . -type f -name Pipfile -execdir bash -c 'PIPENV_IGNORE_VIRTUALENVS=true pipenv lock --python 3.11' \;
+```
