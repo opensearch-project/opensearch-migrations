@@ -50,7 +50,7 @@ def call(Map config = [:]) {
             stage('Build') {
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
-                        sh 'sudo ./gradlew clean build'
+                        sh 'sudo ./gradlew clean build --no-daemon'
                     }
                 }
             }
