@@ -341,7 +341,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 protocol: Protocol.TCP
             }]
             imageCommand = ['/bin/sh', '-c',
-                '/root/loadServicesFromParameterStore.sh && python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt'
+                '/root/loadServicesFromParameterStore.sh && pipenv run python /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt'
             ]
 
             const defaultAllowedHosts = 'localhost'
