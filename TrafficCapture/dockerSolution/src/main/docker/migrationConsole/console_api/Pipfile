@@ -17,4 +17,4 @@ coverage = "*"
 moto = {version = "*", extras = ["sts"]}
 
 [requires]
-python_version = "3.11"
+python_version = "3.10"
