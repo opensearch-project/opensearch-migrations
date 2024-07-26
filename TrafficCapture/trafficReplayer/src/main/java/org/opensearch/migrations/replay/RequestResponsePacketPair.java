@@ -8,6 +8,7 @@ import java.util.List;
 
 import com.google.common.base.Objects;
 
+import lombok.Getter;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
@@ -19,7 +20,7 @@ import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class RequestResponsePacketPair {
+public class RequestResponsePacketPair implements IRequestResponsePacketPair {
 
     public enum ReconstructionStatus {
         COMPLETE,
@@ -27,7 +28,9 @@ public class RequestResponsePacketPair {
         CLOSED_PREMATURELY
     }
 
+    @Getter
     HttpMessageAndTimestamp requestData;
+    @Getter
     HttpMessageAndTimestamp responseData;
     @NonNull
     final ISourceTrafficChannelKey firstTrafficStreamKeyForRequest;

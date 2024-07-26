@@ -19,6 +19,9 @@ import javax.net.ssl.SSLException;
 
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.http.retries.DefaultRetry;
+import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
+import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
@@ -95,7 +98,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             jsonTransformer,
             clientConnectionPool,
             trafficStreamLimiter,
-            workTracker
+            workTracker,
+            new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry())
         );
         allRemainingWorkFutureOrShutdownSignalRef = new AtomicReference<>();
         shutdownReasonRef = new AtomicReference<>();
@@ -269,14 +273,14 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         var workTracker = (IStreamableWorkTracker<Void>) requestWorkTracker;
         Map.Entry<
             UniqueReplayerRequestKey,
-            TrackedFuture<String, TransformedTargetRequestAndResponse>>[] allRemainingWorkArray = workTracker
+            TrackedFuture<String, TransformedTargetRequestAndResponseList>>[] allRemainingWorkArray = workTracker
                 .getRemainingItems()
                 .toArray(Map.Entry[]::new);
         writeStatusLogsForRemainingWork(logLevel, allRemainingWorkArray);
 
         // remember, this block is ONLY for the leftover items. Lots of other items have been processed
         // and were removed from the live map (hopefully)
-        TrackedFuture<String, TransformedTargetRequestAndResponse>[] allCompletableFuturesArray = Arrays.stream(
+        TrackedFuture<String, TransformedTargetRequestAndResponseList>[] allCompletableFuturesArray = Arrays.stream(
             allRemainingWorkArray
         ).map(Map.Entry::getValue).toArray(TrackedFuture[]::new);
         var allWorkFuture = TextTrackedFuture.allOf(
@@ -330,7 +334,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Level logLevel,
         Map.Entry<
             UniqueReplayerRequestKey,
-            TrackedFuture<String, TransformedTargetRequestAndResponse>>[] allRemainingWorkArray
+            TrackedFuture<String, TransformedTargetRequestAndResponseList>>[] allRemainingWorkArray
     ) {
         log.atLevel(logLevel).log("All remaining work to wait on " + allRemainingWorkArray.length);
         if (log.isInfoEnabled()) {
@@ -353,8 +357,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     static String formatWorkItem(TrackedFuture<String, ?> cf) {
         try {
             var resultValue = cf.get();
-            if (resultValue instanceof TransformedTargetRequestAndResponse) {
-                return "" + ((TransformedTargetRequestAndResponse) resultValue).getTransformationStatus();
+            if (resultValue instanceof TransformedTargetRequestAndResponseList) {
+                return "" + ((TransformedTargetRequestAndResponseList) resultValue).getTransformationStatus();
             }
             return null;
         } catch (InterruptedException e) {

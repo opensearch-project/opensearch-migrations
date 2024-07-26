@@ -2,11 +2,9 @@ package org.opensearch.migrations.replay;
 
 import java.io.EOFException;
 import java.net.URI;
-import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -25,6 +23,9 @@ import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
+import org.opensearch.migrations.replay.http.retries.RequestRetryEvaluator;
+import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
@@ -63,6 +64,7 @@ public abstract class TrafficReplayerCore {
     protected final AtomicInteger exceptionRequestCount;
     public final IRootReplayerContext topLevelContext;
     protected final IWorkTracker<Void> requestWorkTracker;
+    protected final IRetryVisitorFactory retryVisitorFactory;
 
     protected final AtomicBoolean stopReadingRef;
     protected final AtomicReference<CompletableFuture<List<ITrafficStreamWithKey>>> nextChunkFutureRef;
@@ -74,9 +76,10 @@ public abstract class TrafficReplayerCore {
         IJsonTransformer jsonTransformer,
         ClientConnectionPool clientConnectionPool,
         TrafficStreamLimiter trafficStreamLimiter,
-        IWorkTracker<Void> requestWorkTracker
+        IWorkTracker<Void> requestWorkTracker, IRetryVisitorFactory retryVisitorFactory
     ) {
         this.topLevelContext = context;
+        this.retryVisitorFactory = retryVisitorFactory;
         if (serverUri.getPort() < 0) {
             throw new IllegalArgumentException("Port not present for URI: " + serverUri);
         }
@@ -142,7 +145,10 @@ public abstract class TrafficReplayerCore {
             return finishedAccumulatingResponseFuture.future::complete;
         }
 
-        private TrackedFuture<String, TransformedTargetRequestAndResponse> sendRequestAfterGoingThroughWorkQueue(
+        /**
+         * @returns @see #transformAndSendRequest(PacketToTransformingHttpHandlerFactory, ReplayEngine, TrackedFuture, IReplayContexts.IReplayerHttpTransactionContext, Instant, Instant, Supplier)
+         */
+        private TrackedFuture<String, TransformedTargetRequestAndResponseList> sendRequestAfterGoingThroughWorkQueue(
             IReplayContexts.IReplayerHttpTransactionContext ctx,
             HttpMessageAndTimestamp request,
             UniqueReplayerRequestKey requestKey,
@@ -170,7 +176,7 @@ public abstract class TrafficReplayerCore {
         Void handleCompletedTransaction(
             @NonNull IReplayContexts.IReplayerHttpTransactionContext context,
             RequestResponsePacketPair rrPair,
-            TransformedTargetRequestAndResponse summary,
+            TransformedTargetRequestAndResponseList summary,
             Throwable t
         ) {
             try (var httpContext = rrPair.getHttpTransactionContext()) {
@@ -277,12 +283,16 @@ public abstract class TrafficReplayerCore {
             IReplayContexts.ITupleHandlingContext tupleHandlingContext,
             Consumer<SourceTargetCaptureTuple> tupleWriter,
             RequestResponsePacketPair rrPair,
-            TransformedTargetRequestAndResponse summary,
+            TransformedTargetRequestAndResponseList summary,
             Exception t
         ) {
             log.trace("done sending and finalizing data to the packet handler");
 
-            try (var requestResponseTuple = getSourceTargetCaptureTuple(tupleHandlingContext, rrPair, summary, t)) {
+            SourceTargetCaptureTuple requestResponseTuple1;
+            if (t != null) {
+                log.error("Got exception in CompletableFuture callback: ", t);
+            }
+            try (var requestResponseTuple = new SourceTargetCaptureTuple(tupleHandlingContext, rrPair, summary, t)) {
                 log.atDebug()
                     .setMessage("{}")
                     .addArgument(() -> "Source/Target Request/Response tuple: " + requestResponseTuple)
@@ -293,59 +303,13 @@ public abstract class TrafficReplayerCore {
             if (t != null) {
                 throw new CompletionException(t);
             }
-            if (summary.getError() != null) {
-                log.atInfo()
-                    .setCause(summary.getError())
-                    .setMessage("Exception for {}: ")
-                    .addArgument(tupleHandlingContext)
-                    .log();
-                exceptionRequestCount.incrementAndGet();
-            } else if (summary.getTransformationStatus() == HttpRequestTransformationStatus.ERROR) {
-                log.atInfo()
-                    .setCause(summary.getError())
-                    .setMessage("Unknown error transforming {}: ")
-                    .addArgument(tupleHandlingContext)
-                    .log();
-                exceptionRequestCount.incrementAndGet();
-            } else {
-                successfulRequestCount.incrementAndGet();
-            }
         }
     }
 
-    private static SourceTargetCaptureTuple getSourceTargetCaptureTuple(
-        @NonNull IReplayContexts.ITupleHandlingContext tupleHandlingContext,
-        RequestResponsePacketPair rrPair,
-        TransformedTargetRequestAndResponse summary,
-        Exception t
-    ) {
-        SourceTargetCaptureTuple requestResponseTuple;
-        if (t != null) {
-            log.error("Got exception in CompletableFuture callback: ", t);
-            requestResponseTuple = new SourceTargetCaptureTuple(
-                tupleHandlingContext,
-                rrPair,
-                new ByteBufList(),
-                new ArrayList<>(),
-                HttpRequestTransformationStatus.ERROR,
-                t,
-                Duration.ZERO
-            );
-        } else {
-            requestResponseTuple = new SourceTargetCaptureTuple(
-                tupleHandlingContext,
-                rrPair,
-                summary.requestPackets,
-                summary.getReceiptTimeAndResponsePackets().map(Map.Entry::getValue).collect(Collectors.toList()),
-                summary.getTransformationStatus(),
-                summary.getError(),
-                summary.getResponseDuration()
-            );
-        }
-        return requestResponseTuple;
-    }
-
-    public TrackedFuture<String, TransformedTargetRequestAndResponse> transformAndSendRequest(
+    /**
+     * @returns @see #transformAndSendRequest(PacketToTransformingHttpHandlerFactory, ReplayEngine, TrackedFuture, IReplayContexts.IReplayerHttpTransactionContext, Instant, Instant, Supplier)
+     */
+    public TrackedFuture<String, TransformedTargetRequestAndResponseList> transformAndSendRequest(
         ReplayEngine replayEngine,
         HttpMessageAndTimestamp request,
         TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
@@ -361,45 +325,67 @@ public abstract class TrafficReplayerCore {
             request.packetBytes::stream);
     }
 
-    public static RequestSenderOrchestrator.RepeatedAggregatedRawResponseVisitor<AggregatedRawResponse>
-    getNoRetryCheckVisitor() {
-        return (aggResponse, t) ->
-            TextTrackedFuture.completedFuture(
-                new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
-                    RequestSenderOrchestrator.RetryDirective.DONE, aggResponse),
-                () -> "Returning a the transformed result in whatever state it was in w/ no retries");
+    private void logResults(AggregatedRawResponse summary, HttpRequestTransformationStatus transformationStatus,
+                            IReplayContexts.IReplayerHttpTransactionContext context) {
+        if (summary.getError() != null) {
+            log.atInfo()
+                .setCause(summary.getError())
+                .setMessage("Exception for {}: ")
+                .addArgument(context)
+                .log();
+            exceptionRequestCount.incrementAndGet();
+        } else if (transformationStatus == HttpRequestTransformationStatus.ERROR) {
+            log.atInfo()
+                .setCause(summary.getError())
+                .setMessage("Unknown error transforming {}: ")
+                .addArgument(context)
+                .log();
+            exceptionRequestCount.incrementAndGet();
+        } else {
+            successfulRequestCount.incrementAndGet();
+        }
     }
 
-    static RequestSenderOrchestrator.RepeatedAggregatedRawResponseVisitor<TransformedTargetRequestAndResponse>
+    RequestSenderOrchestrator.RepeatedAggregatedRawResponseVisitor<TransformedTargetRequestAndResponseList>
     getRetryCheckVisitor(TransformedOutputAndResult<ByteBufList> transformedResult,
-                         TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture) {
-        return (aggResponse, t) -> {
+                         TrackedFuture<String, ? extends IRequestResponsePacketPair> finishedAccumulatingResponseFuture,
+                         Consumer<AggregatedRawResponse> resultsConsumer) {
+        var perRequestStatefulVisitor =
+            retryVisitorFactory.getRetryCheckVisitor(transformedResult, finishedAccumulatingResponseFuture);
+        return (requestBytes, aggResponse, t) -> {
+            resultsConsumer.accept(aggResponse);
             if (t != null) {
+                assert (t instanceof java.net.ConnectException);
                 return TextTrackedFuture.completedFuture(
                     new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
                         RequestSenderOrchestrator.RetryDirective.RETRY,
-                        new TransformedTargetRequestAndResponse(
-                            transformedResult.transformedOutput,
-                            transformedResult.transformationStatus,
-                            t
-                        )),
-                    () -> "Returning a future to retry a failed exception");
+                        null),
+                    () -> "Returning a future to retry due to a connection exception");
             } else {
-                return TextTrackedFuture.completedFuture(
-                    new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
-                        RequestSenderOrchestrator.RetryDirective.DONE,
-                        new TransformedTargetRequestAndResponse(
-                            transformedResult.transformedOutput,
-                            aggResponse,
-                            transformedResult.transformationStatus,
-                            aggResponse.error
-                        )),
-                    () -> "Returning a future to retry a failed exception");
+                assert (aggResponse != null);
+                return perRequestStatefulVisitor.visit(requestBytes, aggResponse, t);
             }
         };
     }
 
-    public static TrackedFuture<String, TransformedTargetRequestAndResponse> transformAndSendRequest(
+    /**
+     * Take a source request and transform it (on the work thread that we'll also SEND the transformed
+     * request).  If an exception happens during transformation, the returned TrackedFuture will have
+     * an exceptional completion.  The transformed request future is composed with a method that sends
+     * the request and awaits a response.  Specifically, a response that is returned through the visitor
+     * that will retry in case of any exceptional or error (status code) occurrences.<br/><br/>
+     *
+     * If there is an error in calling the replayEngine, that exception is trapped and will be returned
+     * immediately in a TrackedFuture with the Exception.
+     *
+     * @return An exceptional value in the TrackedFuture if the replayEngine calls throw immediately
+     * or if transformation fails.  A completed value of a TransformedTargetRequestAndResponseList,
+     * which may include exceptions within individual request's AggregatedRawResponse.getError() fields
+     * and/or results from the target server.  Notice that exceptions due to renegotiating a connection
+     * will NOT be included as responses since that's independent of the outgoing request (since bytes
+     * hadn't begun to be sent).
+     */
+    public TrackedFuture<String, TransformedTargetRequestAndResponseList> transformAndSendRequest(
         PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
         ReplayEngine replayEngine,
         TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
@@ -408,48 +394,29 @@ public abstract class TrafficReplayerCore {
         @NonNull Instant end,
         Supplier<Stream<byte[]>> packetsSupplier) {
         try {
-            var transformationCompleteFuture = replayEngine.scheduleTransformationWork(
+            var requestReadyFuture = replayEngine.scheduleTransformationWork(
                 ctx,
                 start,
                 () -> transformAllData(inputRequestTransformerFactory.create(ctx), packetsSupplier)
             );
-            log.atDebug()
-                .setMessage(
-                    () -> "finalizeRequest future for transformation of " + ctx + " = " + transformationCompleteFuture
-                )
-                .log();
+            log.atDebug().setMessage(() -> "request transform future for " + ctx + " = " + requestReadyFuture).log();
             // It might be safer to chain this work directly inside the scheduleWork call above so that the
             // read buffer horizons aren't set after the transformation work finishes, but after the packets
             // are fully handled
-            ;
-            return transformationCompleteFuture.thenCompose(
+            return requestReadyFuture.thenCompose(
                 transformedRequest -> replayEngine.scheduleRequest(
                     ctx,
                     start,
                     end,
                     transformedRequest.transformedOutput.size(),
                     transformedRequest.transformedOutput,
-                    getRetryCheckVisitor(transformedRequest, finishedAccumulatingResponseFuture)
-                )
-                    .map(
-                        future -> future.thenApply(
-                            t -> new TransformedTargetRequestAndResponse(
-                                transformedRequest.transformedOutput,
-                                t,
-                                transformedRequest.transformationStatus,
-                                t.error
-                            )
-                        ),
-                        () -> "(if applicable) packaging transformed result into a completed TransformedTargetRequestAndResponse object"
-                    ),
+                    getRetryCheckVisitor(transformedRequest, finishedAccumulatingResponseFuture,
+                        arr->logResults(arr, transformedRequest.transformationStatus, ctx))
+                ),
                 () -> "transitioning transformed packets onto the wire"
-            )
-                .map(
-                    future -> future.exceptionally(t -> new TransformedTargetRequestAndResponse(null, null, t)),
-                    () -> "Checking for exception out of sending data to the target server"
-                );
+            );
         } catch (Exception e) {
-            log.debug("Caught exception in writeToSocket, so failing future");
+            log.debug("Caught exception in transformAndSendRequest, so failing future");
             return TextTrackedFuture.failedFuture(e, () -> "TrafficReplayer.writeToSocketAndClose");
         }
     }

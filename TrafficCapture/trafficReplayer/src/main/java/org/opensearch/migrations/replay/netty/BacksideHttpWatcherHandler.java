@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay.netty;
 
 import java.util.function.Consumer;
 
+import io.netty.handler.codec.http.HttpResponse;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 
 import io.netty.channel.ChannelHandlerContext;
@@ -24,9 +25,11 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Http
     }
 
     @Override
-    protected void channelRead0(ChannelHandlerContext ctx, HttpObject msg) throws Exception {
+    protected void channelRead0(ChannelHandlerContext ctx, HttpObject msg) {
         if (msg instanceof LastHttpContent) {
             triggerResponseCallbackAndRemoveCallback();
+        } else if (msg instanceof HttpResponse) {
+            aggregatedRawResponseBuilder.addHttpParsedResponseObject((HttpResponse) msg);
         }
     }
 

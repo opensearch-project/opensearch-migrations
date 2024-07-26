@@ -1,10 +1,13 @@
 package org.opensearch.migrations.replay.datatypes;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.StringJoiner;
 import java.util.stream.Stream;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.CompositeByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.util.ReferenceCounted;
 
 public class ByteBufList implements AutoCloseable {
@@ -47,6 +50,16 @@ public class ByteBufList implements AutoCloseable {
             bb.readBytes(bArr);
             return bArr;
         });
+    }
+
+    public CompositeByteBuf asCompositeByteBufRetained() {
+        return asCompositeByteBufRetained(data.stream());
+    }
+
+    public static CompositeByteBuf asCompositeByteBufRetained(Stream<ByteBuf> byteBufs) {
+        var compositeByteBuf = Unpooled.compositeBuffer();
+        byteBufs.forEach(byteBuf -> compositeByteBuf.addComponent(true, byteBuf));
+        return compositeByteBuf;
     }
 
     @Override

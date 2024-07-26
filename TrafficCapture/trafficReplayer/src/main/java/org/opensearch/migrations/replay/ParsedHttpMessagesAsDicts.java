@@ -34,11 +34,12 @@ import lombok.extern.slf4j.Slf4j;
 public class ParsedHttpMessagesAsDicts {
     public static final String STATUS_CODE_KEY = "Status-Code";
     public static final String RESPONSE_TIME_MS_KEY = "response_time_ms";
+    public static final int MAX_PAYLOAD_BYTES_TO_CAPTURE = 256 * 1024 * 1024;
 
     public final Optional<Map<String, Object>> sourceRequestOp;
     public final Optional<Map<String, Object>> sourceResponseOp;
     public final Optional<Map<String, Object>> targetRequestOp;
-    public final Optional<Map<String, Object>> targetResponseOp;
+    public final List<Map<String, Object>> targetResponseList;
     public final IReplayContexts.ITupleHandlingContext context;
 
     public ParsedHttpMessagesAsDicts(@NonNull SourceTargetCaptureTuple tuple) {
@@ -58,10 +59,10 @@ public class ParsedHttpMessagesAsDicts {
         );
     }
 
-    private static Optional<Map<String, Object>> getTargetResponseOp(SourceTargetCaptureTuple tuple) {
-        return Optional.ofNullable(tuple.targetResponseData)
-            .filter(r -> !r.isEmpty())
-            .map(d -> convertResponse(tuple.context, d, tuple.targetResponseDuration));
+    private static List<Map<String, Object>> getTargetResponseOp(SourceTargetCaptureTuple tuple) {
+        return tuple.responseList.stream()
+            .map(r -> convertResponse(tuple.context, r.targetResponseData, r.targetResponseDuration))
+            .collect(Collectors.toList());
     }
 
     private static Optional<Map<String, Object>> getTargetRequestOp(SourceTargetCaptureTuple tuple) {
@@ -107,23 +108,25 @@ public class ParsedHttpMessagesAsDicts {
         Optional<Map<String, Object>> sourceRequestOp1,
         Optional<Map<String, Object>> sourceResponseOp2,
         Optional<Map<String, Object>> targetRequestOp3,
-        Optional<Map<String, Object>> targetResponseOp4
+        List<Map<String, Object>> targetResponseOps4
     ) {
         this.context = context;
         this.sourceRequestOp = sourceRequestOp1;
         this.sourceResponseOp = sourceResponseOp2;
         this.targetRequestOp = targetRequestOp3;
-        this.targetResponseOp = targetResponseOp4;
-        fillStatusCodeMetrics(context, sourceResponseOp, targetResponseOp);
+        this.targetResponseList = targetResponseOps4;
+        fillStatusCodeMetrics(context, sourceResponseOp, targetResponseOps4);
     }
 
     public static void fillStatusCodeMetrics(
         @NonNull IReplayContexts.ITupleHandlingContext context,
         Optional<Map<String, Object>> sourceResponseOp,
-        Optional<Map<String, Object>> targetResponseOp
+        List<Map<String, Object>> targetResponseList
     ) {
         sourceResponseOp.ifPresent(r -> context.setSourceStatus((Integer) r.get(STATUS_CODE_KEY)));
-        targetResponseOp.ifPresent(r -> context.setTargetStatus((Integer) r.get(STATUS_CODE_KEY)));
+        if (!targetResponseList.isEmpty()) {
+            context.setTargetStatus((Integer) targetResponseList.get(targetResponseList.size() - 1).get(STATUS_CODE_KEY));
+        }
     }
 
     private static Map<String, Object> fillMap(
@@ -169,7 +172,8 @@ public class ParsedHttpMessagesAsDicts {
             var map = new LinkedHashMap<String, Object>();
             try (
                 var bufStream = NettyUtils.createRefCntNeutralCloseableByteBufStream(data);
-                var messageHolder = RefSafeHolder.create(HttpByteBufFormatter.parseHttpRequestFromBufs(bufStream))
+                var messageHolder = RefSafeHolder.create(HttpByteBufFormatter.parseHttpRequestFromBufs(bufStream,
+                    MAX_PAYLOAD_BYTES_TO_CAPTURE))
             ) {
                 var message = messageHolder.get();
                 if (message != null) {
@@ -196,7 +200,8 @@ public class ParsedHttpMessagesAsDicts {
             var map = new LinkedHashMap<String, Object>();
             try (
                 var bufStream = NettyUtils.createRefCntNeutralCloseableByteBufStream(data);
-                var messageHolder = RefSafeHolder.create(HttpByteBufFormatter.parseHttpResponseFromBufs(bufStream))
+                var messageHolder = RefSafeHolder.create(HttpByteBufFormatter.parseHttpResponseFromBufs(bufStream,
+                    MAX_PAYLOAD_BYTES_TO_CAPTURE))
             ) {
                 var message = messageHolder.get();
                 if (message != null) {
