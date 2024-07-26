@@ -12,8 +12,11 @@ import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
+import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
+import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
 import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
@@ -32,6 +35,7 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import io.netty.util.concurrent.DefaultThreadFactory;
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
@@ -271,11 +275,15 @@ public class TrafficReplayer {
             );
             var authTransformer = buildAuthTransformerFactory(params)
         ) {
+            var timeShifter = new TimeShifter(params.speedupFactor);
+            var serverTimeout = Duration.ofSeconds(params.targetServerResponseTimeoutSeconds);
+
             String transformerConfig = getTransformerConfig(params);
             if (transformerConfig != null) {
                 log.atInfo().setMessage(() -> "Transformations config string: " + transformerConfig).log();
             }
             var orderedRequestTracker = new OrderedWorkerTracker<Void>();
+
             var tr = new TrafficReplayerTopLevel(
                 topContext,
                 uri,
@@ -313,10 +321,9 @@ public class TrafficReplayer {
 
             setupShutdownHookForReplayer(tr);
             var tupleWriter = new TupleParserChainConsumer(new ResultsToLogsConsumer());
-            var timeShifter = new TimeShifter(params.speedupFactor);
             tr.setupRunAndWaitForReplayWithShutdownChecks(
                 Duration.ofSeconds(params.observedPacketConnectionTimeout),
-                Duration.ofSeconds(params.targetServerResponseTimeoutSeconds),
+                serverTimeout,
                 blockingTrafficSource,
                 timeShifter,
                 tupleWriter
