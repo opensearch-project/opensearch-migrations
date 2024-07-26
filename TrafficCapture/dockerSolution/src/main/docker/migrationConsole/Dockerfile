@@ -43,14 +43,12 @@ WORKDIR /root
 COPY lib /root/lib
 WORKDIR /root/lib/console_link
 RUN pipenv install --deploy
-RUN pipenv install --dev
 WORKDIR /root/lib/integ_test
 RUN pipenv install --deploy
 
 COPY console_api /root/console_api
 WORKDIR /root/console_api
 RUN pipenv install --deploy
-RUN pipenv install --dev
 
 WORKDIR /root
 
