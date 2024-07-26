@@ -1,2 +1,143 @@
-package org.opensearch.migrations.replay;public class RequestTransformerAndSender {
+package org.opensearch.migrations.replay;
+
+import java.time.Instant;
+import java.util.function.Consumer;
+import java.util.function.Supplier;
+import java.util.stream.Stream;
+
+import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
+import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
+import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.util.TextTrackedFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
+
+import io.netty.buffer.Unpooled;
+import lombok.AllArgsConstructor;
+import lombok.NonNull;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
+@AllArgsConstructor
+public class RequestTransformerAndSender<T> {
+
+    protected final IRetryVisitorFactory<T> retryVisitorFactory;
+
+    RequestSenderOrchestrator.RepeatedAggregatedRawResponseVisitor<T>
+    getRetryCheckVisitor(TransformedOutputAndResult<ByteBufList> transformedResult,
+                         TrackedFuture<String, ? extends IRequestResponsePacketPair> finishedAccumulatingResponseFuture,
+                         Consumer<AggregatedRawResponse> resultsConsumer) {
+        var perRequestStatefulVisitor =
+            retryVisitorFactory.getRetryCheckVisitor(transformedResult, finishedAccumulatingResponseFuture);
+        return (requestBytes, aggResponse, t) -> {
+            resultsConsumer.accept(aggResponse);
+            if (t != null) {
+                assert (t instanceof java.net.ConnectException);
+                return TextTrackedFuture.completedFuture(
+                    new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+                        RequestSenderOrchestrator.RetryDirective.RETRY,
+                        null),
+                    () -> "Returning a future to retry due to a connection exception");
+            } else {
+                assert (aggResponse != null);
+                return perRequestStatefulVisitor.visit(requestBytes, aggResponse, t);
+            }
+        };
+    }
+
+    /**
+     * Do nothing but give subclasses the opportunity to do more.
+     */
+    protected void perResponseConsumer(AggregatedRawResponse summary,
+                                       HttpRequestTransformationStatus transformationStatus,
+                                       IReplayContexts.IReplayerHttpTransactionContext context) {
+        /* only present for extension purposes */
+    }
+
+    /**
+     * Take a source request and transform it (on the work thread that we'll also SEND the transformed
+     * request).  If an exception happens during transformation, the returned TrackedFuture will have
+     * an exceptional completion.  The transformed request future is composed with a method that sends
+     * the request and awaits a response.  Specifically, a response that is returned through the visitor
+     * that will retry in case of any exceptional or error (status code) occurrences.<br><br>
+     *
+     * If there is an error in calling the replayEngine, that exception is trapped and will be returned
+     * immediately in a TrackedFuture with the Exception.
+     *
+     * @return An exceptional value in the TrackedFuture if the replayEngine calls throw immediately
+     * or if transformation fails.  A completed value of a TransformedTargetRequestAndResponseList,
+     * which may include exceptions within individual request's AggregatedRawResponse.getError() fields
+     * and/or results from the target server.  Notice that exceptions due to renegotiating a connection
+     * will NOT be included as responses since that's independent of the outgoing request (since bytes
+     * hadn't begun to be sent).
+     */
+    public TrackedFuture<String, T> transformAndSendRequest(
+        PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
+        ReplayEngine replayEngine,
+        TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
+        IReplayContexts.IReplayerHttpTransactionContext ctx,
+        @NonNull Instant start,
+        @NonNull Instant end,
+        Supplier<Stream<byte[]>> packetsSupplier) {
+        try {
+            var requestReadyFuture = replayEngine.scheduleTransformationWork(
+                ctx,
+                start,
+                () -> transformAllData(inputRequestTransformerFactory.create(ctx), packetsSupplier)
+            );
+            log.atDebug().setMessage(() -> "request transform future for " + ctx + " = " + requestReadyFuture).log();
+            // It might be safer to chain this work directly inside the scheduleWork call above so that the
+            // read buffer horizons aren't set after the transformation work finishes, but after the packets
+            // are fully handled
+            return requestReadyFuture.thenCompose(
+                transformedRequest -> replayEngine.scheduleRequest(
+                    ctx,
+                    start,
+                    end,
+                    transformedRequest.transformedOutput.size(),
+                    transformedRequest.transformedOutput,
+                    getRetryCheckVisitor(transformedRequest, finishedAccumulatingResponseFuture,
+                        arr-> perResponseConsumer(arr, transformedRequest.transformationStatus, ctx))
+                ),
+                () -> "transitioning transformed packets onto the wire"
+            );
+        } catch (Exception e) {
+            log.debug("Caught exception in transformAndSendRequest, so failing future");
+            return TextTrackedFuture.failedFuture(e, () -> "TrafficReplayer.writeToSocketAndClose");
+        }
+    }
+
+    private static <R> TrackedFuture<String, R> transformAllData(
+        IPacketFinalizingConsumer<R> packetHandler,
+        Supplier<Stream<byte[]>> packetSupplier
+    ) {
+        try {
+            var logLabel = packetHandler.getClass().getSimpleName();
+            var packets = packetSupplier.get().map(Unpooled::wrappedBuffer);
+            packets.forEach(packetData -> {
+                log.atDebug()
+                    .setMessage(
+                        () -> logLabel + " sending " + packetData.readableBytes() + " bytes to the packetHandler"
+                    )
+                    .log();
+                var consumeFuture = packetHandler.consumeBytes(packetData);
+                log.atDebug().setMessage(() -> logLabel + " consumeFuture = " + consumeFuture).log();
+            });
+            log.atDebug().setMessage(() -> logLabel + "  done sending bytes, now finalizing the request").log();
+            return packetHandler.finalizeRequest();
+        } catch (Exception e) {
+            log.atInfo()
+                .setCause(e)
+                .setMessage(
+                    "Encountered an exception while transforming the http request.  "
+                        + "The base64 gzipped traffic stream, for later diagnostic purposes, is: "
+                        + Utils.packetsToCompressedTrafficStream(packetSupplier.get())
+                )
+                .log();
+            throw e;
+        }
+    }
+
 }

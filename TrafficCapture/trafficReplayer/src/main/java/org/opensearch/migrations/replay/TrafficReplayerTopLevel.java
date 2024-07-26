@@ -13,17 +13,18 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.net.ssl.SSLException;
 
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
-import org.opensearch.migrations.replay.http.retries.DefaultRetry;
 import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
+import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import org.opensearch.migrations.replay.util.TrackedFuture;
@@ -33,6 +34,7 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -106,6 +108,23 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         shutdownFutureRef = new AtomicReference<>();
     }
 
+
+    @AllArgsConstructor
+    public static class ReplayEngineFactory implements Function<ClientConnectionPool, ReplayEngine> {
+        Duration targetServerResponseTimeout;
+        BufferedFlowController flowController;
+        TimeShifter timeShifter;
+        public ReplayEngine apply(ClientConnectionPool clientConnectionPool) {
+            return new ReplayEngine(
+                new RequestSenderOrchestrator(
+                    clientConnectionPool,
+                    (replaySession, ctx) ->
+                        new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout)
+                ),
+                flowController, timeShifter);
+        }
+    }
+
     public static ClientConnectionPool makeClientConnectionPool(
         URI serverUri,
         boolean allowInsecureConnections,
@@ -159,7 +178,6 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout)
         );
         var replayEngine = new ReplayEngine(senderOrchestrator, trafficSource, timeShifter);
-
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
             new CapturedTrafficToHttpTransactionAccumulator(
                 observedPacketConnectionTimeout,
@@ -181,9 +199,6 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         }
     }
 
-    /**
-     * @param replayEngine is not used here but might be of use to extensions of this class
-     */
     protected void wrapUpWorkAndEmitSummary(
         ReplayEngine replayEngine,
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator

@@ -386,7 +386,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 future.complete(responseBuilder.addErrorCause(t).build());
             }
             return rval;
-        }, () -> "Waiting for previous consumes to set the future").map(f -> f.whenComplete((v, t) -> {
+        }, () -> "Waiting for previous consumes to set the future")
+        .map(f -> f.whenComplete((v, t) -> {
             if (channel == null) {
                 log.atInfo().setMessage(() -> "").log();
             } else {

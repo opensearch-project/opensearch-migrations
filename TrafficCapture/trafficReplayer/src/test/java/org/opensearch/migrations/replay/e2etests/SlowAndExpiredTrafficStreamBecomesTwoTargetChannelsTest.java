@@ -25,6 +25,7 @@ import org.junit.jupiter.api.Test;
 
 import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
 import org.opensearch.migrations.replay.TimeShifter;
+import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
 import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceContext;

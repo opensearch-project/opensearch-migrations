@@ -52,7 +52,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
     @MethodSource("provideTestParameters")
     public void testRequestProcessing(Integer attemptedChunks, Boolean hostTransformation, String requestFile)
         throws Exception {
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(
             Duration.ofMillis(Math.min(100 / attemptedChunks, 1)),
             dummyAggregatedResponse
@@ -98,7 +98,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
 
     @Test
     public void testRemoveAuthHeadersWorks() throws Exception {
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformingConsumer<AggregatedRawResponse>(
             new TransformationLoader().getTransformerFactoryLoader("test.domain"),
@@ -126,7 +126,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
 
     @Test
     public void testPartialBodyThrowsAndIsRedriven() throws Exception {
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var complexTransformer = new JsonCompositeTransformer(new IJsonTransformer() {
             @Override
