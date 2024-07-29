@@ -71,11 +71,11 @@ class OpenSearchWorkCoodinatorTest {
 
     @ParameterizedTest
     @MethodSource("provideGetResultTestArgs")
-    public void testWhenGetResult(DocumentModificationResult expectedTesult, String responsePayload) throws Exception {
+    public void testWhenGetResult(DocumentModificationResult expectedResult, String responsePayload) throws Exception {
         var response = new TestResponse(200, "ok", responsePayload);
         try (var workCoordinator = new OpenSearchWorkCoordinator(new MockHttpClient(response), 2, "testWorker")) {
             var result = workCoordinator.getResult(response);
-            Assertions.assertEquals(expectedTesult, result);
+            Assertions.assertEquals(expectedResult, result);
         }
     }
 
