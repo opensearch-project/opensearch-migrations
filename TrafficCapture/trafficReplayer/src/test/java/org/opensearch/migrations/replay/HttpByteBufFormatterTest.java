@@ -6,12 +6,14 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
 
+import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import org.opensearch.migrations.replay.util.RefSafeStreamUtils;
 import org.opensearch.migrations.testutils.CountingNettyResourceLeakDetector;
@@ -142,6 +144,26 @@ public class HttpByteBufFormatterTest {
                 () -> prettyPrint(byteArrays, HttpByteBufFormatter.HttpMessageType.REQUEST, BufferType.POOLED_BYTEBUF)
             );
             Assertions.assertEquals(new String(fullTrafficBytes, StandardCharsets.UTF_8), outputString);
+        }
+    }
+
+    @ParameterizedTest
+    @ValueSource(ints = {0, 12, 652})
+    public void httpMessageTruncate(int bytesToRead) throws Exception {
+        try (
+            var sampleStream = HttpByteBufFormatterTest.class.getResourceAsStream(
+                "/requests/raw/post_formUrlEncoded_withFixedLength.txt"
+            )
+        ) {
+            var msgBytes = Unpooled.wrappedBuffer(sampleStream.readAllBytes());
+            var msg = HttpByteBufFormatter.parseHttpRequestFromBufs(Stream.of(msgBytes), bytesToRead);
+            var fullMsg = HttpByteBufFormatter.parseHttpRequestFromBufs(Stream.of(msgBytes), 1024*1024);
+            var fullPayload = fullMsg.content().toString(StandardCharsets.UTF_8);
+            Assertions.assertTrue(fullPayload.length() >= bytesToRead);
+            Assertions.assertEquals(fullPayload.substring(0, bytesToRead),
+                msg.content().toString(StandardCharsets.UTF_8));
+            msg.release();
+            fullMsg.release();
         }
     }
 

@@ -15,25 +15,22 @@ import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Stream;
 
 import static org.junit.jupiter.api.Assertions.*;
 class OpenSearchDefaultRetryTest {
 
     private static final String GET_REQUEST =
-        "GET /hello.htm HTTP/1.1\r\n" +
+        "GET / HTTP/1.1\r\n" +
             "User-Agent: Unit Test\r\n" +
-            "Host: localhost\r\n";
+            "Host: localhost\r\n\r\n";
 
     private static String makeResponse(int statusCode) {
         return "HTTP/1.1 " + statusCode + " OK\r\n" +
-            "Content-Length: 88\r\n" +
-            "Content-Type: text/html\r\n\r\n" +
-            "<html>\r\n" +
-            "<body>\r\n" +
-            "<h1>Hello, World!</h1>\r\n" +
-            "</body>\r\n" +
-            "</html>";
+            "Content-Length: 2\r\n" +
+            "Content-Type: text/plain\r\n\r\n" +
+            "hi\r\n";
 
     }
 
@@ -58,7 +55,9 @@ class OpenSearchDefaultRetryTest {
         "200, 403, DONE"
     })
     public void testStatusCodeMatches(int sourceStatusCode, int targetStatusCode,
-                                      RequestSenderOrchestrator.RetryDirective expectedDirective) {
+                                      RequestSenderOrchestrator.RetryDirective expectedDirective)
+        throws Exception
+    {
         var retryChecker = new OpenSearchDefaultRetry();
         var sourceBytes = makeResponse(sourceStatusCode).getBytes(StandardCharsets.UTF_8);
         var targetBytes = makeResponse(targetStatusCode).getBytes(StandardCharsets.UTF_8);
@@ -71,6 +70,6 @@ class OpenSearchDefaultRetryTest {
             List.of(),
             aggregatedResponse,
             TextTrackedFuture.completedFuture(new TestRequestResponsePair(sourceBytes), () -> "test future"));
-        Assertions.assertEquals(expectedDirective, determination);
+        Assertions.assertEquals(expectedDirective, determination.get());
     }
 }

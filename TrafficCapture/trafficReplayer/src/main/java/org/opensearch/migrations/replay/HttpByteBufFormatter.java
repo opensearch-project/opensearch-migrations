@@ -17,14 +17,18 @@ import org.opensearch.migrations.replay.util.NettyUtils;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpClientCodec;
+import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
+import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
@@ -157,6 +161,34 @@ public class HttpByteBufFormatter {
         return sj.toString();
     }
 
+    @AllArgsConstructor
+    private static class HttpContentTruncator extends ChannelInboundHandlerAdapter {
+        private int bytesLeftToRead;
+
+        @Override
+        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+            if (msg instanceof HttpContent) {
+                HttpContent httpContent = (HttpContent) msg;
+                ByteBuf content = httpContent.content();
+                if (content.readableBytes() > bytesLeftToRead) {
+                    content.writerIndex(bytesLeftToRead);
+                }
+                bytesLeftToRead -= content.readableBytes();
+            }
+            super.channelRead(ctx, msg);
+        }
+    }
+
+    private static class LengthIgnoringHttpObjectAggregator extends HttpObjectAggregator {
+        protected boolean isContentLengthInvalid(HttpMessage start, int maxContentLength) {
+            return false;
+        }
+
+        public LengthIgnoringHttpObjectAggregator(int maxContentLength) {
+            super(maxContentLength);
+        }
+    }
+
     /**
      * This won't alter the incoming byteBufStream at all - all buffers are duplicated as they're
      * passed into the parsing channel.  The output message MAY be a ByteBufHolder, in which case,
@@ -168,21 +200,26 @@ public class HttpByteBufFormatter {
     public static HttpMessage parseHttpMessageFromBufs(HttpMessageType msgType,
                                                        Stream<ByteBuf> byteBufStream,
                                                        int payloadCeilingBytes) {
-        return parseHttpMessageFromBufs(msgType, byteBufStream,
-            new HttpObjectAggregator(payloadCeilingBytes));  // Set max content length if needed)
+        return parseHttpMessageFromBufs(msgType,
+            byteBufStream,
+            new HttpContentTruncator(payloadCeilingBytes),
+            new LengthIgnoringHttpObjectAggregator(payloadCeilingBytes));
     }
 
     public static HttpMessage parseHttpMessageFromBufs(HttpMessageType msgType,
                                                        Stream<ByteBuf> byteBufStream,
-                                                       ChannelHandler handler) {
+                                                       ChannelHandler... handlers) {
         EmbeddedChannel channel = new EmbeddedChannel(
             msgType == HttpMessageType.REQUEST ? new HttpServerCodec() : new HttpClientCodec(),
-            new HttpContentDecompressor(),
-            handler
+            new HttpContentDecompressor()
         );
+        for (var h : handlers) {
+            channel.pipeline().addLast(h);
+        }
         try {
             byteBufStream.forEachOrdered(b -> channel.writeInbound(b.retainedDuplicate()));
-            return channel.readInbound();
+            HttpMessage rval = channel.readInbound();
+            return rval;
         } finally {
             channel.finishAndReleaseAll();
         }

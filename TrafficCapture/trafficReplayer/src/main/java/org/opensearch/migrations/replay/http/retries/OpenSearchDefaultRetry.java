@@ -102,20 +102,20 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         var targetRequestByteBuf = Unpooled.wrappedBuffer(targetRequestBytes);
         var targetRequest =
             HttpByteBufFormatter.parseHttpRequestFromBufs(Stream.of(targetRequestByteBuf), 0);
-        if (bulkPathMatcher.matcher(targetRequest.uri()).matches()) {
-            if (currentResponse.getRawResponse().status().code() == 200) { // check more granularly
-                if (bulkResponseHadNoErrors(currentResponse.getResponseAsByteBuf())) {
-                    return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.DONE,
-                        () -> "no errors found in the target response, so not retrying");
-                } else {
-                    return reconstructedSourceTransactionFuture.thenCompose(rrp ->
-                        TextTrackedFuture.completedFuture(
-                            bulkResponseHadNoErrors(rrp.getResponseData().asByteBuf()) ?
-                                RequestSenderOrchestrator.RetryDirective.RETRY :
-                                RequestSenderOrchestrator.RetryDirective.DONE,
-                            () -> "evaluating retry status dependent upon source error field"),
-                        () -> "checking the accumulated source response value");
-                }
+        if (bulkPathMatcher.matcher(targetRequest.uri()).matches() &&
+            currentResponse.getRawResponse().status().code() == 200) // check more granularly
+        {
+            if (bulkResponseHadNoErrors(currentResponse.getResponseAsByteBuf())) {
+                return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.DONE,
+                    () -> "no errors found in the target response, so not retrying");
+            } else {
+                return reconstructedSourceTransactionFuture.thenCompose(rrp ->
+                    TextTrackedFuture.completedFuture(
+                        bulkResponseHadNoErrors(rrp.getResponseData().asByteBuf()) ?
+                            RequestSenderOrchestrator.RetryDirective.RETRY :
+                            RequestSenderOrchestrator.RetryDirective.DONE,
+                        () -> "evaluating retry status dependent upon source error field"),
+                    () -> "checking the accumulated source response value");
             }
         }
         return super.apply(targetRequestBytes, previousResponses, currentResponse, reconstructedSourceTransactionFuture);

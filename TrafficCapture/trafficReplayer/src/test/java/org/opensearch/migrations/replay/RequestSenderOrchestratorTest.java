@@ -247,6 +247,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
 
             Assertions.assertEquals(NUM_REQUESTS_TO_SCHEDULE, scheduledItems.size());
             for (int i = 0; i < scheduledItems.size(); ++i) {
+                log.error("Checking item="+i);
                 var cf = scheduledItems.get(i);
                 var arr = cf.get();
                 Assertions.assertNull(arr.error);
@@ -260,7 +261,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                         HttpByteBufFormatter.parseHttpMessageFromBufs(
                             HttpByteBufFormatter.HttpMessageType.RESPONSE,
                             bufStream,
-                            0))
+                            1024*1024))
                 ) {
                     var message = messageHolder.get();
                     Assertions.assertNotNull(message);
@@ -273,9 +274,16 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                         ),
                         body.toString(StandardCharsets.UTF_8)
                     );
+                } catch (Throwable e) {
+                    log.atError().setMessage(()->"caught exception(1)").setCause(e).log();
+                    throw e;
                 }
             }
             closeFuture.get();
+            log.error("Done running loop");
+        } catch (Throwable e) {
+            log.atError().setMessage(()->"caught exception(2)").setCause(e).log();
+            throw e;
         }
     }
 
