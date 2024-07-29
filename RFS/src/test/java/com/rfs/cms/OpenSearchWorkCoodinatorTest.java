@@ -1,13 +1,16 @@
 package com.rfs.cms;
 
-import java.io.ByteArrayInputStream;
-import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.AbstractMap;
 import java.util.Map;
-import java.util.function.Supplier;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.stream.Stream;
 
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -16,160 +19,114 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.migrations.logging.CloseableLogSetup;
 
 import com.rfs.cms.OpenSearchWorkCoordinator.DocumentModificationResult;
+import org.testcontainers.shaded.com.fasterxml.jackson.core.JsonProcessingException;
+import org.testcontainers.shaded.com.fasterxml.jackson.databind.ObjectMapper;
 
+@Slf4j
 class OpenSearchWorkCoodinatorTest {
 
-    public static class MockHttpClient implements AbstractedHttpClient {
-        Supplier<AbstractHttpResponse> responseSupplier;
+    public static final String THROTTLE_RESULT_VALUE = "slow your roll, dude";
 
-        public MockHttpClient(Supplier<AbstractHttpResponse> responseSupplier) {
-            this.responseSupplier = responseSupplier;
-        }
+    @AllArgsConstructor
+    public static class MockHttpClient implements AbstractedHttpClient {
+        AbstractHttpResponse response;
 
         @Override
         public AbstractHttpResponse makeRequest(String method, String path, Map<String, String> headers, String payload) {
-            return responseSupplier.get();
-        }
-
-        @Override
-        public void close() {
-            // Do nothing
+            return response;
         }
     }
 
+    @AllArgsConstructor
+    @Getter
     public static class TestResponse implements AbstractedHttpClient.AbstractHttpResponse {
+        int statusCode;
+        String statusText;
+        byte[] payloadBytes;
+
+        public TestResponse(int statusCode, String statusText, String payloadString) {
+            this(statusCode, statusText, payloadString.getBytes(StandardCharsets.UTF_8));
+        }
+
         @Override
         public Stream<Map.Entry<String, String>> getHeaders() {
             return Stream.of(new AbstractMap.SimpleEntry<>("Content-Type", "application/json"));
-        }
-
-        @Override
-        public String getStatusText() {
-            return "ok";
-        }
-
-        @Override
-        public int getStatusCode() {
-            return 200;
         }
     }
 
     static Stream<Arguments> provideGetResultTestArgs() {
         return Stream.of(
-            // Noop
-            Arguments.of(
-                (Supplier<AbstractedHttpClient.AbstractHttpResponse>) () -> new TestResponse() {
-                    @Override
-                    public InputStream getPayloadStream() {
-                        String payload = "{\"" + OpenSearchWorkCoordinator.RESULT_OPENSSEARCH_FIELD_NAME + "\": \"noop\"}";
-                        return new ByteArrayInputStream(payload.getBytes(StandardCharsets.UTF_8));
-                    }
-                },
-                DocumentModificationResult.IGNORED
+            Arguments.of(DocumentModificationResult.IGNORED,
+                "{\"" + OpenSearchWorkCoordinator.RESULT_OPENSSEARCH_FIELD_NAME + "\": \"noop\"}"
             ),
-            // Created
-            Arguments.of(
-                (Supplier<AbstractedHttpClient.AbstractHttpResponse>) () -> new TestResponse() {
-                    @Override
-                    public InputStream getPayloadStream() {
-                        String payload = "{\"" + OpenSearchWorkCoordinator.RESULT_OPENSSEARCH_FIELD_NAME + "\": \"created\"}";
-                        return new ByteArrayInputStream(payload.getBytes(StandardCharsets.UTF_8));
-                    }
-                },
-                DocumentModificationResult.CREATED
+            Arguments.of(DocumentModificationResult.CREATED,
+                "{\"" + OpenSearchWorkCoordinator.RESULT_OPENSSEARCH_FIELD_NAME + "\": \"created\"}"
             ),
-            // Updated
-            Arguments.of(
-                (Supplier<AbstractedHttpClient.AbstractHttpResponse>) () -> new TestResponse() {
-                    @Override
-                    public InputStream getPayloadStream() {
-                        String payload = "{\"" + OpenSearchWorkCoordinator.RESULT_OPENSSEARCH_FIELD_NAME + "\": \""+ OpenSearchWorkCoordinator.UPDATED_COUNT_FIELD_NAME +"\"}";
-                        return new ByteArrayInputStream(payload.getBytes(StandardCharsets.UTF_8));
-                    }
-                },
-                DocumentModificationResult.UPDATED
+            Arguments.of(DocumentModificationResult.UPDATED,
+                "{\"" + OpenSearchWorkCoordinator.RESULT_OPENSSEARCH_FIELD_NAME + "\": \""+ OpenSearchWorkCoordinator.UPDATED_COUNT_FIELD_NAME +"\"}"
             )
         );
     }
 
     @ParameterizedTest
     @MethodSource("provideGetResultTestArgs")
-    public void testWhenGetResult(
-            Supplier<AbstractedHttpClient.AbstractHttpResponse> responseSupplier,
-            DocumentModificationResult expectedTesult) throws Exception {
-
-        // Set up our test
-        MockHttpClient client = new MockHttpClient(responseSupplier);
-
-        // Run the test
-        DocumentModificationResult result;
-        try (var workCoordinator = new OpenSearchWorkCoordinator(client, 2, "testWorker")) {
-            result = workCoordinator.getResult(responseSupplier.get());
+    public void testWhenGetResult(DocumentModificationResult expectedTesult, String responsePayload) throws Exception {
+        var response = new TestResponse(200, "ok", responsePayload);
+        try (var workCoordinator = new OpenSearchWorkCoordinator(new MockHttpClient(response), 2, "testWorker")) {
+            var result = workCoordinator.getResult(response);
+            Assertions.assertEquals(expectedTesult, result);
         }
-
-        // Verify the result
-        Assertions.assertEquals(expectedTesult, result);
-
     }
 
     @Test
     public void testWhenGetResultAndConflictThenIgnored() throws Exception {
-        // Set up our test
-        class ConflictResponse extends TestResponse {
-            @Override
-            public String getStatusText() {
-                return "conflict";
-            }
-
-            @Override
-            public int getStatusCode() {
-                return 409;
-            }
+        var response = new TestResponse(409, "conflict", "");
+        try (var workCoordinator = new OpenSearchWorkCoordinator(new MockHttpClient(response), 2, "testWorker")) {
+            var result = workCoordinator.getResult(response);
+            Assertions.assertEquals(DocumentModificationResult.IGNORED, result);
         }
+    }
 
-        Supplier<AbstractedHttpClient.AbstractHttpResponse> responseSupplier = () -> new ConflictResponse();
-        MockHttpClient client = new MockHttpClient(responseSupplier);
-
-        // Run the test
-        DocumentModificationResult result;
-        try (var workCoordinator = new OpenSearchWorkCoordinator(client, 2, "testWorker")) {
-            result = workCoordinator.getResult(responseSupplier.get());
-        }
-
-        // Verify the result
-        Assertions.assertEquals(DocumentModificationResult.IGNORED, result);
-
+    private static TestResponse getThrottleResponse() throws JsonProcessingException {
+        var resultJson = Map.of(OpenSearchWorkCoordinator.RESULT_OPENSSEARCH_FIELD_NAME, THROTTLE_RESULT_VALUE);
+        return new TestResponse(429, "THROTTLED", new ObjectMapper().writeValueAsString(resultJson));
     }
 
     @Test
     public void testWhenGetResultAndErrorThenLogged() throws Exception {
-        // Set up our test
-        class ErrorResponse extends TestResponse {
-            @Override
-            public InputStream getPayloadStream() {
-                String payload = "{\"" + OpenSearchWorkCoordinator.RESULT_OPENSSEARCH_FIELD_NAME + "\": \"slow your roll, dude\"}";
-                return new ByteArrayInputStream(payload.getBytes(StandardCharsets.UTF_8));
-            }
+        var response = getThrottleResponse();
+        MockHttpClient client = new MockHttpClient(response);
 
-            @Override
-            public int getStatusCode() {
-                return 429;
-            }
-        }
-        Supplier<AbstractedHttpClient.AbstractHttpResponse> responseSupplier = () -> new ErrorResponse();
-        MockHttpClient client = new MockHttpClient(responseSupplier);
-
-        // Run the test & verify
-        DocumentModificationResult result;
-        try (
-                var workCoordinator = new OpenSearchWorkCoordinator(client, 2, "testWorker");
-                var closeableLogSetup = new CloseableLogSetup(workCoordinator.getClass().getName())) {
-            Assertions.assertThrows(IllegalArgumentException.class, () -> {
-                workCoordinator.getResult(responseSupplier.get());
-            });
-            System.out.println("Logged events: " + closeableLogSetup.getLogEvents());
-            Assertions.assertTrue(closeableLogSetup.getLogEvents().stream().anyMatch(e -> e.contains("slow your roll")));
+        try (var workCoordinator = new OpenSearchWorkCoordinator(client, 2, "testWorker");
+             var closeableLogSetup = new CloseableLogSetup(workCoordinator.getClass().getName()))
+        {
+            Assertions.assertThrows(IllegalArgumentException.class, () -> workCoordinator.getResult(response));
+            log.atDebug().setMessage(()->"Logged events: " + closeableLogSetup.getLogEvents()).log();
+            Assertions.assertTrue(closeableLogSetup.getLogEvents().stream().anyMatch(e -> e.contains(THROTTLE_RESULT_VALUE)));
         }
     }
 
+    private static final AtomicInteger nonce = new AtomicInteger();
+
+    static Stream<Arguments> makeConsumers() {
+        return Stream.<Function<IWorkCoordinator, Exception>>of(
+            wc -> Assertions.assertThrows(Exception.class,
+                () -> wc.createUnassignedWorkItem("item" + nonce.incrementAndGet(), () -> null)),
+            wc -> Assertions.assertThrows(Exception.class,
+                () -> wc.createOrUpdateLeaseForWorkItem("item" + nonce.incrementAndGet(), Duration.ZERO, () -> null)))
+            .map(Arguments::of);
+    }
+
+    @ParameterizedTest(name = "{index}")
+    @MethodSource("makeConsumers")
+    public void testWhenInvokedWithHttpErrorThenLogged(Function<IWorkCoordinator, Exception> worker) throws Exception {
+        try (var workCoordinator = new OpenSearchWorkCoordinator(new MockHttpClient(getThrottleResponse()), 2, "t");
+             var closeableLogSetup = new CloseableLogSetup(workCoordinator.getClass().getName()))
+        {
+            worker.apply(workCoordinator);
+            log.atDebug().setMessage(() -> "Logged events: " + closeableLogSetup.getLogEvents()).log();
+            var logEvents = closeableLogSetup.getLogEvents();
+            Assertions.assertTrue(logEvents.stream().anyMatch(e -> e.contains(THROTTLE_RESULT_VALUE)));
+        }
+    }
 }

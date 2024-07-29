@@ -77,7 +77,7 @@ public class WorkCoordinatorTest {
             );
 
         var objectMapper = new ObjectMapper();
-        return objectMapper.readTree(response.getPayloadStream()).path("hits");
+        return objectMapper.readTree(response.getPayloadBytes()).path("hits");
     }
 
     private long getMetricValueOrZero(Collection<MetricData> metrics, String s) {
