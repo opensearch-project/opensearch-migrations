@@ -9,14 +9,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-
-import org.opensearch.migrations.logging.CloseableLogSetup;
+import org.opensearch.migrations.testutils.CloseableLogSetup;
 
 import com.rfs.cms.OpenSearchWorkCoordinator.DocumentModificationResult;
 import lombok.SneakyThrows;
 
 import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.CoreMatchers.everyItem;
+import static org.hamcrest.CoreMatchers.hasItem;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -101,7 +100,7 @@ class OpenSearchWorkCoodinatorTest {
             Assertions.assertThrows(IllegalArgumentException.class, () -> {
                 workCoordinator.getResult(coordinatorResponseWithBody(429, "slow your roll, dude"));
             });
-            assertThat(closeableLogSetup.getLogEvents(), everyItem(containsString("slow your roll, dude")));
+            assertThat(closeableLogSetup.getLogEvents(), hasItem(containsString("slow your roll, dude")));
         }
     }
 }
