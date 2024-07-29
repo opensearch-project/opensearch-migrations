@@ -118,6 +118,8 @@ public class OpenSearchClient {
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
 
+        assert getResponse != null : ("getResponse should not be null; it should either be a valid response or an exception"
+            + " should have been thrown.");
         boolean objectDoesNotExist = getResponse.code == HttpURLConnection.HTTP_NOT_FOUND;
         if (objectDoesNotExist) {
             client.putAsync(objectPath, settings.toString(), context.createCheckRequestContext()).flatMap(resp -> {
@@ -214,7 +216,7 @@ public class OpenSearchClient {
         IRfsContexts.ICreateSnapshotContext context
     ) {
         String targetPath = "_snapshot/" + repoName + "/" + snapshotName;
-        RestClient.Response response = client.getAsync(targetPath, context.createGetSnapshotContext()).flatMap(resp -> {
+        RestClient.Response getResponse = client.getAsync(targetPath, context.createGetSnapshotContext()).flatMap(resp -> {
             if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_NOT_FOUND) {
                 return Mono.just(resp);
             } else {
@@ -231,21 +233,23 @@ public class OpenSearchClient {
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
             .block();
 
-        if (response.code == HttpURLConnection.HTTP_OK) {
+        assert getResponse != null : ("getResponse should not be null; it should either be a valid response or an exception"
+            + " should have been thrown.");
+        if (getResponse.code == HttpURLConnection.HTTP_OK) {
             try {
-                return Optional.of(objectMapper.readValue(response.body, ObjectNode.class));
+                return Optional.of(objectMapper.readValue(getResponse.body, ObjectNode.class));
             } catch (Exception e) {
                 String errorMessage = "Could not parse response for: _snapshot/" + repoName + "/" + snapshotName;
-                throw new OperationFailed(errorMessage, response);
+                throw new OperationFailed(errorMessage, getResponse);
             }
-        } else if (response.code == HttpURLConnection.HTTP_NOT_FOUND) {
+        } else if (getResponse.code == HttpURLConnection.HTTP_NOT_FOUND) {
             return Optional.empty();
         } else {
             String errorMessage = "Should not have gotten here while parsing response for: _snapshot/"
                 + repoName
                 + "/"
                 + snapshotName;
-            throw new OperationFailed(errorMessage, response);
+            throw new OperationFailed(errorMessage, getResponse);
         }
     }
 
