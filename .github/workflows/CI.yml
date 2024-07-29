@@ -215,6 +215,7 @@ jobs:
       - python-lint
       - python-tests
       - fetch-migration-docker-build
+    if: always()
     runs-on: ubuntu-latest
     steps:
       - run: |
