@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.replay.transform;
 
 import java.time.Clock;
 import java.time.Instant;
@@ -9,8 +9,10 @@ import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
 
+import org.opensearch.migrations.replay.TestUtils;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import io.netty.util.ResourceLeakDetector;
@@ -19,7 +21,7 @@ import software.amazon.awssdk.auth.credentials.AwsCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 
 @WrapWithNettyLeakDetection
-public class SigV4SigningTransformationTest extends InstrumentationTest {
+public class SigV4AuthTransformerFactoryTest extends InstrumentationTest {
 
     private static class MockCredentialsProvider implements AwsCredentialsProvider {
         @Override
@@ -37,7 +39,6 @@ public class SigV4SigningTransformationTest extends InstrumentationTest {
         Random r = new Random(2);
         var stringParts = IntStream.range(0, 1)
             .mapToObj(i -> TestUtils.makeRandomString(r, 64))
-            .map(o -> (String) o)
             .collect(Collectors.toList());
 
         var mockCredentialsProvider = new MockCredentialsProvider();
@@ -57,20 +58,22 @@ public class SigV4SigningTransformationTest extends InstrumentationTest {
         );
         expectedRequestHeaders.add("X-Amz-Date", "19700101T000000Z");
 
-        TestUtils.runPipelineAndValidate(
-            rootContext,
-            msg -> new SigV4Signer(
-                mockCredentialsProvider,
-                "es",
-                "us-east-1",
-                "https",
-                () -> Clock.fixed(Instant.EPOCH, ZoneOffset.UTC)
-            ),
-            null,
-            stringParts,
-            expectedRequestHeaders,
-            referenceStringBuilder -> TestUtils.resolveReferenceString(referenceStringBuilder)
-        );
+        try (var factory = new SigV4AuthTransformerFactory(
+            mockCredentialsProvider,
+            "es",
+            "us-east-1",
+            "https",
+            () -> Clock.fixed(Instant.EPOCH, ZoneOffset.UTC)
+        )) {
+            TestUtils.runPipelineAndValidate(
+                rootContext,
+                factory,
+                null,
+                stringParts,
+                expectedRequestHeaders,
+                TestUtils::resolveReferenceString
+            );
+        }
 
     }
 }

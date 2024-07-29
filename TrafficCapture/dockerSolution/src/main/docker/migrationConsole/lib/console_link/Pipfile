@@ -5,7 +5,6 @@ name = "pypi"
 
 [packages]
 requests = ">=2.32.3"
-opensearch-benchmark = "*"
 boto3 = "*"
 pyyaml = "*"
 Click = "*"
@@ -20,4 +19,4 @@ coverage = "*"
 moto = "*"
 
 [requires]
-python_version = "3.10"
+python_version = "3.11"

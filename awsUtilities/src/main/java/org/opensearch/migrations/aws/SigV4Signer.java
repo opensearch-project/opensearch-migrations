@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.aws;
 
 import java.net.URI;
 import java.nio.ByteBuffer;
@@ -13,9 +13,7 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
-import org.opensearch.migrations.transform.IAuthTransformer;
-import org.opensearch.migrations.transform.IHttpMessage;
+import org.opensearch.migrations.IHttpMessage;
 
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
@@ -29,11 +27,12 @@ import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.utils.BinaryUtils;
 
 @Slf4j
-public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransformer {
+public class SigV4Signer {
     private static final HashSet<String> AUTH_HEADERS_TO_PULL_WITH_PAYLOAD;
     private static final HashSet<String> AUTH_HEADERS_TO_PULL_NO_PAYLOAD;
 
     public static final String AMZ_CONTENT_SHA_256 = "x-amz-content-sha256";
+    public static final String CONTENT_TYPE = "content-type";
 
     static {
         AUTH_HEADERS_TO_PULL_NO_PAYLOAD = new HashSet<>(Set.of("authorization", "x-amz-date", "x-amz-security-token"));
@@ -64,12 +63,6 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
         this.timestampSupplier = timestampSupplier;
     }
 
-    @Override
-    public ContextForAuthHeader transformType() {
-        return ContextForAuthHeader.HEADERS_AND_CONTENT_PAYLOAD;
-    }
-
-    @Override
     public void consumeNextPayloadPart(ByteBuffer payloadChunk) {
         if (payloadChunk.remaining() <= 0) {
             return;
@@ -84,9 +77,9 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
         messageDigest.update(payloadChunk);
     }
 
-    @Override
-    public void finalizeSignature(HttpJsonMessageWithFaultingPayload msg) {
-        getSignatureHeadersViaSdk(msg).forEach(kvp -> msg.headers().put(kvp.getKey(), kvp.getValue()));
+    public Map<String, List<String>> finalizeSignature(IHttpMessage msg) {
+        var stream = getSignatureHeadersViaSdk(msg);
+        return stream.collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
     private static class AwsSignerWithPrecomputedContentHash extends BaseAws4Signer {
@@ -103,7 +96,7 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
         }
     }
 
-    public Stream<Map.Entry<String, List<String>>> getSignatureHeadersViaSdk(IHttpMessage msg) {
+    private Stream<Map.Entry<String, List<String>>> getSignatureHeadersViaSdk(IHttpMessage msg) {
         var signer = new AwsSignerWithPrecomputedContentHash();
         var httpRequestBuilder = SdkHttpFullRequest.builder();
         httpRequestBuilder.method(SdkHttpMethod.fromValue(msg.method()))
@@ -111,7 +104,7 @@ public class SigV4Signer extends IAuthTransformer.StreamingFullMessageTransforme
             .protocol(protocol)
             .host(msg.getFirstHeader("host"));
 
-        var contentType = msg.getFirstHeader(IHttpMessage.CONTENT_TYPE);
+        var contentType = msg.getFirstHeader(CONTENT_TYPE);
         if (contentType != null) {
             httpRequestBuilder.appendHeader("Content-Type", contentType);
         }

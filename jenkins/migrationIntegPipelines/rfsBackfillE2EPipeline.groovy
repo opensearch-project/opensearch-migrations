@@ -68,7 +68,7 @@ defaultIntegPipeline(
             def uniqueId = "integ_min_${time}_${currentBuild.number}"
             def test_dir = "/root/lib/integ_test/integ_test"
             def test_result_file = "${test_dir}/reports/${uniqueId}/report.xml"
-            def command = "pytest --log-file=${test_dir}/reports/${uniqueId}/pytest.log " +
+            def command = "pipenv run pytest --log-file=${test_dir}/reports/${uniqueId}/pytest.log " +
                     "--junitxml=${test_result_file} ${test_dir}/backfill_tests.py " +
                     "--unique_id ${uniqueId} " +
                     "-s"
