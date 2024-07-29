@@ -91,7 +91,6 @@ class OpenSearchWorkCoodinatorTest {
 
     @Test
     public void testWhenGetResultAndErrorThenLogged() throws Exception {
-        // Set up our test
         // Run the test & verify
         try (
             var workCoordinator = new OpenSearchWorkCoordinator(mockClient, 2, "testWorker");
