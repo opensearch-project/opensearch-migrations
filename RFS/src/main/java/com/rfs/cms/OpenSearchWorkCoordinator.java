@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -295,15 +296,21 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         if (response.getStatusCode() == 409) {
             return DocumentModificationResult.IGNORED;
         }
-        final var resultDoc = objectMapper.readTree(response.getPayloadStream());
+        final var resultDoc = objectMapper.readTree(response.getPayloadBytes());
         var resultStr = resultDoc.path(RESULT_OPENSSEARCH_FIELD_NAME).textValue();
         try {
             return DocumentModificationResult.parse(resultStr);
         } catch (Exception e) {
-            log.atWarn().setCause(e).setMessage(() -> "Caught exception while parsing the result").log();
+            log.atWarn().setCause(e).setMessage(() -> "Caught exception while parsing the response").log();
+            log.atWarn().setMessage(() -> "status: " + response.getStatusCode() + " " + response.getStatusText()).log();
+            log.atWarn().setMessage(() -> "headers: " +
+                response.getHeaders()
+                    .map(kvp->kvp.getKey() + ":" + kvp.getValue())
+                    .collect(Collectors.joining("\n")))
+                .log();
             log.atWarn().setMessage(() -> {
                         try {
-                            return new String(response.getPayloadBytes(), StandardCharsets.UTF_8);
+                            return "Payload: " + new String(response.getPayloadBytes(), StandardCharsets.UTF_8);
                         } catch (Exception e2) {
                             return "while trying to display response bytes, caught exception: " + e2;
                         }
@@ -321,12 +328,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     ) throws IOException {
         try (var ctx = contextSupplier.get()) {
             var response = createOrUpdateLeaseForDocument(workItemId, 0);
-            try {
-                return getResult(response) == DocumentModificationResult.CREATED;
-            } catch (IllegalArgumentException e) {
-                log.error("Error parsing resposne: " + response);
-                throw e;
-            }
+            return getResult(response) == DocumentModificationResult.CREATED;
         }
     }
 
@@ -351,7 +353,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     null,
                     null
                 );
-                final var responseDoc = objectMapper.readTree(httpResponse.getPayloadStream()).path(SOURCE_FIELD_NAME);
+                final var responseDoc = objectMapper.readTree(httpResponse.getPayloadBytes()).path(SOURCE_FIELD_NAME);
                 if (resultFromUpdate == DocumentModificationResult.UPDATED) {
                     return new WorkItemAndDuration(
                         workItemId,
@@ -415,7 +417,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 null,
                 body
             );
-            final var resultStr = objectMapper.readTree(response.getPayloadStream())
+            final var resultStr = objectMapper.readTree(response.getPayloadBytes())
                 .get(RESULT_OPENSSEARCH_FIELD_NAME)
                 .textValue();
             if (DocumentModificationResult.UPDATED != DocumentModificationResult.parse(resultStr)) {
@@ -462,7 +464,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             var path = INDEX_NAME + "/_search" + (maxItemsToCheckFor <= 0 ? "" : "?size=" + maxItemsToCheckFor);
             var response = httpClient.makeJsonRequest(AbstractedHttpClient.POST_METHOD, path, null, queryBody);
 
-            final var resultHitsUpper = objectMapper.readTree(response.getPayloadStream()).path("hits");
+            final var resultHitsUpper = objectMapper.readTree(response.getPayloadBytes()).path("hits");
             var statusCode = response.getStatusCode();
             if (statusCode != 200) {
                 throw new IllegalStateException(
@@ -581,7 +583,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         if (response.getStatusCode() == 409) {
             return UpdateResult.VERSION_CONFLICT;
         }
-        var resultTree = objectMapper.readTree(response.getPayloadStream());
+        var resultTree = objectMapper.readTree(response.getPayloadBytes());
         final var numUpdated = resultTree.path(UPDATED_COUNT_FIELD_NAME).longValue();
         final var noops = resultTree.path("noops").longValue();
         assert numUpdated <= 1;
@@ -632,7 +634,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             body
         );
 
-        final var resultHitsUpper = objectMapper.readTree(response.getPayloadStream()).path("hits");
+        final var resultHitsUpper = objectMapper.readTree(response.getPayloadBytes()).path("hits");
         if (resultHitsUpper.isMissingNode()) {
             log.warn("Couldn't find the top level 'hits' field, returning null");
             return null;
