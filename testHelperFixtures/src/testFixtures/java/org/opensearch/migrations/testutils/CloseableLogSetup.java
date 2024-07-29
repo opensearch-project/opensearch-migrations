@@ -9,9 +9,9 @@ import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.LogEvent;
 import org.apache.logging.log4j.core.appender.AbstractAppender;
-import org.slf4j.LoggerFactory;
 
 import lombok.Getter;
+import org.slf4j.LoggerFactory;
 
 /**
  * A utility class to capture log events from a specific logger, usually for testing purposes.  Implements
