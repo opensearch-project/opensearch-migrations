@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -19,7 +20,7 @@ class ParsedHttpMessagesAsDictsTest extends InstrumentationTest {
             Optional.empty(),
             Optional.ofNullable(sourceResponse),
             Optional.empty(),
-            Optional.ofNullable(targetResponse)
+            List.of(targetResponse)
         );
     }
 

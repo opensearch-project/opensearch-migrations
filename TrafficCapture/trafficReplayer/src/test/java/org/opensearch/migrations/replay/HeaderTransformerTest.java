@@ -32,14 +32,7 @@ public class HeaderTransformerTest extends InstrumentationTest {
     @Test
     public void testTransformer() throws Exception {
         // mock object. values don't matter at all - not what we're testing
-        final var dummyAggregatedResponse = new TransformedTargetRequestAndResponse(
-            null,
-            17,
-            null,
-            null,
-            HttpRequestTransformationStatus.COMPLETED,
-            null
-        );
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformer = new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME);
         var transformingHandler = new HttpJsonTransformingConsumer(
@@ -110,14 +103,7 @@ public class HeaderTransformerTest extends InstrumentationTest {
     @Test
     public void testMalformedPayloadIsPassedThrough() throws Exception {
         // mock object. values don't matter at all - not what we're testing
-        final var dummyAggregatedResponse = new TransformedTargetRequestAndResponse(
-            null,
-            12,
-            null,
-            null,
-            HttpRequestTransformationStatus.COMPLETED,
-            null
-        );
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var httpBasicAuthTransformer = new StaticAuthTransformerFactory("Basic YWRtaW46YWRtaW4=");
         var transformingHandler = new HttpJsonTransformingConsumer(
@@ -152,17 +138,10 @@ public class HeaderTransformerTest extends InstrumentationTest {
     public void testMalformedPayload_andTypeMappingUri_IsPassedThrough() throws Exception {
         var referenceStringBuilder = new StringBuilder();
         // mock object. values don't matter at all - not what we're testing
-        final var dummyAggregatedResponse = new TransformedTargetRequestAndResponse(
-            null,
-            12,
-            null,
-            null,
-            HttpRequestTransformationStatus.COMPLETED,
-            null
-        );
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 12, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
 
-        var transformingHandler = new HttpJsonTransformingConsumer(
+        var transformingHandler = new HttpJsonTransformingConsumer<>(
             new TransformationLoader().getTransformerFactoryLoader(
                 SILLY_TARGET_CLUSTER_NAME,
                 null,

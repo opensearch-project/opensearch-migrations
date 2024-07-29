@@ -24,6 +24,8 @@ import org.junit.jupiter.api.parallel.ExecutionMode;
 
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.http.retries.NoRetryEvaluatorFactory;
 import org.opensearch.migrations.replay.util.NettyUtils;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 import org.opensearch.migrations.replay.util.TextTrackedFuture;
@@ -84,7 +86,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                 } catch (InterruptedException e) {
                     throw Lombok.sneakyThrow(e);
                 }
-                return new AggregatedRawResponse(0, Duration.ZERO, null, null);
+                return new AggregatedRawResponse(null, 0, Duration.ZERO, null, null);
             }), () -> "finalizeRequest waiting on test-gate semaphore release");
         }
     }
@@ -116,15 +118,16 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
             // half the time schedule at the same time as the last one, the other half, 10ms later than the previous
             var perPacketShift = Duration.ofMillis(10 * i / NUM_REPEATS);
             var startTimeForThisRequest = baseTime.plus(perPacketShift);
-            var requestPackets = IntStream.range(0, NUM_PACKETS)
+            var requestPackets = new ByteBufList(IntStream.range(0, NUM_PACKETS)
                 .mapToObj(b -> Unpooled.wrappedBuffer(new byte[] { (byte) b }))  // TODO refCnt issue
-                .collect(Collectors.toList());
+                .toArray(ByteBuf[]::new));
             var arrCf = senderOrchestrator.scheduleRequest(
                 requestContext.getReplayerRequestKey(),
                 requestContext,
                 startTimeForThisRequest,
                 Duration.ofMillis(1),
-                requestPackets.stream()
+                requestPackets,
+                new NoRetryEvaluatorFactory.NoRetryVisitor()
             );
 
             log.info("Scheduled item to run at " + startTimeForThisRequest);
@@ -227,7 +230,8 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                     requestContext,
                     startTimeForThisRequest,
                     Duration.ofMillis(1),
-                    requestPackets.stream()
+                    requestPackets,
+                    new NoRetryEvaluatorFactory.NoRetryVisitor()
                 );
                 log.info("Scheduled item to run at " + startTimeForThisRequest);
                 scheduledItems.add(arr);
@@ -255,9 +259,8 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                     var messageHolder = RefSafeHolder.create(
                         HttpByteBufFormatter.parseHttpMessageFromBufs(
                             HttpByteBufFormatter.HttpMessageType.RESPONSE,
-                            bufStream
-                        )
-                    )
+                            bufStream,
+                            0))
                 ) {
                     var message = messageHolder.get();
                     Assertions.assertNotNull(message);
@@ -276,12 +279,11 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
         }
     }
 
-    private List<ByteBuf> makeRequest(int i) {
+    private ByteBufList makeRequest(int i) {
         // uncomment/swap for a simpler test case to run
-        return // List.of(Unpooled.wrappedBuffer(getRequestString(i).getBytes()));
-        TestHttpServerContext.getRequestString(i)
+        return new ByteBufList(TestHttpServerContext.getRequestString(i)
             .chars()
             .mapToObj(c -> Unpooled.wrappedBuffer(new byte[] { (byte) c }))
-            .collect(Collectors.toList());
+            .toArray(ByteBuf[]::new));
     }
 }

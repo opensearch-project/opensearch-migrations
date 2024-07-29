@@ -7,6 +7,7 @@ import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
@@ -182,12 +183,13 @@ public class ReplayEngine {
         return hookWorkFinishingUpdates(result, originalStart, requestCtx, label);
     }
 
-    public TrackedFuture<String, AggregatedRawResponse> scheduleRequest(
+    public <T> TrackedFuture<String, T> scheduleRequest(
         IReplayContexts.IReplayerHttpTransactionContext ctx,
         Instant originalStart,
         Instant originalEnd,
         int numPackets,
-        Stream<ByteBuf> packets
+        ByteBufList packets,
+        RequestSenderOrchestrator.RepeatedAggregatedRawResponseVisitor<T> visitor
     ) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "request";
@@ -212,7 +214,7 @@ public class ReplayEngine {
                     + " packets"
             )
             .log();
-        var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packets);
+        var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packets, visitor);
         return hookWorkFinishingUpdates(sendResult, originalStart, requestKey, label);
     }
 

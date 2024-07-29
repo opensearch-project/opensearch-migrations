@@ -6,6 +6,8 @@ import java.time.Instant;
 import java.util.Optional;
 import java.util.stream.Stream;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.util.NettyUtils;
 
@@ -53,6 +55,12 @@ public class HttpMessageAndTimestamp {
     public HttpMessageAndTimestamp(Instant firstPacketTimestamp) {
         this.firstPacketTimestamp = firstPacketTimestamp;
         this.packetBytes = new RawPackets();
+    }
+
+    public ByteBuf asByteBuf() {
+        var compositeBuffer = Unpooled.compositeBuffer();
+        packetBytes.stream().map(Unpooled::wrappedBuffer).forEach(compositeBuffer::addComponent);
+        return compositeBuffer.asReadOnly();
     }
 
     public boolean hasInProgressSegment() {

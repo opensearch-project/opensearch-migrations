@@ -7,22 +7,28 @@ import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.Callable;
 import java.util.function.Supplier;
+import java.util.logging.Handler;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import io.netty.channel.ChannelHandler;
 import org.opensearch.migrations.replay.util.NettyUtils;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpClientCodec;
+import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpMessage;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
+import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
@@ -93,9 +99,11 @@ public class HttpByteBufFormatter {
             case FULL_BYTES:
                 return httpPacketBufsToString(byteBufStream, Long.MAX_VALUE);
             case PARSED_HTTP:
-                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, false, lineDelimiter);
+                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, false, lineDelimiter,
+                    Utils.MAX_PAYLOAD_BYTES_TO_PRINT);
             case PARSED_HTTP_SORTED_HEADERS:
-                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, true, lineDelimiter);
+                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, true, lineDelimiter,
+                    Utils.MAX_PAYLOAD_BYTES_TO_PRINT);
             default:
                 throw new IllegalStateException("Unknown PacketPrintFormat: " + printStyle.get());
         }
@@ -105,9 +113,10 @@ public class HttpByteBufFormatter {
         HttpMessageType msgType,
         Stream<ByteBuf> byteBufStream,
         boolean sortHeaders,
-        String lineDelimiter
+        String lineDelimiter,
+        int maxPayloadBytes
     ) {
-        try (var messageHolder = RefSafeHolder.create(parseHttpMessageFromBufs(msgType, byteBufStream))) {
+        try (var messageHolder = RefSafeHolder.create(parseHttpMessageFromBufs(msgType, byteBufStream, maxPayloadBytes))) {
             final HttpMessage httpMessage = messageHolder.get();
             if (httpMessage != null) {
                 if (httpMessage instanceof FullHttpRequest) {
@@ -152,6 +161,34 @@ public class HttpByteBufFormatter {
         return sj.toString();
     }
 
+    @AllArgsConstructor
+    private static class HttpContentTruncator extends ChannelInboundHandlerAdapter {
+        private int bytesLeftToRead;
+
+        @Override
+        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+            if (msg instanceof HttpContent) {
+                HttpContent httpContent = (HttpContent) msg;
+                ByteBuf content = httpContent.content();
+                if (content.readableBytes() > bytesLeftToRead) {
+                    content.writerIndex(bytesLeftToRead);
+                }
+                bytesLeftToRead -= content.readableBytes();
+            }
+            super.channelRead(ctx, msg);
+        }
+    }
+
+    private static class LengthIgnoringHttpObjectAggregator extends HttpObjectAggregator {
+        protected boolean isContentLengthInvalid(HttpMessage start, int maxContentLength) {
+            return false;
+        }
+
+        public LengthIgnoringHttpObjectAggregator(int maxContentLength) {
+            super(maxContentLength);
+        }
+    }
+
     /**
      * This won't alter the incoming byteBufStream at all - all buffers are duplicated as they're
      * passed into the parsing channel.  The output message MAY be a ByteBufHolder, in which case,
@@ -160,26 +197,40 @@ public class HttpByteBufFormatter {
      * @param byteBufStream
      * @return
      */
-    public static HttpMessage parseHttpMessageFromBufs(HttpMessageType msgType, Stream<ByteBuf> byteBufStream) {
+    public static HttpMessage parseHttpMessageFromBufs(HttpMessageType msgType,
+                                                       Stream<ByteBuf> byteBufStream,
+                                                       int payloadCeilingBytes) {
+        return parseHttpMessageFromBufs(msgType,
+            byteBufStream,
+            new HttpContentTruncator(payloadCeilingBytes),
+            new LengthIgnoringHttpObjectAggregator(payloadCeilingBytes));
+    }
+
+    public static HttpMessage parseHttpMessageFromBufs(HttpMessageType msgType,
+                                                       Stream<ByteBuf> byteBufStream,
+                                                       ChannelHandler... handlers) {
         EmbeddedChannel channel = new EmbeddedChannel(
             msgType == HttpMessageType.REQUEST ? new HttpServerCodec() : new HttpClientCodec(),
-            new HttpContentDecompressor(),
-            new HttpObjectAggregator(Utils.MAX_PAYLOAD_BYTES_TO_PRINT)  // Set max content length if needed
+            new HttpContentDecompressor()
         );
+        for (var h : handlers) {
+            channel.pipeline().addLast(h);
+        }
         try {
             byteBufStream.forEachOrdered(b -> channel.writeInbound(b.retainedDuplicate()));
-            return channel.readInbound();
+            HttpMessage rval = channel.readInbound();
+            return rval;
         } finally {
             channel.finishAndReleaseAll();
         }
     }
 
-    public static FullHttpRequest parseHttpRequestFromBufs(Stream<ByteBuf> byteBufStream) {
-        return (FullHttpRequest) parseHttpMessageFromBufs(HttpMessageType.REQUEST, byteBufStream);
+    public static FullHttpRequest parseHttpRequestFromBufs(Stream<ByteBuf> byteBufStream, int maxPayloadBytes) {
+        return (FullHttpRequest) parseHttpMessageFromBufs(HttpMessageType.REQUEST, byteBufStream, maxPayloadBytes);
     }
 
-    public static FullHttpResponse parseHttpResponseFromBufs(Stream<ByteBuf> byteBufStream) {
-        return (FullHttpResponse) parseHttpMessageFromBufs(HttpMessageType.RESPONSE, byteBufStream);
+    public static FullHttpResponse parseHttpResponseFromBufs(Stream<ByteBuf> byteBufStream, int maxPayloadBytes) {
+        return (FullHttpResponse) parseHttpMessageFromBufs(HttpMessageType.RESPONSE, byteBufStream, maxPayloadBytes);
     }
 
     public static String httpPacketBufsToString(Stream<ByteBuf> byteBufStream, long maxBytesToShow) {

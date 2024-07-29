@@ -9,16 +9,18 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import java.util.stream.Stream;
 
+import lombok.AllArgsConstructor;
 import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.ChannelTask;
 import org.opensearch.migrations.replay.datatypes.ChannelTaskType;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.util.RefSafeHolder;
 import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import org.opensearch.migrations.replay.util.TrackedFuture;
 
@@ -106,12 +108,33 @@ public class RequestSenderOrchestrator {
             }, () -> "The scheduled callback is running work for " + ctx);
     }
 
-    public TrackedFuture<String, AggregatedRawResponse> scheduleRequest(
+    public enum RetryDirective {
+        DONE, RETRY
+    }
+
+    @AllArgsConstructor
+    public static class DeterminedTransformedResponse<T> {
+        RetryDirective directive;
+        T value;
+    }
+
+    public interface RepeatedAggregatedRawResponseVisitor<T> {
+        /**
+         * Return null to continue trying according to
+         * @param arr
+         * @return
+         */
+        TrackedFuture<String,DeterminedTransformedResponse<T>>
+        visit(ByteBuf requestBytes, AggregatedRawResponse arr, Throwable t);
+    }
+
+    public <T> TrackedFuture<String, T> scheduleRequest(
         UniqueReplayerRequestKey requestKey,
         IReplayContexts.IReplayerHttpTransactionContext ctx,
         Instant start,
         Duration interval,
-        Stream<ByteBuf> packets
+        ByteBufList packets,
+        RepeatedAggregatedRawResponseVisitor<T> visitor
     ) {
         var sessionNumber = requestKey.sourceRequestIndexSessionIdentifier;
         var channelInteractionNum = requestKey.getReplayerRequestIndex();
@@ -130,7 +153,8 @@ public class RequestSenderOrchestrator {
                 connectionReplaySession,
                 start,
                 interval,
-                packets
+                packets,
+                visitor
             )
         );
     }
@@ -197,12 +221,13 @@ public class RequestSenderOrchestrator {
             }, () -> "Waiting for sequencer to finish for slot " + channelInteractionNumber);
     }
 
-    private TrackedFuture<String, AggregatedRawResponse> scheduleSendRequestOnConnectionReplaySession(
+    private <T> TrackedFuture<String, T> scheduleSendRequestOnConnectionReplaySession(
         IReplayContexts.IReplayerHttpTransactionContext ctx,
         ConnectionReplaySession connectionReplaySession,
         Instant startTime,
         Duration interval,
-        Stream<ByteBuf> packets
+        ByteBufList packets,
+        RepeatedAggregatedRawResponseVisitor<T> visitor
     ) {
         var eventLoop = connectionReplaySession.eventLoop;
         var scheduledContext = ctx.createScheduledContext(startTime);
@@ -217,13 +242,13 @@ public class RequestSenderOrchestrator {
             startTime,
             new ChannelTask<>(ChannelTaskType.TRANSMIT, trigger -> trigger.thenCompose(voidVal -> {
                 scheduledContext.close();
-                return sendSendingRestOfPackets(
-                    packetConsumerFactory.apply(connectionReplaySession, ctx),
+                return sendRequestWithRetries(
+                        () -> packetConsumerFactory.apply(connectionReplaySession, ctx),
                     eventLoop,
-                    packets.iterator(),
+                    packets,
                     startTime,
                     interval,
-                    new AtomicInteger()
+                    visitor
                 );
             }, () -> "sending packets for request"))
         );
@@ -300,16 +325,42 @@ public class RequestSenderOrchestrator {
         return Duration.ofMillis(Math.max(0, Duration.between(now(), to).toMillis()));
     }
 
-    private TrackedFuture<String, AggregatedRawResponse> sendSendingRestOfPackets(
+    private <T> TrackedFuture<String, T>
+    sendRequestWithRetries(
+            Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier,
+                           EventLoop eventLoop,
+                           ByteBufList byteBufList,
+                           Instant startTime,
+                           Duration interval,
+            RepeatedAggregatedRawResponseVisitor<T> visitor) {
+        return sendPackets(senderSupplier.get(), eventLoop,
+            byteBufList.streamRetained().iterator(), startTime, interval, new AtomicInteger())
+            .getDeferredFutureThroughHandle((response, t) -> {
+                    try (var requestBytesHolder = RefSafeHolder.create(byteBufList.asCompositeByteBufRetained())) {
+                        return visitor.visit(requestBytesHolder.get(), response, t);
+                    }
+                },
+                () -> "checking response to determine if done")
+            .getDeferredFutureThroughHandle((dtr,t) -> {
+                if (dtr.directive == RetryDirective.RETRY) {
+                    return sendRequestWithRetries(senderSupplier, eventLoop, byteBufList, startTime, interval, visitor);
+                } else {
+                    return TextTrackedFuture.completedFuture(dtr.value,
+                        () -> "done retrying and returning received response");
+                }
+            }, () -> "determining if the response must be retried or if it should be returned now");
+    }
+
+    private TrackedFuture<String, AggregatedRawResponse> sendPackets(
         IPacketFinalizingConsumer<AggregatedRawResponse> packetReceiver,
         EventLoop eventLoop,
         Iterator<ByteBuf> iterator,
         Instant startAt,
         Duration interval,
-        AtomicInteger counter
+        AtomicInteger requestPacketCounter
     ) {
-        final var oldCounter = counter.getAndIncrement();
-        log.atTrace().setMessage(() -> "sendNextPartAndContinue: counter=" + oldCounter).log();
+        final var oldCounter = requestPacketCounter.getAndIncrement();
+        log.atTrace().setMessage(() -> "sendNextPartAndContinue: packetCounter=" + oldCounter).log();
         assert iterator.hasNext() : "Should not have called this with no items to send";
 
         var consumeFuture = packetReceiver.consumeBytes(iterator.next());
@@ -317,10 +368,10 @@ public class RequestSenderOrchestrator {
             return consumeFuture.thenCompose(
                 tf -> NettyFutureBinders.bindNettyScheduleToCompletableFuture(
                     eventLoop,
-                    Duration.between(now(), startAt.plus(interval.multipliedBy(counter.get())))
+                    Duration.between(now(), startAt.plus(interval.multipliedBy(requestPacketCounter.get())))
                 )
                     .thenCompose(
-                        v -> sendSendingRestOfPackets(packetReceiver, eventLoop, iterator, startAt, interval, counter),
+                        v -> sendPackets(packetReceiver, eventLoop, iterator, startAt, interval, requestPacketCounter),
                         () -> "sending next packet"
                     ),
                 () -> "recursing, once ready"

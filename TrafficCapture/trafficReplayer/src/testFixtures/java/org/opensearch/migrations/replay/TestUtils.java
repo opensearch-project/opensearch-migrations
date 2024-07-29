@@ -169,7 +169,7 @@ public class TestUtils {
     ) throws IOException, ExecutionException, InterruptedException {
         var testPacketCapture = new TestCapturePacketToHttpHandler(
             Duration.ofMillis(100),
-            new AggregatedRawResponse(-1, Duration.ZERO, new ArrayList<>(), null)
+            new AggregatedRawResponse(null, -1, Duration.ZERO, new ArrayList<>(), null)
         );
         var transformingHandler = new HttpJsonTransformingConsumer<>(
             transformer,

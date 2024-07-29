@@ -1,15 +1,24 @@
 package org.opensearch.migrations.replay.datatypes;
 
 import java.util.ArrayList;
+import java.util.List;
 import java.util.StringJoiner;
 import java.util.stream.Stream;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.CompositeByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.util.ReferenceCounted;
 
-public class TransformedPackets implements AutoCloseable {
+public class ByteBufList implements AutoCloseable {
 
     ArrayList<ByteBuf> data = new ArrayList<>();
+
+    public ByteBufList(ByteBuf ...items) {
+        for (var i : items) {
+            add(i);
+        }
+    }
 
     public boolean add(ByteBuf nextRequestPacket) {
         return data.add(nextRequestPacket.retainedDuplicate());
@@ -43,6 +52,16 @@ public class TransformedPackets implements AutoCloseable {
         });
     }
 
+    public CompositeByteBuf asCompositeByteBufRetained() {
+        return asCompositeByteBufRetained(data.stream());
+    }
+
+    public static CompositeByteBuf asCompositeByteBufRetained(Stream<ByteBuf> byteBufs) {
+        var compositeByteBuf = Unpooled.compositeBuffer();
+        byteBufs.forEach(byteBuf -> compositeByteBuf.addComponent(true, byteBuf));
+        return compositeByteBuf;
+    }
+
     @Override
     public void close() {
         data.forEach(ReferenceCounted::release);
@@ -58,7 +77,7 @@ public class TransformedPackets implements AutoCloseable {
         if (isClosed()) {
             return "CLOSED";
         }
-        return new StringJoiner(", ", TransformedPackets.class.getSimpleName() + "[", "]").add("data=" + data)
+        return new StringJoiner(", ", ByteBufList.class.getSimpleName() + "[", "]").add("data=" + data)
             .toString();
     }
 }

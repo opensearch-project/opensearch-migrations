@@ -5,6 +5,7 @@ import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -24,7 +25,7 @@ import org.junit.jupiter.api.parallel.ResourceLock;
 
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
-import org.opensearch.migrations.replay.datatypes.TransformedPackets;
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
@@ -101,10 +102,11 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
 
     @Test
     public void testTupleNewWithNullKeyThrows() {
+        var responses = new TransformedTargetRequestAndResponseList(null, HttpRequestTransformationStatus.SKIPPED);
         try (var closeableLogSetup = new CloseableLogSetup()) {
             Assertions.assertThrows(
                 Exception.class,
-                () -> new SourceTargetCaptureTuple(null, null, null, null, null, null, null)
+                () -> new SourceTargetCaptureTuple(null, null, responses, null)
             );
             Assertions.assertEquals(0, closeableLogSetup.logEvents.size());
         }
@@ -113,15 +115,8 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     @Test
     @ResourceLock("TestContext")
     public void testOutputterWithNulls() throws IOException {
-        var emptyTuple = new SourceTargetCaptureTuple(
-            rootContext.getTestTupleContext(),
-            null,
-            null,
-            null,
-            null,
-            null,
-            null
-        );
+        var responses = new TransformedTargetRequestAndResponseList(null, HttpRequestTransformationStatus.SKIPPED);
+        var emptyTuple = new SourceTargetCaptureTuple(rootContext.getTestTupleContext(), null, responses, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
             var resultsToLogsConsumer = new ResultsToLogsConsumer(closeableLogSetup.testLogger, null);
             var consumer = new TupleParserChainConsumer(resultsToLogsConsumer);
@@ -136,16 +131,9 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     @Test
     @ResourceLock("TestContext")
     public void testOutputterWithException() {
+        var responses = new TransformedTargetRequestAndResponseList(null, HttpRequestTransformationStatus.SKIPPED);
         var exception = new Exception(TEST_EXCEPTION_MESSAGE);
-        var emptyTuple = new SourceTargetCaptureTuple(
-            rootContext.getTestTupleContext(),
-            null,
-            null,
-            null,
-            null,
-            exception,
-            null
-        );
+        var emptyTuple = new SourceTargetCaptureTuple(rootContext.getTestTupleContext(), null, responses, exception);
         try (var closeableLogSetup = new CloseableLogSetup()) {
             var resultsToLogsConsumer = new ResultsToLogsConsumer(closeableLogSetup.testLogger, null);
             var consumer = new TupleParserChainConsumer(resultsToLogsConsumer);
@@ -203,7 +191,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             + "        \"content-length\": \"0\",\r\n"
             + "        \"body\": \"\"\r\n"
             + "    },\r\n"
-            + "    \"targetResponse\": {\r\n"
+            + "    \"targetResponses\": [{\r\n"
             + "        \"HTTP-Version\": {\r\n"
             + "            \"keepAliveDefault\": true\r\n"
             + "        },\r\n"
@@ -216,8 +204,10 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             + "        \"Funtime\": \"checkIt!\",\r\n"
             + "        \"content-length\": \"30\",\r\n"
             + "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\"\r\n"
-            + "    },\r\n"
-            + "    \"connectionId\": \"testConnection.1\"\r\n"
+            + "    }],\r\n"
+            + "    \"connectionId\": \"testConnection.1\"," +
+            "      \"numRequests\":1," +
+            "      \"numErrors\":0\r\n"
             + "}";
         testOutputterForRequest("get_withAuthHeader.txt", EXPECTED_LOGGED_OUTPUT);
     }
@@ -259,7 +249,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             + "        \"Content-Length\": \"652\",\r\n"
             + "        \"body\": \"ew0KICAic2V0dGluZ3MiOiB7DQogICAgImluZGV4Ijogew0KICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LA0KICAgICAgIm51bWJlcl9vZl9yZXBsaWNhcyI6IDMNCiAgICB9LA0KICAgICJhbmFseXNpcyI6IHsNCiAgICAgICJhbmFseXplciI6IHsNCiAgICAgICAgIm5hbWVBbmFseXplciI6IHsNCiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLA0KICAgICAgICAgICJ0b2tlbml6ZXIiOiAia2V5d29yZCIsDQogICAgICAgICAgImZpbHRlciI6ICJ1cHBlcmNhc2UiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0sDQogICJtYXBwaW5ncyI6IHsNCiAgICAiZW1wbG95ZWUiOiB7DQogICAgICAicHJvcGVydGllcyI6IHsNCiAgICAgICAgImFnZSI6IHsNCiAgICAgICAgICAidHlwZSI6ICJsb25nIg0KICAgICAgICB9LA0KICAgICAgICAibGV2ZWwiOiB7DQogICAgICAgICAgInR5cGUiOiAibG9uZyINCiAgICAgICAgfSwNCiAgICAgICAgInRpdGxlIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiDQogICAgICAgIH0sDQogICAgICAgICJuYW1lIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiLA0KICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0NCn0NCg==\"\r\n"
             + "    },\r\n"
-            + "    \"targetResponse\": {\r\n"
+            + "    \"targetResponses\": [{\r\n"
             + "        \"HTTP-Version\": {\r\n"
             + "            \"keepAliveDefault\": true\r\n"
             + "        },\r\n"
@@ -272,8 +262,10 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             + "        \"Funtime\": \"checkIt!\",\r\n"
             + "        \"content-length\": \"30\",\r\n"
             + "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\"\r\n"
-            + "    },\r\n"
-            + "    \"connectionId\": \"testConnection.1\"\r\n"
+            + "    }],\r\n"
+            + "    \"connectionId\": \"testConnection.1\"," +
+            "      \"numRequests\":1," +
+            "      \"numErrors\":0\r\n"
             + "}";
         testOutputterForRequest("post_formUrlEncoded_withFixedLength.txt", EXPECTED_LOGGED_OUTPUT);
     }
@@ -291,20 +283,22 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         var rawResponseData = EXPECTED_RESPONSE_STRING.getBytes(StandardCharsets.UTF_8);
         sourcePair.addResponseData(Instant.EPOCH, rawResponseData);
 
-        var targetRequest = new TransformedPackets();
+        var targetRequest = new ByteBufList();
         targetRequest.add(Unpooled.wrappedBuffer(rawRequestData));
-        var targetResponse = new ArrayList<byte[]>();
-        targetResponse.add(rawResponseData);
-
+        var targetResponse = new ArrayList<AbstractMap.SimpleEntry<Instant, byte[]>>();
+        targetResponse.add(new AbstractMap.SimpleEntry<>(Instant.now(), rawResponseData));
+        var aggregatedResponse = new AggregatedRawResponse(null, 13, Duration.ofMillis(267), targetResponse, null);
+        var targetResponses = new TransformedTargetRequestAndResponseList(
+            targetRequest,
+            HttpRequestTransformationStatus.SKIPPED,
+            aggregatedResponse
+        );
         try (var tupleContext = rootContext.getTestTupleContext(); var closeableLogSetup = new CloseableLogSetup()) {
             var tuple = new SourceTargetCaptureTuple(
                 tupleContext,
                 sourcePair,
-                targetRequest,
-                targetResponse,
-                HttpRequestTransformationStatus.SKIPPED,
-                null,
-                Duration.ofMillis(267)
+                targetResponses,
+                null
             );
             var streamConsumer = new ResultsToLogsConsumer(closeableLogSetup.testLogger, null);
             var consumer = new TupleParserChainConsumer(streamConsumer);

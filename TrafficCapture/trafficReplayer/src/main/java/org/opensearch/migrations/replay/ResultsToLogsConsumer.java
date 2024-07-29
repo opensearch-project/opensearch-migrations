@@ -6,6 +6,10 @@ import java.util.Optional;
 import java.util.StringJoiner;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiConsumer;
+import java.util.function.Function;
+import java.util.function.Predicate;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 
@@ -21,6 +25,7 @@ import org.slf4j.LoggerFactory;
 public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTuple, ParsedHttpMessagesAsDicts> {
     public static final String OUTPUT_TUPLE_JSON_LOGGER = "OutputTupleJsonLogger";
     public static final String TRANSACTION_SUMMARY_LOGGER = "TransactionSummaryLogger";
+    private static final String MISSING_STR = "-";
     private static final ObjectMapper PLAIN_MAPPER = new ObjectMapper();
 
     private final Logger tupleLogger;
@@ -55,10 +60,12 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
         parsed.sourceRequestOp.ifPresent(r -> tupleMap.put("sourceRequest", r));
         parsed.sourceResponseOp.ifPresent(r -> tupleMap.put("sourceResponse", r));
         parsed.targetRequestOp.ifPresent(r -> tupleMap.put("targetRequest", r));
-        parsed.targetResponseOp.ifPresent(r -> tupleMap.put("targetResponse", r));
+        tupleMap.put("targetResponses", parsed.targetResponseList);
 
         tupleMap.put("connectionId", formatUniqueRequestKey(tuple.getRequestKey()));
-        Optional.ofNullable(tuple.errorCause).ifPresent(e -> tupleMap.put("error", e.toString()));
+        Optional.ofNullable(tuple.topLevelErrorCause).ifPresent(e -> tupleMap.put("error", e.toString()));
+        tupleMap.put("numRequests",  tuple.responseList.size());
+        tupleMap.put("numErrors",  tuple.responseList.stream().filter(r->r.errorCause!=null).count());
 
         return tupleMap;
     }
@@ -129,10 +136,10 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
         return new StringJoiner(", ").add("#")
             .add("REQUEST_ID")
             .add("ORIGINAL_TIMESTAMP")
-            .add("SOURCE_STATUS_CODE/TARGET_STATUS_CODE")
             .add("SOURCE_REQUEST_SIZE_BYTES/TARGET_REQUEST_SIZE_BYTES")
-            .add("SOURCE_RESPONSE_SIZE_BYTES/TARGET_RESPONSE_SIZE_BYTES")
-            .add("SOURCE_LATENCY_MS/TARGET_LATENCY_MS")
+            .add("SOURCE_STATUS_CODE/TARGET_STATUS_CODE...")
+            .add("SOURCE_RESPONSE_SIZE_BYTES/TARGET_RESPONSE_SIZE_BYTES...")
+            .add("SOURCE_LATENCY_MS/TARGET_LATENCY_MS...")
             .toString();
     }
 
@@ -141,9 +148,7 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
         SourceTargetCaptureTuple tuple,
         ParsedHttpMessagesAsDicts parsed
     ) {
-        final String MISSING_STR = "-";
-        var s = parsed.sourceResponseOp;
-        var t = parsed.targetResponseOp;
+        var sourceResponse = parsed.sourceResponseOp;
         return new StringJoiner(", ").add(Integer.toString(index))
             // REQUEST_ID
             .add(formatUniqueRequestKey(tuple.getRequestKey()))
@@ -152,12 +157,6 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
                 Optional.ofNullable(tuple.sourcePair)
                     .map(sp -> sp.requestData.getLastPacketTimestamp().toString())
                     .orElse(MISSING_STR)
-            )
-            // SOURCE/TARGET STATUS_CODE
-            .add(
-                s.map(r -> "" + r.get(ParsedHttpMessagesAsDicts.STATUS_CODE_KEY)).orElse(MISSING_STR)
-                    + "/"
-                    + t.map(r -> "" + r.get(ParsedHttpMessagesAsDicts.STATUS_CODE_KEY)).orElse(MISSING_STR)
             )
             // SOURCE/TARGET REQUEST_SIZE_BYTES
             .add(
@@ -174,24 +173,39 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
                         )
                         .orElse(MISSING_STR)
             )
+            // SOURCE/TARGET STATUS_CODE
+            .add(
+                sourceResponse.map(r -> "" + r.get(ParsedHttpMessagesAsDicts.STATUS_CODE_KEY)).orElse(MISSING_STR)
+                    + "/" +
+                    transformStreamToString(parsed.targetResponseList.stream(),
+                        r -> "" + r.get(ParsedHttpMessagesAsDicts.STATUS_CODE_KEY))
+            )
             // SOURCE/TARGET RESPONSE_SIZE_BYTES
             .add(
                 Optional.ofNullable(tuple.sourcePair)
                     .flatMap(sp -> Optional.ofNullable(sp.responseData))
                     .map(rd -> rd.stream().mapToInt(bArr -> bArr.length).sum() + "")
                     .orElse(MISSING_STR)
-                    + "/"
-                    + Optional.ofNullable(tuple.targetResponseData)
-                        .map(rd -> rd.stream().mapToInt(bArr -> bArr.length).sum() + "")
-                        .orElse(MISSING_STR)
+                    + "/" +
+                    transformStreamToString(tuple.responseList.stream(),
+                                r -> r.targetResponseData.stream().mapToInt(bArr -> bArr.length).sum() + "")
             )
             // SOURCE/TARGET LATENCY
             .add(
-                s.map(r -> "" + r.get(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY)).orElse(MISSING_STR)
-                    + "/"
-                    + t.map(r -> "" + r.get(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY)).orElse(MISSING_STR)
+                sourceResponse.map(r -> "" + r.get(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY)).orElse(MISSING_STR)
+                    + "/" +
+                    transformStreamToString(parsed.targetResponseList.stream(),
+                        r -> "" + r.get(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY))
             )
             .toString();
     }
 
+    private static <T> String transformStreamToString(Stream<T> stream, Function<T,String> mapFunction) {
+        return Stream.of(stream
+                .map(mapFunction)
+                .collect(Collectors.joining(",")))
+            .filter(Predicate.not(String::isEmpty))
+            .findFirst()
+            .orElse(MISSING_STR);
+    }
 }
