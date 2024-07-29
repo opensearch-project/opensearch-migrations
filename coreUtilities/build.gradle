@@ -62,9 +62,6 @@ dependencies {
     testFixturesApi group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
     testFixturesImplementation group: 'io.opentelemetry', name: 'opentelemetry-api'
     testFixturesImplementation group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
-    testFixturesImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
-    testFixturesImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
-    testFixturesImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
     testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api'
 }
 
