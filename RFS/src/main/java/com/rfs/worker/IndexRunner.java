@@ -36,7 +36,7 @@ public class IndexRunner {
         repoDataProvider.getIndicesInSnapshot(snapshotName)
             .stream()
             .filter(FilterScheme.filterIndicesByAllowList(indexAllowlist, logger))
-            .peek(index -> {
+            .forEach(index -> {
                 var indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
                 var transformedRoot = transformer.transformIndexMetadata(indexMetadata);
                 var resultOp = indexCreator.create(transformedRoot, index.getName(), indexMetadata.getId(), context);
@@ -44,7 +44,6 @@ public class IndexRunner {
                     value -> log.info("Index " + index.getName() + " created successfully"),
                     () -> log.info("Index " + index.getName() + " already existed; no work required")
                 );
-            })
-            .count(); // Force the stream to execute
+            });
     }
 }
