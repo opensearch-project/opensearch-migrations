@@ -63,6 +63,7 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
         tupleMap.put("targetResponses", parsed.targetResponseList);
 
         tupleMap.put("connectionId", formatUniqueRequestKey(tuple.getRequestKey()));
+        Optional.ofNullable(tuple.topLevelErrorCause).ifPresent(e -> tupleMap.put("error", e.toString()));
         tupleMap.put("numRequests",  tuple.responseList.size());
         tupleMap.put("numErrors",  tuple.responseList.stream().filter(r->r.errorCause!=null).count());
 

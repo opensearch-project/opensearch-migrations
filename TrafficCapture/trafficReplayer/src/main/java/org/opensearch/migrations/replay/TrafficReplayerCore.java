@@ -147,7 +147,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         }
 
         /**
-         * @returns @see #transformAndSendRequest(PacketToTransformingHttpHandlerFactory, TrackedFuture, IReplayContexts.IReplayerHttpTransactionContext, Instant, Instant, Supplier)
+         * @see RequestTransformerAndSender#transformAndSendRequest
          */
         private TrackedFuture<String, TransformedTargetRequestAndResponseList> sendRequestAfterGoingThroughWorkQueue(
             IReplayContexts.IReplayerHttpTransactionContext ctx,
@@ -308,7 +308,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     }
 
     /**
-     * @returns @see #transformAndSendRequest(PacketToTransformingHttpHandlerFactory, TrackedFuture, IReplayContexts.IReplayerHttpTransactionContext, Instant, Instant, Supplier)
+     * @see RequestTransformerAndSender#transformAndSendRequest
      */
     public TrackedFuture<String, TransformedTargetRequestAndResponseList> transformAndSendRequest(
         ReplayEngine replayEngine,

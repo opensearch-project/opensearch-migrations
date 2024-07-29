@@ -61,7 +61,7 @@ public class RequestTransformerAndSender<T> {
      * request).  If an exception happens during transformation, the returned TrackedFuture will have
      * an exceptional completion.  The transformed request future is composed with a method that sends
      * the request and awaits a response.  Specifically, a response that is returned through the visitor
-     * that will retry in case of any exceptional or error (status code) occurrences.<br/><br/>
+     * that will retry in case of any exceptional or error (status code) occurrences.<br><br>
      *
      * If there is an error in calling the replayEngine, that exception is trapped and will be returned
      * immediately in a TrackedFuture with the Exception.
