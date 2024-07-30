@@ -6,16 +6,11 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.core.LogEvent;
-import org.apache.logging.log4j.core.appender.AbstractAppender;
 import org.apache.logging.log4j.core.impl.Log4jContextFactory;
 import org.apache.logging.log4j.core.selector.ClassLoaderContextSelector;
 import org.junit.jupiter.api.Assertions;
@@ -25,13 +20,13 @@ import org.junit.jupiter.api.parallel.ResourceLock;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.TransformedPackets;
+import org.opensearch.migrations.testutils.CloseableLogSetup;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 
 import io.netty.buffer.Unpooled;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.LoggerFactory;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 4)
@@ -58,55 +53,23 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         + "0\r\n"
         + "\r\n";
 
+    public static String calculateLoggerName(Class<?> clazz) {
+        return clazz.getName() + ".Thread" + Thread.currentThread().getId();
+    }
+
     @Override
     protected TestContext makeInstrumentationContext() {
         return TestContext.withTracking(false, true);
     }
 
-    private static class CloseableLogSetup implements AutoCloseable {
-        List<String> logEvents = Collections.synchronizedList(new ArrayList<>());
-        AbstractAppender testAppender;
-        org.slf4j.Logger testLogger;
-        org.apache.logging.log4j.core.Logger internalLogger;
-
-        final String instanceName;
-
-        public CloseableLogSetup() {
-            instanceName = this.getClass().getName() + ".Thread" + Thread.currentThread().getId();
-
-            testAppender = new AbstractAppender(instanceName, null, null, false, null) {
-                @Override
-                public void append(LogEvent event) {
-                    logEvents.add(event.getMessage().getFormattedMessage());
-                }
-            };
-
-            testAppender.start();
-
-            internalLogger = (org.apache.logging.log4j.core.Logger) LogManager.getLogger(instanceName);
-            testLogger = LoggerFactory.getLogger(instanceName);
-
-            // Cast to core.Logger to access internal methods
-            internalLogger.setLevel(Level.ALL);
-            internalLogger.setAdditive(false);
-            internalLogger.addAppender(testAppender);
-        }
-
-        @Override
-        public void close() {
-            internalLogger.removeAppender(testAppender);
-            testAppender.stop();
-        }
-    }
-
     @Test
     public void testTupleNewWithNullKeyThrows() {
-        try (var closeableLogSetup = new CloseableLogSetup()) {
+        try (var closeableLogSetup = new CloseableLogSetup(calculateLoggerName(this.getClass()))) {
             Assertions.assertThrows(
                 Exception.class,
                 () -> new SourceTargetCaptureTuple(null, null, null, null, null, null, null)
             );
-            Assertions.assertEquals(0, closeableLogSetup.logEvents.size());
+            Assertions.assertEquals(0, closeableLogSetup.getLogEvents().size());
         }
     }
 
@@ -122,12 +85,12 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             null,
             null
         );
-        try (var closeableLogSetup = new CloseableLogSetup()) {
-            var resultsToLogsConsumer = new ResultsToLogsConsumer(closeableLogSetup.testLogger, null);
+        try (var closeableLogSetup = new CloseableLogSetup(calculateLoggerName(this.getClass()))) {
+            var resultsToLogsConsumer = new ResultsToLogsConsumer(closeableLogSetup.getTestLogger(), null);
             var consumer = new TupleParserChainConsumer(resultsToLogsConsumer);
             consumer.accept(emptyTuple);
-            Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
-            var contents = closeableLogSetup.logEvents.get(0);
+            Assertions.assertEquals(1, closeableLogSetup.getLogEvents().size());
+            var contents = closeableLogSetup.getLogEvents().get(0);
             log.info("Output=" + contents);
             Assertions.assertTrue(contents.contains(NODE_ID));
         }
@@ -146,12 +109,12 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             exception,
             null
         );
-        try (var closeableLogSetup = new CloseableLogSetup()) {
-            var resultsToLogsConsumer = new ResultsToLogsConsumer(closeableLogSetup.testLogger, null);
+        try (var closeableLogSetup = new CloseableLogSetup(calculateLoggerName(this.getClass()))) {
+            var resultsToLogsConsumer = new ResultsToLogsConsumer(closeableLogSetup.getTestLogger(), null);
             var consumer = new TupleParserChainConsumer(resultsToLogsConsumer);
             consumer.accept(emptyTuple);
-            Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
-            var contents = closeableLogSetup.logEvents.get(0);
+            Assertions.assertEquals(1, closeableLogSetup.getLogEvents().size());
+            var contents = closeableLogSetup.getLogEvents().get(0);
             log.info("Output=" + contents);
             Assertions.assertTrue(contents.contains(NODE_ID));
             Assertions.assertTrue(contents.contains(TEST_EXCEPTION_MESSAGE));
@@ -296,7 +259,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         var targetResponse = new ArrayList<byte[]>();
         targetResponse.add(rawResponseData);
 
-        try (var tupleContext = rootContext.getTestTupleContext(); var closeableLogSetup = new CloseableLogSetup()) {
+        try (var tupleContext = rootContext.getTestTupleContext(); var closeableLogSetup = new CloseableLogSetup(calculateLoggerName(this.getClass()))) {
             var tuple = new SourceTargetCaptureTuple(
                 tupleContext,
                 sourcePair,
@@ -306,11 +269,11 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 null,
                 Duration.ofMillis(267)
             );
-            var streamConsumer = new ResultsToLogsConsumer(closeableLogSetup.testLogger, null);
+            var streamConsumer = new ResultsToLogsConsumer(closeableLogSetup.getTestLogger(), null);
             var consumer = new TupleParserChainConsumer(streamConsumer);
             consumer.accept(tuple);
-            Assertions.assertEquals(1, closeableLogSetup.logEvents.size());
-            var contents = closeableLogSetup.logEvents.get(0);
+            Assertions.assertEquals(1, closeableLogSetup.getLogEvents().size());
+            var contents = closeableLogSetup.getLogEvents().get(0);
             log.info("Output=" + contents);
             Assertions.assertEquals(normalizeJson(expected), normalizeJson(contents));
         }

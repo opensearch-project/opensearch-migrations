@@ -1,8 +1,6 @@
 package com.rfs.cms;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -18,13 +16,7 @@ public interface AbstractedHttpClient extends AutoCloseable {
     interface AbstractHttpResponse {
         Stream<Map.Entry<String, String>> getHeaders();
 
-        default byte[] getPayloadBytes() throws IOException {
-            return getPayloadStream().readAllBytes();
-        }
-
-        default InputStream getPayloadStream() throws IOException {
-            return new ByteArrayInputStream(getPayloadBytes());
-        }
+        byte[] getPayloadBytes() throws IOException;
 
         String getStatusText();
 
@@ -63,4 +55,7 @@ public interface AbstractedHttpClient extends AutoCloseable {
         }
         return makeRequest(method, path, combinedHeaders, body);
     }
+
+    @Override
+    default void close() throws Exception {}
 }
