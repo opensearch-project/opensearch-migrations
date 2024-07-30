@@ -17,13 +17,22 @@ import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 
 import com.rfs.tracing.RfsContexts;
+import reactor.netty.http.client.HttpClient;
+import reactor.netty.resources.ConnectionProvider;
 
 class RestClientTest {
+
+    private static HttpClient makeSingleConnectionHttpClient() {
+        var provider = ConnectionProvider.builder("singleConnection").maxConnections(1).build();
+        return HttpClient.create(provider);
+    }
+
     @Test
     public void testGetEmitsInstrumentation() throws Exception {
         var rootContext = SnapshotTestContext.factory().withAllTracking();
         try (var testServer = SimpleNettyHttpServer.makeServer(false, null, this::makeResponseContext)) {
-            var restClient = new RestClient(new ConnectionDetails("http://localhost:" + testServer.port, null, null));
+            var restClient = new RestClient(new ConnectionDetails("http://localhost:" + testServer.port, null, null),
+                makeSingleConnectionHttpClient());
             try (var topScope = rootContext.createSnapshotCreateContext()) {
                 restClient.postAsync("/", "empty", topScope.createSnapshotContext()).block();
                 restClient.getAsync("/", topScope.createGetSnapshotContext()).block();
