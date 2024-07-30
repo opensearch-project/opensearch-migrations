@@ -11,9 +11,9 @@
     "RetryAttempts": 0
   },
   "service": {
-    "clusterArn": "arn:aws:ecs:us-east-1:471142325910:cluster/migration-aws-integ-ecs-cluster",
+    "clusterArn": "arn:aws:ecs:us-east-1:012345678901:cluster/migration-aws-integ-ecs-cluster",
     "createdAt": "2024-05-29 17:31:13.749000+00:00",
-    "createdBy": "arn:aws:iam::471142325910:role/cdk-hnb659fds-cfn-exec-role-471142325910-us-east-1",
+    "createdBy": "arn:aws:iam::012345678901:role/cdk-hnb659fds-cfn-exec-role-012345678901-us-east-1",
     "deploymentConfiguration": {
       "alarms": {
         "alarmNames": [],
@@ -51,7 +51,7 @@
         "rolloutStateReason": "ECS deployment ecs-svc/4332894108537737212 completed.",
         "runningCount": 1,
         "status": "PRIMARY",
-        "taskDefinition": "arn:aws:ecs:us-east-1:471142325910:task-definition/migration-aws-integ-reindex-from-snapshot:4",
+        "taskDefinition": "arn:aws:ecs:us-east-1:012345678901:task-definition/migration-aws-integ-reindex-from-snapshot:4",
         "updatedAt": "2024-06-19 16:19:25.479000+00:00"
       }
     ],
@@ -555,13 +555,13 @@
     "platformFamily": "Linux",
     "platformVersion": "LATEST",
     "propagateTags": "NONE",
-    "roleArn": "arn:aws:iam::471142325910:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS",
+    "roleArn": "arn:aws:iam::012345678901:role/aws-service-role/ecs.amazonaws.com/AWSServiceRoleForECS",
     "runningCount": 1,
     "schedulingStrategy": "REPLICA",
-    "serviceArn": "arn:aws:ecs:us-east-1:471142325910:service/migration-aws-integ-ecs-cluster/migration-aws-integ-reindex-from-snapshot",
+    "serviceArn": "arn:aws:ecs:us-east-1:012345678901:service/migration-aws-integ-ecs-cluster/migration-aws-integ-reindex-from-snapshot",
     "serviceName": "migration-aws-integ-reindex-from-snapshot",
     "serviceRegistries": [],
     "status": "ACTIVE",
-    "taskDefinition": "arn:aws:ecs:us-east-1:471142325910:task-definition/migration-aws-integ-reindex-from-snapshot:4"
+    "taskDefinition": "arn:aws:ecs:us-east-1:012345678901:task-definition/migration-aws-integ-reindex-from-snapshot:4"
   }
 }

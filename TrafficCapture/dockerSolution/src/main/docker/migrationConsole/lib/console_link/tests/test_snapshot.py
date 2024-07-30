@@ -72,11 +72,11 @@ def test_s3_snapshot_status_full(s3_snapshot, mock_cluster):
                 "stats": {
                     "incremental": {
                         "file_count": 67041,
-                        "size_in_bytes": 440990672819
+                        "size_in_bytes": 67108864
                     },
                     "total": {
                         "file_count": 67041,
-                        "size_in_bytes": 440990672819
+                        "size_in_bytes": 67108864
                     },
                     "start_time_in_millis": 1719343996753,
                     "time_in_millis": 79426
