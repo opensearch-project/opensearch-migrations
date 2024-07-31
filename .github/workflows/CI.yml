@@ -215,7 +215,11 @@ jobs:
       - python-lint
       - python-tests
       - fetch-migration-docker-build
+    if: always()
     runs-on: ubuntu-latest
     steps:
+      - if: ${{ contains(needs.*.result, 'cancelled') || contains(needs.*.result, 'failure') || contains(needs.*.result, 'skipped') }}
+        run: |
+          echo "One or more job cancelled, failed, or skipped" && exit 1
       - run: |
           echo '## :heavy_check_mark: All continous integration checks pass' >> $GITHUB_STEP_SUMMARY
