@@ -48,7 +48,9 @@ public interface AbstractedHttpClient extends AutoCloseable {
         String body
     ) throws IOException {
         var combinedHeaders = new LinkedHashMap<String, String>();
-        combinedHeaders.put("Content-Type", "application/json");
+        if (body != null) {
+            combinedHeaders.put("Content-Type", "application/json");
+        }
         combinedHeaders.put("Accept-Encoding", "identity");
         if (extraHeaders != null) {
             combinedHeaders.putAll(extraHeaders);

@@ -14,9 +14,8 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import com.rfs.common.http.ConnectionContext;
-import com.rfs.common.http.RestClient;
+import com.rfs.common.http.HttpResponse;
 import com.rfs.tracing.IRfsContexts;
-import lombok.NonNull;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
@@ -28,19 +27,9 @@ public class OpenSearchClient {
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
-    public final ConnectionContext connectionContext;
     private final RestClient client;
 
-    public OpenSearchClient(@NonNull String url, UsernamePassword p) {
-        this(url, p == null ? null : p.getUsername(), p == null ? null : p.getPassword(), false);
-    }
-
-    public OpenSearchClient(@NonNull String url, String username, String password, boolean insecure) {
-        this(new ConnectionContext(url, username, password, insecure));
-    }
-
     public OpenSearchClient(ConnectionContext connectionContext) {
-        this.connectionContext = connectionContext;
         this.client = new RestClient(connectionContext);
     }
 
@@ -101,7 +90,7 @@ public class OpenSearchClient {
         ObjectNode settings,
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
-        RestClient.Response getResponse = client.getAsync(objectPath, context.createCheckRequestContext())
+        HttpResponse getResponse = client.getAsync(objectPath, context.createCheckRequestContext())
             .flatMap(resp -> {
                 if (resp.code == HttpURLConnection.HTTP_NOT_FOUND || resp.code == HttpURLConnection.HTTP_OK) {
                     return Mono.just(resp);
@@ -219,7 +208,7 @@ public class OpenSearchClient {
         IRfsContexts.ICreateSnapshotContext context
     ) {
         String targetPath = "_snapshot/" + repoName + "/" + snapshotName;
-        RestClient.Response getResponse = client.getAsync(targetPath, context.createGetSnapshotContext()).flatMap(resp -> {
+        HttpResponse getResponse = client.getAsync(targetPath, context.createGetSnapshotContext()).flatMap(resp -> {
             if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_NOT_FOUND) {
                 return Mono.just(resp);
             } else {
@@ -271,12 +260,12 @@ public class OpenSearchClient {
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)));
     }
 
-    public RestClient.Response refresh(IRfsContexts.IRequestContext context) {
+    public HttpResponse refresh(IRfsContexts.IRequestContext context) {
         String targetPath = "_refresh";
         return client.get(targetPath, context);
     }
 
-    public static class BulkResponse extends RestClient.Response {
+    public static class BulkResponse extends HttpResponse {
         public BulkResponse(int responseCode, String responseBody, String responseMessage,
                             Map<String, String> responseHeaders) {
             super(responseCode, responseBody, responseMessage, responseHeaders);
@@ -310,9 +299,9 @@ public class OpenSearchClient {
     }
 
     public static class OperationFailed extends RfsException {
-        public final RestClient.Response response;
+        public final HttpResponse response;
 
-        public OperationFailed(String message, RestClient.Response response) {
+        public OperationFailed(String message, HttpResponse response) {
             super(message);
 
             this.response = response;

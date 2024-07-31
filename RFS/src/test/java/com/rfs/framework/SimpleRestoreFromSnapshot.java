@@ -6,7 +6,7 @@ import java.util.List;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
 import com.rfs.common.OpenSearchClient;
-import com.rfs.common.http.ConnectionContext;
+import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.models.IndexMetadata;
 
 public interface SimpleRestoreFromSnapshot {
@@ -29,7 +29,10 @@ public interface SimpleRestoreFromSnapshot {
             tempSnapshotName,
             unpackedShardDataDir
         );
-        final var targetClusterClient = new OpenSearchClient(new ConnectionContext(targetClusterUrl, null, null));
+        final var targetClusterClient = new OpenSearchClient(ConnectionContextTestParams.builder()
+            .host(targetClusterUrl)
+            .build()
+            .toConnectionContext());
 
         // TODO: This should update the following metdata:
         // - Global cluster state

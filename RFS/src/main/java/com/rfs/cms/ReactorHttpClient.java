@@ -1,13 +1,15 @@
 package com.rfs.cms;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Stream;
 
+import com.rfs.common.RestClient;
 import com.rfs.common.http.ConnectionContext;
-import com.rfs.common.http.RestClient;
+import com.rfs.common.http.HttpResponse;
 import io.netty.handler.codec.http.HttpMethod;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -45,16 +47,16 @@ public class ReactorHttpClient implements AbstractedHttpClient {
     @Override
     public AbstractHttpResponse makeRequest(String method, String path, Map<String, String> headers, String payload)
         throws IOException {
-        Mono<RestClient.Response> responseMono;
+        Mono<HttpResponse> responseMono;
         HttpMethod httpMethod = HttpMethod.valueOf(method);
-        responseMono = restClient.asyncRequest(httpMethod, path, payload, null);
-        RestClient.Response response = responseMono.block();
-
+        responseMono = restClient.asyncRequestWithStringHeaderValues(httpMethod, path, payload, headers, null);
+        HttpResponse response = responseMono.block();
+        assert response != null;
         return new Response(
             new ArrayList<>(response.headers.entrySet()),
             response.message,
             response.code,
-            response.body.getBytes()
+            response.body != null ? response.body.getBytes(StandardCharsets.UTF_8) : null
         );
     }
 

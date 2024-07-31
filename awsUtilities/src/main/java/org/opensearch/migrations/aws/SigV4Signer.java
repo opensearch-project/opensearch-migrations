@@ -1,53 +1,40 @@
 package org.opensearch.migrations.aws;
 
+import java.io.ByteArrayInputStream;
+import java.io.ByteArrayOutputStream;
 import java.net.URI;
 import java.nio.ByteBuffer;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.time.Clock;
-import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
+import java.util.Optional;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.IHttpMessage;
 
-import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
+import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
+import software.amazon.awssdk.auth.credentials.AwsCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
-import software.amazon.awssdk.auth.signer.internal.BaseAws4Signer;
-import software.amazon.awssdk.auth.signer.params.Aws4SignerParams;
-import software.amazon.awssdk.core.checksums.SdkChecksum;
-import software.amazon.awssdk.http.SdkHttpFullRequest;
+import software.amazon.awssdk.http.ContentStreamProvider;
 import software.amazon.awssdk.http.SdkHttpMethod;
-import software.amazon.awssdk.regions.Region;
-import software.amazon.awssdk.utils.BinaryUtils;
+import software.amazon.awssdk.http.SdkHttpRequest;
+import software.amazon.awssdk.http.auth.aws.signer.AwsV4FamilyHttpSigner;
+import software.amazon.awssdk.http.auth.aws.signer.AwsV4HttpSigner;
+import software.amazon.awssdk.http.auth.spi.signer.HttpSigner;
+import software.amazon.awssdk.identity.spi.AwsCredentialsIdentity;
 
 @Slf4j
 public class SigV4Signer {
-    private static final HashSet<String> AUTH_HEADERS_TO_PULL_WITH_PAYLOAD;
-    private static final HashSet<String> AUTH_HEADERS_TO_PULL_NO_PAYLOAD;
 
-    public static final String AMZ_CONTENT_SHA_256 = "x-amz-content-sha256";
-    public static final String CONTENT_TYPE = "content-type";
-
-    static {
-        AUTH_HEADERS_TO_PULL_NO_PAYLOAD = new HashSet<>(Set.of("authorization", "x-amz-date", "x-amz-security-token"));
-        AUTH_HEADERS_TO_PULL_WITH_PAYLOAD = Stream.concat(
-            AUTH_HEADERS_TO_PULL_NO_PAYLOAD.stream(),
-            Stream.of(AMZ_CONTENT_SHA_256)
-        ).collect(Collectors.toCollection(HashSet::new));
-    }
-
-    private MessageDigest messageDigest;
     private AwsCredentialsProvider credentialsProvider;
     private String service;
     private String region;
     private String protocol;
     private Supplier<Clock> timestampSupplier; // for unit testing
+    private ByteArrayOutputStream bodyStream;
 
     public SigV4Signer(
         AwsCredentialsProvider credentialsProvider,
@@ -61,20 +48,29 @@ public class SigV4Signer {
         this.region = region;
         this.protocol = protocol;
         this.timestampSupplier = timestampSupplier;
+        this.bodyStream = null;
+    }
+
+    private static void writeByteBufferToByteArrayOutputStream(ByteBuffer byteBuffer,
+                                                               ByteArrayOutputStream outputStream) {
+        var readBuffer = byteBuffer.duplicate();
+
+        // If the ByteBuffer has a backing array, use it directly
+        if (readBuffer.hasArray()) {
+            outputStream.write(readBuffer.array(), readBuffer.position(), readBuffer.remaining());
+        } else {
+            // Otherwise, read bytes manually into a temporary array
+            byte[] temp = new byte[readBuffer.remaining()];
+            readBuffer.get(temp);
+            outputStream.write(temp, 0, temp.length);
+        }
     }
 
     public void consumeNextPayloadPart(ByteBuffer payloadChunk) {
-        if (payloadChunk.remaining() <= 0) {
-            return;
+        if (this.bodyStream == null) {
+            this.bodyStream = new ByteArrayOutputStream();
         }
-        if (messageDigest == null) {
-            try {
-                this.messageDigest = MessageDigest.getInstance("SHA-256");
-            } catch (NoSuchAlgorithmException e) {
-                throw Lombok.sneakyThrow(e);
-            }
-        }
-        messageDigest.update(payloadChunk);
+        writeByteBufferToByteArrayOutputStream(payloadChunk, this.bodyStream);
     }
 
     public Map<String, List<String>> finalizeSignature(IHttpMessage msg) {
@@ -82,55 +78,37 @@ public class SigV4Signer {
         return stream.collect(Collectors.toUnmodifiableMap(Map.Entry::getKey, Map.Entry::getValue));
     }
 
-    private static class AwsSignerWithPrecomputedContentHash extends BaseAws4Signer {
-        @Override
-        protected String calculateContentHash(
-            SdkHttpFullRequest.Builder mutableRequest,
-            Aws4SignerParams signerParams,
-            SdkChecksum contentFlexibleChecksum
-        ) {
-            var contentChecksum = mutableRequest.headers().get(AMZ_CONTENT_SHA_256);
-            return contentChecksum != null
-                ? contentChecksum.get(0)
-                : super.calculateContentHash(mutableRequest, signerParams, contentFlexibleChecksum);
-        }
-    }
-
     private Stream<Map.Entry<String, List<String>>> getSignatureHeadersViaSdk(IHttpMessage msg) {
-        var signer = new AwsSignerWithPrecomputedContentHash();
-        var httpRequestBuilder = SdkHttpFullRequest.builder();
-        httpRequestBuilder.method(SdkHttpMethod.fromValue(msg.method()))
-            .uri(URI.create(msg.path()))
-            .protocol(protocol)
-            .host(msg.getFirstHeader("host"));
+        AwsV4HttpSigner signer = AwsV4HttpSigner.create();
 
-        var contentType = msg.getFirstHeader(CONTENT_TYPE);
-        if (contentType != null) {
-            httpRequestBuilder.appendHeader("Content-Type", contentType);
-        }
-        if (messageDigest != null) {
-            byte[] bytesToEncode = messageDigest.digest();
-            String payloadHash = BinaryUtils.toHex(bytesToEncode);
-            httpRequestBuilder.appendHeader(AMZ_CONTENT_SHA_256, payloadHash);
-        }
+        final AwsCredentials awsCredentials = credentialsProvider.resolveCredentials();
 
-        SdkHttpFullRequest request = httpRequestBuilder.build();
+        final AwsCredentialsIdentity credentials = AwsBasicCredentials.create(
+            awsCredentials.accessKeyId(),
+            awsCredentials.secretAccessKey()
+        );
 
-        var signingParamsBuilder = Aws4SignerParams.builder()
-            .signingName(service)
-            .signingRegion(Region.of(region))
-            .awsCredentials(credentialsProvider.resolveCredentials());
-        if (timestampSupplier != null) {
-            signingParamsBuilder.signingClockOverride(timestampSupplier.get());
-        }
-        var signedRequest = signer.sign(request, signingParamsBuilder.build());
+        final String host = Optional.ofNullable(msg.getFirstHeader("Host")).orElseThrow(
+            () -> new IllegalArgumentException("Cannot find host")
+        );
 
-        var headersToReturn = messageDigest == null
-            ? AUTH_HEADERS_TO_PULL_NO_PAYLOAD
-            : AUTH_HEADERS_TO_PULL_WITH_PAYLOAD;
-        return signedRequest.headers()
-            .entrySet()
-            .stream()
-            .filter(kvp -> headersToReturn.contains(kvp.getKey().toLowerCase()));
+        var uri = URI.create(protocol + "://" + host + msg.path());
+
+        final SdkHttpRequest httpRequest = SdkHttpRequest.builder()
+                .uri(uri)
+                .method(SdkHttpMethod.fromValue(msg.method()))
+                .headers(msg.headers())
+                .build();
+
+        final ContentStreamProvider requestPayload = bodyStream != null ?
+            () -> new ByteArrayInputStream(bodyStream.toByteArray()) :
+            null;
+
+        return signer.sign(r -> r.identity(credentials)
+            .request(httpRequest)
+            .payload(requestPayload)
+            .putProperty(AwsV4FamilyHttpSigner.SERVICE_SIGNING_NAME, this.service)
+            .putProperty(AwsV4HttpSigner.REGION_NAME, this.region)
+            .putProperty(HttpSigner.SIGNING_CLOCK, timestampSupplier.get())).request().headers().entrySet().stream();
     }
 }

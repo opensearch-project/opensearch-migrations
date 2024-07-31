@@ -180,9 +180,9 @@ public class TestUtils {
 
         var contentLength = stringParts.stream().mapToInt(String::length).sum();
         var headerString = "GET / HTTP/1.1\r\n"
-            + "host: localhost\r\n"
+            + "Host: localhost\r\n"
             + (extraHeaders == null ? "" : extraHeaders)
-            + "content-length: "
+            + "Content-Length: "
             + contentLength
             + "\r\n\r\n";
         var referenceStringBuilder = new StringBuilder();

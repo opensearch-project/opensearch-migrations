@@ -15,7 +15,6 @@ import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
 import com.rfs.common.ClusterVersion;
-import com.rfs.common.http.ConnectionContext;
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Repo;
@@ -23,6 +22,7 @@ import com.rfs.common.S3Uri;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SourceRepo;
 import com.rfs.common.TryHandlePhaseFailure;
+import com.rfs.common.http.ConnectionContext;
 import com.rfs.models.GlobalMetadata;
 import com.rfs.models.IndexMetadata;
 import com.rfs.transformers.TransformFunctions;
@@ -120,7 +120,7 @@ public class MetadataMigration {
         final List<String> componentTemplateAllowlist = arguments.componentTemplateAllowlist;
         final int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
 
-        final ConnectionContext targetConnection = new ConnectionContext(arguments.targetArgs);
+        final ConnectionContext targetConnection = arguments.targetArgs.toConnectionContext();
 
         TryHandlePhaseFailure.executeWithTryCatch(() -> {
             log.info("Running RfsWorker");

@@ -1,5 +1,6 @@
 package com.rfs.common.http;
 
+import java.nio.ByteBuffer;
 import java.time.Clock;
 import java.util.HashMap;
 import java.util.List;
@@ -12,7 +13,7 @@ import org.opensearch.migrations.aws.SigV4Signer;
 import reactor.core.publisher.Mono;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 
-public class SigV4AuthTransformer implements AuthTransformer {
+public class SigV4AuthTransformer implements RequestTransformer {
     private final SigV4Signer signer;
 
     public SigV4AuthTransformer(AwsCredentialsProvider credentialsProvider, String service, String region, String protocol, Supplier<Clock> timestampSupplier) {
@@ -20,9 +21,11 @@ public class SigV4AuthTransformer implements AuthTransformer {
     }
 
     @Override
-    public Mono<TransformedRequest> transform(String method, String path, Map<String, List<String>> headers, Mono<String> body) {
-        return body.flatMap(content -> {
-            signer.consumeNextPayloadPart(java.nio.ByteBuffer.wrap(content.getBytes()));
+    public Mono<TransformedRequest> transform(String method, String path, Map<String, List<String>> headers, Mono<ByteBuffer> body) {
+        return body
+            .doOnNext(signer::consumeNextPayloadPart)
+            .singleOptional()
+            .map(contentOp -> {
             Map<String, List<String>> signedHeaders = signer.finalizeSignature(new IHttpMessage() {
                 @Override
                 public String method() {
@@ -36,7 +39,7 @@ public class SigV4AuthTransformer implements AuthTransformer {
 
                 @Override
                 public String protocol() {
-                    return "HTTP/1.1";
+                    throw new UnsupportedOperationException("Protocol based transformation not supported");
                 }
 
                 @Override
@@ -46,7 +49,7 @@ public class SigV4AuthTransformer implements AuthTransformer {
             });
             Map<String, List<String>> newHeaders = new HashMap<>(headers);
             newHeaders.putAll(signedHeaders);
-            return Mono.just(new TransformedRequest(newHeaders, Mono.just(content)));
+            return new TransformedRequest(newHeaders, Mono.justOrEmpty(contentOp));
         });
     }
 }

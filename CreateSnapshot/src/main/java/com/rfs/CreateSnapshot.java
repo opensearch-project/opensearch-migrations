@@ -12,12 +12,12 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
-import com.rfs.common.http.ConnectionContext;
 import com.rfs.common.FileSystemSnapshotCreator;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3SnapshotCreator;
 import com.rfs.common.SnapshotCreator;
 import com.rfs.common.TryHandlePhaseFailure;
+import com.rfs.common.http.ConnectionContext;
 import com.rfs.worker.SnapshotRunner;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -51,6 +51,10 @@ public class CreateSnapshot {
         @Parameter(names = {
             "--max-snapshot-rate-mb-per-node" }, required = false, description = "The maximum snapshot rate in megabytes per second per node")
         public Integer maxSnapshotRateMBPerNode;
+
+        @Parameter(names = {
+            "--s3-role-arn" }, required = false, description = "The role arn to use for Amazon Managed Service s3 snapshots")
+        public String s3RoleArn;
 
         @Parameter(required = false, names = {
             "--otel-collector-endpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
@@ -100,9 +104,10 @@ public class CreateSnapshot {
                     arguments.s3RepoUri,
                     arguments.s3Region,
                     arguments.maxSnapshotRateMBPerNode,
+                    arguments.s3RoleArn,
                     rootContext.createSnapshotCreateContext()
                 )),
-            new OpenSearchClient(new ConnectionContext(arguments.sourceArgs)),
+            new OpenSearchClient(arguments.sourceArgs.toConnectionContext()),
             arguments.noWait
         );
     }

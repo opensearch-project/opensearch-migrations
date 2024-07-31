@@ -44,18 +44,19 @@ public class SigV4AuthTransformerFactoryTest extends InstrumentationTest {
         var mockCredentialsProvider = new MockCredentialsProvider();
         DefaultHttpHeaders expectedRequestHeaders = new DefaultHttpHeaders();
         // netty's decompressor and aggregator remove some header values (& add others)
-        expectedRequestHeaders.add("host", "localhost");
+        expectedRequestHeaders.add("Host", "localhost");
         expectedRequestHeaders.add("Content-Length".toLowerCase(), "46");
         expectedRequestHeaders.add(
             "Authorization",
             "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/19700101/us-east-1/es/aws4_request, "
-                + "SignedHeaders=host;x-amz-content-sha256;x-amz-date, "
-                + "Signature=4cb1c423e6fe61216fbaa11398260af7f8daa85e74cd41428711e4df5cd70c97"
+                + "SignedHeaders=content-length;host;x-amz-content-sha256;x-amz-date, "
+                + "Signature=d238eb72c9714af46e6a1997f8cbaa65cd9fec3e9ec278a999f6dad3387cfd2c"
         );
         expectedRequestHeaders.add(
             "x-amz-content-sha256",
             "fc0e8e9a1f7697f510bfdd4d55b8612df8a0140b4210967efd87ee9cb7104362"
         );
+
         expectedRequestHeaders.add("X-Amz-Date", "19700101T000000Z");
 
         try (var factory = new SigV4AuthTransformerFactory(

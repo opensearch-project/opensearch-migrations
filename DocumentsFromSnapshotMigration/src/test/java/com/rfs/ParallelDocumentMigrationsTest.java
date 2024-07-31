@@ -18,7 +18,6 @@ import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import com.rfs.cms.ReactorHttpClient;
 import io.opentelemetry.sdk.metrics.data.LongPointData;
 import io.opentelemetry.sdk.metrics.data.MetricData;
 import org.apache.lucene.document.Document;
@@ -38,7 +37,7 @@ import org.opensearch.testcontainers.OpensearchContainer;
 
 import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.cms.OpenSearchWorkCoordinator;
-import com.rfs.common.http.ConnectionContext;
+import com.rfs.cms.ReactorHttpClient;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
@@ -49,6 +48,7 @@ import com.rfs.common.RestClient;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
+import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.framework.PreloadedSearchClusterContainer;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.http.SearchClusterRequests;
@@ -144,14 +144,20 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                     SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
                     testSnapshotContext.createSnapshotCreateContext()
                 ),
-                new OpenSearchClient(esSourceContainer.getUrl(), null),
+                new OpenSearchClient(ConnectionContextTestParams.builder()
+                    .host(esSourceContainer.getUrl())
+                    .build()
+                    .toConnectionContext()),
                 false
             );
             var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
             try {
                 esSourceContainer.copySnapshotData(tempDir.toString());
 
-                var targetClient = new OpenSearchClient(osTargetContainer.getHttpHostAddress(), null);
+                var targetClient = new OpenSearchClient(ConnectionContextTestParams.builder()
+                    .host(esSourceContainer.getUrl())
+                    .build()
+                    .toConnectionContext());
                 var sourceRepo = new FileSystemRepo(tempDir);
                 migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, INDEX_ALLOWLIST, testMetadataMigrationContext);
 
@@ -264,8 +270,16 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         OpensearchContainer<?> osTargetContainer,
         DocumentMigrationTestContext context
     ) {
-        var targetClient = new RestClient(new ConnectionContext(osTargetContainer.getHttpHostAddress(), null, null));
-        var sourceClient = new RestClient(new ConnectionContext(esSourceContainer.getUrl(), null, null));
+        var targetClient = new RestClient(ConnectionContextTestParams.builder()
+            .host(osTargetContainer.getHttpHostAddress())
+            .build()
+            .toConnectionContext()
+        );
+        var sourceClient = new RestClient(ConnectionContextTestParams.builder()
+            .host(esSourceContainer.getUrl())
+            .build()
+            .toConnectionContext()
+        );
 
         var requests = new SearchClusterRequests(context);
         var sourceMap = requests.getMapOfIndexAndDocCount(sourceClient);
@@ -378,9 +392,15 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
 
             return RfsMigrateDocuments.run(
                 path -> new FilteredLuceneDocumentsReader(path, terminatingDocumentFilter),
-                new DocumentReindexer(new OpenSearchClient(targetAddress, null)),
+                new DocumentReindexer(new OpenSearchClient(ConnectionContextTestParams.builder()
+                    .host(targetAddress)
+                    .build()
+                    .toConnectionContext())),
                 new OpenSearchWorkCoordinator(
-                    new ReactorHttpClient(new ConnectionContext(targetAddress, null, null)),
+                    new ReactorHttpClient(ConnectionContextTestParams.builder()
+                        .host(targetAddress)
+                        .build()
+                        .toConnectionContext()),
                     TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                     UUID.randomUUID().toString(),
                     Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))
