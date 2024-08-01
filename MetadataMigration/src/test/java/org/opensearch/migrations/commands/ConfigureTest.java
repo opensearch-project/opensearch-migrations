@@ -1,25 +1,24 @@
 package org.opensearch.migrations.commands;
 
-import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.MatcherAssert.assertThat;
-
 import org.junit.jupiter.api.Test;
+
 import org.opensearch.migrations.MetadataMigration;
 import org.opensearch.migrations.clusters.Sources;
 
-public class ConfigureTest {
+import static org.hamcrest.CoreMatchers.equalTo;
+import static org.hamcrest.MatcherAssert.assertThat;
+import static org.mockito.Mockito.mock;
 
-    private static final int SuccessExitCode = 0;
+class ConfigureTest {
 
     @Test
-    public void configureSource() {
-        var meta = new MetadataMigration();
+    void configureSource_notImplemented() {
+        var meta = new MetadataMigration(mock(MetadataMigration.Args.class));
 
         var configureSource = meta.configure()
             .source(Sources.withHost("https://localhost:9200"))
             .execute();
 
-        assertThat(configureSource.getExitCode(), equalTo(SuccessExitCode));
-
+        assertThat(configureSource.getExitCode(), equalTo(9999));
     }
 }
