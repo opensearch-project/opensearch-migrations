@@ -1,7 +1,10 @@
 package org.opensearch.migrations.commands;
 
-public class ConfigureResult {
-    public int getExitCode() {
-        return 3;
-    }
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+
+@AllArgsConstructor
+public class ConfigureResult implements Result {
+    @Getter
+    private final int exitCode;
 }
