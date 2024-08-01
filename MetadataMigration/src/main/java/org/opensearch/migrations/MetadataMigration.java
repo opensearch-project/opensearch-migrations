@@ -1,6 +1,7 @@
 package org.opensearch.migrations;
 
 import org.opensearch.migrations.commands.Configure;
+import org.opensearch.migrations.commands.Evaluate;
 import org.opensearch.migrations.commands.Migrate;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
@@ -38,6 +39,10 @@ public class MetadataMigration {
 
     public Configure configure() {
         return new Configure();
+    }
+
+    public Evaluate evaluate() {
+        return new Evaluate();
     }
 
     public Migrate migrate() {
