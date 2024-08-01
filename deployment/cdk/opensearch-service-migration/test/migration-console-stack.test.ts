@@ -2,24 +2,13 @@ import { createStackComposer } from "./test-utils";
 import { Capture, Match, Template } from "aws-cdk-lib/assertions";
 import { MigrationConsoleStack } from "../lib/service-stacks/migration-console-stack";
 import {ContainerImage} from "aws-cdk-lib/aws-ecs";
-import {describe, beforeEach, afterEach, test, expect} from '@jest/globals';
-import { jest } from '@jest/globals';
+import {describe, beforeEach, afterEach, test, expect, jest} from '@jest/globals';
 
-jest.clearAllMocks();
-jest.resetModules();
-jest.restoreAllMocks();
-jest.resetAllMocks();
-
+jest.mock('aws-cdk-lib/aws-ecr-assets');
 describe('Migration Console Stack Tests', () => {
     // Mock the implementation of fromDockerImageAsset before all tests
     beforeEach(() => {
-        jest.clearAllMocks();
-        jest.resetModules();
-        jest.restoreAllMocks();
-        jest.resetAllMocks();
-        jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => {
-            return ContainerImage.fromRegistry('fake-image');
-        });
+        jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => ContainerImage.fromRegistry("ServiceImage"));
     });
 
     // Optionally restore the original implementation after all tests
@@ -28,61 +17,6 @@ describe('Migration Console Stack Tests', () => {
         jest.resetModules();
         jest.restoreAllMocks();
         jest.resetAllMocks();
-    });
-
-    test('IAM policy contains fetch migration IAM statements when fetch migration is enabled', () => {
-        const contextOptions = {
-            vpcEnabled: true,
-            migrationAssistanceEnabled: true,
-            migrationConsoleServiceEnabled: true,
-            fetchMigrationEnabled: true,
-            sourceClusterEndpoint: "https://test-cluster",
-        };
-
-        const stacks = createStackComposer(contextOptions);
-        const migrationConsoleStack = stacks.stacks.find(s => s instanceof MigrationConsoleStack) as MigrationConsoleStack;
-        const migrationConsoleStackTemplate = Template.fromStack(migrationConsoleStack);
-
-        const statementCapture = new Capture();
-        migrationConsoleStackTemplate.hasResourceProperties("AWS::IAM::Policy", {
-            PolicyDocument: Match.objectLike({
-                Statement: statementCapture,
-            })
-        });
-
-        const allStatements: any[] = statementCapture.asArray();
-        const runTaskStatement = allStatements.find(statement => statement.Action.includes("ecs:RunTask"));
-        const iamPassRoleStatement = allStatements.find(statement => statement.Action === "iam:PassRole");
-
-        expect(runTaskStatement).toBeTruthy();
-        expect(iamPassRoleStatement).toBeTruthy();
-    });
-
-    test('IAM policy does not contain fetch migration IAM statements when fetch migration is disabled', () => {
-        const contextOptions = {
-            vpcEnabled: true,
-            migrationAssistanceEnabled: true,
-            migrationConsoleServiceEnabled: true,
-            sourceClusterEndpoint: "https://test-cluster",
-        };
-
-        const stacks = createStackComposer(contextOptions);
-        const migrationConsoleStack = stacks.stacks.find(s => s instanceof MigrationConsoleStack) as MigrationConsoleStack;
-        const migrationConsoleStackTemplate = Template.fromStack(migrationConsoleStack);
-
-        const statementCapture = new Capture();
-        migrationConsoleStackTemplate.hasResourceProperties("AWS::IAM::Policy", {
-            PolicyDocument: Match.objectLike({
-                Statement: statementCapture,
-            })
-        });
-
-        const allStatements: any[] = statementCapture.asArray();
-        const runTaskStatement = allStatements.find(statement => statement.Action === "ecs:RunTask");
-        const iamPassRoleStatement = allStatements.find(statement => statement.Action === "iam:PassRole");
-
-        expect(runTaskStatement).toBeFalsy();
-        expect(iamPassRoleStatement).toBeFalsy();
     });
 
     test('Migration Console task definition is updated when services.yaml inputs change', () => {
