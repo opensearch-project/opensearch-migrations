@@ -29,8 +29,12 @@ public class ListKeyAdaptingCaseInsensitiveHeadersMap extends AbstractMap<String
     }
 
     @Override
-    public Object get(Object key) {
+    public List<String> get(Object key) {
         return strictHeadersMap.get(key);
+    }
+
+    public List<String> getInsensitive(String key) {
+        return get(key);
     }
 
     @Override

@@ -10,18 +10,21 @@ import java.util.function.Supplier;
 import org.opensearch.migrations.IHttpMessage;
 import org.opensearch.migrations.aws.SigV4Signer;
 
+import lombok.AllArgsConstructor;
 import reactor.core.publisher.Mono;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 
+@AllArgsConstructor
 public class SigV4AuthTransformer implements RequestTransformer {
-    private final SigV4Signer signer;
-
-    public SigV4AuthTransformer(AwsCredentialsProvider credentialsProvider, String service, String region, String protocol, Supplier<Clock> timestampSupplier) {
-        this.signer = new SigV4Signer(credentialsProvider, service, region, protocol, timestampSupplier);
-    }
+    AwsCredentialsProvider credentialsProvider;
+    String service;
+    String region;
+    String protocol;
+    Supplier<Clock> timestampSupplier;
 
     @Override
     public Mono<TransformedRequest> transform(String method, String path, Map<String, List<String>> headers, Mono<ByteBuffer> body) {
+        var signer = new SigV4Signer(credentialsProvider, service, region, protocol, timestampSupplier);
         return body
             .doOnNext(signer::consumeNextPayloadPart)
             .singleOptional()
@@ -47,7 +50,7 @@ public class SigV4AuthTransformer implements RequestTransformer {
                     return headers;
                 }
             });
-            Map<String, List<String>> newHeaders = new HashMap<>(headers);
+            var newHeaders = new HashMap<>(headers);
             newHeaders.putAll(signedHeaders);
             return new TransformedRequest(newHeaders, Mono.justOrEmpty(contentOp));
         });

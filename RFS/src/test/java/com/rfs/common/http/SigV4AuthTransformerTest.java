@@ -2,6 +2,7 @@ package com.rfs.common.http;
 
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
@@ -12,6 +13,7 @@ import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import lombok.SneakyThrows;
 import reactor.core.publisher.Mono;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
@@ -56,18 +58,17 @@ public class SigV4AuthTransformerTest {
         assertTrue(authHeader.startsWith("AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/20230420/us-east-1/es/aws4_request"));
 
         assertEquals(List.of("20230420T120000Z"), transformedHeaders.get("X-Amz-Date"));
-        assertNotNull(transformedHeaders.get("x-amz-content-sha256"));
+        assertNull(transformedHeaders.get("x-amz-content-sha256"));
         assertNull(transformedRequest.getBody().block());
     }
 
-    @Test
-    void testTransformWithPayload() {
+    void testTransformWithPayload(String payloadString) {
         String method = "POST";
         String path = "/index/_doc";
         Map<String, List<String>> headers = new HashMap<>();
         headers.put("Host", List.of("example.amazonaws.com"));
         headers.put("Content-Type", List.of("application/json"));
-        var payload = ByteBuffer.wrap("{\"field\":\"value\"}".getBytes(StandardCharsets.UTF_8));
+        var payload = ByteBuffer.wrap(payloadString.getBytes(StandardCharsets.UTF_8));
         var body = Mono.just(payload);
 
         Mono<TransformedRequest> transformedRequestMono = transformer.transform(method, path, headers, body);
@@ -83,8 +84,36 @@ public class SigV4AuthTransformerTest {
 
         assertEquals(List.of("20230420T120000Z"), transformedHeaders.get("X-Amz-Date"));
         assertNotNull(transformedHeaders.get("x-amz-content-sha256"));
+        assertEquals(List.of(calculateSHA256(payloadString)),
+            transformedHeaders.get("x-amz-content-sha256"));
 
         // Verify that the body is unchanged
         assertEquals(payload, transformedRequest.getBody().block());
+    }
+
+    @Test
+    void testTransformWithPayloadTwice() {
+        testTransformWithPayload("payloadString");
+        testTransformWithPayload("payloadString2");
+        testTransformWithPayload("payloadString3");
+    }
+
+    @SneakyThrows
+    private static String calculateSHA256(String payload) {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] encodedHash = digest.digest(payload.getBytes(StandardCharsets.UTF_8));
+        return bytesToHex(encodedHash);
+    }
+
+    private static String bytesToHex(byte[] hash) {
+        StringBuilder hexString = new StringBuilder(2 * hash.length);
+        for (byte b : hash) {
+            String hex = Integer.toHexString(0xff & b);
+            if (hex.length() == 1) {
+                hexString.append('0');
+            }
+            hexString.append(hex);
+        }
+        return hexString.toString();
     }
 }

@@ -8,7 +8,6 @@ import java.time.Clock;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -31,6 +30,7 @@ import software.amazon.awssdk.utils.BinaryUtils;
  * TODO: Figure out how to implement this with AwsV4HttpSigner given
  *  BaseAws4Signer/Aws4Signer is deprecated while keeping the streaming, non-buffering
  *  payload signing behavior.
+ *  Also, think about signing all headers in the request
  */
 @Slf4j
 public class SigV4Signer {
@@ -38,7 +38,7 @@ public class SigV4Signer {
     private static final HashSet<String> AUTH_HEADERS_TO_PULL_NO_PAYLOAD;
 
     public static final String AMZ_CONTENT_SHA_256 = "x-amz-content-sha256";
-    public static final String CONTENT_TYPE = "content-type";
+    public static final String CONTENT_TYPE = "Content-Type";
 
     static {
         AUTH_HEADERS_TO_PULL_NO_PAYLOAD = new HashSet<>(Set.of("authorization", "x-amz-date", "x-amz-security-token"));
@@ -109,17 +109,13 @@ public class SigV4Signer {
         httpRequestBuilder.method(SdkHttpMethod.fromValue(msg.method()))
             .uri(URI.create(msg.path()))
             .protocol(protocol)
-            .host(Optional.ofNullable(msg.getFirstHeader("Host"))
-                .or(() -> msg.headers().entrySet().stream().filter(
-                    entry -> entry.getKey().equalsIgnoreCase("host")).findFirst()
-                    .map(e -> e.getValue().get(0))).orElseThrow(
-                        () -> new IllegalArgumentException("No host header found")
-                ));
+            .host(msg.getFirstHeaderValueCaseInsensitive("Host").orElseThrow(
+                () -> new IllegalArgumentException("Host header is missing")
+            ));
 
-        var contentType = msg.getFirstHeader(CONTENT_TYPE);
-        if (contentType != null) {
-            httpRequestBuilder.appendHeader("Content-Type", contentType);
-        }
+        msg.getFirstHeaderValueCaseInsensitive(CONTENT_TYPE)
+            .ifPresent(contentType -> httpRequestBuilder.appendHeader(CONTENT_TYPE, contentType));
+
         if (messageDigest != null) {
             byte[] bytesToEncode = messageDigest.digest();
             String payloadHash = BinaryUtils.toHex(bytesToEncode);
