@@ -9,6 +9,7 @@ import {
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy,
     getMigrationStringParameterValue,
+    hashStringSHA256,
     MigrationSSMParameter
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
@@ -273,7 +274,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             }
         }
 
-        createMigrationStringParameter(this, servicesYaml.stringify(), {
+        const parameter = createMigrationStringParameter(this, servicesYaml.stringify(), {
             ...props,
             parameter: MigrationSSMParameter.SERVICES_YAML_FILE,
         });
@@ -284,7 +285,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints,
             "MIGRATION_STAGE": props.stage,
             "MIGRATION_SOLUTION_VERSION": props.migrationsSolutionVersion,
-            "MIGRATION_SERVICES_YAML_PARAMETER": `/migration/${props.stage}/${props.defaultDeployId}/servicesYamlFile`,
+            "MIGRATION_SERVICES_YAML_PARAMETER": parameter.parameterName,
+            "MIGRATION_SERVICES_YAML_HASH": hashStringSHA256(servicesYaml.stringify()),
         }
 
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)

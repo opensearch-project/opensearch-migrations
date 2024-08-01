@@ -5,6 +5,7 @@ import {RemovalPolicy} from "aws-cdk-lib";
 import { IApplicationLoadBalancer } from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
+import * as forge from 'node-forge';
 
 export function createOpenSearchIAMAccessPolicy(partition: string, region: string, accountId: string): PolicyStatement {
     return new PolicyStatement({
@@ -167,6 +168,11 @@ export function isNewALBListenerConfig(config: ALBConfig): config is NewALBListe
     return parsed.alb !== undefined && parsed.albListenerCert !== undefined;
 }
 
+export function hashStringSHA256(message: string): string {
+    const md = forge.md.sha256.create();
+    md.update(message);
+    return md.digest().toHex();
+}
 
 export interface MigrationSSMConfig {
     parameter: MigrationSSMParameter,

@@ -90,7 +90,7 @@ test('Test SnapshotYaml for s3 only includes s3', () => {
     expect(s3SnapshotDict).not.toHaveProperty("fs");
 })
 
-test('Test that services yaml parameter is created by mgiration console stack', () => {
+test('Test that services yaml parameter is created by migration console stack', () => {
     const contextOptions = {
         vpcEnabled: true,
         migrationAssistanceEnabled: true,
