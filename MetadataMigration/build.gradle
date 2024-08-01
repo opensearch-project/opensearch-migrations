@@ -42,6 +42,12 @@ test {
     useJUnitPlatform {
         excludeTags 'longTest'
     }
+    testLogging {
+        events "passed", "skipped", "failed"
+        exceptionFormat "full"
+        showExceptions true
+        showCauses true
+    }
 }
 
 task slowTest(type: Test) {
