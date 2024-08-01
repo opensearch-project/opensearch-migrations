@@ -1,10 +1,8 @@
 plugins {
     id 'application'
     id 'java'
-    id 'io.freefair.lombok' version '8.6'
+    id 'io.freefair.lombok'
 }
-
-import org.opensearch.migrations.common.CommonUtils
 
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
@@ -30,15 +28,9 @@ dependencies {
     testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-params'
     testImplementation group: 'org.mockito', name: 'mockito-core'
     testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter'
-
-    testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
-
-    // Integration tests
-    testImplementation testFixtures(project(path: ':testHelperFixtures'))
-    testImplementation testFixtures(project(path: ':coreUtilities'))
-    testImplementation group: 'org.testcontainers', name: 'testcontainers'
     testImplementation group: 'org.hamcrest', name: 'hamcrest'
-    testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
+    testImplementation group: 'org.testcontainers', name: 'testcontainers'
+
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
 }
 
@@ -49,15 +41,6 @@ application {
 test {
     useJUnitPlatform {
         excludeTags 'longTest'
-    }
-
-    testLogging {
-        events "passed", "skipped", "failed"
-        exceptionFormat "full"
-        showExceptions true
-        showCauses true
-        showStackTraces true
-        showStandardStreams = true
     }
 }
 
