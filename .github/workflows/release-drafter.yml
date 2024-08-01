@@ -5,12 +5,22 @@ on:
   push:
     tags:
       - "*"
+env:
+  java-version: '11'
+  gradle-version: '8.0.2'
 
 jobs:
   draft-a-release:
     name: Draft a release
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.java-version }}
+          distribution: 'corretto'
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: ${{ env.gradle-version }}
       - uses: actions/checkout@v4
       - id: get_data
         run: |
@@ -29,6 +39,26 @@ jobs:
         run: |
           wget https://github.com/opensearch-project/opensearch-migrations/archive/refs/tags/${{ steps.get_data.outputs.version }}.tar.gz -O artifacts.tar.gz
           ./gradlew publishMavenJavaPublicationToMavenRepository -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }} && tar -C build -cvf traffic-capture-artifacts.tar.gz repository
+      - name: Build Docker Images
+        run: |
+          ./deployment/cdk/opensearch-service-migration/buildDockerImages.sh
+      - name: Tag Docker image
+        run: |
+          docker tag migrations/migration_console:latest opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }}
+          docker tag migrations/traffic_replayer:latest opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }}
+          docker tag migrations/capture_proxy:latest opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }}
+          docker tag migrations/reindex_from_snapshot:latest opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }}
+#      - name: Login to DockerHub
+#        uses: docker/login-action@v1
+#        with:
+#          username: ${{ secrets.DOCKERHUB_USERNAME }}
+#          password: ${{ secrets.DOCKERHUB_TOKEN }}
+#      - name: Push Docker image to Docker Hub
+#        run: |
+#          docker push opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }}
+#          docker push opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }}
+#          docker push opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }}
+#          docker push opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }}
       - name: Draft a release
         uses: softprops/action-gh-release@v2
         with:
