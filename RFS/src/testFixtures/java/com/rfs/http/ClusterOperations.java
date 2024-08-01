@@ -1,4 +1,4 @@
-package com.rfs.framework;
+package com.rfs.http;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

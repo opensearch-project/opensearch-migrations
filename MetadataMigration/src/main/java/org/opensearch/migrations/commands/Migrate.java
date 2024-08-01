@@ -32,7 +32,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class Migrate {
 
-
     private final Args arguments;
 
     public Migrate(Args arguments) {
@@ -40,15 +39,20 @@ public class Migrate {
     }
 
     public MigrateResult execute(RootMetadataMigrationContext context) {
-
-        if (arguments.fileSystemRepoPath == null && arguments.s3RepoUri == null) {
-            throw new ParameterException("Either file-system-repo-path or s3-repo-uri must be set");
-        }
-        if (arguments.fileSystemRepoPath != null && arguments.s3RepoUri != null) {
-            throw new ParameterException("Only one of file-system-repo-path and s3-repo-uri can be set");
-        }
-        if ((arguments.s3RepoUri != null) && (arguments.s3Region == null || arguments.s3LocalDirPath == null)) {
-            throw new ParameterException("If an s3 repo is being used, s3-region and s3-local-dir-path must be set");
+        log.atInfo().setMessage("Command line arguments {0}").addArgument(arguments::toString).log();
+        try {
+            if (arguments.fileSystemRepoPath == null && arguments.s3RepoUri == null) {
+                throw new ParameterException("Either file-system-repo-path or s3-repo-uri must be set");
+            }
+            if (arguments.fileSystemRepoPath != null && arguments.s3RepoUri != null) {
+                throw new ParameterException("Only one of file-system-repo-path and s3-repo-uri can be set");
+            }
+            if ((arguments.s3RepoUri != null) && (arguments.s3Region == null || arguments.s3LocalDirPath == null)) {
+                throw new ParameterException("If an s3 repo is being used, s3-region and s3-local-dir-path must be set");
+            } 
+        } catch (Exception e) {
+            log.atError().setMessage("Invalid parameter").setCause(e).log();
+            return new MigrateResult(1);
         }
 
         final String snapshotName = arguments.snapshotName;
@@ -87,6 +91,7 @@ public class Migrate {
                 awarenessDimensionality
             );
             new MetadataRunner(snapshotName, metadataFactory, metadataCreator, transformer).migrateMetadata();
+            log.info("Metadata copy complete.");
 
             final IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
             final IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
@@ -98,6 +103,7 @@ public class Migrate {
                 indexAllowlist,
                 context.createIndexContext()
             ).migrateIndices();
+            log.info("Index copy complete.");
         } catch (Exception e) {
             log.atError().setMessage("Unexpected failure").setCause(e).log();
             return new MigrateResult(1);

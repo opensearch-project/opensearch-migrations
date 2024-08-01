@@ -14,11 +14,14 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
 import com.rfs.common.ConnectionDetails;
+
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class MetadataMigration {
 
+    @ToString
     public static class Args {
         @Parameter(names = { "--snapshot-name" }, description = "The name of the snapshot to migrate", required = true)
         public String snapshotName;
