@@ -48,14 +48,12 @@ public class HttpByteBufFormatterTest {
         + "Host: localhost\r\n"
         + "Connection: Keep-Alive\r\n"
         + "User-Agent: UnitTest\r\n"
-        + "content-length: 0\r\n"
         + "\r\n";
 
     final static String SAMPLE_REQUEST_AS_PARSED_HTTP_SORTED = "GET / HTTP/1.1\r\n"
         + "Connection: Keep-Alive\r\n"
         + "Host: localhost\r\n"
         + "User-Agent: UnitTest\r\n"
-        + "content-length: 0\r\n"
         + "\r\n";
 
     enum BufferType {
@@ -156,13 +154,16 @@ public class HttpByteBufFormatterTest {
             )
         ) {
             var msgBytes = Unpooled.wrappedBuffer(sampleStream.readAllBytes());
-            var msg = HttpByteBufFormatter.parseHttpRequestFromBufs(Stream.of(msgBytes), bytesToRead);
+            var cappedMsg = HttpByteBufFormatter.parseHttpRequestFromBufs(Stream.of(msgBytes), bytesToRead);
             var fullMsg = HttpByteBufFormatter.parseHttpRequestFromBufs(Stream.of(msgBytes), 1024*1024);
             var fullPayload = fullMsg.content().toString(StandardCharsets.UTF_8);
+            if (fullPayload.length() > bytesToRead) {
+                Assertions.assertTrue(Integer.parseInt(cappedMsg.headers().get("payloadBytesDropped")) > 0);
+            }
             Assertions.assertTrue(fullPayload.length() >= bytesToRead);
             Assertions.assertEquals(fullPayload.substring(0, bytesToRead),
-                msg.content().toString(StandardCharsets.UTF_8));
-            msg.release();
+                cappedMsg.content().toString(StandardCharsets.UTF_8));
+            cappedMsg.release();
             fullMsg.release();
         }
     }

@@ -4,35 +4,32 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.async.ByteBufferFeeder;
-import com.fasterxml.jackson.core.async.NonBlockingInputFeeder;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
-import io.netty.handler.codec.http.HttpRequest;
-import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.LastHttpContent;
-import lombok.Getter;
 import lombok.NonNull;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
+
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.HttpByteBufFormatter;
 import org.opensearch.migrations.replay.IRequestResponsePacketPair;
-import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import org.opensearch.migrations.replay.util.TrackedFuture;
 
 import java.io.IOException;
 import java.util.List;
-import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
+@Slf4j
 public class OpenSearchDefaultRetry extends DefaultRetry {
 
-    private static final Pattern bulkPathMatcher = Pattern.compile("^(/[^/]*)?/_bulk([/?]+.*)$");
+    private static final Pattern bulkPathMatcher = Pattern.compile("^(/[^/]*)?/_bulk([/?]+.*)*$");
 
     private static class BulkErrorFindingHandler extends ChannelInboundHandlerAdapter {
         private final JsonParser parser;
@@ -52,7 +49,8 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
 
         @Override
         public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
-            if (msg instanceof HttpContent) {
+            if (msg instanceof HttpContent && errorField == null) {
+                log.atInfo().setMessage(() -> "body contents: " + ((HttpContent) msg).content().duplicate().toString()).log();
                 feeder.feedInput(((HttpContent) msg).content().nioBuffer());
                 consumeInput();
                 if (msg instanceof LastHttpContent) {
@@ -68,8 +66,13 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
                 return;
             }
             JsonToken token;
-            while ((token = parser.nextToken()) != null) {
-                if (token == JsonToken.FIELD_NAME && "error".equals(parser.getCurrentName())) {
+            while (!parser.isClosed() &&
+                ((token = parser.nextToken()) != null) &&
+                token != JsonToken.NOT_AVAILABLE)
+            {
+                JsonToken finalToken = token;
+                log.atInfo().setMessage(() -> "Got token: " + finalToken).log();
+                if (token == JsonToken.FIELD_NAME && "errors".equals(parser.getCurrentName())) {
                     parser.nextToken();
                     errorField = parser.getValueAsBoolean();
                     break;
@@ -87,7 +90,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
 
     boolean bulkResponseHadNoErrors(ByteBuf responseByteBuf) {
         var errorFieldFinderHandler = new BulkErrorFindingHandler();
-        HttpByteBufFormatter.parseHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
+        HttpByteBufFormatter.processHttpMessageFromBufs(HttpByteBufFormatter.HttpMessageType.RESPONSE,
             Stream.of(responseByteBuf), errorFieldFinderHandler);
         return errorFieldFinderHandler.hadNoErrors();
     }
@@ -100,9 +103,8 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
           TrackedFuture<String, ? extends IRequestResponsePacketPair> reconstructedSourceTransactionFuture) {
 
         var targetRequestByteBuf = Unpooled.wrappedBuffer(targetRequestBytes);
-        var targetRequest =
-            HttpByteBufFormatter.parseHttpRequestFromBufs(Stream.of(targetRequestByteBuf), 0);
-        if (bulkPathMatcher.matcher(targetRequest.uri()).matches() &&
+        var uriPath = HttpByteBufFormatter.parseHttpRequestFromBufs(Stream.of(targetRequestByteBuf), 0).uri();
+        if (bulkPathMatcher.matcher(uriPath).matches() &&
             currentResponse.getRawResponse().status().code() == 200) // check more granularly
         {
             if (bulkResponseHadNoErrors(currentResponse.getResponseAsByteBuf())) {

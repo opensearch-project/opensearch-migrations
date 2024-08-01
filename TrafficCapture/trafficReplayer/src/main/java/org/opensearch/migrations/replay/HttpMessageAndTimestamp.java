@@ -58,9 +58,14 @@ public class HttpMessageAndTimestamp {
     }
 
     public ByteBuf asByteBuf() {
-        var compositeBuffer = Unpooled.compositeBuffer();
-        packetBytes.stream().map(Unpooled::wrappedBuffer).forEach(compositeBuffer::addComponent);
-        return compositeBuffer.asReadOnly();
+        var compositeBuf = Unpooled.compositeBuffer();
+        packetBytes.stream()
+            .map(Unpooled::wrappedBuffer)
+            .forEach(buffer -> {
+                compositeBuf.addComponent(buffer);
+                compositeBuf.writerIndex(compositeBuf.writerIndex() + buffer.readableBytes());
+            });
+        return compositeBuf.asReadOnly();
     }
 
     public boolean hasInProgressSegment() {
