@@ -79,8 +79,11 @@ public class SigV4SigningTransformationTest {
         assertTrue(authHeader.startsWith("AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/19700101/us-east-1/es/aws4_request"),
             "Expected 'Authorization' header to be present in " + authHeader + " but got '" + authHeader + "'");
         assertEquals(List.of("19700101T000000Z"), signedHeaders.get("X-Amz-Date"));
-        String expectedHash = calculateSHA256(Optional.ofNullable(payload).orElse(""));
-        assertEquals(List.of(expectedHash), signedHeaders.get("x-amz-content-sha256"));
+
+        Optional<String> expectedHash = Optional.ofNullable(payload)
+                .map(SigV4SigningTransformationTest::calculateSHA256);
+
+        assertEquals(expectedHash.map(List::of).orElse(null), signedHeaders.get("x-amz-content-sha256"));
 
         // Verify header map returned is unmodifiable (check both keys and values)
         assertThrows(UnsupportedOperationException.class, () -> signedHeaders.put("Test", List.of("Value")));
@@ -88,7 +91,7 @@ public class SigV4SigningTransformationTest {
     }
 
     @SneakyThrows
-    private String calculateSHA256(String payload) {
+    private static String calculateSHA256(String payload) {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         byte[] encodedHash = digest.digest(payload.getBytes(StandardCharsets.UTF_8));
         return bytesToHex(encodedHash);
