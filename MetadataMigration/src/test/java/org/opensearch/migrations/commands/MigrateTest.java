@@ -13,12 +13,25 @@ import static org.mockito.Mockito.mock;
 class MigrateTest {
 
     @Test
-    void configureSource_noSourceSet() {
-        var meta = new MetadataMigration(mock(MetadataArgs.class));
+    void migrate_failsInvalidInvalidParameters() {
+        var args = new MetadataArgs();
+        var context = mock(RootMetadataMigrationContext.class);
+        var meta = new MetadataMigration(args);
 
-        var configureSource = meta.migrate()
-            .execute(mock(RootMetadataMigrationContext.class));
+        var configureSource = meta.migrate().execute(context);
 
-        assertThat(configureSource.getExitCode(), equalTo(1));
+        assertThat(configureSource.getExitCode(), equalTo(999));
+    }
+
+    @Test
+    void migrate_failsUnexpectedException() {
+        var args = new MetadataArgs();
+        args.fileSystemRepoPath = "";
+        var context = mock(RootMetadataMigrationContext.class);
+        var meta = new MetadataMigration(args);
+
+        var configureSource = meta.migrate().execute(context);
+
+        assertThat(configureSource.getExitCode(), equalTo(888));
     }
 }

@@ -32,6 +32,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class Migrate {
 
+    private static final int INVALID_PARAMETER_CODE = 999;
+    private static final int UNEXPECTED_FAILURE_CODE = 888;
     private final MetadataArgs arguments;
 
     public Migrate(MetadataArgs arguments) {
@@ -52,7 +54,7 @@ public class Migrate {
             } 
         } catch (Exception e) {
             log.atError().setMessage("Invalid parameter").setCause(e).log();
-            return new MigrateResult(1);
+            return new MigrateResult(INVALID_PARAMETER_CODE);
         }
 
         final String snapshotName = arguments.snapshotName;
@@ -106,7 +108,7 @@ public class Migrate {
             log.info("Index copy complete.");
         } catch (Exception e) {
             log.atError().setMessage("Unexpected failure").setCause(e).log();
-            return new MigrateResult(1);
+            return new MigrateResult(UNEXPECTED_FAILURE_CODE);
         }
 
         return new MigrateResult(0);
