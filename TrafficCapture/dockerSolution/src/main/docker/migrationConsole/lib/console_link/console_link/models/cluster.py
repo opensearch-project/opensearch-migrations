@@ -96,7 +96,7 @@ class Cluster:
         # Pull password from AWS Secrets Manager
         assert "password_from_secret_arn" in self.auth_details
         client = boto3.client('secretsmanager')
-        password = client.get_secret_value(self.auth_details["password_from_secret_arn"])
+        password = client.get_secret_value(SecretId=self.auth_details["password_from_secret_arn"])
         return password["SecretString"]
 
     def _generate_auth_object(self) -> requests.auth.AuthBase | None:
