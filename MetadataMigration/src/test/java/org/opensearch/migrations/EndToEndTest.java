@@ -5,9 +5,9 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import org.hamcrest.Matchers;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
-import org.opensearch.migrations.MetadataMigration.Args;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
@@ -25,6 +25,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 /**
  * Tests focused on setting up whole source clusters, performing a migration, and validation on the target cluster
  */
+@Tag("longTest")
 class EndToEndTest {
 
     @TempDir
@@ -79,7 +80,7 @@ class EndToEndTest {
         var targetArgs = new TargetArgs();
         targetArgs.host = targetCluster.getUrl();
 
-        var arguments = new Args();
+        var arguments = new MetadataArgs();
         arguments.fileSystemRepoPath = localDirectory.getAbsolutePath();
         arguments.snapshotName = snapshotName;
         arguments.targetArgs = targetArgs;

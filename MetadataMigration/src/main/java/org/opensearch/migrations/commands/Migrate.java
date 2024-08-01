@@ -4,7 +4,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.List;
 
-import org.opensearch.migrations.MetadataMigration.Args;
+import org.opensearch.migrations.MetadataArgs;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 
 import com.beust.jcommander.ParameterException;
@@ -32,9 +32,9 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class Migrate {
 
-    private final Args arguments;
+    private final MetadataArgs arguments;
 
-    public Migrate(Args arguments) {
+    public Migrate(MetadataArgs arguments) {
         this.arguments = arguments;
     }
 

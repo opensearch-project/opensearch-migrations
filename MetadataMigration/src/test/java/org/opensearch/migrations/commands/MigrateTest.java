@@ -1,7 +1,7 @@
 package org.opensearch.migrations.commands;
 
 import org.junit.jupiter.api.Test;
-
+import org.opensearch.migrations.MetadataArgs;
 import org.opensearch.migrations.MetadataMigration;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 
@@ -13,7 +13,7 @@ class MigrateTest {
 
     @Test
     void configureSource_noSourceSet() {
-        var meta = new MetadataMigration(mock(MetadataMigration.Args.class));
+        var meta = new MetadataMigration(mock(MetadataArgs.class));
 
         var configureSource = meta.migrate()
             .execute(mock(RootMetadataMigrationContext.class));
