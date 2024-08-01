@@ -10,8 +10,6 @@ import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
 
 import com.beust.jcommander.JCommander;
-
-import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j

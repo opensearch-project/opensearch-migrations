@@ -15,7 +15,6 @@ import com.rfs.common.OpenSearchClient;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.framework.SimpleRestoreFromSnapshot_ES_7_10;
 import com.rfs.http.ClusterOperations;
-
 import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
 

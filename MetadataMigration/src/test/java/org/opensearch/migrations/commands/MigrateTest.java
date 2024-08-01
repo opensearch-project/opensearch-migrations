@@ -1,6 +1,7 @@
 package org.opensearch.migrations.commands;
 
 import org.junit.jupiter.api.Test;
+
 import org.opensearch.migrations.MetadataArgs;
 import org.opensearch.migrations.MetadataMigration;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
