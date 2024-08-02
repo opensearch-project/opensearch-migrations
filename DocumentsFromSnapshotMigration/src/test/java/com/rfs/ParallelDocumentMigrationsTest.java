@@ -35,9 +35,9 @@ import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 import org.opensearch.testcontainers.OpensearchContainer;
 
+import com.rfs.cms.CoordinateWorkHttpClient;
 import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.cms.OpenSearchWorkCoordinator;
-import com.rfs.cms.ReactorHttpClient;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
@@ -284,7 +284,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         var requests = new SearchClusterRequests(context);
         var sourceMap = requests.getMapOfIndexAndDocCount(sourceClient);
         var refreshResponse = targetClient.get("_refresh", context.createUnboundRequestContext());
-        Assertions.assertEquals(200, refreshResponse.code);
+        Assertions.assertEquals(200, refreshResponse.statusCode);
         var targetMap = requests.getMapOfIndexAndDocCount(targetClient);
 
         MatcherAssert.assertThat(targetMap, Matchers.equalTo(sourceMap));
@@ -397,7 +397,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                     .build()
                     .toConnectionContext())),
                 new OpenSearchWorkCoordinator(
-                    new ReactorHttpClient(ConnectionContextTestParams.builder()
+                    new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                         .host(targetAddress)
                         .build()
                         .toConnectionContext()),

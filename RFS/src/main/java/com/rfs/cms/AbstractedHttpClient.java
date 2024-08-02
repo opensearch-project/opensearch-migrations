@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public interface AbstractedHttpClient extends AutoCloseable {
+public interface AbstractedHttpClient {
     String PUT_METHOD = "PUT";
     String POST_METHOD = "POST";
     String GET_METHOD = "GET";
@@ -57,7 +57,4 @@ public interface AbstractedHttpClient extends AutoCloseable {
         }
         return makeRequest(method, path, combinedHeaders, body);
     }
-
-    @Override
-    default void close() throws Exception {}
 }

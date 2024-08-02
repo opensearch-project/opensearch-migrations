@@ -1,9 +1,7 @@
 package com.rfs.common;
 
-import java.net.URL;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
-import java.util.AbstractMap;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,13 +14,13 @@ import javax.net.ssl.SSLParameters;
 
 import com.rfs.common.http.ConnectionContext;
 import com.rfs.common.http.HttpResponse;
-import com.rfs.common.http.RequestTransformer;
 import com.rfs.netty.ReadMeteringHandler;
 import com.rfs.netty.WriteMeteringHandler;
 import com.rfs.tracing.IRfsContexts;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelPipeline;
+import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.HttpHeaders;
 import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.ssl.SslContext;
@@ -38,13 +36,16 @@ import reactor.util.annotation.Nullable;
 public class RestClient {
     private final ConnectionContext connectionContext;
     private final HttpClient client;
-    private final RequestTransformer authTransformer;
 
     public static final String READ_METERING_HANDLER_NAME = "REST_CLIENT_READ_METERING_HANDLER";
     public static final String WRITE_METERING_HANDLER_NAME = "REST_CLIENT_WRITE_METERING_HANDLER";
-    private static final Map.Entry<String, List<String>> USER_AGENT_HEADER = new AbstractMap.SimpleEntry<>("User-Agent", List.of("RfsWorker-1.0"));
-    private static final Map.Entry<String, List<String>> JSON_CONTENT_TYPE_HEADER = new AbstractMap.SimpleEntry<>("Content-Type", List.of("application/json"));
-    private static final String HOST_HEADER_KEY = "Host";
+
+    private static final String USER_AGENT_HEADER_NAME = HttpHeaderNames.USER_AGENT.toString();
+    private static final String CONTENT_TYPE_HEADER_NAME = HttpHeaderNames.CONTENT_TYPE.toString();
+    private static final String HOST_HEADER_NAME = HttpHeaderNames.HOST.toString();
+
+    private static final String USER_AGENT = "RfsWorker-1.0";
+    private static final String JSON_CONTENT_TYPE = "application/json";
 
     public RestClient(ConnectionContext connectionContext) {
         this(connectionContext, HttpClient.create());
@@ -52,10 +53,9 @@ public class RestClient {
 
     protected RestClient(ConnectionContext connectionContext, HttpClient httpClient) {
         this.connectionContext = connectionContext;
-        this.authTransformer = connectionContext.getAuthTransformer();
 
         SslProvider sslProvider;
-        if (connectionContext.insecure) {
+        if (connectionContext.isInsecure()) {
             try {
                 SslContext sslContext = SslContextBuilder.forClient()
                     .trustManager(InsecureTrustManagerFactory.INSTANCE)
@@ -73,29 +73,30 @@ public class RestClient {
             sslProvider = SslProvider.defaultClientProvider();
         }
 
-        this.client = httpClient.secure(sslProvider).baseUrl(connectionContext.getUrl()).keepAlive(true);
+        this.client = httpClient.secure(sslProvider).baseUrl(connectionContext.getUri().toString()).keepAlive(true);
     }
 
-    public static String getHostHeader(String urlString) {
-        try {
-            URL url = new URL(urlString);
-            String host = url.getHost();
-            int port = url.getPort();
-            String protocol = url.getProtocol();
+    public static String getHostHeaderValue(ConnectionContext connectionContext) {
+        String host = connectionContext.getUri().getHost();
+        int port = connectionContext.getUri().getPort();
+        ConnectionContext.Protocol protocol = connectionContext.getProtocol();
 
-            if (port == -1 || (protocol.equals("http") && port == 80) || (protocol.equals("https") && port == 443)) {
+        if (ConnectionContext.Protocol.HTTP.equals(protocol)) {
+            if (port == -1 || port == 80) {
                 return host;
-            } else {
-                return host + ":" + port;
             }
-        } catch (Exception e) {
-            e.printStackTrace();
-            return null;
+        } else if (ConnectionContext.Protocol.HTTPS.equals(protocol)) {
+            if (port == -1 || port == 443) {
+                return host;
+            }
+        } else {
+            throw new IllegalArgumentException("Unexpected protocol" + protocol);
         }
+        return host + ":" + port;
     }
 
-    public Mono<HttpResponse> asyncRequestWithStringHeaderValues(HttpMethod method, String path, String body, Map<String, String> additionalHeaders,
-                                                                 IRfsContexts.IRequestContext context) {
+    public Mono<HttpResponse> asyncRequestWithFlatHeaderValues(HttpMethod method, String path, String body, Map<String, String> additionalHeaders,
+                                                               IRfsContexts.IRequestContext context) {
         var convertedHeaders = additionalHeaders.entrySet().stream().collect(Collectors
             .toMap(Map.Entry::getKey, e -> List.of(e.getValue())));
         return asyncRequest(method, path, body, convertedHeaders, context);
@@ -104,11 +105,13 @@ public class RestClient {
 
     public Mono<HttpResponse> asyncRequest(HttpMethod method, String path, String body, Map<String, List<String>> additionalHeaders,
                                            @Nullable IRfsContexts.IRequestContext context) {
+        assert connectionContext.getUri() != null;
         Map<String, List<String>> headers = new HashMap<>();
-        headers.put(USER_AGENT_HEADER.getKey(), USER_AGENT_HEADER.getValue());
-        headers.put(HOST_HEADER_KEY, List.of(getHostHeader(connectionContext.getUrl())));
+        headers.put(USER_AGENT_HEADER_NAME, List.of(USER_AGENT));
+        var hostHeaderValue = getHostHeaderValue(connectionContext);
+        headers.put(HOST_HEADER_NAME, List.of(hostHeaderValue));
         if (body != null) {
-            headers.put(JSON_CONTENT_TYPE_HEADER.getKey(), JSON_CONTENT_TYPE_HEADER.getValue());
+            headers.put(CONTENT_TYPE_HEADER_NAME, List.of(JSON_CONTENT_TYPE));
         }
         if (additionalHeaders != null) {
             additionalHeaders.forEach((key, value) -> {
@@ -119,12 +122,12 @@ public class RestClient {
                     }
                 });
         }
-        var contextCleanupRef = new AtomicReference<Runnable>();
-        return authTransformer.transform(method.name(), path, headers, Mono.justOrEmpty(body)
+        var contextCleanupRef = new AtomicReference<Runnable>(() -> {});
+        return connectionContext.getRequestTransformer().transform(method.name(), path, headers, Mono.justOrEmpty(body)
                 .map(b -> ByteBuffer.wrap(b.getBytes(StandardCharsets.UTF_8)))
             )
             .flatMap(transformedRequest ->
-                client.doOnRequest((r, conn) -> contextCleanupRef.set(addSizeMetricsHandlers(context).apply(r, conn)))
+                client.doOnRequest((r, conn) -> contextCleanupRef.set(addSizeMetricsHandlersAndGetCleanup(context).apply(r, conn)))
                 .headers(h -> transformedRequest.getHeaders().forEach(h::add))
                 .request(method)
                 .uri("/" + path)
@@ -134,10 +137,10 @@ public class RestClient {
                         .singleOptional()
                         .map(bodyOp -> new HttpResponse(
                             response.status().code(),
-                            bodyOp.orElse(null),
                             response.status().reasonPhrase(),
-                            extractHeaders(response.responseHeaders())
-                        ))
+                            extractHeaders(response.responseHeaders()),
+                            bodyOp.orElse(null)
+                            ))
                 ))
             .doOnError(t -> {
                 if (context != null) {
@@ -193,7 +196,7 @@ public class RestClient {
     }
 
     private BiFunction<HttpClientRequest, Connection, Runnable>
-    addSizeMetricsHandlers(final IRfsContexts.IRequestContext ctx) {
+    addSizeMetricsHandlersAndGetCleanup(final IRfsContexts.IRequestContext ctx) {
         if (ctx == null) {
             return (r, conn) -> () -> {};
         }

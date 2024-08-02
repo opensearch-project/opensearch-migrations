@@ -53,7 +53,7 @@ public class WorkCoordinatorTest {
         var testContext = WorkCoordinationTestContext.factory().noOtelTracking();
         // Start the container. This step might take some time...
         container.start();
-        httpClientSupplier = () -> new ReactorHttpClient(ConnectionContextTestParams.builder()
+        httpClientSupplier = () -> new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
             .host(container.getUrl())
             .build()
             .toConnectionContext());

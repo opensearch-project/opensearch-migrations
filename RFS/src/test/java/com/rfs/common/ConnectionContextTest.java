@@ -19,18 +19,14 @@ class ConnectionContextTest {
     @MethodSource("validConnectionParams")
     void testValidConnectionContextCreation(ConnectionContextTestParams params,
                                             ConnectionContext.Protocol expectedProtocol,
-                                            String expectedHostName,
-                                            int expectedPort,
                                             Class<?> expectedAuthTransformerClass,
                                             boolean expectedInsecure) {
         ConnectionContext context = params.toConnectionContext();
 
-        assertEquals(params.getHost(), context.getUrl());
-        assertEquals(expectedProtocol, context.protocol);
-        assertEquals(expectedHostName, context.hostName);
-        assertEquals(expectedPort, context.port);
-        assertEquals(expectedInsecure, context.insecure);
-        assertTrue(expectedAuthTransformerClass.isInstance(context.getAuthTransformer()));
+        assertEquals(params.getHost(), context.getUri().toString());
+        assertEquals(expectedProtocol, context.getProtocol());
+        assertEquals(expectedInsecure, context.isInsecure());
+        assertTrue(expectedAuthTransformerClass.isInstance(context.getRequestTransformer()));
     }
 
     private static Stream<Arguments> validConnectionParams() {
@@ -40,8 +36,6 @@ class ConnectionContextTest {
                     .host("http://localhost:9200")
                     .build(),
                 ConnectionContext.Protocol.HTTP,
-                "localhost",
-                9200,
                 NoAuthTransformer.class,
                 true
             ),
@@ -52,8 +46,6 @@ class ConnectionContextTest {
                     .password("pass")
                     .build(),
                 ConnectionContext.Protocol.HTTPS,
-                "example.com",
-                443,
                 BasicAuthTransformer.class,
                 true
             ),
@@ -64,8 +56,6 @@ class ConnectionContextTest {
                     .awsServiceSigningName("es")
                     .build(),
                 ConnectionContext.Protocol.HTTPS,
-                "opensearch.us-east-1.amazonaws.com",
-                -1,
                 SigV4AuthTransformer.class,
                 true
             ),
@@ -75,8 +65,6 @@ class ConnectionContextTest {
                     .insecure(false)
                     .build(),
                 ConnectionContext.Protocol.HTTPS,
-                "secure.example.com",
-                -1,
                 NoAuthTransformer.class,
                 false
             ),
@@ -86,8 +74,6 @@ class ConnectionContextTest {
                     .insecure(true)
                     .build(),
                 ConnectionContext.Protocol.HTTP,
-                "insecure.example.com",
-                -1,
                 NoAuthTransformer.class,
                 true
             )

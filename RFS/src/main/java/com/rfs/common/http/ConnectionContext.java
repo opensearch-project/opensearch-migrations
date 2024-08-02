@@ -11,79 +11,64 @@ import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 /**
  * Stores the connection context for an Elasticsearch/OpenSearch cluster
  */
+@Getter
 public class ConnectionContext {
     public enum Protocol {
         HTTP,
         HTTPS
     }
 
-    @Getter
-    private final String url;
-    public final Protocol protocol;
-    public final String hostName;
-    public final int port;
-    public final boolean insecure;
-    @Getter
-    private final RequestTransformer authTransformer;
+    private final URI uri;
+    private final Protocol protocol;
+    private final boolean insecure;
+    private final RequestTransformer requestTransformer;
 
     private ConnectionContext(IParams params) {
         assert params.getHost() != null : "host is null";
 
-        this.url = params.getHost(); // http://localhost:9200
         this.insecure = params.isInsecure();
 
-        if (url == null) {
-            hostName = null;
-            port = -1;
-            protocol = null;
-            authTransformer = NoAuthTransformer.INSTANCE;
+        try {
+            uri = new URI(params.getHost()); // e.g. http://localhost:9200
+        } catch (URISyntaxException e) {
+            throw new IllegalArgumentException("Invalid URL format", e);
+        }
+
+        if (uri.getScheme().equals("http")) {
+            protocol = Protocol.HTTP;
+        } else if (uri.getScheme().equals("https")) {
+            protocol = Protocol.HTTPS;
         } else {
-            URI uri;
-            try {
-                uri = new URI(url);
-            } catch (URISyntaxException e) {
-                throw new IllegalArgumentException("Invalid URL format", e);
-            }
+            throw new IllegalArgumentException("Invalid protocol");
+        }
 
-            hostName = uri.getHost();
-            port = uri.getPort(); // Default port can be set here if -1
+        if (params.getUsername() != null ^ params.getPassword() != null) {
+            throw new IllegalArgumentException("Both username and password must be provided, or neither");
+        }
+        if (params.getAwsRegion() != null ^ params.getAwsServiceSigningName() != null) {
+            throw new IllegalArgumentException("Both aws region and aws service signing name must be provided, or neither");
+        }
 
-            if (uri.getScheme().equals("http")) {
-                protocol = Protocol.HTTP;
-            } else if (uri.getScheme().equals("https")) {
-                protocol = Protocol.HTTPS;
-            } else {
-                throw new IllegalArgumentException("Invalid protocol");
-            }
+        var basicAuthEnabled = params.getUsername() != null && params.getPassword() != null;
+        var sigv4Enabled = params.getAwsRegion() != null && params.getAwsServiceSigningName() != null;
 
-            if (params.getUsername() != null ^ params.getPassword() != null) {
-                throw new IllegalArgumentException("Both username and password must be provided, or neither");
-            }
-            if (params.getAwsRegion() != null ^ params.getAwsServiceSigningName() != null) {
-                throw new IllegalArgumentException("Both aws region and aws service signing name must be provided, or neither");
-            }
+        if (basicAuthEnabled && sigv4Enabled) {
+            throw new IllegalArgumentException("Cannot have both Basic Auth and SigV4 Auth enabled.");
+        }
 
-            var basicAuthEnabled = params.getUsername() != null && params.getPassword() != null;
-            var sigv4Enabled = params.getAwsRegion() != null && params.getAwsServiceSigningName() != null;
-
-            if (basicAuthEnabled && sigv4Enabled) {
-                throw new IllegalArgumentException("Cannot have both Basic Auth and SigV4 Auth enabled.");
-            }
-
-            if (basicAuthEnabled) {
-                this.authTransformer = new BasicAuthTransformer(params.getUsername(), params.getPassword());
-            }
-            else if (sigv4Enabled) {
-                this.authTransformer = new SigV4AuthTransformer(
-                    DefaultCredentialsProvider.create(),
-                    params.getAwsServiceSigningName(),
-                    params.getAwsRegion(),
-                    protocol.name(),
-                    Clock::systemUTC);
-            }
-            else {
-                this.authTransformer = NoAuthTransformer.INSTANCE;
-            }
+        if (basicAuthEnabled) {
+            this.requestTransformer = new BasicAuthTransformer(params.getUsername(), params.getPassword());
+        }
+        else if (sigv4Enabled) {
+            this.requestTransformer = new SigV4AuthTransformer(
+                DefaultCredentialsProvider.create(),
+                params.getAwsServiceSigningName(),
+                params.getAwsRegion(),
+                protocol.name(),
+                Clock::systemUTC);
+        }
+        else {
+            this.requestTransformer = NoAuthTransformer.INSTANCE;
         }
     }
 

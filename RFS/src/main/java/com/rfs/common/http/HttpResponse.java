@@ -6,8 +6,8 @@ import lombok.AllArgsConstructor;
 
 @AllArgsConstructor
 public class HttpResponse {
-    public final int code;
-    public final String body;
-    public final String message;
+    public final int statusCode;
+    public final String statusText;
     public final Map<String, String> headers;
+    public final String body;
 }

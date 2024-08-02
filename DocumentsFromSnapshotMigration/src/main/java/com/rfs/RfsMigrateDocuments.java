@@ -20,10 +20,10 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
+import com.rfs.cms.CoordinateWorkHttpClient;
 import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.cms.OpenSearchWorkCoordinator;
-import com.rfs.cms.ReactorHttpClient;
 import com.rfs.cms.ScopedWorkCoordinator;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
@@ -158,7 +158,7 @@ public class RfsMigrateDocuments {
         }, Clock.systemUTC())) {
             ConnectionContext connectionContext = arguments.targetArgs.toConnectionContext();
             var workCoordinator = new OpenSearchWorkCoordinator(
-                new ReactorHttpClient(connectionContext),
+                new CoordinateWorkHttpClient(connectionContext),
                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                 UUID.randomUUID().toString()
             );

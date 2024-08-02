@@ -96,7 +96,6 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
     @Override
     public void close() throws Exception {
-        httpClient.close();
     }
 
     public void setup(Supplier<IWorkCoordinationContexts.IInitializeCoordinatorStateContext> contextSupplier)

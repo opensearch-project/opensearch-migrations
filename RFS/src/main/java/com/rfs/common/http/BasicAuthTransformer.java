@@ -1,7 +1,6 @@
 package com.rfs.common.http;
 
 import java.nio.ByteBuffer;
-import java.util.ArrayList;
 import java.util.Base64;
 import java.util.HashMap;
 import java.util.List;
@@ -17,12 +16,10 @@ public class BasicAuthTransformer implements RequestTransformer {
 
     @Override
     public Mono<TransformedRequest> transform(String method, String path, Map<String, List<String>> headers, Mono<ByteBuffer> body) {
-        Map<String, List<String>> newHeaders = new HashMap<>(headers);
+        var newHeaders = new HashMap<>(headers);
         String credentials = username + ":" + password;
         String encodedCredentials = Base64.getEncoder().encodeToString(credentials.getBytes());
-        List<String> authHeader = new ArrayList<>();
-        authHeader.add("Basic " + encodedCredentials);
-        newHeaders.put("Authorization", authHeader);
+        newHeaders.put("Authorization", List.of("Basic " + encodedCredentials));
         return Mono.just(new TransformedRequest(newHeaders, body));
     }
 }
