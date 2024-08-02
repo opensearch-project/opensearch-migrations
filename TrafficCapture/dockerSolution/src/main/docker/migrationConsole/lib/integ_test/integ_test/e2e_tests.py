@@ -95,15 +95,16 @@ class E2ETests(unittest.TestCase):
         create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id_base + "_2",
                         expected_status_code=HTTPStatus.CREATED, test_case=self)
 
+        ignore_list = [".", "searchguard", "sg7", "security-auditlog", "reindexed-logs"]
         expected_docs = dict(EXPECTED_BENCHMARK_DOCS)
         # Source should have both documents
         expected_docs[index_name] = {"docs.count": "2"}
         check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_docs,
-                               test_case=self)
+                               index_prefix_ignore_list=ignore_list, test_case=self)
         # Target should have one document from snapshot
         expected_docs[index_name] = {"docs.count": "1"}
         check_doc_counts_match(cluster=target_cluster, expected_index_details=expected_docs,
-                               max_attempts=40, delay=30.0, test_case=self)
+                               index_prefix_ignore_list=ignore_list, max_attempts=40, delay=30.0, test_case=self)
 
         backfill.stop()
 
@@ -115,7 +116,7 @@ class E2ETests(unittest.TestCase):
 
         expected_docs[index_name] = {"docs.count": "3"}
         check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_docs,
-                               test_case=self)
+                               index_prefix_ignore_list=ignore_list, test_case=self)
 
         check_doc_counts_match(cluster=target_cluster, expected_index_details=expected_docs,
-                               max_attempts=30, delay=10.0, test_case=self)
+                               index_prefix_ignore_list=ignore_list, max_attempts=30, delay=10.0, test_case=self)
