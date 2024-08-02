@@ -10,7 +10,7 @@
     "enableDemoAdmin": true,
     "trafficReplayerEnableClusterFGACAuth": true,
     "captureProxyESServiceEnabled": true,
-    "fetchMigrationEnabled": true,
+    "reindexFromSnapshotEnabled": true,
     "otelCollectorEnabled": true
   }
 }
