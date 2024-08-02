@@ -1,7 +1,6 @@
 package com.rfs.cms;
 
 import java.io.IOException;
-import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -21,6 +20,7 @@ import org.junit.jupiter.api.Test;
 
 import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 
+import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.framework.SearchClusterContainer;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -46,14 +46,17 @@ public class WorkCoordinatorTest {
     public static final String DUMMY_FINISHED_DOC_ID = "dummy_finished_doc";
 
     final SearchClusterContainer container = new SearchClusterContainer(SearchClusterContainer.OS_V1_3_16);
-    private Supplier<ApacheHttpClient> httpClientSupplier;
+    private Supplier<AbstractedHttpClient> httpClientSupplier;
 
     @BeforeEach
     void setupOpenSearchContainer() throws Exception {
         var testContext = WorkCoordinationTestContext.factory().noOtelTracking();
         // Start the container. This step might take some time...
         container.start();
-        httpClientSupplier = () -> new ApacheHttpClient(URI.create(container.getUrl()));
+        httpClientSupplier = () -> new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
+            .host(container.getUrl())
+            .build()
+            .toConnectionContext());
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 2, "testWorker")) {
             workCoordinator.setup(testContext::createCoordinationInitializationStateContext);
         }

@@ -2,6 +2,7 @@ package com.rfs.common;
 
 import java.net.HttpURLConnection;
 import java.time.Duration;
+import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -12,8 +13,9 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.rfs.common.http.ConnectionContext;
+import com.rfs.common.http.HttpResponse;
 import com.rfs.tracing.IRfsContexts;
-import lombok.NonNull;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
@@ -25,20 +27,10 @@ public class OpenSearchClient {
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
-    public final ConnectionDetails connectionDetails;
     private final RestClient client;
 
-    public OpenSearchClient(@NonNull String url, UsernamePassword p) {
-        this(url, p == null ? null : p.getUsername(), p == null ? null : p.getPassword(), false);
-    }
-
-    public OpenSearchClient(@NonNull String url, String username, String password, boolean insecure) {
-        this(new ConnectionDetails(url, username, password, insecure));
-    }
-
-    public OpenSearchClient(ConnectionDetails connectionDetails) {
-        this.connectionDetails = connectionDetails;
-        this.client = new RestClient(connectionDetails);
+    public OpenSearchClient(ConnectionContext connectionContext) {
+        this.client = new RestClient(connectionContext);
     }
 
     /*
@@ -98,17 +90,17 @@ public class OpenSearchClient {
         ObjectNode settings,
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
-        RestClient.Response getResponse = client.getAsync(objectPath, context.createCheckRequestContext())
+        HttpResponse getResponse = client.getAsync(objectPath, context.createCheckRequestContext())
             .flatMap(resp -> {
-                if (resp.code == HttpURLConnection.HTTP_NOT_FOUND || resp.code == HttpURLConnection.HTTP_OK) {
+                if (resp.statusCode == HttpURLConnection.HTTP_NOT_FOUND || resp.statusCode == HttpURLConnection.HTTP_OK) {
                     return Mono.just(resp);
                 } else {
                     String errorMessage = ("Could not create object: "
                         + objectPath
                         + ". Response Code: "
-                        + resp.code
+                        + resp.statusCode
                         + ", Response Message: "
-                        + resp.message
+                        + resp.statusText
                         + ", Response Body: "
                         + resp.body);
                     return Mono.error(new OperationFailed(errorMessage, resp));
@@ -120,18 +112,18 @@ public class OpenSearchClient {
 
         assert getResponse != null : ("getResponse should not be null; it should either be a valid response or an exception"
             + " should have been thrown.");
-        boolean objectDoesNotExist = getResponse.code == HttpURLConnection.HTTP_NOT_FOUND;
+        boolean objectDoesNotExist = getResponse.statusCode == HttpURLConnection.HTTP_NOT_FOUND;
         if (objectDoesNotExist) {
             client.putAsync(objectPath, settings.toString(), context.createCheckRequestContext()).flatMap(resp -> {
-                if (resp.code == HttpURLConnection.HTTP_OK) {
+                if (resp.statusCode == HttpURLConnection.HTTP_OK) {
                     return Mono.just(resp);
                 } else {
                     String errorMessage = ("Could not create object: "
                         + objectPath
                         + ". Response Code: "
-                        + resp.code
+                        + resp.statusCode
                         + ", Response Message: "
-                        + resp.message
+                        + resp.statusText
                         + ", Response Body: "
                         + resp.body);
                     return Mono.error(new OperationFailed(errorMessage, resp));
@@ -157,15 +149,15 @@ public class OpenSearchClient {
     ) {
         String targetPath = "_snapshot/" + repoName;
         client.putAsync(targetPath, settings.toString(), context.createRegisterRequest()).flatMap(resp -> {
-            if (resp.code == HttpURLConnection.HTTP_OK) {
+            if (resp.statusCode == HttpURLConnection.HTTP_OK) {
                 return Mono.just(resp);
             } else {
                 String errorMessage = ("Could not register snapshot repo: "
                     + targetPath
                     + ". Response Code: "
-                    + resp.code
+                    + resp.statusCode
                     + ", Response Message: "
-                    + resp.message
+                    + resp.statusText
                     + ", Response Body: "
                     + resp.body);
                 return Mono.error(new OperationFailed(errorMessage, resp));
@@ -187,15 +179,15 @@ public class OpenSearchClient {
     ) {
         String targetPath = "_snapshot/" + repoName + "/" + snapshotName;
         client.putAsync(targetPath, settings.toString(), context.createSnapshotContext()).flatMap(resp -> {
-            if (resp.code == HttpURLConnection.HTTP_OK) {
+            if (resp.statusCode == HttpURLConnection.HTTP_OK) {
                 return Mono.just(resp);
             } else {
                 String errorMessage = ("Could not create snapshot: "
                     + targetPath
                     + ". Response Code: "
-                    + resp.code
+                    + resp.statusCode
                     + ", Response Message: "
-                    + resp.message
+                    + resp.statusText
                     + ", Response Body: "
                     + resp.body);
                 return Mono.error(new OperationFailed(errorMessage, resp));
@@ -216,14 +208,14 @@ public class OpenSearchClient {
         IRfsContexts.ICreateSnapshotContext context
     ) {
         String targetPath = "_snapshot/" + repoName + "/" + snapshotName;
-        RestClient.Response getResponse = client.getAsync(targetPath, context.createGetSnapshotContext()).flatMap(resp -> {
-            if (resp.code == HttpURLConnection.HTTP_OK || resp.code == HttpURLConnection.HTTP_NOT_FOUND) {
+        var getResponse = client.getAsync(targetPath, context.createGetSnapshotContext()).flatMap(resp -> {
+            if (resp.statusCode == HttpURLConnection.HTTP_OK || resp.statusCode == HttpURLConnection.HTTP_NOT_FOUND) {
                 return Mono.just(resp);
             } else {
                 String errorMessage = "Could get status of snapshot: "
                     + targetPath
                     + ". Response Code: "
-                    + resp.code
+                    + resp.statusCode
                     + ", Response Body: "
                     + resp.body;
                 return Mono.error(new OperationFailed(errorMessage, resp));
@@ -235,14 +227,14 @@ public class OpenSearchClient {
 
         assert getResponse != null : ("getResponse should not be null; it should either be a valid response or an exception"
             + " should have been thrown.");
-        if (getResponse.code == HttpURLConnection.HTTP_OK) {
+        if (getResponse.statusCode == HttpURLConnection.HTTP_OK) {
             try {
                 return Optional.of(objectMapper.readValue(getResponse.body, ObjectNode.class));
             } catch (Exception e) {
                 String errorMessage = "Could not parse response for: _snapshot/" + repoName + "/" + snapshotName;
                 throw new OperationFailed(errorMessage, getResponse);
             }
-        } else if (getResponse.code == HttpURLConnection.HTTP_NOT_FOUND) {
+        } else if (getResponse.statusCode == HttpURLConnection.HTTP_NOT_FOUND) {
             return Optional.empty();
         } else {
             String errorMessage = "Should not have gotten here while parsing response for: _snapshot/"
@@ -257,7 +249,7 @@ public class OpenSearchClient {
         String targetPath = indexName + "/_bulk";
 
         return client.postAsync(targetPath, body, context)
-            .map(response -> new BulkResponse(response.code, response.body, response.message))
+            .map(response -> new BulkResponse(response.statusCode, response.statusText, response.headers, response.body))
             .flatMap(resp -> {
                 if (resp.hasBadStatusCode() || resp.hasFailedOperations()) {
                     logger.error(resp.getFailureMessage());
@@ -268,18 +260,18 @@ public class OpenSearchClient {
             .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)));
     }
 
-    public RestClient.Response refresh(IRfsContexts.IRequestContext context) {
+    public HttpResponse refresh(IRfsContexts.IRequestContext context) {
         String targetPath = "_refresh";
         return client.get(targetPath, context);
     }
 
-    public static class BulkResponse extends RestClient.Response {
-        public BulkResponse(int responseCode, String responseBody, String responseMessage) {
-            super(responseCode, responseBody, responseMessage);
+    public static class BulkResponse extends HttpResponse {
+        public BulkResponse(int statusCode, String statusText, Map<String, String> headers, String body) {
+            super(statusCode, statusText, headers, body);
         }
 
         public boolean hasBadStatusCode() {
-            return !(code == HttpURLConnection.HTTP_OK || code == HttpURLConnection.HTTP_CREATED);
+            return !(statusCode == HttpURLConnection.HTTP_OK || statusCode == HttpURLConnection.HTTP_CREATED);
         }
 
         public boolean hasFailedOperations() {
@@ -296,7 +288,7 @@ public class OpenSearchClient {
         public String getFailureMessage() {
             String failureMessage;
             if (hasBadStatusCode()) {
-                failureMessage = "Bulk request failed.  Status code: " + code + ", Response body: " + body;
+                failureMessage = "Bulk request failed.  Status code: " + statusCode + ", Response body: " + body;
             } else {
                 failureMessage = "Bulk request succeeded, but some operations failed.  Response body: " + body;
             }
@@ -306,9 +298,9 @@ public class OpenSearchClient {
     }
 
     public static class OperationFailed extends RfsException {
-        public final RestClient.Response response;
+        public final HttpResponse response;
 
-        public OperationFailed(String message, RestClient.Response response) {
+        public OperationFailed(String message, HttpResponse response) {
             super(message);
 
             this.response = response;

@@ -44,19 +44,26 @@ public class SigV4AuthTransformerFactoryTest extends InstrumentationTest {
         var mockCredentialsProvider = new MockCredentialsProvider();
         DefaultHttpHeaders expectedRequestHeaders = new DefaultHttpHeaders();
         // netty's decompressor and aggregator remove some header values (& add others)
-        expectedRequestHeaders.add("host", "localhost");
-        expectedRequestHeaders.add("Content-Length".toLowerCase(), "46");
+
+        // Using unusual spelling to verify SigV4 signer behavior with list insensitive map
+        var contentTypeHeaderKey = "CoNteNt-Type";
+        var contentTypeHeaderValue = "application/json";
+
+        expectedRequestHeaders.add("Host", "localhost");
+        expectedRequestHeaders.add(contentTypeHeaderKey, contentTypeHeaderValue);
+        expectedRequestHeaders.add("Content-Length", "46");
         expectedRequestHeaders.add(
             "Authorization",
             "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/19700101/us-east-1/es/aws4_request, "
-                + "SignedHeaders=host;x-amz-content-sha256;x-amz-date, "
-                + "Signature=4cb1c423e6fe61216fbaa11398260af7f8daa85e74cd41428711e4df5cd70c97"
+                + "SignedHeaders=" + contentTypeHeaderKey.toLowerCase() + ";host;x-amz-content-sha256;x-amz-date, "
+                + "Signature=7f321c18069cac1ec6dbbeb4cabeae83ed7fd31724d692f7e486932792c8f82b"
         );
         expectedRequestHeaders.add(
             "x-amz-content-sha256",
             "fc0e8e9a1f7697f510bfdd4d55b8612df8a0140b4210967efd87ee9cb7104362"
         );
-        expectedRequestHeaders.add("X-Amz-Date", "19700101T000000Z");
+
+        expectedRequestHeaders.add("x-amz-date", "19700101T000000Z");
 
         try (var factory = new SigV4AuthTransformerFactory(
             mockCredentialsProvider,
@@ -68,7 +75,7 @@ public class SigV4AuthTransformerFactoryTest extends InstrumentationTest {
             TestUtils.runPipelineAndValidate(
                 rootContext,
                 factory,
-                null,
+                contentTypeHeaderKey + ": "+ contentTypeHeaderValue + "\r\n",
                 stringParts,
                 expectedRequestHeaders,
                 TestUtils::resolveReferenceString

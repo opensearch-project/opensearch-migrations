@@ -8,6 +8,7 @@ import java.time.ZoneOffset;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.TestInstance;
@@ -62,7 +63,7 @@ public class SigV4SigningTransformationTest {
             httpMessage.headers().put("Content-Type", List.of("application/json"));
         }
         // Set the host header
-        httpMessage.headers().put("host", List.of("example.amazonaws.com"));
+        httpMessage.headers().put("Host", List.of("example.amazonaws.com"));
 
         // Apply the body
         if (payload != null) {
@@ -75,16 +76,14 @@ public class SigV4SigningTransformationTest {
         assertNotNull(signedHeaders);
         assertTrue(signedHeaders.containsKey("Authorization"));
         String authHeader = signedHeaders.get("Authorization").get(0);
-        assertTrue(authHeader.startsWith("AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/19700101/us-east-1/es/aws4_request"));
+        assertTrue(authHeader.startsWith("AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/19700101/us-east-1/es/aws4_request"),
+            "Expected 'Authorization' header to be present in " + authHeader + " but got '" + authHeader + "'");
         assertEquals(List.of("19700101T000000Z"), signedHeaders.get("X-Amz-Date"));
 
-        if (payload != null) {
-            assertTrue(signedHeaders.containsKey("x-amz-content-sha256"));
-            String expectedHash = calculateSHA256(payload);
-            assertEquals(List.of(expectedHash), signedHeaders.get("x-amz-content-sha256"));
-        } else {
-            assertNull(signedHeaders.get("x-amz-content-sha256"));
-        }
+        Optional<String> expectedHash = Optional.ofNullable(payload)
+                .map(SigV4SigningTransformationTest::calculateSHA256);
+
+        assertEquals(expectedHash.map(List::of).orElse(null), signedHeaders.get("x-amz-content-sha256"));
 
         // Verify header map returned is unmodifiable (check both keys and values)
         assertThrows(UnsupportedOperationException.class, () -> signedHeaders.put("Test", List.of("Value")));
@@ -92,7 +91,7 @@ public class SigV4SigningTransformationTest {
     }
 
     @SneakyThrows
-    private String calculateSHA256(String payload) {
+    private static String calculateSHA256(String payload) {
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         byte[] encodedHash = digest.digest(payload.getBytes(StandardCharsets.UTF_8));
         return bytesToHex(encodedHash);

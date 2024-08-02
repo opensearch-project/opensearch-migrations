@@ -1,7 +1,6 @@
 package com.rfs;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
@@ -20,7 +19,8 @@ import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
-import com.rfs.cms.ApacheHttpClient;
+import com.beust.jcommander.ParametersDelegate;
+import com.rfs.cms.CoordinateWorkHttpClient;
 import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.cms.OpenSearchWorkCoordinator;
@@ -36,6 +36,7 @@ import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
 import com.rfs.common.TryHandlePhaseFailure;
+import com.rfs.common.http.ConnectionContext;
 import com.rfs.models.IndexMetadata;
 import com.rfs.models.ShardMetadata;
 import com.rfs.tracing.RootWorkCoordinationContext;
@@ -87,17 +88,8 @@ public class RfsMigrateDocuments {
             "--lucene-dir" }, required = true, description = "The absolute path to the directory where we'll put the Lucene docs")
         public String luceneDir;
 
-        @Parameter(names = {
-            "--target-host" }, required = true, description = "The target host and port (e.g. http://localhost:9200)")
-        public String targetHost;
-
-        @Parameter(names = {
-            "--target-username" }, description = "Optional.  The target username; if not provided, will assume no auth on target")
-        public String targetUser = null;
-
-        @Parameter(names = {
-            "--target-password" }, description = "Optional.  The target password; if not provided, will assume no auth on target")
-        public String targetPass = null;
+        @ParametersDelegate
+        public ConnectionContext.TargetArgs targetArgs = new ConnectionContext.TargetArgs();
 
         @Parameter(names = { "--index-allowlist" }, description = ("Optional.  List of index names to migrate"
             + " (e.g. 'logs_2024_01, logs_2024_02').  Default: all non-system indices (e.g. those not starting with '.')"), required = false)
@@ -164,21 +156,16 @@ public class RfsMigrateDocuments {
             log.error("Terminating RfsMigrateDocuments because the lease has expired for " + workItemId);
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC())) {
+            ConnectionContext connectionContext = arguments.targetArgs.toConnectionContext();
             var workCoordinator = new OpenSearchWorkCoordinator(
-                new ApacheHttpClient(new URI(arguments.targetHost)),
+                new CoordinateWorkHttpClient(connectionContext),
                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                 UUID.randomUUID().toString()
             );
-
             TryHandlePhaseFailure.executeWithTryCatch(() -> {
                 log.info("Running RfsWorker");
 
-                OpenSearchClient targetClient = new OpenSearchClient(
-                    arguments.targetHost,
-                    arguments.targetUser,
-                    arguments.targetPass,
-                    false
-                );
+                OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
                 DocumentReindexer reindexer = new DocumentReindexer(targetClient);
 
                 SourceRepo sourceRepo;

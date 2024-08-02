@@ -1,132 +1,185 @@
 package com.rfs.common;
 
-import java.util.Base64;
+import java.nio.ByteBuffer;
+import java.nio.charset.StandardCharsets;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
+import java.util.stream.Collectors;
 import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLParameters;
 
+import com.rfs.common.http.ConnectionContext;
+import com.rfs.common.http.HttpResponse;
 import com.rfs.netty.ReadMeteringHandler;
 import com.rfs.netty.WriteMeteringHandler;
 import com.rfs.tracing.IRfsContexts;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandler;
 import io.netty.channel.ChannelPipeline;
+import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpHeaders;
+import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
-import lombok.SneakyThrows;
-import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
-import reactor.netty.ByteBufMono;
 import reactor.netty.Connection;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.http.client.HttpClientRequest;
 import reactor.netty.tcp.SslProvider;
+import reactor.util.annotation.Nullable;
 
-@Slf4j
 public class RestClient {
+    private final ConnectionContext connectionContext;
+    private final HttpClient client;
 
     public static final String READ_METERING_HANDLER_NAME = "REST_CLIENT_READ_METERING_HANDLER";
     public static final String WRITE_METERING_HANDLER_NAME = "REST_CLIENT_WRITE_METERING_HANDLER";
 
-    public static class Response {
-        public final int code;
-        public final String body;
-        public final String message;
+    private static final String USER_AGENT_HEADER_NAME = HttpHeaderNames.USER_AGENT.toString();
+    private static final String CONTENT_TYPE_HEADER_NAME = HttpHeaderNames.CONTENT_TYPE.toString();
+    private static final String HOST_HEADER_NAME = HttpHeaderNames.HOST.toString();
 
-        public Response(int responseCode, String responseBody, String responseMessage) {
-            this.code = responseCode;
-            this.body = responseBody;
-            this.message = responseMessage;
-        }
+    private static final String USER_AGENT = "RfsWorker-1.0";
+    private static final String JSON_CONTENT_TYPE = "application/json";
+
+    public RestClient(ConnectionContext connectionContext) {
+        this(connectionContext, HttpClient.create());
     }
 
-    public final ConnectionDetails connectionDetails;
-    private final HttpClient client;
-
-    @SneakyThrows
-    public RestClient(ConnectionDetails connectionDetails) {
-        this(connectionDetails, HttpClient.create());
-    }
-
-    @SneakyThrows
-    protected RestClient(ConnectionDetails connectionDetails, HttpClient httpClient) {
-        this.connectionDetails = connectionDetails;
+    protected RestClient(ConnectionContext connectionContext, HttpClient httpClient) {
+        this.connectionContext = connectionContext;
 
         SslProvider sslProvider;
-        if (connectionDetails.insecure) {
-            SslContext sslContext = SslContextBuilder.forClient()
-                .trustManager(InsecureTrustManagerFactory.INSTANCE)
-                .build();
-
-            sslProvider = SslProvider.builder().sslContext(sslContext).handlerConfigurator(sslHandler -> {
-                SSLEngine engine = sslHandler.engine();
-                SSLParameters sslParameters = engine.getSSLParameters();
-                sslParameters.setEndpointIdentificationAlgorithm(null);
-                engine.setSSLParameters(sslParameters);
-            }).build();
+        if (connectionContext.isInsecure()) {
+            try {
+                SslContext sslContext = SslContextBuilder.forClient()
+                    .trustManager(InsecureTrustManagerFactory.INSTANCE)
+                    .build();
+                sslProvider = SslProvider.builder().sslContext(sslContext).handlerConfigurator(sslHandler -> {
+                    SSLEngine engine = sslHandler.engine();
+                    SSLParameters sslParameters = engine.getSSLParameters();
+                    sslParameters.setEndpointIdentificationAlgorithm(null);
+                    engine.setSSLParameters(sslParameters);
+                }).build();
+            } catch (SSLException e) {
+                throw new IllegalStateException("Unable to construct SslProvider", e);
+            }
         } else {
             sslProvider = SslProvider.defaultClientProvider();
         }
 
-        this.client = httpClient.secure(sslProvider).baseUrl(connectionDetails.url).keepAlive(true)
-            .headers(h -> {
-                h.add("Content-Type", "application/json");
-                h.add("User-Agent", "RfsWorker-1.0");
-                if (connectionDetails.authType == ConnectionDetails.AuthType.BASIC) {
-                    String credentials = connectionDetails.username + ":" + connectionDetails.password;
-                    String encodedCredentials = Base64.getEncoder().encodeToString(credentials.getBytes());
-                    h.add("Authorization", "Basic " + encodedCredentials);
-                }
-            });
+        this.client = httpClient.secure(sslProvider).baseUrl(connectionContext.getUri().toString()).keepAlive(true);
     }
 
-    public Mono<Response> getAsync(String path, IRfsContexts.IRequestContext context) {
-        var contextCleanupRef = new AtomicReference<Runnable>();
-        return client.doOnRequest((r, conn) -> contextCleanupRef.set(addSizeMetricsHandlers(context).apply(r, conn)))
-            .get()
-            .uri("/" + path)
-            .responseSingle(
-                (response, bytes) -> bytes.asString()
-                    .map(body -> new Response(response.status().code(), body, response.status().reasonPhrase()))
+    public static String getHostHeaderValue(ConnectionContext connectionContext) {
+        String host = connectionContext.getUri().getHost();
+        int port = connectionContext.getUri().getPort();
+        ConnectionContext.Protocol protocol = connectionContext.getProtocol();
+
+        if (ConnectionContext.Protocol.HTTP.equals(protocol)) {
+            if (port == -1 || port == 80) {
+                return host;
+            }
+        } else if (ConnectionContext.Protocol.HTTPS.equals(protocol)) {
+            if (port == -1 || port == 443) {
+                return host;
+            }
+        } else {
+            throw new IllegalArgumentException("Unexpected protocol" + protocol);
+        }
+        return host + ":" + port;
+    }
+
+    public Mono<HttpResponse> asyncRequestWithFlatHeaderValues(HttpMethod method, String path, String body, Map<String, String> additionalHeaders,
+                                                               IRfsContexts.IRequestContext context) {
+        var convertedHeaders = additionalHeaders.entrySet().stream().collect(Collectors
+            .toMap(Map.Entry::getKey, e -> List.of(e.getValue())));
+        return asyncRequest(method, path, body, convertedHeaders, context);
+    }
+
+
+    public Mono<HttpResponse> asyncRequest(HttpMethod method, String path, String body, Map<String, List<String>> additionalHeaders,
+                                           @Nullable IRfsContexts.IRequestContext context) {
+        assert connectionContext.getUri() != null;
+        Map<String, List<String>> headers = new HashMap<>();
+        headers.put(USER_AGENT_HEADER_NAME, List.of(USER_AGENT));
+        var hostHeaderValue = getHostHeaderValue(connectionContext);
+        headers.put(HOST_HEADER_NAME, List.of(hostHeaderValue));
+        if (body != null) {
+            headers.put(CONTENT_TYPE_HEADER_NAME, List.of(JSON_CONTENT_TYPE));
+        }
+        if (additionalHeaders != null) {
+            additionalHeaders.forEach((key, value) -> {
+                    if (headers.containsKey(key.toLowerCase())) {
+                        headers.put(key.toLowerCase(), value);
+                    } else {
+                        headers.put(key, value);
+                    }
+                });
+        }
+        var contextCleanupRef = new AtomicReference<Runnable>(() -> {});
+        return connectionContext.getRequestTransformer().transform(method.name(), path, headers, Mono.justOrEmpty(body)
+                .map(b -> ByteBuffer.wrap(b.getBytes(StandardCharsets.UTF_8)))
             )
-            .doOnError(t -> context.addTraceException(t, true))
-            .doFinally(r -> contextCleanupRef.get().run());
+            .flatMap(transformedRequest ->
+                client.doOnRequest((r, conn) -> contextCleanupRef.set(addSizeMetricsHandlersAndGetCleanup(context).apply(r, conn)))
+                .headers(h -> transformedRequest.getHeaders().forEach(h::add))
+                .request(method)
+                .uri("/" + path)
+                .send(transformedRequest.getBody().map(Unpooled::wrappedBuffer))
+                .responseSingle(
+                    (response, bytes) -> bytes.asString()
+                        .singleOptional()
+                        .map(bodyOp -> new HttpResponse(
+                            response.status().code(),
+                            response.status().reasonPhrase(),
+                            extractHeaders(response.responseHeaders()),
+                            bodyOp.orElse(null)
+                            ))
+                ))
+            .doOnError(t -> {
+                if (context != null) {
+                    context.addTraceException(t, true);
+                }
+            })
+            .doOnTerminate(() -> contextCleanupRef.get().run());
     }
 
-    public Response get(String path, IRfsContexts.IRequestContext context) {
+    private Map<String, String> extractHeaders(HttpHeaders headers) {
+        return headers.entries().stream()
+            .collect(java.util.stream.Collectors.toMap(
+                Map.Entry::getKey,
+                Map.Entry::getValue,
+                (v1, v2) -> v1 + "," + v2
+            ));
+    }
+
+    public HttpResponse get(String path, IRfsContexts.IRequestContext context) {
         return getAsync(path, context).block();
     }
 
-    public Mono<Response> postAsync(String path, String body, IRfsContexts.IRequestContext context) {
-        var contextCleanupRef = new AtomicReference<Runnable>();
-        return client.doOnRequest((r, conn) -> contextCleanupRef.set(addSizeMetricsHandlers(context).apply(r, conn)))
-            .post()
-            .uri("/" + path)
-            .send(ByteBufMono.fromString(Mono.just(body)))
-            .responseSingle(
-                (response, bytes) -> bytes.asString()
-                    .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase()))
-            )
-            .doOnError(t -> context.addTraceException(t, true))
-            .doFinally(r -> contextCleanupRef.get().run());
+    public Mono<HttpResponse> getAsync(String path, IRfsContexts.IRequestContext context) {
+        return asyncRequest(HttpMethod.GET, path, null, null, context);
     }
 
-    public Mono<Response> putAsync(String path, String body, IRfsContexts.IRequestContext context) {
-        var contextCleanupRef = new AtomicReference<Runnable>();
-        return client.doOnRequest((r, conn) -> contextCleanupRef.set(addSizeMetricsHandlers(context).apply(r, conn)))
-            .put()
-            .uri("/" + path)
-            .send(ByteBufMono.fromString(Mono.just(body)))
-            .responseSingle(
-                (response, bytes) -> bytes.asString()
-                    .map(b -> new Response(response.status().code(), b, response.status().reasonPhrase()))
-            )
-            .doOnError(t -> context.addTraceException(t, true))
-            .doFinally(r -> contextCleanupRef.get().run());
+    public Mono<HttpResponse> postAsync(String path, String body, IRfsContexts.IRequestContext context) {
+        return asyncRequest(HttpMethod.POST, path, body, null, context);
     }
 
-    public Response put(String path, String body, IRfsContexts.IRequestContext context) {
+    public HttpResponse post(String path, String body, IRfsContexts.IRequestContext context) {
+        return postAsync(path, body, context).block();
+    }
+
+    public Mono<HttpResponse> putAsync(String path, String body, IRfsContexts.IRequestContext context) {
+        return asyncRequest(HttpMethod.PUT, path, body, null, context);
+    }
+
+    public HttpResponse put(String path, String body, IRfsContexts.IRequestContext context) {
         return putAsync(path, body, context).block();
     }
 
@@ -143,16 +196,19 @@ public class RestClient {
     }
 
     private BiFunction<HttpClientRequest, Connection, Runnable>
-    addSizeMetricsHandlers(final IRfsContexts.IRequestContext ctx) {
-        return (r, conn) -> {
-            var p = conn.channel().pipeline();
-            addNewHandler(p, WRITE_METERING_HANDLER_NAME, new WriteMeteringHandler(ctx::addBytesSent));
-            addNewHandler(p, READ_METERING_HANDLER_NAME, new ReadMeteringHandler(ctx::addBytesRead));
-            return () -> {
-                ctx.close();
-                removeIfPresent(p, WRITE_METERING_HANDLER_NAME);
-                removeIfPresent(p, READ_METERING_HANDLER_NAME);
+    addSizeMetricsHandlersAndGetCleanup(final IRfsContexts.IRequestContext ctx) {
+        if (ctx == null) {
+            return (r, conn) -> () -> {};
+        }
+            return (r, conn) -> {
+                var p = conn.channel().pipeline();
+                addNewHandler(p, WRITE_METERING_HANDLER_NAME, new WriteMeteringHandler(ctx::addBytesSent));
+                addNewHandler(p, READ_METERING_HANDLER_NAME, new ReadMeteringHandler(ctx::addBytesRead));
+                return () -> {
+                    ctx.close();
+                    removeIfPresent(p, WRITE_METERING_HANDLER_NAME);
+                    removeIfPresent(p, READ_METERING_HANDLER_NAME);
+                };
             };
-        };
     }
 }
