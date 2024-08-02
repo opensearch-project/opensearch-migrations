@@ -5,7 +5,13 @@ import {Construct} from "constructs";
 import {join} from "path";
 import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
 import {StreamingSourceType} from "../streaming-source-type";
-import {MigrationSSMParameter, createMSKProducerIAMPolicies, getCustomStringParameterValue, getMigrationStringParameterValue} from "../common-utilities";
+import {
+    MigrationSSMParameter,
+    createMSKProducerIAMPolicies,
+    getCustomStringParameterValue,
+    getMigrationStringParameterValue,
+    parseAndMergeArgs
+} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 
 export interface CaptureProxyProps extends StackPropsExt {
@@ -19,12 +25,12 @@ export interface CaptureProxyProps extends StackPropsExt {
     readonly extraArgs?: string,
 }
 
-type MigrationSSMDestinationConfig = { 
+type MigrationSSMDestinationConfig = {
     readonly endpointMigrationSSMParameter: MigrationSSMParameter,
     readonly securityGroupMigrationSSMParameter?: MigrationSSMParameter,
 }
 
-type CustomSSMDestinationConfig = { 
+type CustomSSMDestinationConfig = {
     readonly endpointCustomSSMParameter: string,
     readonly securityGroupCustomSSMParameter?: string,
 }
@@ -43,15 +49,15 @@ function getDestinationSecurityGroup(scope: Construct, config: DestinationConfig
     let securityGroupId: string | null = null;
 
     if (isMigrationDestinationConfig(config)) {
-        securityGroupId = config.securityGroupMigrationSSMParameter 
+        securityGroupId = config.securityGroupMigrationSSMParameter
             ? getMigrationStringParameterValue(scope, {
                 ...props,
                 parameter: config.securityGroupMigrationSSMParameter,
-            }) 
+            })
             : null;
     } else if (isCustomDestinationConfig(config)) {
-        securityGroupId = config.securityGroupCustomSSMParameter 
-            ? getCustomStringParameterValue(scope, config.securityGroupCustomSSMParameter) 
+        securityGroupId = config.securityGroupCustomSSMParameter
+            ? getCustomStringParameterValue(scope, config.securityGroupCustomSSMParameter)
             : null;
     } else {
         throw new Error('Invalid DestinationConfig provided.');
@@ -120,7 +126,8 @@ export class CaptureProxyStack extends MigrationServiceCore {
         command = props.streamingSourceType !== StreamingSourceType.DISABLED ? command.concat(`  --kafkaConnection ${brokerEndpoints}`) : command
         command = props.streamingSourceType === StreamingSourceType.AWS_MSK ? command.concat(" --enableMSKAuth") : command
         command = props.otelCollectorEnabled ? command.concat(` --otelCollectorEndpoint http://localhost:${OtelCollectorSidecar.OTEL_CONTAINER_PORT}`) : command
-        command = props.extraArgs ? command.concat(` ${props.extraArgs}`) : command
+        command = parseAndMergeArgs(command, props.extraArgs);
+
         this.createService({
             serviceName: serviceName,
             dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),
