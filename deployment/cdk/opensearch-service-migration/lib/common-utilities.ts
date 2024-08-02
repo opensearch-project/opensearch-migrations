@@ -11,6 +11,10 @@ import * as yargs from 'yargs';
 
 // parseAndMergeArgs, see @common-utilities.test.ts for an example of different cases
 export function parseAndMergeArgs(baseCommand: string, extraArgs?: string): string {
+    if (!extraArgs) {
+        return baseCommand;
+    }
+
     // Extract command prefix
     const commandPrefix = baseCommand.substring(0, baseCommand.indexOf('--')).trim();
     const baseArgs = baseCommand.substring(baseCommand.indexOf('--'));
@@ -45,10 +49,14 @@ export function parseAndMergeArgs(baseCommand: string, extraArgs?: string): stri
     const mergedArgv: { [key: string]: unknown } = { ...baseArgv };
     for (const [key, value] of Object.entries(extraArgv)) {
         if (key !== '_' && key !== '$0') {
-            if (typeof value === 'boolean' && (typeof (baseArgv as any)[key] === 'boolean' || typeof (baseArgv as any)[`no-${key}`] != 'boolean')) {
-                if (!value) {
-                    delete mergedArgv[key];
-                }
+            if (!value &&
+                typeof value === 'boolean' &&
+                (
+                    typeof (baseArgv as any)[key] === 'boolean' ||
+                    (typeof (baseArgv as any)[`no-${key}`] != 'boolean' && typeof (baseArgv as any)[`no-${key}`])
+                )
+            ) {
+                delete mergedArgv[key];
             } else {
                 mergedArgv[key] = value;
             }
@@ -66,7 +74,8 @@ export function parseAndMergeArgs(baseCommand: string, extraArgs?: string): stri
         })
         .join(' ');
 
-    return `${commandPrefix} ${mergedArgs}`.trim();
+    let fullCommand = `${commandPrefix} ${mergedArgs}`.trim()
+    return fullCommand;
 }
 
 

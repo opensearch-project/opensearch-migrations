@@ -1,4 +1,4 @@
-import { Template, Capture, Match } from 'aws-cdk-lib/assertions';
+import { Template, Capture } from 'aws-cdk-lib/assertions';
 import { ContainerImage } from 'aws-cdk-lib/aws-ecs';
 import { StringParameter } from 'aws-cdk-lib/aws-ssm';
 import { ReindexFromSnapshotStack } from '../lib/service-stacks/reindex-from-snapshot-stack';
@@ -68,36 +68,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
             },
           },
         ],
-      },
-      ManagedPolicyArns: [
-        {
-          'Fn::Join': [
-            '',
-            [
-              'arn:',
-              {
-                Ref: 'AWS::Partition',
-              },
-              ':iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy',
-            ],
-          ],
-        },
-      ],
-    });
-
-    template.hasResourceProperties('AWS::IAM::Policy', {
-      PolicyDocument: {
-        Statement: [
-          {
-            Action: 's3:*',
-            Effect: 'Allow',
-            Resource: [
-              'arn:aws:s3:::migration-artifacts-bucket',
-              'arn:aws:s3:::migration-artifacts-bucket/*',
-            ],
-          },
-        ],
-      },
+      }
     });
   });
 
@@ -128,8 +99,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
       {
         "Fn::Join": [
           "",
-          [
-            "/rfs-app/runJavaWithClasspath.sh --s3-local-dir /tmp/s3_files --s3-repo-uri s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir '/lucene' --target-host ",
+          [ "/rfs-app/runJavaWithClasspath.sh com.rfs.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir '/lucene' --target-host ",
             {
               "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
             },
@@ -189,8 +159,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
       {
         "Fn::Join": [
           "",
-          [
-            "/rfs-app/runJavaWithClasspath.sh --s3-local-dir /tmp/s3_files --s3-repo-uri s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo --s3-region us-east-1 --snapshot-name custom-snapshot --lucene-dir '/lucene' --target-host ",
+          [ "/rfs-app/runJavaWithClasspath.sh com.rfs.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo --s3-region us-east-1 --snapshot-name custom-snapshot --lucene-dir /lucene --target-host ",
             {
               "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
             },

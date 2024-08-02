@@ -44,6 +44,15 @@ describe('validateFargateCpuArch', () => {
         expect(result).toBe('node script.js --foo override --baz --foo-bar bar --qux quux');
     });
 
+    test('Test parseAndMergeArgs function with only args', () => {
+        const baseCommand = '--foo bar --baz --foo-bar bar';
+        const extraArgs = '--qux quux --foo override';
+
+        const result = parseAndMergeArgs(baseCommand, extraArgs);
+
+        expect(result).toBe('--foo override --baz --foo-bar bar --qux quux');
+    });
+
     test('parseAndMergeArgs handles boolean flags correctly', () => {
         const baseCommand = 'node script.js --verbose --quiet false';
         const extraArgs = '--debug';
