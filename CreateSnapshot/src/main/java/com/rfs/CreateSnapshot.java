@@ -53,7 +53,7 @@ public class CreateSnapshot {
         public Integer maxSnapshotRateMBPerNode;
 
         @Parameter(names = {
-            "--s3-role-arn" }, required = false, description = "The role arn to use for Amazon Managed Service s3 snapshots")
+            "--s3-role-arn" }, required = false, description = "The role ARN the cluster will assume to write a snapshot to S3")
         public String s3RoleArn;
 
         @Parameter(required = false, names = {
