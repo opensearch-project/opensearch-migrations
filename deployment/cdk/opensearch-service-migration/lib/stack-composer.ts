@@ -331,7 +331,7 @@ export class StackComposer {
             servicesYaml.target_cluster = openSearchStack.targetClusterYaml;
         } else {
             servicesYaml.target_cluster = { endpoint: targetEndpoint }
-            if (fineGrainedManagerUserName) {
+            if (fineGrainedManagerUserName && fineGrainedManagerUserSecretManagerKeyARN) {
                 servicesYaml.target_cluster.basic_auth = new ClusterBasicAuth({username: fineGrainedManagerUserName,
                     password_from_secret_arn: fineGrainedManagerUserSecretManagerKeyARN
                 })
