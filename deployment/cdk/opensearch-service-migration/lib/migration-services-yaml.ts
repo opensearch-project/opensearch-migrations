@@ -1,9 +1,34 @@
 import * as yaml from 'yaml';
 
+export class ClusterBasicAuth {
+    username: string;
+    password?: string;
+    password_from_secret_arn?: string;
+
+    constructor({
+        username,
+        password,
+        password_from_secret_arn,
+    }: {
+        username: string;
+        password?: string;
+        password_from_secret_arn?: string;
+    }) {
+        this.username = username;
+        this.password = password;
+        this.password_from_secret_arn = password_from_secret_arn;
+
+        // Validation: Exactly one of password or password_from_secret_arn must be provided
+        if ((password && password_from_secret_arn) || (!password && !password_from_secret_arn)) {
+            throw new Error('Exactly one of password or password_from_secret_arn must be provided');
+        }
+    }
+}
+
 export class ClusterYaml {
     endpoint: string = '';
     no_auth?: string | null;
-    basic_auth?: object | null;
+    basic_auth?: ClusterBasicAuth | null;
 }
 
 export class MetricsSourceYaml {

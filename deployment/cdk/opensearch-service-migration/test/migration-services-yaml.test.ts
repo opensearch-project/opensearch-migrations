@@ -1,5 +1,5 @@
 import { ContainerImage } from "aws-cdk-lib/aws-ecs";
-import { ClusterYaml, RFSBackfillYaml, ServicesYaml, SnapshotYaml } from "../lib/migration-services-yaml"
+import { ClusterBasicAuth, ClusterYaml, RFSBackfillYaml, ServicesYaml, SnapshotYaml } from "../lib/migration-services-yaml"
 import { Template, Capture, Match } from "aws-cdk-lib/assertions";
 import { MigrationConsoleStack } from "../lib/service-stacks/migration-console-stack";
 import { createStackComposer } from "./test-utils";
@@ -43,13 +43,15 @@ describe('Migration Services YAML Tests', () => {
     servicesYaml.target_cluster = targetCluster;
     const sourceClusterUser = "abc";
     const sourceClusterPassword = "XXXXX";
-    const sourceCluster: ClusterYaml = { 'endpoint': 'https://xyz.com:9200', 'basic_auth': { user: sourceClusterUser, password: sourceClusterPassword } };
+    const sourceCluster: ClusterYaml = { 'endpoint': 'https://xyz.com:9200',
+        'basic_auth': new ClusterBasicAuth({ username: sourceClusterUser, password: sourceClusterPassword })
+    };
     servicesYaml.source_cluster = sourceCluster;
 
     expect(servicesYaml.target_cluster).toBeDefined();
     expect(servicesYaml.source_cluster).toBeDefined();
     const yaml = servicesYaml.stringify();
-    const sourceClusterYaml = `source_cluster:\n  endpoint: ${sourceCluster.endpoint}\n  basic_auth:\n    user: ${sourceClusterUser}\n    password: ${sourceClusterPassword}\n`
+    const sourceClusterYaml = `source_cluster:\n  endpoint: ${sourceCluster.endpoint}\n  basic_auth:\n    username: ${sourceClusterUser}\n    password: ${sourceClusterPassword}\n`
     expect(yaml).toBe(`${sourceClusterYaml}target_cluster:\n  endpoint: ${targetCluster.endpoint}\n  no_auth: ""\nmetrics_source:\n  cloudwatch:\n`);
   });
 
@@ -98,14 +100,19 @@ describe('Migration Services YAML Tests', () => {
     expect(s3SnapshotDict).not.toHaveProperty("fs");
   });
 
-  test('Test that services yaml parameter is created by migration console stack', () => {
+test('Test that services yaml parameter is created by migration console stack', () => {
     const contextOptions = {
-      vpcEnabled: true,
-      migrationAssistanceEnabled: true,
-      migrationConsoleServiceEnabled: true,
-      sourceClusterEndpoint: "https://test-cluster",
-      reindexFromSnapshotServiceEnabled: true,
-      trafficReplayerServiceEnabled: true
+        vpcEnabled: true,
+        migrationAssistanceEnabled: true,
+        migrationConsoleServiceEnabled: true,
+        sourceClusterEndpoint: "https://test-cluster",
+        reindexFromSnapshotServiceEnabled: true,
+        trafficReplayerServiceEnabled: true,
+        fineGrainedManagerUserName: "admin",
+        fineGrainedManagerUserSecretManagerKeyARN: "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc",
+        nodeToNodeEncryptionEnabled: true, // required if FGAC is being used
+        encryptionAtRestEnabled: true, // required if FGAC is being used
+        enforceHTTPS: true // required if FGAC is being used
     }
 
     const stacks = createStackComposer(contextOptions)
@@ -127,6 +134,10 @@ describe('Migration Services YAML Tests', () => {
     const yamlFileContents = value['Fn::Join'][1].join('')
     expect(yamlFileContents).toContain('source_cluster')
     expect(yamlFileContents).toContain('target_cluster')
+
+    expect(yamlFileContents).toContain('basic_auth')
+    expect(yamlFileContents).toContain(`username: ${contextOptions.fineGrainedManagerUserName}`)
+    expect(yamlFileContents).toContain(`password_from_secret_arn: ${contextOptions.fineGrainedManagerUserSecretManagerKeyARN}`)
     expect(yamlFileContents).toContain('metrics_source:\n  cloudwatch:')
     expect(yamlFileContents).toContain('kafka')
     // Validates that the file can be parsed as valid yaml and has the expected fields

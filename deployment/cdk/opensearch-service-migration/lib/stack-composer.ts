@@ -19,7 +19,7 @@ import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-st
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
 import {MigrationSSMParameter, parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
-import {ServicesYaml} from "./migration-services-yaml";
+import {ClusterBasicAuth, ServicesYaml} from "./migration-services-yaml";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -330,7 +330,14 @@ export class StackComposer {
             this.stacks.push(openSearchStack)
             servicesYaml.target_cluster = openSearchStack.targetClusterYaml;
         } else {
-            servicesYaml.target_cluster = { endpoint: targetEndpoint, no_auth: '' }
+            servicesYaml.target_cluster = { endpoint: targetEndpoint }
+            if (fineGrainedManagerUserName && fineGrainedManagerUserSecretManagerKeyARN) {
+                servicesYaml.target_cluster.basic_auth = new ClusterBasicAuth({username: fineGrainedManagerUserName,
+                    password_from_secret_arn: fineGrainedManagerUserSecretManagerKeyARN
+                })
+            } else {
+                servicesYaml.target_cluster.no_auth = ""
+            }
         }
 
         // Currently, placing a requirement on a VPC for a migration stack but this can be revisited
