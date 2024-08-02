@@ -99,7 +99,12 @@ test('Test that services yaml parameter is created by migration console stack', 
         migrationConsoleServiceEnabled: true,
         sourceClusterEndpoint: "https://test-cluster",
         reindexFromSnapshotServiceEnabled: true,
-        trafficReplayerServiceEnabled: true
+        trafficReplayerServiceEnabled: true,
+        fineGrainedManagerUserName: "admin",
+        fineGrainedManagerUserSecretManagerKeyARN: "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc",
+        nodeToNodeEncryptionEnabled: true, // required if FGAC is being used
+        encryptionAtRestEnabled: true, // required if FGAC is being used
+        enforceHTTPS: true // required if FGAC is being used
     }
 
     const stacks = createStackComposer(contextOptions)
@@ -121,6 +126,10 @@ test('Test that services yaml parameter is created by migration console stack', 
     const yamlFileContents = value['Fn::Join'][1].join('')
     expect(yamlFileContents).toContain('source_cluster')
     expect(yamlFileContents).toContain('target_cluster')
+
+    expect(yamlFileContents).toContain('basic_auth')
+    expect(yamlFileContents).toContain(`username: ${contextOptions.fineGrainedManagerUserName}`)
+    expect(yamlFileContents).toContain(`password_from_secret_arn: ${contextOptions.fineGrainedManagerUserSecretManagerKeyARN}`)
     expect(yamlFileContents).toContain('metrics_source:\n  cloudwatch:')
     expect(yamlFileContents).toContain('kafka')
     // Validates that the file can be parsed as valid yaml and has the expected fields
