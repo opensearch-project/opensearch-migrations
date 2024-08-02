@@ -9,6 +9,7 @@ import {
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy,
     getMigrationStringParameterValue,
+    getMigrationStringParameter,
     MigrationSSMParameter
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
@@ -255,6 +256,14 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
+        const getSecretsPolicy = new PolicyStatement({
+            effect: Effect.ALLOW,
+            resources: [props.servicesYaml.target_cluster.basic_auth?.password_from_secret_arn ?? ""],
+            actions: [
+                "secretsmanager:GetSecretValue"
+            ]
+        });
+
         // Upload the services.yaml file to Parameter Store
         let servicesYaml = props.servicesYaml
         servicesYaml.source_cluster = {
@@ -290,7 +299,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
         let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
-            listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy]
+            listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy, getSecretsPolicy]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)

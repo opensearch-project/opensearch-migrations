@@ -1,5 +1,5 @@
 import { ContainerImage } from "aws-cdk-lib/aws-ecs";
-import { ClusterYaml, RFSBackfillYaml, ServicesYaml, SnapshotYaml } from "../lib/migration-services-yaml"
+import { ClusterBasicAuth, ClusterYaml, RFSBackfillYaml, ServicesYaml, SnapshotYaml } from "../lib/migration-services-yaml"
 import { Template, Capture, Match } from "aws-cdk-lib/assertions";
 import { MigrationConsoleStack } from "../lib/service-stacks/migration-console-stack";
 import { createStackComposer } from "./test-utils";
@@ -35,13 +35,15 @@ test('Test servicesYaml with source and target cluster can be stringified', () =
     servicesYaml.target_cluster = targetCluster;
     const sourceClusterUser = "abc";
     const sourceClusterPassword = "XXXXX";
-    const sourceCluster: ClusterYaml = { 'endpoint': 'https://xyz.com:9200', 'basic_auth': { user: sourceClusterUser, password: sourceClusterPassword } };
+    const sourceCluster: ClusterYaml = { 'endpoint': 'https://xyz.com:9200',
+        'basic_auth': new ClusterBasicAuth({ username: sourceClusterUser, password: sourceClusterPassword })
+    };
     servicesYaml.source_cluster = sourceCluster;
 
     expect(servicesYaml.target_cluster).toBeDefined();
     expect(servicesYaml.source_cluster).toBeDefined();
     const yaml = servicesYaml.stringify();
-    const sourceClusterYaml = `source_cluster:\n  endpoint: ${sourceCluster.endpoint}\n  basic_auth:\n    user: ${sourceClusterUser}\n    password: ${sourceClusterPassword}\n`
+    const sourceClusterYaml = `source_cluster:\n  endpoint: ${sourceCluster.endpoint}\n  basic_auth:\n    username: ${sourceClusterUser}\n    password: ${sourceClusterPassword}\n`
     expect(yaml).toBe(`${sourceClusterYaml}target_cluster:\n  endpoint: ${targetCluster.endpoint}\n  no_auth: ""\nmetrics_source:\n  cloudwatch:\n`);
 })
 
@@ -90,7 +92,7 @@ test('Test SnapshotYaml for s3 only includes s3', () => {
     expect(s3SnapshotDict).not.toHaveProperty("fs");
 })
 
-test('Test that services yaml parameter is created by mgiration console stack', () => {
+test('Test that services yaml parameter is created by migration console stack', () => {
     const contextOptions = {
         vpcEnabled: true,
         migrationAssistanceEnabled: true,
