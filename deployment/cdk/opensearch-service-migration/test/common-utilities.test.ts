@@ -96,4 +96,13 @@ describe('validateFargateCpuArch', () => {
 
         expect(result).toBe('node script.js --verbose --quiet');
     });
+
+    test('parseAndMergeArgs handles extraArgs boolean negations on non-boolean fields', () => {
+        const baseCommand = 'node script.js --foo bar';
+        const extraArgs = '--no-foo';
+
+        const result = parseAndMergeArgs(baseCommand, extraArgs);
+
+        expect(result).toBe('node script.js');
+    });
 })

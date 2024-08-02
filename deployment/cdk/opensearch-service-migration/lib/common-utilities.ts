@@ -8,6 +8,8 @@ import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
 import * as forge from 'node-forge';
 import * as yargs from 'yargs';
 
+
+// parseAndMergeArgs, see @common-utilities.test.ts for an example of different cases
 export function parseAndMergeArgs(baseCommand: string, extraArgs?: string): string {
     // Extract command prefix
     const commandPrefix = baseCommand.substring(0, baseCommand.indexOf('--')).trim();
@@ -43,7 +45,7 @@ export function parseAndMergeArgs(baseCommand: string, extraArgs?: string): stri
     const mergedArgv: { [key: string]: unknown } = { ...baseArgv };
     for (const [key, value] of Object.entries(extraArgv)) {
         if (key !== '_' && key !== '$0') {
-            if (typeof value === 'boolean' && typeof (baseArgv as any)[key] === 'boolean') {
+            if (typeof value === 'boolean' && (typeof (baseArgv as any)[key] === 'boolean' || typeof (baseArgv as any)[`no-${key}`] != 'boolean')) {
                 if (!value) {
                     delete mergedArgv[key];
                 }
