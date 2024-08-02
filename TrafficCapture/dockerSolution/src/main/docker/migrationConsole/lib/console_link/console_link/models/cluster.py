@@ -94,7 +94,7 @@ class Cluster:
         if "password" in self.auth_details:
             return self.auth_details["password"]
         # Pull password from AWS Secrets Manager
-        assert "password_from_secret_arn" in self.auth_details
+        assert "password_from_secret_arn" in self.auth_details  # for mypy's sake
         client = boto3.client('secretsmanager')
         password = client.get_secret_value(SecretId=self.auth_details["password_from_secret_arn"])
         return password["SecretString"]
