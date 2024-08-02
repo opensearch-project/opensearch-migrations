@@ -256,13 +256,13 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
-        const getSecretsPolicy = new PolicyStatement({
+        const getSecretsPolicy = props.servicesYaml.target_cluster.basic_auth?.password_from_secret_arn ? new PolicyStatement({
             effect: Effect.ALLOW,
-            resources: [props.servicesYaml.target_cluster.basic_auth?.password_from_secret_arn ?? ""],
+            resources: [props.servicesYaml.target_cluster.basic_auth?.password_from_secret_arn],
             actions: [
                 "secretsmanager:GetSecretValue"
             ]
-        });
+        }) : null;
 
         // Upload the services.yaml file to Parameter Store
         let servicesYaml = props.servicesYaml
@@ -299,7 +299,9 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
         let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
-            listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy, getSecretsPolicy]
+            listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
+            ...(getSecretsPolicy ? [getSecretsPolicy] : []) // only add secrets policy if it's non-null
+        ]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
