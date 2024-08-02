@@ -95,7 +95,7 @@ class E2ETests(unittest.TestCase):
         create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id_base + "_2",
                         expected_status_code=HTTPStatus.CREATED, test_case=self)
 
-        ignore_list = [".", "searchguard", "sg7", "security-auditlog"]
+        ignore_list = [".", "searchguard", "sg7", "security-auditlog", "reindexed-logs"]
         expected_docs = dict(EXPECTED_BENCHMARK_DOCS)
         # Source should have both documents
         expected_docs[index_name] = {"docs.count": "2"}
