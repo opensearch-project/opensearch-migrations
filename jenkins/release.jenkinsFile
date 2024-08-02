@@ -83,149 +83,31 @@ pipeline {
                             autoPublish: true
                         )
 
-                        def dockerCopyHubConsole =
-                            build job: 'docker-copy',
-                            parameters: [
-                                string(name: 'SOURCE_IMAGE_REGISTRY', value: 'opensearchstaging'),
-                                string(name: 'SOURCE_IMAGE', value: 'opensearch-migrations-console'),
-                                string(name: 'DESTINATION_IMAGE_REGISTRY', value: 'opensearchproject'),
-                                string(name: 'DESTINATION_IMAGE', value: "opensearch-migrations-console:${tag}")
-                            ]
+                        def copyDockerImage = {imageName ->
+                            def registries = ['opensearchproject', 'public.ecr.aws/opensearchproject']
+                            destRegistries.each { destRegistry ->
+                                build job: 'docker-copy',
+                                parameters: [
+                                    string(name: 'SOURCE_IMAGE_REGISTRY', value: sourceRegistry),
+                                    string(name: 'SOURCE_IMAGE', value: sourceImage),
+                                    string(name: 'DESTINATION_IMAGE_REGISTRY', value: destRegistry),
+                                    string(name: 'DESTINATION_IMAGE', value: "${imageName}:${tag}")
+                                ]
 
-                        def dockerCopyHubConsoleLatest =
-                            build job: 'docker-copy',
-                            parameters: [
-                                string(name: 'SOURCE_IMAGE_REGISTRY', value: 'opensearchstaging'),
-                                string(name: 'SOURCE_IMAGE', value: 'opensearch-migrations-console'),
-                                string(name: 'DESTINATION_IMAGE_REGISTRY', value: 'opensearchproject'),
-                                string(name: 'DESTINATION_IMAGE', value: 'opensearch-migrations-console:latest')
-                            ]
+                                build job: 'docker-copy',
+                                parameters: [
+                                    string(name: 'SOURCE_IMAGE_REGISTRY', value: sourceRegistry),
+                                    string(name: 'SOURCE_IMAGE', value: sourceImage),
+                                    string(name: 'DESTINATION_IMAGE_REGISTRY', value: destRegistry),
+                                    string(name: 'DESTINATION_IMAGE', value: "${imageName}:latest")
+                                ]
+                            }
+                        }
 
-                        def dockerCopyHubTrafficReplayer =
-                            build job: 'docker-copy',
-                            parameters: [
-                                string(name: 'SOURCE_IMAGE_REGISTRY', value: 'opensearchstaging'),
-                                string(name: 'SOURCE_IMAGE', value: 'opensearch-migrations-traffic-replayer'),
-                                string(name: 'DESTINATION_IMAGE_REGISTRY', value: 'opensearchproject'),
-                                string(name: 'DESTINATION_IMAGE', value: "opensearch-migrations-traffic-replayer:${tag}")
-                            ]
-
-                        def dockerCopyHubTrafficReplayerLatest =
-                            build job: 'docker-copy',
-                            parameters: [
-                                string(name: 'SOURCE_IMAGE_REGISTRY', value: 'opensearchstaging'),
-                                string(name: 'SOURCE_IMAGE', value: 'opensearch-migrations-console'),
-                                string(name: 'DESTINATION_IMAGE_REGISTRY', value: 'opensearchproject'),
-                                string(name: 'DESTINATION_IMAGE', value: 'opensearch-migrations-traffic-replayer:latest')
-                            ]
-
-                        def dockerCopyHubTrafficCaptureProxy =
-                            build job: 'docker-copy',
-                            parameters: [
-                                string(name: 'SOURCE_IMAGE_REGISTRY', value: 'opensearchstaging'),
-                                string(name: 'SOURCE_IMAGE', value: 'opensearch-migrations-traffic-capture-proxy'),
-                                string(name: 'DESTINATION_IMAGE_REGISTRY', value: 'opensearchproject'),
-                                string(name: 'DESTINATION_IMAGE', value: "opensearch-migrations-traffic-capture-proxy:${tag}")
-                            ]
-
-                        def dockerCopyHubTrafficCaptureProxyLatest =
-                            build job: 'docker-copy',
-                            parameters: [
-                                string(name: 'SOURCE_IMAGE_REGISTRY', value: 'opensearchstaging'),
-                                string(name: 'SOURCE_IMAGE', value: 'opensearch-migrations-traffic-capture-proxy'),
-                                string(name: 'DESTINATION_IMAGE_REGISTRY', value: 'opensearchproject'),
-                                string(name: 'DESTINATION_IMAGE', value: 'opensearch-migrations-traffic-capture-proxy:latest')
-                            ]
-
-                        def dockerCopyHubReindexFromSnapshot =
-                            build job: 'docker-copy',
-                            parameters: [
-                                string(name: 'SOURCE_IMAGE_REGISTRY', value: 'opensearchstaging'),
-                                string(name: 'SOURCE_IMAGE', value: 'opensearch-migrations-reindex-from-snapshot'),
-                                string(name: 'DESTINATION_IMAGE_REGISTRY', value: 'opensearchproject'),
-                                string(name: 'DESTINATION_IMAGE', value: "opensearch-migrations-reindex-from-snapshot:${tag}")
-                            ]
-
-                        def dockerCopyHubReindexFromSnapshotLatest =
-                            build job: 'docker-copy',
-                            parameters: [
-                                string(name: 'SOURCE_IMAGE_REGISTRY', value: 'opensearchstaging'),
-                                string(name: 'SOURCE_IMAGE', value: 'opensearch-migrations-reindex-from-snapshot'),
-                                string(name: 'DESTINATION_IMAGE_REGISTRY', value: 'opensearchproject'),
-                                string(name: 'DESTINATION_IMAGE', value: 'opensearch-migrations-reindex-from-snapshot:latest')
-                            ]
-
-                        def dockerCopyEcrConsole =
-                            build job: 'docker-copy',
-                            parameters: [
-                                string(name: 'SOURCE_IMAGE_REGISTRY', value: 'opensearchstaging'),
-                                string(name: 'SOURCE_IMAGE', value: 'opensearch-migrations-console'),
-                                string(name: 'DESTINATION_IMAGE_REGISTRY', value: 'public.ecr.aws/opensearchproject'),
-                                string(name: 'DESTINATION_IMAGE', value: "opensearch-migrations-console:${tag}")
-                            ]
-
-                        def dockerCopyEcrConsoleLatest =
-                            build job: 'docker-copy',
-                            parameters: [
-                                string(name: 'SOURCE_IMAGE_REGISTRY', value: 'opensearchstaging'),
-                                string(name: 'SOURCE_IMAGE', value: 'opensearch-migrations-console'),
-                                string(name: 'DESTINATION_IMAGE_REGISTRY', value: 'public.ecr.aws/opensearchproject'),
-                                string(name: 'DESTINATION_IMAGE', value: 'opensearch-migrations-console:latest')
-                            ]
-
-                        def dockerCopyEcrTrafficReplayer =
-                            build job: 'docker-copy',
-                            parameters: [
-                                string(name: 'SOURCE_IMAGE_REGISTRY', value: 'opensearchstaging'),
-                                string(name: 'SOURCE_IMAGE', value: 'opensearch-migrations-traffic-replayer'),
-                                string(name: 'DESTINATION_IMAGE_REGISTRY', value: 'public.ecr.aws/opensearchproject'),
-                                string(name: 'DESTINATION_IMAGE', value: "opensearch-migrations-traffic-replayer:${tag}")
-                            ]
-
-                        def dockerCopyEcrTrafficReplayerLatest =
-                            build job: 'docker-copy',
-                            parameters: [
-                                string(name: 'SOURCE_IMAGE_REGISTRY', value: 'opensearchstaging'),
-                                string(name: 'SOURCE_IMAGE', value: 'opensearch-migrations-console'),
-                                string(name: 'DESTINATION_IMAGE_REGISTRY', value: 'public.ecr.aws/opensearchproject'),
-                                string(name: 'DESTINATION_IMAGE', value: 'opensearch-migrations-traffic-replayer:latest')
-                            ]
-
-                        def dockerCopyEcrTrafficCaptureProxy =
-                            build job: 'docker-copy',
-                            parameters: [
-                                string(name: 'SOURCE_IMAGE_REGISTRY', value: 'opensearchstaging'),
-                                string(name: 'SOURCE_IMAGE', value: 'opensearch-migrations-traffic-capture-proxy'),
-                                string(name: 'DESTINATION_IMAGE_REGISTRY', value: 'public.ecr.aws/opensearchproject'),
-                                string(name: 'DESTINATION_IMAGE', value: "opensearch-migrations-traffic-capture-proxy:${tag}")
-                            ]
-
-                        def dockerCopyEcrTrafficCaptureProxyLatest =
-                            build job: 'docker-copy',
-                            parameters: [
-                                string(name: 'SOURCE_IMAGE_REGISTRY', value: 'opensearchstaging'),
-                                string(name: 'SOURCE_IMAGE', value: 'opensearch-migrations-traffic-capture-proxy'),
-                                string(name: 'DESTINATION_IMAGE_REGISTRY', value: 'public.ecr.aws/opensearchproject'),
-                                string(name: 'DESTINATION_IMAGE', value: 'opensearch-migrations-traffic-capture-proxy:latest')
-                            ]
-
-                        def dockerCopyEcrReindexFromSnapshot =
-                            build job: 'docker-copy',
-                            parameters: [
-                                string(name: 'SOURCE_IMAGE_REGISTRY', value: 'opensearchstaging'),
-                                string(name: 'SOURCE_IMAGE', value: 'opensearch-migrations-reindex-from-snapshot'),
-                                string(name: 'DESTINATION_IMAGE_REGISTRY', value: 'public.ecr.aws/opensearchproject'),
-                                string(name: 'DESTINATION_IMAGE', value: "opensearch-migrations-reindex-from-snapshot:${tag}")
-                            ]
-
-                        def dockerCopyEcrReindexFromSnapshotLatest =
-                            build job: 'docker-copy',
-                            parameters: [
-                                string(name: 'SOURCE_IMAGE_REGISTRY', value: 'opensearchstaging'),
-                                string(name: 'SOURCE_IMAGE', value: 'opensearch-migrations-reindex-from-snapshot'),
-                                string(name: 'DESTINATION_IMAGE_REGISTRY', value: 'public.ecr.aws/opensearchproject'),
-                                string(name: 'DESTINATION_IMAGE', value: 'opensearch-migrations-reindex-from-snapshot:latest')
-                            ]
+                        copyDockerImage('opensearch-migrations-console');
+                        copyDockerImage('opensearch-migrations-traffic-replayer');
+                        copyDockerImage('opensearch-migrations-traffic-capture-proxy');
+                        copyDockerImage('opensearch-migrations-reindex-from-snapshot');
                     }
                 }
             }
