@@ -65,7 +65,8 @@
     "node-forge": "^1.1.0",
     "semver": "^7.5.4",
     "source-map-support": "^0.5.21",
-    "yaml": "^2.4.3"
+    "yaml": "^2.4.3",
+    "yargs": "^17.7.2"
   },
   "peerDependencies": {
     "@aws-cdk/aws-servicecatalogappregistry-alpha": "^2.117.0-alpha.0",

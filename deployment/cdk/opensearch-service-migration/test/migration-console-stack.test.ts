@@ -3,6 +3,7 @@ import { Capture, Match, Template } from "aws-cdk-lib/assertions";
 import { MigrationConsoleStack } from "../lib/service-stacks/migration-console-stack";
 import {ContainerImage} from "aws-cdk-lib/aws-ecs";
 import {describe, beforeEach, afterEach, test, expect, jest} from '@jest/globals';
+import {ReindexFromSnapshotStack} from "../lib";
 
 jest.mock('aws-cdk-lib/aws-ecr-assets');
 describe('Migration Console Stack Tests', () => {
@@ -32,6 +33,8 @@ describe('Migration Console Stack Tests', () => {
         // Create initial stack
         const initialStacks = createStackComposer(baseContextOptions);
         const initialMigrationConsoleStack = initialStacks.stacks.find(s => s instanceof MigrationConsoleStack) as MigrationConsoleStack;
+        const rfsStack = initialStacks.stacks.find(s => s instanceof ReindexFromSnapshotStack) as ReindexFromSnapshotStack;
+        expect(rfsStack).toBeDefined();
         const initialTemplate = Template.fromStack(initialMigrationConsoleStack);
 
         // Capture initial task definition

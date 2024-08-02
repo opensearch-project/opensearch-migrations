@@ -9,7 +9,8 @@ import {
     MigrationSSMParameter,
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy,
-    getMigrationStringParameterValue
+    getMigrationStringParameterValue,
+    parseAndMergeArgs
 } from "../common-utilities";
 import { RFSBackfillYaml, SnapshotYaml } from "../migration-services-yaml";
 
@@ -67,7 +68,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         });
         const s3Uri = `s3://migration-artifacts-${this.account}-${props.stage}-${this.region}/rfs-snapshot-repo`;
         let rfsCommand = `/rfs-app/runJavaWithClasspath.sh com.rfs.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri ${s3Uri} --s3-region ${this.region} --snapshot-name rfs-snapshot --lucene-dir '/lucene' --target-host ${osClusterEndpoint}`
-        rfsCommand = props.extraArgs ? rfsCommand.concat(` ${props.extraArgs}`) : rfsCommand
+        rfsCommand = parseAndMergeArgs(rfsCommand, props.extraArgs);
 
         this.createService({
             serviceName: 'reindex-from-snapshot',
@@ -90,5 +91,4 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         this.rfsSnapshotYaml.s3 = {repo_uri: s3Uri, aws_region: this.region};
         this.rfsSnapshotYaml.snapshot_name = "rfs-snapshot";
     }
-
 }
