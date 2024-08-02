@@ -26,7 +26,7 @@ public class SigV4AuthTransformer implements RequestTransformer {
     public Mono<TransformedRequest> transform(String method, String path, Map<String, List<String>> headers, Mono<ByteBuffer> body) {
         var signer = new SigV4Signer(credentialsProvider, service, region, protocol, timestampSupplier);
         return body
-            .doOnNext(signer::consumeNextPayloadPart)
+            .doOnNext(b -> signer.consumeNextPayloadPart(b.duplicate()))
             .singleOptional()
             .map(contentOp -> {
             Map<String, List<String>> signedHeaders = signer.finalizeSignature(new IHttpMessage() {

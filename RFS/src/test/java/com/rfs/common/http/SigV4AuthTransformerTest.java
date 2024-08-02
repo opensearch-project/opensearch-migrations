@@ -71,9 +71,11 @@ public class SigV4AuthTransformerTest {
         var payload = ByteBuffer.wrap(payloadString.getBytes(StandardCharsets.UTF_8));
         var body = Mono.just(payload);
 
-        Mono<TransformedRequest> transformedRequestMono = transformer.transform(method, path, headers, body);
+        var transformedRequest = transformer.transform(method, path, headers, body).block();
 
-        TransformedRequest transformedRequest = transformedRequestMono.block();
+        // Verify input/output body was not modified (including positional arguments)
+        assertEquals(payloadString, byteBufferToString(payload));
+        assertEquals(payloadString, byteBufferToString(transformedRequest.getBody().block()));
 
         assertNotNull(transformedRequest);
         Map<String, List<String>> transformedHeaders = transformedRequest.getHeaders();
@@ -92,10 +94,20 @@ public class SigV4AuthTransformerTest {
     }
 
     @Test
-    void testTransformWithPayloadTwice() {
+    void testTransformWithPayloadMultipleTimes() {
         testTransformWithPayload("payloadString");
         testTransformWithPayload("payloadString2");
         testTransformWithPayload("payloadString3");
+    }
+
+    public static String byteBufferToString(ByteBuffer byteBuffer) {
+        // Create a byte array from the ByteBuffer
+        var duplicateBuffer = byteBuffer.duplicate();
+        byte[] bytes = new byte[duplicateBuffer.remaining()];
+        duplicateBuffer.get(bytes);
+
+        // Convert byte array to String
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 
     @SneakyThrows
