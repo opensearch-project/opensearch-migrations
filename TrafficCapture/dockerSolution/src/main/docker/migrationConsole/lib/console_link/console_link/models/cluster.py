@@ -150,13 +150,11 @@ class Cluster:
         client_options = "verify_certs:false"
         if not self.allow_insecure:
             client_options += ",use_ssl:true"
+        password_to_censor = ""
         if self.auth_type == AuthMethod.BASIC_AUTH:
-            if self.auth_details['password'] is not None:
-                client_options += (f",basic_auth_user:{self.auth_details['username']},"
-                                   f"basic_auth_password:{self.auth_details['password']}")
-            else:
-                raise NotImplementedError(f"Auth type {self.auth_type} with AWS Secret ARN is not currently support "
-                                          f"for executing benchmark workloads")
+            password_to_censor = self.get_basic_auth_password()
+            client_options += (f",basic_auth_user:{self.auth_details['username']},"
+                               f"basic_auth_password:{password_to_censor}")
         elif self.auth_type == AuthMethod.SIGV4:
             raise NotImplementedError(f"Auth type {self.auth_type} is not currently support for executing "
                                       f"benchmark workloads")
@@ -165,5 +163,8 @@ class Cluster:
         command = (f"opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host={self.endpoint} "
                    f"--workload={workload} --pipeline=benchmark-only --test-mode --kill-running-processes "
                    f"--workload-params={workload_params} --client-options={client_options}")
-        logger.info(f"Executing command: {command}")
+        # While a little wordier, this apprach prevents us from censoring the password if it appears in other contexts,
+        # e.g. username:admin,password:admin.
+        display_command = command.replace(f"basic_auth_password:{password_to_censor}", "basic_auth_password:********")
+        logger.info(f"Executing command: {display_command}")
         subprocess.run(command, shell=True)
