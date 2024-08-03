@@ -2,7 +2,6 @@ from typing import Any, Dict, Optional
 from enum import Enum
 import logging
 import subprocess
-from dataclasses import dataclass
 
 import boto3
 from cerberus import Validator
