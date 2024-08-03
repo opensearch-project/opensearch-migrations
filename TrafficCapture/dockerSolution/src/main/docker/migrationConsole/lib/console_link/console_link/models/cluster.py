@@ -2,13 +2,15 @@ from typing import Any, Dict, Optional
 from enum import Enum
 import logging
 import subprocess
-from console_link.models.schema_tools import contains_one_of
+from dataclasses import dataclass
 
 import boto3
 from cerberus import Validator
 import requests
 import requests.auth
 from requests.auth import HTTPBasicAuth
+
+from console_link.models.schema_tools import contains_one_of
 
 requests.packages.urllib3.disable_warnings()  # ignore: type
 
@@ -88,7 +90,10 @@ class Cluster:
         elif 'sigv4' in config:
             self.auth_type = AuthMethod.SIGV4
 
-    def _get_basic_auth_password(self) -> str:
+    def get_basic_auth_password(self) -> str:
+        """This method will return the basic auth password, if basic auth is enabled.
+        It will pull a password from the secrets manager if necessary.
+        """
         assert self.auth_type == AuthMethod.BASIC_AUTH
         assert self.auth_details is not None  # for mypy's sake
         if "password" in self.auth_details:
@@ -102,7 +107,7 @@ class Cluster:
     def _generate_auth_object(self) -> requests.auth.AuthBase | None:
         if self.auth_type == AuthMethod.BASIC_AUTH:
             assert self.auth_details is not None  # for mypy's sake
-            password = self._get_basic_auth_password()
+            password = self.get_basic_auth_password()
             return HTTPBasicAuth(
                 self.auth_details.get("username", None),
                 password

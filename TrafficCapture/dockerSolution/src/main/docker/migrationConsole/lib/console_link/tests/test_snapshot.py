@@ -246,7 +246,7 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
 
 
 @pytest.mark.parametrize("source_auth", [(AuthMethod.BASIC_AUTH)])
-def test_s3_snapshot_create_fails_for_clusters_with_auth(source_auth):
+def test_s3_snapshot_create_fails_for_clusters_with_auth(mocker, source_auth):
     config = {
         "snapshot": {
             "snapshot_name": "reindex_from_snapshot",
@@ -257,13 +257,15 @@ def test_s3_snapshot_create_fails_for_clusters_with_auth(source_auth):
         }
     }
     snapshot = S3Snapshot(config["snapshot"], create_valid_cluster(auth_type=source_auth))
+    mock = mocker.patch("subprocess.run")
+
     with pytest.raises(NotImplementedError) as excinfo:
         snapshot.create()
     assert "authentication is not supported" in str(excinfo.value.args[0])
 
 
 @pytest.mark.parametrize("source_auth", [(AuthMethod.BASIC_AUTH)])
-def test_fs_snapshot_create_fails_for_clusters_with_auth(source_auth):
+def test_fs_snapshot_create_fails_for_clusters_with_auth(mocker, source_auth):
     config = {
         "snapshot": {
             "snapshot_name": "reindex_from_snapshot",

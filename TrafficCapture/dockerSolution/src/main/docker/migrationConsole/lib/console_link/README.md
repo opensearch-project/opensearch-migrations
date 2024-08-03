@@ -91,6 +91,7 @@ kafka:
 Source and target clusters have the following options:
 
 - `endpoint`: required, the endpoint to reach the cluster.
+- `allow_insecure`: optional, default is false, equivalent to the curl `--insecure` flag, will not verify unsigned or invalid certificates
 
 Exactly one of the following blocks must be present:
 

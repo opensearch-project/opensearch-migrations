@@ -84,8 +84,8 @@ class S3Snapshot(Snapshot):
 
     def create(self, *args, **kwargs) -> CommandResult:
         assert isinstance(self.source_cluster, Cluster)
-        if self.source_cluster.auth_type != AuthMethod.NO_AUTH:
-            raise NotImplementedError("Source cluster authentication is not supported for creating snapshots")
+        password_field_index = None
+
 
         wait = kwargs.get('wait', False)
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
@@ -97,6 +97,17 @@ class S3Snapshot(Snapshot):
             "--source-host", self.source_cluster.endpoint
         ]
 
+        if self.source_cluster.auth_type == AuthMethod.BASIC_AUTH:
+            try:
+                command.extend([
+                    "--source-username", self.source_cluster.auth_details.get("username"),
+                    "--source-password", self.source_cluster.get_basic_auth_password()
+                ])
+                password_field_index = len(command) - 1
+                logger.info("Using basic auth for source cluster")
+            except KeyError as e:
+                raise ValueError(f"Missing required auth details for source cluster: {e}")
+
         if self.source_cluster.allow_insecure:
             command.append("--source-insecure")
         if not wait:
@@ -107,7 +118,12 @@ class S3Snapshot(Snapshot):
         if self.otel_endpoint:
             command.extend(["--otel-collector-endpoint", self.otel_endpoint])
 
-        logger.info(f"Creating snapshot with command: {' '.join(command)}")
+        if password_field_index:
+            display_command = command[:password_field_index] + ["********"] + command[password_field_index:]
+        else:
+            display_command = command
+        logger.info(f"Creating snapshot with command: {' '.join(display_command)}")
+
         try:
             # Pass None to stdout and stderr to not capture output and show in terminal
             subprocess.run(command, stdout=None, stderr=None, text=True, check=True)
@@ -135,9 +151,7 @@ class FileSystemSnapshot(Snapshot):
 
     def create(self, *args, **kwargs) -> CommandResult:
         assert isinstance(self.source_cluster, Cluster)
-
-        if self.source_cluster.auth_type != AuthMethod.NO_AUTH:
-            raise NotImplementedError("Source cluster authentication is not supported for creating snapshots")
+        password_field_index = None
 
         command = [
             "/root/createSnapshot/bin/CreateSnapshot",
@@ -146,12 +160,28 @@ class FileSystemSnapshot(Snapshot):
             "--source-host", self.source_cluster.endpoint,
         ]
 
+        if self.source_cluster.auth_type == AuthMethod.BASIC_AUTH:
+            try:
+                command.extend([
+                    "--source-username", self.source_cluster.auth_details.get("username"),
+                    "--source-password", self.source_cluster.get_basic_auth_password()
+                ])
+                password_field_index = len(command) - 1
+                logger.info("Using basic auth for source cluster")
+            except KeyError as e:
+                raise ValueError(f"Missing required auth details for source cluster: {e}")
+
         if self.source_cluster.allow_insecure:
             command.append("--source-insecure")
         if self.otel_endpoint:
             command.extend(["--otel-collector-endpoint", self.otel_endpoint])
 
-        logger.info(f"Creating snapshot with command: {' '.join(command)}")
+        if password_field_index:
+            display_command = command[:password_field_index] + ["********"] + command[password_field_index:]
+        else:
+            display_command = command
+        logger.info(f"Creating snapshot with command: {' '.join(display_command)}")
+
         try:
             subprocess.run(command, stdout=None, stderr=None, text=True, check=True)
             message = f"Snapshot {self.snapshot_name} created successfully"

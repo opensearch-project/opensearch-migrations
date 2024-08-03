@@ -153,11 +153,11 @@ class Metadata:
                 "--file-system-repo-path", self._repo_path,
             ])
 
-        if self._target_cluster.auth_details == AuthMethod.BASIC_AUTH:
+        if self._target_cluster.auth_type == AuthMethod.BASIC_AUTH:
             try:
                 command.extend([
                     "--target-username", self._target_cluster.auth_details.get("username"),
-                    "--target-password", self._target_cluster.auth_details.get("password")
+                    "--target-password", self._target_cluster.get_basic_auth_password()
                 ])
                 password_field_index = len(command) - 1
                 logger.info("Using basic auth for target cluster")
