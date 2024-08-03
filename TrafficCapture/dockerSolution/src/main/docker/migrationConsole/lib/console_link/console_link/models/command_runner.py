@@ -18,18 +18,18 @@ class CommandRunner:
             self.command.append(key)
             if value is not None:
                 self.command.append(value)
-        
+
         self.password_field = password_field
         self.run_as_detached = run_as_detatched
         self.log_file = log_file
-    
+
     def run(self) -> CommandResult:
         if self.run_as_detached:
             return self._run_as_detached_process(self.log_file)
         return self._run_as_synchronous_process()
 
     def sanitized_command(self) -> List[str]:
-        if not self.password_field or self.password_field not in self.command_args:
+        if (not self.password_field) or (self.password_field not in self.command_args):
             return self.command
         # Check whether the value of the password field is in the command
         password_index = self.command.index(self.command_args[self.password_field])

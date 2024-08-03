@@ -1,14 +1,13 @@
 import argparse
 import datetime
 import logging
-import subprocess
 from abc import ABC, abstractmethod
 from typing import Dict, Optional
 
 from cerberus import Validator
 from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
-
+from console_link.models.command_runner import CommandRunner, CommandRunnerError
 from console_link.models.schema_tools import contains_one_of
 
 logger = logging.getLogger(__name__)
@@ -65,6 +64,30 @@ class Snapshot(ABC):
         """Delete a snapshot."""
         pass
 
+    def _collect_universal_command_args(self) -> Dict:
+        command_args = {
+            "--snapshot-name": self.snapshot_name,
+            "--source-host": self.source_cluster.endpoint
+        }
+
+        if self.source_cluster.auth_type == AuthMethod.BASIC_AUTH:
+            try:
+                command_args.update({
+                    "--source-username": self.source_cluster.auth_details.get("username"),
+                    "--source-password": self.source_cluster.get_basic_auth_password()
+                })
+                logger.info("Using basic auth for source cluster")
+            except KeyError as e:
+                raise ValueError(f"Missing required auth details for source cluster: {e}")
+
+        if self.source_cluster.allow_insecure:
+            command_args["--source-insecure"] = None
+
+        if self.otel_endpoint:
+            command_args["--otel-collector-endpoint"] = self.otel_endpoint
+
+        return command_args
+
 
 S3_SNAPSHOT_SCHEMA = {
     'snapshot_name': {'type': 'string', 'required': True},
@@ -84,53 +107,30 @@ class S3Snapshot(Snapshot):
 
     def create(self, *args, **kwargs) -> CommandResult:
         assert isinstance(self.source_cluster, Cluster)
-        password_field_index = None
+        base_command = "/root/createSnapshot/bin/CreateSnapshot"
+
+        s3_command_args = {
+            "--s3-repo-uri": self.s3_repo_uri,
+            "--s3-region": self.s3_region,
+        }
+
+        command_args = self._collect_universal_command_args()
+        command_args.update(s3_command_args)
 
         wait = kwargs.get('wait', False)
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
-        command = [
-            "/root/createSnapshot/bin/CreateSnapshot",
-            "--snapshot-name", self.snapshot_name,
-            "--s3-repo-uri", self.s3_repo_uri,
-            "--s3-region", self.s3_region,
-            "--source-host", self.source_cluster.endpoint
-        ]
 
-        if self.source_cluster.auth_type == AuthMethod.BASIC_AUTH:
-            try:
-                command.extend([
-                    "--source-username", self.source_cluster.auth_details.get("username"),
-                    "--source-password", self.source_cluster.get_basic_auth_password()
-                ])
-                password_field_index = len(command) - 1
-                logger.info("Using basic auth for source cluster")
-            except KeyError as e:
-                raise ValueError(f"Missing required auth details for source cluster: {e}")
-
-        if self.source_cluster.allow_insecure:
-            command.append("--source-insecure")
         if not wait:
-            command.append("--no-wait")
+            command_args["--no-wait"] = None
         if max_snapshot_rate_mb_per_node is not None:
-            command.extend(["--max-snapshot-rate-mb-per-node",
-                            str(max_snapshot_rate_mb_per_node)])
-        if self.otel_endpoint:
-            command.extend(["--otel-collector-endpoint", self.otel_endpoint])
+            command_args["--max-snapshot-rate-mb-per-node"] = str(max_snapshot_rate_mb_per_node)
 
-        if password_field_index:
-            display_command = command[:password_field_index] + ["********"] + command[password_field_index:]
-        else:
-            display_command = command
-        logger.info(f"Creating snapshot with command: {' '.join(display_command)}")
-
+        command_runner = CommandRunner(base_command, command_args, password_field="--source-password")
         try:
-            # Pass None to stdout and stderr to not capture output and show in terminal
-            subprocess.run(command, stdout=None, stderr=None, text=True, check=True)
+            command_runner.run()
             logger.info(f"Snapshot {self.config['snapshot_name']} created successfully")
             return CommandResult(success=True, value=f"Snapshot {self.config['snapshot_name']} created successfully")
-        except subprocess.CalledProcessError as e:
-            # Replace cmd with display command to avoid logging the password
-            e.cmd = display_command
+        except CommandRunnerError as e:
             logger.error(f"Failed to create snapshot: {str(e)}")
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
@@ -152,48 +152,24 @@ class FileSystemSnapshot(Snapshot):
 
     def create(self, *args, **kwargs) -> CommandResult:
         assert isinstance(self.source_cluster, Cluster)
-        password_field_index = None
+        base_command = "/root/createSnapshot/bin/CreateSnapshot"
 
-        command = [
-            "/root/createSnapshot/bin/CreateSnapshot",
-            "--snapshot-name", self.snapshot_name,
-            "--file-system-repo-path", self.repo_path,
-            "--source-host", self.source_cluster.endpoint,
-        ]
+        command_args = self._collect_universal_command_args()
+        command_args["--file-system-repo-path"] = self.repo_path
 
-        if self.source_cluster.auth_type == AuthMethod.BASIC_AUTH:
-            try:
-                command.extend([
-                    "--source-username", self.source_cluster.auth_details.get("username"),
-                    "--source-password", self.source_cluster.get_basic_auth_password()
-                ])
-                password_field_index = len(command) - 1
-                logger.info("Using basic auth for source cluster")
-            except KeyError as e:
-                raise ValueError(f"Missing required auth details for source cluster: {e}")
+        max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
 
-        if self.source_cluster.allow_insecure:
-            command.append("--source-insecure")
-        if self.otel_endpoint:
-            command.extend(["--otel-collector-endpoint", self.otel_endpoint])
+        if max_snapshot_rate_mb_per_node is not None:
+            command_args["--max-snapshot-rate-mb-per-node"] = str(max_snapshot_rate_mb_per_node)
 
-        if password_field_index:
-            display_command = command[:password_field_index] + ["********"] + command[password_field_index:]
-        else:
-            display_command = command
-        logger.info(f"Creating snapshot with command: {' '.join(display_command)}")
-
+        command_runner = CommandRunner(base_command, command_args, password_field="--source-password")
         try:
-            subprocess.run(command, stdout=None, stderr=None, text=True, check=True)
-            message = f"Snapshot {self.snapshot_name} created successfully"
-            logger.info(message)
-            return CommandResult(success=True, value=message)
-        except subprocess.CalledProcessError as e:
-            # Replace cmd with display command to avoid logging the password
-            e.cmd = display_command
-            message = f"Failed to create snapshot: {str(e)}"
-            logger.error(message)
-            return CommandResult(success=False, value=message)
+            command_runner.run()
+            logger.info(f"Snapshot {self.config['snapshot_name']} created successfully")
+            return CommandResult(success=True, value=f"Snapshot {self.config['snapshot_name']} created successfully")
+        except CommandRunnerError as e:
+            logger.error(f"Failed to create snapshot: {str(e)}")
+            return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
     def status(self, *args, **kwargs) -> CommandResult:
         raise NotImplementedError("Status check for FileSystemSnapshot is not implemented yet.")
