@@ -86,7 +86,6 @@ class S3Snapshot(Snapshot):
         assert isinstance(self.source_cluster, Cluster)
         password_field_index = None
 
-
         wait = kwargs.get('wait', False)
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
         command = [
