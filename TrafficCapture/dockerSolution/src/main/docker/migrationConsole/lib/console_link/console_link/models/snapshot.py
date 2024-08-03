@@ -129,6 +129,8 @@ class S3Snapshot(Snapshot):
             logger.info(f"Snapshot {self.config['snapshot_name']} created successfully")
             return CommandResult(success=True, value=f"Snapshot {self.config['snapshot_name']} created successfully")
         except subprocess.CalledProcessError as e:
+            # Replace cmd with display command to avoid logging the password
+            e.cmd = display_command
             logger.error(f"Failed to create snapshot: {str(e)}")
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
 
@@ -187,6 +189,8 @@ class FileSystemSnapshot(Snapshot):
             logger.info(message)
             return CommandResult(success=True, value=message)
         except subprocess.CalledProcessError as e:
+            # Replace cmd with display command to avoid logging the password
+            e.cmd = display_command
             message = f"Failed to create snapshot: {str(e)}"
             logger.error(message)
             return CommandResult(success=False, value=message)

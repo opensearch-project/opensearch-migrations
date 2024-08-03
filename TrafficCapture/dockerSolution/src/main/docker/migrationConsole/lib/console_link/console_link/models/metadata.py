@@ -186,20 +186,22 @@ class Metadata:
         logger.info(f"Migrating metadata with command: {' '.join(display_command)}")
 
         if detached_log:
-            return self._run_as_detached_process(command, detached_log)
-        return self._run_as_synchronous_process(command)
+            return self._run_as_detached_process(command, detached_log, display_command)
+        return self._run_as_synchronous_process(command, display_command)
 
-    def _run_as_synchronous_process(self, command) -> CommandResult:
+    def _run_as_synchronous_process(self, command, display_command) -> CommandResult:
         try:
             # Pass None to stdout and stderr to not capture output and show in terminal
             subprocess.run(command, stdout=None, stderr=None, text=True, check=True)
             logger.info(f"Metadata migration for snapshot {self._snapshot_name} completed")
             return CommandResult(success=True, value="Metadata migration completed")
         except subprocess.CalledProcessError as e:
+            # Replace cmd with display command to avoid logging the password
+            e.cmd = display_command
             logger.error(f"Failed to migrate metadata: {str(e)}")
             return CommandResult(success=False, value=f"Failed to migrate metadata: {str(e)}")
 
-    def _run_as_detached_process(self, command, log_file) -> CommandResult:
+    def _run_as_detached_process(self, command, log_file, display_command) -> CommandResult:
         try:
             with open(log_file, "w") as f:
                 # Start the process in detached mode
@@ -209,5 +211,7 @@ class Metadata:
                 return CommandResult(success=True, value=f"Metadata migration started with PID {process.pid}\n"
                                      f"Logs are being written to {log_file}")
         except subprocess.CalledProcessError as e:
+            # Replace cmd with display command to avoid logging the password
+            e.cmd = display_command
             logger.error(f"Failed to create snapshot: {str(e)}")
             return CommandResult(success=False, value=f"Failed to migrate metadata: {str(e)}")
