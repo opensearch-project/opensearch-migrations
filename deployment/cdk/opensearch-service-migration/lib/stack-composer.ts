@@ -20,6 +20,7 @@ import {determineStreamingSourceType, StreamingSourceType} from "./streaming-sou
 import {createMigrationStringParameter, MigrationSSMParameter, parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
 import {ClusterBasicAuth, ClusterSigV4Auth, ServicesYaml} from "./migration-services-yaml";
+import { PrexistingClustersStack } from "./service-stacks/prexisting-clusters-stack";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -286,6 +287,7 @@ export class StackComposer {
         // There is an assumption here that for any deployment we will always have a target cluster, whether that be a
         // created Domain like below or an imported one
         let openSearchStack
+        let prexistingClustersStack
         if (!prexistingTargetClusterDetails) {
             openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
                 version: version,
@@ -330,34 +332,19 @@ export class StackComposer {
             this.stacks.push(openSearchStack)
             servicesYaml.target_cluster = openSearchStack.targetClusterYaml;
         } else {
-            const endpointSSM = createMigrationStringParameter(scope, targetEndpoint, {
-                parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
-                defaultDeployId: deployId,
-                stage,
-            });
-            servicesYaml.target_cluster = { endpoint: targetEndpoint }
-            if (prexistingTargetClusterDetails.basic_auth) {
-                servicesYaml.target_cluster.basic_auth = new ClusterBasicAuth(prexistingTargetClusterDetails.basic_auth);
-                const secretSSM = createMigrationStringParameter(scope,
-                    `${prexistingTargetClusterDetails.basic_auth.username} ${prexistingTargetClusterDetails.basic_auth.password_from_secret_arn}`, {
-                    parameter: MigrationSSMParameter.OS_USER_AND_SECRET_ARN,
-                    defaultDeployId: deployId,
-                    stage,
-                });
-            } else if (prexistingTargetClusterDetails.sigv4) {
-                servicesYaml.target_cluster.sigv4 = new ClusterSigV4Auth();
-
-                if (prexistingTargetClusterDetails.sigv4.region) {
-                    servicesYaml.target_cluster.sigv4.region = prexistingTargetClusterDetails.sigv4.region
-                } else if (region) {
-                    servicesYaml.target_cluster.sigv4.region = region
-                }
-                if (prexistingTargetClusterDetails.sigv4.service) {
-                    servicesYaml.target_cluster.sigv4.service = prexistingTargetClusterDetails.sigv4.service
-                }
-            } else (
-                servicesYaml.target_cluster.no_auth = ""
-            )
+            prexistingClustersStack = new PrexistingClustersStack(scope, `prexistingClustersStack-${deployId}`, {
+                targetClusterDetails: prexistingTargetClusterDetails,
+                sourceClusterDetails: {'endpoint': sourceClusterEndpoint}, // TODO: this needs to be expanded
+                stackName: `OSMigrations-${stage}-${region}-${deployId}-PrexistingClusters`,
+                description: "This stack handles creating and managing resources for prexisting source and target clusters",
+                stage: stage,
+                defaultDeployId: defaultDeployId,
+                addOnMigrationDeployId: addOnMigrationDeployId,
+                env: props.env
+            })
+            this.stacks.push(prexistingClustersStack)
+            servicesYaml.target_cluster = prexistingClustersStack.targetClusterYaml;
+            servicesYaml.source_cluster = prexistingClustersStack.sourceClusterYaml;
         }
 
         // Currently, placing a requirement on a VPC for a migration stack but this can be revisited

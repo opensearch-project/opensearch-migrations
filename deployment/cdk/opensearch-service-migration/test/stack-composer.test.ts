@@ -3,9 +3,10 @@ import { OpenSearchDomainStack } from "../lib/opensearch-domain-stack";
 import { createStackComposer, createStackComposerOnlyPassedContext } from "./test-utils";
 import { App } from "aws-cdk-lib";
 import { StackComposer } from "../lib/stack-composer";
-import { KafkaStack } from "../lib";
+import { KafkaStack, MigrationConsoleStack, MigrationSSMParameter, TrafficReplayerStack } from "../lib";
 import { describe, beforeEach, afterEach, test, expect, jest } from '@jest/globals';
 import { ContainerImage } from "aws-cdk-lib/aws-ecs";
+import { PrexistingClustersStack } from "../lib/service-stacks/prexisting-clusters-stack";
 
 jest.mock('aws-cdk-lib/aws-ecr-assets');
 describe('Stack Composer Tests', () => {
@@ -266,5 +267,71 @@ describe('Stack Composer Tests', () => {
     const createStackFunc = () => createStackComposerOnlyPassedContext(contextOptions)
 
     expect(createStackFunc).toThrow()
+  })
+
+  test('Test that prexistingTargetClusterDetails is propogated through services', () => {
+    const contextOptions = {
+      prexistingTargetClusterDetails: {
+        "endpoint": "http://prexistingtargetcluster:9200",
+        "basic_auth": {
+          "username": "username",
+          "password_from_secret_arn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc"
+        }
+      },
+      sourceClusterEndpoint: "http://sourceclusterendpoint:9200",
+      migrationAssistanceEnabled: true,
+      vpcEnabled: true,
+      migrationConsoleServiceEnabled: true,
+      reindexFromSnapshotServiceEnabled: true,
+      trafficReplayerServiceEnabled: true,
+      trafficReplayerEnableClusterFGACAuth: true,
+      targetClusterProxyServiceEnabled: true
+    }
+    const stacks = createStackComposer(contextOptions)
+    const domainStack = stacks.stacks.filter((s) => s instanceof OpenSearchDomainStack)[0]
+    expect(domainStack).toBeUndefined()
+
+    const migrationConsoleStack = stacks.stacks.filter((s) => s instanceof MigrationConsoleStack)[0]
+    expect(migrationConsoleStack).toBeDefined()
+    const migrationConsoleTemplate = Template.fromStack(migrationConsoleStack)
+    // Check that the migration console creates a parameter with "servicesyaml" in the name
+    // Check that the endpoint is set to the prexistingTargetClusterDetails endpoint
+    migrationConsoleTemplate.hasResourceProperties('AWS::SSM::Parameter', {});
+    const servicesYamlParameter = migrationConsoleTemplate.findResources('AWS::SSM::Parameter', {});
+    expect(servicesYamlParameter).toBeDefined();
+
+    for (const ssmParameterKey in servicesYamlParameter) {
+      const ssmParameter = servicesYamlParameter[ssmParameterKey];
+      expect(ssmParameter.Properties.Value).toEqual(expect.objectContaining({
+        'Fn::Join': expect.arrayContaining([
+          '',
+          expect.arrayContaining([
+            expect.stringContaining('source_cluster'),
+            expect.stringContaining('target_cluster'),
+            expect.stringContaining('http://prexistingtargetcluster:9200'),
+            expect.stringContaining('password_from_secret_arn: arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc'),
+          ]),
+        ]),
+      }));
+    }
+
+    const prexistingClustersStack = stacks.stacks.filter((s) => s instanceof PrexistingClustersStack)[0]
+    expect(prexistingClustersStack).toBeDefined()
+    const prexistingClustersTemplate = Template.fromStack(prexistingClustersStack)
+    const targetClusterEndpointParameter = Object.entries(prexistingClustersTemplate.findResources('AWS::SSM::Parameter')).filter(
+        ([k, v]) =>
+          k.match(/^SSMParameterOsClusterEndpoint/)
+    )
+    expect(targetClusterEndpointParameter).toHaveLength(1);
+    expect(targetClusterEndpointParameter[0][1].Properties.Value).toEqual(contextOptions.prexistingTargetClusterDetails.endpoint)
+
+    const sourceClusterEndpointParameter = Object.entries(prexistingClustersTemplate.findResources('AWS::SSM::Parameter')).filter(
+        ([k, v]) =>
+          k.match(/^SSMParameterSourceClusterEndpoint/)
+    );
+    expect(sourceClusterEndpointParameter).toHaveLength(1);
+    expect(sourceClusterEndpointParameter[0][1].Properties.Value).toEqual(contextOptions.sourceClusterEndpoint)
+
+    // Ideally we also check that the target and source endpoints are being passed through the replayer and RFS correctly.
   })
 })
