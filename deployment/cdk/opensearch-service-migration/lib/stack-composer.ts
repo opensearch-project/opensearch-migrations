@@ -17,9 +17,9 @@ import {KafkaStack} from "./service-stacks/kafka-stack";
 import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-stack";
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
-import {MigrationSSMParameter, parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
+import {createMigrationStringParameter, MigrationSSMParameter, parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
-import {ClusterBasicAuth, ServicesYaml} from "./migration-services-yaml";
+import {ClusterBasicAuth, ClusterSigV4Auth, ServicesYaml} from "./migration-services-yaml";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -148,6 +148,7 @@ export class StackComposer {
 
         let version: EngineVersion
 
+        const prexistingTargetClusterDetails = this.getContextForType('prexistingTargetClusterDetails', 'object', defaultValues, contextJSON)
         const domainName = this.getContextForType('domainName', 'string', defaultValues, contextJSON)
         const domainAZCount = this.getContextForType('domainAZCount', 'number', defaultValues, contextJSON)
         const dataNodeType = this.getContextForType('dataNodeType', 'string', defaultValues, contextJSON)
@@ -207,7 +208,6 @@ export class StackComposer {
         const captureProxyExtraArgs = this.getContextForType('captureProxyExtraArgs', 'string', defaultValues, contextJSON)
         const elasticsearchServiceEnabled = this.getContextForType('elasticsearchServiceEnabled', 'boolean', defaultValues, contextJSON)
         const kafkaBrokerServiceEnabled = this.getContextForType('kafkaBrokerServiceEnabled', 'boolean', defaultValues, contextJSON)
-        const targetClusterEndpoint = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
         const fetchMigrationEnabled = this.getContextForType('fetchMigrationEnabled', 'boolean', defaultValues, contextJSON)
         const dpPipelineTemplatePath = this.getContextForType('dpPipelineTemplatePath', 'string', defaultValues, contextJSON)
         const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
@@ -227,10 +227,10 @@ export class StackComposer {
             console.warn("Addon deployments will use the original deployment 'vpcId' regardless of passed 'vpcId' values")
         }
         let targetEndpoint
-        if (targetClusterEndpoint && osContainerServiceEnabled) {
+        if (prexistingTargetClusterDetails && osContainerServiceEnabled) {
             throw new Error("The following options are mutually exclusive as only one target cluster can be specified for a given deployment: [targetClusterEndpoint, osContainerServiceEnabled]")
-        } else if (targetClusterEndpoint || osContainerServiceEnabled) {
-            targetEndpoint = targetClusterEndpoint ? targetClusterEndpoint : "https://opensearch:9200"
+        } else if (prexistingTargetClusterDetails || osContainerServiceEnabled) {
+            targetEndpoint = prexistingTargetClusterDetails ? prexistingTargetClusterDetails["endpoint"] : "https://opensearch:9200"
         }
 
         const fargateCpuArch = validateFargateCpuArch(defaultFargateCpuArch)
@@ -286,7 +286,7 @@ export class StackComposer {
         // There is an assumption here that for any deployment we will always have a target cluster, whether that be a
         // created Domain like below or an imported one
         let openSearchStack
-        if (!targetEndpoint) {
+        if (!prexistingTargetClusterDetails) {
             openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
                 version: version,
                 domainName: domainName,
@@ -330,14 +330,34 @@ export class StackComposer {
             this.stacks.push(openSearchStack)
             servicesYaml.target_cluster = openSearchStack.targetClusterYaml;
         } else {
+            const endpointSSM = createMigrationStringParameter(scope, targetEndpoint, {
+                parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
+                defaultDeployId: deployId,
+                stage,
+            });
             servicesYaml.target_cluster = { endpoint: targetEndpoint }
-            if (fineGrainedManagerUserName && fineGrainedManagerUserSecretManagerKeyARN) {
-                servicesYaml.target_cluster.basic_auth = new ClusterBasicAuth({username: fineGrainedManagerUserName,
-                    password_from_secret_arn: fineGrainedManagerUserSecretManagerKeyARN
-                })
-            } else {
+            if (prexistingTargetClusterDetails.basic_auth) {
+                servicesYaml.target_cluster.basic_auth = new ClusterBasicAuth(prexistingTargetClusterDetails.basic_auth);
+                const secretSSM = createMigrationStringParameter(scope,
+                    `${prexistingTargetClusterDetails.basic_auth.username} ${prexistingTargetClusterDetails.basic_auth.password_from_secret_arn}`, {
+                    parameter: MigrationSSMParameter.OS_USER_AND_SECRET_ARN,
+                    defaultDeployId: deployId,
+                    stage,
+                });
+            } else if (prexistingTargetClusterDetails.sigv4) {
+                servicesYaml.target_cluster.sigv4 = new ClusterSigV4Auth();
+
+                if (prexistingTargetClusterDetails.sigv4.region) {
+                    servicesYaml.target_cluster.sigv4.region = prexistingTargetClusterDetails.sigv4.region
+                } else if (region) {
+                    servicesYaml.target_cluster.sigv4.region = region
+                }
+                if (prexistingTargetClusterDetails.sigv4.service) {
+                    servicesYaml.target_cluster.sigv4.service = prexistingTargetClusterDetails.sigv4.service
+                }
+            } else (
                 servicesYaml.target_cluster.no_auth = ""
-            }
+            )
         }
 
         // Currently, placing a requirement on a VPC for a migration stack but this can be revisited

@@ -14,7 +14,7 @@ import {AnyPrincipal, Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {ILogGroup, LogGroup} from "aws-cdk-lib/aws-logs";
 import {ISecret, Secret} from "aws-cdk-lib/aws-secretsmanager";
 import {StackPropsExt} from "./stack-composer";
-import { ClusterBasicAuth, ClusterYaml } from "./migration-services-yaml";
+import { ClusterBasicAuth, ClusterSigV4Auth, ClusterYaml } from "./migration-services-yaml";
 import { MigrationSSMParameter, createMigrationStringParameter, getMigrationStringParameterValue } from "./common-utilities";
 
 
@@ -121,7 +121,9 @@ export class OpenSearchDomainStack extends Stack {
     if (adminUserName) {
         targetCluster.basic_auth = new ClusterBasicAuth({ username: adminUserName, password_from_secret_arn: adminUserSecret?.secretArn })
     } else {
-      targetCluster.no_auth = ''
+        targetCluster.sigv4 = new ClusterSigV4Auth();
+        targetCluster.sigv4.region = this.region;
+        targetCluster.sigv4.service = "es";
     }
     this.targetClusterYaml = targetCluster;
   }

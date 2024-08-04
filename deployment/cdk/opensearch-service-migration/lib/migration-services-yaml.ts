@@ -25,10 +25,16 @@ export class ClusterBasicAuth {
     }
 }
 
+export class ClusterSigV4Auth {
+    service: string;
+    region: string;
+}
+
 export class ClusterYaml {
     endpoint: string = '';
     no_auth?: string | null;
     basic_auth?: ClusterBasicAuth | null;
+    sigv4?: ClusterSigV4Auth | null;
 }
 
 export class MetricsSourceYaml {

@@ -27,10 +27,6 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
 
     constructor(scope: Construct, id: string, props: ReindexFromSnapshotProps) {
         super(scope, id, props)
-        const sourceEndpoint = getMigrationStringParameterValue(this, {
-            ...props,
-            parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
-        });
 
         let securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceSG", getMigrationStringParameterValue(this, {
