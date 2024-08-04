@@ -86,7 +86,7 @@ public class HeaderTransformerTest extends InstrumentationTest {
             // do nothing but check connectivity between the layers in the bottom most handler
             innermostFinalizeCallCount.incrementAndGet();
             Assertions.assertEquals(
-                HttpRequestTransformationStatus.COMPLETED,
+                HttpRequestTransformationStatus.completed(),
                 aggregatedRawResponse.transformationStatus
             );
         }), () -> "HeaderTransformerTest.runRandomPayloadWithTransformer.assertionCheck").get();

@@ -25,7 +25,7 @@ public class RequestTransformerAndSender<T> {
 
     protected final IRetryVisitorFactory<T> retryVisitorFactory;
 
-    RequestSenderOrchestrator.RepeatedAggregatedRawResponseVisitor<T>
+    RequestSenderOrchestrator.RetryVisitor<T>
     getRetryCheckVisitor(TransformedOutputAndResult<ByteBufList> transformedResult,
                          TrackedFuture<String, ? extends IRequestResponsePacketPair> finishedAccumulatingResponseFuture,
                          Consumer<AggregatedRawResponse> resultsConsumer) {

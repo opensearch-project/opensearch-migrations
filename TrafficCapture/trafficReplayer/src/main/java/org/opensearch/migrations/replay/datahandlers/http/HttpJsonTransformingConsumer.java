@@ -185,7 +185,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
             () -> "HttpJsonTransformingConsumer.redriveWithoutTransformation.compose()"
         );
         return finalizedFuture.thenApply(
-            r -> new TransformedOutputAndResult<>(r, makeStatus(reason), reason),
+            r -> new TransformedOutputAndResult<>(r, makeStatusForRedrive(reason)),
             () -> "redrive final packaging"
         ).whenComplete((v, t) -> {
             transformationContext.onTransformSkip();
@@ -193,7 +193,8 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         }, () -> "HttpJsonTransformingConsumer.redriveWithoutTransformation().map()");
     }
 
-    private static HttpRequestTransformationStatus makeStatus(Throwable reason) {
-        return reason == null ? HttpRequestTransformationStatus.SKIPPED : HttpRequestTransformationStatus.ERROR;
+    private static HttpRequestTransformationStatus makeStatusForRedrive(Throwable reason) {
+        return reason == null
+            ? HttpRequestTransformationStatus.skipped() : HttpRequestTransformationStatus.makeError(reason);
     }
 }

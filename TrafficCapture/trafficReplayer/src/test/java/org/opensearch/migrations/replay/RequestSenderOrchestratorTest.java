@@ -8,7 +8,6 @@ import java.util.AbstractMap.SimpleEntry;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
@@ -89,6 +88,14 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                 return new AggregatedRawResponse(null, 0, Duration.ZERO, null, null);
             }), () -> "finalizeRequest waiting on test-gate semaphore release");
         }
+    }
+
+    static String getUriForIthRequest(int i) {
+        return String.format("/%04d", i);
+    }
+
+    static String getRequestString(int i) {
+        return TestHttpServerContext.getRequestStringForSimpleGet(getUriForIthRequest(i));
     }
 
     @Test
@@ -269,7 +276,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                     Assertions.assertEquals(200, response.status().code());
                     var body = response.content();
                     Assertions.assertEquals(
-                        TestHttpServerContext.SERVER_RESPONSE_BODY_PREFIX + TestHttpServerContext.getUriForIthRequest(
+                        TestHttpServerContext.SERVER_RESPONSE_BODY_PREFIX + getUriForIthRequest(
                             i / NUM_REPEATS
                         ),
                         body.toString(StandardCharsets.UTF_8)
@@ -289,7 +296,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
 
     private ByteBufList makeRequest(int i) {
         // uncomment/swap for a simpler test case to run
-        return new ByteBufList(TestHttpServerContext.getRequestString(i)
+        return new ByteBufList(getRequestString(i)
             .chars()
             .mapToObj(c -> Unpooled.wrappedBuffer(new byte[] { (byte) c }))
             .toArray(ByteBuf[]::new));

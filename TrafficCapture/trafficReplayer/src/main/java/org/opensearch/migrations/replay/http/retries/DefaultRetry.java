@@ -34,7 +34,7 @@ public class DefaultRetry implements RequestRetryEvaluator {
         var d = previousResponses.size() > MAX_RETRIES ?
             RequestSenderOrchestrator.RetryDirective.DONE :
             RequestSenderOrchestrator.RetryDirective.RETRY;
-        return TextTrackedFuture.completedFuture(d, () -> "determining if we should retry or return the response now");
+        return TextTrackedFuture.completedFuture(d, () -> "determined if we should retry or return the response now");
     }
 
     TrackedFuture<String, RequestSenderOrchestrator.RetryDirective>

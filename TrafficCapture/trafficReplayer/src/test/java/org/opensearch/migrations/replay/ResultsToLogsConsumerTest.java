@@ -102,7 +102,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
 
     @Test
     public void testTupleNewWithNullKeyThrows() {
-        var responses = new TransformedTargetRequestAndResponseList(null, HttpRequestTransformationStatus.SKIPPED);
+        var responses = new TransformedTargetRequestAndResponseList(null, HttpRequestTransformationStatus.skipped());
         try (var closeableLogSetup = new CloseableLogSetup()) {
             Assertions.assertThrows(
                 Exception.class,
@@ -115,7 +115,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     @Test
     @ResourceLock("TestContext")
     public void testOutputterWithNulls() throws IOException {
-        var responses = new TransformedTargetRequestAndResponseList(null, HttpRequestTransformationStatus.SKIPPED);
+        var responses = new TransformedTargetRequestAndResponseList(null, HttpRequestTransformationStatus.skipped());
         var emptyTuple = new SourceTargetCaptureTuple(rootContext.getTestTupleContext(), null, responses, null);
         try (var closeableLogSetup = new CloseableLogSetup()) {
             var resultsToLogsConsumer = new ResultsToLogsConsumer(closeableLogSetup.testLogger, null);
@@ -131,7 +131,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     @Test
     @ResourceLock("TestContext")
     public void testOutputterWithException() {
-        var responses = new TransformedTargetRequestAndResponseList(null, HttpRequestTransformationStatus.SKIPPED);
+        var responses = new TransformedTargetRequestAndResponseList(null, HttpRequestTransformationStatus.skipped());
         var exception = new Exception(TEST_EXCEPTION_MESSAGE);
         var emptyTuple = new SourceTargetCaptureTuple(rootContext.getTestTupleContext(), null, responses, exception);
         try (var closeableLogSetup = new CloseableLogSetup()) {
@@ -288,7 +288,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         var aggregatedResponse = new AggregatedRawResponse(null, 13, Duration.ofMillis(267), targetResponse, null);
         var targetResponses = new TransformedTargetRequestAndResponseList(
             targetRequest,
-            HttpRequestTransformationStatus.SKIPPED,
+            HttpRequestTransformationStatus.skipped(),
             aggregatedResponse
         );
         try (var tupleContext = rootContext.getTestTupleContext(); var closeableLogSetup = new CloseableLogSetup()) {

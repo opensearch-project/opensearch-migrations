@@ -16,7 +16,6 @@ public class TransformedTargetRequestAndResponseList {
     protected final ByteBufList requestPackets;
 
     @Getter
-    @Setter
     private HttpRequestTransformationStatus transformationStatus;
 
     @Getter

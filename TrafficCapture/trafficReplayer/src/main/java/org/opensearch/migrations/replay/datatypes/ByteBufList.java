@@ -53,7 +53,7 @@ public class ByteBufList implements AutoCloseable {
     }
 
     public CompositeByteBuf asCompositeByteBufRetained() {
-        return asCompositeByteBufRetained(data.stream());
+        return asCompositeByteBufRetained(streamRetained());
     }
 
     public static CompositeByteBuf asCompositeByteBufRetained(Stream<ByteBuf> byteBufs) {

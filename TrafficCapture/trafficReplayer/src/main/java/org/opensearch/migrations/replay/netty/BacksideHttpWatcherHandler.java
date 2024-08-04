@@ -26,10 +26,11 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Http
 
     @Override
     protected void channelRead0(ChannelHandlerContext ctx, HttpObject msg) {
+        if (msg instanceof HttpResponse) {
+            aggregatedRawResponseBuilder.addHttpParsedResponseObject((HttpResponse) msg);
+        }
         if (msg instanceof LastHttpContent) {
             triggerResponseCallbackAndRemoveCallback();
-        } else if (msg instanceof HttpResponse) {
-            aggregatedRawResponseBuilder.addHttpParsedResponseObject((HttpResponse) msg);
         }
     }
 

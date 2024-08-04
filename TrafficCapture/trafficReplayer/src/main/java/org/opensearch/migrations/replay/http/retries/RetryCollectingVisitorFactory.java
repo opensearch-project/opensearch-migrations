@@ -1,7 +1,6 @@
 package org.opensearch.migrations.replay.http.retries;
 
 import org.opensearch.migrations.replay.IRequestResponsePacketPair;
-import org.opensearch.migrations.replay.RequestResponsePacketPair;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TransformedTargetRequestAndResponseList;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
@@ -19,7 +18,7 @@ public class RetryCollectingVisitorFactory implements IRetryVisitorFactory<Trans
     }
 
     @Override
-    public RequestSenderOrchestrator.RepeatedAggregatedRawResponseVisitor<TransformedTargetRequestAndResponseList>
+    public RequestSenderOrchestrator.RetryVisitor<TransformedTargetRequestAndResponseList>
     getRetryCheckVisitor(TransformedOutputAndResult<ByteBufList> transformedResult,
                          TrackedFuture<String, ? extends IRequestResponsePacketPair> finishedAccumulatingResponseFuture) {
         var collector = new TransformedTargetRequestAndResponseList(

@@ -79,8 +79,8 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
             : testBytes;
 
         var expectedTransformationStatus = (hostTransformation)
-            ? HttpRequestTransformationStatus.COMPLETED
-            : HttpRequestTransformationStatus.SKIPPED;
+            ? HttpRequestTransformationStatus.completed()
+            : HttpRequestTransformationStatus.skipped();
 
         Assertions.assertEquals(
             new String(expectedBytes, StandardCharsets.UTF_8),
@@ -121,7 +121,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         var returnedResponse = transformingHandler.finalizeRequest().get();
         Assertions.assertEquals(new String(testBytes, StandardCharsets.UTF_8), testPacketCapture.getCapturedAsString());
         Assertions.assertArrayEquals(testBytes, testPacketCapture.getBytesCaptured());
-        Assertions.assertEquals(HttpRequestTransformationStatus.SKIPPED, returnedResponse.transformationStatus);
+        Assertions.assertEquals(HttpRequestTransformationStatus.skipped(), returnedResponse.transformationStatus);
     }
 
     @Test
@@ -164,10 +164,10 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         var returnedResponse = transformingHandler.finalizeRequest().get();
         Assertions.assertEquals(new String(testBytes, StandardCharsets.UTF_8), testPacketCapture.getCapturedAsString());
         Assertions.assertArrayEquals(testBytes, testPacketCapture.getBytesCaptured());
-        Assertions.assertEquals(HttpRequestTransformationStatus.ERROR, returnedResponse.transformationStatus);
+        Assertions.assertTrue(returnedResponse.transformationStatus.isError());
         Assertions.assertInstanceOf(
             NettyJsonBodyAccumulateHandler.IncompleteJsonBodyException.class,
-            returnedResponse.error
+            returnedResponse.transformationStatus.getException()
         );
     }
 

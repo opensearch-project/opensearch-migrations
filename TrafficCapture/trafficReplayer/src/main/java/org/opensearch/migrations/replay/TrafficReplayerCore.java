@@ -76,7 +76,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         IJsonTransformer jsonTransformer,
         ClientConnectionPool clientConnectionPool,
         TrafficStreamLimiter trafficStreamLimiter,
-        IWorkTracker<Void> requestWorkTracker, IRetryVisitorFactory retryVisitorFactory
+        IWorkTracker<Void> requestWorkTracker,
+        IRetryVisitorFactory retryVisitorFactory
     ) {
         super(retryVisitorFactory);
         this.topLevelContext = context;
@@ -336,7 +337,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 .addArgument(context)
                 .log();
             exceptionRequestCount.incrementAndGet();
-        } else if (transformationStatus == HttpRequestTransformationStatus.ERROR) {
+        } else if (transformationStatus.isError()) {
             log.atInfo()
                 .setCause(summary.getError())
                 .setMessage("Unknown error transforming {}: ")

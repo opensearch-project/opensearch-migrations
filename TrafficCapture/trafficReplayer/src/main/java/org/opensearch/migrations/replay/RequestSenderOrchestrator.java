@@ -118,7 +118,7 @@ public class RequestSenderOrchestrator {
         T value;
     }
 
-    public interface RepeatedAggregatedRawResponseVisitor<T> {
+    public interface RetryVisitor<T> {
         /**
          * Return null to continue trying according to
          * @param arr
@@ -134,7 +134,7 @@ public class RequestSenderOrchestrator {
         Instant start,
         Duration interval,
         ByteBufList packets,
-        RepeatedAggregatedRawResponseVisitor<T> visitor
+        RetryVisitor<T> visitor
     ) {
         var sessionNumber = requestKey.sourceRequestIndexSessionIdentifier;
         var channelInteractionNum = requestKey.getReplayerRequestIndex();
@@ -227,7 +227,7 @@ public class RequestSenderOrchestrator {
         Instant startTime,
         Duration interval,
         ByteBufList packets,
-        RepeatedAggregatedRawResponseVisitor<T> visitor
+        RetryVisitor<T> visitor
     ) {
         var eventLoop = connectionReplaySession.eventLoop;
         var scheduledContext = ctx.createScheduledContext(startTime);
@@ -332,7 +332,7 @@ public class RequestSenderOrchestrator {
                            ByteBufList byteBufList,
                            Instant startTime,
                            Duration interval,
-            RepeatedAggregatedRawResponseVisitor<T> visitor) {
+            RetryVisitor<T> visitor) {
         return sendPackets(senderSupplier.get(), eventLoop,
             byteBufList.streamRetained().iterator(), startTime, interval, new AtomicInteger())
             .getDeferredFutureThroughHandle((response, t) -> {
@@ -342,6 +342,9 @@ public class RequestSenderOrchestrator {
                 },
                 () -> "checking response to determine if done")
             .getDeferredFutureThroughHandle((dtr,t) -> {
+                if (t != null) {
+                    return TextTrackedFuture.failedFuture(t, () -> "failed future");
+                }
                 if (dtr.directive == RetryDirective.RETRY) {
                     return sendRequestWithRetries(senderSupplier, eventLoop, byteBufList, startTime, interval, visitor);
                 } else {
@@ -363,7 +366,8 @@ public class RequestSenderOrchestrator {
         log.atTrace().setMessage(() -> "sendNextPartAndContinue: packetCounter=" + oldCounter).log();
         assert iterator.hasNext() : "Should not have called this with no items to send";
 
-        var consumeFuture = packetReceiver.consumeBytes(iterator.next());
+        var packet = iterator.next();
+        var consumeFuture = packetReceiver.consumeBytes(packet);
         if (iterator.hasNext()) {
             return consumeFuture.thenCompose(
                 tf -> NettyFutureBinders.bindNettyScheduleToCompletableFuture(

@@ -93,11 +93,9 @@ public class SimpleHttpServer implements AutoCloseable {
      * @param port
      * @return the port upon successfully binding the server
      */
-    public SimpleHttpServer(
-        boolean useTls,
-        int port,
-        Function<HttpRequestFirstLine, SimpleHttpResponse> uriToContentMapper
-    ) throws Exception {
+    public SimpleHttpServer(boolean useTls, int port, Function<HttpRequestFirstLine, SimpleHttpResponse> contentMapper)
+        throws Exception
+    {
         var addr = new InetSocketAddress(LOCALHOST, port);
         this.useTls = useTls;
         httpServer = useTls ? createSecureServer(addr) : HttpServer.create(addr, 0);
@@ -107,13 +105,13 @@ public class SimpleHttpServer implements AutoCloseable {
                 httpExchange.getRequestURI(),
                 httpExchange.getProtocol()
             );
-            var headersAndPayload = uriToContentMapper.apply(requestToMatch);
+            var headersAndPayload = contentMapper.apply(requestToMatch);
             var responseHeaders = httpExchange.getResponseHeaders();
             for (var kvp : headersAndPayload.headers.entrySet()) {
                 responseHeaders.set(kvp.getKey(), kvp.getValue());
             }
 
-            httpExchange.sendResponseHeaders(200, 0);
+            httpExchange.sendResponseHeaders(headersAndPayload.statusCode, 0);
             httpExchange.getResponseBody().write(headersAndPayload.payloadBytes);
             httpExchange.getResponseBody().flush();
             httpExchange.getResponseBody().close();

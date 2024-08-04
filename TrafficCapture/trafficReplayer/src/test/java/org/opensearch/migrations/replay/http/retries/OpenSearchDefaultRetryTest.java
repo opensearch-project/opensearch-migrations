@@ -1,14 +1,11 @@
 package org.opensearch.migrations.replay.http.retries;
 
 import io.netty.buffer.Unpooled;
-import lombok.Getter;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.HttpByteBufFormatter;
-import org.opensearch.migrations.replay.HttpMessageAndTimestamp;
-import org.opensearch.migrations.replay.IRequestResponsePacketPair;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.util.TextTrackedFuture;
 
@@ -19,30 +16,6 @@ import java.util.Optional;
 import java.util.stream.Stream;
 
 class OpenSearchDefaultRetryTest {
-
-    private static final String GET_SLASH_REQUEST =
-        "GET / HTTP/1.1\r\n" +
-            "User-Agent: Unit Test\r\n" +
-            "Host: localhost\r\n\r\n";
-
-    private static String makeSlashResponse(int statusCode) {
-        return "HTTP/1.1 " + statusCode + " OK\r\n" +
-            "Content-Length: 2\r\n" +
-            "Content-Type: text/plain\r\n\r\n" +
-            "hi\r\n";
-    }
-
-    @Getter
-    private static class TestRequestResponsePair implements IRequestResponsePacketPair {
-        HttpMessageAndTimestamp responseData;
-
-        @Override public HttpMessageAndTimestamp getRequestData() { throw new IllegalStateException(); }
-
-        public TestRequestResponsePair(byte[] bytes) {
-            responseData = new HttpMessageAndTimestamp(Instant.now());
-            responseData.add(bytes);
-        }
-    }
 
     @ParameterizedTest
     @CsvSource(value = {
@@ -57,17 +30,19 @@ class OpenSearchDefaultRetryTest {
         throws Exception
     {
         var retryChecker = new OpenSearchDefaultRetry();
-        var sourceBytes = makeSlashResponse(sourceStatusCode).getBytes(StandardCharsets.UTF_8);
-        var targetBytes = makeSlashResponse(targetStatusCode).getBytes(StandardCharsets.UTF_8);
+        var sourceBytes = RetryTestUtils.makeSlashResponse(sourceStatusCode).getBytes(StandardCharsets.UTF_8);
+        var targetBytes = RetryTestUtils.makeSlashResponse(targetStatusCode).getBytes(StandardCharsets.UTF_8);
         var aggregatedResponse = AggregatedRawResponse.builder(Instant.now())
             .addHttpParsedResponseObject(
                 HttpByteBufFormatter.parseHttpResponseFromBufs(Stream.of(Unpooled.wrappedBuffer(targetBytes)), 0))
             .addResponsePacket(targetBytes)
             .build();
-        var determination = retryChecker.apply(Unpooled.wrappedBuffer(GET_SLASH_REQUEST.getBytes(StandardCharsets.UTF_8)),
+        var requestBytes = RetryTestUtils.GET_SLASH_REQUEST.getBytes(StandardCharsets.UTF_8);
+        var determination = retryChecker.apply(Unpooled.wrappedBuffer(requestBytes),
             List.of(),
             aggregatedResponse,
-            TextTrackedFuture.completedFuture(new TestRequestResponsePair(sourceBytes), () -> "test future"));
+            TextTrackedFuture.completedFuture(new RetryTestUtils.TestRequestResponsePair(sourceBytes),
+                () -> "test future"));
         Assertions.assertEquals(expectedDirective, determination.get());
     }
 
@@ -130,7 +105,8 @@ class OpenSearchDefaultRetryTest {
         var determination = retryChecker.apply(Unpooled.wrappedBuffer(BULK_REQUEST.getBytes(StandardCharsets.UTF_8)),
             List.of(),
             aggregatedResponse,
-            TextTrackedFuture.completedFuture(new TestRequestResponsePair(sourceBytes), () -> "test future"));
+            TextTrackedFuture.completedFuture(new RetryTestUtils.TestRequestResponsePair(sourceBytes),
+                () -> "test future"));
         Assertions.assertEquals(expectedDirective, determination.get());
     }
 }

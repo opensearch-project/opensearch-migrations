@@ -5,7 +5,6 @@ import java.time.Instant;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Supplier;
-import java.util.stream.Stream;
 
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
@@ -13,7 +12,6 @@ import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.replay.util.TrackedFuture;
 
-import io.netty.buffer.ByteBuf;
 import io.netty.util.concurrent.ScheduledFuture;
 import lombok.extern.slf4j.Slf4j;
 
@@ -189,7 +187,7 @@ public class ReplayEngine {
         Instant originalEnd,
         int numPackets,
         ByteBufList packets,
-        RequestSenderOrchestrator.RepeatedAggregatedRawResponseVisitor<T> visitor
+        RequestSenderOrchestrator.RetryVisitor<T> retryVisitor
     ) {
         var newCount = totalCountOfScheduledTasksOutstanding.incrementAndGet();
         final String label = "request";
@@ -199,23 +197,11 @@ public class ReplayEngine {
         var requestKey = ctx.getReplayerRequestKey();
         logStartOfWork(requestKey, newCount, start, label);
 
-        log.atDebug()
-            .setMessage(
-                () -> "Scheduling request for "
-                    + ctx
-                    + " to run from ["
-                    + start
-                    + ", "
-                    + end
-                    + " with an interval of "
-                    + interval
-                    + " for "
-                    + numPackets
-                    + " packets"
-            )
-            .log();
-        var sendResult = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packets, visitor);
-        return hookWorkFinishingUpdates(sendResult, originalStart, requestKey, label);
+        log.atDebug().setMessage(
+            () -> "Scheduling request for " + ctx + " to run from [" + start + ", " + end + " with an interval of "
+                + interval + " for " + numPackets + " packets").log();
+        var result = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packets, retryVisitor);
+        return hookWorkFinishingUpdates(result, originalStart, requestKey, label);
     }
 
     public TrackedFuture<String, Void> closeConnection(
