@@ -73,26 +73,17 @@ public class ClientConnectionPool {
         return new ConnectionReplaySession(
             eventLoop,
             channelKeyCtx,
-            () -> getResilientClientChannelProducer(eventLoop, channelKeyCtx)
-        );
-    }
-
-    private TrackedFuture<String, ChannelFuture> getResilientClientChannelProducer(
-        EventLoop eventLoop,
-        IReplayContexts.IChannelKeyContext connectionContext
-    ) {
-        return new AdaptiveRateLimiter<String, ChannelFuture>().get(
-            () -> NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext, serverUri, connectionContext)
+            () -> NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext, serverUri, channelKeyCtx)
                 .whenComplete((v, t) -> {
                     if (t == null) {
                         log.atDebug()
-                            .setMessage(() -> "New network connection result for " + connectionContext + " =" + v)
+                            .setMessage(() -> "New network connection result for " + channelKeyCtx + " =" + v)
                             .log();
                     } else {
-                        log.atInfo().setMessage(() -> "got exception for " + connectionContext).setCause(t).log();
+                        log.atInfo().setMessage(() -> "got exception for " + channelKeyCtx).setCause(t).log();
                     }
                 }, () -> "waiting for createClientConnection to finish")
-        );
+            );
     }
 
     public CompletableFuture<Void> shutdownNow() {

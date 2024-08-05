@@ -53,10 +53,6 @@ dependencies {
 
     api group: 'org.projectlombok', name: 'lombok', version: '1.18.28'
 
-    def resilience4j = '1.7.0'
-    api group: 'io.github.resilience4j', name: 'resilience4j-ratelimiter', version: resilience4j
-    api group: 'io.github.resilience4j', name: 'resilience4j-retry', version: resilience4j
-
     def jackson = '2.16.2'
     api group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: jackson
     api group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-smile', version: jackson
