@@ -50,7 +50,6 @@ graph LR
     B[Traffic Proxy]
     C[Source Cluster]
     D[Migration Assistant]
-    E[Target Cluster]
     A --> |???| B
     B --> |???| C
     B --> |Network Access| D
