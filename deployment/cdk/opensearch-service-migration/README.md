@@ -2,9 +2,78 @@
 
 This directory contains the infrastructure-as-code CDK solution for deploying an OpenSearch Domain as well as the infrastructure for the Migration solution. Users have the ability to easily deploy their infrastructure using default values or provide [configuration options](./options.md) for a more customized setup. The goal of this repo is not to become a one-size-fits-all solution for users- rather, this code base should be viewed as a starting point for users to use and add to individually as their custom use case requires.
 
+## Understanding Access Control With Migration Assistant
+
+### Source / Target Cluster
+
+```mermaid
+graph LR
+    A[Migration Assistant]
+    B[Networking Infra]
+    C[Cluster]
+    A --> |VPC, Access Policies| B
+    B --> |Credentials| C
+```
+
+#### Networking
+Any network systems that need to be opened up for network level access to the cluster.  In AWS infrastructure this might be VPC, security groups or Domain Access Polices.
+
+#### Endpoint
+The url that can be used to access the cluster
+
+#### Credentials
+
+Credentials will need to be able to read all data to be migrated from the cluster, create snapshot repository, and create snapshot.
+
+- Username & passwords for Http Basic
+- SigV4, after the Migration Assistant is deployed, update Domain access policy and/or security controls on the domain
+
+### Snapshot Storage
+
+```mermaid
+graph LR
+    A[Migration Assistant]
+    B[S3 Bucket]
+    C[Source Cluster]
+    C --> |IAM Role Access| B
+    A --> |IAM Role Access| B
+```
+
+#### Bucket access
+The source cluster will need to save the snapshot into the associated bucket, and the Migration Assistant will be reading the snapshot from the bucket.  The resource policy on the bucket will need to allow the IAM role(s) used by the source cluster and migration assistant.
+
+### Traffic Capture
+
+```mermaid
+graph LR
+    A[Traffic]
+    B[Traffic Proxy]
+    C[Source Cluster]
+    D[Migration Assistant]
+    E[Target Cluster]
+    A --> |???| B
+    B --> |???| C
+    B --> |Network Access| D
+```
+
+#### Pass through traffic
+The Traffic proxy needs to be installed between the traffic and the source cluster with whatever network configuration
+
+### Traffic Replay
+
+```mermaid
+graph LR
+    D[Migration Assistant]
+    E[Target Cluster]
+    D --> |Access Polices + Credentials| E
+```
+
+#### Replayed traffic
+The Migration Assistant needs access for network access and any credentials.  
+
 ## Infrastructure Requirements
 ### VPC Requirements
-There are certain requirements for imported and created VPCs used in this solution that come from its dependencies on other AWS services such as MSK(Kafka), OpenSearch Service, and ECS. These requirements should be met before using an imported VPC with this solution.
+There are certain requirements for imported and created VPCs used in this solution that come from its dependencies on other AWS services such as MSK(Kafka), OpenSearch Service, and ECS. These requirements should be met before using an imported VPC with this soluation.
 * At least 2 private subnets should be available which span at least 2 Availability Zones
 
 ## Getting Started
