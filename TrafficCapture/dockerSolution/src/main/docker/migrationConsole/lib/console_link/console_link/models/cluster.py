@@ -2,13 +2,14 @@ from typing import Any, Dict, Optional
 from enum import Enum
 import logging
 import subprocess
-from console_link.models.schema_tools import contains_one_of
 
 import boto3
 from cerberus import Validator
 import requests
 import requests.auth
 from requests.auth import HTTPBasicAuth
+
+from console_link.models.schema_tools import contains_one_of
 
 requests.packages.urllib3.disable_warnings()  # ignore: type
 
@@ -88,7 +89,10 @@ class Cluster:
         elif 'sigv4' in config:
             self.auth_type = AuthMethod.SIGV4
 
-    def _get_basic_auth_password(self) -> str:
+    def get_basic_auth_password(self) -> str:
+        """This method will return the basic auth password, if basic auth is enabled.
+        It will pull a password from the secrets manager if necessary.
+        """
         assert self.auth_type == AuthMethod.BASIC_AUTH
         assert self.auth_details is not None  # for mypy's sake
         if "password" in self.auth_details:
@@ -102,7 +106,7 @@ class Cluster:
     def _generate_auth_object(self) -> requests.auth.AuthBase | None:
         if self.auth_type == AuthMethod.BASIC_AUTH:
             assert self.auth_details is not None  # for mypy's sake
-            password = self._get_basic_auth_password()
+            password = self.get_basic_auth_password()
             return HTTPBasicAuth(
                 self.auth_details.get("username", None),
                 password
@@ -146,13 +150,11 @@ class Cluster:
         client_options = "verify_certs:false"
         if not self.allow_insecure:
             client_options += ",use_ssl:true"
+        password_to_censor = ""
         if self.auth_type == AuthMethod.BASIC_AUTH:
-            if self.auth_details['password'] is not None:
-                client_options += (f",basic_auth_user:{self.auth_details['username']},"
-                                   f"basic_auth_password:{self.auth_details['password']}")
-            else:
-                raise NotImplementedError(f"Auth type {self.auth_type} with AWS Secret ARN is not currently support "
-                                          f"for executing benchmark workloads")
+            password_to_censor = self.get_basic_auth_password()
+            client_options += (f",basic_auth_user:{self.auth_details['username']},"
+                               f"basic_auth_password:{password_to_censor}")
         elif self.auth_type == AuthMethod.SIGV4:
             raise NotImplementedError(f"Auth type {self.auth_type} is not currently support for executing "
                                       f"benchmark workloads")
@@ -161,5 +163,8 @@ class Cluster:
         command = (f"opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host={self.endpoint} "
                    f"--workload={workload} --pipeline=benchmark-only --test-mode --kill-running-processes "
                    f"--workload-params={workload_params} --client-options={client_options}")
-        logger.info(f"Executing command: {command}")
+        # While a little wordier, this apprach prevents us from censoring the password if it appears in other contexts,
+        # e.g. username:admin,password:admin.
+        display_command = command.replace(f"basic_auth_password:{password_to_censor}", "basic_auth_password:********")
+        logger.info(f"Executing command: {display_command}")
         subprocess.run(command, shell=True)

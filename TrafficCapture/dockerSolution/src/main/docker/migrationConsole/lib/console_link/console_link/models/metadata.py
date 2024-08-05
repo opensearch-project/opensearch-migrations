@@ -1,11 +1,11 @@
-import os
-import subprocess
 from typing import Optional
-from cerberus import Validator
 import tempfile
 import logging
 
+from cerberus import Validator
+
 from console_link.models.command_result import CommandResult
+from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.schema_tools import list_schema
 from console_link.models.cluster import AuthMethod, Cluster
 from console_link.models.snapshot import S3Snapshot, Snapshot, FileSystemSnapshot
@@ -134,80 +134,56 @@ class Metadata:
         self._repo_path = snapshot.repo_path
 
     def migrate(self, detached_log=None) -> CommandResult:
-        password_field_index = None
-        command = [
-            "/root/metadataMigration/bin/MetadataMigration",
-            # Initially populate only the required params
-            "--snapshot-name", self._snapshot_name,
-            "--target-host", self._target_cluster.endpoint,
-            "--min-replicas", str(self._min_replicas)
-        ]
+        logger.info("Starting metadata migration")
+        command_base = "/root/metadataMigration/bin/MetadataMigration"
+        command_args = {
+            "--snapshot-name": self._snapshot_name,
+            "--target-host": self._target_cluster.endpoint,
+            "--min-replicas": self._min_replicas
+        }
         if self._snapshot_location == 's3':
-            command.extend([
-                "--s3-local-dir", self._local_dir,
-                "--s3-repo-uri", self._s3_uri,
-                "--s3-region", self._aws_region,
-            ])
+            command_args.update({
+                "--s3-local-dir": self._local_dir,
+                "--s3-repo-uri": self._s3_uri,
+                "--s3-region": self._aws_region,
+            })
         elif self._snapshot_location == 'fs':
-            command.extend([
-                "--file-system-repo-path", self._repo_path,
-            ])
+            command_args.update({
+                "--file-system-repo-path": self._repo_path,
+            })
 
-        if self._target_cluster.auth_details == AuthMethod.BASIC_AUTH:
+        if self._target_cluster.auth_type == AuthMethod.BASIC_AUTH:
             try:
-                command.extend([
-                    "--target-username", self._target_cluster.auth_details.get("username"),
-                    "--target-password", self._target_cluster.auth_details.get("password")
-                ])
-                password_field_index = len(command) - 1
+                command_args.update({
+                    "--target-username": self._target_cluster.auth_details.get("username"),
+                    "--target-password": self._target_cluster.get_basic_auth_password()
+                })
                 logger.info("Using basic auth for target cluster")
             except KeyError as e:
                 raise ValueError(f"Missing required auth details for target cluster: {e}")
 
         if self._target_cluster.allow_insecure:
-            command.append("--target-insecure")
+            command_args.update({"--target-insecure": FlagOnlyArgument})
 
         if self._index_allowlist:
-            command.extend(["--index-allowlist", ",".join(self._index_allowlist)])
+            command_args.update({"--index-allowlist": ",".join(self._index_allowlist)})
 
         if self._index_template_allowlist:
-            command.extend(["--index-template-allowlist", ",".join(self._index_template_allowlist)])
+            command_args.update({"--index-template-allowlist": ",".join(self._index_template_allowlist)})
 
         if self._component_template_allowlist:
-            command.extend(["--component-template-allowlist", ",".join(self._component_template_allowlist)])
+            command_args.update({"--component-template-allowlist": ",".join(self._component_template_allowlist)})
 
         if self._otel_endpoint:
-            command.extend(["--otel-collector-endpoint", self._otel_endpoint])
+            command_args.update({"--otel-collector-endpoint": self._otel_endpoint})
 
-        if password_field_index:
-            display_command = command[:password_field_index] + ["********"] + command[password_field_index:]
-        else:
-            display_command = command
-        logger.info(f"Migrating metadata with command: {' '.join(display_command)}")
-
-        if detached_log:
-            return self._run_as_detached_process(command, detached_log)
-        return self._run_as_synchronous_process(command)
-
-    def _run_as_synchronous_process(self, command) -> CommandResult:
+        command_runner = CommandRunner(command_base, command_args,
+                                       sensitive_fields=["--target-password"],
+                                       run_as_detatched=detached_log is not None,
+                                       log_file=detached_log)
+        logger.info(f"Migrating metadata with command: {' '.join(command_runner.sanitized_command())}")
         try:
-            # Pass None to stdout and stderr to not capture output and show in terminal
-            subprocess.run(command, stdout=None, stderr=None, text=True, check=True)
-            logger.info(f"Metadata migration for snapshot {self._snapshot_name} completed")
-            return CommandResult(success=True, value="Metadata migration completed")
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to migrate metadata: {str(e)}")
-            return CommandResult(success=False, value=f"Failed to migrate metadata: {str(e)}")
-
-    def _run_as_detached_process(self, command, log_file) -> CommandResult:
-        try:
-            with open(log_file, "w") as f:
-                # Start the process in detached mode
-                process = subprocess.Popen(command, stdout=f, stderr=subprocess.STDOUT, preexec_fn=os.setpgrp)
-                logger.info(f"Metadata migration process started with PID {process.pid}")
-                logger.info(f"Metadata migration logs available at {log_file}")
-                return CommandResult(success=True, value=f"Metadata migration started with PID {process.pid}\n"
-                                     f"Logs are being written to {log_file}")
-        except subprocess.CalledProcessError as e:
-            logger.error(f"Failed to create snapshot: {str(e)}")
-            return CommandResult(success=False, value=f"Failed to migrate metadata: {str(e)}")
+            return command_runner.run()
+        except CommandRunnerError as e:
+            logger.error(f"Metadata migration failed: {e}")
+            return CommandResult(success=False, value=f"Metadata migration failed: {e}")
