@@ -6,7 +6,7 @@ set -e
 # Print our ENV variables
 if [[ $RFS_COMMAND != *"--target-password"* ]]; then
     echo "RFS_COMMAND: $RFS_COMMAND"
-else; then
+else
     echo "RFS Target Cluster password found in RFS_COMMAND; skipping logging of the value"
 fi
 
