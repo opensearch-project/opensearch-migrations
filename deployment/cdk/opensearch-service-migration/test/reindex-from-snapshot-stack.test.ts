@@ -79,6 +79,11 @@ describe('ReindexFromSnapshotStack Tests', () => {
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
       migrationAssistanceEnabled: true,
+      fineGrainedManagerUserName: "test-user",
+      fineGrainedManagerUserSecretManagerKeyARN: "arn:aws:secretsmanager:us-east-1:123456789012:secret:test-secret",
+      nodeToNodeEncryptionEnabled: true,
+      encryptionAtRestEnabled: true,
+      enforceHTTPS: true
     };
 
     const stacks = createStackComposer(contextOptions);
@@ -96,16 +101,34 @@ describe('ReindexFromSnapshotStack Tests', () => {
     expect(containerDefinitions[0].Command).toEqual([
       '/bin/sh',
       '-c',
+      '/rfs-app/entrypoint.sh'
+    ]);
+    expect(containerDefinitions[0].Environment).toEqual([
       {
-        "Fn::Join": [
-          "",
-          [ "/rfs-app/runJavaWithClasspath.sh com.rfs.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir '/lucene' --target-host ",
-            {
-              "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
-            },
+        Name: 'RFS_COMMAND',
+        Value: {
+          "Fn::Join": [
+            "",
+            [ "/rfs-app/runJavaWithClasspath.sh com.rfs.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir '/lucene' --target-host ",
+              {
+                "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
+              },
+            ],
           ],
-        ],
+        }
       },
+      {
+        Name: 'RFS_TARGET_USER',
+        Value: 'test-user'
+      },
+      {
+        Name: 'RFS_TARGET_PASSWORD',
+        Value: ''
+      },
+      {
+        Name: 'RFS_TARGET_PASSWORD_ARN',
+        Value: 'arn:aws:secretsmanager:us-east-1:123456789012:secret:test-secret'
+      }
     ]);
   });
 
@@ -156,16 +179,34 @@ describe('ReindexFromSnapshotStack Tests', () => {
     expect(containerDefinitions[0].Command).toEqual([
       '/bin/sh',
       '-c',
+      '/rfs-app/entrypoint.sh'
+    ]);
+    expect(containerDefinitions[0].Environment).toEqual([
       {
-        "Fn::Join": [
-          "",
-          [ "/rfs-app/runJavaWithClasspath.sh com.rfs.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo --s3-region us-east-1 --snapshot-name custom-snapshot --lucene-dir /lucene --target-host ",
-            {
-              "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
-            },
-            " --custom-arg value --flag"
+        Name: 'RFS_COMMAND',
+        Value: {
+          "Fn::Join": [
+            "",
+            [ "/rfs-app/runJavaWithClasspath.sh com.rfs.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo --s3-region us-east-1 --snapshot-name custom-snapshot --lucene-dir /lucene --target-host ",
+              {
+                "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
+              },
+              " --custom-arg value --flag"
+            ]
           ]
-        ]
+        }
+      },
+      {
+        Name: 'RFS_TARGET_USER',
+        Value: ''
+      },
+      {
+        Name: 'RFS_TARGET_PASSWORD',
+        Value: ''
+      },
+      {
+        Name: 'RFS_TARGET_PASSWORD_ARN',
+        Value: ''
       }
     ]);
   });

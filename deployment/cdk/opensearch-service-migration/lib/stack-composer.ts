@@ -435,6 +435,7 @@ export class StackComposer {
             reindexFromSnapshotStack = new ReindexFromSnapshotStack(scope, "reindexFromSnapshotStack", {
                 vpc: networkStack.vpc,
                 extraArgs: reindexFromSnapshotExtraArgs,
+                clusterAuthDetails: servicesYaml.target_cluster,
                 stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
                 description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
                 stage: stage,

@@ -78,6 +78,15 @@ export function parseAndMergeArgs(baseCommand: string, extraArgs?: string): stri
     return fullCommand;
 }
 
+export function getTargetPasswordAccessPolicy(targetPasswordSecretArn: string): PolicyStatement {
+    return new PolicyStatement({
+        effect: Effect.ALLOW,
+        resources: [targetPasswordSecretArn],
+        actions: [
+            "secretsmanager:GetSecretValue"
+        ]
+    })
+}
 
 export function createOpenSearchIAMAccessPolicy(partition: string, region: string, accountId: string): PolicyStatement {
     return new PolicyStatement({
