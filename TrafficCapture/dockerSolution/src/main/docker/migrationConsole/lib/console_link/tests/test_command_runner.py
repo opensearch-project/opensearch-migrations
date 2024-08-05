@@ -23,13 +23,13 @@ def test_command_runner_builds_command_with_multiple_args():
 
 
 def test_command_runner_sanitizes_input_with_password():
-    runner = CommandRunner("ls", {"-l": "/tmp", "--password": "realpassword"}, password_field="--password")
+    runner = CommandRunner("ls", {"-l": "/tmp", "--password": "realpassword"}, sensitive_fields=["--password"])
     assert runner.command == ["ls", "-l", "/tmp", "--password", "realpassword"]
     assert runner.sanitized_command() == ["ls", "-l", "/tmp", "--password", "********"]
 
 
 def test_command_runner_sanitizes_password_with_error(mocker):
-    runner = CommandRunner("ls", {"-l": "/tmp", "--password": "realpassword"}, password_field="--password")
+    runner = CommandRunner("ls", {"-l": "/tmp", "--password": "realpassword"}, sensitive_fields=["--password"])
     assert runner.command == ["ls", "-l", "/tmp", "--password", "realpassword"]
     assert runner.sanitized_command() == ["ls", "-l", "/tmp", "--password", "********"]
 

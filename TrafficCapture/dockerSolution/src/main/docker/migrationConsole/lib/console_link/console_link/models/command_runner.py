@@ -1,25 +1,29 @@
 import subprocess
 import os
 import logging
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from console_link.models.command_result import CommandResult
 
 
 logger = logging.getLogger(__name__)
 
+FlagOnlyArgument = None
+
 
 class CommandRunner:
-    def __init__(self, command_root: str, command_args: Dict[str, str], password_field: Optional[str] = None,
+    def __init__(self, command_root: str, command_args: Dict[str, Any], sensitive_fields: Optional[List[str]] = None,
                  run_as_detatched: bool = False, log_file: Optional[str] = None):
         self.command_args = command_args
         self.command = [command_root]
         for key, value in command_args.items():
             self.command.append(key)
-            if value is not None:
+            if value is not FlagOnlyArgument:
+                if type(value) is not str:
+                    value = str(value)
                 self.command.append(value)
 
-        self.password_field = password_field
+        self.sensitive_fields = sensitive_fields
         self.run_as_detached = run_as_detatched
         self.log_file = log_file
 
@@ -29,11 +33,15 @@ class CommandRunner:
         return self._run_as_synchronous_process()
 
     def sanitized_command(self) -> List[str]:
-        if (not self.password_field) or (self.password_field not in self.command_args):
+        if not self.sensitive_fields:
             return self.command
         # Check whether the value of the password field is in the command
-        password_index = self.command.index(self.command_args[self.password_field])
-        return self.command[:password_index] + ["*" * 8] + self.command[password_index + 1:]
+        display_command = self.command.copy()
+        for field in self.sensitive_fields:
+            if field in display_command:
+                password_index = display_command.index(self.command_args[field])
+                display_command[password_index] = "*" * 8
+        return display_command
 
     def _run_as_synchronous_process(self) -> CommandResult:
         try:

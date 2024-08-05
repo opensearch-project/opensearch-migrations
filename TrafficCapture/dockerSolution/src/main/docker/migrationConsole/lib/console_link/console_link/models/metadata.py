@@ -5,7 +5,7 @@ import logging
 from cerberus import Validator
 
 from console_link.models.command_result import CommandResult
-from console_link.models.command_runner import CommandRunner, CommandRunnerError
+from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.schema_tools import list_schema
 from console_link.models.cluster import AuthMethod, Cluster
 from console_link.models.snapshot import S3Snapshot, Snapshot, FileSystemSnapshot
@@ -139,7 +139,7 @@ class Metadata:
         command_args = {
             "--snapshot-name": self._snapshot_name,
             "--target-host": self._target_cluster.endpoint,
-            "--min-replicas": str(self._min_replicas)
+            "--min-replicas": self._min_replicas
         }
         if self._snapshot_location == 's3':
             command_args.update({
@@ -163,7 +163,7 @@ class Metadata:
                 raise ValueError(f"Missing required auth details for target cluster: {e}")
 
         if self._target_cluster.allow_insecure:
-            command_args.update({"--target-insecure": None})
+            command_args.update({"--target-insecure": FlagOnlyArgument})
 
         if self._index_allowlist:
             command_args.update({"--index-allowlist": ",".join(self._index_allowlist)})
@@ -178,7 +178,7 @@ class Metadata:
             command_args.update({"--otel-collector-endpoint": self._otel_endpoint})
 
         command_runner = CommandRunner(command_base, command_args,
-                                       password_field="--target-password",
+                                       sensitive_fields=["--target-password"],
                                        run_as_detatched=detached_log is not None,
                                        log_file=detached_log)
         logger.info(f"Migrating metadata with command: {' '.join(command_runner.sanitized_command())}")

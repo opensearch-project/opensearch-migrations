@@ -7,7 +7,7 @@ from typing import Dict, Optional
 from cerberus import Validator
 from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
-from console_link.models.command_runner import CommandRunner, CommandRunnerError
+from console_link.models.command_runner import CommandRunner, CommandRunnerError, FlagOnlyArgument
 from console_link.models.schema_tools import contains_one_of
 
 logger = logging.getLogger(__name__)
@@ -121,11 +121,11 @@ class S3Snapshot(Snapshot):
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
 
         if not wait:
-            command_args["--no-wait"] = None
+            command_args["--no-wait"] = FlagOnlyArgument
         if max_snapshot_rate_mb_per_node is not None:
-            command_args["--max-snapshot-rate-mb-per-node"] = str(max_snapshot_rate_mb_per_node)
+            command_args["--max-snapshot-rate-mb-per-node"] = max_snapshot_rate_mb_per_node
 
-        command_runner = CommandRunner(base_command, command_args, password_field="--source-password")
+        command_runner = CommandRunner(base_command, command_args, sensitive_fields=["--source-password"])
         try:
             command_runner.run()
             logger.info(f"Snapshot {self.config['snapshot_name']} created successfully")
@@ -160,9 +160,9 @@ class FileSystemSnapshot(Snapshot):
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
 
         if max_snapshot_rate_mb_per_node is not None:
-            command_args["--max-snapshot-rate-mb-per-node"] = str(max_snapshot_rate_mb_per_node)
+            command_args["--max-snapshot-rate-mb-per-node"] = max_snapshot_rate_mb_per_node
 
-        command_runner = CommandRunner(base_command, command_args, password_field="--source-password")
+        command_runner = CommandRunner(base_command, command_args, sensitive_fields=["--source-password"])
         try:
             command_runner.run()
             logger.info(f"Snapshot {self.config['snapshot_name']} created successfully")
