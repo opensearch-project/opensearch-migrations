@@ -83,8 +83,7 @@ export function getTargetPasswordAccessPolicy(targetPasswordSecretArn: string): 
         effect: Effect.ALLOW,
         resources: [targetPasswordSecretArn],
         actions: [
-            "secretsmanager:GetSecretValue",
-            "secretsmanager:DescribeSecret"
+            "secretsmanager:GetSecretValue"
         ]
     })
 }
