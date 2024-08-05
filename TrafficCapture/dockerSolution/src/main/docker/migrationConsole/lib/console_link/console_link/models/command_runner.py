@@ -35,12 +35,13 @@ class CommandRunner:
     def sanitized_command(self) -> List[str]:
         if not self.sensitive_fields:
             return self.command
-        # Check whether the value of the password field is in the command
         display_command = self.command.copy()
         for field in self.sensitive_fields:
             if field in display_command:
-                password_index = display_command.index(self.command_args[field])
-                display_command[password_index] = "*" * 8
+                field_index = display_command.index(field)
+                if len(display_command) > (field_index + 1) and \
+                        display_command[field_index + 1] == self.command_args[field]:
+                    display_command[field_index + 1] = "*" * 8
         return display_command
 
     def _run_as_synchronous_process(self) -> CommandResult:
