@@ -13,7 +13,7 @@ from console_link.models.replayer_base import Replayer, ReplayStatus
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_INDEX_IGNORE_LIST = ["test_", ".", "searchguard", "sg7", "security-auditlog"]
+DEFAULT_INDEX_IGNORE_LIST = ["test_", ".", "searchguard", "sg7", "security-auditlog", "reindexed-logs"]
 
 EXPECTED_BENCHMARK_DOCS = {
     "geonames": {"docs.count": "1000"},
@@ -25,7 +25,6 @@ EXPECTED_BENCHMARK_DOCS = {
     "logs-201998": {"docs.count": "1000"},
     "logs-191998": {"docs.count": "1000"},
     "sonested": {"docs.count": "2977"},
-    "reindexed-logs": {"docs.count": "0"},
     "nyc_taxis": {"docs.count": "1000"}
 }
 

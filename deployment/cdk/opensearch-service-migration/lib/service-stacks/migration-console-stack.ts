@@ -8,6 +8,7 @@ import {
     createMigrationStringParameter,
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy,
+    getTargetPasswordAccessPolicy,
     getMigrationStringParameterValue,
     hashStringSHA256,
     MigrationSSMParameter
@@ -256,13 +257,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
-        const getSecretsPolicy = props.servicesYaml.target_cluster.basic_auth?.password_from_secret_arn ? new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: [props.servicesYaml.target_cluster.basic_auth?.password_from_secret_arn],
-            actions: [
-                "secretsmanager:GetSecretValue"
-            ]
-        }) : null;
+        const getSecretsPolicy = props.servicesYaml.target_cluster.basic_auth?.password_from_secret_arn ? 
+            getTargetPasswordAccessPolicy(props.servicesYaml.target_cluster.basic_auth.password_from_secret_arn) : null;
 
         // Upload the services.yaml file to Parameter Store
         let servicesYaml = props.servicesYaml
