@@ -39,31 +39,11 @@ These tables list all CDK context configuration values a user can specify for th
 | dpPipelineTemplatePath         | string  | "path/to/config.yaml"                                 | Path to a local Data Prepper pipeline configuration YAML file that Fetch Migration will use to derive source and target cluster endpoints and other settings. Default value is the included template file i.e. [dp_pipeline_template.yaml](dp_pipeline_template.yaml) |
 
 ### Reindex from Snapshot (RFS) Service Options
-| Name                              | Type    | Example                                                              | Description                                                                                                                                   |
-|-----------------------------------|---------|----------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------|
-| reindexFromSnapshotServiceEnabled | boolean | true                                                                 | Create resources for deploying and configuring the RFS ECS service                                                                            |
-| reindexFromSnapshotExtraArgs      | string  | "--target-aws-region us-east-1 --target-aws-service-signing-name es" | Extra arguments to provide to the Document Migration command with space separation. See RFS Extra Arguments below for available options. [^1] |
-| sourceClusterEndpoint             | string  | `"https://source-cluster.elb.us-east-1.endpoint.com"`                | The endpoint for the source cluster from which RFS will take a snapshot                                                                       |
-
-#### RFS Extra Arguments 
-| Argument                          | Description                                                                                                                                             |
-|-----------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------|
-| --snapshot-name                   | The name of the snapshot to migrate                                                                                                                     |
-| --snapshot-local-dir              | The absolute path to the directory on local disk where the snapshot exists                                                                              |
-| --s3-local-dir                    | The absolute path to the directory on local disk to download S3 files to                                                                                |
-| --s3-repo-uri                     | The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2                                                                                         |
-| --s3-region                       | The AWS Region the S3 bucket is in, like: us-east-2                                                                                                     |
-| --lucene-dir                      | The absolute path to the directory where we'll put the Lucene docs                                                                                      |
-| --index-allowlist                 | The list of index names to migrate (e.g. 'logs_2024_01, logs_2024_02')                                                                                  |
-| --max-shard-size-bytes            | The maximum shard size in bytes to allow when performing the document migration                                                                         |
-| --max-initial-lease-duration      | The maximum time for the first attempt to migrate a shard's documents                                                                                   |
-| --otel-collector-endpoint         | The endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be forwarded                                                      |
-| --target-host                     | The target host and port (e.g. http://localhost:9200)                                                                                                   |
-| --target-username                 | The username for target cluster authentication                                                                                                          |
-| --target-password                 | The password for target cluster authentication                                                                                                          |
-| --target-aws-region               | The AWS region for the target cluster. Required if using SigV4 authentication                                                                           |
-| --target-aws-service-signing-name | The AWS service signing name (e.g. 'es' for Amazon OpenSearch Service, 'aoss' for Amazon OpenSearch Serverless). Required if using SigV4 authentication |
-| --target-insecure                 | Flag to allow untrusted SSL certificates for target cluster                                                                                             |
+| Name                              | Type    | Example                                                              | Description                                                                                                                                                                |
+|-----------------------------------|---------|----------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| reindexFromSnapshotServiceEnabled | boolean | true                                                                 | Create resources for deploying and configuring the RFS ECS service                                                                                                         |
+| reindexFromSnapshotExtraArgs      | string  | "--target-aws-region us-east-1 --target-aws-service-signing-name es" | Extra arguments to provide to the Document Migration command with space separation. See [RFS Arguments](../../../DocumentsFromSnapshotMigration/README.md#Arguments). [^1] |
+| sourceClusterEndpoint             | string  | `"https://source-cluster.elb.us-east-1.endpoint.com"`                | The endpoint for the source cluster from which RFS will take a snapshot                                                                                                    |
 
 ### OpenSearch Domain Options
 | Name                                            | Type         | Example                                                                                                                                                                                                                      | Description                                                                                                                                                                                                                                                  |
