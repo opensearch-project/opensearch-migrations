@@ -2,10 +2,7 @@
 FROM amazoncorretto:11-al2023-headless
 
 # Install the AWS CLI in the container
-RUN yum update -y && yum install -y unzip
-RUN curl "https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" -o "awscliv2.zip" && \
-    unzip awscliv2.zip && \
-    ./aws/install
+RUN dnf update -y && dnf install -y aws-cli
 
 # Requires Gradle to genearte runtime jars initially
 COPY ./build/runtimeJars /rfs-app/jars

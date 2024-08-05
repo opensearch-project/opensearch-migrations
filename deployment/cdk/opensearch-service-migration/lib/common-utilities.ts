@@ -78,7 +78,7 @@ export function parseAndMergeArgs(baseCommand: string, extraArgs?: string): stri
     return fullCommand;
 }
 
-export function createTargetPasswordAccessPolicy(targetPasswordSecretArn: string): PolicyStatement {
+export function getTargetPasswordAccessPolicy(targetPasswordSecretArn: string): PolicyStatement {
     return new PolicyStatement({
         effect: Effect.ALLOW,
         resources: [targetPasswordSecretArn],

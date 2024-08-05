@@ -9,7 +9,7 @@ import {
     MigrationSSMParameter,
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy,
-    createTargetPasswordAccessPolicy,
+    getTargetPasswordAccessPolicy,
     getMigrationStringParameterValue,
     parseAndMergeArgs
 } from "../common-utilities";
@@ -83,7 +83,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         let servicePolicies = [artifactS3PublishPolicy, openSearchPolicy, openSearchServerlessPolicy];
 
         const getSecretsPolicy = props.clusterAuthDetails.basic_auth?.password_from_secret_arn ? 
-            createTargetPasswordAccessPolicy(props.clusterAuthDetails.basic_auth.password_from_secret_arn) : null;
+            getTargetPasswordAccessPolicy(props.clusterAuthDetails.basic_auth.password_from_secret_arn) : null;
         if (getSecretsPolicy) {
             servicePolicies.push(getSecretsPolicy);
         }
