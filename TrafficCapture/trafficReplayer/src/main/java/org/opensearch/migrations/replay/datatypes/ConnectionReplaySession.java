@@ -1,6 +1,8 @@
 package org.opensearch.migrations.replay.datatypes;
 
 import java.io.IOException;
+import java.time.Duration;
+import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -25,7 +27,18 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ConnectionReplaySession {
 
-    private static final int MAX_CHANNEL_CREATE_RETRIES = 16;
+    /**
+     * This value is only applicable for retrying exception issues when creating a socket that were
+     * NOT of type java.net.SocketException.  Socket Exceptions will be retried repeatedly.  This is
+     * intentional so that the messages that are being attempted won't finish with an error,
+     * especially due to a misconfiguration on the client or on the server.
+     *
+     * NB/TODO - IS THIS THE RIGHT THING TO DO?  I suspect NOT because not getting a connection for
+     * any reason still means that you don't want it to propagate up and cause the replayer to
+     * consume the messages from the message stream.
+     */
+    private static final int MAX_RETRIES = 4;
+    private static final Duration MAX_WAIT_BETWEEN_CREATE_RETRIES = Duration.ofSeconds(30);
 
     /**
      * We need to store this separately from the channelFuture because the channelFuture itself is
@@ -58,31 +71,34 @@ public class ConnectionReplaySession {
     public TrackedFuture<String, ChannelFuture> getFutureThatReturnsChannelFutureInAnyState(
         boolean requireActiveChannel
     ) {
-        TextTrackedFuture<ChannelFuture> eventLoopFuture = new TextTrackedFuture<>("procuring a connection");
+        TextTrackedFuture<ChannelFuture> eventLoopTrigger = new TextTrackedFuture<>("procuring a connection");
         eventLoop.submit(() -> {
             if (!requireActiveChannel || (cachedChannel != null && cachedChannel.channel().isActive())) {
-                eventLoopFuture.future.complete(cachedChannel);
+                eventLoopTrigger.future.complete(cachedChannel);
             } else {
-                createNewChannelFuture(requireActiveChannel, eventLoopFuture);
+                createNewChannelFuture(requireActiveChannel, eventLoopTrigger);
             }
         });
-        return eventLoopFuture;
+        return eventLoopTrigger;
     }
 
     private void createNewChannelFuture(
         boolean requireActiveChannel,
-        TextTrackedFuture<ChannelFuture> eventLoopFuture
+        TextTrackedFuture<ChannelFuture> eventLoopTrigger
     ) {
-        createNewChannelFuture(requireActiveChannel, MAX_CHANNEL_CREATE_RETRIES, eventLoopFuture);
+        createNewChannelFuture(requireActiveChannel, MAX_RETRIES, eventLoopTrigger, Duration.ofMillis(1));
     }
 
     private void createNewChannelFuture(
-        boolean requireActiveChannel,
+        boolean requireActive,
         int retries,
-        TextTrackedFuture<ChannelFuture> eventLoopFuture
+        TextTrackedFuture<ChannelFuture> eventLoopTrigger,
+        Duration waitBetweenRetryDuration
     ) {
-        channelFutureFutureFactory.get().future.whenComplete((v, t) -> {
-            if (requireActiveChannel && retries > 0 && (t == null || exceptionIsRetryable(t))) {
+        channelFutureFutureFactory.get().future.whenComplete((v, tWrapped) -> {
+            var t = TrackedFuture.unwindPossibleCompletionException(tWrapped);
+            if (requireActive &&
+                ((t == null || exceptionIsRetryable(t)) && retries > 0)) {
                 if (t != null || !v.channel().isActive()) {
                     if (t != null) {
                         channelKeyContext.addCaughtException(t);
@@ -91,16 +107,22 @@ public class ConnectionReplaySession {
                             .setCause(t)
                             .log();
                     }
-                    createNewChannelFuture(requireActiveChannel, retries - 1, eventLoopFuture);
+                    var retriesLeft = retries - (t instanceof java.net.SocketException ? 0 : 1);
+                    var doubledDuration = waitBetweenRetryDuration.multipliedBy(2);
+                    var w = MAX_WAIT_BETWEEN_CREATE_RETRIES.minus(doubledDuration).isNegative()
+                        ? MAX_WAIT_BETWEEN_CREATE_RETRIES
+                        : doubledDuration;
+                    eventLoop.schedule(() -> createNewChannelFuture(requireActive, retriesLeft, eventLoopTrigger, w),
+                        w.toMillis(), TimeUnit.MILLISECONDS);
                 } else {
                     cachedChannel = v;
-                    eventLoopFuture.future.complete(v);
+                    eventLoopTrigger.future.complete(v);
                 }
             } else if (t != null) {
                 channelKeyContext.addTraceException(t, true);
-                eventLoopFuture.future.completeExceptionally(t);
+                eventLoopTrigger.future.completeExceptionally(t);
             } else {
-                eventLoopFuture.future.complete(v);
+                eventLoopTrigger.future.complete(v);
             }
         });
     }

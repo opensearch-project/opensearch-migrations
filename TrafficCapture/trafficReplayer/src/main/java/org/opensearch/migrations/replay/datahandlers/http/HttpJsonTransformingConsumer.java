@@ -144,7 +144,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
         return offloadingHandler.getPacketReceiverCompletionFuture().getDeferredFutureThroughHandle((v, t) -> {
             if (t != null) {
                 transformationContext.onTransformFailure();
-                t = unwindPossibleCompletionException(t);
+                t = TrackedFuture.unwindPossibleCompletionException(t);
                 if (t instanceof NoContentException) {
                     return redriveWithoutTransformation(offloadingHandler.packetReceiver, t);
                 } else {
@@ -157,13 +157,6 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
                 return TextTrackedFuture.completedFuture(v, () -> "transformedHttpMessageValue");
             }
         }, () -> "HttpJsonTransformingConsumer.finalizeRequest() is waiting to handle");
-    }
-
-    private static Throwable unwindPossibleCompletionException(Throwable t) {
-        while (t instanceof CompletionException) {
-            t = t.getCause();
-        }
-        return t;
     }
 
     private TrackedFuture<String, TransformedOutputAndResult<R>> redriveWithoutTransformation(

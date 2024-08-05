@@ -16,6 +16,7 @@ import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.util.TextTrackedFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -25,12 +26,13 @@ import io.netty.buffer.Unpooled;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 
 import static org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest.REGULAR_RESPONSE_TIMEOUT;
 
 @Slf4j
-@WrapWithNettyLeakDetection
+@WrapWithNettyLeakDetection()
 public class HttpRetryTest {
 
     private ByteBufList makeRequest() {
@@ -48,7 +50,10 @@ public class HttpRetryTest {
         return new SimpleHttpResponse(Map.of(), null, "Not Found", 404);
     }
 
-    private TransformedTargetRequestAndResponseList getResponseList(URI testServerUri) throws Exception {
+    private TrackedFuture<String, TransformedTargetRequestAndResponseList>
+    getResponseList(URI testServerUri)
+        throws Exception
+    {
         try (var rootContext = TestContext.noOtelTracking()) {
             var retryFactory = new RetryCollectingVisitorFactory(new DefaultRetry());
             var clientConnectionPool = TrafficReplayerTopLevel.makeClientConnectionPool(
@@ -71,7 +76,7 @@ public class HttpRetryTest {
                 TextTrackedFuture.completedFuture(new RetryTestUtils.TestRequestResponsePair(sourceResponseBytes),
                     () -> "static rrp"));
             log.info("Scheduling item to run at " + startTimeForThisRequest);
-            var responseFuture = senderOrchestrator.scheduleRequest(
+            return senderOrchestrator.scheduleRequest(
                 requestContext.getReplayerRequestKey(),
                 requestContext,
                 startTimeForThisRequest,
@@ -79,7 +84,6 @@ public class HttpRetryTest {
                 sourceRequestPackets,
                 retryVisitor
             );
-            return Assertions.assertDoesNotThrow(() -> responseFuture.get());
         }
     }
 
@@ -95,7 +99,8 @@ public class HttpRetryTest {
                     : makeTransientErrorResponse(Duration.ofMillis(100))
             );
         ) {
-            return getResponseList(httpServer.localhostEndpoint());
+            var responseFuture = getResponseList(httpServer.localhostEndpoint());
+            return Assertions.assertDoesNotThrow(() -> responseFuture.get());
         }
     }
 
@@ -124,13 +129,23 @@ public class HttpRetryTest {
             .allMatch(c -> 404 == c));
     }
 
+    @Disabled
+    @Test
+    @WrapWithNettyLeakDetection(disableLeakChecks = true) // code is forcibly terminated so leaks are expected
     public void testConnectionFailuresNeverGiveUp() throws Exception {
-        var response = runServerAndGetResponse(DefaultRetry.MAX_RETRIES+2);
-        Assertions.assertNotNull(response.responses());
-        Assertions.assertFalse(response.responses().isEmpty());
-        Assertions.assertEquals(DefaultRetry.MAX_RETRIES+1, response.responses().size());
-        Assertions.assertTrue(response.responses().stream()
-            .map(r -> r.getRawResponse().status().code())
-            .allMatch(c -> 404 == c));
+        URI serverUri;
+        try (var server = SimpleHttpServer.makeServer(false, r -> makeTransientErrorResponse(Duration.ZERO))) {
+            // do nothing but close it back down
+            serverUri = server.localhostEndpoint();
+        }
+
+        var responseFuture = getResponseList(serverUri);
+        var e = Assertions.assertThrows(Exception.class, responseFuture::get);
+        log.atInfo().setCause(e).setMessage(()->"exception: ").log();
+//        Assertions.assertFalse(response.responses().isEmpty());
+//        Assertions.assertEquals(DefaultRetry.MAX_RETRIES+1, response.responses().size());
+//        Assertions.assertTrue(response.responses().stream()
+//            .map(r -> r.getRawResponse().status().code())
+//            .allMatch(c -> 404 == c));
     }
 }
