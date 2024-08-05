@@ -10,12 +10,12 @@ import {
     createMSKConsumerIAMPolicies,
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy,
-    getMigrationStringParameterValue, parseAndMergeArgs
+    getMigrationStringParameterValue, getTargetPasswordAccessPolicy, parseAndMergeArgs
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
 import { Duration } from "aws-cdk-lib";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
-import { ECSReplayerYaml } from "../migration-services-yaml";
+import { ClusterYaml, ECSReplayerYaml } from "../migration-services-yaml";
 
 
 export interface TrafficReplayerProps extends StackPropsExt {
@@ -28,7 +28,8 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly userAgentSuffix?: string,
     readonly extraArgs?: string,
     readonly otelCollectorEnabled?: boolean,
-    readonly maxUptime?: Duration
+    readonly maxUptime?: Duration,
+    readonly clusterAuthDetails: ClusterYaml
 }
 
 export class TrafficReplayerStack extends MigrationServiceCore {
@@ -76,17 +77,17 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             ]
         })
 
-        const secretAccessPolicy = new PolicyStatement({
-            effect: Effect.ALLOW,
-            resources: ["*"],
-            actions: [
-                "secretsmanager:GetSecretValue",
-                "secretsmanager:DescribeSecret"
-            ]
-        })
+        const getSecretsPolicy = props.clusterAuthDetails.basic_auth?.password_from_secret_arn ? 
+            getTargetPasswordAccessPolicy(props.clusterAuthDetails.basic_auth.password_from_secret_arn) : null;
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
-        let servicePolicies = [replayerOutputMountPolicy, secretAccessPolicy, openSearchPolicy, openSearchServerlessPolicy]
+
+        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy]
+        if (getSecretsPolicy) {
+            servicePolicies.push(getSecretsPolicy)
+        }
+
+
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskConsumerPolicies = createMSKConsumerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskConsumerPolicies)
