@@ -8,6 +8,7 @@
     "domainRemovalPolicy": "DESTROY",
     "artifactBucketRemovalPolicy": "DESTROY",
     "enableDemoAdmin": true,
+    "trafficReplayerServiceEnabled": true,
     "trafficReplayerEnableClusterFGACAuth": true,
     "captureProxyESServiceEnabled": true,
     "reindexFromSnapshotEnabled": true,

@@ -211,10 +211,10 @@ def test_fs_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
 
     mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
                                   "--snapshot-name", config["snapshot"]["snapshot_name"],
-                                  "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
                                   "--source-host", source.endpoint,
                                   "--source-insecure",
                                   "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
+                                  "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
                                   ], stdout=None, stderr=None, text=True, check=True)
 
 
@@ -237,16 +237,16 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
 
     mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
                                   "--snapshot-name", config["snapshot"]["snapshot_name"],
+                                  "--source-host", source.endpoint,
+                                  "--source-insecure",
+                                  "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
                                   "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
                                   "--s3-region", config["snapshot"]["s3"]["aws_region"],
-                                  "--source-host", source.endpoint,
-                                  "--source-insecure", "--no-wait",
-                                  "--otel-collector-endpoint", config["snapshot"]["otel_endpoint"],
+                                  "--no-wait",
                                   ], stdout=None, stderr=None, text=True, check=True)
 
 
-@pytest.mark.parametrize("source_auth", [(AuthMethod.BASIC_AUTH)])
-def test_s3_snapshot_create_fails_for_clusters_with_auth(source_auth):
+def test_s3_snapshot_create_fails_for_clusters_with_auth(mocker):
     config = {
         "snapshot": {
             "snapshot_name": "reindex_from_snapshot",
@@ -256,14 +256,22 @@ def test_s3_snapshot_create_fails_for_clusters_with_auth(source_auth):
             },
         }
     }
-    snapshot = S3Snapshot(config["snapshot"], create_valid_cluster(auth_type=source_auth))
-    with pytest.raises(NotImplementedError) as excinfo:
-        snapshot.create()
-    assert "authentication is not supported" in str(excinfo.value.args[0])
+    snapshot = S3Snapshot(config["snapshot"], create_valid_cluster(auth_type=AuthMethod.BASIC_AUTH))
+    mock = mocker.patch("subprocess.run")
+    snapshot.create()
+    mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
+                                  "--snapshot-name", config["snapshot"]["snapshot_name"],
+                                  "--source-host", snapshot.source_cluster.endpoint,
+                                  "--source-username", snapshot.source_cluster.auth_details.get("username"),
+                                  "--source-password", snapshot.source_cluster.get_basic_auth_password(),
+                                  "--source-insecure",
+                                  "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
+                                  "--s3-region", config["snapshot"]["s3"]["aws_region"],
+                                  "--no-wait"
+                                  ], stdout=None, stderr=None, text=True, check=True)
 
 
-@pytest.mark.parametrize("source_auth", [(AuthMethod.BASIC_AUTH)])
-def test_fs_snapshot_create_fails_for_clusters_with_auth(source_auth):
+def test_fs_snapshot_create_fails_for_clusters_with_auth(mocker):
     config = {
         "snapshot": {
             "snapshot_name": "reindex_from_snapshot",
@@ -272,7 +280,14 @@ def test_fs_snapshot_create_fails_for_clusters_with_auth(source_auth):
             },
         }
     }
-    with pytest.raises(NotImplementedError) as excinfo:
-        snapshot = FileSystemSnapshot(config["snapshot"], create_valid_cluster(auth_type=source_auth))
-        snapshot.create()
-    assert "authentication is not supported" in str(excinfo.value.args[0])
+    snapshot = FileSystemSnapshot(config["snapshot"], create_valid_cluster(auth_type=AuthMethod.BASIC_AUTH))
+    mock = mocker.patch("subprocess.run")
+    snapshot.create()
+    mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
+                                  "--snapshot-name", config["snapshot"]["snapshot_name"],
+                                  "--source-host", snapshot.source_cluster.endpoint,
+                                  "--source-username", snapshot.source_cluster.auth_details.get("username"),
+                                  "--source-password", snapshot.source_cluster.get_basic_auth_password(),
+                                  "--source-insecure",
+                                  "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
+                                  ], stdout=None, stderr=None, text=True, check=True)

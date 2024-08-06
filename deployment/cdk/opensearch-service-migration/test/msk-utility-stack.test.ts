@@ -21,6 +21,7 @@ describe('MSKUtilityStack Tests', () => {
     const contextOptions = {
       vpcEnabled: true,
       migrationAssistanceEnabled: true,
+      trafficReplayerServiceEnabled: true,
       mskEnablePublicEndpoints: true,
       mskRestrictPublicAccessTo: "10.0.0.0/32",
       mskRestrictPublicAccessType: "ipv4",
@@ -49,6 +50,7 @@ describe('MSKUtilityStack Tests', () => {
     const contextOptions = {
       vpcEnabled: true,
       migrationAssistanceEnabled: true,
+      trafficReplayerServiceEnabled: true,
       sourceClusterEndpoint: "https://test-cluster",
     }
 

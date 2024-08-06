@@ -234,7 +234,14 @@ export class StackComposer {
         }
 
         const fargateCpuArch = validateFargateCpuArch(defaultFargateCpuArch)
-        const streamingSourceType = determineStreamingSourceType(kafkaBrokerServiceEnabled)
+
+        let streamingSourceType
+        if (captureProxyServiceEnabled || captureProxyESServiceEnabled || trafficReplayerServiceEnabled || kafkaBrokerServiceEnabled) {
+            streamingSourceType = determineStreamingSourceType(kafkaBrokerServiceEnabled)
+        } else {
+            console.log("MSK is not enabled and will not be deployed.")
+            streamingSourceType = StreamingSourceType.DISABLED
+        }
 
         const engineVersion = this.getContextForType('engineVersion', 'string', defaultValues, contextJSON)
         version = this.getEngineVersion(engineVersion)
@@ -277,6 +284,8 @@ export class StackComposer {
                 targetClusterProxyServiceEnabled,
                 migrationAPIEnabled,
                 sourceClusterEndpoint: sourceClusterEndpoint,
+                targetClusterUsername: fineGrainedManagerUserName,
+                targetClusterPasswordSecretArn: fineGrainedManagerUserSecretManagerKeyARN,
                 env: props.env
             })
             this.stacks.push(networkStack)

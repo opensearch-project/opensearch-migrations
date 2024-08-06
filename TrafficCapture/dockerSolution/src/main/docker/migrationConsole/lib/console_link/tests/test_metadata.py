@@ -278,3 +278,35 @@ def test_metadata_migrate_detached_makes_correct_subprocess_call(mocker):
     metadata.migrate(detached_log="/tmp/log_file.log")
 
     mock.assert_called_once()
+
+
+def test_metadata_with_target_config_auth_makes_correct_subprocess_call(mocker):
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "local_dir": "/tmp/s3",
+            "s3": {
+                "repo_uri": "s3://my-bucket",
+                "aws_region": "us-east-1"
+            },
+        }
+    }
+    target = create_valid_cluster(auth_type=AuthMethod.BASIC_AUTH)
+    metadata = Metadata(config, target, None)
+
+    mock = mocker.patch("subprocess.run")
+    metadata.migrate()
+
+    mock.assert_called_once_with([
+        "/root/metadataMigration/bin/MetadataMigration",
+        "--snapshot-name", config["from_snapshot"]["snapshot_name"],
+        "--target-host", target.endpoint,
+        "--min-replicas", '0',
+        "--s3-local-dir", config["from_snapshot"]["local_dir"],
+        "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
+        "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
+        "--target-username", target.auth_details.get("username"),
+        "--target-password", target.get_basic_auth_password(),
+        "--target-insecure",
+    ], stdout=None, stderr=None, text=True, check=True
+    )
