@@ -16,16 +16,16 @@ logger = logging.getLogger(__name__)
 DEFAULT_INDEX_IGNORE_LIST = ["test_", ".", "searchguard", "sg7", "security-auditlog", "reindexed-logs"]
 
 EXPECTED_BENCHMARK_DOCS = {
-    "geonames": {"count": "1000"},
-    "logs-221998": {"count": "1000"},
-    "logs-211998": {"count": "1000"},
-    "logs-231998": {"count": "1000"},
-    "logs-241998": {"count": "1000"},
-    "logs-181998": {"count": "1000"},
-    "logs-201998": {"count": "1000"},
-    "logs-191998": {"count": "1000"},
-    "sonested": {"count": "1000"},
-    "nyc_taxis": {"count": "1000"}
+    "geonames": {"count": 1000},
+    "logs-221998": {"count": 1000},
+    "logs-211998": {"count": 1000},
+    "logs-231998": {"count": 1000},
+    "logs-241998": {"count": 1000},
+    "logs-181998": {"count": 1000},
+    "logs-201998": {"count": 1000},
+    "logs-191998": {"count": 1000},
+    "sonested": {"count": 1000},
+    "nyc_taxis": {"count": 1000}
 }
 
 
