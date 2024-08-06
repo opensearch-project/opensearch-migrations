@@ -128,7 +128,8 @@ def get_all_index_details(cluster: Cluster, index_prefix_ignore_list=None, **kwa
         valid_index = not index_matches_ignored_index(index_name,
                                                       index_prefix_ignore_list=index_prefix_ignore_list)
         if index_prefix_ignore_list is None or valid_index:
-            index_dict[index_name] = execute_api_call(cluster=cluster, path=f"/{index_name}/_count?format=json", **kwargs).json()
+            count_response = execute_api_call(cluster=cluster, path=f"/{index_name}/_count?format=json", **kwargs)
+            index_dict[index_name] = count_response.json()
     return index_dict
 
 
