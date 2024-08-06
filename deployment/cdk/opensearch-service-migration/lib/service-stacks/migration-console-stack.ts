@@ -153,10 +153,11 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ...props,
             parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
         });
-        const brokerEndpoints = getMigrationStringParameterValue(this, {
-            ...props,
-            parameter: MigrationSSMParameter.KAFKA_BROKERS,
-        });
+        const brokerEndpoints = props.streamingSourceType != StreamingSourceType.DISABLED ?
+            getMigrationStringParameterValue(this, {
+                ...props,
+                parameter: MigrationSSMParameter.KAFKA_BROKERS,
+            }) : "";
 
         const volumeName = "sharedReplayerOutputVolume"
         const volumeId = getMigrationStringParameterValue(this, {

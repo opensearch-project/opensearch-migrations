@@ -45,6 +45,7 @@ def migration_cdk_context = """
         "openAccessPolicyEnabled": true,
         "domainRemovalPolicy": "DESTROY",
         "artifactBucketRemovalPolicy": "DESTROY",
+        "trafficReplayerServiceEnabled": true,
         "trafficReplayerExtraArgs": "--speedup-factor 10.0",
         "fetchMigrationEnabled": true,
         "reindexFromSnapshotServiceEnabled": true,
