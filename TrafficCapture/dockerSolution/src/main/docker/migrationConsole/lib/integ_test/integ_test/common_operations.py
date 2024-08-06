@@ -155,8 +155,8 @@ def check_doc_counts_match(cluster: Cluster,
         else:
             for index_details in actual_index_details.values():
                 index_name = index_details['index']
-                actual_doc_count = index_details['docs.count']
-                expected_doc_count = expected_index_details[index_name]['docs.count']
+                actual_doc_count = index_details['count']
+                expected_doc_count = expected_index_details[index_name]['count']
                 if actual_doc_count != expected_doc_count:
                     error_message = (f"Index {index_name} has {actual_doc_count} documents but {expected_doc_count} "
                                      f"were expected")
