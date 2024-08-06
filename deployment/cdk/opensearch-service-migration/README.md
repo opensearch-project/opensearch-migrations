@@ -315,6 +315,7 @@ To give an example of this process, a user could decide to configure an addition
     "openAccessPolicyEnabled": true,
     "domainRemovalPolicy": "DESTROY",
     "enableDemoAdmin": true,
+    "trafficReplayerServiceEnabled": true,
     "trafficReplayerEnableClusterFGACAuth": true
   }
 ```
