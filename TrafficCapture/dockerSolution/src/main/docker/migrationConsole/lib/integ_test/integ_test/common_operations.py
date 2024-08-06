@@ -135,7 +135,7 @@ def get_all_index_details(cluster: Cluster, index_prefix_ignore_list=None, **kwa
 
             count_response = execute_api_call(cluster=cluster, path=f"/{index_name}/_count?format=json", **kwargs)
             index_dict[index_name] = count_response.json()
-            index_dict['index'] = index_name
+            index_dict[index_name]['index'] = index_name
     return index_dict
 
 
