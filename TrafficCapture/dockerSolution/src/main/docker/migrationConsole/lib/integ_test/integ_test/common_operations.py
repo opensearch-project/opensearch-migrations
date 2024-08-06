@@ -124,8 +124,8 @@ def get_all_index_details(cluster: Cluster, index_prefix_ignore_list=None, **kwa
     all_index_details = execute_api_call(cluster=cluster, path="/_cat/indices?format=json", **kwargs).json()
     index_dict = {}
     for index_details in all_index_details:
-        # While cat/indices returns a doc count metric, the underlying implementation bleeds through details, only 
-        # capture the index name and make a separate api call for the doc count 
+        # While cat/indices returns a doc count metric, the underlying implementation bleeds through details, only
+        # capture the index name and make a separate api call for the doc count
         index_name = index_details['index']
         valid_index = not index_matches_ignored_index(index_name,
                                                       index_prefix_ignore_list=index_prefix_ignore_list)
@@ -135,6 +135,7 @@ def get_all_index_details(cluster: Cluster, index_prefix_ignore_list=None, **kwa
 
             count_response = execute_api_call(cluster=cluster, path=f"/{index_name}/_count?format=json", **kwargs)
             index_dict[index_name] = count_response.json()
+            index_dict['index'] = index_name
     return index_dict
 
 
