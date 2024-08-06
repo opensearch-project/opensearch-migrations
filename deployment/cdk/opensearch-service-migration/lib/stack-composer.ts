@@ -256,6 +256,11 @@ export class StackComposer {
             trafficReplayerCustomUserAgent = trafficReplayerUserAgentSuffix ? trafficReplayerUserAgentSuffix : props.customReplayerUserAgent
         }
 
+        let mskEnabled = false;
+        if (captureProxyServiceEnabled || captureProxyESServiceEnabled || trafficReplayerServiceEnabled) {
+            mskEnabled = true;
+        }
+
         const deployId = addOnMigrationDeployId ? addOnMigrationDeployId : defaultDeployId
 
         // If enabled re-use existing VPC and/or associated resources or create new
