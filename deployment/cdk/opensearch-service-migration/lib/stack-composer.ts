@@ -282,6 +282,8 @@ export class StackComposer {
                 targetClusterProxyServiceEnabled,
                 migrationAPIEnabled,
                 sourceClusterEndpoint: sourceClusterEndpoint,
+                targetClusterUsername: fineGrainedManagerUserName,
+                targetClusterPasswordSecretArn: fineGrainedManagerUserSecretManagerKeyARN,
                 env: props.env
             })
             this.stacks.push(networkStack)
@@ -568,6 +570,7 @@ export class StackComposer {
                 migrationsSolutionVersion: props.migrationsSolutionVersion,
                 vpc: networkStack.vpc,
                 streamingSourceType: streamingSourceType,
+                mskEnabled,
                 fetchMigrationEnabled: fetchMigrationEnabled,
                 migrationConsoleEnableOSI: migrationConsoleEnableOSI,
                 migrationAPIEnabled: migrationAPIEnabled,
