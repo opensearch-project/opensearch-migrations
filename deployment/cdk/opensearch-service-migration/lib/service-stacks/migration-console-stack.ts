@@ -23,7 +23,6 @@ import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
 export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationsSolutionVersion: string,
     readonly vpc: IVpc,
-    readonly mskEnabled?: boolean,
     readonly streamingSourceType: StreamingSourceType,
     readonly fetchMigrationEnabled: boolean,
     readonly fargateCpuArch: CpuArchitecture,
@@ -154,10 +153,11 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ...props,
             parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
         });
-        const brokerEndpoints = props.mskEnabled ? getMigrationStringParameterValue(this, {
-            ...props,
-            parameter: MigrationSSMParameter.KAFKA_BROKERS,
-        }) : "";
+        const brokerEndpoints = props.streamingSourceType != StreamingSourceType.DISABLED ?
+            getMigrationStringParameterValue(this, {
+                ...props,
+                parameter: MigrationSSMParameter.KAFKA_BROKERS,
+            }) : "";
 
         const volumeName = "sharedReplayerOutputVolume"
         const volumeId = getMigrationStringParameterValue(this, {
@@ -300,7 +300,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
             ...(getSecretsPolicy ? [getSecretsPolicy] : []) // only add secrets policy if it's non-null
         ]
-        if (props.mskEnabled && (props.streamingSourceType === StreamingSourceType.AWS_MSK)) {
+        if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
         }

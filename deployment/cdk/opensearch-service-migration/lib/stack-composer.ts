@@ -234,7 +234,14 @@ export class StackComposer {
         }
 
         const fargateCpuArch = validateFargateCpuArch(defaultFargateCpuArch)
-        const streamingSourceType = determineStreamingSourceType(kafkaBrokerServiceEnabled)
+
+        let streamingSourceType
+        if (captureProxyServiceEnabled || captureProxyESServiceEnabled || trafficReplayerServiceEnabled || kafkaBrokerServiceEnabled) {
+            streamingSourceType = determineStreamingSourceType(kafkaBrokerServiceEnabled)
+        } else {
+            console.log("MSK is not enabled and will not be deployed.")
+            streamingSourceType = StreamingSourceType.DISABLED
+        }
 
         const engineVersion = this.getContextForType('engineVersion', 'string', defaultValues, contextJSON)
         version = this.getEngineVersion(engineVersion)
@@ -254,13 +261,6 @@ export class StackComposer {
         }
         else {
             trafficReplayerCustomUserAgent = trafficReplayerUserAgentSuffix ? trafficReplayerUserAgentSuffix : props.customReplayerUserAgent
-        }
-
-        let mskEnabled = false;
-        if (captureProxyServiceEnabled || captureProxyESServiceEnabled || trafficReplayerServiceEnabled) {
-            mskEnabled = true;
-        } else {
-            console.log("MSK is not enabled and will not be deployed.")
         }
 
         const deployId = addOnMigrationDeployId ? addOnMigrationDeployId : defaultDeployId
@@ -374,7 +374,7 @@ export class StackComposer {
             this.addDependentStacks(migrationStack, [networkStack])
             this.stacks.push(migrationStack)
 
-            if (mskEnabled && (streamingSourceType === StreamingSourceType.AWS_MSK)) {
+            if (streamingSourceType === StreamingSourceType.AWS_MSK) {
                 mskUtilityStack = new MSKUtilityStack(scope, 'mskUtilityStack', {
                     vpc: networkStack.vpc,
                     mskEnablePublicEndpoints: mskEnablePublicEndpoints,
@@ -572,7 +572,6 @@ export class StackComposer {
                 migrationsSolutionVersion: props.migrationsSolutionVersion,
                 vpc: networkStack.vpc,
                 streamingSourceType: streamingSourceType,
-                mskEnabled,
                 fetchMigrationEnabled: fetchMigrationEnabled,
                 migrationConsoleEnableOSI: migrationConsoleEnableOSI,
                 migrationAPIEnabled: migrationAPIEnabled,

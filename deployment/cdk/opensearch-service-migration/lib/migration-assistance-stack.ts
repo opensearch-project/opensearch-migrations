@@ -21,7 +21,6 @@ import {createMigrationStringParameter, MigrationSSMParameter, parseRemovalPolic
 export interface MigrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly streamingSourceType: StreamingSourceType,
-    readonly mskEnabled?: boolean
     // Future support needed to allow importing an existing MSK cluster
     readonly mskImportARN?: string,
     readonly mskEnablePublicEndpoints?: boolean,
@@ -201,7 +200,7 @@ export class MigrationAssistanceStack extends Stack {
             parameter: MigrationSSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID
         });
 
-        if (props.mskEnabled && (props.streamingSourceType === StreamingSourceType.AWS_MSK)) {
+        if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             this.createMSKResources(props, streamingSecurityGroup)
         }
 
