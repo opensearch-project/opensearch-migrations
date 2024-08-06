@@ -372,7 +372,7 @@ export class StackComposer {
             this.addDependentStacks(migrationStack, [networkStack])
             this.stacks.push(migrationStack)
 
-            if (streamingSourceType === StreamingSourceType.AWS_MSK) {
+            if (mskEnabled && (streamingSourceType === StreamingSourceType.AWS_MSK)) {
                 mskUtilityStack = new MSKUtilityStack(scope, 'mskUtilityStack', {
                     vpc: networkStack.vpc,
                     mskEnablePublicEndpoints: mskEnablePublicEndpoints,
