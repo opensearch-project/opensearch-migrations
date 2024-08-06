@@ -16,16 +16,16 @@ logger = logging.getLogger(__name__)
 DEFAULT_INDEX_IGNORE_LIST = ["test_", ".", "searchguard", "sg7", "security-auditlog", "reindexed-logs"]
 
 EXPECTED_BENCHMARK_DOCS = {
-    "geonames": {"docs.count": "1000"},
-    "logs-221998": {"docs.count": "1000"},
-    "logs-211998": {"docs.count": "1000"},
-    "logs-231998": {"docs.count": "1000"},
-    "logs-241998": {"docs.count": "1000"},
-    "logs-181998": {"docs.count": "1000"},
-    "logs-201998": {"docs.count": "1000"},
-    "logs-191998": {"docs.count": "1000"},
-    "sonested": {"docs.count": "2977"},
-    "nyc_taxis": {"docs.count": "1000"}
+    "geonames": {"count": "1000"},
+    "logs-221998": {"count": "1000"},
+    "logs-211998": {"count": "1000"},
+    "logs-231998": {"count": "1000"},
+    "logs-241998": {"count": "1000"},
+    "logs-181998": {"count": "1000"},
+    "logs-201998": {"count": "1000"},
+    "logs-191998": {"count": "1000"},
+    "sonested": {"count": "1000"},
+    "nyc_taxis": {"count": "1000"}
 }
 
 
@@ -124,10 +124,11 @@ def get_all_index_details(cluster: Cluster, index_prefix_ignore_list=None, **kwa
     all_index_details = execute_api_call(cluster=cluster, path="/_cat/indices?format=json", **kwargs).json()
     index_dict = {}
     for index_details in all_index_details:
-        valid_index = not index_matches_ignored_index(index_name=index_details['index'],
+        index_name = index_details['index']
+        valid_index = not index_matches_ignored_index(index_name,
                                                       index_prefix_ignore_list=index_prefix_ignore_list)
         if index_prefix_ignore_list is None or valid_index:
-            index_dict[index_details['index']] = index_details
+            index_dict[index_name] = execute_api_call(cluster=cluster, path=f"/{index_name}/_count?format=json", **kwargs).json()
     return index_dict
 
 
