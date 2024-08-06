@@ -259,6 +259,8 @@ export class StackComposer {
         let mskEnabled = false;
         if (captureProxyServiceEnabled || captureProxyESServiceEnabled || trafficReplayerServiceEnabled) {
             mskEnabled = true;
+        } else {
+            console.log("MSK is not enabled and will not be deployed.")
         }
 
         const deployId = addOnMigrationDeployId ? addOnMigrationDeployId : defaultDeployId
