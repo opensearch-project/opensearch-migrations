@@ -1,5 +1,7 @@
 # RFS High Level Design
 
+**LAST UPDATED: June 2024**
+
 ## Table of Contents
 - [RFS High Level Design](#rfs-high-level-design)
     - [Terminology](#terminology)

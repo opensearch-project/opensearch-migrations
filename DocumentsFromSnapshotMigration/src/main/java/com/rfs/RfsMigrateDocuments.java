@@ -61,6 +61,9 @@ public class RfsMigrateDocuments {
     }
 
     public static class Args {
+        @Parameter(names = {"--help", "-h"}, help = true, description = "Displays information about how to use this tool")
+        private boolean help;
+
         @Parameter(names = { "--snapshot-name" }, required = true, description = "The name of the snapshot to migrate")
         public String snapshotName;
 
@@ -99,6 +102,7 @@ public class RfsMigrateDocuments {
             "--max-shard-size-bytes" }, description = ("Optional. The maximum shard size, in bytes, to allow when"
                 + " performing the document migration.  Useful for preventing disk overflow.  Default: 50 * 1024 * 1024 * 1024 (50 GB)"), required = false)
         public long maxShardSizeBytes = 50 * 1024 * 1024 * 1024L;
+
         @Parameter(names = { "--max-initial-lease-duration" }, description = ("Optional. The maximum time that the "
             + "first attempt to migrate a shard's documents should take.  If a process takes longer than this "
             + "the process will terminate, allowing another process to attempt the migration, but with double the "
@@ -144,7 +148,13 @@ public class RfsMigrateDocuments {
 
     public static void main(String[] args) throws Exception {
         Args arguments = new Args();
-        JCommander.newBuilder().addObject(arguments).build().parse(args);
+        JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
+        jCommander.parse(args);
+
+        if (arguments.help) {
+            jCommander.usage();
+            return;
+        }
 
         validateArgs(arguments);
 
