@@ -19,7 +19,7 @@ exporters:
     sampling_initial: 5
     sampling_thereafter: 200
   awsemf:
-    namespace: 'TrafficCaptureReplay'
+    namespace: 'OpenSearchMigrations'
   awsxray:
     index_all_attributes: true
   prometheus:
