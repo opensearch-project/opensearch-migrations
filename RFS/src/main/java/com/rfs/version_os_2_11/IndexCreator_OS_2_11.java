@@ -2,7 +2,6 @@ package com.rfs.version_os_2_11;
 
 import java.util.Optional;
 
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -11,7 +10,6 @@ import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts;
 import com.rfs.common.InvalidResponse;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.models.IndexMetadata;
-
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -61,7 +59,7 @@ public class IndexCreator_OS_2_11 {
                     log.warn("Expecting all retryable errors to start with 'index.', instead saw " + illegalArgument);
                     return Optional.empty();
                 }
-                
+
                 var shortenedIllegalArgument = illegalArgument.replaceFirst("index.", "");
                 removeFieldsByPath(settings, shortenedIllegalArgument);
             }
