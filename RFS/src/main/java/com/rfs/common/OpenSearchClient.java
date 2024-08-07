@@ -21,7 +21,7 @@ import reactor.util.retry.Retry;
 
 public class OpenSearchClient {
     private static final Logger logger = LogManager.getLogger(OpenSearchClient.class);
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    static final ObjectMapper objectMapper = new ObjectMapper();
 
     static {
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -118,9 +118,12 @@ public class OpenSearchClient {
             + " should have been thrown.");
         boolean objectDoesNotExist = getResponse.statusCode == HttpURLConnection.HTTP_NOT_FOUND;
         if (objectDoesNotExist) {
+            logger.debug("Creating object " + objectPath + "\r\n" + settings.toPrettyString());
             client.putAsync(objectPath, settings.toString(), context.createCheckRequestContext()).flatMap(resp -> {
                 if (resp.statusCode == HttpURLConnection.HTTP_OK) {
                     return Mono.just(resp);
+                } else if (resp.statusCode == HttpURLConnection.HTTP_BAD_REQUEST) {
+                    return Mono.error(new InvalidResponse("Create object failed for " + objectPath + "\r\n" + resp.body, resp));
                 } else {
                     String errorMessage = ("Could not create object: "
                         + objectPath
@@ -134,7 +137,7 @@ public class OpenSearchClient {
                 }
             })
                 .doOnError(e -> logger.error(e.getMessage()))
-                .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
+                .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)).filter(OperationFailed.class::isInstance))
                 .block();
 
             return Optional.of(settings);
