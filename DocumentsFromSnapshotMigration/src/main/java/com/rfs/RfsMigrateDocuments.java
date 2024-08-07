@@ -100,8 +100,8 @@ public class RfsMigrateDocuments {
 
         @Parameter(names = {
             "--max-shard-size-bytes" }, description = ("Optional. The maximum shard size, in bytes, to allow when"
-                + " performing the document migration.  Useful for preventing disk overflow.  Default: 50 * 1024 * 1024 * 1024 (50 GB)"), required = false)
-        public long maxShardSizeBytes = 50 * 1024 * 1024 * 1024L;
+                + " performing the document migration.  Useful for preventing disk overflow.  Default: 80 * 1024 * 1024 * 1024 (80 GB)"), required = false)
+        public long maxShardSizeBytes = 80 * 1024 * 1024 * 1024L;
 
         @Parameter(names = { "--max-initial-lease-duration" }, description = ("Optional. The maximum time that the "
             + "first attempt to migrate a shard's documents should take.  If a process takes longer than this "
