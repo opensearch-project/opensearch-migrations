@@ -156,8 +156,8 @@ jobs:
           docker exec $(docker ps --filter "name=migration-console" -q) pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s
       - name: Clean up migrations docker images before caching
         run: |
-          docker stop $(docker ps -q) && docker rm $(docker ps -aq)
-          docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^migrations/' | grep -v '<none>' | xargs -I {} docker image rm {}
+          docker stop $(docker ps -q) && docker system prune --volumes -f
+          docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^migrations/' | xargs -I {} docker image rm {}
 
   cdk-tests:
     runs-on: ubuntu-latest
