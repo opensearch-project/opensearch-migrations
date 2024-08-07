@@ -9,13 +9,14 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
-
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rfs.common.http.HttpResponse;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class InvalidResponse extends RfsException {
     private static final Pattern unknownSetting = Pattern.compile("unknown setting \\[(.+)\\].+");
+    private static final ObjectMapper objectMapper = new ObjectMapper();
     private final HttpResponse response;
 
     public InvalidResponse(String message, HttpResponse response) {
@@ -30,7 +31,7 @@ public class InvalidResponse extends RfsException {
     public Set<String> getIllegalArguments() {
         try {
             var interimResults = new ArrayList<Map.Entry<String, String>>();
-            var bodyNode = OpenSearchClient.objectMapper.readTree(response.body);
+            var bodyNode = objectMapper.readTree(response.body);
 
             var errorBody = Optional.ofNullable(bodyNode).map(node -> node.get("error"));
 
