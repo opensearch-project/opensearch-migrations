@@ -9,16 +9,20 @@ import {
     MigrationSSMParameter,
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy,
-    getMigrationStringParameterValue
+    getTargetPasswordAccessPolicy,
+    getMigrationStringParameterValue,
+    parseAndMergeArgs
 } from "../common-utilities";
-import { RFSBackfillYaml, SnapshotYaml } from "../migration-services-yaml";
+import { ClusterYaml, RFSBackfillYaml, SnapshotYaml } from "../migration-services-yaml";
+import cluster from "cluster";
 
 
 export interface ReindexFromSnapshotProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly fargateCpuArch: CpuArchitecture,
     readonly extraArgs?: string,
-    readonly otelCollectorEnabled?: boolean
+    readonly otelCollectorEnabled?: boolean,
+    readonly clusterAuthDetails: ClusterYaml
 }
 
 export class ReindexFromSnapshotStack extends MigrationServiceCore {
@@ -57,29 +61,50 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             ]
         })
 
-        const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
-        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
-        let servicePolicies = [artifactS3PublishPolicy, openSearchPolicy, openSearchServerlessPolicy]
-
         const osClusterEndpoint = getMigrationStringParameterValue(this, {
             ...props,
             parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
         });
         const s3Uri = `s3://migration-artifacts-${this.account}-${props.stage}-${this.region}/rfs-snapshot-repo`;
         let rfsCommand = `/rfs-app/runJavaWithClasspath.sh com.rfs.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri ${s3Uri} --s3-region ${this.region} --snapshot-name rfs-snapshot --lucene-dir '/lucene' --target-host ${osClusterEndpoint}`
-        rfsCommand = props.extraArgs ? rfsCommand.concat(` ${props.extraArgs}`) : rfsCommand
+        rfsCommand = parseAndMergeArgs(rfsCommand, props.extraArgs);
+
+        let targetUser = "";
+        let targetPassword = "";
+        let targetPasswordArn = "";
+        if (props.clusterAuthDetails.basic_auth) {
+            targetUser = props.clusterAuthDetails.basic_auth.username,
+            targetPassword = props.clusterAuthDetails.basic_auth.password? props.clusterAuthDetails.basic_auth.password : "",
+            targetPasswordArn = props.clusterAuthDetails.basic_auth.password_from_secret_arn? props.clusterAuthDetails.basic_auth.password_from_secret_arn : ""            
+        };
+
+        const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account);
+        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account);
+        let servicePolicies = [artifactS3PublishPolicy, openSearchPolicy, openSearchServerlessPolicy];
+
+        const getSecretsPolicy = props.clusterAuthDetails.basic_auth?.password_from_secret_arn ? 
+            getTargetPasswordAccessPolicy(props.clusterAuthDetails.basic_auth.password_from_secret_arn) : null;
+        if (getSecretsPolicy) {
+            servicePolicies.push(getSecretsPolicy);
+        }
 
         this.createService({
             serviceName: 'reindex-from-snapshot',
             taskInstanceCount: 0,
             dockerDirectoryPath: join(__dirname, "../../../../../", "DocumentsFromSnapshotMigration/docker"),
-            dockerImageCommand: ['/bin/sh', '-c', rfsCommand],
+            dockerImageCommand: ['/bin/sh', '-c', "/rfs-app/entrypoint.sh"],
             securityGroups: securityGroups,
             taskRolePolicies: servicePolicies,
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 4096,
             ephemeralStorageGiB: 200,
+            environment: {
+                "RFS_COMMAND": rfsCommand,
+                "RFS_TARGET_USER": targetUser,
+                "RFS_TARGET_PASSWORD": targetPassword,
+                "RFS_TARGET_PASSWORD_ARN": targetPasswordArn,
+            },
             ...props
         });
 
@@ -90,5 +115,4 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         this.rfsSnapshotYaml.s3 = {repo_uri: s3Uri, aws_region: this.region};
         this.rfsSnapshotYaml.snapshot_name = "rfs-snapshot";
     }
-
 }

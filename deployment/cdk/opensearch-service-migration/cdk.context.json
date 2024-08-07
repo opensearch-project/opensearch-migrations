@@ -8,9 +8,10 @@
     "domainRemovalPolicy": "DESTROY",
     "artifactBucketRemovalPolicy": "DESTROY",
     "enableDemoAdmin": true,
+    "trafficReplayerServiceEnabled": true,
     "trafficReplayerEnableClusterFGACAuth": true,
     "captureProxyESServiceEnabled": true,
-    "fetchMigrationEnabled": true,
+    "reindexFromSnapshotEnabled": true,
     "otelCollectorEnabled": true
   }
 }

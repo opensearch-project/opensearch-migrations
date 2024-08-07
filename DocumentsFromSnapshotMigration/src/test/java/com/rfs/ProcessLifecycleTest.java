@@ -23,6 +23,7 @@ import org.opensearch.testcontainers.OpensearchContainer;
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.FileSystemSnapshotCreator;
 import com.rfs.common.OpenSearchClient;
+import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.framework.PreloadedSearchClusterContainer;
 import com.rfs.framework.SearchClusterContainer;
 import eu.rekawek.toxiproxy.ToxiproxyClient;
@@ -112,7 +113,10 @@ public class ProcessLifecycleTest extends SourceTestBase {
                     SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
                     testSnapshotContext.createSnapshotCreateContext()
                 ),
-                new OpenSearchClient(esSourceContainer.getUrl(), null),
+                new OpenSearchClient(ConnectionContextTestParams.builder()
+                    .host(esSourceContainer.getUrl())
+                    .build()
+                    .toConnectionContext()),
                 false
             );
             esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
@@ -143,7 +147,10 @@ public class ProcessLifecycleTest extends SourceTestBase {
             + targetContainer.getHost()
             + ":"
             + targetContainer.getMappedPort(OPENSEARCH_PORT);
-        var targetClient = new OpenSearchClient(targetAddress, null);
+        var targetClient = new OpenSearchClient(ConnectionContextTestParams.builder()
+            .host(targetAddress)
+            .build()
+            .toConnectionContext());
         var sourceRepo = new FileSystemRepo(tempDirSnapshot);
         migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, INDEX_ALLOWLIST, testMetadataMigrationContext);
     }

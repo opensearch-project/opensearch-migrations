@@ -40,11 +40,11 @@ public class TestUtils {
 
     private TestUtils() {}
 
-    static String resolveReferenceString(StringBuilder referenceStringBuilder) {
+    public static String resolveReferenceString(StringBuilder referenceStringBuilder) {
         return resolveReferenceString(referenceStringBuilder, List.of());
     }
 
-    static String resolveReferenceString(
+    public static String resolveReferenceString(
         StringBuilder referenceStringBuilder,
         Collection<AbstractMap.SimpleEntry<String, String>> replacementMappings
     ) {
@@ -55,13 +55,13 @@ public class TestUtils {
         return referenceStringBuilder.toString();
     }
 
-    static String makeRandomString(Random r, int maxStringSize) {
+    public static String makeRandomString(Random r, int maxStringSize) {
         return r.ints(r.nextInt(maxStringSize), 'A', 'Z')
             .collect(StringBuilder::new, StringBuilder::appendCodePoint, StringBuilder::append)
             .toString();
     }
 
-    static TrackedFuture<String, Void> writeStringToBoth(
+    public static TrackedFuture<String, Void> writeStringToBoth(
         String s,
         StringBuilder referenceStringBuilder,
         IPacketConsumer transformingHandler
@@ -72,7 +72,7 @@ public class TestUtils {
         return transformingHandler.consumeBytes(bytes);
     }
 
-    static TrackedFuture<String, Void> chainedWriteHeadersAndDualWritePayloadParts(
+    public static TrackedFuture<String, Void> chainedWriteHeadersAndDualWritePayloadParts(
         IPacketConsumer packetConsumer,
         List<String> stringParts,
         StringBuilder referenceStringAccumulator,
@@ -139,7 +139,7 @@ public class TestUtils {
         return fullRequest.content().toString(StandardCharsets.UTF_8);
     }
 
-    static void runPipelineAndValidate(
+    public static void runPipelineAndValidate(
         TestContext rootContext,
         IAuthTransformerFactory authTransformer,
         String extraHeaders,
@@ -158,7 +158,7 @@ public class TestUtils {
         );
     }
 
-    static void runPipelineAndValidate(
+    public static void runPipelineAndValidate(
         TestContext rootContext,
         IJsonTransformer transformer,
         IAuthTransformerFactory authTransformer,
@@ -180,9 +180,9 @@ public class TestUtils {
 
         var contentLength = stringParts.stream().mapToInt(String::length).sum();
         var headerString = "GET / HTTP/1.1\r\n"
-            + "host: localhost\r\n"
+            + "Host: localhost\r\n"
             + (extraHeaders == null ? "" : extraHeaders)
-            + "content-length: "
+            + "Content-Length: "
             + contentLength
             + "\r\n\r\n";
         var referenceStringBuilder = new StringBuilder();

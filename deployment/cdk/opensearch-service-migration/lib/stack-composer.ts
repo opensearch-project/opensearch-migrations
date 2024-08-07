@@ -19,7 +19,7 @@ import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-st
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
 import {MigrationSSMParameter, parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
-import {ServicesYaml} from "./migration-services-yaml";
+import {ClusterBasicAuth, ServicesYaml} from "./migration-services-yaml";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -234,7 +234,14 @@ export class StackComposer {
         }
 
         const fargateCpuArch = validateFargateCpuArch(defaultFargateCpuArch)
-        const streamingSourceType = determineStreamingSourceType(kafkaBrokerServiceEnabled)
+
+        let streamingSourceType
+        if (captureProxyServiceEnabled || captureProxyESServiceEnabled || trafficReplayerServiceEnabled || kafkaBrokerServiceEnabled) {
+            streamingSourceType = determineStreamingSourceType(kafkaBrokerServiceEnabled)
+        } else {
+            console.log("MSK is not enabled and will not be deployed.")
+            streamingSourceType = StreamingSourceType.DISABLED
+        }
 
         const engineVersion = this.getContextForType('engineVersion', 'string', defaultValues, contextJSON)
         version = this.getEngineVersion(engineVersion)
@@ -277,6 +284,8 @@ export class StackComposer {
                 targetClusterProxyServiceEnabled,
                 migrationAPIEnabled,
                 sourceClusterEndpoint: sourceClusterEndpoint,
+                targetClusterUsername: fineGrainedManagerUserName,
+                targetClusterPasswordSecretArn: fineGrainedManagerUserSecretManagerKeyARN,
                 env: props.env
             })
             this.stacks.push(networkStack)
@@ -330,7 +339,14 @@ export class StackComposer {
             this.stacks.push(openSearchStack)
             servicesYaml.target_cluster = openSearchStack.targetClusterYaml;
         } else {
-            servicesYaml.target_cluster = { endpoint: targetEndpoint, no_auth: '' }
+            servicesYaml.target_cluster = { endpoint: targetEndpoint }
+            if (fineGrainedManagerUserName && fineGrainedManagerUserSecretManagerKeyARN) {
+                servicesYaml.target_cluster.basic_auth = new ClusterBasicAuth({username: fineGrainedManagerUserName,
+                    password_from_secret_arn: fineGrainedManagerUserSecretManagerKeyARN
+                })
+            } else {
+                servicesYaml.target_cluster.no_auth = ""
+            }
         }
 
         // Currently, placing a requirement on a VPC for a migration stack but this can be revisited
@@ -428,6 +444,7 @@ export class StackComposer {
             reindexFromSnapshotStack = new ReindexFromSnapshotStack(scope, "reindexFromSnapshotStack", {
                 vpc: networkStack.vpc,
                 extraArgs: reindexFromSnapshotExtraArgs,
+                clusterAuthDetails: servicesYaml.target_cluster,
                 stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
                 description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
                 stage: stage,

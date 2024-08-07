@@ -13,7 +13,6 @@ import org.opensearch.migrations.replay.GenerateRandomNestedJsonObject;
 import org.opensearch.migrations.replay.ReplayUtils;
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-import org.opensearch.migrations.transform.IHttpMessage;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 import io.netty.buffer.ByteBuf;
@@ -29,7 +28,7 @@ public class NettyJsonBodySerializeHandlerTest {
         var randomJsonGenerator = new GenerateRandomNestedJsonObject();
         var randomJson = randomJsonGenerator.makeRandomJsonObject(new Random(2), 2, 1);
         var headers = new StrictCaseInsensitiveHttpHeadersMap();
-        headers.put(IHttpMessage.CONTENT_TYPE, List.of(IHttpMessage.APPLICATION_JSON));
+        headers.put("content-type", List.of("application/json"));
         var fullHttpMessageWithJsonBody = new HttpJsonMessageWithFaultingPayload(headers);
         fullHttpMessageWithJsonBody.setPayloadFaultMap(new PayloadAccessFaultingMap(headers));
         fullHttpMessageWithJsonBody.payload().put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, randomJson);

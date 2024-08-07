@@ -10,7 +10,7 @@ import {
     createMSKConsumerIAMPolicies,
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy,
-    getMigrationStringParameterValue
+    getMigrationStringParameterValue, parseAndMergeArgs
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
 import { Duration } from "aws-cdk-lib";
@@ -75,7 +75,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
                 "elasticfilesystem:ClientWrite"
             ]
         })
-        
+
         const secretAccessPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
             resources: ["*"],
@@ -114,7 +114,8 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         replayerCommand = props.streamingSourceType === StreamingSourceType.AWS_MSK ? replayerCommand.concat(" --kafka-traffic-enable-msk-auth") : replayerCommand
         replayerCommand = props.userAgentSuffix ? replayerCommand.concat(` --user-agent ${props.userAgentSuffix}`) : replayerCommand
         replayerCommand = props.otelCollectorEnabled ? replayerCommand.concat(` --otelCollectorEndpoint http://localhost:${OtelCollectorSidecar.OTEL_CONTAINER_PORT}`) : replayerCommand
-        replayerCommand = props.extraArgs ? replayerCommand.concat(` ${props.extraArgs}`) : replayerCommand
+        replayerCommand = parseAndMergeArgs(replayerCommand, props.extraArgs);
+
         this.createService({
             serviceName: `traffic-replayer-${deployId}`,
             taskInstanceCount: 0,

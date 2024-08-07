@@ -1,15 +1,13 @@
 package com.rfs.cms;
 
-import java.io.ByteArrayInputStream;
 import java.io.IOException;
-import java.io.InputStream;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public interface AbstractedHttpClient extends AutoCloseable {
+public interface AbstractedHttpClient {
     String PUT_METHOD = "PUT";
     String POST_METHOD = "POST";
     String GET_METHOD = "GET";
@@ -18,13 +16,7 @@ public interface AbstractedHttpClient extends AutoCloseable {
     interface AbstractHttpResponse {
         Stream<Map.Entry<String, String>> getHeaders();
 
-        default byte[] getPayloadBytes() throws IOException {
-            return getPayloadStream().readAllBytes();
-        }
-
-        default InputStream getPayloadStream() throws IOException {
-            return new ByteArrayInputStream(getPayloadBytes());
-        }
+        byte[] getPayloadBytes() throws IOException;
 
         String getStatusText();
 
@@ -56,7 +48,9 @@ public interface AbstractedHttpClient extends AutoCloseable {
         String body
     ) throws IOException {
         var combinedHeaders = new LinkedHashMap<String, String>();
-        combinedHeaders.put("Content-Type", "application/json");
+        if (body != null) {
+            combinedHeaders.put("Content-Type", "application/json");
+        }
         combinedHeaders.put("Accept-Encoding", "identity");
         if (extraHeaders != null) {
             combinedHeaders.putAll(extraHeaders);

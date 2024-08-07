@@ -91,14 +91,17 @@ kafka:
 Source and target clusters have the following options:
 
 - `endpoint`: required, the endpoint to reach the cluster.
+- `allow_insecure`: optional, default is false, equivalent to the curl `--insecure` flag, will not verify unsigned or invalid certificates
 
 Exactly one of the following blocks must be present:
 
 - `no_auth`: may be empty, no authorization to use.
 - `basic_auth`:
     - `username`
-    - `password`
+    - `password` OR `password_from_secret_arn`
 - `sigv4`: may be empty, not yet implemented
+
+Within a `basic_auth` block, either a password can be provided directly, or it can contain the ARN of a secret in secrets manager which contains the password to use.
 
 Having a `source_cluster` and `target_cluster` is required.
 
@@ -274,7 +277,7 @@ Unit tests can be run from this current `console_link/` by first installing depe
 
 ```shell
 pipenv install --dev
-pipenv run python -m coverage run -m pytest
+pipenv run coverage run -m pytest
 ```
 
 ### Coverage
@@ -282,11 +285,11 @@ pipenv run python -m coverage run -m pytest
 _Code coverage_ metrics can be generated after a unit-test run. A report can either be printed on the command line:
 
 ```shell
-pipenv run python -m coverage report
+pipenv run coverage report
 ```
 
 or generated as HTML:
 
 ```shell
-pipenv run python -m coverage html
+pipenv run coverage html
 ```
