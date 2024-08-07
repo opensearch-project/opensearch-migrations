@@ -1,16 +1,16 @@
 package com.rfs.common;
 
-import java.util.Set;
 import java.util.ArrayList;
 import java.util.Map;
-import java.util.Optional;
-import java.util.stream.Collectors;
 import java.util.Map.Entry;
+import java.util.Optional;
+import java.util.Set;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.JsonNode;
-import com.rfs.common.http.HttpResponse;
 
+import com.rfs.common.http.HttpResponse;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -32,37 +32,32 @@ public class InvalidResponse extends RfsException {
             var interimResults = new ArrayList<Map.Entry<String, String>>();
             var bodyNode = OpenSearchClient.objectMapper.readTree(response.body);
 
-            var errorBody = Optional.ofNullable(bodyNode)
-                .map(node -> node.get("error"));
+            var errorBody = Optional.ofNullable(bodyNode).map(node -> node.get("error"));
 
             // Check high level cause
-            errorBody
-                .map(InvalidResponse::getUnknownSetting)
-                .ifPresent(interimResults::add);
+            errorBody.map(InvalidResponse::getUnknownSetting).ifPresent(interimResults::add);
 
             // Check root cause errors
-            errorBody
-                .map(node -> node.get("root_cause"))
-                .ifPresent(nodes -> {
-                    nodes.forEach(node -> {
-                        Optional.of(node)
-                            .map(InvalidResponse::getUnknownSetting)
-                            .ifPresent(interimResults::add);
-                    });
-                });
-            
-            // Check all suppressed errors
-            errorBody
-                .map(node -> node.get("suppressed"))
-                .ifPresent(nodes -> {
-                    nodes.forEach(node -> {
-                        Optional.of(node)
-                            .map(InvalidResponse::getUnknownSetting)
-                            .ifPresent(interimResults::add);
-                    });
-                });
+            errorBody.map(node -> node.get("root_cause")).ifPresent(nodes -> {
+                nodes.forEach(
+                    node -> {
+                        Optional.of(node).map(InvalidResponse::getUnknownSetting).ifPresent(interimResults::add);
+                    }
+                );
+            });
 
-            var onlyExpectedErrors = interimResults.stream().map(Entry::getKey).allMatch("illegal_argument_exception"::equals);
+            // Check all suppressed errors
+            errorBody.map(node -> node.get("suppressed")).ifPresent(nodes -> {
+                nodes.forEach(
+                    node -> {
+                        Optional.of(node).map(InvalidResponse::getUnknownSetting).ifPresent(interimResults::add);
+                    }
+                );
+            });
+
+            var onlyExpectedErrors = interimResults.stream()
+                .map(Entry::getKey)
+                .allMatch("illegal_argument_exception"::equals);
             if (!onlyExpectedErrors) {
                 log.warn("Expecting only invalid argument errors, found additional error types " + interimResults);
                 return Set.of();
@@ -76,23 +71,20 @@ public class InvalidResponse extends RfsException {
     }
 
     private static Map.Entry<String, String> getUnknownSetting(JsonNode json) {
-        return Optional.ofNullable(json)
-            .map(node -> {
-                var typeNode = node.get("type");
-                var reasonNode = node.get("reason");
-                if (typeNode == null || reasonNode == null) {
-                    return null;
-                }
-                return Map.entry(typeNode, reasonNode);
-            })
-            .map(entry -> {
-                var matcher = unknownSetting.matcher(entry.getValue().asText());
-                if (!matcher.matches()) {
-                    return null;
-                }
+        return Optional.ofNullable(json).map(node -> {
+            var typeNode = node.get("type");
+            var reasonNode = node.get("reason");
+            if (typeNode == null || reasonNode == null) {
+                return null;
+            }
+            return Map.entry(typeNode, reasonNode);
+        }).map(entry -> {
+            var matcher = unknownSetting.matcher(entry.getValue().asText());
+            if (!matcher.matches()) {
+                return null;
+            }
 
-                return Map.entry(entry.getKey().asText(), matcher.group(1));
-            })
-            .orElse(null);
+            return Map.entry(entry.getKey().asText(), matcher.group(1));
+        }).orElse(null);
     }
 }
