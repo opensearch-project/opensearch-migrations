@@ -34,10 +34,10 @@ public class IndexCreator_OS_2_11 {
         // Remove some settings which will cause errors if you try to pass them to the API
         ObjectNode settings = indexMetadata.getSettings();
 
-        // String[] problemFields = { "creation_date", "provided_name", "uuid", "version" };
-        // for (String field : problemFields) {
-        //     settings.remove(field);
-        // }
+        String[] problemFields = { "creation_date", "provided_name", "uuid", "version" };
+        for (String field : problemFields) {
+            settings.remove(field);
+        }
 
         // Assemble the request body
         ObjectNode body = mapper.createObjectNode();
@@ -52,7 +52,7 @@ public class IndexCreator_OS_2_11 {
             var illegalArguments = invalidResponse.getIllegalArguments();
 
             if (illegalArguments.isEmpty()) {
-                log.debug("Unable to alter index creation request to retry");
+                log.debug("Cannot retry invalid response.");
                 return Optional.empty();
             }
 
@@ -85,12 +85,9 @@ public class IndexCreator_OS_2_11 {
             if (nextNode != null && nextNode.isObject()) {
                 currentNode = (ObjectNode) nextNode;
             } else {
-                // Path is invalid or does not exist
-                log.debug("Unable to remove path " + path + " , on current node " + node.toPrettyString());
                 return;
             }
         }
-        log.debug("Removing " + pathParts[pathParts.length - 1] + " on node " + currentNode.toPrettyString());
         currentNode.remove(pathParts[pathParts.length - 1]);
     }
 }
