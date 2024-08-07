@@ -53,9 +53,13 @@ jobs:
       - name: Tag Docker image
         run: |
           docker tag migrations/migration_console:latest opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }}
+          docker tag migrations/migration_console:latest opensearchstaging/opensearch-migrations-console:latest
           docker tag migrations/traffic_replayer:latest opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }}
+          docker tag migrations/traffic_replayer:latest opensearchstaging/opensearch-migrations-traffic-replayer:latest
           docker tag migrations/capture_proxy:latest opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }}
+          docker tag migrations/capture_proxy:latest opensearchstaging/opensearch-migrations-traffic-capture-proxy:latest
           docker tag migrations/reindex_from_snapshot:latest opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }}
+          docker tag migrations/reindex_from_snapshot:latest opensearchstaging/opensearch-migrations-reindex-from-snapshot:latest
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
