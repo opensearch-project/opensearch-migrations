@@ -12,6 +12,7 @@ env:
 permissions:
   id-token: write
   contents: read
+  issues: write
 
 jobs:
   draft-a-release:
@@ -55,7 +56,8 @@ jobs:
           docker tag migrations/traffic_replayer:latest opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }}
           docker tag migrations/capture_proxy:latest opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }}
           docker tag migrations/reindex_from_snapshot:latest opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }}
-      - uses: aws-actions/configure-aws-credentials@v4
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.MIGRATIONS_DOCKER_ROLE }}
           aws-region: us-east-1
