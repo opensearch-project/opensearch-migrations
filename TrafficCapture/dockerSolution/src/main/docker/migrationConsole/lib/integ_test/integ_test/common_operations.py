@@ -51,7 +51,8 @@ def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=No
                 logger.debug(f"Received expected status code {expected_status_code}. Exiting loop.")
                 return response
 
-            logger.debug(f"Status code {response.status_code} does not match expected {expected_status_code}. Retrying in {delay} seconds.")
+            logger.debug(f"Status code {response.status_code} does not match expected "
+                         f"{expected_status_code}. Retrying in {delay} seconds.")
 
         except (ConnectionError, SSLError) as e:
             logger.debug(f"Connection error: {e}. Retrying in {delay} seconds.")
@@ -61,7 +62,8 @@ def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=No
 
     error_message = (
         f"Failed to receive expected status code {expected_status_code}. "
-        f"Last received status code: {last_response.status_code if last_response else 'None'} for request: {method.name} {path}"
+        f"Last received status code: {last_response.status_code if last_response else 'None'} "
+        f"for request: {method.name} {path}"
     )
     if test_case:
         test_case.assertEqual(expected_status_code, last_response.status_code if last_response else None, error_message)
