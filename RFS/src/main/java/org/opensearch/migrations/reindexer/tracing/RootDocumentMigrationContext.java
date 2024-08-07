@@ -22,7 +22,7 @@ public class RootDocumentMigrationContext extends BaseRootRfsContext implements 
         IContextTracker contextTracker,
         RootWorkCoordinationContext workCoordinationContext
     ) {
-        super(sdk, contextTracker);
+        super(SCOPE_NAME, sdk, contextTracker);
         var meter = this.getMeterProvider().get(SCOPE_NAME);
         this.workCoordinationContext = workCoordinationContext;
         documentReindexInstruments = DocumentMigrationContexts.DocumentReindexContext.makeMetrics(meter);

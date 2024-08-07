@@ -12,7 +12,7 @@ public class RootSnapshotContext extends BaseRootRfsContext implements IRootSnap
     public final CreateSnapshotContext.MetricInstruments snapshotInstruments;
 
     public RootSnapshotContext(OpenTelemetry sdk, IContextTracker contextTracker) {
-        super(sdk, contextTracker);
+        super(SCOPE_NAME, sdk, contextTracker);
         var meter = this.getMeterProvider().get(SCOPE_NAME);
 
         snapshotInstruments = CreateSnapshotContext.makeMetrics(meter);

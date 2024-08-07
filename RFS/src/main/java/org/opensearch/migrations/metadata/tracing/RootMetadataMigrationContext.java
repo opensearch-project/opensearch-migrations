@@ -14,7 +14,7 @@ public class RootMetadataMigrationContext extends BaseRootRfsContext {
     public final MetadataMigrationContexts.CreateIndexContext.MetricInstruments createIndexInstruments;
 
     public RootMetadataMigrationContext(OpenTelemetry sdk, IContextTracker contextTracker) {
-        super(sdk, contextTracker);
+        super(SCOPE_NAME, sdk, contextTracker);
         var meter = this.getMeterProvider().get(SCOPE_NAME);
 
         metadataMetrics = MetadataMigrationContexts.ClusterMetadataContext.makeMetrics(meter);
