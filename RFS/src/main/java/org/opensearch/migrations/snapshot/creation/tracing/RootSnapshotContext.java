@@ -8,7 +8,7 @@ import com.rfs.tracing.BaseRootRfsContext;
 import com.rfs.tracing.IRfsContexts;
 
 public class RootSnapshotContext extends BaseRootRfsContext implements IRootSnapshotContext {
-    public static final String SCOPE_NAME = "createSnapshot";
+    public static final String SCOPE_NAME = "snapshotCreation";
     public final CreateSnapshotContext.MetricInstruments snapshotInstruments;
 
     public RootSnapshotContext(OpenTelemetry sdk, IContextTracker contextTracker) {

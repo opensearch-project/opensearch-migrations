@@ -7,7 +7,7 @@ import org.opensearch.migrations.tracing.IContextTracker;
 import com.rfs.tracing.BaseRootRfsContext;
 
 public class RootMetadataMigrationContext extends BaseRootRfsContext {
-    public static final String SCOPE_NAME = "metadata";
+    public static final String SCOPE_NAME = "metadataMigration";
 
     public final MetadataMigrationContexts.ClusterMetadataContext.MetricInstruments metadataMetrics;
     public final MetadataMigrationContexts.MigrateTemplateContext.MetricInstruments indexTemplateInstruments;
