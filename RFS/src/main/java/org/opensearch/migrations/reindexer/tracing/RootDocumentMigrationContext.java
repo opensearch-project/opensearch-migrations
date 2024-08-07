@@ -9,7 +9,7 @@ import com.rfs.tracing.RootWorkCoordinationContext;
 import lombok.Getter;
 
 public class RootDocumentMigrationContext extends BaseRootRfsContext implements IRootDocumentMigrationContext {
-    public static final String SCOPE_NAME = "snapshotDocumentReindex";
+    public static final String SCOPE_NAME = "documentMigration";
 
     @Getter
     private final RootWorkCoordinationContext workCoordinationContext;
