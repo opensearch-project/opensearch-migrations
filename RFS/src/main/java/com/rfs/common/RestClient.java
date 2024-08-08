@@ -26,13 +26,16 @@ import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 import reactor.netty.Connection;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.http.client.HttpClientRequest;
+import reactor.netty.resources.ConnectionProvider;
 import reactor.netty.tcp.SslProvider;
 import reactor.util.annotation.Nullable;
 
+@Slf4j
 public class RestClient {
     private final ConnectionContext connectionContext;
     private final HttpClient client;
@@ -48,7 +51,18 @@ public class RestClient {
     private static final String JSON_CONTENT_TYPE = "application/json";
 
     public RestClient(ConnectionContext connectionContext) {
-        this(connectionContext, HttpClient.create());
+        this(connectionContext, 0);
+    }
+
+    /**
+     * @param maxConnections If &gt; 0, an HttpClient will be created with a provider
+     *                       that uses this value for maxConnections.  Otherwise, a client
+     *                       will be created with default values provided by Reactor.
+     */
+    public RestClient(ConnectionContext connectionContext, int maxConnections) {
+        this(connectionContext, maxConnections <= 0
+            ? HttpClient.create()
+            : HttpClient.create(ConnectionProvider.create("RestClient", maxConnections)));
     }
 
     protected RestClient(ConnectionContext connectionContext, HttpClient httpClient) {
@@ -73,7 +87,10 @@ public class RestClient {
             sslProvider = SslProvider.defaultClientProvider();
         }
 
-        this.client = httpClient.secure(sslProvider).baseUrl(connectionContext.getUri().toString()).keepAlive(true);
+        this.client = httpClient
+            .secure(sslProvider)
+            .baseUrl(connectionContext.getUri().toString())
+            .keepAlive(true);
     }
 
     public static String getHostHeaderValue(ConnectionContext connectionContext) {

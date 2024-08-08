@@ -33,6 +33,10 @@ public class OpenSearchClient {
         this.client = new RestClient(connectionContext);
     }
 
+    public OpenSearchClient(ConnectionContext connectionContext, int maxConnections) {
+        this.client = new RestClient(connectionContext, maxConnections);
+    }
+
     /*
      * Create a legacy template if it does not already exist.  Returns an Optional; if the template was created, it
      * will be the created object and empty otherwise.
