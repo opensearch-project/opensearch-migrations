@@ -141,7 +141,7 @@ public class OpenSearchClient {
                 .retryWhen(
                     Retry.backoff(3, Duration.ofSeconds(1))
                         .maxBackoff(Duration.ofSeconds(10))
-                        .filter(OperationFailed.class::isInstance)
+                        .filter(throwable -> !(throwable instanceof InvalidResponse)) // Do not retry on this exception
                 )
                 .block();
 
