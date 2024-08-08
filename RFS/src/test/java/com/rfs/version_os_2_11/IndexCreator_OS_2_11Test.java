@@ -1,5 +1,21 @@
 package com.rfs.version_os_2_11;
 
+import java.util.Optional;
+import java.util.Set;
+
+import com.fasterxml.jackson.core.StreamReadFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.junit.jupiter.api.Test;
+
+import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
+
+import com.rfs.common.InvalidResponse;
+import com.rfs.common.OpenSearchClient;
+import lombok.SneakyThrows;
+import org.mockito.ArgumentCaptor;
+
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
@@ -10,22 +26,6 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-
-import java.util.Optional;
-import java.util.Set;
-
-import org.junit.jupiter.api.Test;
-import org.mockito.ArgumentCaptor;
-import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
-
-import com.fasterxml.jackson.core.StreamReadFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.rfs.common.InvalidResponse;
-import com.rfs.common.OpenSearchClient;
-
-import lombok.SneakyThrows;
 
 class IndexCreator_OS_2_11Test {
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder()
