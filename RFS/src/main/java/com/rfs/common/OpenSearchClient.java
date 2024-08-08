@@ -121,6 +121,10 @@ public class OpenSearchClient {
             client.putAsync(objectPath, settings.toString(), context.createCheckRequestContext()).flatMap(resp -> {
                 if (resp.statusCode == HttpURLConnection.HTTP_OK) {
                     return Mono.just(resp);
+                } else if (resp.statusCode == HttpURLConnection.HTTP_BAD_REQUEST) {
+                    return Mono.error(
+                        new InvalidResponse("Create object failed for " + objectPath + "\r\n" + resp.body, resp)
+                    );
                 } else {
                     String errorMessage = ("Could not create object: "
                         + objectPath
@@ -134,7 +138,11 @@ public class OpenSearchClient {
                 }
             })
                 .doOnError(e -> logger.error(e.getMessage()))
-                .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
+                .retryWhen(
+                    Retry.backoff(3, Duration.ofSeconds(1))
+                        .maxBackoff(Duration.ofSeconds(10))
+                        .filter(OperationFailed.class::isInstance)
+                )
                 .block();
 
             return Optional.of(settings);
