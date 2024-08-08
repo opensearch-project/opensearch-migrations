@@ -57,6 +57,14 @@ def run_test_benchmarks(cluster: Cluster):
 
 # As a default we exclude system indices and searchguard indices
 def clear_indices(cluster: Cluster):
+    try:
+        cluster.call_api("/_refresh", method=HttpMethod.POST, params={"ignore_unavailable": "true"})
+    except Exception as e:
+        logging.debug(f"Ignoring error received when attempting to refresh indexes: {e}")
+
     clear_indices_path = "/*,-.*,-searchguard*,-sg7*,.migrations_working_state"
-    r = cluster.call_api(clear_indices_path, method=HttpMethod.DELETE, params={"ignore_unavailable": "true"})
-    return r.content
+    try:
+        r = cluster.call_api(clear_indices_path, method=HttpMethod.DELETE, params={"ignore_unavailable": "true"})
+        return r.content
+    except Exception as e:
+        logging.debug(f"Ignoring error recieved when attempting to delete indexes: {e}")

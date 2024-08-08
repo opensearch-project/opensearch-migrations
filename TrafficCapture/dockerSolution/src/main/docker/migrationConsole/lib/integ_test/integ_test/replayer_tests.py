@@ -54,6 +54,17 @@ def setup_replayer(request):
     wait_for_running_replayer(replayer=replayer)
 
 
+@pytest.fixture(scope="function", autouse=True)
+def clear_cluster():
+    logger.info("Clearing out all cluster contents")
+
+    source_cluster: Cluster = pytest.console_env.source_cluster
+    target_cluster: Cluster = pytest.console_env.target_cluster
+
+    clear_indices(source_cluster)
+    clear_indices(target_cluster)
+
+
 @pytest.fixture(scope="session", autouse=True)
 def cleanup_after_tests():
     # Setup code
@@ -94,7 +105,6 @@ class ReplayerTests(unittest.TestCase):
         get_index(cluster=target_cluster, index_name=index_name, expected_status_code=HTTPStatus.NOT_FOUND,
                   test_case=self)
 
-    @unittest.skip("Flaky test - https://opensearch.atlassian.net/browse/MIGRATIONS-1925")
     def test_replayer_0002_single_document(self):
         # This test will verify that a document will be created (then deleted) on the target cluster when one is created
         # on the source cluster by going through the proxy first. It will verify that the traffic is captured by the
