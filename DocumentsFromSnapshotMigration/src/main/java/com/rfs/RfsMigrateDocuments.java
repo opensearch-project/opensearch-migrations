@@ -113,6 +113,17 @@ public class RfsMigrateDocuments {
             "--otel-collector-endpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
                 + "forwarded. If no value is provided, metrics will not be forwarded.")
         String otelCollectorEndpoint;
+
+        @Parameter(required = false,
+        names = "--documents-per-bulk-request",
+        description = "Optional.  The number of documents to be included within each bulk request sent.")
+        int numDocsPerBulkRequest = 1000;
+
+        @Parameter(required = false,
+            names = "--max-connections",
+            description = "Optional.  The maximum number of connections to simultaneously " +
+                "used to communicate to the target.")
+        int maxConnections = -1;
     }
 
     public static class NoWorkLeftException extends Exception {
@@ -175,8 +186,8 @@ public class RfsMigrateDocuments {
             TryHandlePhaseFailure.executeWithTryCatch(() -> {
                 log.info("Running RfsWorker");
 
-                OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
-                DocumentReindexer reindexer = new DocumentReindexer(targetClient);
+                OpenSearchClient targetClient = new OpenSearchClient(connectionContext, arguments.maxConnections);
+                DocumentReindexer reindexer = new DocumentReindexer(targetClient, arguments.numDocsPerBulkRequest);
 
                 SourceRepo sourceRepo;
                 if (snapshotLocalDirPath == null) {
