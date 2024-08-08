@@ -32,7 +32,7 @@ public interface SimpleRestoreFromSnapshot {
         final var targetClusterClient = new OpenSearchClient(ConnectionContextTestParams.builder()
             .host(targetClusterUrl)
             .build()
-            .toConnectionContext());
+            .toConnectionContext(), 4);
 
         // TODO: This should update the following metdata:
         // - Global cluster state
