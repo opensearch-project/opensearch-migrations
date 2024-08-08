@@ -50,7 +50,7 @@ public class IndexCreator_OS_2_11 {
             var illegalArguments = invalidResponse.getIllegalArguments();
 
             if (illegalArguments.isEmpty()) {
-                log.debug("Cannot retry invalid response.");
+                log.debug("Cannot retry invalid response, there are no illegal arguments to remove.");
                 return Optional.empty();
             }
 
@@ -64,7 +64,7 @@ public class IndexCreator_OS_2_11 {
                 removeFieldsByPath(settings, shortenedIllegalArgument);
             }
 
-            log.debug("Reattempting creation of index after removing illegal arguments; " + illegalArguments);
+            log.info("Reattempting creation of index '" + indexName + "' after removing illegal arguments; " + illegalArguments);
             return client.createIndex(indexName, body, context);
         }
     }
