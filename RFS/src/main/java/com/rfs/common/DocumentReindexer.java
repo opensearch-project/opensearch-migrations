@@ -19,6 +19,7 @@ public class DocumentReindexer {
     private static final Logger logger = LogManager.getLogger(DocumentReindexer.class);
     protected final OpenSearchClient client;
     private final int numDocsPerBulkRequest;
+    private final int maxConcurrentRequests;
 
     public Mono<Void> reindex(
         String indexName,
@@ -31,13 +32,14 @@ public class DocumentReindexer {
             .buffer(numDocsPerBulkRequest) // Collect until you hit the batch size
             .doOnNext(bulk -> logger.info("{} documents in current bulk request", bulk.size()))
             .map(this::convertToBulkRequestBody)  // Assemble the bulk request body from the parts
+            // Retry on failures accumulating requests
+            .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(5)))
             .flatMap(
                 bulkJson -> client.sendBulkRequest(indexName, bulkJson, context.createBulkRequest()) // Send the request
                     .doOnSuccess(unused -> logger.debug("Batch succeeded"))
                     .doOnError(error -> logger.error("Batch failed", error))
-                    .onErrorResume(e -> Mono.empty()) // Prevent the error from stopping the entire stream
-            )
-            .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(5)))
+                    // Prevent the error from stopping the entire stream
+                    .onErrorResume(e -> Mono.empty()), maxConcurrentRequests)
             .doOnComplete(() -> logger.debug("All batches processed"))
             .then();
     }
