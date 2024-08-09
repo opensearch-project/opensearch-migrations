@@ -395,7 +395,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                 new DocumentReindexer(new OpenSearchClient(ConnectionContextTestParams.builder()
                     .host(targetAddress)
                     .build()
-                    .toConnectionContext()), 1000),
+                    .toConnectionContext()), 1000, 1),
                 new OpenSearchWorkCoordinator(
                     new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                         .host(targetAddress)

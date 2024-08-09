@@ -33,10 +33,6 @@ public class OpenSearchClient {
         this.client = new RestClient(connectionContext);
     }
 
-    public OpenSearchClient(ConnectionContext connectionContext, int maxConnections) {
-        this.client = new RestClient(connectionContext, maxConnections);
-    }
-
     /*
      * Create a legacy template if it does not already exist.  Returns an Optional; if the template was created, it
      * will be the created object and empty otherwise.
@@ -269,7 +265,8 @@ public class OpenSearchClient {
                 }
                 return Mono.just(resp);
             })
-            .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)));
+            // In throttle cases, this will be low enough to get down to 1tps with 50 concurrency
+            .retryWhen(Retry.backoff(6, Duration.ofSeconds(2)).maxBackoff(Duration.ofSeconds(60)));
     }
 
     public HttpResponse refresh(IRfsContexts.IRequestContext context) {

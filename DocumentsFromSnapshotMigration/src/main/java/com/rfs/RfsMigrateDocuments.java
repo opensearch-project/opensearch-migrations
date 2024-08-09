@@ -116,14 +116,14 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
         names = "--documents-per-bulk-request",
-        description = "Optional.  The number of documents to be included within each bulk request sent.")
+        description = "Optional.  The number of documents to be included within each bulk request sent, default 1000")
         int numDocsPerBulkRequest = 1000;
 
         @Parameter(required = false,
             names = "--max-connections",
             description = "Optional.  The maximum number of connections to simultaneously " +
-                "used to communicate to the target.")
-        int maxConnections = -1;
+                "used to communicate to the target, default 50")
+        int maxConnections = 50;
     }
 
     public static class NoWorkLeftException extends Exception {
@@ -186,8 +186,9 @@ public class RfsMigrateDocuments {
             TryHandlePhaseFailure.executeWithTryCatch(() -> {
                 log.info("Running RfsWorker");
 
-                OpenSearchClient targetClient = new OpenSearchClient(connectionContext, arguments.maxConnections);
-                DocumentReindexer reindexer = new DocumentReindexer(targetClient, arguments.numDocsPerBulkRequest);
+                OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
+                DocumentReindexer reindexer = new DocumentReindexer(targetClient, arguments.numDocsPerBulkRequest,
+                    arguments.maxConnections);
 
                 SourceRepo sourceRepo;
                 if (snapshotLocalDirPath == null) {
