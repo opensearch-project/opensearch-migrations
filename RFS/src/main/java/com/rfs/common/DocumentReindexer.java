@@ -39,7 +39,8 @@ public class DocumentReindexer {
                     .doOnSuccess(unused -> logger.debug("Batch succeeded"))
                     .doOnError(error -> logger.error("Batch failed", error))
                     // Prevent the error from stopping the entire stream
-                    .onErrorResume(e -> Mono.empty()), maxConcurrentRequests)
+                    .onErrorResume(e -> Mono.empty()),
+                maxConcurrentRequests)
             .doOnComplete(() -> logger.debug("All batches processed"))
             .then();
     }
