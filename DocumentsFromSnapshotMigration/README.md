@@ -71,3 +71,5 @@ To see the default shard size, use the `--help` CLI option:
 | --target-aws-region               | The AWS region for the target cluster. Required if using SigV4 authentication                                                                           |
 | --target-aws-service-signing-name | The AWS service signing name (e.g. 'es' for Amazon OpenSearch Service, 'aoss' for Amazon OpenSearch Serverless). Required if using SigV4 authentication |
 | --target-insecure                 | Flag to allow untrusted SSL certificates for target cluster                                                                                             |
+| --documents-per-bulk-request      | The number of documents to be included within each bulk request sent, default 1000                                                                      |
+| --max-connections                 | The maximum number of connections to simultaneously used to communicate to the target, default 50                                                       |
