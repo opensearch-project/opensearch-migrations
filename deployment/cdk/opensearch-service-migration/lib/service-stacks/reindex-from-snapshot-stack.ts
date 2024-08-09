@@ -15,6 +15,7 @@ import {
 } from "../common-utilities";
 import { ClusterYaml, RFSBackfillYaml, SnapshotYaml } from "../migration-services-yaml";
 import cluster from "cluster";
+import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
 
 
 export interface ReindexFromSnapshotProps extends StackPropsExt {
@@ -67,6 +68,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         });
         const s3Uri = `s3://migration-artifacts-${this.account}-${props.stage}-${this.region}/rfs-snapshot-repo`;
         let rfsCommand = `/rfs-app/runJavaWithClasspath.sh com.rfs.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri ${s3Uri} --s3-region ${this.region} --snapshot-name rfs-snapshot --lucene-dir '/lucene' --target-host ${osClusterEndpoint}`
+        rfsCommand = props.otelCollectorEnabled ? rfsCommand.concat(` --otelCollectorEndpoint http://localhost:${OtelCollectorSidecar.OTEL_CONTAINER_PORT}`) : rfsCommand
         rfsCommand = parseAndMergeArgs(rfsCommand, props.extraArgs);
 
         let targetUser = "";
