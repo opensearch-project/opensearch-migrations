@@ -103,11 +103,11 @@ public class RfsMigrateDocuments {
                 + " performing the document migration.  Useful for preventing disk overflow.  Default: 80 * 1024 * 1024 * 1024 (80 GB)"), required = false)
         public long maxShardSizeBytes = 80 * 1024 * 1024 * 1024L;
 
-        @Parameter(names = { "--max-initial-lease-duration" }, description = ("Optional. The maximum time that the "
+        @Parameter(names = { "--initial-lease-duration" }, description = ("Optional. The time that the "
             + "first attempt to migrate a shard's documents should take.  If a process takes longer than this "
             + "the process will terminate, allowing another process to attempt the migration, but with double the "
             + "amount of time than the last time.  Default: PT10M"), required = false, converter = DurationConverter.class)
-        public Duration maxInitialLeaseDuration = Duration.ofMinutes(10);
+        public Duration initialLeaseDuration = Duration.ofMinutes(10);
 
         @Parameter(required = false, names = {
             "--otel-collector-endpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
@@ -214,7 +214,7 @@ public class RfsMigrateDocuments {
                     LuceneDocumentsReader::new,
                     reindexer,
                     workCoordinator,
-                    arguments.maxInitialLeaseDuration,
+                    arguments.initialLeaseDuration,
                     processManager,
                     indexMetadataFactory,
                     arguments.snapshotName,
