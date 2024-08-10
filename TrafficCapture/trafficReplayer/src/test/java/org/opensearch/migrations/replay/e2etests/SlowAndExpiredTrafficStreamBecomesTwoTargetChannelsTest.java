@@ -15,8 +15,6 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import io.opentelemetry.sdk.metrics.data.LongPointData;
-import io.opentelemetry.sdk.metrics.data.MetricData;
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;
 import org.junit.jupiter.api.Assertions;
@@ -32,6 +30,7 @@ import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.testutils.HttpRequestFirstLine;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
 import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
@@ -145,9 +144,9 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
         var matchingMetrics = rc.inMemoryInstrumentationBundle.getMetricsUntil(
             TCP_CONNECTION_COUNT_METRIC_NAME,
             IntStream.range(0, 5).map(i -> (i + 1000) * (int) (Math.pow(2, i))),
-            filteredMetricList -> reduceMetricStreamToSum(filteredMetricList.stream()) >= 3
+            filteredMetricList -> InMemoryInstrumentationBundle.reduceMetricStreamToSum(filteredMetricList.stream()) >= 3
         );
-        Assertions.assertEquals(3, reduceMetricStreamToSum(matchingMetrics.stream()));
+        Assertions.assertEquals(3, InMemoryInstrumentationBundle.reduceMetricStreamToSum(matchingMetrics.stream()));
 
         Assertions.assertEquals(3, responseTracker.pathsReceivedList.size());
         Map<String, ArrayList<String>> connectionToRequestUrisMap = new HashMap<>();
@@ -167,12 +166,6 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
                     "unordered " + kvp.getKey() + ": " + String.join(",", kvp.getValue())
                 )
             );
-    }
-
-    private static long reduceMetricStreamToSum(Stream<MetricData> stream) {
-        return stream.reduce((a, b) -> b)
-            .flatMap(s -> s.getLongSumData().getPoints().stream().reduce((a, b) -> b).map(LongPointData::getValue))
-            .orElse(-1L);
     }
 
     static String makePath(String connection, int i) {
