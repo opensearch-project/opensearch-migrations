@@ -1,13 +1,5 @@
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
-import {
-    IPeer,
-    IVpc,
-    Peer,
-    Port,
-    SecurityGroup,
-    SubnetFilter,
-    SubnetType
-} from "aws-cdk-lib/aws-ec2";
+import {IPeer, IVpc, Peer, Port, SecurityGroup, SubnetFilter, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {FileSystem} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnCluster, CfnConfiguration} from "aws-cdk-lib/aws-msk";
@@ -17,6 +9,13 @@ import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {StreamingSourceType} from "./streaming-source-type";
 import {Bucket, BucketEncryption} from "aws-cdk-lib/aws-s3";
 import {createMigrationStringParameter, MigrationSSMParameter, parseRemovalPolicy} from "./common-utilities";
+import {
+    ClientAuthentication,
+    ClientBrokerEncryption,
+    Cluster as MSKCluster,
+    ClusterMonitoringLevel,
+    KafkaVersion
+} from "@aws-cdk/aws-msk-alpha";
 
 export interface MigrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -123,54 +122,35 @@ export class MigrationAssistanceStack extends Stack {
         const mskAZs = props.mskAZCount ? props.mskAZCount : 2
         const subnets = this.validateAndReturnVPCSubnetsForMSK(props.vpc, brokerNodes, mskAZs, props.mskSubnetIds)
 
-        // Create an MSK cluster
-        const mskCluster = new CfnCluster(this, 'migrationMSKCluster', {
+        // TODO add specify subnets
+        // TODO handle broker nodes per AZ
+        const mskCluster = new MSKCluster(this, 'mskCluster', {
             clusterName: `migration-msk-cluster-${props.stage}`,
-            kafkaVersion: '3.6.0',
+            kafkaVersion: KafkaVersion.V3_6_0,
             numberOfBrokerNodes: brokerNodes,
-            brokerNodeGroupInfo: {
-                instanceType: 'kafka.m5.large',
-                clientSubnets: subnets,
-                connectivityInfo: {
-                    // Public access cannot be enabled on cluster creation
-                    publicAccess: {
-                        type: "DISABLED"
-                    }
-                },
-                securityGroups: [streamingSecurityGroup.securityGroupId]
-            },
+            vpc: props.vpc,
+            securityGroups: [streamingSecurityGroup],
             configurationInfo: {
                 arn: mskClusterConfig.attrArn,
-                // Current limitation of using L1 construct, would like to get latest revision dynamically
+                // Current limitation of alpha construct, would like to get latest revision dynamically
                 revision: 1
             },
-            encryptionInfo: {
-                encryptionInTransit: {
-                    clientBroker: 'TLS',
-                    inCluster: true
-                },
+            encryptionInTransit: {
+                clientBroker: ClientBrokerEncryption.TLS,
+                enableInCluster: true
             },
-            enhancedMonitoring: 'DEFAULT',
-            clientAuthentication: {
-                sasl: {
-                    iam: {
-                        enabled: true
-                    }
-                },
-                unauthenticated: {
-                    enabled: false
-                }
+            clientAuthentication: ClientAuthentication.sasl({
+                iam: true,
+            }),
+            logging: {
+                cloudwatchLogGroup: mskLogGroup
             },
-            loggingInfo: {
-                brokerLogs: {
-                    cloudWatchLogs: {
-                        enabled: true,
-                        logGroup: mskLogGroup.logGroupName
-                    }
-                }
+            monitoring: {
+                clusterMonitoringLevel: ClusterMonitoringLevel.DEFAULT
             }
         });
-        createMigrationStringParameter(this, mskCluster.attrArn, {
+
+        createMigrationStringParameter(this, mskCluster.clusterArn, {
             ...props,
             parameter: MigrationSSMParameter.MSK_CLUSTER_ARN
         });
@@ -178,6 +158,11 @@ export class MigrationAssistanceStack extends Stack {
             ...props,
             parameter: MigrationSSMParameter.MSK_CLUSTER_NAME
         });
+        createMigrationStringParameter(this, mskCluster.bootstrapBrokersSaslIam, {
+            ...props,
+            parameter: MigrationSSMParameter.KAFKA_BROKERS
+        });
+
     }
 
     constructor(scope: Construct, id: string, props: MigrationStackProps) {
