@@ -19,7 +19,7 @@ export interface CaptureProxyProps extends StackPropsExt {
     readonly streamingSourceType: StreamingSourceType,
     readonly fargateCpuArch: CpuArchitecture,
     readonly destinationConfig: DestinationConfig,
-    readonly otelCollectorEnabled?: boolean,
+    readonly otelCollectorEnabled: boolean,
     readonly serviceName?: string,
     readonly targetGroups: ELBTargetGroup[],
     readonly extraArgs?: string,
@@ -125,7 +125,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
         let command = `/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy --destinationUri ${destinationEndpoint} --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`
         command = props.streamingSourceType !== StreamingSourceType.DISABLED ? command.concat(`  --kafkaConnection ${brokerEndpoints}`) : command
         command = props.streamingSourceType === StreamingSourceType.AWS_MSK ? command.concat(" --enableMSKAuth") : command
-        command = props.otelCollectorEnabled ? command.concat(` --otelCollectorEndpoint http://localhost:${OtelCollectorSidecar.OTEL_CONTAINER_PORT}`) : command
+        command = props.otelCollectorEnabled ? command.concat(` --otelCollectorEndpoint ${OtelCollectorSidecar.getOtelLocalhostEndpoint()}`) : command
         command = parseAndMergeArgs(command, props.extraArgs);
 
         this.createService({
