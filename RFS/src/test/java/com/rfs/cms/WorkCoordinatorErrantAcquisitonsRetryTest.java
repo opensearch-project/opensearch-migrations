@@ -4,7 +4,6 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.function.Function;
-import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -101,27 +100,18 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
             try (var workCoordinator = new OpenSearchWorkCoordinator(client, 2, "testWorker")) {
                 var e = Assertions.assertThrows(OpenSearchWorkCoordinator.RetriesExceededException.class,
                     () -> workCoordinator.acquireNextWorkItem(startingLeaseDuration, rootContext::createAcquireNextItemContext));
-                validate(pathToCounts, rootContext, exceptionClassToTest, e);
+                validate(pathToCounts, exceptionClassToTest, e);
 
-                // TODO - figure out how to reliably get metric values.  These are flaky in an eventual consistent way
-                // and flaky WAY too often.  This is general for ALL of our metric verifications, not just here, but
-                // the importance of verifying these metrics isn't as great  as the rest of the test/change, so pushing
-                // this for a deeper investigation
-//                Thread.sleep(1000); // let metrics settle down
-//                var metrics = rootContext.inMemoryInstrumentationBundle.getMetricsUntil(
-//                    ACQUIRE_NEXT_WORK_ITEM_EXCEPTION_COUNT_METRIC_NAME,
-//                    IntStream.range(0, 5).map(i -> (i + 1000) * (int) (Math.pow(2, i))),
-//                    filteredMetricList -> InMemoryInstrumentationBundle.reduceMetricStreamToSum(filteredMetricList.stream()) >= e.retries
-//                );
-//                Assertions.assertEquals(e.retries,
-//                    InMemoryInstrumentationBundle.getMetricValueOrZero(metrics,
-//                        ACQUIRE_NEXT_WORK_ITEM_EXCEPTION_COUNT_METRIC_NAME));
+                var metrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
+                Assertions.assertEquals(e.retries + 1, // we don't retry on the final exception
+                    InMemoryInstrumentationBundle.getMetricValueOrZero(metrics,
+                        ACQUIRE_NEXT_WORK_ITEM_EXCEPTION_COUNT_METRIC_NAME));
             }
         }
     }
 
     private static <E extends Exception> void validate(PathCounts pathToCounts,
-                                                       WorkCoordinationTestContext rootContext, Class<E> expectedCauseClass,
+                                                       Class<E> expectedCauseClass,
                                                        OpenSearchWorkCoordinator.RetriesExceededException e) throws Exception {
         Assertions.assertEquals(0, pathToCounts.unknowns);
         Assertions.assertEquals(1, pathToCounts.updates);
@@ -145,12 +135,12 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
             try (var wc = new OpenSearchWorkCoordinator(client, 2, "testWorker")) {
                 var e1 = Assertions.assertThrows(OpenSearchWorkCoordinator.RetriesExceededException.class,
                     () -> wc.acquireNextWorkItem(startingLeaseDuration, rootContext::createAcquireNextItemContext));
-                validate(pathToCounts, rootContext, OpenSearchWorkCoordinator.MalformedAssignedWorkDocumentException.class, e1);
+                validate(pathToCounts, OpenSearchWorkCoordinator.MalformedAssignedWorkDocumentException.class, e1);
 
                 pathToCounts.reset();
                 var e2 = Assertions.assertThrows(OpenSearchWorkCoordinator.RetriesExceededException.class,
                     () -> wc.acquireNextWorkItem(startingLeaseDuration.multipliedBy(3), rootContext::createAcquireNextItemContext));
-                validate(pathToCounts, rootContext, OpenSearchWorkCoordinator.MalformedAssignedWorkDocumentException.class, e2);
+                validate(pathToCounts, OpenSearchWorkCoordinator.MalformedAssignedWorkDocumentException.class, e2);
                 Assertions.assertTrue(e1.retries < e2.retries);
             }
         }
