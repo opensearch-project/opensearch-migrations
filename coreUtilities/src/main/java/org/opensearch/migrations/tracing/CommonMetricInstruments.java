@@ -15,7 +15,7 @@ public class CommonMetricInstruments {
         }
     }
 
-    final LongCounter exceptionCounter;
+    public final LongCounter exceptionCounter;
 
     public CommonMetricInstruments(Meter meter, String activityName) {
         this(meter, Labels.fromActivityName(activityName));

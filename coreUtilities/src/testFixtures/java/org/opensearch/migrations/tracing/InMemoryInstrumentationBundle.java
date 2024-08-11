@@ -75,6 +75,7 @@ public class InMemoryInstrumentationBundle implements AutoCloseable {
         if (testMetricReader == null) {
             throw new IllegalStateException("Metrics collector was not configured");
         }
+        testMetricReader.forceFlush();
         return testMetricReader.collectAllMetrics();
     }
 

@@ -22,8 +22,7 @@ public interface IInstrumentationAttributes {
     Throwable getObservedExceptionToIncludeInMetrics();
 
     default @NonNull Attributes getPopulatedMetricAttributes(AttributesBuilder attributesBuilder) {
-        final var e = getObservedExceptionToIncludeInMetrics();
-        return e == null ? attributesBuilder.build() : attributesBuilder.put(HAD_EXCEPTION_KEY, true).build();
+        return attributesBuilder.build();
     }
 
     default void addCaughtException(Throwable e) {
