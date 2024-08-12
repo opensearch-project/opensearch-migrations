@@ -1,5 +1,6 @@
 package com.rfs.common;
 
+import java.util.Collection;
 import java.util.List;
 
 import org.apache.logging.log4j.LogManager;
@@ -8,6 +9,9 @@ import org.apache.lucene.document.Document;
 
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
+import lombok.AllArgsConstructor;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -25,13 +29,12 @@ public class DocumentReindexer {
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
 
-        return documentStream.map(this::convertDocumentToBulkSection)  // Convert each Document to part of a bulk
+        return documentStream.map(BulkDocSection::new)  // Convert each Document to part of a bulk
                                                                        // operation
             .buffer(numDocsPerBulkRequest) // Collect until you hit the batch size
             .doOnNext(bulk -> logger.info("{} documents in current bulk request", bulk.size()))
-            .map(this::convertToBulkRequestBody)  // Assemble the bulk request body from the parts
             .flatMap(
-                bulkJson -> client.sendBulkRequest(indexName, bulkJson, context.createBulkRequest()) // Send the request
+                bulkDocs -> client.sendBulkRequest(indexName, bulkDocs, context.createBulkRequest()) // Send the request
                     .doOnSuccess(unused -> logger.debug("Batch succeeded"))
                     .doOnError(error -> logger.error("Batch failed", error))
                     // Prevent the error from stopping the entire stream, retries occurring within sendBulkRequest
@@ -41,19 +44,32 @@ public class DocumentReindexer {
             .then();
     }
 
-    private String convertDocumentToBulkSection(Document document) {
-        String id = Uid.decodeId(document.getBinaryValue("_id").bytes);
-        String source = document.getBinaryValue("_source").utf8ToString();
-        String action = "{\"index\": {\"_id\": \"" + id + "\"}}";
+    @EqualsAndHashCode(onlyExplicitlyIncluded = true)
+    public static class BulkDocSection {
+        private Document doc;
+        @EqualsAndHashCode.Include
+        @Getter
+        private String docId;
 
-        return action + "\n" + source;
-    }
-
-    private String convertToBulkRequestBody(List<String> bulkSections) {
-        StringBuilder builder = new StringBuilder();
-        for (String section : bulkSections) {
-            builder.append(section).append("\n");
+        public BulkDocSection(Document doc) {
+            this.doc = doc;
+            this.docId = Uid.decodeId(doc.getBinaryValue("_id").bytes); 
         }
-        return builder.toString();
+
+        String asBulkIndex() {
+            String source = doc.getBinaryValue("_source").utf8ToString();
+            String action = "{\"index\": {\"_id\": \"" + getDocId() + "\"}}";
+            return action + "\n" + source;
+        }
+
+        public static String convertToBulkRequestBody(Collection<BulkDocSection> bulkSections) {
+            StringBuilder builder = new StringBuilder();
+            for (var section : bulkSections) {
+                var indexCommand = section.asBulkIndex();
+                builder.append(indexCommand).append("\n");
+            }
+            return builder.toString();
+        }
+    
     }
 }

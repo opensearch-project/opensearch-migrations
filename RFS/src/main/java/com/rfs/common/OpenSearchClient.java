@@ -1,21 +1,28 @@
 package com.rfs.common;
 
+import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.time.Duration;
+import java.util.Collection;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.opensearch.migrations.parsing.BulkResponseParser;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
+import com.rfs.common.DocumentReindexer.BulkDocSection;
 import com.rfs.common.http.ConnectionContext;
 import com.rfs.common.http.HttpResponse;
 import com.rfs.tracing.IRfsContexts;
+
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
@@ -89,6 +96,12 @@ public class OpenSearchClient {
         return createObjectIdempotent(targetPath, settings, context);
     }
 
+    Retry checkIfItemExistsRetryStrategy = Retry.backoff(3, Duration.ofSeconds(1))
+        .maxBackoff(Duration.ofSeconds(10));
+    Retry createItemExistsRetryStrategy = Retry.backoff(3, Duration.ofSeconds(1))
+        .maxBackoff(Duration.ofSeconds(10))
+        .filter(throwable -> !(throwable instanceof InvalidResponse)); // Do not retry on this exception
+
     private Optional<ObjectNode> createObjectIdempotent(
         String objectPath,
         ObjectNode settings,
@@ -111,7 +124,7 @@ public class OpenSearchClient {
                 }
             })
             .doOnError(e -> logger.error(e.getMessage()))
-            .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
+            .retryWhen(checkIfItemExistsRetryStrategy)
             .block();
 
         assert getResponse != null : ("getResponse should not be null; it should either be a valid response or an exception"
@@ -138,11 +151,7 @@ public class OpenSearchClient {
                 }
             })
                 .doOnError(e -> logger.error(e.getMessage()))
-                .retryWhen(
-                    Retry.backoff(3, Duration.ofSeconds(1))
-                        .maxBackoff(Duration.ofSeconds(10))
-                        .filter(throwable -> !(throwable instanceof InvalidResponse)) // Do not retry on this exception
-                )
+                .retryWhen(createItemExistsRetryStrategy)
                 .block();
 
             return Optional.of(settings);
@@ -150,6 +159,8 @@ public class OpenSearchClient {
         // The only response code that can end up here is HTTP_OK, which means the object already existed
         return Optional.empty();
     }
+
+    Retry snapshotRetryStrategy = Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10));
 
     /*
      * Attempts to register a snapshot repository; no-op if the repo already exists.
@@ -176,7 +187,7 @@ public class OpenSearchClient {
             }
         })
             .doOnError(e -> logger.error(e.getMessage()))
-            .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
+            .retryWhen(snapshotRetryStrategy)
             .block();
     }
 
@@ -206,7 +217,7 @@ public class OpenSearchClient {
             }
         })
             .doOnError(e -> logger.error(e.getMessage()))
-            .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
+            .retryWhen(snapshotRetryStrategy)
             .block();
     }
 
@@ -234,7 +245,7 @@ public class OpenSearchClient {
             }
         })
             .doOnError(e -> logger.error(e.getMessage()))
-            .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)))
+            .retryWhen(snapshotRetryStrategy)
             .block();
 
         assert getResponse != null : ("getResponse should not be null; it should either be a valid response or an exception"
@@ -257,20 +268,47 @@ public class OpenSearchClient {
         }
     }
 
-    public Mono<BulkResponse> sendBulkRequest(String indexName, String body, IRfsContexts.IRequestContext context) {
-        String targetPath = indexName + "/_bulk";
+    Retry getBulkRetryStrategy() {
+        return Retry.backoff(6, Duration.ofSeconds(2)).maxBackoff(Duration.ofSeconds(60));
+    }
 
-        return client.postAsync(targetPath, body, context)
-            .map(response -> new BulkResponse(response.statusCode, response.statusText, response.headers, response.body))
-            .flatMap(resp -> {
-                if (resp.hasBadStatusCode() || resp.hasFailedOperations()) {
-                    logger.error(resp.getFailureMessage());
-                    return Mono.error(new OperationFailed(resp.getFailureMessage(), resp));
+    public Mono<BulkResponse> sendBulkRequest(String indexName, List<BulkDocSection> docs, IRfsContexts.IRequestContext context) {
+        String targetPath = indexName + "/_bulk";
+        var maxAttempts = 6;
+
+        Map<String, BulkDocSection> docsMap = docs.stream().collect(Collectors.toMap(d -> d.getDocId(), d -> d));
+        for (int i = 0; i < maxAttempts; i++) {
+
+            logger.warn("Creating bulk body with " + docsMap.keySet());
+            if (docsMap.isEmpty()) {
+                return Mono.empty();
+            }
+            var body = BulkDocSection.convertToBulkRequestBody(docsMap.values());
+            try {
+                var outerResponse = client.postAsync(targetPath, body, context)
+                    .flatMap(response -> {
+                        var resp = new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
+                        if (!resp.hasBadStatusCode() && !resp.hasFailedOperations()) {
+                            return Mono.just(resp);
+                        }
+                        // Remove all successful documents for the next bulk request attempt
+                        resp.getSuccessfulDocs().forEach(docsMap::remove);
+
+                        logger.error(resp.getFailureMessage());
+                        return Mono.error(new OperationFailed(resp.getFailureMessage(), resp));
+                    }).blockOptional();
+
+                if (outerResponse.isPresent()) {
+                    return Mono.just(outerResponse.get());
                 }
-                return Mono.just(resp);
-            })
-            // In throttle cases, this will be low enough to get down to 1tps with 50 concurrency
-            .retryWhen(Retry.backoff(6, Duration.ofSeconds(2)).maxBackoff(Duration.ofSeconds(60)));
+            } catch (OperationFailed of) {
+                if (i + 1 < maxAttempts) {
+                    continue;
+                }
+                throw of;
+            }
+        }
+        return Mono.empty();
     }
 
     public HttpResponse refresh(IRfsContexts.IRequestContext context) {
@@ -296,6 +334,15 @@ public class OpenSearchClient {
             Pattern pattern = Pattern.compile(regexPattern);
             Matcher matcher = pattern.matcher(body);
             return matcher.find();
+        }
+
+        public List<String> getSuccessfulDocs() {
+            try {
+                return BulkResponseParser.findSuccessDocs(body);
+            } catch (IOException ioe) {
+                logger.warn("Unable to process bulk request for success", ioe);
+                return List.of();
+            }
         }
 
         public String getFailureMessage() {
