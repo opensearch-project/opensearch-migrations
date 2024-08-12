@@ -16,7 +16,7 @@ from console_link.models.cluster import Cluster, AuthMethod
 from console_link.cli import Context
 
 from common_operations import (get_index, create_index, delete_index, get_document, create_document, delete_document,
-                               check_doc_match, check_doc_counts_match, generate_large_doc, execute_api_call,
+                               check_doc_match, check_doc_counts_match, generate_large_doc, execute_api_call, refresh_cluster
                                wait_for_running_replayer, EXPECTED_BENCHMARK_DOCS)
 from metric_operations import assert_metrics_present
 
@@ -117,8 +117,8 @@ class ReplayerTests(unittest.TestCase):
         doc_id = "replayer_0002_doc"
 
         def refreshClusters():
-            source_cluster.refresh_cluster()
-            target_cluster.refresh_cluster()
+            refresh_cluster(source_cluster)
+            refresh_cluster(target_cluster)
 
         create_index(cluster=source_cluster, index_name=index_name, test_case=self)
         refreshClusters()
