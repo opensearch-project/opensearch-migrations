@@ -164,13 +164,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                         log.info("Not creating " + INDEX_NAME + " because it already exists");
                         return indexCheckResponse;
                     }
-                    log.atInfo()
-                        .setMessage(
-                            "Creating "
-                                + INDEX_NAME
-                                + " because it's HEAD check returned "
-                                + indexCheckResponse.getStatusCode()
-                        )
+                    log.atInfo().setMessage(() ->
+                            "Creating " + INDEX_NAME + " because HEAD returned " + indexCheckResponse.getStatusCode())
                         .log();
                     return httpClient.makeJsonRequest(AbstractedHttpClient.PUT_METHOD, INDEX_NAME, null, body);
                 } catch (Exception e) {
@@ -631,14 +626,20 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             body
         );
 
+        if (response.getStatusCode() >= 400) {
+            throw new AssignedWorkDocumentNotFoundException(response);
+        }
+
         final var resultHitsUpper = objectMapper.readTree(response.getPayloadBytes()).path("hits");
         if (resultHitsUpper.isMissingNode()) {
             log.warn("Couldn't find the top level 'hits' field, returning null");
             return null;
         }
         final var numDocs = resultHitsUpper.path("total").path("value").longValue();
-        if (numDocs != 1) {
-            throw new AssignedWorkDocumentNotFoundException(response, numDocs);
+        if (numDocs == 0) {
+            throw new AssignedWorkDocumentNotFoundException(response);
+        } else if (numDocs != 1) {
+            throw new MalformedAssignedWorkDocumentException(response);
         }
         var resultHitInner = resultHitsUpper.path("hits").path(0);
         var expiration = resultHitInner.path(SOURCE_FIELD_NAME).path(EXPIRATION_FIELD_NAME).longValue();
@@ -659,37 +660,35 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         int malformedDocRetries = 0;
         int transientRetries = 0;
         while (true) {
-            Duration sleepBeforeNextRetryDuration;
             try {
                 return getAssignedWorkItemUnsafe();
-            } catch (MalformedAssignedWorkDocumentException e) {
-                // This probably isn't a recoverable error, but since we think that we might have the lease,
-                // there's no reason to not try at least a few times
-                if (malformedDocRetries > MAX_MALFORMED_ASSIGNED_WORK_DOC_RETRIES) {
-                    log.atError().setCause(e)
-                        .setMessage(() -> "Throwing exception because max tries (" + MAX_MALFORMED_ASSIGNED_WORK_DOC_RETRIES + ")" +
-                            " have been exhausted").log();
-                    ctx.addTraceException(e, true);
-                    throw new RetriesExceededException(e, malformedDocRetries);
+            } catch (MalformedAssignedWorkDocumentException | IOException | AssignedWorkDocumentNotFoundException e) {
+                int retries;
+                if (e instanceof  MalformedAssignedWorkDocumentException) {
+                    // This probably isn't a recoverable error, but since we think that we might have the lease,
+                    // there's no reason to not try at least a few times
+                    if (malformedDocRetries > MAX_MALFORMED_ASSIGNED_WORK_DOC_RETRIES) {
+                        ctx.addTraceException(e, true);
+                        log.atError().setCause(e).setMessage(() ->
+                            "Throwing exception because max tries (" + MAX_MALFORMED_ASSIGNED_WORK_DOC_RETRIES + ")" +
+                                " have been exhausted").log();
+                        throw new RetriesExceededException(e, malformedDocRetries);
+                    }
+                    retries = ++malformedDocRetries;
                 } else {
-                    ctx.addTraceException(e, false);
-                    sleepBeforeNextRetryDuration =
-                        Duration.ofMillis((long) (Math.pow(2.0, malformedDocRetries) * ACQUIRE_WORK_RETRY_BASE_MS));
-                    leaseChecker.checkRetryWaitTimeOrThrow(e, malformedDocRetries, sleepBeforeNextRetryDuration);
-                    ++malformedDocRetries;
+                    retries = ++transientRetries;
                 }
-            } catch (IOException | AssignedWorkDocumentNotFoundException e) {
-                ctx.addTraceException(e, false);
-                sleepBeforeNextRetryDuration = Duration.ofMillis(
-                    Math.min(MAX_ASSIGNED_DOCUMENT_NOT_FOUND_RETRY_INTERVAL,
-                        (long) (Math.pow(2.0, transientRetries) * ACQUIRE_WORK_RETRY_BASE_MS)));
-                leaseChecker.checkRetryWaitTimeOrThrow(e, transientRetries, sleepBeforeNextRetryDuration);
-                ++transientRetries;
-            }
 
-            log.atWarn().setMessage(() -> "Couldn't complete work assignment due to exception.  "
-                + "Backing off " + sleepBeforeNextRetryDuration + "ms and trying again.").log();
-            Thread.sleep(sleepBeforeNextRetryDuration.toMillis());
+                ctx.addTraceException(e, false);
+                var sleepBeforeNextRetryDuration = Duration.ofMillis(
+                    Math.min(MAX_ASSIGNED_DOCUMENT_NOT_FOUND_RETRY_INTERVAL,
+                        (long) (Math.pow(2.0, retries-1) * ACQUIRE_WORK_RETRY_BASE_MS)));
+                leaseChecker.checkRetryWaitTimeOrThrow(e, retries-1, sleepBeforeNextRetryDuration);
+
+                log.atWarn().setMessage(() -> "Couldn't complete work assignment due to exception.  "
+                    + "Backing off " + sleepBeforeNextRetryDuration + "ms and trying again.").setCause(e).log();
+                Thread.sleep(sleepBeforeNextRetryDuration.toMillis());
+            }
         }
     }
 
@@ -715,16 +714,14 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         @Override
         public String getMessage() {
-            return super.getMessage() + " Response: " + response.toDiagnosticString() ;
+            var parentPrefix = Optional.ofNullable(super.getMessage()).map(s -> s + " ").orElse("");
+            return parentPrefix  + "Response: " + response.toDiagnosticString() ;
         }
     }
 
     public static class AssignedWorkDocumentNotFoundException extends ResponseException {
-        final long numDocs;
-
-        private AssignedWorkDocumentNotFoundException(AbstractedHttpClient.AbstractHttpResponse r, long numDocs) {
+        private AssignedWorkDocumentNotFoundException(AbstractedHttpClient.AbstractHttpResponse r) {
             super(r);
-            this.numDocs = numDocs;
         }
     }
 
@@ -857,7 +854,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                         leaseChecker.checkRetryWaitTimeOrThrow(e, driftRetries, sleepBeforeNextRetryDuration);
                     }
                     ++driftRetries;
-                    log.atInfo().setMessage(() -> "Couldn't complete work assignment due to exception.  "
+                    log.atInfo().setCause(e).setMessage(() -> "Couldn't complete work assignment due to exception.  "
                         + "Backing off " + sleepBeforeNextRetryDuration + "ms and trying again.").log();
                     Thread.sleep(sleepBeforeNextRetryDuration.toMillis());
                 }

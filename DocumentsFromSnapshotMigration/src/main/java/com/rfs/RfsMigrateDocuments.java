@@ -47,11 +47,13 @@ import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.worker.DocumentsRunner;
 import com.rfs.worker.ShardWorkPreparer;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 
 @Slf4j
 public class RfsMigrateDocuments {
     public static final int PROCESS_TIMED_OUT = 2;
     public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
+    public static final String LOGGING_MDC_WORKER_ID = "workerId";
 
     public static class DurationConverter implements IStringConverter<Duration> {
         @Override
@@ -178,13 +180,15 @@ public class RfsMigrateDocuments {
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC())) {
             ConnectionContext connectionContext = arguments.targetArgs.toConnectionContext();
+            final var workerId = UUID.randomUUID().toString();
             var workCoordinator = new OpenSearchWorkCoordinator(
                 new CoordinateWorkHttpClient(connectionContext),
                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                UUID.randomUUID().toString()
+                workerId
             );
+            MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
             TryHandlePhaseFailure.executeWithTryCatch(() -> {
-                log.info("Running RfsWorker");
+                log.info("Running RfsMigrateDocuments with workerId = " + workerId);
 
                 OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
                 DocumentReindexer reindexer = new DocumentReindexer(targetClient, arguments.numDocsPerBulkRequest,

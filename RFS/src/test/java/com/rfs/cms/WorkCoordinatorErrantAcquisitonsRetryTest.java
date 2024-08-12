@@ -4,11 +4,14 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.Map;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ValueSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import org.opensearch.migrations.testutils.HttpRequestFirstLine;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
@@ -18,6 +21,7 @@ import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestCo
 
 import com.rfs.common.http.ConnectionContextTestParams;
 import lombok.NonNull;
+import org.slf4j.MDC;
 
 public class WorkCoordinatorErrantAcquisitonsRetryTest {
 
@@ -31,21 +35,26 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
         "  \"failures\": []\n" +
         "}";
 
-    private static final String GET_NO_RESULTS_ASSIGNED_WORK_BODY = "" +
-        "{\n" +
-        "  \"_shards\": {\n" +
-        "    \"total\": 0,\n" +
-        "    \"successful\": 1,\n" +
-        "    \"skipped\": 0,\n" +
-        "    \"failed\": 0\n" +
-        "  },\n" +
-        "  \"hits\": {\n" +
-        "    \"total\": {\n" +
-        "      \"value\": 0,\n" +
-        "      \"relation\": \"eq\"\n" +
-        "    }\n" +
-        "  }\n" +
-        "}";
+    private static final String GET_NO_RESULTS_ASSIGNED_WORK_BODY = getAssignedWorkBody(0);
+    private static final String GET_TWO_RESULTS_ASSIGNED_WORK_BODY = getAssignedWorkBody(2);
+
+    private static String getAssignedWorkBody(int numDocs) {
+        return
+            "{\n" +
+            "  \"_shards\": {\n" +
+            "    \"total\": 0,\n" +
+            "    \"successful\": 1,\n" +
+            "    \"skipped\": 0,\n" +
+            "    \"failed\": 0\n" +
+            "  },\n" +
+            "  \"hits\": {\n" +
+            "    \"total\": {\n" +
+            "      \"value\": " + numDocs + ",\n" +
+            "      \"relation\": \"eq\"\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+    }
 
     private static final String GET_MALFORMED_ASSIGNED_WORK_BODY = "" +
         "{\n" +
@@ -73,23 +82,39 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
         "  }\n" +
         "}";
     public static final String ACQUIRE_NEXT_WORK_ITEM_EXCEPTION_COUNT_METRIC_NAME = "acquireNextWorkItemExceptionCount";
+    public static final String TEST_WORKER_ID = "testWorker";
+
+    @BeforeAll
+    public static void initialize() {
+        MDC.put("workerId", TEST_WORKER_ID); // I don't see a need to clean this up since we're in main
+    }
+
+    private static Stream<Arguments> makeArgs() {
+        return Stream.of(
+            Arguments.of(OpenSearchWorkCoordinator.AssignedWorkDocumentNotFoundException.class,
+                getCountingResponseMakerWithSearchBody(GET_NO_RESULTS_ASSIGNED_WORK_BODY)),
+            Arguments.of(OpenSearchWorkCoordinator.AssignedWorkDocumentNotFoundException.class,
+                getCountingResponseMaker(makeResponse(429, "Too Many Requests",
+                    "{}".getBytes(StandardCharsets.UTF_8)))),
+
+            Arguments.of(OpenSearchWorkCoordinator.MalformedAssignedWorkDocumentException.class,
+                getCountingResponseMakerWithSearchBody(GET_TWO_RESULTS_ASSIGNED_WORK_BODY)),
+            Arguments.of(OpenSearchWorkCoordinator.MalformedAssignedWorkDocumentException.class,
+                getCountingResponseMakerWithSearchBody(GET_MALFORMED_ASSIGNED_WORK_BODY))
+        );
+    }
 
     @ParameterizedTest
-    @ValueSource(classes = { OpenSearchWorkCoordinator.AssignedWorkDocumentNotFoundException.class,
-        OpenSearchWorkCoordinator.MalformedAssignedWorkDocumentException.class })
-    public void testSecondPhaseLeaseAcquisitionFailureKeepsRetrying(Class exceptionClassToTest) throws Exception {
+    @MethodSource(value = "makeArgs")
+    public void testSecondPhaseLeaseAcquisitionFailureKeepsRetrying(
+        Class exceptionClassToTest,
+        Function<PathCounts, Function<HttpRequestFirstLine, SimpleHttpResponse>> responseFactory)
+        throws Exception
+    {
         var pathToCounts = new PathCounts();
-        String searchResultBody;
-        if (exceptionClassToTest.equals(OpenSearchWorkCoordinator.AssignedWorkDocumentNotFoundException.class)) {
-            searchResultBody = GET_NO_RESULTS_ASSIGNED_WORK_BODY;
-        } else if (exceptionClassToTest.equals(OpenSearchWorkCoordinator.MalformedAssignedWorkDocumentException.class)) {
-            searchResultBody = GET_MALFORMED_ASSIGNED_WORK_BODY;
-        } else {
-            throw new IllegalArgumentException("unknown class: " + exceptionClassToTest);
-        }
 
         try (SimpleNettyHttpServer testServer = SimpleNettyHttpServer.makeServer(false, null,
-            getCountingResponseMaker(pathToCounts, searchResultBody)))
+            responseFactory.apply(pathToCounts)))
         {
             var client = new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                 .host("http://localhost:" + testServer.port)
@@ -97,7 +122,7 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
                 .toConnectionContext());
             var startingLeaseDuration = Duration.ofSeconds(1);
             var rootContext = WorkCoordinationTestContext.factory().withAllTracking();
-            try (var workCoordinator = new OpenSearchWorkCoordinator(client, 2, "testWorker")) {
+            try (var workCoordinator = new OpenSearchWorkCoordinator(client, 2, TEST_WORKER_ID)) {
                 var e = Assertions.assertThrows(OpenSearchWorkCoordinator.RetriesExceededException.class,
                     () -> workCoordinator.acquireNextWorkItem(startingLeaseDuration, rootContext::createAcquireNextItemContext));
                 validate(pathToCounts, exceptionClassToTest, e);
@@ -124,7 +149,7 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
     public void doubledLeaseIntervalCausesExtraRetry() throws Exception {
         var pathToCounts = new PathCounts();
         try (SimpleNettyHttpServer testServer = SimpleNettyHttpServer.makeServer(false, null,
-            getCountingResponseMaker(pathToCounts, GET_MALFORMED_ASSIGNED_WORK_BODY)))
+            getCountingResponseMakerWithSearchBody(GET_MALFORMED_ASSIGNED_WORK_BODY).apply(pathToCounts)))
         {
             var client = new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                 .host("http://localhost:" + testServer.port)
@@ -132,7 +157,7 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
                 .toConnectionContext());
             var startingLeaseDuration = Duration.ofSeconds(1);
             var rootContext = WorkCoordinationTestContext.factory().withAllTracking();
-            try (var wc = new OpenSearchWorkCoordinator(client, 2, "testWorker")) {
+            try (var wc = new OpenSearchWorkCoordinator(client, 2, TEST_WORKER_ID)) {
                 var e1 = Assertions.assertThrows(OpenSearchWorkCoordinator.RetriesExceededException.class,
                     () -> wc.acquireNextWorkItem(startingLeaseDuration, rootContext::createAcquireNextItemContext));
                 validate(pathToCounts, OpenSearchWorkCoordinator.MalformedAssignedWorkDocumentException.class, e1);
@@ -146,7 +171,7 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
         }
     }
 
-    private static class PathCounts {
+    public static class PathCounts {
         int updates;
         int searches;
         int refreshes;
@@ -158,8 +183,21 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
     }
 
     @NonNull
+    private static Function<PathCounts, Function<HttpRequestFirstLine, SimpleHttpResponse>>
+    getCountingResponseMakerWithSearchBody(String searchResponse) {
+        var payloadBytes = searchResponse.getBytes(StandardCharsets.UTF_8);
+        return pathCounts -> getCountingResponseMaker(pathCounts, makeResponse(200, "OK", payloadBytes));
+    }
+
+    @NonNull
+    private static Function<PathCounts, Function<HttpRequestFirstLine, SimpleHttpResponse>>
+    getCountingResponseMaker(SimpleHttpResponse searchResponse) {
+        return pathCounts -> getCountingResponseMaker(pathCounts, searchResponse);
+    }
+
+    @NonNull
     private static Function<HttpRequestFirstLine, SimpleHttpResponse>
-    getCountingResponseMaker(PathCounts pathToCountMap, String searchResponse) {
+    getCountingResponseMaker(PathCounts pathToCountMap, SimpleHttpResponse searchResponse) {
         return httpRequestFirstLine -> {
             final var uriPath = httpRequestFirstLine.path().getPath();
             if (uriPath.startsWith("/" + OpenSearchWorkCoordinator.INDEX_NAME + "/_refresh")) {
@@ -172,8 +210,7 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
                     UPDATE_BY_QUERY_RESPONSE_BODY.getBytes(StandardCharsets.UTF_8));
             } else if (uriPath.startsWith("/" + OpenSearchWorkCoordinator.INDEX_NAME + "/_search")) {
                 ++pathToCountMap.searches;
-                return makeResponse(200, "OK",
-                    searchResponse.getBytes(StandardCharsets.UTF_8));
+                return searchResponse;
             } else {
                 ++pathToCountMap.unknowns;
                 return makeResponse(404, "Not Found", new byte[0]);
