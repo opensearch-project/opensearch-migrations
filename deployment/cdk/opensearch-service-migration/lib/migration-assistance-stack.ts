@@ -1,5 +1,5 @@
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
-import {IPeer, IVpc, Peer, Port, SecurityGroup, SubnetFilter, SubnetType} from "aws-cdk-lib/aws-ec2";
+import {IVpc, Port, SecurityGroup, SubnetFilter, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {FileSystem} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnConfiguration} from "aws-cdk-lib/aws-msk";
@@ -17,15 +17,13 @@ import {
     KafkaVersion
 } from "@aws-cdk/aws-msk-alpha";
 import {SelectedSubnets} from "aws-cdk-lib/aws-ec2/lib/vpc";
+import {KafkaYaml} from "./migration-services-yaml";
 
 export interface MigrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly streamingSourceType: StreamingSourceType,
     // Future support needed to allow importing an existing MSK cluster
     readonly mskImportARN?: string,
-    readonly mskEnablePublicEndpoints?: boolean,
-    readonly mskRestrictPublicAccessTo?: string,
-    readonly mskRestrictPublicAccessType?: string,
     readonly mskBrokersPerAZCount?: number,
     readonly mskSubnetIds?: string[],
     readonly mskAZCount?: number,
@@ -35,21 +33,7 @@ export interface MigrationStackProps extends StackPropsExt {
 
 
 export class MigrationAssistanceStack extends Stack {
-
-    getPublicEndpointAccess(restrictPublicAccessTo: string, restrictPublicAccessType: string): IPeer {
-        switch (restrictPublicAccessType) {
-            case 'ipv4':
-                return Peer.ipv4(restrictPublicAccessTo);
-            case 'ipv6':
-                return Peer.ipv6(restrictPublicAccessTo);
-            case 'prefixList':
-                return Peer.prefixList(restrictPublicAccessTo);
-            case 'securityGroupId':
-                return Peer.securityGroupId(restrictPublicAccessTo);
-            default:
-                throw new Error('mskRestrictPublicAccessType should be one of the below values: ipv4, ipv6, prefixList or securityGroupId');
-        }
-    }
+    kafkaYaml: KafkaYaml;
 
     // This function exists to overcome the limitation on the vpc.selectSubnets() call which requires the subnet
     // type to be provided or else an empty list will be returned if public subnets are provided, thus this function
@@ -114,10 +98,6 @@ export class MigrationAssistanceStack extends Stack {
             serverProperties: "auto.create.topics.enable=true"
         })
 
-        if (props.mskEnablePublicEndpoints && props.mskRestrictPublicAccessTo && props.mskRestrictPublicAccessType) {
-            streamingSecurityGroup.addIngressRule(this.getPublicEndpointAccess(props.mskRestrictPublicAccessTo, props.mskRestrictPublicAccessType), Port.allTcp())
-        }
-
         const mskLogGroup = new LogGroup(this, 'migrationMSKBrokerLogGroup',  {
             retention: RetentionDays.THREE_MONTHS
         });
@@ -167,14 +147,14 @@ export class MigrationAssistanceStack extends Stack {
             parameter: MigrationSSMParameter.KAFKA_BROKERS
         });
 
+        this.kafkaYaml = new KafkaYaml();
+        this.kafkaYaml.msk = '';
+        this.kafkaYaml.broker_endpoints = mskCluster.bootstrapBrokersSaslIam;
+
     }
 
     constructor(scope: Construct, id: string, props: MigrationStackProps) {
         super(scope, id, props);
-
-        if (props.mskEnablePublicEndpoints && (!props.mskRestrictPublicAccessTo || !props.mskRestrictPublicAccessType)) {
-            throw new Error("The 'mskEnablePublicEndpoints' option requires both 'mskRestrictPublicAccessTo' and 'mskRestrictPublicAccessType' options to be provided")
-        }
 
         const bucketRemovalPolicy = parseRemovalPolicy('artifactBucketRemovalPolicy', props.artifactBucketRemovalPolicy)
         const replayerEFSRemovalPolicy = parseRemovalPolicy('replayerOutputEFSRemovalPolicy', props.replayerOutputEFSRemovalPolicy)
