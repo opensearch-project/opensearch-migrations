@@ -116,19 +116,30 @@ class ReplayerTests(unittest.TestCase):
         index_name = f"test_replayer_0002_{pytest.unique_id}"
         doc_id = "replayer_0002_doc"
 
+        def refreshClusters():
+            source_cluster.refresh_cluster()
+            target_cluster.refresh_cluster()
+
         create_index(cluster=source_cluster, index_name=index_name, test_case=self)
+        refreshClusters()
         get_index(cluster=source_cluster, index_name=index_name, test_case=self)
         get_index(cluster=target_cluster, index_name=index_name, test_case=self)
+
         create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id,
                         expected_status_code=HTTPStatus.CREATED, test_case=self)
+        refreshClusters()
         check_doc_match(source_cluster=source_cluster, target_cluster=target_cluster,
                         index_name=index_name, doc_id=doc_id, test_case=self)
+
         delete_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id, test_case=self)
+        refreshClusters()
         get_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id,
                      expected_status_code=HTTPStatus.NOT_FOUND, test_case=self)
         get_document(cluster=target_cluster, index_name=index_name, doc_id=doc_id,
                      expected_status_code=HTTPStatus.NOT_FOUND, test_case=self)
+
         delete_index(cluster=source_cluster, index_name=index_name)
+        refreshClusters()
         get_index(cluster=source_cluster, index_name=index_name, expected_status_code=HTTPStatus.NOT_FOUND,
                   test_case=self)
         get_index(cluster=target_cluster, index_name=index_name, expected_status_code=HTTPStatus.NOT_FOUND,

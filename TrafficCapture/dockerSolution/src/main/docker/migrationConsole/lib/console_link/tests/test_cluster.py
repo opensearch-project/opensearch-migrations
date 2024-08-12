@@ -188,3 +188,21 @@ def test_valid_cluster_api_call_with_secrets_auth(requests_mock, aws_credentials
         assert response.json() == {'test': True}
         print(requests_mock.last_request.headers)
         assert requests_mock.last_request.headers['Authorization'] == auth_header_should_be
+
+def test_clear_indices(requests_mock):
+    cluster = create_valid_cluster()
+    requests_mock.delete(f"{cluster.endpoint}/*,-.*,-searchguard*,-sg7*,.migrations_working_state", json={"action": "deleted"})
+
+    result = clusters_.clear_indices(cluster)
+
+    assert result.status_code == 200
+    assert result.json() == {"action": "deleted"}
+
+def test_refresh_cluster(requests_mock):
+    cluster = create_valid_cluster()
+    requests_mock.post(f"{cluster.endpoint}/_refresh", json={"action": "refreshed"})
+
+    result = clusters_.refresh_cluster(cluster)
+
+    assert result.status_code == 200
+    assert result.json() == {"action" : "refreshed"}
