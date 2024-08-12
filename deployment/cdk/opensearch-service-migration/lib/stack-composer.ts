@@ -183,7 +183,7 @@ export class StackComposer {
         const mskEnablePublicEndpoints = this.getContextForType('mskEnablePublicEndpoints', 'boolean', defaultValues, contextJSON)
         const mskRestrictPublicAccessTo = this.getContextForType('mskRestrictPublicAccessTo', 'string', defaultValues, contextJSON)
         const mskRestrictPublicAccessType = this.getContextForType('mskRestrictPublicAccessType', 'string', defaultValues, contextJSON)
-        const mskBrokerNodeCount = this.getContextForType('mskBrokerNodeCount', 'number', defaultValues, contextJSON)
+        const mskBrokersPerAZCount = this.getContextForType('mskBrokersPerAZCount', 'number', defaultValues, contextJSON)
         const mskSubnetIds = this.getContextForType('mskSubnetIds', 'object', defaultValues, contextJSON)
         const mskAZCount = this.getContextForType('mskAZCount', 'number', defaultValues, contextJSON)
         const replayerOutputEFSRemovalPolicy = this.getContextForType('replayerOutputEFSRemovalPolicy', 'string', defaultValues, contextJSON)
@@ -360,7 +360,7 @@ export class StackComposer {
                 mskEnablePublicEndpoints: mskEnablePublicEndpoints,
                 mskRestrictPublicAccessTo: mskRestrictPublicAccessTo,
                 mskRestrictPublicAccessType: mskRestrictPublicAccessType,
-                mskBrokerNodeCount: mskBrokerNodeCount,
+                mskBrokersPerAZCount: mskBrokersPerAZCount,
                 mskSubnetIds: mskSubnetIds,
                 mskAZCount: mskAZCount,
                 replayerOutputEFSRemovalPolicy: replayerOutputEFSRemovalPolicy,
