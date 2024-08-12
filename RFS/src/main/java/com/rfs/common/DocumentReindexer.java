@@ -29,8 +29,7 @@ public class DocumentReindexer {
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
 
-        return documentStream.map(BulkDocSection::new)  // Convert each Document to part of a bulk
-                                                                       // operation
+        return documentStream.map(BulkDocSection::new)
             .buffer(numDocsPerBulkRequest) // Collect until you hit the batch size
             .doOnNext(bulk -> logger.info("{} documents in current bulk request", bulk.size()))
             .flatMap(

@@ -3,7 +3,6 @@ package com.rfs.common;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.time.Duration;
-import java.util.Collection;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -11,8 +10,6 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.opensearch.migrations.parsing.BulkResponseParser;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -23,11 +20,15 @@ import com.rfs.common.http.ConnectionContext;
 import com.rfs.common.http.HttpResponse;
 import com.rfs.tracing.IRfsContexts;
 
+import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
+import org.slf4j.LoggerFactory;
+import org.slf4j.Logger;
 
+@Slf4j
 public class OpenSearchClient {
-    private static final Logger logger = LogManager.getLogger(OpenSearchClient.class);
+    private static final Logger failedRequestsLogger = LoggerFactory.getLogger("FailedRequestsLogger");
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     static {
@@ -123,7 +124,7 @@ public class OpenSearchClient {
                     return Mono.error(new OperationFailed(errorMessage, resp));
                 }
             })
-            .doOnError(e -> logger.error(e.getMessage()))
+            .doOnError(e -> log.error(e.getMessage()))
             .retryWhen(checkIfItemExistsRetryStrategy)
             .block();
 
@@ -150,7 +151,7 @@ public class OpenSearchClient {
                     return Mono.error(new OperationFailed(errorMessage, resp));
                 }
             })
-                .doOnError(e -> logger.error(e.getMessage()))
+                .doOnError(e -> log.error(e.getMessage()))
                 .retryWhen(createItemExistsRetryStrategy)
                 .block();
 
@@ -186,7 +187,7 @@ public class OpenSearchClient {
                 return Mono.error(new OperationFailed(errorMessage, resp));
             }
         })
-            .doOnError(e -> logger.error(e.getMessage()))
+            .doOnError(e -> log.error(e.getMessage()))
             .retryWhen(snapshotRetryStrategy)
             .block();
     }
@@ -216,7 +217,7 @@ public class OpenSearchClient {
                 return Mono.error(new OperationFailed(errorMessage, resp));
             }
         })
-            .doOnError(e -> logger.error(e.getMessage()))
+            .doOnError(e -> log.error(e.getMessage()))
             .retryWhen(snapshotRetryStrategy)
             .block();
     }
@@ -244,7 +245,7 @@ public class OpenSearchClient {
                 return Mono.error(new OperationFailed(errorMessage, resp));
             }
         })
-            .doOnError(e -> logger.error(e.getMessage()))
+            .doOnError(e -> log.error(e.getMessage()))
             .retryWhen(snapshotRetryStrategy)
             .block();
 
@@ -269,46 +270,52 @@ public class OpenSearchClient {
     }
 
     Retry getBulkRetryStrategy() {
-        return Retry.backoff(6, Duration.ofSeconds(2)).maxBackoff(Duration.ofSeconds(60));
+        return Retry.backoff(10, Duration.ofSeconds(2)).maxBackoff(Duration.ofSeconds(60));
     }
 
     public Mono<BulkResponse> sendBulkRequest(String indexName, List<BulkDocSection> docs, IRfsContexts.IRequestContext context) {
         String targetPath = indexName + "/_bulk";
-        var maxAttempts = 6;
-
         Map<String, BulkDocSection> docsMap = docs.stream().collect(Collectors.toMap(d -> d.getDocId(), d -> d));
-        for (int i = 0; i < maxAttempts; i++) {
 
-            logger.warn("Creating bulk body with " + docsMap.keySet());
+        return Mono.defer(() -> {
+            log.atTrace().setMessage("Creating bulk body with document ids {}").addArgument(docsMap.keySet());
             if (docsMap.isEmpty()) {
                 return Mono.empty();
             }
             var body = BulkDocSection.convertToBulkRequestBody(docsMap.values());
-            try {
-                var outerResponse = client.postAsync(targetPath, body, context)
-                    .flatMap(response -> {
-                        var resp = new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
-                        if (!resp.hasBadStatusCode() && !resp.hasFailedOperations()) {
-                            return Mono.just(resp);
-                        }
-                        // Remove all successful documents for the next bulk request attempt
-                        resp.getSuccessfulDocs().forEach(docsMap::remove);
+            return client.postAsync(targetPath, body, context)
+                .flatMap(response -> {
+                    var resp = new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
+                    if (!resp.hasBadStatusCode() && !resp.hasFailedOperations()) {
+                        return Mono.just(resp);
+                    }
+                    // Remove all successful documents for the next bulk request attempt
+                    var successfulDocs = resp.getSuccessfulDocs();
+                    successfulDocs.forEach(docsMap::remove);
+                    log.info("After bulk request on index '{}', {} more documents have succeed, {} remain", indexName, successfulDocs.size(), docsMap.size());
 
-                        logger.error(resp.getFailureMessage());
-                        return Mono.error(new OperationFailed(resp.getFailureMessage(), resp));
-                    }).blockOptional();
+                    log.error(resp.getFailureMessage());
+                    return Mono.error(new OperationFailed(resp.getFailureMessage(), resp));
+                });
+        })
+        .retryWhen(getBulkRetryStrategy())
+        .doOnError(error -> {
+            if (!docsMap.isEmpty()) {
+                final String response;
+                if (error instanceof OperationFailed) {
+                    response = ((OperationFailed)error).response.body;
+                } else {
+                    response = error.getMessage();
+                }
 
-                if (outerResponse.isPresent()) {
-                    return Mono.just(outerResponse.get());
-                }
-            } catch (OperationFailed of) {
-                if (i + 1 < maxAttempts) {
-                    continue;
-                }
-                throw of;
+                failedRequestsLogger.atInfo()
+                    .setMessage("Bulk request failed for {} documents, request followed by response.\n{},\n{}")
+                    .addArgument(docsMap.size())
+                    .addArgument(BulkDocSection.convertToBulkRequestBody(docsMap.values()))
+                    .addArgument(response)
+                    .log();
             }
-        }
-        return Mono.empty();
+        });
     }
 
     public HttpResponse refresh(IRfsContexts.IRequestContext context) {
@@ -340,7 +347,7 @@ public class OpenSearchClient {
             try {
                 return BulkResponseParser.findSuccessDocs(body);
             } catch (IOException ioe) {
-                logger.warn("Unable to process bulk request for success", ioe);
+                log.warn("Unable to process bulk request for success", ioe);
                 return List.of();
             }
         }
