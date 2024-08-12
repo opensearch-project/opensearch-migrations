@@ -11,14 +11,11 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
 import com.rfs.common.DocumentReindexer.BulkDocSection;
-import com.rfs.common.OpenSearchClient.OperationFailed;
 import com.rfs.common.http.HttpResponse;
 import com.rfs.tracing.IRfsContexts;
 import com.rfs.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
-import com.rfs.tracing.IRfsContexts.IRequestContext;
 
 import lombok.SneakyThrows;
-import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
 import static org.hamcrest.CoreMatchers.containsString;
@@ -27,7 +24,6 @@ import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
@@ -232,7 +228,7 @@ class OpenSearchClientTest {
 
         var bulkDocs = List.of(dockSection, dockSection2);
         var openSearchClient = spy(new OpenSearchClient(restClient));
-        doReturn(Retry.fixedDelay(2, Duration.ofMillis(10)).maxAttempts(2)).when(openSearchClient).getBulkRetryStrategy();
+        doReturn(Retry.fixedDelay(4, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
 
         var responseMono = openSearchClient.sendBulkRequest("myIndex", bulkDocs, mock(IRfsContexts.IRequestContext.class));
 
