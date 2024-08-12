@@ -65,6 +65,7 @@ def clear_indices(cluster: Cluster):
     except Exception as e:
         logging.debug(f"Ignoring error recieved when attempting to delete indexes: {e}")
 
+
 def refresh_cluster(cluster: Cluster):
     try:
         return cluster.call_api("/_refresh", method=HttpMethod.POST, params={"ignore_unavailable": "true"})
