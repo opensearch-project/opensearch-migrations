@@ -51,13 +51,13 @@ public class IndexCreator_OS_2_11 {
 
             if (illegalArguments.isEmpty()) {
                 log.debug("Cannot retry invalid response, there are no illegal arguments to remove.");
-                return Optional.empty();
+                throw invalidResponse;
             }
 
             for (var illegalArgument : illegalArguments) {
                 if (!illegalArgument.startsWith("index.")) {
                     log.warn("Expecting all retryable errors to start with 'index.', instead saw " + illegalArgument);
-                    return Optional.empty();
+                    throw invalidResponse;
                 }
 
                 var shortenedIllegalArgument = illegalArgument.replaceFirst("index.", "");

@@ -33,10 +33,6 @@ public class OpenSearchClient {
         this(new RestClient(connectionContext));
     }
 
-    public OpenSearchClient(ConnectionContext connectionContext, int maxConnections) {
-        this(new RestClient(connectionContext, maxConnections));
-    }
-
     OpenSearchClient(RestClient client) {
         this.client = client;
     }
@@ -145,7 +141,7 @@ public class OpenSearchClient {
                 .retryWhen(
                     Retry.backoff(3, Duration.ofSeconds(1))
                         .maxBackoff(Duration.ofSeconds(10))
-                        .filter(OperationFailed.class::isInstance)
+                        .filter(throwable -> !(throwable instanceof InvalidResponse)) // Do not retry on this exception
                 )
                 .block();
 
@@ -273,7 +269,8 @@ public class OpenSearchClient {
                 }
                 return Mono.just(resp);
             })
-            .retryWhen(Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10)));
+            // In throttle cases, this will be low enough to get down to 1tps with 50 concurrency
+            .retryWhen(Retry.backoff(6, Duration.ofSeconds(2)).maxBackoff(Duration.ofSeconds(60)));
     }
 
     public HttpResponse refresh(IRfsContexts.IRequestContext context) {
