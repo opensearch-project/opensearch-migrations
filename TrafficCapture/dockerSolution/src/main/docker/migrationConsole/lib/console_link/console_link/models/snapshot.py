@@ -128,8 +128,9 @@ class S3Snapshot(Snapshot):
         command_runner = CommandRunner(base_command, command_args, sensitive_fields=["--source-password"])
         try:
             command_runner.run()
-            logger.info(f"Snapshot {self.config['snapshot_name']} created successfully")
-            return CommandResult(success=True, value=f"Snapshot {self.config['snapshot_name']} created successfully")
+            logger.info(f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
+            return CommandResult(success=True,
+                                 value=f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
         except CommandRunnerError as e:
             logger.error(f"Failed to create snapshot: {str(e)}")
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
@@ -165,8 +166,9 @@ class FileSystemSnapshot(Snapshot):
         command_runner = CommandRunner(base_command, command_args, sensitive_fields=["--source-password"])
         try:
             command_runner.run()
-            logger.info(f"Snapshot {self.config['snapshot_name']} created successfully")
-            return CommandResult(success=True, value=f"Snapshot {self.config['snapshot_name']} created successfully")
+            logger.info(f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
+            return CommandResult(success=True,
+                                 value=f"Snapshot {self.config['snapshot_name']} creation initiated successfully")
         except CommandRunnerError as e:
             logger.error(f"Failed to create snapshot: {str(e)}")
             return CommandResult(success=False, value=f"Failed to create snapshot: {str(e)}")
