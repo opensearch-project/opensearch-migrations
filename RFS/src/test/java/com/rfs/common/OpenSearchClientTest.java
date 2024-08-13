@@ -254,7 +254,7 @@ class OpenSearchClientTest {
 
     @SneakyThrows
     private Optional<ObjectNode> createIndex(RestClient restClient, String rawJson) {
-        var openSearchClient = new OpenSearchClient(restClient, mock(new FailedRequestsLogger()));
+        var openSearchClient = new OpenSearchClient(restClient, mock(FailedRequestsLogger.class));
 
         var body = (ObjectNode) OBJECT_MAPPER.readTree(rawJson);
         return openSearchClient.createIndex("indexName", body, mock(ICheckedIdempotentPutRequestContext.class));
