@@ -32,7 +32,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
-import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 import org.opensearch.testcontainers.OpensearchContainer;
 
 import com.rfs.cms.CoordinateWorkHttpClient;
@@ -78,7 +77,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
 
     public static Stream<Arguments> makeDocumentMigrationArgs() {
         List<Object[]> sourceImageArgs = SOURCE_IMAGES.stream()
-            .map(name -> makeParamsForBase(name))
+            .map(SourceTestBase::makeParamsForBase)
             .collect(Collectors.toList());
         var targetImageNames = TARGET_IMAGES.stream()
             .map(SearchClusterContainer.Version::getImageName)
@@ -114,8 +113,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         var executorService = Executors.newFixedThreadPool(numWorkers);
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
         final var testMetadataMigrationContext = MetadataMigrationTestContext.factory().noOtelTracking();
-        final var workCoordinationContext = WorkCoordinationTestContext.factory().withAllTracking();
-        final var testDocMigrationContext = DocumentMigrationTestContext.factory(workCoordinationContext)
+        final var testDocMigrationContext = DocumentMigrationTestContext.factory()
             .withAllTracking();
 
         try (
@@ -226,8 +224,17 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         }
     }
 
+//    @Test
+//    public void testDocumentMigrationForBigMonolithicShardWorks() throws Exception {
+//        testDocumentMigration(1,
+//            SearchClusterContainer.OS_V2_14_0.getImageName(),
+//            SearchClusterContainer.OS_V2_14_0,
+//            GENERATOR_BASE_IMAGE,
+//            new String[]{"tail", "-f", "/dev/null"});
+//    }
+
     private void verifyWorkMetrics(DocumentMigrationTestContext rootContext, int numWorkers, int numRuns) {
-        var workMetrics = rootContext.getWorkCoordinationContext().inMemoryInstrumentationBundle.getFinishedMetrics();
+        var workMetrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         var migrationMetrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
 
         verifyCoordinatorBehavior(workMetrics, numRuns);

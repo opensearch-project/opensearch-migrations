@@ -35,13 +35,9 @@ public class RootOtelContext implements IRootOtelContext {
 
     public static OpenTelemetry initializeOpenTelemetryForCollector(
         @NonNull String collectorEndpoint,
-        @NonNull String serviceName
+        @NonNull String serviceName,
+        String nodeName
     ) {
-        var serviceResource = Resource.getDefault()
-            .toBuilder()
-            .put(ResourceAttributes.SERVICE_NAME, serviceName)
-            .build();
-
         final var spanProcessor = BatchSpanProcessor.builder(
             OtlpGrpcSpanExporter.builder().setEndpoint(collectorEndpoint).setTimeout(2, TimeUnit.SECONDS).build()
         ).build();
@@ -56,10 +52,22 @@ public class RootOtelContext implements IRootOtelContext {
 
         var openTelemetrySdk = OpenTelemetrySdk.builder()
             .setTracerProvider(
-                SdkTracerProvider.builder().setResource(serviceResource).addSpanProcessor(spanProcessor).build()
+                SdkTracerProvider.builder()
+                    .setResource(Resource.getDefault()
+                        .toBuilder()
+                        .put(ResourceAttributes.SERVICE_NAME, serviceName)
+                        .put(ResourceAttributes.SERVICE_INSTANCE_ID, nodeName)
+                        .build())
+                    .addSpanProcessor(spanProcessor)
+                    .build()
             )
             .setMeterProvider(
-                SdkMeterProvider.builder().setResource(serviceResource).registerMetricReader(metricReader).build()
+                SdkMeterProvider.builder()
+                    .setResource(Resource.getDefault()
+                        .toBuilder()
+                        .put(ResourceAttributes.SERVICE_NAME, serviceName)
+                        .build())
+                    .registerMetricReader(metricReader).build()
             )
             .build();
 
@@ -81,10 +89,11 @@ public class RootOtelContext implements IRootOtelContext {
      */
     public static OpenTelemetry initializeOpenTelemetryWithCollectorOrAsNoop(
         String collectorEndpoint,
-        String serviceName
+        String serviceName,
+        String instanceName
     ) {
         return Optional.ofNullable(collectorEndpoint)
-            .map(endpoint -> initializeOpenTelemetryForCollector(endpoint, serviceName))
+            .map(endpoint -> initializeOpenTelemetryForCollector(endpoint, serviceName, instanceName))
             .orElseGet(() -> {
                 if (serviceName != null) {
                     log.atWarn()
@@ -114,12 +123,13 @@ public class RootOtelContext implements IRootOtelContext {
         return null;
     }
 
-    public RootOtelContext(String scopeName, IContextTracker contextTracker) {
-        this(scopeName, contextTracker, null);
+    public RootOtelContext(String scopeName, IContextTracker contextTracker, String instanceName) {
+        this(scopeName, contextTracker,
+            initializeOpenTelemetryWithCollectorOrAsNoop(null, null, instanceName));
     }
 
-    public RootOtelContext(String scopeName, IContextTracker contextTracker, OpenTelemetry sdk) {
-        openTelemetryImpl = sdk != null ? sdk : initializeOpenTelemetryWithCollectorOrAsNoop(null, null);
+    public RootOtelContext(String scopeName, IContextTracker contextTracker, @NonNull  OpenTelemetry sdk) {
+        openTelemetryImpl = sdk;
         this.scopeName = scopeName;
         this.contextTracker = contextTracker;
     }

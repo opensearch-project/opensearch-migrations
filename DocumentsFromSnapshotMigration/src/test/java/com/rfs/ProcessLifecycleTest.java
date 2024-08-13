@@ -63,7 +63,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
         // The Document Migration process will throw an exception immediately, which will cause an exit.
         "AT_STARTUP, 1",
         // This test is dependent upon the max lease duration that is passed to the command line. It's set
-        // to such a short value (1s), that no document migration will exit in that amount of time. For good
+        // to such a short value (1s) that no document migration will exit in that amount of time. For good
         // measure though, the toxiproxy also adds latency to the requests to make it impossible for the
         // migration to complete w/in that 1s.
         "WITH_DELAYS, 2" })
