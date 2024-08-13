@@ -11,7 +11,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
-import org.opensearch.migrations.testutils.CloseableLogSetup;
+import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 
 import com.rfs.common.DocumentReindexer.BulkDocSection;
 import com.rfs.common.http.HttpResponse;
@@ -22,13 +22,10 @@ import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 import reactor.util.retry.Retry;
 
-import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
-import static org.hamcrest.CoreMatchers.hasItem;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.hamcrest.Matchers.empty;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
@@ -36,8 +33,9 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
+import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
-
 
 class OpenSearchClientTest {
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder()
@@ -125,37 +123,41 @@ class OpenSearchClientTest {
         var docId1 = "tt1979320";
         var docId2 = "tt0816711";
 
-        var bothDocsFail = bulkItemResponse(true, List.of(
-            bulkItemResponseFailure(docId1),
-            bulkItemResponseFailure(docId2)));
-        var oneFailure  = bulkItemResponse(true, List.of(
-            bulkItemResponse(docId1, "index", "created"),
-            bulkItemResponseFailure(docId2)));
-        var finalDocSuccess  = bulkItemResponse(true, List.of(
-            bulkItemResponse(docId2, "index", "created")));
+        var bothDocsFail = bulkItemResponse(
+            true,
+            List.of(bulkItemResponseFailure(docId1), bulkItemResponseFailure(docId2))
+        );
+        var oneFailure = bulkItemResponse(
+            true,
+            List.of(bulkItemResponse(docId1, "index", "created"), bulkItemResponseFailure(docId2))
+        );
+        var finalDocSuccess = bulkItemResponse(true, List.of(bulkItemResponse(docId2, "index", "created")));
         var server500 = new HttpResponse(500, "", null, "{\"error\":\"Cannot Process Error!\"}");
 
         var restClient = mock(RestClient.class);
-        when(restClient.postAsync(any(), any(), any()))
-            .thenReturn(Mono.just(bothDocsFail))
+        when(restClient.postAsync(any(), any(), any())).thenReturn(Mono.just(bothDocsFail))
             .thenReturn(Mono.just(oneFailure))
             .thenReturn(Mono.just(server500))
             .thenReturn(Mono.just(finalDocSuccess));
 
         var bulkDocs = List.of(createBulkDoc(docId1), createBulkDoc(docId2));
-        var openSearchClient = spy(new OpenSearchClient(restClient));
+
+        var failedRequestLogger = mock(FailedRequestsLogger.class);
+        var openSearchClient = spy(new OpenSearchClient(restClient, failedRequestLogger));
         doReturn(Retry.fixedDelay(6, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
 
         // Action
-        try (var logs = new CloseableLogSetup("FailedRequestsLogger")) {
-            var responseMono = openSearchClient.sendBulkRequest("myIndex", bulkDocs, mock(IRfsContexts.IRequestContext.class));
+        var responseMono = openSearchClient.sendBulkRequest(
+            "myIndex",
+            bulkDocs,
+            mock(IRfsContexts.IRequestContext.class)
+        );
 
-            // Assertions
-            StepVerifier.create(responseMono).expectComplete().verify();
+        // Assertions
+        StepVerifier.create(responseMono).expectComplete().verify();
 
-            verify(restClient, times(4)).postAsync(any(), any(), any());
-            assertThat(logs.getLogEvents(), empty());
-        }
+        verify(restClient, times(4)).postAsync(any(), any(), any());
+        verifyNoInteractions(failedRequestLogger);
     }
 
     @Test
@@ -166,27 +168,30 @@ class OpenSearchClientTest {
         var restClient = mock(RestClient.class);
         when(restClient.postAsync(any(), any(), any())).thenReturn(Mono.just(docFails));
 
-        // Action
-        var openSearchClient = spy(new OpenSearchClient(restClient));
+        var failedRequestLogger = mock(FailedRequestsLogger.class);
+        var openSearchClient = spy(new OpenSearchClient(restClient, failedRequestLogger));
+
         var maxRetries = 6;
         doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+
         var bulkDoc = createBulkDoc(docId1);
         var indexName = "alwaysFailingIndexName";
 
-        try (var logs = new CloseableLogSetup("FailedRequestsLogger")) {
-            var responseMono = openSearchClient.sendBulkRequest(indexName, List.of(bulkDoc), mock(IRfsContexts.IRequestContext.class));
-            var exception = assertThrows(Exception.class, () -> responseMono.block());
-            assertThat(exception.getMessage(), containsString("Retries exhausted"));
+        // Action
+        var responseMono = openSearchClient.sendBulkRequest(
+            indexName,
+            List.of(bulkDoc),
+            mock(IRfsContexts.IRequestContext.class)
+        );
+        var exception = assertThrows(Exception.class, () -> responseMono.block());
 
-            assertThat(logs.getLogEvents(), hasItem(allOf(
-                containsString("myIndex"),
-                containsString(bulkDoc.asBulkIndex()),
-                containsString(docFails.body)
-            )));
-        }
+        // Assertions
+        assertThat(exception.getMessage(), containsString("Retries exhausted"));
 
         var maxAttempts = maxRetries + 1;
         verify(restClient, times(maxAttempts)).postAsync(any(), any(), any());
+        verify(failedRequestLogger).logBulkFailure(any(), any(), any(), any());
+        verifyNoMoreInteractions(failedRequestLogger);
     }
 
     private BulkDocSection createBulkDoc(String docId) {
@@ -199,7 +204,7 @@ class OpenSearchClientTest {
     private HttpResponse bulkItemResponse(boolean hasErrors, List<String> itemResponses) {
         var responseBody = "{\r\n" + //
             "    \"took\": 11,\r\n" + //
-            "    \"errors\": " + hasErrors +",\r\n" + //
+            "    \"errors\": " + hasErrors + ",\r\n" + //
             "    \"items\": [\r\n" + //
             itemResponses.stream().collect(Collectors.joining(",")) + //
             "    ]\r\n" + //
@@ -207,7 +212,7 @@ class OpenSearchClientTest {
         return new HttpResponse(200, "", null, responseBody);
     }
 
-    private String bulkItemResponse(String itemId, String operationName, String result){
+    private String bulkItemResponse(String itemId, String operationName, String result) {
         return ("        {\r\n" + //
             "            \"{1}\": {\r\n" + //
             "                \"_index\": \"movies\",\r\n" + //
@@ -229,7 +234,7 @@ class OpenSearchClientTest {
             .replaceAll("\\{2\\}", result);
     }
 
-    private String bulkItemResponseFailure(String itemId){
+    private String bulkItemResponseFailure(String itemId) {
         return ("        {\r\n" + //
         "            \"create\": {\r\n" + //
         "                \"_index\": \"movies\",\r\n" + //
@@ -249,7 +254,7 @@ class OpenSearchClientTest {
 
     @SneakyThrows
     private Optional<ObjectNode> createIndex(RestClient restClient, String rawJson) {
-        var openSearchClient = new OpenSearchClient(restClient);
+        var openSearchClient = new OpenSearchClient(restClient, mock(new FailedRequestsLogger()));
 
         var body = (ObjectNode) OBJECT_MAPPER.readTree(rawJson);
         return openSearchClient.createIndex("indexName", body, mock(ICheckedIdempotentPutRequestContext.class));

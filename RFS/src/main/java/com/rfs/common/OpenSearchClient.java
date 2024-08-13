@@ -15,20 +15,19 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.opensearch.migrations.parsing.BulkResponseParser;
+import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 
 import com.rfs.common.DocumentReindexer.BulkDocSection;
 import com.rfs.common.http.ConnectionContext;
 import com.rfs.common.http.HttpResponse;
 import com.rfs.tracing.IRfsContexts;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
 @Slf4j
 public class OpenSearchClient {
-    private static final Logger failedRequestsLogger = LoggerFactory.getLogger("FailedRequestsLogger");
+
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
     static {
@@ -36,13 +35,15 @@ public class OpenSearchClient {
     }
 
     private final RestClient client;
+    private final FailedRequestsLogger failedRequestsLogger;
 
     public OpenSearchClient(ConnectionContext connectionContext) {
-        this(new RestClient(connectionContext));
+        this(new RestClient(connectionContext), new FailedRequestsLogger());
     }
 
-    OpenSearchClient(RestClient client) {
+    OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger) {
         this.client = client;
+        this.failedRequestsLogger = failedRequestsLogger;
     }
 
     /*
@@ -292,7 +293,12 @@ public class OpenSearchClient {
                     // Remove all successful documents for the next bulk request attempt
                     var successfulDocs = resp.getSuccessfulDocs();
                     successfulDocs.forEach(docsMap::remove);
-                    log.info("After bulk request on index '{}', {} more documents have succeed, {} remain", indexName, successfulDocs.size(), docsMap.size());
+                    log.info(
+                        "After bulk request on index '{}', {} more documents have succeed, {} remain",
+                        indexName,
+                        successfulDocs.size(),
+                        docsMap.size()
+                    );
 
                     log.error(resp.getFailureMessage());
                     return Mono.error(new OperationFailed(resp.getFailureMessage(), resp));
@@ -301,30 +307,12 @@ public class OpenSearchClient {
         .retryWhen(getBulkRetryStrategy())
         .doOnError(error -> {
             if (!docsMap.isEmpty()) {
-                // get root cause
-                var currentError = error;
-                while (currentError.getCause() != null) {
-                    currentError = currentError.getCause();
-                }
-
-                if (currentError instanceof OperationFailed) {
-                    var responseBody = ((OperationFailed)currentError).response.body;
-                    failedRequestsLogger.atInfo()
-                        .setMessage("Bulk request failed for {} index on {} documents, bulk request body followed by response:\n{}\n{}")
-                        .addArgument(indexName)
-                        .addArgument(docsMap::size)
-                        .addArgument(() -> BulkDocSection.convertToBulkRequestBody(docsMap.values()))
-                        .addArgument(() -> responseBody)
-                        .log();
-                } else {
-                    failedRequestsLogger.atInfo()
-                        .setMessage("Bulk request failed for {} index on {} documents, reason {}, bulk request body:\n{}")
-                        .addArgument(indexName)
-                        .addArgument(docsMap::size)
-                        .addArgument(currentError.getMessage())
-                        .addArgument(() -> BulkDocSection.convertToBulkRequestBody(docsMap.values()))
-                        .log();
-                }
+                failedRequestsLogger.logBulkFailure(
+                    indexName,
+                    docsMap::size,
+                    () -> BulkDocSection.convertToBulkRequestBody(docsMap.values()),
+                    error
+                );
             }
         });
     }

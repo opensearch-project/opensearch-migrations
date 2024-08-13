@@ -36,7 +36,8 @@ public class DocumentReindexer {
                     .doOnError(error -> logger.error("Batch failed", error))
                     // Prevent the error from stopping the entire stream, retries occurring within sendBulkRequest
                     .onErrorResume(e -> Mono.empty()),
-                maxConcurrentRequests)
+                maxConcurrentRequests
+            )
             .doOnComplete(() -> logger.debug("All batches processed"))
             .then();
     }
@@ -50,7 +51,7 @@ public class DocumentReindexer {
 
         public BulkDocSection(Document doc) {
             this.doc = doc;
-            this.docId = Uid.decodeId(doc.getBinaryValue("_id").bytes); 
+            this.docId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
         }
 
         String asBulkIndex() {
@@ -67,6 +68,6 @@ public class DocumentReindexer {
             }
             return builder.toString();
         }
-    
+
     }
 }
