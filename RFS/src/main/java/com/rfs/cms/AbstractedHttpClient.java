@@ -1,7 +1,7 @@
 package com.rfs.cms;
 
 import java.io.IOException;
-import java.util.Arrays;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -25,7 +25,7 @@ public interface AbstractedHttpClient {
         default String toDiagnosticString() {
             String payloadStr;
             try {
-                payloadStr = Arrays.toString(getPayloadBytes());
+                payloadStr = new String(getPayloadBytes(), StandardCharsets.UTF_8);
             } catch (IOException e) {
                 payloadStr = "[EXCEPTION EVALUATING PAYLOAD]: " + e;
             }

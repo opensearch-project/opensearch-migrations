@@ -63,7 +63,7 @@ To see the default shard size, use the `--help` CLI option:
 | --lucene-dir                      | The absolute path to the directory where we'll put the Lucene docs                                                                                      |
 | --index-allowlist                 | The list of index names to migrate (e.g. 'logs_2024_01, logs_2024_02')                                                                                  |
 | --max-shard-size-bytes            | The maximum shard size in bytes to allow when performing the document migration                                                                         |
-| --max-initial-lease-duration      | The maximum time for the first attempt to migrate a shard's documents                                                                                   |
+| --initial-lease-duration          | The time give for the first attempt to migrate a shard's documents before quitting and requiring another process to pick it up.                         |
 | --otel-collector-endpoint         | The endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be forwarded                                                      |
 | --target-host                     | The target host and port (e.g. http://localhost:9200)                                                                                                   |
 | --target-username                 | The username for target cluster authentication                                                                                                          |
