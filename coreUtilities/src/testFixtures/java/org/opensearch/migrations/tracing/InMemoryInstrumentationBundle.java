@@ -9,9 +9,11 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
+import java.util.stream.Stream;
 
 import io.opentelemetry.sdk.OpenTelemetrySdk;
 import io.opentelemetry.sdk.metrics.SdkMeterProvider;
+import io.opentelemetry.sdk.metrics.data.LongPointData;
 import io.opentelemetry.sdk.metrics.data.MetricData;
 import io.opentelemetry.sdk.testing.exporter.InMemoryMetricReader;
 import io.opentelemetry.sdk.testing.exporter.InMemorySpanExporter;
@@ -73,7 +75,24 @@ public class InMemoryInstrumentationBundle implements AutoCloseable {
         if (testMetricReader == null) {
             throw new IllegalStateException("Metrics collector was not configured");
         }
+        testMetricReader.forceFlush();
         return testMetricReader.collectAllMetrics();
+    }
+
+    public static long getMetricValueOrZero(Collection<MetricData> metrics, String metricName) {
+        return reduceMetricStreamToOptionalSum(
+            metrics.stream()
+                .filter(md -> md.getName().startsWith(metricName)))
+            .orElse(0L);
+    }
+
+    public static Optional<Long> reduceMetricStreamToOptionalSum(Stream<MetricData> stream) {
+        return stream.reduce((a, b) -> b)
+            .flatMap(md -> md.getLongSumData().getPoints().stream().reduce((a, b) -> b).map(LongPointData::getValue));
+    }
+
+    public static long reduceMetricStreamToSum(Stream<MetricData> stream) {
+        return reduceMetricStreamToOptionalSum(stream).orElse(-1L);
     }
 
     @Override
@@ -105,17 +124,9 @@ public class InMemoryInstrumentationBundle implements AutoCloseable {
                 return true;
             } else {
                 try {
-                    log.atInfo()
-                        .setMessage(
-                            () -> "Waiting "
-                                + sleepAmount
-                                + "ms for predicate to pass because the last test for metrics from "
-                                + metricName
-                                + " on "
-                                + matchingMetrics.get()
-                                + " did not"
-                        )
-                        .log();
+                    log.atInfo().setMessage("{}").addArgument(() ->
+                            "Waiting " + sleepAmount + "ms because the last test for metrics from " + metricName +
+                                " on " + matchingMetrics.get() + " did not satisfy the predicate").log();
                     Thread.sleep(sleepAmount);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();

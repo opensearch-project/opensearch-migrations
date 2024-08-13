@@ -50,10 +50,8 @@ def cli(ctx, config_file, json, verbose):
 @cli.group(name="clusters", help="Commands to interact with source and target clusters")
 @click.pass_obj
 def cluster_group(ctx):
-    if ctx.env.source_cluster is None:
-        raise click.UsageError("Source cluster is not set")
-    if ctx.env.target_cluster is None:
-        raise click.UsageError("Target cluster is not set")
+    if ctx.env.source_cluster is None and ctx.env.target_cluster is None:
+        raise click.UsageError("Neither source nor target cluster is defined.")
 
 
 @cluster_group.command(name="cat-indices")
@@ -67,18 +65,24 @@ def cat_indices_cmd(ctx, refresh):
                 {
                     "source_cluster": clusters_.cat_indices(
                         ctx.env.source_cluster, as_json=True, refresh=refresh
-                    ),
+                    ) if ctx.env.source_cluster else None,
                     "target_cluster": clusters_.cat_indices(
                         ctx.env.target_cluster, as_json=True, refresh=refresh
-                    ),
+                    ) if ctx.env.target_cluster else None,
                 }
             )
         )
         return
     click.echo("SOURCE CLUSTER")
-    click.echo(clusters_.cat_indices(ctx.env.source_cluster, refresh=refresh))
+    if ctx.env.source_cluster:
+        click.echo(clusters_.cat_indices(ctx.env.source_cluster, refresh=refresh))
+    else:
+        click.echo("No source cluster defined.")
     click.echo("TARGET CLUSTER")
-    click.echo(clusters_.cat_indices(ctx.env.target_cluster, refresh=refresh))
+    if ctx.env.target_cluster:
+        click.echo(clusters_.cat_indices(ctx.env.target_cluster, refresh=refresh))
+    else:
+        click.echo("No target cluster defined.")
 
 
 @cluster_group.command(name="connection-check")
@@ -86,15 +90,23 @@ def cat_indices_cmd(ctx, refresh):
 def connection_check_cmd(ctx):
     """Checks if a connection can be established to source and target clusters"""
     click.echo("SOURCE CLUSTER")
-    click.echo(clusters_.connection_check(ctx.env.source_cluster))
+    if ctx.env.source_cluster:
+        click.echo(clusters_.connection_check(ctx.env.source_cluster))
+    else:
+        click.echo("No source cluster defined.")
     click.echo("TARGET CLUSTER")
-    click.echo(clusters_.connection_check(ctx.env.target_cluster))
+    if ctx.env.target_cluster:
+        click.echo(clusters_.connection_check(ctx.env.target_cluster))
+    else:
+        click.echo("No target cluster defined.")
 
 
 @cluster_group.command(name="run-test-benchmarks")
 @click.pass_obj
 def run_test_benchmarks_cmd(ctx):
     """Run a series of OpenSearch Benchmark workloads against the source cluster"""
+    if not ctx.env.source_cluster:
+        raise click.UsageError("Cannot run test benchmarks because no source cluster is defined.")
     click.echo(clusters_.run_test_benchmarks(ctx.env.source_cluster))
 
 
@@ -109,6 +121,8 @@ def run_test_benchmarks_cmd(ctx):
 def clear_indices_cmd(ctx, acknowledge_risk, cluster):
     """[Caution] Clear indices on a source or target cluster"""
     cluster_focus = ctx.env.source_cluster if cluster.lower() == 'source' else ctx.env.target_cluster
+    if not cluster_focus:
+        raise click.UsageError(f"No {cluster.lower()} cluster defined.")
     if acknowledge_risk:
         click.echo("Performing clear indices operation...")
         click.echo(clusters_.clear_indices(cluster_focus))
