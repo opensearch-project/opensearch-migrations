@@ -14,6 +14,8 @@ import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.JCommander;
@@ -158,6 +160,9 @@ public class RfsMigrateDocuments {
     }
 
     public static void main(String[] args) throws Exception {
+        final Logger failedRequestsLogger = LoggerFactory.getLogger("FailedRequestsLogger");
+        failedRequestsLogger.info("Something!");
+
         Args arguments = new Args();
         JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
