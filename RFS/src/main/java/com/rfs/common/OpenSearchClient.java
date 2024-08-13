@@ -30,6 +30,24 @@ public class OpenSearchClient {
 
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
+    private static final int defaultMaxRetryAttempts = 3;
+    private static final Duration defaultBackoff = Duration.ofSeconds(1);
+    private static final Duration defaultMaxBackoff = Duration.ofSeconds(10);
+    private static final Retry snapshotRetryStrategy = Retry.backoff(defaultMaxRetryAttempts, defaultBackoff)
+        .maxBackoff(defaultMaxBackoff);
+    private static final Retry checkIfItemExistsRetryStrategy = Retry.backoff(defaultMaxRetryAttempts, defaultBackoff)
+        .maxBackoff(defaultMaxBackoff);
+    private static final Retry createItemExistsRetryStrategy = Retry.backoff(defaultMaxRetryAttempts, defaultBackoff)
+        .maxBackoff(defaultMaxBackoff)
+        .filter(throwable -> !(throwable instanceof InvalidResponse)); // Do not retry on this exception
+
+    private static final int bulkMaxRetryAttempts = 15;
+    private static final Duration bulkBackoff = Duration.ofSeconds(2);
+    private static final Duration bulkMaxBackoff = Duration.ofSeconds(60);
+    /** Retries for up 10 minutes */
+    private static final Retry bulkRetryStrategy = Retry.backoff(bulkMaxRetryAttempts, bulkBackoff)
+        .maxBackoff(bulkMaxBackoff);
+
     static {
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
@@ -98,12 +116,6 @@ public class OpenSearchClient {
         return createObjectIdempotent(targetPath, settings, context);
     }
 
-    Retry checkIfItemExistsRetryStrategy = Retry.backoff(3, Duration.ofSeconds(1))
-        .maxBackoff(Duration.ofSeconds(10));
-    Retry createItemExistsRetryStrategy = Retry.backoff(3, Duration.ofSeconds(1))
-        .maxBackoff(Duration.ofSeconds(10))
-        .filter(throwable -> !(throwable instanceof InvalidResponse)); // Do not retry on this exception
-
     private Optional<ObjectNode> createObjectIdempotent(
         String objectPath,
         ObjectNode settings,
@@ -161,8 +173,6 @@ public class OpenSearchClient {
         // The only response code that can end up here is HTTP_OK, which means the object already existed
         return Optional.empty();
     }
-
-    Retry snapshotRetryStrategy = Retry.backoff(3, Duration.ofSeconds(1)).maxBackoff(Duration.ofSeconds(10));
 
     /*
      * Attempts to register a snapshot repository; no-op if the repo already exists.
@@ -271,18 +281,17 @@ public class OpenSearchClient {
     }
 
     Retry getBulkRetryStrategy() {
-        return Retry.backoff(10, Duration.ofSeconds(2)).maxBackoff(Duration.ofSeconds(60));
+        return bulkRetryStrategy;
     }
 
     public Mono<BulkResponse> sendBulkRequest(String indexName, List<BulkDocSection> docs, IRfsContexts.IRequestContext context) {
-        String targetPath = indexName + "/_bulk";
-        Map<String, BulkDocSection> docsMap = docs.stream().collect(Collectors.toMap(d -> d.getDocId(), d -> d));
-
+        final var docsMap = docs.stream().collect(Collectors.toMap(d -> d.getDocId(), d -> d));
         return Mono.defer(() -> {
-            log.atTrace().setMessage("Creating bulk body with document ids {}").addArgument(docsMap.keySet());
-            if (docsMap.isEmpty()) {
-                return Mono.empty();
-            }
+            final String targetPath = indexName + "/_bulk";
+            log.atTrace()
+                .setMessage("Creating bulk body with document ids {}")
+                .addArgument(() -> docsMap.keySet())
+                .log();
             var body = BulkDocSection.convertToBulkRequestBody(docsMap.values());
             return client.postAsync(targetPath, body, context)
                 .flatMap(response -> {
@@ -293,14 +302,13 @@ public class OpenSearchClient {
                     // Remove all successful documents for the next bulk request attempt
                     var successfulDocs = resp.getSuccessfulDocs();
                     successfulDocs.forEach(docsMap::remove);
-                    log.info(
-                        "After bulk request on index '{}', {} more documents have succeed, {} remain",
-                        indexName,
-                        successfulDocs.size(),
-                        docsMap.size()
-                    );
-
-                    log.error(resp.getFailureMessage());
+                    log.atWarn()
+                        .setMessage("After bulk request on index '{}', {} more documents have succeed, {} remain, failure reason {}")
+                        .addArgument(indexName)
+                        .addArgument(successfulDocs::size)
+                        .addArgument(docsMap::size)
+                        .addArgument(resp::getFailureMessage)
+                        .log();
                     return Mono.error(new OperationFailed(resp.getFailureMessage(), resp));
                 });
         })
@@ -313,6 +321,12 @@ public class OpenSearchClient {
                     () -> BulkDocSection.convertToBulkRequestBody(docsMap.values()),
                     error
                 );
+            } else {
+                log.atWarn()
+                    .setMessage("Unexpected empty document map for bulk request on index {}")
+                    .addArgument(indexName)
+                    .setCause(error)
+                    .log();
             }
         });
     }
