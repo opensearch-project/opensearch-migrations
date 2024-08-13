@@ -63,7 +63,7 @@ public class DocumentReindexer {
         for (String section : bulkSections) {
             builder.append(section).append("\n");
         }
-        log.atInfo().log("Bulk request body: \n{}", builder.toString());
+        log.atDebug().log("Bulk request body: \n{}", builder.toString());
 
         return builder.toString();
     }

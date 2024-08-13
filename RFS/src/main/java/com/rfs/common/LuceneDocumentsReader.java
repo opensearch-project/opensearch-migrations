@@ -30,6 +30,39 @@ public class LuceneDocumentsReader {
     protected final boolean softDeletesPossible;
     protected final String softDeletesField;
 
+    /**
+     * There are a variety of states the documents in our Lucene Index can be in; this method extracts those documents
+     * that would be considered "live" from the ElasticSearch/OpenSearch perspective.
+     *
+     * For context, when ElasticSearch/OpenSearch deletes a document, it doesn't actually remove it from the Lucene Index.
+     * Instead, what happens is that the document is marked as "deleted" in the Lucene Index, but it is still present in the
+     * Lucene segment on disk.  The next time that segment is merged, the deleted documents are removed from the Lucene Index.
+     * A similar thing happens when a document is updated; the old document is marked as "deleted" and a new document is
+     * added in a new Lucene segment.  This means that from an ES/OS perspective, you could have a single document that has
+     * been created, deleted, recreated, updated, etc. multiple times and only a single version of the doc would exist when
+     * you queried the ES/OS Index - but every single iteration of that doc might still exist in the Lucene Segments on disk,
+     * all of which have the same _id (from the ES/OS perspective).
+     *
+     * Additionally, Elasticsearch 7 introduced a feature called "soft deletes" which allows you to mark a document as
+     * "deleted" in the Lucene Index without actually removing it from the Lucene Index.  This works by having the
+     * application writing the Lucene Index define a field that is used to mark a document as "soft deleted" or not.  When
+     * a document is marked as "soft deleted", it is not returned in search results, but it is still present in the Lucene
+     * Index.  The status of whether any given document is "soft deleted" or not is stored in the Lucene Index itself.  By
+     * default, Elasticsearch 7+ Indices have soft deletes enabled; this is an Index-level setting.
+     *
+     * In order to retrieve only those documents that would be considered "live" in ES/OS, we use a few tricks:
+     * 1. We make sure we use the latest Lucene commit point on the Lucene Index.  A commit is a Lucene abstraction that
+     *     comprises a consistent, point-in-time view of the Segments in the Lucene Index.  By default, a DirectoryReader
+     *     will use the latest commit point.
+     * 2. We use a concept called "liveDocs" to determine if a document is "live" or not.  The liveDocs are a bitset that
+     *    is associated with each Lucene segment that tells us if a document is "live" or not.  If a document is hard-deleted
+     *    (i.e. deleted from the ES/OS perspective or an old version of an updated doc), then the liveDocs bit for that
+     *    document will be false.
+     * 3. We wrap our DirectoryReader in a SoftDeletesDirectoryReaderWrapper if it's possible that soft deletes will be
+     *    present in the Lucene Index.  This wrapper will filter out documents that are marked as "soft deleted" in the
+     *    Lucene Index.
+
+    */
     public Flux<Document> readDocuments() {
         return Flux.using(() -> wrapReader(DirectoryReader.open(FSDirectory.open(indexDirectoryPath)), softDeletesPossible, softDeletesField), reader -> {
             log.atInfo().log(reader.maxDoc() + " documents found in the current Lucene index");
