@@ -27,18 +27,18 @@ public class DocumentReindexer {
         Flux<Document> documentStream,
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
-        var documentStreamRunner = Schedulers.newSingle("luceneRunner");
-        var requestSendingRunner = Schedulers.newParallel("requestSendingRunner", maxConcurrentWorkItems);
+        var documentStreamRunner = Schedulers.newSingle("documentStream");
+        var documentIngestRunner = Schedulers.newParallel("documentIngest", maxConcurrentWorkItems);
         return documentStream
-            .subscribeOn(documentStreamRunner)
+            .subscribeOn(documentStreamRunner) // Use dedicated single threaded lucene scheduler
+            .publishOn(documentIngestRunner) // Use parallel scheduler for everything else
             .map(this::convertDocumentToBulkSection)
-            .subscribeOn(documentStreamRunner) // Use same thread for lucene reading and buffering
             .bufferUntil(statefulSizeSegmentingPredicate(numDocsPerBulkRequest, numBytesPerBulkRequest), true)
             .parallel(
                 maxConcurrentWorkItems, // Number of parallel workers, tested in reindex_shouldRespectMaxConcurrentRequests
-                maxConcurrentWorkItems * 2 // Limit prefetch for memory pressure
+                maxConcurrentWorkItems // Limit prefetch for memory pressure
             )
-            .runOn(requestSendingRunner) // Dedicate maxConcurrentRequests threads for sending
+            .runOn(documentIngestRunner) // Continue to use requestProcessingRunner after splitting into parallel rails
             .flatMap(
                 bulkSections -> client
                     .sendBulkRequest(indexName,
@@ -57,7 +57,7 @@ public class DocumentReindexer {
             .then()
             .doFinally(unused -> {
                 documentStreamRunner.dispose();
-                requestSendingRunner.dispose();
+                documentIngestRunner.dispose();
             });
     }
 
