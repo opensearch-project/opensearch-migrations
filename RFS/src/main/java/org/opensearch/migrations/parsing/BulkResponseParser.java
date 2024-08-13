@@ -73,7 +73,13 @@ public class BulkResponseParser {
 
                     // Check if the document was successfully created
                     if (docInfo.getResult() != null && docInfo.getId() != null) {
-                        log.warn("Found successfully item, result '" + docInfo.getResult() + "'', id: '" + docInfo.getId() + "'");
+                        log.warn(
+                            "Found successfully item, result '"
+                                + docInfo.getResult()
+                                + "'', id: '"
+                                + docInfo.getId()
+                                + "'"
+                        );
                         successfulDocumentIds.add(docInfo.getId());
                     }
                 } else {
