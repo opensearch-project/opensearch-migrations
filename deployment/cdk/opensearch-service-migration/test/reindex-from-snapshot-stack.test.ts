@@ -128,10 +128,6 @@ describe('ReindexFromSnapshotStack Tests', () => {
       {
         Name: 'RFS_TARGET_PASSWORD_ARN',
         Value: 'arn:aws:secretsmanager:us-east-1:123456789012:secret:test-secret'
-      },
-      {
-        Name: 'TUPLE_DIR_PATH',
-        Value: '/shared-replayer-output/traffic-replayer-default'
       }
     ]);
   });
@@ -211,10 +207,6 @@ describe('ReindexFromSnapshotStack Tests', () => {
       {
         Name: 'RFS_TARGET_PASSWORD_ARN',
         Value: ''
-      },
-      {
-        Name: 'TUPLE_DIR_PATH',
-        Value: '/shared-replayer-output/traffic-replayer-default'
       }
     ]);
   });
