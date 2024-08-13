@@ -90,6 +90,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             servicePolicies.push(getSecretsPolicy);
         }
 
+        const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
         this.createService({
             serviceName: 'reindex-from-snapshot',
             taskInstanceCount: 0,
@@ -106,6 +107,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
                 "RFS_TARGET_USER": targetUser,
                 "RFS_TARGET_PASSWORD": targetPassword,
                 "RFS_TARGET_PASSWORD_ARN": targetPasswordArn,
+                "TUPLE_DIR_PATH": `/shared-replayer-output/traffic-replayer-${deployId}`
             },
             ...props
         });
