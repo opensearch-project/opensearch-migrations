@@ -131,7 +131,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
       },
       {
         Name: 'TUPLE_DIR_PATH',
-        Value: ''
+        Value: '/shared-replayer-output/traffic-replayer-default'
       }
     ]);
   });
@@ -214,7 +214,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
       },
       {
         Name: 'TUPLE_DIR_PATH',
-        Value: ''
+        Value: '/shared-replayer-output/traffic-replayer-default'
       }
     ]);
   });
