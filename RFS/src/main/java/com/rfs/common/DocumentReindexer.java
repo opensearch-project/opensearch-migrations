@@ -54,7 +54,7 @@ public class DocumentReindexer {
             this.docId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
         }
 
-        String asBulkIndex() {
+        public String asBulkIndex() {
             String source = doc.getBinaryValue("_source").utf8ToString();
             String action = "{\"index\": {\"_id\": \"" + getDocId() + "\"}}";
             return action + "\n" + source;
