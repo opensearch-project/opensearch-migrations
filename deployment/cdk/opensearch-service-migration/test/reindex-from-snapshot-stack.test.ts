@@ -131,7 +131,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
       },
       {
         Name: 'TUPLE_DIR_PATH',
-        Value: '/shared-replayer-output/traffic-replayer-default'
+        Value: ''
       }
     ]);
   });
