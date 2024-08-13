@@ -1,18 +1,20 @@
 package org.opensearch.migrations.parsing;
 
+import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 
 import lombok.Builder;
 import lombok.Getter;
+import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
 
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
-
 @Slf4j
+@UtilityClass
 public class BulkResponseParser {
     private static JsonFactory jsonFactory = new JsonFactory();
 

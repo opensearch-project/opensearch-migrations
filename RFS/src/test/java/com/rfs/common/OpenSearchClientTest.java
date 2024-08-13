@@ -3,6 +3,7 @@ package com.rfs.common;
 import java.time.Duration;
 import java.util.List;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -10,18 +11,24 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import org.opensearch.migrations.testutils.CloseableLogSetup;
+
 import com.rfs.common.DocumentReindexer.BulkDocSection;
 import com.rfs.common.http.HttpResponse;
 import com.rfs.tracing.IRfsContexts;
 import com.rfs.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
-
 import lombok.SneakyThrows;
 import reactor.core.publisher.Mono;
+import reactor.test.StepVerifier;
+import reactor.util.retry.Retry;
 
+import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
+import static org.hamcrest.CoreMatchers.hasItem;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.empty;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doReturn;
@@ -30,8 +37,6 @@ import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import reactor.test.StepVerifier;
-import reactor.util.retry.Retry;
 
 
 class OpenSearchClientTest {
@@ -116,127 +121,130 @@ class OpenSearchClientTest {
     }
 
     @Test
-    void testBulkRequest() {
-        var response = "{\r\n" + //
-            "    \"took\": 11,\r\n" + //
-            "    \"errors\": true,\r\n" + //
-            "    \"items\": [\r\n" + //
-            "        {\r\n" + //
-            "            \"index\": {\r\n" + //
-            "                \"_index\": \"movies\",\r\n" + //
-            "                \"_id\": \"tt1979320\",\r\n" + //
-            "                \"_version\": 1,\r\n" + //
-            "                \"result\": \"created\",\r\n" + //
-            "                \"_shards\": {\r\n" + //
-            "                    \"total\": 2,\r\n" + //
-            "                    \"successful\": 1,\r\n" + //
-            "                    \"failed\": 0\r\n" + //
-            "                },\r\n" + //
-            "                \"_seq_no\": 1,\r\n" + //
-            "                \"_primary_term\": 1,\r\n" + //
-            "                \"status\": 201\r\n" + //
-            "            }\r\n" + //
-            "        },\r\n" + //
-            "        {\r\n" + //
-            "            \"create\": {\r\n" + //
-            "                \"_index\": \"movies\",\r\n" + //
-            "                \"_id\": \"tt1392214\",\r\n" + //
-            "                \"status\": 409,\r\n" + //
-            "                \"error\": {\r\n" + //
-            "                    \"type\": \"version_conflict_engine_exception\",\r\n" + //
-            "                    \"reason\": \"[tt1392214]: version conflict, document already exists (current version [1])\",\r\n" + //
-            "                    \"index\": \"movies\",\r\n" + //
-            "                    \"shard\": \"0\",\r\n" + //
-            "                    \"index_uuid\": \"yhizhusbSWmP0G7OJnmcLg\"\r\n" + //
-            "                }\r\n" + //
-            "            }\r\n" + //
-            "        },\r\n" + //
-            "        {\r\n" + //
-            "            \"update\": {\r\n" + //
-            "                \"_index\": \"movies\",\r\n" + //
-            "                \"_id\": \"tt0816711\",\r\n" + //
-            "                \"status\": 404,\r\n" + //
-            "                \"error\": {\r\n" + //
-            "                    \"type\": \"document_missing_exception\",\r\n" + //
-            "                    \"reason\": \"[_doc][tt0816711]: document missing\",\r\n" + //
-            "                    \"index\": \"movies\",\r\n" + //
-            "                    \"shard\": \"0\",\r\n" + //
-            "                    \"index_uuid\": \"yhizhusbSWmP0G7OJnmcLg\"\r\n" + //
-            "                }\r\n" + //
-            "            }\r\n" + //
-            "        }\r\n" + //
-            "    ]\r\n" + //
-            "}";
+    void testBulkRequest_succeedAfterRetries() {
+        var docId1 = "tt1979320";
+        var docId2 = "tt0816711";
 
-        var response2 = "{\r\n" + //
-            "    \"took\": 11,\r\n" + //
-            "    \"errors\": true,\r\n" + //
-            "    \"items\": [\r\n" + //
-            "        {\r\n" + //
-            "            \"index\": {\r\n" + //
-            "                \"_index\": \"movies\",\r\n" + //
-            "                \"_id\": \"tt0816711\",\r\n" + //
-            "                \"_version\": 1,\r\n" + //
-            "                \"result\": \"created\",\r\n" + //
-            "                \"_shards\": {\r\n" + //
-            "                    \"total\": 2,\r\n" + //
-            "                    \"successful\": 1,\r\n" + //
-            "                    \"failed\": 0\r\n" + //
-            "                },\r\n" + //
-            "                \"_seq_no\": 1,\r\n" + //
-            "                \"_primary_term\": 1,\r\n" + //
-            "                \"status\": 201\r\n" + //
-            "            }\r\n" + //
-            "        },\r\n" + //
-            "        {\r\n" + //
-            "            \"create\": {\r\n" + //
-            "                \"_index\": \"movies\",\r\n" + //
-            "                \"_id\": \"tt1392214\",\r\n" + //
-            "                \"status\": 409,\r\n" + //
-            "                \"error\": {\r\n" + //
-            "                    \"type\": \"version_conflict_engine_exception\",\r\n" + //
-            "                    \"reason\": \"[tt1392214]: version conflict, document already exists (current version [1])\",\r\n" + //
-            "                    \"index\": \"movies\",\r\n" + //
-            "                    \"shard\": \"0\",\r\n" + //
-            "                    \"index_uuid\": \"yhizhusbSWmP0G7OJnmcLg\"\r\n" + //
-            "                }\r\n" + //
-            "            }\r\n" + //
-            "        }\r\n" + //
-            "    ]\r\n" + //
-            "}";
-
-        var bulkResponse = new HttpResponse(200, "", null, response);
-        var bulkResponse2 = new HttpResponse(200, "", null, response2);
+        var bothDocsFail = bulkItemResponse(true, List.of(
+            bulkItemResponseFailure(docId1),
+            bulkItemResponseFailure(docId2)));
+        var oneFailure  = bulkItemResponse(true, List.of(
+            bulkItemResponse(docId1, "index", "created"),
+            bulkItemResponseFailure(docId2)));
+        var finalDocSuccess  = bulkItemResponse(true, List.of(
+            bulkItemResponse(docId2, "index", "created")));
         var server500 = new HttpResponse(500, "", null, "{\"error\":\"Cannot Process Error!\"}");
 
         var restClient = mock(RestClient.class);
         when(restClient.postAsync(any(), any(), any()))
-            .thenReturn(Mono.just(bulkResponse))
+            .thenReturn(Mono.just(bothDocsFail))
+            .thenReturn(Mono.just(oneFailure))
             .thenReturn(Mono.just(server500))
-            .thenReturn(Mono.just(bulkResponse2))
-            .thenReturn(Mono.just(server500));
+            .thenReturn(Mono.just(finalDocSuccess));
 
+        var bulkDocs = List.of(createBulkDoc(docId1), createBulkDoc(docId2));
+        var openSearchClient = spy(new OpenSearchClient(restClient));
+        doReturn(Retry.fixedDelay(6, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
 
         // Action
-        var dockSection = mock(BulkDocSection.class);
-        when(dockSection.getDocId()).thenReturn("tt1979320");
-        when(dockSection.asBulkIndex()).thenReturn("BULK-INDEX");
+        try (var logs = new CloseableLogSetup("FailedRequestsLogger")) {
+            var responseMono = openSearchClient.sendBulkRequest("myIndex", bulkDocs, mock(IRfsContexts.IRequestContext.class));
 
-        var dockSection2 = mock(BulkDocSection.class);
-        when(dockSection2.getDocId()).thenReturn("tt0816711");
-        when(dockSection2.asBulkIndex()).thenReturn("BULK-INDEX");
+            // Assertions
+            StepVerifier.create(responseMono).expectComplete().verify();
 
-        var bulkDocs = List.of(dockSection, dockSection2);
+            verify(restClient, times(4)).postAsync(any(), any(), any());
+            assertThat(logs.getLogEvents(), empty());
+        }
+    }
+
+    @Test
+    void testBulkRequest_recordsTotalFailures() {
+        var docId1 = "tt1979320";
+        var docFails = bulkItemResponse(true, List.of(bulkItemResponseFailure(docId1)));
+
+        var restClient = mock(RestClient.class);
+        when(restClient.postAsync(any(), any(), any())).thenReturn(Mono.just(docFails));
+
+        // Action
         var openSearchClient = spy(new OpenSearchClient(restClient));
-        doReturn(Retry.fixedDelay(4, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+        var maxRetries = 6;
+        doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
+        var bulkDoc = createBulkDoc(docId1);
+        var indexName = "alwaysFailingIndexName";
 
-        var responseMono = openSearchClient.sendBulkRequest("myIndex", bulkDocs, mock(IRfsContexts.IRequestContext.class));
+        try (var logs = new CloseableLogSetup("FailedRequestsLogger")) {
+            var responseMono = openSearchClient.sendBulkRequest(indexName, List.of(bulkDoc), mock(IRfsContexts.IRequestContext.class));
+            var exception = assertThrows(Exception.class, () -> responseMono.block());
+            assertThat(exception.getMessage(), containsString("Retries exhausted"));
 
-        StepVerifier.create(responseMono)
-            .expectComplete()
-            .verify();
+            assertThat(logs.getLogEvents(), hasItem(allOf(
+                containsString("myIndex"),
+                containsString(bulkDoc.asBulkIndex()),
+                containsString(docFails.body)
+            )));
+        }
 
-        verify(restClient, times(3)).postAsync(any(), any(), any());
+        var maxAttempts = maxRetries + 1;
+        verify(restClient, times(maxAttempts)).postAsync(any(), any(), any());
+    }
+
+    private BulkDocSection createBulkDoc(String docId) {
+        var bulkDoc = mock(BulkDocSection.class);
+        when(bulkDoc.getDocId()).thenReturn(docId);
+        when(bulkDoc.asBulkIndex()).thenReturn("BULK-INDEX\nBULK_BODY");
+        return bulkDoc;
+    }
+
+    private HttpResponse bulkItemResponse(boolean hasErrors, List<String> itemResponses) {
+        var responseBody = "{\r\n" + //
+            "    \"took\": 11,\r\n" + //
+            "    \"errors\": " + hasErrors +",\r\n" + //
+            "    \"items\": [\r\n" + //
+            itemResponses.stream().collect(Collectors.joining(",")) + //
+            "    ]\r\n" + //
+            "}";
+        return new HttpResponse(200, "", null, responseBody);
+    }
+
+    private String bulkItemResponse(String itemId, String operationName, String result){
+        return ("        {\r\n" + //
+            "            \"{1}\": {\r\n" + //
+            "                \"_index\": \"movies\",\r\n" + //
+            "                \"_id\": \"{0}\",\r\n" + //
+            "                \"_version\": 1,\r\n" + //
+            "                \"result\": \"{2}\",\r\n" + //
+            "                \"_shards\": {\r\n" + //
+            "                    \"total\": 2,\r\n" + //
+            "                    \"successful\": 1,\r\n" + //
+            "                    \"failed\": 0\r\n" + //
+            "                },\r\n" + //
+            "                \"_seq_no\": 1,\r\n" + //
+            "                \"_primary_term\": 1,\r\n" + //
+            "                \"status\": 201\r\n" + //
+            "            }\r\n" + //
+            "        }\r\n") //
+            .replaceAll("\\{0\\}", itemId)
+            .replaceAll("\\{1\\}", operationName)
+            .replaceAll("\\{2\\}", result);
+    }
+
+    private String bulkItemResponseFailure(String itemId){
+        return ("        {\r\n" + //
+        "            \"create\": {\r\n" + //
+        "                \"_index\": \"movies\",\r\n" + //
+        "                \"_id\": \"{0}\",\r\n" + //
+        "                \"status\": 409,\r\n" + //
+        "                \"error\": {\r\n" + //
+        "                    \"type\": \"version_conflict_engine_exception\",\r\n" + //
+        "                    \"reason\": \"[{0}]: version conflict, document already exists (current version [1])\",\r\n" + //
+        "                    \"index\": \"movies\",\r\n" + //
+        "                    \"shard\": \"0\",\r\n" + //
+        "                    \"index_uuid\": \"yhizhusbSWmP0G7OJnmcLg\"\r\n" + //
+        "                }\r\n" + //
+        "            }\r\n" + //
+        "        }\r\n")
+        .replaceAll("\\{0\\}", itemId);
     }
 
     @SneakyThrows
