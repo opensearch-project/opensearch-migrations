@@ -2,11 +2,10 @@ package com.rfs.common;
 
 import java.util.List;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.lucene.document.Document;
 
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
-
-import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
