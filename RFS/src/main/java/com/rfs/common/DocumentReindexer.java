@@ -27,25 +27,22 @@ public class DocumentReindexer {
         Flux<Document> documentStream,
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
-        // Build up to 2x the allowed concurrent requests
-        final int requestBuffer = maxConcurrentRequests * 2;
-
         return documentStream
             .map(this::convertDocumentToBulkSection)
-            .bufferWhile(statefulSizeSegmentingPredicate(numDocsPerBulkRequest, numBytesPerBulkRequest))
             .subscribeOn(Schedulers.parallel()) // Initiate request scheduling in parallel
-            .limitRate(requestBuffer) // Reduce memory and cpu pressure by limiting request building
+            .bufferUntil(statefulSizeSegmentingPredicate(numDocsPerBulkRequest, numBytesPerBulkRequest), true)
             .flatMap(
                 bulkSections -> client
                     .sendBulkRequest(indexName,
                         this.convertToBulkRequestBody(bulkSections),
                         context.createBulkRequest()) // Send the request
-                    .doOnRequest(unused -> logger.info("{} documents in current bulk request.", bulkSections.size()))
+                    .doFirst(() -> logger.info("{} documents in current bulk request.", bulkSections.size()))
                     .doOnSuccess(unused -> logger.debug("Batch succeeded"))
                     .doOnError(error -> logger.error("Batch failed", error))
                     // Prevent the error from stopping the entire stream, retries occurring within sendBulkRequest
                     .onErrorResume(e -> Mono.empty()),
-                maxConcurrentRequests)
+                maxConcurrentRequests,
+                2) // Prefetch up to 2 requests per connection to limit memory pressure
             .doOnComplete(() -> logger.debug("All batches processed"))
             .then();
     }
@@ -73,21 +70,19 @@ public class DocumentReindexer {
 
             @Override
             public boolean test(String next) {
-                currentItemCount++;
                 // TODO: Move to Bytebufs to convert from string to bytes only once
                 // Add one for newline between bulk sections
-                currentSize += next.getBytes(StandardCharsets.UTF_8).length + 1;
+                var nextSize = next.getBytes(StandardCharsets.UTF_8).length + 1L;
+                currentSize += nextSize;
+                currentItemCount++;
 
-                // Return true to keep buffering while conditions are met
-                if (currentSize == 0 ||
-                    (currentItemCount <= maxItems && currentSize <= maxSizeInBytes)) {
+                if (currentItemCount > maxItems || currentSize > maxSizeInBytes) {
+                    // Reset and return true to signal to stop buffering.
+                    // Current item is included in the current buffer
+                    currentItemCount = 1;
+                    currentSize = nextSize;
                     return true;
                 }
-
-                // Reset and return false to signal to stop buffering.
-                // Next item is excluded from current buffer
-                currentItemCount = 0;
-                currentSize = 0;
                 return false;
             }
         };
