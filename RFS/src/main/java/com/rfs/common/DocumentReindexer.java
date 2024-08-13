@@ -20,17 +20,25 @@ public class DocumentReindexer {
     protected final OpenSearchClient client;
     private final int numDocsPerBulkRequest;
     private final long numBytesPerBulkRequest;
-    private final int maxConcurrentRequests;
+    private final int maxConcurrentWorkItems;
 
     public Mono<Void> reindex(
         String indexName,
         Flux<Document> documentStream,
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
+        var documentStreamRunner = Schedulers.newSingle("luceneRunner");
+        var requestSendingRunner = Schedulers.newParallel("requestSendingRunner", maxConcurrentWorkItems);
         return documentStream
+            .subscribeOn(documentStreamRunner)
             .map(this::convertDocumentToBulkSection)
-            .subscribeOn(Schedulers.parallel()) // Initiate request scheduling in parallel
+            .subscribeOn(documentStreamRunner) // Use same thread for lucene reading and buffering
             .bufferUntil(statefulSizeSegmentingPredicate(numDocsPerBulkRequest, numBytesPerBulkRequest), true)
+            .parallel(
+                maxConcurrentWorkItems, // Number of parallel workers, tested in reindex_shouldRespectMaxConcurrentRequests
+                maxConcurrentWorkItems * 2 // Limit prefetch for memory pressure
+            )
+            .runOn(requestSendingRunner) // Dedicate maxConcurrentRequests threads for sending
             .flatMap(
                 bulkSections -> client
                     .sendBulkRequest(indexName,
@@ -41,10 +49,16 @@ public class DocumentReindexer {
                     .doOnError(error -> logger.error("Batch failed", error))
                     // Prevent the error from stopping the entire stream, retries occurring within sendBulkRequest
                     .onErrorResume(e -> Mono.empty()),
-                maxConcurrentRequests,
-                2) // Prefetch up to 2 requests per connection to limit memory pressure
+            false,
+                1, // control concurrency on parallel rails
+                1 // control prefetch across all parallel runners
+            )
             .doOnComplete(() -> logger.debug("All batches processed"))
-            .then();
+            .then()
+            .doFinally(unused -> {
+                documentStreamRunner.dispose();
+                requestSendingRunner.dispose();
+            });
     }
 
     private String convertDocumentToBulkSection(Document document) {

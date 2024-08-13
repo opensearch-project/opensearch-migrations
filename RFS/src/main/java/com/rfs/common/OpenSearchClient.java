@@ -265,8 +265,13 @@ public class OpenSearchClient {
                 }
                 return Mono.just(resp);
             })
-            // In throttle cases, this will be low enough to get down to 1tps with 50 concurrency
-            .retryWhen(Retry.backoff(6, Duration.ofSeconds(2)).maxBackoff(Duration.ofSeconds(60)));
+            .retryWhen(Retry.backoff(6, Duration.ofSeconds(2))
+                .maxBackoff(Duration.ofSeconds(60))
+                .doAfterRetry(retrySignal -> 
+                    logger.error("Retrying bulk request after error: {}. Attempt: {}/{}",
+                        retrySignal.failure().getMessage(),
+                        retrySignal.totalRetriesInARow() + 1,
+                        retrySignal.totalRetries())));
     }
 
     public HttpResponse refresh(IRfsContexts.IRequestContext context) {

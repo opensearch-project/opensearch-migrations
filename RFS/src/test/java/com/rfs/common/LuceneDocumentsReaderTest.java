@@ -5,6 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
+import lombok.extern.log4j.Log4j2;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
 import org.apache.lucene.document.StoredField;
@@ -14,6 +15,7 @@ import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.Test;
 
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 
 import static org.mockito.Mockito.*;
@@ -66,6 +68,7 @@ class TestLuceneDocumentsReader extends LuceneDocumentsReader {
     }
 }
 
+@Log4j2
 public class LuceneDocumentsReaderTest {
     @Test
     void ReadDocuments_AsExpected() {
@@ -87,4 +90,33 @@ public class LuceneDocumentsReaderTest {
             return "id3".equals(testId) && "source3".equals(testSource);
         }).expectComplete().verify();
     }
+
+
+    @Test
+    void ReadDocuments_AsExpected_withParallelSubscriber() {
+        // Use the TestLuceneDocumentsReader to get the mocked documents
+        var documents = new TestLuceneDocumentsReader(Paths.get("/fake/path/testIndex/0")).readDocuments()
+            .parallel()
+            .runOn(Schedulers.newParallel("parallelRunner", 10))
+            .map(item -> {
+                log.info("Got item: {}", item);
+                return item;
+            });
+
+        // Verify that the results are as expected
+        StepVerifier.create(documents).expectNextMatches(doc -> {
+            String testId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
+            String testSource = doc.getBinaryValue("_source").utf8ToString();
+            return "id1".equals(testId) && "source1".equals(testSource);
+        }).expectNextMatches(doc -> {
+            String testId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
+            String testSource = doc.getBinaryValue("_source").utf8ToString();
+            return "id2".equals(testId) && "source2".equals(testSource);
+        }).expectNextMatches(doc -> {
+            String testId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
+            String testSource = doc.getBinaryValue("_source").utf8ToString();
+            return "id3".equals(testId) && "source3".equals(testSource);
+        }).expectComplete().verify();
+    }
+
 }

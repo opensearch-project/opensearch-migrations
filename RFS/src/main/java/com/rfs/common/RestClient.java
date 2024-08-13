@@ -145,7 +145,6 @@ public class RestClient {
         return connectionContext.getRequestTransformer().transform(method.name(), path, headers, Mono.justOrEmpty(body)
                 .map(b -> ByteBuffer.wrap(b.getBytes(StandardCharsets.UTF_8)))
             )
-            .subscribeOn(Schedulers.parallel()) // Use parallel scheduler for performance
             .flatMap(transformedRequest ->
                 client.doOnRequest((r, conn) -> contextCleanupRef.set(addSizeMetricsHandlersAndGetCleanup(context).apply(r, conn)))
                 .headers(h -> transformedRequest.getHeaders().forEach(h::add))
@@ -161,7 +160,8 @@ public class RestClient {
                             extractHeaders(response.responseHeaders()),
                             bodyOp.orElse(null)
                             ))
-                ))
+                )
+            )
             .doOnError(t -> {
                 if (context != null) {
                     context.addTraceException(t, true);
