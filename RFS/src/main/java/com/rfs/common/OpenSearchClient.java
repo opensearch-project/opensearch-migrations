@@ -30,7 +30,11 @@ public class OpenSearchClient {
     private final RestClient client;
 
     public OpenSearchClient(ConnectionContext connectionContext) {
-        this.client = new RestClient(connectionContext);
+        this(new RestClient(connectionContext));
+    }
+
+    OpenSearchClient(RestClient client) {
+        this.client = client;
     }
 
     /*

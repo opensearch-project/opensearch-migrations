@@ -224,7 +224,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
             targetAddress,
             "--index-allowlist",
             "geonames",
-            "--max-initial-lease-duration",
+            "--initial-lease-duration",
             failHow == FailHow.NEVER ? "PT10M" : "PT1S" };
 
         // Kick off the doc migration process
