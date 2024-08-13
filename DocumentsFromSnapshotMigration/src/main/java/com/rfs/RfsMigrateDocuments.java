@@ -166,7 +166,6 @@ public class RfsMigrateDocuments {
     }
 
     public static void main(String[] args) throws Exception {
-
         Args arguments = new Args();
         JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
