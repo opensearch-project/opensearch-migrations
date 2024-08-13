@@ -16,7 +16,9 @@ import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
 
+import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -153,5 +155,34 @@ class DocumentReindexerTest {
         String largeField = "x".repeat(size);
         doc.add(new StringField("_source", new BytesRef("{\"field\":\"" + largeField + "\"}"), Field.Store.YES));
         return doc;
+    }
+
+    @Test
+    void reindex_shouldRespectMaxConcurrentRequests() {
+        int numDocs = 100;
+        int maxConcurrentRequests = 5;
+        DocumentReindexer concurrentReindexer = new DocumentReindexer(mockClient, 1, MAX_BULK_SIZE, maxConcurrentRequests);
+
+        Flux<Document> documentStream = Flux.range(1, numDocs).map(i -> createTestDocument(String.valueOf(i)));
+
+        AtomicInteger concurrentRequests = new AtomicInteger(0);
+        AtomicInteger maxObservedConcurrency = new AtomicInteger(0);
+
+        when(mockClient.sendBulkRequest(eq("test-index"), anyString(), any()))
+            .thenAnswer(invocation -> {
+                int current = concurrentRequests.incrementAndGet();
+                maxObservedConcurrency.updateAndGet(max -> Math.max(max, current));
+                return Mono.just(new OpenSearchClient.BulkResponse(200, "OK", null, "{\"took\":1,\"errors\":false,\"items\":[{}]}"))
+                    .delayElement(Duration.ofMillis(100))
+                    .doOnTerminate(concurrentRequests::decrementAndGet);
+            });
+
+        StepVerifier.create(concurrentReindexer.reindex("test-index", documentStream, mockContext))
+            .verifyComplete();
+
+        verify(mockClient, times(numDocs)).sendBulkRequest(eq("test-index"), anyString(), any());
+        assertTrue(maxObservedConcurrency.get() <= maxConcurrentRequests,
+            "Max observed concurrency (" + maxObservedConcurrency.get() +
+            ") should not exceed max concurrent requests (" + maxConcurrentRequests + ")");
     }
 }
