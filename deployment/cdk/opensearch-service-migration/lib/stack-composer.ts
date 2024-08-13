@@ -425,6 +425,7 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
                 description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
                 stage: stage,
+                otelCollectorEnabled: otelCollectorEnabled,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 env: props.env

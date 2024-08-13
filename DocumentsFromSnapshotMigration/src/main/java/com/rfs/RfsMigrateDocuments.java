@@ -47,11 +47,13 @@ import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.worker.DocumentsRunner;
 import com.rfs.worker.ShardWorkPreparer;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 
 @Slf4j
 public class RfsMigrateDocuments {
     public static final int PROCESS_TIMED_OUT = 2;
     public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
+    public static final String LOGGING_MDC_WORKER_ID = "workerId";
 
     public static class DurationConverter implements IStringConverter<Duration> {
         @Override
@@ -103,11 +105,11 @@ public class RfsMigrateDocuments {
                 + " performing the document migration.  Useful for preventing disk overflow.  Default: 80 * 1024 * 1024 * 1024 (80 GB)"), required = false)
         public long maxShardSizeBytes = 80 * 1024 * 1024 * 1024L;
 
-        @Parameter(names = { "--max-initial-lease-duration" }, description = ("Optional. The maximum time that the "
+        @Parameter(names = { "--initial-lease-duration" }, description = ("Optional. The time that the "
             + "first attempt to migrate a shard's documents should take.  If a process takes longer than this "
             + "the process will terminate, allowing another process to attempt the migration, but with double the "
             + "amount of time than the last time.  Default: PT10M"), required = false, converter = DurationConverter.class)
-        public Duration maxInitialLeaseDuration = Duration.ofMinutes(10);
+        public Duration initialLeaseDuration = Duration.ofMinutes(10);
 
         @Parameter(required = false, names = {
             "--otel-collector-endpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
@@ -116,14 +118,14 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
         names = "--documents-per-bulk-request",
-        description = "Optional.  The number of documents to be included within each bulk request sent.")
+        description = "Optional.  The number of documents to be included within each bulk request sent, default 1000")
         int numDocsPerBulkRequest = 1000;
 
         @Parameter(required = false,
             names = "--max-connections",
             description = "Optional.  The maximum number of connections to simultaneously " +
-                "used to communicate to the target.")
-        int maxConnections = -1;
+                "used to communicate to the target, default 50")
+        int maxConnections = 50;
     }
 
     public static class NoWorkLeftException extends Exception {
@@ -178,16 +180,19 @@ public class RfsMigrateDocuments {
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC())) {
             ConnectionContext connectionContext = arguments.targetArgs.toConnectionContext();
+            final var workerId = UUID.randomUUID().toString();
             var workCoordinator = new OpenSearchWorkCoordinator(
                 new CoordinateWorkHttpClient(connectionContext),
                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                UUID.randomUUID().toString()
+                workerId
             );
+            MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
             TryHandlePhaseFailure.executeWithTryCatch(() -> {
-                log.info("Running RfsWorker");
+                log.info("Running RfsMigrateDocuments with workerId = " + workerId);
 
-                OpenSearchClient targetClient = new OpenSearchClient(connectionContext, arguments.maxConnections);
-                DocumentReindexer reindexer = new DocumentReindexer(targetClient, arguments.numDocsPerBulkRequest);
+                OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
+                DocumentReindexer reindexer = new DocumentReindexer(targetClient, arguments.numDocsPerBulkRequest,
+                    arguments.maxConnections);
 
                 SourceRepo sourceRepo;
                 if (snapshotLocalDirPath == null) {
@@ -214,7 +219,7 @@ public class RfsMigrateDocuments {
                     LuceneDocumentsReader::new,
                     reindexer,
                     workCoordinator,
-                    arguments.maxInitialLeaseDuration,
+                    arguments.initialLeaseDuration,
                     processManager,
                     indexMetadataFactory,
                     arguments.snapshotName,
