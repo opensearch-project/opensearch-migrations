@@ -303,11 +303,10 @@ public class OpenSearchClient {
                     var successfulDocs = resp.getSuccessfulDocs();
                     successfulDocs.forEach(docsMap::remove);
                     log.atWarn()
-                        .setMessage("After bulk request on index '{}', {} more documents have succeed, {} remain, failure reason {}")
+                        .setMessage("After bulk request on index '{}', {} more documents have succeed, {} remain")
                         .addArgument(indexName)
                         .addArgument(successfulDocs::size)
                         .addArgument(docsMap::size)
-                        .addArgument(resp::getFailureMessage)
                         .log();
                     return Mono.error(new OperationFailed(resp.getFailureMessage(), resp));
                 });

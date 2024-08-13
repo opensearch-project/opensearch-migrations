@@ -131,7 +131,7 @@ class OpenSearchClientTest {
             true,
             List.of(bulkItemResponse(docId1, "index", "created"), bulkItemResponseFailure(docId2))
         );
-        var finalDocSuccess = bulkItemResponse(true, List.of(bulkItemResponse(docId2, "index", "created")));
+        var finalDocSuccess = bulkItemResponse(false, List.of(bulkItemResponse(docId2, "index", "created")));
         var server500 = new HttpResponse(500, "", null, "{\"error\":\"Cannot Process Error!\"}");
 
         var restClient = mock(RestClient.class);
@@ -152,9 +152,10 @@ class OpenSearchClientTest {
             bulkDocs,
             mock(IRfsContexts.IRequestContext.class)
         );
+        responseMono.block();
 
         // Assertions
-        StepVerifier.create(responseMono).expectComplete().verify();
+        // StepVerifier.create(responseMono).expectComplete().verify();
 
         verify(restClient, times(4)).postAsync(any(), any(), any());
         verifyNoInteractions(failedRequestLogger);
