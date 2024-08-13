@@ -10,21 +10,21 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.parsing.BulkResponseParser;
-
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import org.opensearch.migrations.parsing.BulkResponseParser;
+
 import com.rfs.common.DocumentReindexer.BulkDocSection;
 import com.rfs.common.http.ConnectionContext;
 import com.rfs.common.http.HttpResponse;
 import com.rfs.tracing.IRfsContexts;
-
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
-import org.slf4j.LoggerFactory;
-import org.slf4j.Logger;
 
 @Slf4j
 public class OpenSearchClient {
@@ -301,19 +301,30 @@ public class OpenSearchClient {
         .retryWhen(getBulkRetryStrategy())
         .doOnError(error -> {
             if (!docsMap.isEmpty()) {
-                final String response;
-                if (error instanceof OperationFailed) {
-                    response = ((OperationFailed)error).response.body;
-                } else {
-                    response = error.getMessage();
+                // get root cause
+                var currentError = error;
+                while (currentError.getCause() != null) {
+                    currentError = currentError.getCause();
                 }
 
-                failedRequestsLogger.atInfo()
-                    .setMessage("Bulk request failed for {} documents, request followed by response.\n{},\n{}")
-                    .addArgument(docsMap.size())
-                    .addArgument(BulkDocSection.convertToBulkRequestBody(docsMap.values()))
-                    .addArgument(response)
-                    .log();
+                if (currentError instanceof OperationFailed) {
+                    var responseBody = ((OperationFailed)currentError).response.body;
+                    failedRequestsLogger.atInfo()
+                        .setMessage("Bulk request failed for {} index on {} documents, bulk request body followed by response:\n{}\n{}")
+                        .addArgument(indexName)
+                        .addArgument(docsMap::size)
+                        .addArgument(() -> BulkDocSection.convertToBulkRequestBody(docsMap.values()))
+                        .addArgument(() -> responseBody)
+                        .log();
+                } else {
+                    failedRequestsLogger.atInfo()
+                        .setMessage("Bulk request failed for {} index on {} documents, reason {}, bulk request body:\n{}")
+                        .addArgument(indexName)
+                        .addArgument(docsMap::size)
+                        .addArgument(currentError.getMessage())
+                        .addArgument(() -> BulkDocSection.convertToBulkRequestBody(docsMap.values()))
+                        .log();
+                }
             }
         });
     }

@@ -16,14 +16,8 @@ import com.rfs.common.OpenSearchClient;
 import com.rfs.framework.ClusterOperations;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.framework.SimpleRestoreFromSnapshot_ES_7_10;
-import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
 
-import static org.hamcrest.CoreMatchers.allOf;
-import static org.hamcrest.CoreMatchers.anyOf;
-import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.CoreMatchers.not;
-import static org.hamcrest.MatcherAssert.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
