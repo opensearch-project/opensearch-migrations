@@ -113,8 +113,9 @@ task slowTest(type: Test) {
 }
 
 jmh {
-    includeTests = true
+    includeTests = true // Benchmarks should be in test code, not product code
+    failOnError = true
     fork = 0
-    humanOutputFile = project.file("${project.buildDir}/reports/jmh/human.txt") // human-readable output file
-    resultsFile = project.file("${project.buildDir}/reports/jmh/results.txt") // results file
+    humanOutputFile = project.file("${project.buildDir}/reports/jmh/human.txt")
+    resultsFile = project.file("${project.buildDir}/reports/jmh/results.txt")
 }

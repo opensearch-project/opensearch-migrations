@@ -19,14 +19,14 @@ public class BulkRequestGenerator {
         return sb.toString();
     }
 
-    public static BulkItemResponseEntry itemEntry(String itemId, String operationName, String result) {
+    public static BulkItemResponseEntry itemEntry(String itemId) {
         return BulkItemResponseEntry.builder().raw(
             ("        {\r\n" + //
-            "            \"{1}\": {\r\n" + //
+            "            \"index\": {\r\n" + //
             "                \"_index\": \"movies\",\r\n" + //
             "                \"_id\": \"{0}\",\r\n" + //
             "                \"_version\": 1,\r\n" + //
-            "                \"result\": \"{2}\",\r\n" + //
+            "                \"result\": \"created\",\r\n" + //
             "                \"_shards\": {\r\n" + //
             "                    \"total\": 2,\r\n" + //
             "                    \"successful\": 1,\r\n" + //
@@ -37,16 +37,14 @@ public class BulkRequestGenerator {
             "                \"status\": 201\r\n" + //
             "            }\r\n" + //
             "        }\r\n") //
-            .replaceAll("\\{0\\}", itemId)
-            .replaceAll("\\{1\\}", operationName)
-            .replaceAll("\\{2\\}", result))
+            .replaceAll("\\{0\\}", itemId))
             .build();
     }
 
     public static BulkItemResponseEntry itemEntryFailure(String itemId) {
         return BulkItemResponseEntry.builder().raw(
             ("        {\r\n" + //
-            "            \"create\": {\r\n" + //
+            "            \"index\": {\r\n" + //
             "                \"_index\": \"movies\",\r\n" + //
             "                \"_id\": \"{0}\",\r\n" + //
             "                \"status\": 409,\r\n" + //

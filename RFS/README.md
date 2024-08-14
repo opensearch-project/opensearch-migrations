@@ -16,6 +16,26 @@ Several entrypoints are provided to handle different aspects of an overall clust
 
 It is recommended to refer to the respective README of the tool you want to use for more details about how to use them.
 
+## Benchmarking
+
+This library supports benchmarks via [Java Microbenchmark Harness or JMH](https://github.com/openjdk/jmh).  These are best to be used with A/B testing that does not involve any external systems, such as string parsers.  Run the command with `./gradlew RFS:jmh` after it has completed results will be available in {project.dir}/build/reports/jmh in addition to the human readable logs.
+
+### Adding a benchmark
+
+It is recommended to put benchmarks into the test code, so they are validated for correctness when not run in the benchmark suite. The following shows example annotations that are used.
+
+```java
+@Test
+@Benchmark
+@BenchmarkMode({Mode.Throughput})
+@Warmup(iterations = 0)
+@Measurement(iterations = 2)
+public void testJacksonParser() throws IOException {
+    var successfulItems = BulkResponseParser.findSuccessDocs(bulkResponse);
+    assertThat(successfulItems, hasSize(expectedSuccesses));
+}
+```
+
 ## How to run the full process against local test clusters
 
 If you made some local changes to the code and want to test them beyond just running the various unit tests, try the following process to run all of the individual tools against some local Dockerized Source/Target cluster while storing the snapshot in S3.
