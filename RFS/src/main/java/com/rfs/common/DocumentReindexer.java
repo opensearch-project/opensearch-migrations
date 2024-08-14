@@ -95,7 +95,7 @@ public class DocumentReindexer {
         for (String section : bulkSections) {
             builder.append(section).append("\n");
         }
-        log.atDebug().setMessage("Bulk request body: \n{}").addArgument(builder::toString);
+        log.atDebug().setMessage("Bulk request body: \n{}").addArgument(builder::toString).log();
 
         return builder.toString();
     }
