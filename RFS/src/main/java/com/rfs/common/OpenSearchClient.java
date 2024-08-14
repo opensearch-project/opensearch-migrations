@@ -265,9 +265,11 @@ public class OpenSearchClient {
                 }
                 return Mono.just(resp);
             })
-            .retryWhen(Retry.backoff(6, Duration.ofSeconds(2))
+            // In throttle cases, this will get down to 0.5 tps with 30 concurrency
+            // and hold that for 10 minutes
+            .retryWhen(Retry.backoff(15, Duration.ofSeconds(2))
                 .maxBackoff(Duration.ofSeconds(60))
-                .doAfterRetry(retrySignal -> 
+                .doAfterRetry(retrySignal ->
                     logger.error("Retrying bulk request after error: {}. Attempt: {}/{}",
                         retrySignal.failure().getMessage(),
                         retrySignal.totalRetriesInARow() + 1,
