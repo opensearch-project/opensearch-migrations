@@ -1,5 +1,6 @@
 package com.rfs.common;
 
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -25,7 +26,6 @@ import reactor.test.StepVerifier;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -59,10 +59,10 @@ class DocumentReindexerTest {
         Flux<Document> documentStream = Flux.range(1, 10)
             .map(i -> createTestDocument(String.valueOf(i)));
 
-        when(mockClient.sendBulkRequest(eq("test-index"), anyString(), any()))
+        when(mockClient.sendBulkRequest(eq("test-index"), any(), any()))
             .thenAnswer(invocation -> {
-                String bulkBody = invocation.getArgument(1);
-                long docCount = bulkBody.lines().filter(line -> line.contains("\"index\":")).count();
+                List<?> bulkBody = invocation.getArgument(1);
+                long docCount = bulkBody.size();
                 return Mono.just(new OpenSearchClient.BulkResponse(200, "OK", null,
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
@@ -71,22 +71,22 @@ class DocumentReindexerTest {
             .verifyComplete();
 
         int expectedBulkRequests = (10 + MAX_DOCS_PER_BULK - 1) / MAX_DOCS_PER_BULK;
-        verify(mockClient, times(expectedBulkRequests)).sendBulkRequest(eq("test-index"), anyString(), any());
+        verify(mockClient, times(expectedBulkRequests)).sendBulkRequest(eq("test-index"), any(), any());
 
-        ArgumentCaptor<String> bulkRequestCaptor = ArgumentCaptor.forClass(String.class);
+        @SuppressWarnings("unchecked")
+        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<DocumentReindexer.BulkDocSection>>)(Class<?>) List.class);
         verify(mockClient, times(expectedBulkRequests)).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
 
-        List<String> capturedBulkRequests = bulkRequestCaptor.getAllValues();
+        var capturedBulkRequests = bulkRequestCaptor.getAllValues();
         assertEquals(expectedBulkRequests, capturedBulkRequests.size());
 
         for (int i = 0; i < expectedBulkRequests - 1; i++) {
-            String request = capturedBulkRequests.get(i);
-            assertEquals(MAX_DOCS_PER_BULK * 2, request.split("\n").length); // MAX_DOCS_PER_BULK index actions + MAX_DOCS_PER_BULK documents
+            assertEquals(MAX_DOCS_PER_BULK, capturedBulkRequests.get(i).size());
         }
 
-        String lastRequest = capturedBulkRequests.get(expectedBulkRequests - 1);
+        var lastRequest = capturedBulkRequests.get(expectedBulkRequests - 1);
         int remainingDocs = 10 % MAX_DOCS_PER_BULK;
-        assertEquals(remainingDocs * 2, lastRequest.split("\n").length); // remainingDocs index actions + remainingDocs documents
+        assertEquals(remainingDocs, lastRequest.size());
     }
 
     @Test
@@ -95,10 +95,10 @@ class DocumentReindexerTest {
         Flux<Document> documentStream = Flux.range(1, numDocs)
             .map(i -> createLargeTestDocument(String.valueOf(i), MAX_BULK_SIZE / 2 + 1));
 
-        when(mockClient.sendBulkRequest(eq("test-index"), anyString(), any()))
+        when(mockClient.sendBulkRequest(eq("test-index"), any(), any()))
             .thenAnswer(invocation -> {
-                String bulkBody = invocation.getArgument(1);
-                long docCount = bulkBody.lines().filter(line -> line.contains("\"index\":")).count();
+                List<?> bulkBody = invocation.getArgument(1);
+                long docCount = bulkBody.size();
                 return Mono.just(new OpenSearchClient.BulkResponse(200, "OK", null,
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
@@ -106,16 +106,17 @@ class DocumentReindexerTest {
         StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
             .verifyComplete();
 
-        verify(mockClient, times(numDocs)).sendBulkRequest(eq("test-index"), anyString(), any());
+        verify(mockClient, times(numDocs)).sendBulkRequest(eq("test-index"), any(), any());
 
-        ArgumentCaptor<String> bulkRequestCaptor = ArgumentCaptor.forClass(String.class);
+        @SuppressWarnings("unchecked")
+        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<DocumentReindexer.BulkDocSection>>)(Class<?>) List.class);
         verify(mockClient, times(numDocs)).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
 
-        List<String> capturedBulkRequests = bulkRequestCaptor.getAllValues();
+        var capturedBulkRequests = bulkRequestCaptor.getAllValues();
         assertEquals(numDocs, capturedBulkRequests.size());
 
-        for (String request : capturedBulkRequests) {
-            assertEquals(2, request.split("\n").length); // 1 index action + 1 document
+        for (var bulkDocSections : capturedBulkRequests) {
+            assertEquals(1, bulkDocSections.size());
         }
     }
 
@@ -123,10 +124,10 @@ class DocumentReindexerTest {
     void reindex_shouldSendDocumentsLargerThanMaxBulkSize() {
         Flux<Document> documentStream = Flux.just(createLargeTestDocument("1", MAX_BULK_SIZE * 3 / 2));
 
-        when(mockClient.sendBulkRequest(eq("test-index"), anyString(), any()))
+        when(mockClient.sendBulkRequest(eq("test-index"), any(), any()))
             .thenAnswer(invocation -> {
-                String bulkBody = invocation.getArgument(1);
-                long docCount = bulkBody.lines().filter(line -> line.contains("\"index\":")).count();
+                List<?> bulkBody = invocation.getArgument(1);
+                long docCount = bulkBody.size();
                 return Mono.just(new OpenSearchClient.BulkResponse(200, "OK", null,
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
@@ -134,14 +135,15 @@ class DocumentReindexerTest {
         StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
             .verifyComplete();
 
-        verify(mockClient, times(1)).sendBulkRequest(eq("test-index"), anyString(), any());
+        verify(mockClient, times(1)).sendBulkRequest(eq("test-index"), any(), any());
 
-        ArgumentCaptor<String> bulkRequestCaptor = ArgumentCaptor.forClass(String.class);
+        @SuppressWarnings("unchecked")
+        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<DocumentReindexer.BulkDocSection>>)(Class<?>) List.class);
         verify(mockClient).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
 
-        String capturedBulkRequest = bulkRequestCaptor.getValue();
-        assertTrue(capturedBulkRequest.length() > MAX_BULK_SIZE, "Bulk request should be larger than max bulk size");
-        assertEquals(2, capturedBulkRequest.split("\n").length, "Should contain 1 index action and 1 document");
+        var capturedBulkRequests = bulkRequestCaptor.getValue();
+        assertTrue(capturedBulkRequests.get(0).asBulkIndex().getBytes(StandardCharsets.UTF_8).length > MAX_BULK_SIZE, "Bulk request should be larger than max bulk size");
+        assertEquals(1, capturedBulkRequests.size(), "Should contain 1 document");
     }
 
     private Document createTestDocument(String id) {
@@ -170,7 +172,7 @@ class DocumentReindexerTest {
         AtomicInteger concurrentRequests = new AtomicInteger(0);
         AtomicInteger maxObservedConcurrency = new AtomicInteger(0);
 
-        when(mockClient.sendBulkRequest(eq("test-index"), anyString(), any()))
+        when(mockClient.sendBulkRequest(eq("test-index"), any(), any()))
             .thenAnswer(invocation -> {
                 int current = concurrentRequests.incrementAndGet();
                 maxObservedConcurrency.updateAndGet(max -> Math.max(max, current));
@@ -182,7 +184,7 @@ class DocumentReindexerTest {
         StepVerifier.create(concurrentReindexer.reindex("test-index", documentStream, mockContext))
             .verifyComplete();
 
-        verify(mockClient, times(numDocs)).sendBulkRequest(eq("test-index"), anyString(), any());
+        verify(mockClient, times(numDocs)).sendBulkRequest(eq("test-index"), any(), any());
         assertTrue(maxObservedConcurrency.get() <= maxConcurrentRequests,
             "Max observed concurrency (" + maxObservedConcurrency.get() +
             ") should not exceed max concurrent requests (" + maxConcurrentRequests + ")");
