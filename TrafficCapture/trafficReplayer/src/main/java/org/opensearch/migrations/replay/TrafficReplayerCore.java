@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay;
 import java.io.EOFException;
 import java.net.URI;
 import java.time.Instant;
-import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
@@ -13,19 +12,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
-import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.ByteBufList;
-import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
-import org.opensearch.migrations.replay.http.retries.RequestRetryEvaluator;
-import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
@@ -37,7 +29,6 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
-import io.netty.buffer.Unpooled;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.NonNull;
@@ -58,7 +49,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     }
 
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
-    protected final ClientConnectionPool clientConnectionPool;
     protected final TrafficStreamLimiter liveTrafficStreamLimiter;
     protected final AtomicInteger successfulRequestCount;
     protected final AtomicInteger exceptionRequestCount;
@@ -74,7 +64,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         URI serverUri,
         IAuthTransformerFactory authTransformer,
         IJsonTransformer jsonTransformer,
-        ClientConnectionPool clientConnectionPool,
         TrafficStreamLimiter trafficStreamLimiter,
         IWorkTracker<Void> requestWorkTracker,
         IRetryVisitorFactory retryVisitorFactory
@@ -92,7 +81,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             throw new IllegalArgumentException("Scheme (http|https) is not present for URI: " + serverUri);
         }
         this.liveTrafficStreamLimiter = trafficStreamLimiter;
-        this.clientConnectionPool = clientConnectionPool;
         this.requestWorkTracker = requestWorkTracker;
         inputRequestTransformerFactory = new PacketToTransformingHttpHandlerFactory(jsonTransformer, authTransformer);
         successfulRequestCount = new AtomicInteger();

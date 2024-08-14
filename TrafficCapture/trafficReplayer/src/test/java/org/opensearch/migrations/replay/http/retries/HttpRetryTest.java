@@ -56,7 +56,7 @@ public class HttpRetryTest {
     {
         try (var rootContext = TestContext.noOtelTracking()) {
             var retryFactory = new RetryCollectingVisitorFactory(new DefaultRetry());
-            var clientConnectionPool = TrafficReplayerTopLevel.makeClientConnectionPool(
+            var clientConnectionPool = TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                 testServerUri,
                 false,
                 1,

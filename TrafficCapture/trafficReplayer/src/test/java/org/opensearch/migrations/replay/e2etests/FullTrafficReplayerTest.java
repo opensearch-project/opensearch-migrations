@@ -24,7 +24,6 @@ import org.junit.jupiter.params.provider.CsvSource;
 
 import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumulator;
 import org.opensearch.migrations.replay.ReplayEngine;
-import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
 import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import org.opensearch.migrations.replay.TestHttpServerContext;
 import org.opensearch.migrations.replay.TimeShifter;
@@ -92,7 +91,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                 serverUri,
                 authTransformerFactory,
                 jsonTransformer,
-                TrafficReplayerTopLevel.makeClientConnectionPool(
+                TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                     serverUri,
                     allowInsecureConnections,
                     numSendingThreads,

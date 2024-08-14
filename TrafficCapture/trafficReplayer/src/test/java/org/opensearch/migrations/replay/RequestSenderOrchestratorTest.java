@@ -104,7 +104,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
         final int NUM_REPEATS = 1;
         final int NUM_PACKETS = 3;
 
-        var clientConnectionPool = TrafficReplayerTopLevel.makeClientConnectionPool(
+        var clientConnectionPool = TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
             new URI("http://localhost"),
             false,
             1,
@@ -213,7 +213,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
             )
         ) {
             var testServerUri = httpServer.localhostEndpoint();
-            var clientConnectionPool = TrafficReplayerTopLevel.makeClientConnectionPool(
+            var clientConnectionPool = TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                 testServerUri,
                 false,
                 1,

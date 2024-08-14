@@ -626,6 +626,11 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
 
         @Override
+        public IRequestConnectingContext createHttpConnectingContext() {
+            return new ReplayContexts.RequestConnectingContext(this);
+        }
+
+        @Override
         public IRequestSendingContext createHttpSendingContext() {
             return new ReplayContexts.RequestSendingContext(this);
         }
@@ -638,6 +643,30 @@ public abstract class ReplayContexts extends IReplayContexts {
         @Override
         public IReplayContexts.IWaitingForHttpResponseContext createWaitingForResponseContext() {
             return new ReplayContexts.WaitingForHttpResponseContext(this);
+        }
+    }
+
+    public static class RequestConnectingContext extends DirectNestedSpanContext<
+        RootReplayerContext,
+        TargetRequestContext,
+        IReplayContexts.ITargetRequestContext> implements IReplayContexts.IRequestConnectingContext {
+        public RequestConnectingContext(TargetRequestContext enclosingScope) {
+            super(enclosingScope);
+            initializeSpan();
+        }
+
+        public static class MetricInstruments extends CommonScopedMetricInstruments {
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, activityName);
+            }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
+        }
+
+        public @NonNull MetricInstruments getMetrics() {
+            return getRootInstrumentationScope().requestConnectingInstruments;
         }
     }
 

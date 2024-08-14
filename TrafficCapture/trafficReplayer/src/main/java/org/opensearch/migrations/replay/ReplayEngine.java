@@ -60,13 +60,12 @@ public class ReplayEngine {
         // this is gross, but really useful. Grab a thread out of the clientConnectionPool's event loop
         // and run a daemon to update the contentTimeController if there isn't any work that will be doing that
         var bufferPeriodMs = getUpdatePeriodMs();
-        updateContentTimeControllerScheduledFuture = networkSendOrchestrator.clientConnectionPool.eventLoopGroup.next()
-            .scheduleAtFixedRate(
-                this::updateContentTimeControllerWhenIdling,
-                bufferPeriodMs,
-                bufferPeriodMs,
-                TIME_UNIT_MILLIS
-            );
+        updateContentTimeControllerScheduledFuture = networkSendOrchestrator.scheduleAtFixedRate(
+            this::updateContentTimeControllerWhenIdling,
+            bufferPeriodMs,
+            bufferPeriodMs,
+            TIME_UNIT_MILLIS
+        );
     }
 
     private long getUpdatePeriodMs() {

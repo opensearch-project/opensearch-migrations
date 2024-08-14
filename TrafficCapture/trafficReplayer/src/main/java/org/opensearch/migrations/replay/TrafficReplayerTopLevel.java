@@ -13,10 +13,8 @@ import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.function.Function;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import javax.net.ssl.SSLException;
 
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
@@ -24,7 +22,6 @@ import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
 import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
-import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import org.opensearch.migrations.replay.util.TrackedFuture;
@@ -34,7 +31,6 @@ import org.opensearch.migrations.transform.IJsonTransformer;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
-import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -81,6 +77,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     }
 
     private final AtomicReference<TextTrackedFuture<Void>> allRemainingWorkFutureOrShutdownSignalRef;
+    protected final ClientConnectionPool clientConnectionPool;
     private final AtomicReference<Error> shutdownReasonRef;
     private final AtomicReference<CompletableFuture<Void>> shutdownFutureRef;
 
@@ -98,50 +95,31 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             serverUri,
             authTransformerFactory,
             jsonTransformer,
-            clientConnectionPool,
             trafficStreamLimiter,
             workTracker,
             new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry())
         );
+        this.clientConnectionPool = clientConnectionPool;
         allRemainingWorkFutureOrShutdownSignalRef = new AtomicReference<>();
         shutdownReasonRef = new AtomicReference<>();
         shutdownFutureRef = new AtomicReference<>();
     }
 
 
-    @AllArgsConstructor
-    public static class ReplayEngineFactory implements Function<ClientConnectionPool, ReplayEngine> {
-        Duration targetServerResponseTimeout;
-        BufferedFlowController flowController;
-        TimeShifter timeShifter;
-        public ReplayEngine apply(ClientConnectionPool clientConnectionPool) {
-            return new ReplayEngine(
-                new RequestSenderOrchestrator(
-                    clientConnectionPool,
-                    (replaySession, ctx) ->
-                        new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout)
-                ),
-                flowController, timeShifter);
-        }
+    public static ClientConnectionPool
+    makeNettyPacketConsumerConnectionPool(URI serverUri, boolean allowInsecureConnections, int numSendingThreads) {
+        return makeNettyPacketConsumerConnectionPool(serverUri, allowInsecureConnections, numSendingThreads, null);
     }
 
-    public static ClientConnectionPool makeClientConnectionPool(
-        URI serverUri,
-        boolean allowInsecureConnections,
-        int numSendingThreads
-    ) throws SSLException {
-        return makeClientConnectionPool(serverUri, allowInsecureConnections, numSendingThreads, null);
-    }
-
-    public static ClientConnectionPool makeClientConnectionPool(
+    public static ClientConnectionPool makeNettyPacketConsumerConnectionPool(
         URI serverUri,
         boolean allowInsecureConnections,
         int numSendingThreads,
         String connectionPoolName
-    ) throws SSLException {
+    ) {
         return new ClientConnectionPool(
-            serverUri,
-            loadSslContext(serverUri, allowInsecureConnections),
+            NettyPacketToHttpConsumer.createClientConnectionFactory(
+                loadSslContext(serverUri, allowInsecureConnections), serverUri),
             connectionPoolName != null
                 ? connectionPoolName
                 : getTargetConnectionPoolName(targetConnectionPoolUniqueCounter.getAndIncrement()),
@@ -153,7 +131,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         return TARGET_CONNECTION_POOL_NAME + (i == 0 ? "" : Integer.toString(i));
     }
 
-    public static SslContext loadSslContext(URI serverUri, boolean allowInsecureConnections) throws SSLException {
+    @SneakyThrows
+    public static SslContext loadSslContext(URI serverUri, boolean allowInsecureConnections) {
         if (serverUri.getScheme().equalsIgnoreCase("https")) {
             var sslContextBuilder = SslContextBuilder.forClient();
             if (allowInsecureConnections) {
@@ -172,7 +151,6 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         TimeShifter timeShifter,
         Consumer<SourceTargetCaptureTuple> resultTupleConsumer
     ) throws InterruptedException, ExecutionException {
-
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
             (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout)

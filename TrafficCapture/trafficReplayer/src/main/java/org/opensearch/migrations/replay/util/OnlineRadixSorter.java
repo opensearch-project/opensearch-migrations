@@ -15,7 +15,7 @@ import lombok.extern.slf4j.Slf4j;
 
 /**
  * This provides a simple implementation to sort incoming elements that are ordered by a sequence
- * of unique and contiguous integers.  This implementation uses a PriorityQueue for staging out of order
+ * of unique and contiguous integers.  This implementation uses a SortedMap for staging out of order
  * elements and the memory utilization will be O(total number of items to be sequenced) in the worst case,
  * but O(1) when the items are arriving in order.
  *

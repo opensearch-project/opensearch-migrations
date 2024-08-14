@@ -26,6 +26,7 @@ public abstract class IReplayContexts {
         public static final String TRANSFORMATION = "transformation";
         public static final String SCHEDULED = "scheduled";
         public static final String TARGET_TRANSACTION = "targetTransaction";
+        public static final String REQUEST_CONNECTING = "requestConnecting";
         public static final String REQUEST_SENDING = "requestSending";
         public static final String WAITING_FOR_RESPONSE = "waitingForResponse";
         public static final String RECEIVING_RESPONSE = "receivingResponse";
@@ -301,6 +302,8 @@ public abstract class IReplayContexts {
 
         void onBytesReceived(int size);
 
+        IRequestConnectingContext createHttpConnectingContext();
+
         IRequestSendingContext createHttpSendingContext();
 
         IWaitingForHttpResponseContext createWaitingForResponseContext();
@@ -308,10 +311,22 @@ public abstract class IReplayContexts {
         IReceivingHttpResponseContext createHttpReceivingContext();
     }
 
+    public interface IRequestConnectingContext
+        extends
+        IAccumulationScope,
+        IWithTypedEnclosingScope<ITargetRequestContext> {
+        String ACTIVITY_NAME = ActivityNames.REQUEST_CONNECTING;
+
+        @Override
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
+    }
+
     public interface IRequestSendingContext
         extends
-            IAccumulationScope,
-            IWithTypedEnclosingScope<ITargetRequestContext> {
+        IAccumulationScope,
+        IWithTypedEnclosingScope<ITargetRequestContext> {
         String ACTIVITY_NAME = ActivityNames.REQUEST_SENDING;
 
         @Override

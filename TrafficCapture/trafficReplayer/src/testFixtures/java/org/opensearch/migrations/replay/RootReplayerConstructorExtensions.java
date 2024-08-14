@@ -2,7 +2,6 @@ package org.opensearch.migrations.replay;
 
 import java.net.URI;
 import java.time.Duration;
-import java.util.function.Function;
 
 import javax.net.ssl.SSLException;
 
@@ -67,16 +66,18 @@ public class RootReplayerConstructorExtensions extends TrafficReplayerTopLevel {
         return new ReplayEngineFactory(Duration.ofSeconds(70), flowController, new TimeShifter(10 * 1000));
     }
 
-    public static ClientConnectionPool makeClientConnectionPool(URI serverUri) throws SSLException {
-        return makeClientConnectionPool(serverUri, null);
+    public static ClientConnectionPool makeNettyPacketConsumerConnectionPool(URI serverUri) throws SSLException {
+        return makeNettyPacketConsumerConnectionPool(serverUri, null);
     }
 
-    public static ClientConnectionPool makeClientConnectionPool(URI serverUri, String poolPrefix) throws SSLException {
-        return makeClientConnectionPool(serverUri, true, 0, poolPrefix);
+    public static ClientConnectionPool makeNettyPacketConsumerConnectionPool(URI serverUri, String poolPrefix)
+        throws SSLException
+    {
+        return makeNettyPacketConsumerConnectionPool(serverUri, true, 0, poolPrefix);
     }
 
-    public static ClientConnectionPool makeClientConnectionPool(URI serverUri, int numSendingThreads)
+    public static ClientConnectionPool makeNettyPacketConsumerConnectionPool(URI serverUri, int numSendingThreads)
         throws SSLException {
-        return makeClientConnectionPool(serverUri, true, numSendingThreads, null);
+        return makeNettyPacketConsumerConnectionPool(serverUri, true, numSendingThreads, null);
     }
 }
