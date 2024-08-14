@@ -41,15 +41,20 @@ public class BulkResponseParser {
                 throw new IOException("Expected data to start with an Object");
             }
 
-            while (parser.nextToken() != JsonToken.END_OBJECT) {
-                var fieldName = parser.getCurrentName();
 
-                if ("items".equals(fieldName)) {
-                    scanItems(parser, successfulDocumentIds);
-                } else {
-                    // Skip other fields at the root level
-                    parser.skipChildren();
+            try {
+                while (parser.nextToken() != JsonToken.END_OBJECT) {
+                    var fieldName = parser.getCurrentName();
+
+                    if ("items".equals(fieldName)) {
+                        scanItems(parser, successfulDocumentIds);
+                    } else {
+                        // Skip other fields at the root level
+                        parser.skipChildren();
+                    }
                 }
+            } catch (IOException ioe) {
+                log.warn("Unable to finish parsing the entire bulk response body", ioe);
             }
         }
         return successfulDocumentIds;
@@ -73,7 +78,7 @@ public class BulkResponseParser {
 
                     // Check if the document was successfully created
                     if (docInfo.getResult() != null && docInfo.getId() != null) {
-                        log.warn(
+                        log.debug(
                             "Found successfully item, result '"
                                 + docInfo.getResult()
                                 + "'', id: '"
