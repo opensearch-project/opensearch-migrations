@@ -39,15 +39,15 @@ public class LeaseExpireTrigger implements AutoCloseable {
     public void registerExpiration(String workItemId, Instant killTime) {
         workItemToLeaseMap.put(workItemId, killTime);
         final var killDuration = Duration.between(currentTimeSupplier.instant(), killTime);
-        final Runnable exirationRunnable = () -> {
+        final Runnable expirationRunnable = () -> {
             if (workItemToLeaseMap.containsKey(workItemId)) {
                 onLeaseExpired.accept(workItemId);
             }
         };
         if (killDuration.isNegative()) {
-            exirationRunnable.run();
+            expirationRunnable.run();
         } else {
-            scheduledExecutorService.schedule(exirationRunnable,
+            scheduledExecutorService.schedule(expirationRunnable,
                 killDuration.toMillis(),
                 TimeUnit.MILLISECONDS
             );
