@@ -2,8 +2,7 @@ package com.rfs.common;
 
 import java.util.Collection;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.lucene.document.Document;
 
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
@@ -11,12 +10,15 @@ import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 
+@Slf4j
 @RequiredArgsConstructor
 public class DocumentReindexer {
-    private static final Logger logger = LogManager.getLogger(DocumentReindexer.class);
+    private static final ObjectMapper objectMapper = new ObjectMapper();
     protected final OpenSearchClient client;
     private final int numDocsPerBulkRequest;
     private final int maxConcurrentRequests;
@@ -29,16 +31,16 @@ public class DocumentReindexer {
 
         return documentStream.map(BulkDocSection::new)
             .buffer(numDocsPerBulkRequest) // Collect until you hit the batch size
-            .doOnNext(bulk -> logger.info("{} documents in current bulk request", bulk.size()))
+            .doOnNext(bulk -> log.atInfo().log("{} documents in current bulk request", bulk.size()))
             .flatMap(
                 bulkDocs -> client.sendBulkRequest(indexName, bulkDocs, context.createBulkRequest()) // Send the request
-                    .doOnSuccess(unused -> logger.debug("Batch succeeded"))
-                    .doOnError(error -> logger.error("Batch failed", error))
+                    .doOnSuccess(unused -> log.atDebug().log("Batch succeeded"))
+                    .doOnError(error -> log.atError().log("Batch failed", error))
                     // Prevent the error from stopping the entire stream, retries occurring within sendBulkRequest
                     .onErrorResume(e -> Mono.empty()),
                 maxConcurrentRequests
             )
-            .doOnComplete(() -> logger.debug("All batches processed"))
+            .doOnComplete(() -> log.atDebug().log("All batches processed"))
             .then();
     }
 
@@ -54,10 +56,15 @@ public class DocumentReindexer {
             this.docId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
         }
 
+        @SneakyThrows
         public String asBulkIndex() {
-            String source = doc.getBinaryValue("_source").utf8ToString();
             String action = "{\"index\": {\"_id\": \"" + getDocId() + "\"}}";
-            return action + "\n" + source;
+            // We must ensure the _source document is a "minified" JSON string, otherwise the bulk request will be corrupted.
+            // Specifically, we cannot have any leading or trailing whitespace, and the JSON must be on a single line.
+            String trimmedSource = doc.getBinaryValue("_source").utf8ToString().trim();
+            Object jsonObject = objectMapper.readValue(trimmedSource, Object.class);
+            String minifiedSource = objectMapper.writeValueAsString(jsonObject);
+            return action + "\n" + minifiedSource;
         }
 
         public static String convertToBulkRequestBody(Collection<BulkDocSection> bulkSections) {

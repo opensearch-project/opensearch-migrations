@@ -216,7 +216,8 @@ public class RfsMigrateDocuments {
                 );
 
                 run(
-                    LuceneDocumentsReader::new,
+                    LuceneDocumentsReader.getFactory(ElasticsearchConstants_ES_7_10.SOFT_DELETES_POSSIBLE,
+                        ElasticsearchConstants_ES_7_10.SOFT_DELETES_FIELD),
                     reindexer,
                     workCoordinator,
                     arguments.initialLeaseDuration,

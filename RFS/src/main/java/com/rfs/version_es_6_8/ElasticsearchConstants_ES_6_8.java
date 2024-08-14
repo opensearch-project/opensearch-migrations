@@ -8,6 +8,8 @@ import com.fasterxml.jackson.dataformat.smile.SmileGenerator;
 public class ElasticsearchConstants_ES_6_8 {
     public static final int BUFFER_SIZE_IN_BYTES;
     public static final SmileFactory SMILE_FACTORY;
+    public static final String SOFT_DELETES_FIELD;
+    public static final boolean SOFT_DELETES_POSSIBLE;
 
     static {
         // Taken from a running ES 6.8 process
@@ -22,6 +24,10 @@ public class ElasticsearchConstants_ES_6_8 {
         smileFactory.configure(JsonGenerator.Feature.AUTO_CLOSE_JSON_CONTENT, false);
         smileFactory.configure(JsonParser.Feature.STRICT_DUPLICATE_DETECTION, false);
         SMILE_FACTORY = smileFactory;
+
+        // Soft Deletes were added in 7.0
+        SOFT_DELETES_FIELD = "";
+        SOFT_DELETES_POSSIBLE = false;
     }
 
 }
