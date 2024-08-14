@@ -1,5 +1,6 @@
 package com.rfs.common;
 
+import java.util.Collection;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.function.Predicate;
@@ -9,6 +10,8 @@ import org.apache.lucene.document.Document;
 
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -30,7 +33,7 @@ public class DocumentReindexer {
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
         return documentStream
-            .map(this::convertDocumentToBulkSection)
+            .map(BulkDocSection::new)
             .bufferUntil(new Predicate<>() {
                 private int currentItemCount = 0;
                 private long currentSize = 0;
@@ -58,13 +61,11 @@ public class DocumentReindexer {
                 maxConcurrentWorkItems // Limit prefetch for memory pressure
             )
             .flatMap(
-                bulkSections -> client
-                    .sendBulkRequest(indexName,
-                        this.convertToBulkRequestBody(bulkSections),
-                        context.createBulkRequest()) // Send the request
-                    .doFirst(() -> log.info("{} documents in current bulk request.", bulkSections.size()))
-                    .doOnSuccess(unused -> log.debug("Batch succeeded"))
-                    .doOnError(error -> log.error("Batch failed", error))
+                bulkDocs -> client
+                    .sendBulkRequest(indexName, bulkDocs, context.createBulkRequest()) // Send the request
+                    .doFirst(() -> log.atInfo().log("{} documents in current bulk request.", bulkDocs.size()))
+                    .doOnSuccess(unused -> log.atDebug().log("Batch succeeded"))
+                    .doOnError(error -> log.atError().log("Batch failed", error))
                     // Prevent the error from stopping the entire stream, retries occurring within sendBulkRequest
                     .onErrorResume(e -> Mono.empty()),
             false,
@@ -75,28 +76,37 @@ public class DocumentReindexer {
             .then();
     }
 
-    @SneakyThrows
-    private String convertDocumentToBulkSection(Document document) {
-        String id = Uid.decodeId(document.getBinaryValue("_id").bytes);
+    @EqualsAndHashCode(onlyExplicitlyIncluded = true)
+    public static class BulkDocSection {
+        private Document doc;
+        @EqualsAndHashCode.Include
+        @Getter
+        private String docId;
 
-        String action = "{\"index\": {\"_id\": \"" + id + "\"}}";
-
-        // We must ensure the _source document is a "minified" JSON string, otherwise the bulk request will be corrupted.
-        // Specifically, we cannot have any leading or trailing whitespace, and the JSON must be on a single line.
-        String trimmedSource = document.getBinaryValue("_source").utf8ToString().trim();
-        Object jsonObject = objectMapper.readValue(trimmedSource, Object.class);
-        String minifiedSource = objectMapper.writeValueAsString(jsonObject);
-
-        return action + "\n" + minifiedSource;
-    }
-
-    private String convertToBulkRequestBody(List<String> bulkSections) {
-        StringBuilder builder = new StringBuilder();
-        for (String section : bulkSections) {
-            builder.append(section).append("\n");
+        public BulkDocSection(Document doc) {
+            this.doc = doc;
+            this.docId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
         }
-        log.atDebug().setMessage("Bulk request body: \n{}").addArgument(builder::toString).log();
 
-        return builder.toString();
+        @SneakyThrows
+        public String asBulkIndex() {
+            String action = "{\"index\": {\"_id\": \"" + getDocId() + "\"}}";
+            // We must ensure the _source document is a "minified" JSON string, otherwise the bulk request will be corrupted.
+            // Specifically, we cannot have any leading or trailing whitespace, and the JSON must be on a single line.
+            String trimmedSource = doc.getBinaryValue("_source").utf8ToString().trim();
+            Object jsonObject = objectMapper.readValue(trimmedSource, Object.class);
+            String minifiedSource = objectMapper.writeValueAsString(jsonObject);
+            return action + "\n" + minifiedSource;
+        }
+
+        public static String convertToBulkRequestBody(Collection<BulkDocSection> bulkSections) {
+            StringBuilder builder = new StringBuilder();
+            for (var section : bulkSections) {
+                var indexCommand = section.asBulkIndex();
+                builder.append(indexCommand).append("\n");
+            }
+            return builder.toString();
+        }
+
     }
 }
