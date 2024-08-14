@@ -2,7 +2,6 @@ export * from './common-utilities';
 export * from './fetch-migration-stack';
 export * from './lambda'
 export * from './migration-assistance-stack';
-export * from './msk-utility-stack';
 export * from './network-stack';
 export * from './opensearch-domain-stack';
 export * from './service-stacks';
