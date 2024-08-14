@@ -72,7 +72,9 @@ public class SigV4AuthTransformerFactory implements IAuthTransformerFactory {
 
                 @Override
                 public Optional<String> getFirstHeaderValueCaseInsensitive(String key) {
-                    return Optional.ofNullable(message.headers().getInsensitive(key).get(0));
+                    return Optional.ofNullable(message.headers().getInsensitive(key))
+                        .filter(l -> !l.isEmpty())
+                        .map(l -> l.get(0));
                 }
 
                 @Override
