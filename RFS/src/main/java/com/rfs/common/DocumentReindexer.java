@@ -1,8 +1,6 @@
 package com.rfs.common;
 
 import java.util.Collection;
-import java.nio.charset.StandardCharsets;
-import java.util.List;
 import java.util.function.Predicate;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -39,10 +37,10 @@ public class DocumentReindexer {
                 private long currentSize = 0;
 
                 @Override
-                public boolean test(String next) {
+                public boolean test(BulkDocSection next) {
                     // TODO: Move to Bytebufs to convert from string to bytes only once
                     // Add one for newline between bulk sections
-                    var nextSize = next.getBytes(StandardCharsets.UTF_8).length + 1L;
+                    var nextSize = next.asBulkIndex().length() + 1L;
                     currentSize += nextSize;
                     currentItemCount++;
 
@@ -83,6 +81,8 @@ public class DocumentReindexer {
         @Getter
         private String docId;
 
+        private String asBulkIndexCache;
+
         public BulkDocSection(Document doc) {
             this.doc = doc;
             this.docId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
@@ -90,13 +90,16 @@ public class DocumentReindexer {
 
         @SneakyThrows
         public String asBulkIndex() {
-            String action = "{\"index\": {\"_id\": \"" + getDocId() + "\"}}";
-            // We must ensure the _source document is a "minified" JSON string, otherwise the bulk request will be corrupted.
-            // Specifically, we cannot have any leading or trailing whitespace, and the JSON must be on a single line.
-            String trimmedSource = doc.getBinaryValue("_source").utf8ToString().trim();
-            Object jsonObject = objectMapper.readValue(trimmedSource, Object.class);
-            String minifiedSource = objectMapper.writeValueAsString(jsonObject);
-            return action + "\n" + minifiedSource;
+            if (asBulkIndexCache == null) {
+                String action = "{\"index\": {\"_id\": \"" + getDocId() + "\"}}";
+                // We must ensure the _source document is a "minified" JSON string, otherwise the bulk request will be corrupted.
+                // Specifically, we cannot have any leading or trailing whitespace, and the JSON must be on a single line.
+                String trimmedSource = doc.getBinaryValue("_source").utf8ToString().trim();
+                Object jsonObject = objectMapper.readValue(trimmedSource, Object.class);
+                String minifiedSource = objectMapper.writeValueAsString(jsonObject);
+                asBulkIndexCache = action + "\n" + minifiedSource;
+            }
+            return asBulkIndexCache;
         }
 
         public static String convertToBulkRequestBody(Collection<BulkDocSection> bulkSections) {
