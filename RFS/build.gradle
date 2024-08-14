@@ -3,6 +3,7 @@ plugins {
     id 'java'
     id 'io.freefair.lombok' version '8.6'
     id 'java-test-fixtures'
+    id 'me.champeau.jmh' version '0.7.2'
 }
 
 java.sourceCompatibility = JavaVersion.VERSION_11
@@ -84,6 +85,9 @@ dependencies {
     testFixturesImplementation group: 'org.testcontainers', name: 'testcontainers'
 
     testFixturesImplementation group: 'org.hamcrest', name: 'hamcrest'
+
+    testImplementation 'org.openjdk.jmh:jmh-core:1.36'
+    testImplementation 'org.openjdk.jmh:jmh-generator-annprocess:1.36'
 }
 
 test {
@@ -106,4 +110,11 @@ task slowTest(type: Test) {
     jacoco {
         enabled = true
     }
+}
+
+jmh {
+    includeTests = true
+    fork = 0
+    humanOutputFile = project.file("${project.buildDir}/reports/jmh/human.txt") // human-readable output file
+    resultsFile = project.file("${project.buildDir}/reports/jmh/results.txt") // results file
 }
