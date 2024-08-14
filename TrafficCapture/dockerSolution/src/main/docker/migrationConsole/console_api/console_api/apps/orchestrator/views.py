@@ -1,7 +1,7 @@
 from console_api.apps.orchestrator.serializers import (OpenSearchIngestionCreateRequestSerializer,
-                                                       OpenSearchIngestionUpdateRequestSerializer)
+                                                       OpenSearchIngestionDefaultRequestSerializer)
 from console_link.models.osi_utils import (InvalidAuthParameters, create_pipeline_from_json, start_pipeline,
-                                           stop_pipeline, delete_pipeline, get_assume_role_session)
+                                           stop_pipeline, delete_pipeline, get_status, get_assume_role_session)
 from rest_framework.decorators import api_view, parser_classes
 from rest_framework.parsers import JSONParser
 from rest_framework.response import Response
@@ -52,7 +52,7 @@ def osi_update_workflow(request, osi_action_func: Callable, action_name: str):
     request_data = request.data
     logger.info(pretty_request(request, request_data))
 
-    osi_serializer = OpenSearchIngestionUpdateRequestSerializer(data=request_data)
+    osi_serializer = OpenSearchIngestionDefaultRequestSerializer(data=request_data)
     osi_serializer.is_valid(raise_exception=True)
     pipeline_name = request_data.get('PipelineName')
     try:
@@ -63,7 +63,7 @@ def osi_update_workflow(request, osi_action_func: Callable, action_name: str):
         return Response(str(e), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     response_data = {
-        'Timestamp': datetime.datetime.now(datetime.timezone.utc)
+        'timestamp': datetime.datetime.now(datetime.timezone.utc)
     }
     return Response(response_data, status=status.HTTP_200_OK)
 
@@ -89,7 +89,7 @@ def osi_create_migration(request):
         return Response(str(e), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     response_data = {
-        'Timestamp': datetime.datetime.now(datetime.timezone.utc)
+        'timestamp': datetime.datetime.now(datetime.timezone.utc)
     }
     return Response(response_data, status=status.HTTP_200_OK)
 
@@ -110,3 +110,27 @@ def osi_stop_migration(request):
 @parser_classes([JSONParser])
 def osi_delete_migration(request):
     return osi_update_workflow(request=request, osi_action_func=delete_pipeline, action_name='Delete')
+
+
+@api_view(['POST'])
+@parser_classes([JSONParser])
+def osi_get_status_migration(request):
+    request_data = request.data
+    logger.info(pretty_request(request, request_data))
+    action_name = 'GetStatus'
+
+    osi_serializer = OpenSearchIngestionDefaultRequestSerializer(data=request_data)
+    osi_serializer.is_valid(raise_exception=True)
+    pipeline_name = request_data.get('PipelineName')
+    try:
+        status_dict = get_status(osi_client=determine_osi_client(request_data=request_data, action_name=action_name),
+                                 pipeline_name=pipeline_name)
+    except Exception as e:
+        logger.error(f'Error performing OSI {action_name} Pipeline API: {e}')
+        return Response(str(e), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    response_data = {
+        'timestamp': datetime.datetime.now(datetime.timezone.utc),
+        **status_dict
+    }
+    return Response(response_data, status=status.HTTP_200_OK)

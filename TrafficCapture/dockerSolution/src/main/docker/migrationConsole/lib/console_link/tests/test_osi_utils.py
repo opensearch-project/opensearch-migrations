@@ -11,7 +11,8 @@ from console_link.models.osi_utils import (InvalidAuthParameters,
                                            delete_pipeline,
                                            get_assume_role_session,
                                            start_pipeline,
-                                           stop_pipeline)
+                                           stop_pipeline,
+                                           get_status)
 from console_link.models.cluster import AuthMethod
 from moto import mock_aws
 from tests.utils import create_valid_cluster
@@ -267,6 +268,25 @@ def test_valid_delete_pipeline(osi_client_stubber):
     osi_client_stubber.activate()
 
     delete_pipeline(osi_client=osi_client_stubber.client, pipeline_name=PIPELINE_NAME)
+
+    osi_client_stubber.assert_no_pending_responses()
+
+
+def test_valid_get_status_pipeline(osi_client_stubber):
+    expected_request_body = {'PipelineName': f'{PIPELINE_NAME}'}
+    response_status = 'UPDATING'
+    response_status_reason = {'Description': 'Pipeline is being updated'}
+    service_response_body = {'Pipeline':
+        {
+            'PipelineName': PIPELINE_NAME,
+            'Status': response_status,
+            'StatusReason': response_status_reason
+        }
+    }
+    osi_client_stubber.add_response("get_pipeline", service_response_body, expected_request_body)
+    osi_client_stubber.activate()
+
+    get_status(osi_client=osi_client_stubber.client, pipeline_name=PIPELINE_NAME)
 
     osi_client_stubber.assert_no_pending_responses()
 

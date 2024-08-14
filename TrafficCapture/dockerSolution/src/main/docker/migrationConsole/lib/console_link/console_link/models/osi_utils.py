@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+from cerberus import Validator
 from console_link.models.cluster import AuthMethod, Cluster
 from pathlib import Path
 from typing import List, Dict, Optional
@@ -198,6 +199,20 @@ def construct_pipeline_config(pipeline_config_file_path: str, source_endpoint: s
     pipeline_config = pipeline_config.replace(SOURCE_ENDPOINT_PLACEHOLDER, source_endpoint)
     pipeline_config = pipeline_config.replace(TARGET_ENDPOINT_PLACEHOLDER, target_endpoint)
     return pipeline_config
+
+
+# TODO We will want to reconcile the status from OSI with our internal Backfill status, but these are in flux right now
+def get_status(osi_client, pipeline_name: str):
+    name = pipeline_name if pipeline_name is not None else DEFAULT_PIPELINE_NAME
+    logger.info(f"Getting status of pipeline: {name}")
+    get_pipeline_response = osi_client.get_pipeline(
+        PipelineName=name
+    )
+
+    return {
+        'status': get_pipeline_response['Pipeline']['Status'],
+        'statusMessage': get_pipeline_response['Pipeline']['StatusReason']['Description']
+    }
 
 
 def start_pipeline(osi_client, pipeline_name: str):
