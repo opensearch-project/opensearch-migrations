@@ -5,7 +5,6 @@ import java.nio.file.Path;
 
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -20,7 +19,6 @@ import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
 
 import static org.hamcrest.CoreMatchers.allOf;
-import static org.hamcrest.CoreMatchers.anyOf;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -68,7 +66,7 @@ public class SnapshotStateTest {
         final var testContext = DocumentMigrationTestContext.factory(workCoordinationContext).noOtelTracking();
         final var indexName = "my-index";
         final var document1Id = "doc1";
-        final var document1Body = "{\"fo$o\":\"bar\"}";
+        final var document1Body = "   \n {\n\t\"fo$o\":\"bar\"\n} \n"; // Wacky whitespace added to ensure we can handle it
         operations.createDocument(indexName, document1Id, document1Body);
 
         final var snapshotName = "snapshot-1";
@@ -94,13 +92,12 @@ public class SnapshotStateTest {
         final var bodyCaptor = ArgumentCaptor.forClass(String.class);
         verify(client, times(1)).sendBulkRequest(eq(indexName), bodyCaptor.capture(), any());
         final var bulkRequestRaw = bodyCaptor.getValue();
-        assertThat(bulkRequestRaw, allOf(containsString(document1Id), containsString(document1Body)));
+        assertThat(bulkRequestRaw, allOf(containsString(document1Id), containsString("{\"fo$o\":\"bar\"}")));
 
         verifyNoMoreInteractions(client);
     }
 
     @Test
-    @Disabled("https://opensearch.atlassian.net/browse/MIGRATIONS-1746")
     public void SingleSnapshot_SingleDocument_Then_DeletedDocument() throws Exception {
         // Setup
         final var workCoordinationContext = WorkCoordinationTestContext.factory().noOtelTracking();
@@ -131,15 +128,11 @@ public class SnapshotStateTest {
 
         // Validation
         final var bodyCaptor = ArgumentCaptor.forClass(String.class);
-        verify(client, times(1)).sendBulkRequest(eq(indexName), bodyCaptor.capture(), any());
-        final var bulkRequestRaw = bodyCaptor.getValue();
-        assertThat(bulkRequestRaw, not(anyOf(containsString(document1Id), containsString(document1Body))));
-
+        verify(client, times(0)).sendBulkRequest(eq(indexName), bodyCaptor.capture(), any());
         verifyNoMoreInteractions(client);
     }
 
     @Test
-    @Disabled("https://opensearch.atlassian.net/browse/MIGRATIONS-1747")
     public void SingleSnapshot_SingleDocument_Then_UpdateDocument() throws Exception {
         // Setup
         final var workCoordinationContext = WorkCoordinationTestContext.factory().noOtelTracking();
