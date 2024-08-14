@@ -224,6 +224,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
             targetAddress,
             "--index-allowlist",
             "geonames",
+            "--documents-per-bulk-request",
+            "10",
             "--initial-lease-duration",
             failHow == FailHow.NEVER ? "PT10M" : "PT1S" };
 
