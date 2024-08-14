@@ -23,7 +23,7 @@ class BulkResponseParserTest {
         var failedIds = List.of("76", "65", "88");
 
         var allEntries = Streams.concat(
-            successfulIds.stream().map(id -> itemEntry(id, "index", "created")),
+            successfulIds.stream().map(id -> itemEntry(id)),
             failedIds.stream().map(id -> itemEntryFailure(id))
         ).collect(Collectors.toList());
 
@@ -39,7 +39,7 @@ class BulkResponseParserTest {
         var successDocId = "223";
         var bulkResponse = BulkRequestGenerator.bulkItemResponse(true, List.of(
             itemEntryFailure("failed"),
-            itemEntry(successDocId, "index", "created")
+            itemEntry(successDocId)
         ));
 
         var boundaryWhenParsable = 1017; // Found by running the test 

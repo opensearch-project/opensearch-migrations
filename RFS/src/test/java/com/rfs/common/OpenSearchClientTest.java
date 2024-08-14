@@ -131,9 +131,9 @@ class OpenSearchClientTest {
         );
         var oneFailure = bulkItemResponse(
             true,
-            List.of(itemEntry(docId1, "index", "created"), itemEntryFailure(docId2))
+            List.of(itemEntry(docId1), itemEntryFailure(docId2))
         );
-        var finalDocSuccess = bulkItemResponse(false, List.of(itemEntry(docId2, "index", "created")));
+        var finalDocSuccess = bulkItemResponse(false, List.of(itemEntry(docId2)));
         var server500 = new HttpResponse(500, "", null, "{\"error\":\"Cannot Process Error!\"}");
 
         var restClient = mock(RestClient.class);

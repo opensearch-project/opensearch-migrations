@@ -321,7 +321,7 @@ public class OpenSearchClient {
                     error
                 );
             } else {
-                log.atWarn()
+                log.atError()
                     .setMessage("Unexpected empty document map for bulk request on index {}")
                     .addArgument(indexName)
                     .setCause(error)
