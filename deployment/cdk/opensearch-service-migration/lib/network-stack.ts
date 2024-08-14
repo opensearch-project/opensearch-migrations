@@ -22,6 +22,7 @@ export interface NetworkStackProps extends StackPropsExt {
     readonly targetClusterProxyServiceEnabled?: boolean;
     readonly captureProxyESServiceEnabled?: boolean;
     readonly migrationAPIEnabled?: boolean;
+    readonly sourceClusterDisabled?: boolean;
     readonly sourceClusterEndpoint?: string;
     readonly targetClusterEndpoint?: string;
     readonly targetClusterUsername?: string;
@@ -229,8 +230,11 @@ export class NetworkStack extends Stack {
         }
 
         // Create Source SSM Parameter
-        if (props.sourceClusterEndpoint) {
-            createMigrationStringParameter(this, props.sourceClusterEndpoint, {
+        if (props.sourceClusterEndpoint || props.sourceClusterDisabled) {
+            // The migration console stack depends on this parameter, even if the source cluster is disabled, so
+            // it's essential to create it, even if the value is effectively* empty in the sourceClusterDisabled case.
+            // * SSM does a validity check for length > 1 on parameters, so it can't be an actual empty string.
+            createMigrationStringParameter(this, props.sourceClusterEndpoint ?? "source cluster disabled", {
                 ...props,
                 parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
             });

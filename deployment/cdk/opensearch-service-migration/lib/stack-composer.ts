@@ -210,6 +210,7 @@ export class StackComposer {
         const targetClusterEndpoint = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
         const fetchMigrationEnabled = this.getContextForType('fetchMigrationEnabled', 'boolean', defaultValues, contextJSON)
         const dpPipelineTemplatePath = this.getContextForType('dpPipelineTemplatePath', 'string', defaultValues, contextJSON)
+        const sourceClusterDisabled = this.getContextForType('sourceClusterDisabled', 'boolean', defaultValues, contextJSON)
         const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
         const osContainerServiceEnabled = this.getContextForType('osContainerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
@@ -263,6 +264,10 @@ export class StackComposer {
             trafficReplayerCustomUserAgent = trafficReplayerUserAgentSuffix ? trafficReplayerUserAgentSuffix : props.customReplayerUserAgent
         }
 
+        if (sourceClusterDisabled && (sourceClusterEndpoint || captureProxyESServiceEnabled || elasticsearchServiceEnabled || captureProxyServiceEnabled)) {
+            throw new Error("sourceClusterDisabled is mutually exclusive with [sourceClusterEndpoint, captureProxyESServiceEnabled, elasticsearchServiceEnabled, captureProxyServiceEnabled]");
+        }
+
         const deployId = addOnMigrationDeployId ? addOnMigrationDeployId : defaultDeployId
 
         // If enabled re-use existing VPC and/or associated resources or create new
@@ -283,7 +288,8 @@ export class StackComposer {
                 captureProxyServiceEnabled,
                 targetClusterProxyServiceEnabled,
                 migrationAPIEnabled,
-                sourceClusterEndpoint: sourceClusterEndpoint,
+                sourceClusterDisabled,
+                sourceClusterEndpoint,
                 targetClusterUsername: fineGrainedManagerUserName,
                 targetClusterPasswordSecretArn: fineGrainedManagerUserSecretManagerKeyARN,
                 env: props.env
@@ -579,6 +585,7 @@ export class StackComposer {
                 targetGroups: [networkStack.albMigrationConsoleTG],
                 servicesYaml: servicesYaml,
                 migrationAPIAllowedHosts: migrationAPIAllowedHosts,
+                sourceClusterDisabled,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,
