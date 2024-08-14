@@ -2,6 +2,7 @@ package com.rfs.common;
 
 import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.function.Predicate;
 
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
@@ -18,8 +19,8 @@ import reactor.core.scheduler.Schedulers;
 public class DocumentReindexer {
     private static final Logger logger = LogManager.getLogger(DocumentReindexer.class);
     protected final OpenSearchClient client;
-    private final int numDocsPerBulkRequest;
-    private final long numBytesPerBulkRequest;
+    private final int maxDocsPerBulkRequest;
+    private final long maxBytesPerBulkRequest;
     private final int maxConcurrentWorkItems;
 
     public Mono<Void> reindex(
@@ -33,8 +34,29 @@ public class DocumentReindexer {
             .subscribeOn(documentStreamRunner) // Use dedicated single threaded lucene scheduler
             .publishOn(documentIngestRunner) // Use parallel scheduler for everything else
             .map(this::convertDocumentToBulkSection)
-            .bufferUntil(statefulSizeSegmentingPredicate(numDocsPerBulkRequest, numBytesPerBulkRequest), true)
-            .parallel(
+            .bufferUntil(new Predicate<String>() {
+                private int currentItemCount = 0;
+                private long currentSize = 0;
+
+                @Override
+                public boolean test(String next) {
+                    // TODO: Move to Bytebufs to convert from string to bytes only once
+                    // Add one for newline between bulk sections
+                    var nextSize = next.getBytes(StandardCharsets.UTF_8).length + 1L;
+                    currentSize += nextSize;
+                    currentItemCount++;
+
+                    if (currentItemCount > maxDocsPerBulkRequest || currentSize > maxBytesPerBulkRequest) {
+                        // Reset and return true to signal to stop buffering.
+                        // Current item is included in the current buffer
+                        currentItemCount = 1;
+                        currentSize = nextSize;
+                        return true;
+                    }
+                    return false;
+                }
+            }, true)
+             .parallel(
                 maxConcurrentWorkItems, // Number of parallel workers, tested in reindex_shouldRespectMaxConcurrentRequests
                 maxConcurrentWorkItems // Limit prefetch for memory pressure
             )
@@ -75,30 +97,5 @@ public class DocumentReindexer {
             builder.append(section).append("\n");
         }
         return builder.toString();
-    }
-
-    private static java.util.function.Predicate<String> statefulSizeSegmentingPredicate(int maxItems, long maxSizeInBytes) {
-        return new java.util.function.Predicate<>() {
-            private int currentItemCount = 0;
-            private long currentSize = 0;
-
-            @Override
-            public boolean test(String next) {
-                // TODO: Move to Bytebufs to convert from string to bytes only once
-                // Add one for newline between bulk sections
-                var nextSize = next.getBytes(StandardCharsets.UTF_8).length + 1L;
-                currentSize += nextSize;
-                currentItemCount++;
-
-                if (currentItemCount > maxItems || currentSize > maxSizeInBytes) {
-                    // Reset and return true to signal to stop buffering.
-                    // Current item is included in the current buffer
-                    currentItemCount = 1;
-                    currentSize = nextSize;
-                    return true;
-                }
-                return false;
-            }
-        };
     }
 }

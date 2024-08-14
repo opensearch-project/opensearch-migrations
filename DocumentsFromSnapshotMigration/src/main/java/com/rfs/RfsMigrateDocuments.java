@@ -48,7 +48,6 @@ import com.rfs.worker.DocumentsRunner;
 import com.rfs.worker.ShardWorkPreparer;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
-import reactor.core.scheduler.Schedulers;
 
 @Slf4j
 public class RfsMigrateDocuments {

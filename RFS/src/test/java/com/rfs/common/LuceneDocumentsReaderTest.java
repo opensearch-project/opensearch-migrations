@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.Comparator;
 
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.Field;
@@ -13,7 +14,7 @@ import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.Test;
 
-import lombok.extern.log4j.Log4j2;
+import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
@@ -68,7 +69,7 @@ class TestLuceneDocumentsReader extends LuceneDocumentsReader {
     }
 }
 
-@Log4j2
+@Slf4j
 public class LuceneDocumentsReaderTest {
     @Test
     void ReadDocuments_AsExpected() {
@@ -101,7 +102,8 @@ public class LuceneDocumentsReaderTest {
             .map(item -> {
                 log.info("Got item: {}", item);
                 return item;
-            });
+            })
+            .ordered(Comparator.comparing(a -> a.getBinaryValue("_id")));
 
         // Verify that the results are as expected
         StepVerifier.create(documents).expectNextMatches(doc -> {
