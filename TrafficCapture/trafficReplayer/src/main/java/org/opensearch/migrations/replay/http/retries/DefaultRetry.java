@@ -15,9 +15,6 @@ public class DefaultRetry implements RequestRetryEvaluator {
     static final int MAX_RETRIES = 4;
 
     public static boolean doNotRetryRequestFromResultAlone(int statusCode) {
-        if (statusCode >= 300 && statusCode < 400) {
-            return true;
-        }
         switch (statusCode) {
             case 200:
             case 201:
@@ -25,7 +22,7 @@ public class DefaultRetry implements RequestRetryEvaluator {
             case 403:
                 return true;
             default:
-                return false;
+                return statusCode >= 300 && statusCode < 400;
         }
     }
 
@@ -48,7 +45,9 @@ public class DefaultRetry implements RequestRetryEvaluator {
           List<AggregatedRawResponse> previousResponses,
           AggregatedRawResponse currentResponse,
           TrackedFuture<String, ? extends IRequestResponsePacketPair> reconstructedSourceTransactionFuture) {
-        if (doNotRetryRequestFromResultAlone(currentResponse.getRawResponse().status().code())) {
+        if (Optional.ofNullable(currentResponse.getRawResponse())
+            .map(r->doNotRetryRequestFromResultAlone(r.status().code()))
+            .orElse(false)) { // if the response wasn't available, fall through and try again
             return makeDeterminationFuture(RequestSenderOrchestrator.RetryDirective.DONE,
                 "returning DONE because response code was terminal");
         }

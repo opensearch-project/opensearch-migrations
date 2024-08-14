@@ -402,7 +402,9 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                             + System.identityHashCode(packetData)
                     )
                     .log();
-                channel.close();
+                if (channel != null) {
+                    channel.close();
+                }
                 return TrackedFuture.Factory.failedFuture(channelException, () -> "exception");
             }
         }, () -> "consumeBytes - after channel is fully initialized (potentially waiting on TLS handshake)");

@@ -99,7 +99,7 @@ public class RequestTransformerAndSender<T> {
                     transformedRequest.transformedOutput.size(),
                     transformedRequest.transformedOutput,
                     getRetryCheckVisitor(transformedRequest, finishedAccumulatingResponseFuture,
-                        arr-> perResponseConsumer(arr, transformedRequest.transformationStatus, ctx))
+                        arr -> perResponseConsumer(arr, transformedRequest.transformationStatus, ctx))
                 ),
                 () -> "transitioning transformed packets onto the wire"
             );

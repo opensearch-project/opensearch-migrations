@@ -118,6 +118,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             var allWorkFinishedForTransactionFuture =
                 sendRequestAfterGoingThroughWorkQueue(ctx, request, requestKey, finishedAccumulatingResponseFuture)
                     .getDeferredFutureThroughHandle(
+                        // TODO - what if finishedAccumulatingResponseFuture completed exceptionally?
                         (arr, httpRequestException) -> finishedAccumulatingResponseFuture.thenCompose(
                             rrPair -> TextTrackedFuture.completedFuture(
                                 handleCompletedTransaction(ctx, rrPair, arr, httpRequestException),
@@ -318,7 +319,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
     protected void perResponseConsumer(AggregatedRawResponse summary,
                                        HttpRequestTransformationStatus transformationStatus,
                                        IReplayContexts.IReplayerHttpTransactionContext context) {
-        if (summary.getError() != null) {
+        if (summary != null && summary.getError() != null) {
             log.atInfo()
                 .setCause(summary.getError())
                 .setMessage("Exception for {}: ")
@@ -332,6 +333,11 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 .addArgument(context)
                 .log();
             exceptionRequestCount.incrementAndGet();
+        } else if (summary == null) {
+            log.atInfo()
+                .setMessage("Not counting this response.  No result at all for {}: ")
+                .addArgument(context)
+                .log();
         } else {
             successfulRequestCount.incrementAndGet();
         }

@@ -23,6 +23,7 @@ import org.opensearch.migrations.replay.util.TrackedFuture;
 
 import java.io.IOException;
 import java.util.List;
+import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
 
@@ -43,6 +44,9 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
             feeder = (ByteBufferFeeder) parser.getNonBlockingInputFeeder();
         }
 
+        /**
+         * @return true iff the "errors" field was present at the root and its value was false.  false otherwise.
+         */
         boolean hadNoErrors() {
             return errorField != null && !errorField;
         }
@@ -50,7 +54,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         @Override
         public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
             if (msg instanceof HttpContent && errorField == null) {
-                log.atInfo().setMessage(() -> "body contents: " + ((HttpContent) msg).content().duplicate().toString()).log();
+                log.atDebug().setMessage(() -> "body contents: " + ((HttpContent) msg).content().duplicate().toString()).log();
                 feeder.feedInput(((HttpContent) msg).content().nioBuffer());
                 consumeInput();
                 if (msg instanceof LastHttpContent) {
@@ -97,27 +101,30 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
 
     @Override
     public TrackedFuture<String, RequestSenderOrchestrator.RetryDirective>
-    apply(ByteBuf targetRequestBytes,
-          List<AggregatedRawResponse> previousResponses,
-          AggregatedRawResponse currentResponse,
-          TrackedFuture<String, ? extends IRequestResponsePacketPair> reconstructedSourceTransactionFuture) {
+    apply(@NonNull ByteBuf targetRequestBytes,
+          @NonNull List<AggregatedRawResponse> previousResponses,
+          @NonNull AggregatedRawResponse currentResponse,
+          @NonNull TrackedFuture<String, ? extends IRequestResponsePacketPair> reconstructedSourceTransactionFuture) {
 
         var targetRequestByteBuf = Unpooled.wrappedBuffer(targetRequestBytes);
-        var uriPath = HttpByteBufFormatter.parseHttpRequestFromBufs(Stream.of(targetRequestByteBuf), 0).uri();
-        if (bulkPathMatcher.matcher(uriPath).matches() &&
-            currentResponse.getRawResponse().status().code() == 200) // check more granularly
-        {
-            if (bulkResponseHadNoErrors(currentResponse.getResponseAsByteBuf())) {
-                return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.DONE,
-                    () -> "no errors found in the target response, so not retrying");
-            } else {
-                return reconstructedSourceTransactionFuture.thenCompose(rrp ->
-                    TextTrackedFuture.completedFuture(
-                        bulkResponseHadNoErrors(rrp.getResponseData().asByteBuf()) ?
-                            RequestSenderOrchestrator.RetryDirective.RETRY :
-                            RequestSenderOrchestrator.RetryDirective.DONE,
-                        () -> "evaluating retry status dependent upon source error field"),
-                    () -> "checking the accumulated source response value");
+        var parsedRequest = HttpByteBufFormatter.parseHttpRequestFromBufs(Stream.of(targetRequestByteBuf), 0);
+        if (parsedRequest != null &&
+            bulkPathMatcher.matcher(parsedRequest.uri()).matches()) {
+            // do a more granular check.  If the raw response wasn't present, then just push it to the superclass
+            // since it isn't going to be any kind of response, let alone a bulk one
+            if (Optional.ofNullable(currentResponse.getRawResponse()).map(r->r.status().code() == 200).orElse(false)) {
+                if (bulkResponseHadNoErrors(currentResponse.getResponseAsByteBuf())) {
+                    return TextTrackedFuture.completedFuture(RequestSenderOrchestrator.RetryDirective.DONE,
+                        () -> "no errors found in the target response, so not retrying");
+                } else {
+                    return reconstructedSourceTransactionFuture.thenCompose(rrp ->
+                            TextTrackedFuture.completedFuture(
+                                bulkResponseHadNoErrors(rrp.getResponseData().asByteBuf()) ?
+                                    RequestSenderOrchestrator.RetryDirective.RETRY :
+                                    RequestSenderOrchestrator.RetryDirective.DONE,
+                                () -> "evaluating retry status dependent upon source error field"),
+                        () -> "checking the accumulated source response value");
+                }
             }
         }
         return super.apply(targetRequestBytes, previousResponses, currentResponse, reconstructedSourceTransactionFuture);

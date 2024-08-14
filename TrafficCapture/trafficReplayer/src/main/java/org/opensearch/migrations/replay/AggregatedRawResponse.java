@@ -57,9 +57,10 @@ public class AggregatedRawResponse {
     }
 
     public ByteBuf getResponseAsByteBuf() {
-        return ByteBufList.asCompositeByteBufRetained(responsePackets.stream()
-            .map(Map.Entry::getValue).map(Unpooled::wrappedBuffer))
-            .asReadOnly();
+        return responsePackets == null ? Unpooled.EMPTY_BUFFER :
+            ByteBufList.asCompositeByteBufRetained(responsePackets.stream()
+                    .map(Map.Entry::getValue).map(Unpooled::wrappedBuffer))
+                .asReadOnly();
     }
 
     public static class Builder {

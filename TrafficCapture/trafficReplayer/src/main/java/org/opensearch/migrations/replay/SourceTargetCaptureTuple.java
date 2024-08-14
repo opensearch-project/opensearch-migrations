@@ -64,9 +64,12 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
     ) {
         this.context = tupleHandlingContext;
         this.sourcePair = sourcePair;
-        this.targetRequestData = transformedTargetRequestAndResponseList.requestPackets;
-        this.transformationStatus = transformedTargetRequestAndResponseList.getTransformationStatus();
-        this.responseList = transformedTargetRequestAndResponseList.responses().stream()
+        this.targetRequestData = transformedTargetRequestAndResponseList == null ? null :
+            transformedTargetRequestAndResponseList.requestPackets;
+        this.transformationStatus = transformedTargetRequestAndResponseList == null ? null :
+            transformedTargetRequestAndResponseList.getTransformationStatus();
+        this.responseList = transformedTargetRequestAndResponseList == null ? List.of() :
+            transformedTargetRequestAndResponseList.responses().stream()
             .map(arr -> new Response(arr.responsePackets.stream().map(AbstractMap.SimpleEntry::getValue)
                 .collect(Collectors.toList()), arr.error, arr.responseDuration))
             .collect(Collectors.toList());
