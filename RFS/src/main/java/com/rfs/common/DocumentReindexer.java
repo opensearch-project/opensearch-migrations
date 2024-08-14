@@ -13,7 +13,6 @@ import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import lombok.RequiredArgsConstructor;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Schedulers;
 
 @RequiredArgsConstructor
 public class DocumentReindexer {
