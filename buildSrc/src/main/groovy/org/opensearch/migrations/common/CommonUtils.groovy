@@ -65,7 +65,8 @@ class CommonUtils {
             }
 
             copyFile("jars", "/jars")
-            def jvmParams = "-XX:MaxRAMPercentage=80.0 -XX:+ExitOnOutOfMemoryError"
+            // Leave memory headroom for native execution which allocates memory outside jvm
+            def jvmParams = "-XX:+UseContainerSupport -XX:MaxRAMPercentage=60.0 -XX:+ExitOnOutOfMemoryError"
             // can't set the environment variable from the runtimeClasspath because the Dockerfile is
             // constructed in the configuration phase and the classpath won't be realized until the
             // execution phase.  Therefore, we need to have docker run the command to resolve the classpath
