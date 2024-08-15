@@ -116,7 +116,7 @@ class Cluster:
         This will fail if AWS credentials are not available.
         """
         assert self.auth_type == AuthMethod.SIGV4
-        if force_region:
+        if force_region and 'region' not in self.auth_details:
             session = boto3.session.Session()
             return self.auth_details.get("service", "es"), self.auth_details.get("region", session.region_name)
         return self.auth_details.get("service", "es"), self.auth_details.get("region", None)
