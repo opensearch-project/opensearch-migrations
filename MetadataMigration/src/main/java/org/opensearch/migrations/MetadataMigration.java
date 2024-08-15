@@ -16,8 +16,14 @@ import lombok.extern.slf4j.Slf4j;
 public class MetadataMigration {
 
     public static void main(String[] args) throws Exception {
-        MetadataArgs arguments = new MetadataArgs();
-        JCommander.newBuilder().addObject(arguments).build().parse(args);
+        var arguments = new MetadataArgs();
+        var jCommander = JCommander.newBuilder().addObject(arguments).build();
+        jCommander.parse(args);
+
+        if (arguments.help) {
+            jCommander.usage();
+            return;
+        }
 
         var context = new RootMetadataMigrationContext(
             RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "metadata"),

@@ -26,13 +26,19 @@ import software.amazon.awssdk.http.SdkHttpMethod;
 import software.amazon.awssdk.regions.Region;
 import software.amazon.awssdk.utils.BinaryUtils;
 
+/*
+ * TODO: Figure out how to implement this with AwsV4HttpSigner given
+ *  BaseAws4Signer/Aws4Signer is deprecated while keeping the streaming, non-buffering
+ *  payload signing behavior.
+ *  Also, think about signing all headers in the request
+ */
 @Slf4j
 public class SigV4Signer {
     private static final HashSet<String> AUTH_HEADERS_TO_PULL_WITH_PAYLOAD;
     private static final HashSet<String> AUTH_HEADERS_TO_PULL_NO_PAYLOAD;
 
     public static final String AMZ_CONTENT_SHA_256 = "x-amz-content-sha256";
-    public static final String CONTENT_TYPE = "content-type";
+    public static final String CONTENT_TYPE = "Content-Type";
 
     static {
         AUTH_HEADERS_TO_PULL_NO_PAYLOAD = new HashSet<>(Set.of("authorization", "x-amz-date", "x-amz-security-token"));
@@ -99,15 +105,17 @@ public class SigV4Signer {
     private Stream<Map.Entry<String, List<String>>> getSignatureHeadersViaSdk(IHttpMessage msg) {
         var signer = new AwsSignerWithPrecomputedContentHash();
         var httpRequestBuilder = SdkHttpFullRequest.builder();
+
         httpRequestBuilder.method(SdkHttpMethod.fromValue(msg.method()))
             .uri(URI.create(msg.path()))
             .protocol(protocol)
-            .host(msg.getFirstHeader("host"));
+            .host(msg.getFirstHeaderValueCaseInsensitive("Host").orElseThrow(
+                () -> new IllegalArgumentException("Host header is missing")
+            ));
 
-        var contentType = msg.getFirstHeader(CONTENT_TYPE);
-        if (contentType != null) {
-            httpRequestBuilder.appendHeader("Content-Type", contentType);
-        }
+        msg.getFirstHeaderValueCaseInsensitive(CONTENT_TYPE)
+            .ifPresent(contentType -> httpRequestBuilder.appendHeader(CONTENT_TYPE, contentType));
+
         if (messageDigest != null) {
             byte[] bytesToEncode = messageDigest.digest();
             String payloadHash = BinaryUtils.toHex(bytesToEncode);

@@ -9,7 +9,7 @@ import com.rfs.tracing.RootWorkCoordinationContext;
 import lombok.Getter;
 
 public class RootDocumentMigrationContext extends BaseRootRfsContext implements IRootDocumentMigrationContext {
-    public static final String SCOPE_NAME = "snapshotDocumentReindex";
+    public static final String SCOPE_NAME = "documentMigration";
 
     @Getter
     private final RootWorkCoordinationContext workCoordinationContext;
@@ -22,7 +22,7 @@ public class RootDocumentMigrationContext extends BaseRootRfsContext implements 
         IContextTracker contextTracker,
         RootWorkCoordinationContext workCoordinationContext
     ) {
-        super(sdk, contextTracker);
+        super(SCOPE_NAME, sdk, contextTracker);
         var meter = this.getMeterProvider().get(SCOPE_NAME);
         this.workCoordinationContext = workCoordinationContext;
         documentReindexInstruments = DocumentMigrationContexts.DocumentReindexContext.makeMetrics(meter);

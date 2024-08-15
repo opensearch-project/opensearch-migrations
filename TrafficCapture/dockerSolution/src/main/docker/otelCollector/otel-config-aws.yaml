@@ -11,7 +11,7 @@ extensions:
   health_check:
 exporters:
   awsemf:
-    namespace: 'TrafficCaptureReplay'
+    namespace: 'OpenSearchMigrations'
   awsxray:
     index_all_attributes: true
 service:

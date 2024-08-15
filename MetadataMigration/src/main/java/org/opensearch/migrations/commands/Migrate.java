@@ -9,7 +9,6 @@ import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 
 import com.beust.jcommander.ParameterException;
 import com.rfs.common.ClusterVersion;
-import com.rfs.common.ConnectionDetails;
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Repo;
@@ -69,11 +68,9 @@ public class Migrate {
         final List<String> componentTemplateAllowlist = arguments.componentTemplateAllowlist;
         final int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
 
-        final ConnectionDetails targetConnection = new ConnectionDetails(arguments.targetArgs);
-
         try {
             log.info("Running RfsWorker");
-            OpenSearchClient targetClient = new OpenSearchClient(targetConnection);
+            final OpenSearchClient targetClient = new OpenSearchClient(arguments.targetArgs.toConnectionContext());
 
             final SourceRepo sourceRepo = fileSystemRepoPath != null
                 ? new FileSystemRepo(fileSystemRepoPath)
@@ -106,7 +103,7 @@ public class Migrate {
                 context.createIndexContext()
             ).migrateIndices();
             log.info("Index copy complete.");
-        } catch (Exception e) {
+        } catch (Throwable e) {
             log.atError().setMessage("Unexpected failure").setCause(e).log();
             return new MigrateResult(UNEXPECTED_FAILURE_CODE);
         }

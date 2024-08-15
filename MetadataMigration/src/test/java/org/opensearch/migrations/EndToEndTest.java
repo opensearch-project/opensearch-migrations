@@ -12,9 +12,10 @@ import org.junit.jupiter.api.io.TempDir;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
-import com.rfs.common.ConnectionDetails.TargetArgs;
 import com.rfs.common.FileSystemSnapshotCreator;
 import com.rfs.common.OpenSearchClient;
+import com.rfs.common.http.ConnectionContext.TargetArgs;
+import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.http.ClusterOperations;
 import com.rfs.worker.SnapshotRunner;
@@ -68,7 +69,11 @@ class EndToEndTest {
         // ACTION: Take a snapshot
         var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
         var snapshotName = "my_snap";
-        var sourceClient = new OpenSearchClient(sourceCluster.getUrl(), null, null, true);
+        var sourceClient = new OpenSearchClient(ConnectionContextTestParams.builder()
+            .host(sourceCluster.getUrl())
+            .insecure(true)
+            .build()
+            .toConnectionContext());
         var snapshotCreator = new FileSystemSnapshotCreator(
             snapshotName,
             sourceClient,

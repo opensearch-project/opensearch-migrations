@@ -4,9 +4,12 @@ import java.util.List;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
-import com.rfs.common.ConnectionDetails;
+import com.rfs.common.http.ConnectionContext;
 
 public class MetadataArgs {
+    @Parameter(names = {"--help", "-h"}, help = true, description = "Displays information about how to use this tool")
+    public boolean help;
+
     @Parameter(names = { "--snapshot-name" }, description = "The name of the snapshot to migrate", required = true)
     public String snapshotName;
 
@@ -27,7 +30,7 @@ public class MetadataArgs {
     public String s3Region;
 
     @ParametersDelegate
-    public ConnectionDetails.TargetArgs targetArgs = new ConnectionDetails.TargetArgs();
+    public ConnectionContext.TargetArgs targetArgs = new ConnectionContext.TargetArgs();
 
     @Parameter(names = { "--index-allowlist" }, description = ("Optional.  List of index names to migrate"
         + " (e.g. 'logs_2024_01, logs_2024_02').  Default: all non-system indices (e.g. those not starting with '.')"), required = false)

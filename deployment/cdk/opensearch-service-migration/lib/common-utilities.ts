@@ -5,6 +5,88 @@ import {RemovalPolicy} from "aws-cdk-lib";
 import { IApplicationLoadBalancer } from "aws-cdk-lib/aws-elasticloadbalancingv2";
 import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
+import * as forge from 'node-forge';
+import * as yargs from 'yargs';
+
+
+// parseAndMergeArgs, see @common-utilities.test.ts for an example of different cases
+export function parseAndMergeArgs(baseCommand: string, extraArgs?: string): string {
+    if (!extraArgs) {
+        return baseCommand;
+    }
+
+    // Extract command prefix
+    const commandPrefix = baseCommand.substring(0, baseCommand.indexOf('--')).trim();
+    const baseArgs = baseCommand.substring(baseCommand.indexOf('--'));
+
+    // Parse base command
+    const baseYargsConfig = {
+        parserConfiguration: {
+            'camel-case-expansion': false,
+            'boolean-negation': false,
+        }
+    };
+
+    const baseArgv = yargs(baseArgs)
+        .parserConfiguration(baseYargsConfig.parserConfiguration)
+        .parse();
+
+    // Parse extra args if provided
+    const extraYargsConfig = {
+        parserConfiguration: {
+            'camel-case-expansion': false,
+            'boolean-negation': true,
+        }
+    };
+
+    const extraArgv = extraArgs
+        ? yargs(extraArgs.split(' '))
+            .parserConfiguration(extraYargsConfig.parserConfiguration)
+            .parse()
+        : {};
+
+    // Merge arguments
+    const mergedArgv: { [key: string]: unknown } = { ...baseArgv };
+    for (const [key, value] of Object.entries(extraArgv)) {
+        if (key !== '_' && key !== '$0') {
+            if (!value &&
+                typeof value === 'boolean' &&
+                (
+                    typeof (baseArgv as any)[key] === 'boolean' ||
+                    (typeof (baseArgv as any)[`no-${key}`] != 'boolean' && typeof (baseArgv as any)[`no-${key}`])
+                )
+            ) {
+                delete mergedArgv[key];
+            } else {
+                mergedArgv[key] = value;
+            }
+        }
+    }
+
+    // Reconstruct command
+    const mergedArgs = Object.entries(mergedArgv)
+        .filter(([key]) => key !== '_' && key !== '$0')
+        .map(([key, value]) => {
+            if (typeof value === 'boolean') {
+                return value ? `--${key}` : `--no-${key}`;
+            }
+            return `--${key} ${value}`;
+        })
+        .join(' ');
+
+    let fullCommand = `${commandPrefix} ${mergedArgs}`.trim()
+    return fullCommand;
+}
+
+export function getTargetPasswordAccessPolicy(targetPasswordSecretArn: string): PolicyStatement {
+    return new PolicyStatement({
+        effect: Effect.ALLOW,
+        resources: [targetPasswordSecretArn],
+        actions: [
+            "secretsmanager:GetSecretValue"
+        ]
+    })
+}
 
 export function createOpenSearchIAMAccessPolicy(partition: string, region: string, accountId: string): PolicyStatement {
     return new PolicyStatement({
@@ -167,6 +249,11 @@ export function isNewALBListenerConfig(config: ALBConfig): config is NewALBListe
     return parsed.alb !== undefined && parsed.albListenerCert !== undefined;
 }
 
+export function hashStringSHA256(message: string): string {
+    const md = forge.md.sha256.create();
+    md.update(message);
+    return md.digest().toHex();
+}
 
 export interface MigrationSSMConfig {
     parameter: MigrationSSMParameter,

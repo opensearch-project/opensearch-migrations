@@ -24,6 +24,8 @@ export interface NetworkStackProps extends StackPropsExt {
     readonly migrationAPIEnabled?: boolean;
     readonly sourceClusterEndpoint?: string;
     readonly targetClusterEndpoint?: string;
+    readonly targetClusterUsername?: string;
+    readonly targetClusterPasswordSecretArn?: string;
     readonly albAcmCertArn?: string;
     readonly env?: { [key: string]: any };
 }
@@ -257,6 +259,17 @@ export class NetworkStack extends Stack {
                     defaultDeployId: deployId,
                     parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT
                 });
+                // This is a somewhat surprsing place for this non-network related set of parameters, but it pairs well with
+                // the OS_CLUSTER_ENDPOINT parameter and is helpful to ensure it happens. This probably isn't a long-term place
+                // for it, but is helpful for the time being.
+                if (props.targetClusterUsername && props.targetClusterPasswordSecretArn) {
+                    createMigrationStringParameter(this,
+                        `${props.targetClusterUsername} ${props.targetClusterPasswordSecretArn}`, {
+                        parameter: MigrationSSMParameter.OS_USER_AND_SECRET_ARN,
+                        defaultDeployId: deployId,
+                        stage: props.stage,
+                    });
+                }
             }
         }
     }

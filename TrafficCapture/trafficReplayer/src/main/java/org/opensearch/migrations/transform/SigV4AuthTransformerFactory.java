@@ -6,6 +6,7 @@ import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.IHttpMessage;
@@ -67,6 +68,11 @@ public class SigV4AuthTransformerFactory implements IAuthTransformerFactory {
                 @Override
                 public String protocol() {
                     return (String) message.get(JsonKeysForHttpMessage.PROTOCOL_KEY);
+                }
+
+                @Override
+                public Optional<String> getFirstHeaderValueCaseInsensitive(String key) {
+                    return Optional.ofNullable(message.headers().getInsensitive(key).get(0));
                 }
 
                 @Override

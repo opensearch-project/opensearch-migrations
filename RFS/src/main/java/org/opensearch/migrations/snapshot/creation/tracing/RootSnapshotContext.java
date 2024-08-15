@@ -8,11 +8,11 @@ import com.rfs.tracing.BaseRootRfsContext;
 import com.rfs.tracing.IRfsContexts;
 
 public class RootSnapshotContext extends BaseRootRfsContext implements IRootSnapshotContext {
-    public static final String SCOPE_NAME = "createSnapshot";
+    public static final String SCOPE_NAME = "snapshotCreation";
     public final CreateSnapshotContext.MetricInstruments snapshotInstruments;
 
     public RootSnapshotContext(OpenTelemetry sdk, IContextTracker contextTracker) {
-        super(sdk, contextTracker);
+        super(SCOPE_NAME, sdk, contextTracker);
         var meter = this.getMeterProvider().get(SCOPE_NAME);
 
         snapshotInstruments = CreateSnapshotContext.makeMetrics(meter);

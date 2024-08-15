@@ -32,7 +32,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
 
 # Install HDF5 from source for Opensearch Benchmark compatibility with ARM
 ARG HDF5_VERSION=1.14.4
-RUN wget -q https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5_${HDF5_VERSION}.tar.gz -O /tmp/hdf5.tar.gz && \
+RUN wget --tries=5 --retry-connrefused --waitretry=15 -q https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5_${HDF5_VERSION}.tar.gz -O /tmp/hdf5.tar.gz && \
     mkdir /tmp/hdf5 && \
     tar -xzf /tmp/hdf5.tar.gz -C /tmp/hdf5 --strip-components=1 && \
     rm /tmp/hdf5.tar.gz

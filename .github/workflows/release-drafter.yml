@@ -5,12 +5,30 @@ on:
   push:
     tags:
       - "*"
+env:
+  java-version: '11'
+  gradle-version: '8.0.2'
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
 
 jobs:
   draft-a-release:
     name: Draft a release
+    if: github.repository == 'opensearch-project/opensearch-migrations'
     runs-on: ubuntu-latest
+    outputs:
+      dockerhub-password: ${{ steps.retrieve-values.outputs.dockerhub-password }}
     steps:
+      - uses: actions/setup-java@v4
+        with:
+          java-version: ${{ env.java-version }}
+          distribution: 'corretto'
+      - uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: ${{ env.gradle-version }}
       - uses: actions/checkout@v4
       - id: get_data
         run: |
@@ -29,6 +47,48 @@ jobs:
         run: |
           wget https://github.com/opensearch-project/opensearch-migrations/archive/refs/tags/${{ steps.get_data.outputs.version }}.tar.gz -O artifacts.tar.gz
           ./gradlew publishMavenJavaPublicationToMavenRepository -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }} && tar -C build -cvf traffic-capture-artifacts.tar.gz repository
+      - name: Build Docker Images
+        run: |
+          ./deployment/cdk/opensearch-service-migration/buildDockerImages.sh
+      - name: Tag Docker image
+        run: |
+          docker tag migrations/migration_console:latest opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }}
+          docker tag migrations/migration_console:latest opensearchstaging/opensearch-migrations-console:latest
+          docker tag migrations/traffic_replayer:latest opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }}
+          docker tag migrations/traffic_replayer:latest opensearchstaging/opensearch-migrations-traffic-replayer:latest
+          docker tag migrations/capture_proxy:latest opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }}
+          docker tag migrations/capture_proxy:latest opensearchstaging/opensearch-migrations-traffic-capture-proxy:latest
+          docker tag migrations/reindex_from_snapshot:latest opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }}
+          docker tag migrations/reindex_from_snapshot:latest opensearchstaging/opensearch-migrations-reindex-from-snapshot:latest
+      - name: Configure AWS Credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.MIGRATIONS_DOCKER_ROLE }}
+          aws-region: us-east-1
+      - name: Retrieve Values
+        id: retrieve-values
+        run: |
+          DOCKERHUB_PASSWORD=`aws secretsmanager get-secret-value --secret-id jenkins-staging-dockerhub-credential --query SecretString --output text`
+          echo "::add-mask::$DOCKERHUB_PASSWORD"
+          echo "dockerhub-password=$DOCKERHUB_PASSWORD" >> $GITHUB_OUTPUT
+      - name: Login to DockerHub
+        uses: docker/login-action@v1
+        with:
+          username: ${{ secrets.MIGRATIONS_DOCKER_USERNAME }}
+          password: ${{ steps.retrieve-values.outputs.dockerhub-password }}
+      - name: Push Docker image to Docker Hub
+        run: |
+          docker push opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }}
+          docker push opensearchstaging/opensearch-migrations-console:latest
+          docker push opensearchstaging/opensearch-migrations-traffic-replayer:${{ steps.get_data.outputs.version }}
+          docker push opensearchstaging/opensearch-migrations-traffic-replayer:latest
+          docker push opensearchstaging/opensearch-migrations-traffic-capture-proxy:${{ steps.get_data.outputs.version }}
+          docker push opensearchstaging/opensearch-migrations-traffic-capture-proxy:latest
+          docker push opensearchstaging/opensearch-migrations-reindex-from-snapshot:${{ steps.get_data.outputs.version }}
+          docker push opensearchstaging/opensearch-migrations-reindex-from-snapshot:latest
+      - name: Logout to DockerHub
+        if: always()
+        run: docker logout
       - name: Draft a release
         uses: softprops/action-gh-release@v2
         with:

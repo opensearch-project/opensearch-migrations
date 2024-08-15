@@ -8,7 +8,9 @@ import {
     createMigrationStringParameter,
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy,
+    getTargetPasswordAccessPolicy,
     getMigrationStringParameterValue,
+    hashStringSHA256,
     MigrationSSMParameter
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
@@ -151,10 +153,11 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ...props,
             parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
         });
-        const brokerEndpoints = getMigrationStringParameterValue(this, {
-            ...props,
-            parameter: MigrationSSMParameter.KAFKA_BROKERS,
-        });
+        const brokerEndpoints = props.streamingSourceType != StreamingSourceType.DISABLED ?
+            getMigrationStringParameterValue(this, {
+                ...props,
+                parameter: MigrationSSMParameter.KAFKA_BROKERS,
+            }) : "";
 
         const volumeName = "sharedReplayerOutputVolume"
         const volumeId = getMigrationStringParameterValue(this, {
@@ -255,6 +258,9 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
+        const getSecretsPolicy = props.servicesYaml.target_cluster.basic_auth?.password_from_secret_arn ? 
+            getTargetPasswordAccessPolicy(props.servicesYaml.target_cluster.basic_auth.password_from_secret_arn) : null;
+
         // Upload the services.yaml file to Parameter Store
         let servicesYaml = props.servicesYaml
         servicesYaml.source_cluster = {
@@ -273,7 +279,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             }
         }
 
-        createMigrationStringParameter(this, servicesYaml.stringify(), {
+        const parameter = createMigrationStringParameter(this, servicesYaml.stringify(), {
             ...props,
             parameter: MigrationSSMParameter.SERVICES_YAML_FILE,
         });
@@ -284,13 +290,16 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints,
             "MIGRATION_STAGE": props.stage,
             "MIGRATION_SOLUTION_VERSION": props.migrationsSolutionVersion,
-            "MIGRATION_SERVICES_YAML_PARAMETER": `/migration/${props.stage}/${props.defaultDeployId}/servicesYamlFile`,
+            "MIGRATION_SERVICES_YAML_PARAMETER": parameter.parameterName,
+            "MIGRATION_SERVICES_YAML_HASH": hashStringSHA256(servicesYaml.stringify()),
         }
 
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
         let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
-            listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy]
+            listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
+            ...(getSecretsPolicy ? [getSecretsPolicy] : []) // only add secrets policy if it's non-null
+        ]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)

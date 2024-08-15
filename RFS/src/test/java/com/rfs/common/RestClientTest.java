@@ -16,6 +16,7 @@ import org.opensearch.migrations.testutils.HttpRequestFirstLine;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 
+import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.tracing.RfsContexts;
 import reactor.netty.http.client.HttpClient;
 import reactor.netty.resources.ConnectionProvider;
@@ -31,8 +32,10 @@ class RestClientTest {
     public void testGetEmitsInstrumentation() throws Exception {
         var rootContext = SnapshotTestContext.factory().withAllTracking();
         try (var testServer = SimpleNettyHttpServer.makeServer(false, null, this::makeResponseContext)) {
-            var restClient = new RestClient(new ConnectionDetails("http://localhost:" + testServer.port, null, null),
-                makeSingleConnectionHttpClient());
+            var restClient = new RestClient(ConnectionContextTestParams.builder()
+                .host("http://localhost:" + testServer.port)
+                .build()
+                .toConnectionContext(), makeSingleConnectionHttpClient());
             try (var topScope = rootContext.createSnapshotCreateContext()) {
                 restClient.postAsync("/", "empty", topScope.createSnapshotContext()).block();
                 restClient.getAsync("/", topScope.createGetSnapshotContext()).block();
@@ -44,11 +47,11 @@ class RestClientTest {
 
         for (var kvp : Map.of(
             "createGetSnapshotContext",
-            new long[] { 133, 66 },
+            new long[] { 101, 66 },
             "createSnapshotContext",
             new long[] { 139, 66 },
             "",
-            new long[] { 272, 132 }
+            new long[] { 240, 132 }
         ).entrySet()) {
             long bytesSent = allMetricData.stream()
                 .filter(md -> md.getName().startsWith("bytesSent"))
@@ -107,7 +110,7 @@ class RestClientTest {
             .sorted(Comparator.comparing(SpanData::getEndEpochNanos))
             .collect(Collectors.toList());
         int i = 0;
-        for (var expectedBytes : List.of(new long[] { 139, 66 }, new long[] { 133, 66 })) {
+        for (var expectedBytes : List.of(new long[] { 139, 66 }, new long[] { 101, 66 })) {
             var span = httpRequestSpansByTime.get(i++);
             long bytesSent = span.getAttributes().get(RfsContexts.GenericRequestContext.BYTES_SENT_ATTR);
             long bytesRead = span.getAttributes().get(RfsContexts.GenericRequestContext.BYTES_READ_ATTR);

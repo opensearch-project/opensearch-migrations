@@ -13,20 +13,19 @@ from console_link.models.replayer_base import Replayer, ReplayStatus
 
 logger = logging.getLogger(__name__)
 
-DEFAULT_INDEX_IGNORE_LIST = ["test_", ".", "searchguard", "sg7", "security-auditlog"]
+DEFAULT_INDEX_IGNORE_LIST = ["test_", ".", "searchguard", "sg7", "security-auditlog", "reindexed-logs"]
 
 EXPECTED_BENCHMARK_DOCS = {
-    "geonames": {"docs.count": "1000"},
-    "logs-221998": {"docs.count": "1000"},
-    "logs-211998": {"docs.count": "1000"},
-    "logs-231998": {"docs.count": "1000"},
-    "logs-241998": {"docs.count": "1000"},
-    "logs-181998": {"docs.count": "1000"},
-    "logs-201998": {"docs.count": "1000"},
-    "logs-191998": {"docs.count": "1000"},
-    "sonested": {"docs.count": "2977"},
-    "reindexed-logs": {"docs.count": "0"},
-    "nyc_taxis": {"docs.count": "1000"}
+    "geonames": {"count": 1000},
+    "logs-221998": {"count": 1000},
+    "logs-211998": {"count": 1000},
+    "logs-231998": {"count": 1000},
+    "logs-241998": {"count": 1000},
+    "logs-181998": {"count": 1000},
+    "logs-201998": {"count": 1000},
+    "logs-191998": {"count": 1000},
+    "sonested": {"count": 1000},
+    "nyc_taxis": {"count": 1000}
 }
 
 
@@ -125,10 +124,18 @@ def get_all_index_details(cluster: Cluster, index_prefix_ignore_list=None, **kwa
     all_index_details = execute_api_call(cluster=cluster, path="/_cat/indices?format=json", **kwargs).json()
     index_dict = {}
     for index_details in all_index_details:
-        valid_index = not index_matches_ignored_index(index_name=index_details['index'],
+        # While cat/indices returns a doc count metric, the underlying implementation bleeds through details, only
+        # capture the index name and make a separate api call for the doc count
+        index_name = index_details['index']
+        valid_index = not index_matches_ignored_index(index_name,
                                                       index_prefix_ignore_list=index_prefix_ignore_list)
         if index_prefix_ignore_list is None or valid_index:
-            index_dict[index_details['index']] = index_details
+            # "To get an accurate count of Elasticsearch documents, use the cat count or count APIs."
+            # See https://www.elastic.co/guide/en/elasticsearch/reference/7.10/cat-indices.html
+
+            count_response = execute_api_call(cluster=cluster, path=f"/{index_name}/_count?format=json", **kwargs)
+            index_dict[index_name] = count_response.json()
+            index_dict[index_name]['index'] = index_name
     return index_dict
 
 
@@ -154,8 +161,8 @@ def check_doc_counts_match(cluster: Cluster,
         else:
             for index_details in actual_index_details.values():
                 index_name = index_details['index']
-                actual_doc_count = index_details['docs.count']
-                expected_doc_count = expected_index_details[index_name]['docs.count']
+                actual_doc_count = index_details['count']
+                expected_doc_count = expected_index_details[index_name]['count']
                 if actual_doc_count != expected_doc_count:
                     error_message = (f"Index {index_name} has {actual_doc_count} documents but {expected_doc_count} "
                                      f"were expected")

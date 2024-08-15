@@ -7,9 +7,12 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts;
 
+import com.rfs.common.InvalidResponse;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.models.IndexMetadata;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 public class IndexCreator_OS_2_11 {
     private static final ObjectMapper mapper = new ObjectMapper();
     protected final OpenSearchClient client;
@@ -41,6 +44,48 @@ public class IndexCreator_OS_2_11 {
         body.set("settings", settings);
 
         // Create the index; it's fine if it already exists
-        return client.createIndex(indexName, body, context);
+        try {
+            return client.createIndex(indexName, body, context);
+        } catch (InvalidResponse invalidResponse) {
+            var illegalArguments = invalidResponse.getIllegalArguments();
+
+            if (illegalArguments.isEmpty()) {
+                log.debug("Cannot retry invalid response, there are no illegal arguments to remove.");
+                throw invalidResponse;
+            }
+
+            for (var illegalArgument : illegalArguments) {
+                if (!illegalArgument.startsWith("index.")) {
+                    log.warn("Expecting all retryable errors to start with 'index.', instead saw " + illegalArgument);
+                    throw invalidResponse;
+                }
+
+                var shortenedIllegalArgument = illegalArgument.replaceFirst("index.", "");
+                removeFieldsByPath(settings, shortenedIllegalArgument);
+            }
+
+            log.info("Reattempting creation of index '" + indexName + "' after removing illegal arguments; " + illegalArguments);
+            return client.createIndex(indexName, body, context);
+        }
+    }
+
+    private void removeFieldsByPath(ObjectNode node, String path) {
+        var pathParts = path.split("\\.");
+
+        if (pathParts.length == 1) {
+            node.remove(pathParts[0]);
+            return;
+        }
+
+        var currentNode = node;
+        for (int i = 0; i < pathParts.length - 1; i++) {
+            var nextNode = currentNode.get(pathParts[i]);
+            if (nextNode != null && nextNode.isObject()) {
+                currentNode = (ObjectNode) nextNode;
+            } else {
+                return;
+            }
+        }
+        currentNode.remove(pathParts[pathParts.length - 1]);
     }
 }

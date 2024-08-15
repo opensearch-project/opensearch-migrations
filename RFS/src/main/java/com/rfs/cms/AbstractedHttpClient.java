@@ -1,13 +1,13 @@
 package com.rfs.cms;
 
 import java.io.IOException;
-import java.util.Arrays;
+import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-public interface AbstractedHttpClient extends AutoCloseable {
+public interface AbstractedHttpClient {
     String PUT_METHOD = "PUT";
     String POST_METHOD = "POST";
     String GET_METHOD = "GET";
@@ -25,7 +25,7 @@ public interface AbstractedHttpClient extends AutoCloseable {
         default String toDiagnosticString() {
             String payloadStr;
             try {
-                payloadStr = Arrays.toString(getPayloadBytes());
+                payloadStr = new String(getPayloadBytes(), StandardCharsets.UTF_8);
             } catch (IOException e) {
                 payloadStr = "[EXCEPTION EVALUATING PAYLOAD]: " + e;
             }
@@ -48,14 +48,13 @@ public interface AbstractedHttpClient extends AutoCloseable {
         String body
     ) throws IOException {
         var combinedHeaders = new LinkedHashMap<String, String>();
-        combinedHeaders.put("Content-Type", "application/json");
+        if (body != null) {
+            combinedHeaders.put("Content-Type", "application/json");
+        }
         combinedHeaders.put("Accept-Encoding", "identity");
         if (extraHeaders != null) {
             combinedHeaders.putAll(extraHeaders);
         }
         return makeRequest(method, path, combinedHeaders, body);
     }
-
-    @Override
-    default void close() throws Exception {}
 }
