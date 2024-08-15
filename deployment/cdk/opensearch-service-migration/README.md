@@ -301,34 +301,6 @@ cdk destroy migration-console --c contextId=demo-deploy
 ```
 **Note**: The `demo-deploy`contextId has the retention policy for the OpenSearch Domain set to `DESTROY`, which will remove this resource and all its data when the stack is deleted. In order to retain the Domain on stack deletion the `domainRemovalPolicy` would need to be set to `RETAIN`.
 
-## How to run multiple Traffic Replayer scenarios
-The project supports running distinct Replayers in parallel, with each Replayer sending traffic to a different target cluster. This functionality allows users to test replaying captured traffic to multiple different target clusters in parallel. Users are able to provide the desired configuration options to spin up a new OpenSearch Domain and Traffic Replayer while using the existing Migration infrastructure that has already been deployed.
-
-To give an example of this process, a user could decide to configure an additional Replayer and Domain for the demo setup in the `cdk.context.json` by configuring a new context block like below. **Note**: `addOnMigrationDeployId` is a required field to allow proper naming of these additional resources.
-```shell
-  "demo-addon1": {
-    "addOnMigrationDeployId": "demo-addon1",
-    "stage": "dev",
-    "engineVersion": "OS_1.3",
-    "domainName": "demo-cluster-1-3",
-    "dataNodeCount": 2,
-    "openAccessPolicyEnabled": true,
-    "domainRemovalPolicy": "DESTROY",
-    "enableDemoAdmin": true,
-    "trafficReplayerServiceEnabled": true,
-    "trafficReplayerEnableClusterFGACAuth": true
-  }
-```
-And then deploy this additional infrastructure with the command:
-```shell
-cdk deploy "*" --c contextId=demo-addon1 --require-approval never --concurrency 3
-```
-
-Finally, the additional infrastructure can be removed with:
-```shell
-cdk destroy "*" --c contextId=demo-addon1
-```
-
 ## Appendix
 
 ### How is an Authorization header set for requests from the Replayer to the target cluster?

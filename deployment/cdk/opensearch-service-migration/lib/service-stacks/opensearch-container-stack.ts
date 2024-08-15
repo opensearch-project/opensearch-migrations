@@ -27,20 +27,17 @@ const dnsNameForContainer = "opensearch";
  */
 export class OpenSearchContainerStack extends MigrationServiceCore {
 
-    private createSSMParameters(stage: string, deployId: string, adminUserName: string|undefined, adminUserSecret: ISecret|undefined) {
+    private createSSMParameters(stage: string, adminUserName: string|undefined, adminUserSecret: ISecret|undefined) {
         if (adminUserSecret) {
             createMigrationStringParameter(this, `${adminUserName} ${adminUserSecret.secretArn}`, {
                 parameter: MigrationSSMParameter.OS_USER_AND_SECRET_ARN,
-                stage,
-                defaultDeployId: deployId
+                stage
             });
         }
     }
 
     constructor(scope: Construct, id: string, props: OpenSearchContainerProps) {
         super(scope, id, props)
-
-        const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
 
         let securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceSG", getMigrationStringParameterValue(this, {
@@ -55,7 +52,7 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
         if (props.enableDemoAdmin) { // Enable demo mode setting
             adminUserName = "admin"
             adminUserSecret = new Secret(this, "demoUserSecret", {
-                secretName: `demo-user-secret-${props.stage}-${deployId}`,
+                secretName: `demo-user-secret-${props.stage}`,
                 // This is unsafe and strictly for ease of use in a demo mode setup
                 secretStringValue: SecretValue.unsafePlainText(opensearch_target_initial_admin_password)
             })
@@ -102,7 +99,7 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
         });
 
         if (props.enableDemoAdmin) {
-            this.createSSMParameters(props.stage, deployId, adminUserName, adminUserSecret)
+            this.createSSMParameters(props.stage, adminUserName, adminUserSecret)
         }
     }
 }

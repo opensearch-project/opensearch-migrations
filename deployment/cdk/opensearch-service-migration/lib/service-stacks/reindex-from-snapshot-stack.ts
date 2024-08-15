@@ -46,7 +46,6 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         const artifactS3Arn = getMigrationStringParameterValue(this, {
             parameter: MigrationSSMParameter.ARTIFACT_S3_ARN,
             stage: props.stage,
-            defaultDeployId: props.defaultDeployId
         });
         const artifactS3AnyObjectPath = `${artifactS3Arn}/*`
         const artifactS3PublishPolicy = new PolicyStatement({

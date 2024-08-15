@@ -42,16 +42,14 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         return Fn.select(0, Fn.split(':', Fn.select(2, Fn.split('/', url))));
     }
 
-    createMSKAdminIAMPolicies(stage: string, deployId: string): PolicyStatement[] {
+    createMSKAdminIAMPolicies(stage: string): PolicyStatement[] {
         const mskClusterARN = getMigrationStringParameterValue(this, {
             parameter: MigrationSSMParameter.MSK_CLUSTER_ARN,
-            stage,
-            defaultDeployId: deployId,
+            stage
         });
         const mskClusterName = getMigrationStringParameterValue(this, {
             parameter: MigrationSSMParameter.MSK_CLUSTER_NAME,
-            stage,
-            defaultDeployId: deployId,
+            stage
         });
         const mskClusterAdminPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
@@ -79,7 +77,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         return [mskClusterAdminPolicy, mskTopicAdminPolicy, mskConsumerGroupAdminPolicy]
     }
 
-    configureOpenSearchIngestionPipelineRole(stage: string, deployId: string) {
+    configureOpenSearchIngestionPipelineRole(stage: string) {
         const osiPipelineRole = new Role(this, 'osisPipelineRole', {
             assumedBy: new ServicePrincipal('osis-pipelines.amazonaws.com'),
             description: 'OpenSearch Ingestion Pipeline role for OpenSearch Migrations'
@@ -94,7 +92,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         createMigrationStringParameter(this, osiPipelineRole.roleArn, {
             parameter: MigrationSSMParameter.OSI_PIPELINE_ROLE_ARN,
             stage,
-            defaultDeployId: deployId,
         });
         return osiPipelineRole.roleArn;
     }
@@ -243,7 +240,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         // Allow Console to retrieve SSM Parameters
         const getSSMParamsPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
-            resources: [`arn:${this.partition}:ssm:${this.region}:${this.account}:parameter/migration/${props.stage}/${props.defaultDeployId}/*`],
+            resources: [`arn:${this.partition}:ssm:${this.region}:${this.account}:parameter/migration/${props.stage}/*`],
             actions: [
                 "ssm:GetParameters"
             ]
@@ -302,7 +299,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ...(getSecretsPolicy ? [getSecretsPolicy] : []) // only add secrets policy if it's non-null
         ]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
-            const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
+            const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
         }
         if (props.fetchMigrationEnabled) {
@@ -369,13 +366,13 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         }
 
         if (props.migrationConsoleEnableOSI) {
-            const pipelineRoleArn = this.configureOpenSearchIngestionPipelineRole(props.stage, props.defaultDeployId)
+            const pipelineRoleArn = this.configureOpenSearchIngestionPipelineRole(props.stage)
             servicePolicies.push(...this.createOpenSearchIngestionManagementPolicy(pipelineRoleArn))
             const osiLogGroup = new LogGroup(this, 'OSILogGroup',  {
                 retention: RetentionDays.ONE_MONTH,
                 removalPolicy: RemovalPolicy.DESTROY,
                 // Naming requirement from OSI
-                logGroupName: `/aws/vendedlogs/osi-${props.stage}-${props.defaultDeployId}`
+                logGroupName: `/aws/vendedlogs/osi-${props.stage}`
             });
             createMigrationStringParameter(this, osiLogGroup.logGroupName, {
                 ...props,

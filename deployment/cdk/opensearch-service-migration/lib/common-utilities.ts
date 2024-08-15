@@ -108,9 +108,9 @@ export function createOpenSearchServerlessIAMAccessPolicy(partition: string, reg
     })
 }
 
-export function createMSKConsumerIAMPolicies(scope: Construct, partition: string, region: string, accountId: string, stage: string, deployId: string): PolicyStatement[] {
-    const mskClusterARN = getMigrationStringParameterValue(scope, { parameter: MigrationSSMParameter.MSK_CLUSTER_ARN, stage, defaultDeployId: deployId });
-    const mskClusterName = getMigrationStringParameterValue(scope, { parameter: MigrationSSMParameter.MSK_CLUSTER_NAME, stage, defaultDeployId: deployId });
+export function createMSKConsumerIAMPolicies(scope: Construct, partition: string, region: string, accountId: string, stage: string): PolicyStatement[] {
+    const mskClusterARN = getMigrationStringParameterValue(scope, { parameter: MigrationSSMParameter.MSK_CLUSTER_ARN, stage });
+    const mskClusterName = getMigrationStringParameterValue(scope, { parameter: MigrationSSMParameter.MSK_CLUSTER_NAME, stage });
     const mskClusterConnectPolicy = new PolicyStatement({
         effect: Effect.ALLOW,
         resources: [mskClusterARN],
@@ -140,9 +140,9 @@ export function createMSKConsumerIAMPolicies(scope: Construct, partition: string
 
 }
 
-export function createMSKProducerIAMPolicies(scope: Construct, partition: string, region: string, accountId: string, stage: string, deployId: string): PolicyStatement[] {
-    const mskClusterARN = getMigrationStringParameterValue(scope, { parameter: MigrationSSMParameter.MSK_CLUSTER_ARN, stage, defaultDeployId: deployId });
-    const mskClusterName = getMigrationStringParameterValue(scope, { parameter: MigrationSSMParameter.MSK_CLUSTER_NAME, stage, defaultDeployId: deployId });
+export function createMSKProducerIAMPolicies(scope: Construct, partition: string, region: string, accountId: string, stage: string): PolicyStatement[] {
+    const mskClusterARN = getMigrationStringParameterValue(scope, { parameter: MigrationSSMParameter.MSK_CLUSTER_ARN, stage });
+    const mskClusterName = getMigrationStringParameterValue(scope, { parameter: MigrationSSMParameter.MSK_CLUSTER_NAME, stage });
     const mskClusterConnectPolicy = new PolicyStatement({
         effect: Effect.ALLOW,
         resources: [mskClusterARN],
@@ -258,14 +258,13 @@ export function hashStringSHA256(message: string): string {
 export interface MigrationSSMConfig {
     parameter: MigrationSSMParameter,
     stage: string,
-    defaultDeployId: string
 }
 
 export function createMigrationStringParameter(scope: Construct, stringValue: string, props: MigrationSSMConfig) {
     return new StringParameter(scope, `SSMParameter${props.parameter.charAt(0).toUpperCase() + props.parameter.slice(1)}`, {
         parameterName: getMigrationStringParameterName(props),
         stringValue: stringValue,
-        description: `Opensearch migration SSM parameter for ${props.parameter} with stage ${props.stage} and deploy id ${props.defaultDeployId}`,
+        description: `Opensearch migration SSM parameter for ${props.parameter} with stage ${props.stage}`,
     });
 }
 
@@ -283,7 +282,7 @@ export function getCustomStringParameterValue(scope: Construct, parameterName: s
 }
 
 export function getMigrationStringParameterName(props: MigrationSSMConfig): string {
-    return `/migration/${props.stage}/${props.defaultDeployId}/${props.parameter}`;
+    return `/migration/${props.stage}/${props.parameter}`;
 }
 
 export enum MigrationSSMParameter {

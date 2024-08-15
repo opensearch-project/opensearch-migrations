@@ -55,23 +55,6 @@ describe('NetworkStack Tests', () => {
         expect(vpc.privateSubnets.length).toBe(2)
     });
 
-    test('Test if addOnMigrationDeployId is provided, stack does not create VPC or Security Group', () => {
-        const contextOptions = {
-            addOnMigrationDeployId: "junit-addon",
-            vpcEnabled: true,
-            vpcAZCount: 2,
-            sourceClusterEndpoint: "https://test-cluster",
-        }
-
-        const stacks = createStackComposer(contextOptions)
-
-        const networkStack: NetworkStack = (stacks.stacks.filter((s) => s instanceof NetworkStack)[0]) as NetworkStack
-        const networkTemplate = Template.fromStack(networkStack)
-
-        networkTemplate.resourceCountIs("AWS::EC2::VPC", 0)
-        networkTemplate.resourceCountIs("AWS::EC2::SecurityGroup", 0)
-    });
-
     test('Test valid https imported target cluster endpoint with port is formatted correctly', () => {
         const inputTargetEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443"
         const expectedFormattedEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443"

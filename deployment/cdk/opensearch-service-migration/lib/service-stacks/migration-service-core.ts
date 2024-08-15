@@ -102,7 +102,7 @@ export class MigrationServiceCore extends Stack {
         const serviceLogGroup = new LogGroup(this, 'ServiceLogGroup',  {
             retention: RetentionDays.ONE_MONTH,
             removalPolicy: RemovalPolicy.DESTROY,
-            logGroupName: `/migration/${props.stage}/${props.defaultDeployId}/${props.serviceName}`
+            logGroupName: `/migration/${props.stage}/${props.serviceName}`
         });
 
         const serviceContainer = serviceTaskDef.addContainer("ServiceContainer", {

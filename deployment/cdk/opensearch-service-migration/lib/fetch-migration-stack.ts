@@ -102,7 +102,7 @@ export class FetchMigrationStack extends Stack {
 
         // Create secret using Secrets Manager
         const dpPipelineConfigSecret = new SMSecret(this, "dpPipelineConfigSecret", {
-            secretName: `${props.stage}-${props.defaultDeployId}-${fetchMigrationContainer.containerName}-pipelineConfig`,
+            secretName: `${props.stage}-${fetchMigrationContainer.containerName}-pipelineConfig`,
             secretStringValue: SecretValue.unsafePlainText(encodedPipeline)
         });
         // Add secrets to container

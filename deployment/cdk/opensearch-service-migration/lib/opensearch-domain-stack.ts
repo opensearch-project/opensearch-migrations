@@ -97,19 +97,17 @@ export class OpenSearchDomainStack extends Stack {
     return accessPolicies
   }
 
-  createSSMParameters(domain: Domain, adminUserName: string|undefined, adminUserSecret: ISecret|undefined, stage: string, deployId: string) {
+  createSSMParameters(domain: Domain, adminUserName: string|undefined, adminUserSecret: ISecret|undefined, stage: string) {
     const endpointParameter = osClusterEndpointParameterName
     const endpointSSM = createMigrationStringParameter(this, `https://${domain.domainEndpoint}:443`, {
       parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
-      defaultDeployId: deployId,
       stage,
     });
     if (domain.masterUserPassword && !adminUserSecret) {
-      console.log(`An OpenSearch domain fine-grained access control user was configured without an existing Secrets Manager secret, will not create SSM Parameter: /migration/${stage}/${deployId}/osUserAndSecret`)
+      console.log(`An OpenSearch domain fine-grained access control user was configured without an existing Secrets Manager secret, will not create SSM Parameter: /migration/${stage}/osUserAndSecret`)
     } else if (domain.masterUserPassword && adminUserSecret) {
       const secretSSM = createMigrationStringParameter(this, `${adminUserName} ${adminUserSecret.secretArn}`, {
           parameter: MigrationSSMParameter.OS_USER_AND_SECRET_ARN,
-          defaultDeployId: deployId,
           stage,    
       });
     }
@@ -129,7 +127,6 @@ export class OpenSearchDomainStack extends Stack {
   constructor(scope: Construct, id: string, props: OpensearchDomainStackProps) {
     super(scope, id, props);
 
-    const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
     // Retrieve existing account resources if defined
     const earKmsKey: IKey|undefined = props.encryptionAtRestKmsKeyARN && props.encryptionAtRestEnabled ?
         Key.fromKeyArn(this, "earKey", props.encryptionAtRestKmsKeyARN) : undefined
@@ -150,7 +147,7 @@ export class OpenSearchDomainStack extends Stack {
     if (props.enableDemoAdmin) { // Enable demo mode setting
       adminUserName = "admin"
       adminUserSecret = new Secret(this, "demoUserSecret", {
-        secretName: `demo-user-secret-${props.stage}-${deployId}`,
+        secretName: `demo-user-secret-${props.stage}`,
         // This is unsafe and strictly for ease of use in a demo mode setup
         secretStringValue: SecretValue.unsafePlainText("myStrongPassword123!")
       })
@@ -228,7 +225,7 @@ export class OpenSearchDomainStack extends Stack {
       removalPolicy: props.domainRemovalPolicy
     });
 
-    this.createSSMParameters(domain, adminUserName, adminUserSecret, props.stage, deployId)
+    this.createSSMParameters(domain, adminUserName, adminUserSecret, props.stage)
     this.generateTargetClusterYaml(domain, adminUserName, adminUserSecret)
   }
 }

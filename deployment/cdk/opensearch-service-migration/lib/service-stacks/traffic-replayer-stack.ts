@@ -23,7 +23,6 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly enableClusterFGACAuth: boolean,
     readonly streamingSourceType: StreamingSourceType,
     readonly fargateCpuArch: CpuArchitecture,
-    readonly addOnMigrationId?: string,
     readonly customKafkaGroupId?: string,
     readonly userAgentSuffix?: string,
     readonly extraArgs?: string,
@@ -88,11 +87,10 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
         let servicePolicies = [replayerOutputMountPolicy, secretAccessPolicy, openSearchPolicy, openSearchServerlessPolicy]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
-            const mskConsumerPolicies = createMSKConsumerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId)
+            const mskConsumerPolicies = createMSKConsumerIAMPolicies(this, this.partition, this.region, this.account, props.stage)
             servicePolicies = servicePolicies.concat(mskConsumerPolicies)
         }
 
-        const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId
         const osClusterEndpoint = getMigrationStringParameterValue(this, {
             ...props,
             parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
@@ -101,7 +99,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             ...props,
             parameter: MigrationSSMParameter.KAFKA_BROKERS,
         });
-        const groupId = props.customKafkaGroupId ? props.customKafkaGroupId : `logging-group-${deployId}`
+        const groupId = props.customKafkaGroupId ? props.customKafkaGroupId : `logging-group`
 
         let replayerCommand = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint} --insecure --kafka-traffic-brokers ${brokerEndpoints} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id ${groupId}`
         if (props.enableClusterFGACAuth) {
@@ -117,7 +115,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         replayerCommand = parseAndMergeArgs(replayerCommand, props.extraArgs);
 
         this.createService({
-            serviceName: `traffic-replayer-${deployId}`,
+            serviceName: `traffic-replayer`,
             taskInstanceCount: 0,
             dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficReplayer"),
             dockerImageCommand: ['/bin/sh', '-c', replayerCommand],
@@ -126,7 +124,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             mountPoints: [replayerOutputMountPoint],
             taskRolePolicies: servicePolicies,
             environment: {
-                "TUPLE_DIR_PATH": `/shared-replayer-output/traffic-replayer-${deployId}`
+                "TUPLE_DIR_PATH": `/shared-replayer-output/traffic-replayer`
             },
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 1024,
@@ -136,6 +134,6 @@ export class TrafficReplayerStack extends MigrationServiceCore {
 
         this.replayerYaml = new ECSReplayerYaml();
         this.replayerYaml.ecs.cluster_name = `migration-${props.stage}-ecs-cluster`;
-        this.replayerYaml.ecs.service_name = `migration-${props.stage}-traffic-replayer-${deployId}`;
+        this.replayerYaml.ecs.service_name = `migration-${props.stage}-traffic-replayer`;
     }
 }

@@ -22,8 +22,6 @@ import {ClusterBasicAuth, ServicesYaml} from "./migration-services-yaml";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
-    readonly defaultDeployId: string,
-    readonly addOnMigrationDeployId?: string
 }
 
 export interface StackComposerProps extends StackProps {
@@ -131,7 +129,6 @@ export class StackComposer {
 
         const defaultValues: { [x: string]: (any); } = defaultValuesJson
         const region = props.env?.region
-        const defaultDeployId = 'default'
 
         const contextId = scope.node.tryGetContext("contextId")
         if (!contextId) {
@@ -176,14 +173,12 @@ export class StackComposer {
         const vpcAZCount = this.getContextForType('vpcAZCount', 'number', defaultValues, contextJSON)
         const openAccessPolicyEnabled = this.getContextForType('openAccessPolicyEnabled', 'boolean', defaultValues, contextJSON)
         const accessPolicyJson = this.getContextForType('accessPolicies', 'object', defaultValues, contextJSON)
-        const migrationAssistanceEnabled = this.getContextForType('migrationAssistanceEnabled', 'boolean', defaultValues, contextJSON)
         const mskARN = this.getContextForType('mskARN', 'string', defaultValues, contextJSON)
         const mskBrokersPerAZCount = this.getContextForType('mskBrokersPerAZCount', 'number', defaultValues, contextJSON)
         const mskSubnetIds = this.getContextForType('mskSubnetIds', 'object', defaultValues, contextJSON)
         const mskAZCount = this.getContextForType('mskAZCount', 'number', defaultValues, contextJSON)
         const replayerOutputEFSRemovalPolicy = this.getContextForType('replayerOutputEFSRemovalPolicy', 'string', defaultValues, contextJSON)
         const artifactBucketRemovalPolicy = this.getContextForType('artifactBucketRemovalPolicy', 'string', defaultValues, contextJSON)
-        const addOnMigrationDeployId = this.getContextForType('addOnMigrationDeployId', 'string', defaultValues, contextJSON)
         const defaultFargateCpuArch = this.getContextForType('defaultFargateCpuArch', 'string', defaultValues, contextJSON)
         const captureProxyESServiceEnabled = this.getContextForType('captureProxyESServiceEnabled', 'boolean', defaultValues, contextJSON)
         const captureProxyESExtraArgs = this.getContextForType('captureProxyESExtraArgs', 'string', defaultValues, contextJSON)
@@ -218,9 +213,6 @@ export class StackComposer {
             if (!requiredFields[key]) {
                 throw new Error(`Required CDK context field ${key} is not present`)
             }
-        }
-        if (addOnMigrationDeployId && vpcId) {
-            console.warn("Addon deployments will use the original deployment 'vpcId' regardless of passed 'vpcId' values")
         }
         let targetEndpoint
         if (targetClusterEndpoint && osContainerServiceEnabled) {
@@ -263,20 +255,16 @@ export class StackComposer {
             throw new Error("sourceClusterDisabled is mutually exclusive with [sourceClusterEndpoint, captureProxyESServiceEnabled, elasticsearchServiceEnabled, captureProxyServiceEnabled]");
         }
 
-        const deployId = addOnMigrationDeployId ? addOnMigrationDeployId : defaultDeployId
-
         // If enabled re-use existing VPC and/or associated resources or create new
         let networkStack: NetworkStack|undefined
-        if (vpcEnabled || addOnMigrationDeployId) {
-            networkStack = new NetworkStack(scope, `networkStack-${deployId}`, {
+        if (vpcEnabled) {
+            networkStack = new NetworkStack(scope, `networkStack`, {
                 vpcId: vpcId,
                 vpcAZCount: vpcAZCount,
                 targetClusterEndpoint: targetEndpoint,
-                stackName: `OSMigrations-${stage}-${region}-${deployId}-NetworkInfra`,
+                stackName: `OSMigrations-${stage}-${region}-NetworkInfra`,
                 description: "This stack contains resources to create/manage networking for an OpenSearch Service domain",
                 stage: stage,
-                defaultDeployId: defaultDeployId,
-                addOnMigrationDeployId: addOnMigrationDeployId,
                 albAcmCertArn: albAcmCertArn,
                 elasticsearchServiceEnabled,
                 captureProxyESServiceEnabled,
@@ -297,7 +285,7 @@ export class StackComposer {
         // created Domain like below or an imported one
         let openSearchStack
         if (!targetEndpoint) {
-            openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
+            openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack`, {
                 version: version,
                 domainName: domainName,
                 dataNodeInstanceType: dataNodeType,
@@ -329,11 +317,9 @@ export class StackComposer {
                 vpcSecurityGroupIds: vpcSecurityGroupIds,
                 domainAZCount: domainAZCount,
                 domainRemovalPolicy: domainRemovalPolicy,
-                stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchDomain`,
+                stackName: `OSMigrations-${stage}-${region}-OpenSearchDomain`,
                 description: "This stack contains resources to create/manage an OpenSearch Service domain",
                 stage: stage,
-                defaultDeployId: defaultDeployId,
-                addOnMigrationDeployId: addOnMigrationDeployId,
                 env: props.env
             });
             this.addDependentStacks(openSearchStack, [networkStack])
@@ -351,7 +337,7 @@ export class StackComposer {
         }
 
         let migrationStack
-        if (migrationAssistanceEnabled && networkStack && !addOnMigrationDeployId) {
+        if (networkStack) {
             migrationStack = new MigrationAssistanceStack(scope, "migrationInfraStack", {
                 vpc: networkStack.vpc,
                 streamingSourceType: streamingSourceType,
@@ -364,7 +350,6 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-MigrationInfra`,
                 description: "This stack contains resources to assist migrating an OpenSearch Service domain",
                 stage: stage,
-                defaultDeployId: defaultDeployId,
                 env: props.env
             })
             this.addDependentStacks(migrationStack, [networkStack])
@@ -374,14 +359,12 @@ export class StackComposer {
 
         let osContainerStack
         if (osContainerServiceEnabled && networkStack && migrationStack) {
-            osContainerStack = new OpenSearchContainerStack(scope, `opensearch-container-${deployId}`, {
+            osContainerStack = new OpenSearchContainerStack(scope, `opensearch-container`, {
                 vpc: networkStack.vpc,
-                stackName: `OSMigrations-${stage}-${region}-${deployId}-OpenSearchContainer`,
+                stackName: `OSMigrations-${stage}-${region}-OpenSearchContainer`,
                 description: "This stack contains resources for the OpenSearch Container ECS service",
                 stage: stage,
-                defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                addOnMigrationDeployId: addOnMigrationDeployId,
                 enableDemoAdmin: true,
                 env: props.env
             })
@@ -396,7 +379,6 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-KafkaBroker`,
                 description: "This stack contains resources for the Kafka Broker ECS service",
                 stage: stage,
-                defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 env: props.env
             })
@@ -413,7 +395,6 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-FetchMigration`,
                 description: "This stack contains resources to assist migrating historical data to an OpenSearch Service domain",
                 stage: stage,
-                defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 env: props.env
             })
@@ -431,7 +412,6 @@ export class StackComposer {
                 description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
                 stage: stage,
                 otelCollectorEnabled: otelCollectorEnabled,
-                defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 env: props.env
             })
@@ -452,7 +432,6 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxyES`,
                 description: "This stack contains resources for the Capture Proxy/Elasticsearch ECS service",
                 stage: stage,
-                defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 targetGroups: [networkStack.albSourceProxyTG, networkStack.albSourceClusterTG],
                 env: props.env
@@ -462,20 +441,18 @@ export class StackComposer {
         }
 
         let trafficReplayerStack
-        if ((trafficReplayerServiceEnabled && networkStack && migrationStack) || (addOnMigrationDeployId && networkStack)) {
-            trafficReplayerStack = new TrafficReplayerStack(scope, `traffic-replayer-${deployId}`, {
+        if ((trafficReplayerServiceEnabled && networkStack && migrationStack)) {
+            trafficReplayerStack = new TrafficReplayerStack(scope, `traffic-replayer`, {
                 vpc: networkStack.vpc,
                 enableClusterFGACAuth: trafficReplayerEnableClusterFGACAuth,
-                addOnMigrationDeployId: addOnMigrationDeployId,
                 customKafkaGroupId: trafficReplayerGroupId,
                 userAgentSuffix: trafficReplayerCustomUserAgent,
                 extraArgs: trafficReplayerExtraArgs,
                 otelCollectorEnabled: otelCollectorEnabled,
                 streamingSourceType: streamingSourceType,
-                stackName: `OSMigrations-${stage}-${region}-${deployId}-TrafficReplayer`,
+                stackName: `OSMigrations-${stage}-${region}-TrafficReplayer`,
                 description: "This stack contains resources for the Traffic Replayer ECS service",
                 stage: stage,
-                defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 maxUptime: trafficReplayerMaxUptime ? Duration.parse(trafficReplayerMaxUptime) : undefined,
                 env: props.env
@@ -493,7 +470,6 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-Elasticsearch`,
                 description: "This stack contains resources for a testing mock Elasticsearch single node cluster ECS service",
                 stage: stage,
-                defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 targetGroups: [networkStack.albSourceClusterTG],
                 env: props.env
@@ -515,7 +491,6 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-CaptureProxy`,
                 description: "This stack contains resources for the Capture Proxy ECS service",
                 stage: stage,
-                defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 targetGroups: [networkStack.albSourceProxyTG],
                 env: props.env
@@ -540,7 +515,6 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-TargetClusterProxy`,
                 description: "This stack contains resources for the Target Cluster Proxy ECS service",
                 stage: stage,
-                defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 targetGroups: [networkStack.albTargetProxyTG],
                 env: props.env,
@@ -565,7 +539,6 @@ export class StackComposer {
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,
-                defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 otelCollectorEnabled,
                 env: props.env

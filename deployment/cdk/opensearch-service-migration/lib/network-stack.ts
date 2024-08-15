@@ -82,21 +82,8 @@ export class NetworkStack extends Stack {
     constructor(scope: Construct, id: string, props: NetworkStackProps) {
         super(scope, id, props);
 
-        // Retrieve original deployment VPC for addon deployments
-        if (props.addOnMigrationDeployId) {
-            const vpcId = StringParameter.valueFromLookup(this,
-                getMigrationStringParameterName({
-                    stage: props.stage,
-                    defaultDeployId: props.defaultDeployId,
-                    parameter: MigrationSSMParameter.VPC_ID
-                })
-            )
-            this.vpc = Vpc.fromLookup(this, 'domainVPC', {
-                vpcId
-            });
-        }
         // Retrieve existing VPC
-        else if (props.vpcId) {
+        if (props.vpcId) {
             this.vpc = Vpc.fromLookup(this, 'domainVPC', {
                 vpcId: props.vpcId,
             });
@@ -130,12 +117,10 @@ export class NetworkStack extends Stack {
             });
         }
         this.validateVPC(this.vpc)
-        if(!props.addOnMigrationDeployId) {
-            createMigrationStringParameter(this, this.vpc.vpcId, {
-                ...props,
-                parameter: MigrationSSMParameter.VPC_ID
-            });
-        }
+        createMigrationStringParameter(this, this.vpc.vpcId, {
+            ...props,
+            parameter: MigrationSSMParameter.VPC_ID
+        });
 
         const needAlb = props.captureProxyServiceEnabled ||
             props.elasticsearchServiceEnabled ||
@@ -239,38 +224,33 @@ export class NetworkStack extends Stack {
             throw new Error(`Capture Proxy ESService, Elasticsearch Service, or SourceClusterEndpoint must be enabled, unless the source cluster is disabled.`);
         }
 
-        if (!props.addOnMigrationDeployId) {
-            // Create a default SG which only allows members of this SG to access the Domain endpoints
-            const defaultSecurityGroup = new SecurityGroup(this, 'osClusterAccessSG', {
-                vpc: this.vpc,
-                allowAllOutbound: false,
-            });
-            defaultSecurityGroup.addIngressRule(defaultSecurityGroup, Port.allTraffic());
+        // Create a default SG which only allows members of this SG to access the Domain endpoints
+        const defaultSecurityGroup = new SecurityGroup(this, 'osClusterAccessSG', {
+            vpc: this.vpc,
+            allowAllOutbound: false,
+        });
+        defaultSecurityGroup.addIngressRule(defaultSecurityGroup, Port.allTraffic());
 
-            createMigrationStringParameter(this, defaultSecurityGroup.securityGroupId, {
-                ...props,
-                parameter: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID
-            });
+        createMigrationStringParameter(this, defaultSecurityGroup.securityGroupId, {
+            ...props,
+            parameter: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID
+        });
 
-            if (props.targetClusterEndpoint) {
-                const formattedClusterEndpoint = NetworkStack.validateAndReturnFormattedHttpURL(props.targetClusterEndpoint);
-                const deployId = props.addOnMigrationDeployId ? props.addOnMigrationDeployId : props.defaultDeployId;
-                createMigrationStringParameter(this, formattedClusterEndpoint, {
+        if (props.targetClusterEndpoint) {
+            const formattedClusterEndpoint = NetworkStack.validateAndReturnFormattedHttpURL(props.targetClusterEndpoint);
+            createMigrationStringParameter(this, formattedClusterEndpoint, {
+                stage: props.stage,
+                parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT
+            });
+            // This is a somewhat surprsing place for this non-network related set of parameters, but it pairs well with
+            // the OS_CLUSTER_ENDPOINT parameter and is helpful to ensure it happens. This probably isn't a long-term place
+            // for it, but is helpful for the time being.
+            if (props.targetClusterUsername && props.targetClusterPasswordSecretArn) {
+                createMigrationStringParameter(this,
+                    `${props.targetClusterUsername} ${props.targetClusterPasswordSecretArn}`, {
+                    parameter: MigrationSSMParameter.OS_USER_AND_SECRET_ARN,
                     stage: props.stage,
-                    defaultDeployId: deployId,
-                    parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT
                 });
-                // This is a somewhat surprsing place for this non-network related set of parameters, but it pairs well with
-                // the OS_CLUSTER_ENDPOINT parameter and is helpful to ensure it happens. This probably isn't a long-term place
-                // for it, but is helpful for the time being.
-                if (props.targetClusterUsername && props.targetClusterPasswordSecretArn) {
-                    createMigrationStringParameter(this,
-                        `${props.targetClusterUsername} ${props.targetClusterPasswordSecretArn}`, {
-                        parameter: MigrationSSMParameter.OS_USER_AND_SECRET_ARN,
-                        defaultDeployId: deployId,
-                        stage: props.stage,
-                    });
-                }
             }
         }
     }

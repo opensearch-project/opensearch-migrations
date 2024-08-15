@@ -57,7 +57,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
             protocol: Protocol.TCP
         }
 
-        const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId) : []
+        const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.partition, this.region, this.account, props.stage) : []
 
         const brokerEndpoints = getMigrationStringParameterValue(this, {
             ...props,
