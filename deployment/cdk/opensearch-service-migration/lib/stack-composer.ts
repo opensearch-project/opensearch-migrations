@@ -125,7 +125,6 @@ export class StackComposer {
             contextJSON = JSON.parse(JSON.parse(contextJSON))
         }
         return contextJSON
-
     }
 
     constructor(scope: Construct, props: StackComposerProps) {

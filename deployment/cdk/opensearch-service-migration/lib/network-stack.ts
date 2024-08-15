@@ -230,16 +230,13 @@ export class NetworkStack extends Stack {
         }
 
         // Create Source SSM Parameter
-        if (props.sourceClusterEndpoint || props.sourceClusterDisabled) {
-            // The migration console stack depends on this parameter, even if the source cluster is disabled, so
-            // it's essential to create it, even if the value is effectively* empty in the sourceClusterDisabled case.
-            // * SSM does a validity check for length > 1 on parameters, so it can't be an actual empty string.
-            createMigrationStringParameter(this, props.sourceClusterEndpoint ?? "source cluster disabled", {
+        if (props.sourceClusterEndpoint) {
+            createMigrationStringParameter(this, props.sourceClusterEndpoint, {
                 ...props,
                 parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
             });
-        } else if (!this.albSourceClusterTG) {
-            throw new Error(`Capture Proxy ESService, Elasticsearch Service, or SourceClusterEndpoint must be enabled`);
+        } else if (!props.sourceClusterDisabled && !this.albSourceClusterTG) {
+            throw new Error(`Capture Proxy ESService, Elasticsearch Service, or SourceClusterEndpoint must be enabled, unless the source cluster is disabled.`);
         }
 
         if (!props.addOnMigrationDeployId) {
