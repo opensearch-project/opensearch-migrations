@@ -111,7 +111,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
             "",
             [ "/rfs-app/runJavaWithClasspath.sh com.rfs.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir '/lucene' --target-host ",
               {
-                "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
+                "Ref": "SsmParameterValuemigrationunittestosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
             ],
           ],
@@ -189,7 +189,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
             "",
             [ "/rfs-app/runJavaWithClasspath.sh com.rfs.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo --s3-region us-east-1 --snapshot-name custom-snapshot --lucene-dir /lucene --target-host ",
               {
-                "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
+                "Ref": "SsmParameterValuemigrationunittestosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
               " --custom-arg value --flag"
             ]

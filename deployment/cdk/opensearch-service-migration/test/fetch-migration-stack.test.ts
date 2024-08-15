@@ -27,7 +27,7 @@ describe('FetchMigrationStack Tests', () => {
     template.resourceCountIs("AWS::ECS::TaskDefinition", 1)
     template.resourceCountIs("AWS::SecretsManager::Secret", 1)
     template.hasResourceProperties("AWS::SecretsManager::Secret", {
-      Name: "unit-test-default-fetch-migration-pipelineConfig"
+      Name: "unit-test-fetch-migration-pipelineConfig"
     })
   });
 

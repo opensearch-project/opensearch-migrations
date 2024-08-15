@@ -123,7 +123,7 @@ test('Test that services yaml parameter is created by migration console stack', 
     const valueCapture = new Capture();
     migrationConsoleStackTemplate.hasResourceProperties("AWS::SSM::Parameter", {
       Type: "String",
-      Name: Match.stringLikeRegexp("/migration/.*/.*/servicesYamlFile"),
+      Name: Match.stringLikeRegexp("/migration/.*/servicesYamlFile"),
       Value: valueCapture,
     });
     const value = valueCapture.asObject()
