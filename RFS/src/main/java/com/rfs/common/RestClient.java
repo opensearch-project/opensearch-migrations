@@ -158,7 +158,8 @@ public class RestClient {
                             extractHeaders(response.responseHeaders()),
                             bodyOp.orElse(null)
                             ))
-                ))
+                )
+            )
             .doOnError(t -> {
                 if (context != null) {
                     context.addTraceException(t, true);

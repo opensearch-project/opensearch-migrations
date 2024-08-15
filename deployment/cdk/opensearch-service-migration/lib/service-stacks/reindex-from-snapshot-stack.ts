@@ -77,14 +77,14 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         if (props.clusterAuthDetails.basic_auth) {
             targetUser = props.clusterAuthDetails.basic_auth.username,
             targetPassword = props.clusterAuthDetails.basic_auth.password? props.clusterAuthDetails.basic_auth.password : "",
-            targetPasswordArn = props.clusterAuthDetails.basic_auth.password_from_secret_arn? props.clusterAuthDetails.basic_auth.password_from_secret_arn : ""            
+            targetPasswordArn = props.clusterAuthDetails.basic_auth.password_from_secret_arn? props.clusterAuthDetails.basic_auth.password_from_secret_arn : ""
         };
 
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account);
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account);
         let servicePolicies = [artifactS3PublishPolicy, openSearchPolicy, openSearchServerlessPolicy];
 
-        const getSecretsPolicy = props.clusterAuthDetails.basic_auth?.password_from_secret_arn ? 
+        const getSecretsPolicy = props.clusterAuthDetails.basic_auth?.password_from_secret_arn ?
             getTargetPasswordAccessPolicy(props.clusterAuthDetails.basic_auth.password_from_secret_arn) : null;
         if (getSecretsPolicy) {
             servicePolicies.push(getSecretsPolicy);
@@ -98,7 +98,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             securityGroups: securityGroups,
             taskRolePolicies: servicePolicies,
             cpuArchitecture: props.fargateCpuArch,
-            taskCpuUnits: 1024,
+            taskCpuUnits: 2048,
             taskMemoryLimitMiB: 4096,
             ephemeralStorageGiB: 200,
             environment: {

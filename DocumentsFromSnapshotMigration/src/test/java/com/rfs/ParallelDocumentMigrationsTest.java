@@ -14,6 +14,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Function;
 import java.util.function.UnaryOperator;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
@@ -341,8 +342,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
     private static class FilteredLuceneDocumentsReader extends LuceneDocumentsReader {
         private final UnaryOperator<Document> docTransformer;
 
-        public FilteredLuceneDocumentsReader(Path luceneFilesBasePath, UnaryOperator<Document> docTransformer) {
-            super(luceneFilesBasePath);
+        public FilteredLuceneDocumentsReader(Path luceneFilesBasePath, boolean softDeletesPossible, String softDeletesField, UnaryOperator<Document> docTransformer) {
+            super(luceneFilesBasePath, softDeletesPossible, softDeletesField);
             this.docTransformer = docTransformer;
         }
 
@@ -390,12 +391,16 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
             final var nextClockShift = (int) (clockJitter.nextDouble() * ms_window) - (ms_window / 2);
             log.info("nextClockShift=" + nextClockShift);
 
+
+            Function<Path, LuceneDocumentsReader> readerFactory = path -> new FilteredLuceneDocumentsReader(path, ElasticsearchConstants_ES_7_10.SOFT_DELETES_POSSIBLE,
+                    ElasticsearchConstants_ES_7_10.SOFT_DELETES_FIELD, terminatingDocumentFilter);
+
             return RfsMigrateDocuments.run(
-                path -> new FilteredLuceneDocumentsReader(path, terminatingDocumentFilter),
+                readerFactory,
                 new DocumentReindexer(new OpenSearchClient(ConnectionContextTestParams.builder()
                     .host(targetAddress)
                     .build()
-                    .toConnectionContext()), 1000, 1),
+                    .toConnectionContext()), 1000, Long.MAX_VALUE, 1),
                 new OpenSearchWorkCoordinator(
                     new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                         .host(targetAddress)
