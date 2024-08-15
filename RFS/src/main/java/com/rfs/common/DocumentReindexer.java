@@ -3,7 +3,6 @@ package com.rfs.common;
 import java.util.Collection;
 import java.util.function.Predicate;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.lucene.document.Document;
 
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
