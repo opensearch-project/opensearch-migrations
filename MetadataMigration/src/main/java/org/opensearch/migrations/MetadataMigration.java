@@ -20,7 +20,7 @@ public class MetadataMigration {
         JCommander.newBuilder().addObject(arguments).build().parse(args);
 
         var context = new RootMetadataMigrationContext(
-            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "rfs"),
+            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "metadata"),
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
         );
 
