@@ -119,6 +119,8 @@ dependencies {
 
     api group: 'org.hamcrest', name: 'hamcrest', version: '2.2'
 
+    api group: 'org.openjdk.jmh', name: 'jmh-core', version: '1.36'
+
     // ************************************************************
     // The following constraints are for mitigating transitive CVEs
     // ************************************************************
