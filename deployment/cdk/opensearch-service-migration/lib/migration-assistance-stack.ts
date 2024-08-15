@@ -18,6 +18,7 @@ import {
 } from "@aws-cdk/aws-msk-alpha";
 import {SelectedSubnets} from "aws-cdk-lib/aws-ec2/lib/vpc";
 import {KafkaYaml} from "./migration-services-yaml";
+import {MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
 
 export interface MigrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -34,6 +35,7 @@ export interface MigrationStackProps extends StackPropsExt {
 
 export class MigrationAssistanceStack extends Stack {
     kafkaYaml: KafkaYaml;
+    sharedLogsFileSystem: SharedLogFileSystem;
 
     // This function exists to overcome the limitation on the vpc.selectSubnets() call which requires the subnet
     // type to be provided or else an empty list will be returned if public subnets are provided, thus this function
@@ -185,14 +187,10 @@ export class MigrationAssistanceStack extends Stack {
         });
 
         // Create an EFS file system for Traffic Replayer output
-        const replayerOutputEFS = new FileSystem(this, 'replayerOutputEFS', {
+        this.sharedLogsFileSystem = new SharedLogFileSystem(this, 'replayerOutputEFS', {
             vpc: props.vpc,
             securityGroup: replayerOutputSG,
             removalPolicy: replayerEFSRemovalPolicy
-        });
-        createMigrationStringParameter(this, replayerOutputEFS.fileSystemId, {
-            ...props,
-            parameter: MigrationSSMParameter.REPLAYER_OUTPUT_EFS_ID
         });
 
         const serviceSecurityGroup = new SecurityGroup(this, 'serviceSecurityGroup', {
@@ -223,6 +221,26 @@ export class MigrationAssistanceStack extends Stack {
             vpc: props.vpc,
             clusterName: `migration-${props.stage}-ecs-cluster`
         })
+    }
+}
 
+export class SharedLogFileSystem extends FileSystem {
+    readonly volumeName = "sharedLogsVolume";
+    asVolume(): Volume {
+        return {
+            name: this.volumeName,
+            efsVolumeConfiguration: {
+                fileSystemId: this.fileSystemId,
+                transitEncryption: "ENABLED"
+            }
+        }
+    }
+
+    asMountPoint(): MountPoint {
+        return {
+            containerPath: "/shared-replayer-output",
+            readOnly: false,
+            sourceVolume: this.volumeName
+        }
     }
 }

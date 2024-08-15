@@ -14,8 +14,8 @@ import {
     parseAndMergeArgs
 } from "../common-utilities";
 import { ClusterYaml, RFSBackfillYaml, SnapshotYaml } from "../migration-services-yaml";
-import cluster from "cluster";
 import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
+import { SharedLogFileSystem } from "../migration-assistance-stack";
 
 
 export interface ReindexFromSnapshotProps extends StackPropsExt {
@@ -24,6 +24,7 @@ export interface ReindexFromSnapshotProps extends StackPropsExt {
     readonly extraArgs?: string,
     readonly otelCollectorEnabled: boolean,
     readonly clusterAuthDetails: ClusterYaml
+    readonly sharedLogFileSystem: SharedLogFileSystem;
 }
 
 export class ReindexFromSnapshotStack extends MigrationServiceCore {

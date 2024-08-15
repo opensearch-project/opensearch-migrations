@@ -19,6 +19,7 @@ import {Fn, RemovalPolicy} from "aws-cdk-lib";
 import {MetadataMigrationYaml, ServicesYaml} from "../migration-services-yaml";
 import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
 import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
+import { SharedLogFileSystem } from "../migration-assistance-stack";
 
 export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationsSolutionVersion: string,
@@ -32,6 +33,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly targetGroups: ELBTargetGroup[],
     readonly servicesYaml: ServicesYaml,
     readonly otelCollectorEnabled?: boolean,
+    readonly sharedLogFileSystem: SharedLogFileSystem;
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
@@ -159,33 +161,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 parameter: MigrationSSMParameter.KAFKA_BROKERS,
             }) : "";
 
-        const volumeName = "sharedReplayerOutputVolume"
-        const volumeId = getMigrationStringParameterValue(this, {
-            ...props,
-            parameter: MigrationSSMParameter.REPLAYER_OUTPUT_EFS_ID,
-        });
-        const replayerOutputEFSVolume: Volume = {
-            name: volumeName,
-            efsVolumeConfiguration: {
-                fileSystemId: volumeId,
-                transitEncryption: "ENABLED"
-            }
-        };
-        const replayerOutputMountPoint: MountPoint = {
-            containerPath: "/shared-replayer-output",
-            readOnly: false,
-            sourceVolume: volumeName
-        }
-        const replayerOutputEFSArn = `arn:${this.partition}:elasticfilesystem:${this.region}:${this.account}:file-system/${volumeId}`
-        const replayerOutputMountPolicy = new PolicyStatement( {
-            effect: Effect.ALLOW,
-            resources: [replayerOutputEFSArn],
-            actions: [
-                "elasticfilesystem:ClientMount",
-                "elasticfilesystem:ClientWrite"
-            ]
-        })
-
         const ecsClusterArn = `arn:${this.partition}:ecs:${this.region}:${this.account}:service/migration-${props.stage}-ecs-cluster`
         const allReplayerServiceArn = `${ecsClusterArn}/migration-${props.stage}-traffic-replayer*`
         const reindexFromSnapshotServiceArn = `${ecsClusterArn}/migration-${props.stage}-reindex-from-snapshot`
@@ -296,7 +271,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
-        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
+        let servicePolicies = [openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
             listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
             ...(getSecretsPolicy ? [getSecretsPolicy] : []) // only add secrets policy if it's non-null
         ]
@@ -387,8 +362,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             securityGroups: securityGroups,
             portMappings: servicePortMappings,
             dockerImageCommand: imageCommand,
-            volumes: [replayerOutputEFSVolume],
-            mountPoints: [replayerOutputMountPoint],
             environment: environment,
             taskRolePolicies: servicePolicies,
             cpuArchitecture: props.fargateCpuArch,
@@ -396,7 +369,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             taskMemoryLimitMiB: 2048,
             ...props
         });
-
     }
 
 }

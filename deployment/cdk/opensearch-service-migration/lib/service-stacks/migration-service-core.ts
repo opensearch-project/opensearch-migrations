@@ -1,17 +1,14 @@
 import {StackPropsExt} from "../stack-composer";
 import {ISecurityGroup, IVpc, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {
-    CfnService as FargateCfnService,
     Cluster,
     ContainerImage, CpuArchitecture,
     FargateService,
     FargateTaskDefinition,
     LogDrivers,
-    MountPoint,
     PortMapping,
     Ulimit,
     OperatingSystemFamily,
-    Volume,
     AwsLogDriverMode,
     ContainerDependencyCondition,
 } from "aws-cdk-lib/aws-ecs";
@@ -22,6 +19,7 @@ import {PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {createDefaultECSTaskRole} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { IApplicationTargetGroup, INetworkTargetGroup } from "aws-cdk-lib/aws-elasticloadbalancingv2";
+import { SharedLogFileSystem } from "../migration-assistance-stack";
 
 
 export interface MigrationServiceCoreProps extends StackPropsExt {
@@ -37,8 +35,6 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
         [key: string]: string
     },
     readonly taskRolePolicies?: PolicyStatement[],
-    readonly mountPoints?: MountPoint[],
-    readonly volumes?: Volume[],
     readonly portMappings?: PortMapping[],
     readonly environment?: {
         [key: string]: string;
@@ -51,6 +47,7 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly otelCollectorEnabled?: boolean,
     readonly targetGroups?: ELBTargetGroup[],
     readonly ephemeralStorageGiB?: number
+    readonly sharedLogFileSystem?: SharedLogFileSystem,
 }
 
 export type ELBTargetGroup = IApplicationTargetGroup | INetworkTargetGroup;
@@ -67,7 +64,7 @@ export class MigrationServiceCore extends Stack {
             vpc: props.vpc
         })
 
-        const serviceTaskRole = createDefaultECSTaskRole(this, props.serviceName)
+        const serviceTaskRole = createDefaultECSTaskRole(this, props.serviceName);
         props.taskRolePolicies?.forEach(policy => serviceTaskRole.addToPolicy(policy))
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {
@@ -81,10 +78,6 @@ export class MigrationServiceCore extends Stack {
             cpu: props.taskCpuUnits ? props.taskCpuUnits : 256,
             taskRole: serviceTaskRole
         });
-        if (props.volumes) {
-            props.volumes.forEach(vol => serviceTaskDef.addVolume(vol))
-        }
-
         let serviceImage
         if (props.dockerDirectoryPath) {
             serviceImage = ContainerImage.fromDockerImageAsset(new DockerImageAsset(this, "ServiceImage", {
@@ -124,10 +117,6 @@ export class MigrationServiceCore extends Stack {
             }),
             ulimits: props.ulimits
         });
-        if (props.mountPoints) {
-            serviceContainer.addMountPoints(...props.mountPoints)
-        }
-
         if (props.maxUptime) {
             let maxUptimeSeconds = Math.max(props.maxUptime.toSeconds(), Duration.minutes(5).toSeconds());
 
@@ -169,6 +158,12 @@ export class MigrationServiceCore extends Stack {
                 container: serviceContainer,
                 condition: ContainerDependencyCondition.START,
             });
+        }
+
+        if (props.sharedLogFileSystem) {
+            props.sharedLogFileSystem.grantReadWrite(serviceTaskRole);
+            serviceTaskDef.addVolume(props.sharedLogFileSystem.asVolume())
+            serviceContainer.addMountPoints(props.sharedLogFileSystem.asMountPoint());
         }
 
         if (props.otelCollectorEnabled) {

@@ -16,6 +16,7 @@ import {StreamingSourceType} from "../streaming-source-type";
 import { Duration } from "aws-cdk-lib";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { ECSReplayerYaml } from "../migration-services-yaml";
+import { SharedLogFileSystem } from "../migration-assistance-stack";
 
 
 export interface TrafficReplayerProps extends StackPropsExt {
@@ -29,6 +30,7 @@ export interface TrafficReplayerProps extends StackPropsExt {
     readonly extraArgs?: string,
     readonly otelCollectorEnabled: boolean,
     readonly maxUptime?: Duration
+    readonly sharedLogFileSystem: SharedLogFileSystem;
 }
 
 export class TrafficReplayerStack extends MigrationServiceCore {
@@ -54,13 +56,6 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             ...props,
             parameter: MigrationSSMParameter.REPLAYER_OUTPUT_EFS_ID,
         })
-        const replayerOutputEFSVolume: Volume = {
-            name: volumeName,
-            efsVolumeConfiguration: {
-                fileSystemId: volumeId,
-                transitEncryption: "ENABLED"
-            }
-        };
         const replayerOutputMountPoint: MountPoint = {
             containerPath: "/shared-replayer-output",
             readOnly: false,
@@ -122,8 +117,6 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficReplayer"),
             dockerImageCommand: ['/bin/sh', '-c', replayerCommand],
             securityGroups: securityGroups,
-            volumes: [replayerOutputEFSVolume],
-            mountPoints: [replayerOutputMountPoint],
             taskRolePolicies: servicePolicies,
             environment: {
                 "TUPLE_DIR_PATH": `/shared-replayer-output/traffic-replayer-${deployId}`

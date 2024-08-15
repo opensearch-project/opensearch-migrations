@@ -345,7 +345,7 @@ export class StackComposer {
             }
         }
 
-        let migrationStack
+        let migrationStack: MigrationAssistanceStack | undefined;
         if (migrationAssistanceEnabled && networkStack && !addOnMigrationDeployId) {
             migrationStack = new MigrationAssistanceStack(scope, "migrationInfraStack", {
                 vpc: networkStack.vpc,
@@ -428,6 +428,7 @@ export class StackComposer {
                 otelCollectorEnabled: otelCollectorEnabled,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
+                sharedLogFileSystem: migrationStack.sharedLogsFileSystem,
                 env: props.env
             })
             this.addDependentStacks(reindexFromSnapshotStack, [migrationStack, openSearchStack, osContainerStack])
@@ -457,7 +458,7 @@ export class StackComposer {
         }
 
         let trafficReplayerStack
-        if ((trafficReplayerServiceEnabled && networkStack && migrationStack) || (addOnMigrationDeployId && networkStack)) {
+        if ((trafficReplayerServiceEnabled && networkStack && migrationStack)) {
             trafficReplayerStack = new TrafficReplayerStack(scope, `traffic-replayer-${deployId}`, {
                 vpc: networkStack.vpc,
                 enableClusterFGACAuth: trafficReplayerEnableClusterFGACAuth,
@@ -473,6 +474,7 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 maxUptime: trafficReplayerMaxUptime ? Duration.parse(trafficReplayerMaxUptime) : undefined,
+                sharedLogFileSystem: migrationStack.sharedLogsFileSystem,
                 env: props.env
             })
             this.addDependentStacks(trafficReplayerStack, [networkStack, migrationStack,kafkaBrokerStack,
@@ -513,6 +515,7 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 targetGroups: [networkStack.albSourceProxyTG],
+                sharedLogsFileSystem: migrationStack.sharedLogsFileSystem,
                 env: props.env
             })
             this.addDependentStacks(captureProxyStack, [elasticsearchStack, migrationStack,
@@ -538,6 +541,7 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 targetGroups: [networkStack.albTargetProxyTG],
+                sharedLogsFileSystem: migrationStack.sharedLogsFileSystem,
                 env: props.env,
             })
             this.addDependentStacks(targetClusterProxyStack, [migrationStack])
@@ -562,6 +566,7 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 otelCollectorEnabled,
+                sharedLogFileSystem: migrationStack.sharedLogsFileSystem,
                 env: props.env
             })
             // To enable the Migration Console to make requests to other service endpoints with services,

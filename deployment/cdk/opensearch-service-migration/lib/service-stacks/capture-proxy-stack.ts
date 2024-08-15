@@ -13,6 +13,7 @@ import {
     parseAndMergeArgs
 } from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
+import { SharedLogFileSystem } from "../migration-assistance-stack";
 
 export interface CaptureProxyProps extends StackPropsExt {
     readonly vpc: IVpc,
@@ -23,6 +24,7 @@ export interface CaptureProxyProps extends StackPropsExt {
     readonly serviceName?: string,
     readonly targetGroups: ELBTargetGroup[],
     readonly extraArgs?: string,
+    readonly sharedLogsFileSystem: SharedLogFileSystem;
 }
 
 type MigrationSSMDestinationConfig = {
