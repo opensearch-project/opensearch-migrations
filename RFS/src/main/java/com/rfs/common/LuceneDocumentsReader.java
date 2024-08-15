@@ -2,21 +2,23 @@ package com.rfs.common;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.Objects;
 import java.util.function.Function;
 
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexReader;
-import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.SoftDeletesDirectoryReaderWrapper;
 import org.apache.lucene.store.FSDirectory;
-import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
 
 import lombok.Lombok;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Scheduler;
+import reactor.core.scheduler.Schedulers;
+import reactor.util.function.Tuples;
 
 @RequiredArgsConstructor
 @Slf4j
@@ -24,7 +26,6 @@ public class LuceneDocumentsReader {
     public static Function<Path, LuceneDocumentsReader> getFactory(boolean softDeletesPossible, String softDeletesField) {
         return path -> new LuceneDocumentsReader(path, softDeletesPossible, softDeletesField);
     }
-    public static final int NUM_DOCUMENTS_BUFFERED = 1024;
 
     protected final Path indexDirectoryPath;
     protected final boolean softDeletesPossible;
@@ -78,26 +79,28 @@ public class LuceneDocumentsReader {
 
     */
     public Flux<Document> readDocuments() {
+        // Create elastic scheduler for i/o bound lucene document reading
+        int luceneReaderThreadCount = Schedulers.DEFAULT_BOUNDED_ELASTIC_SIZE;
+        Scheduler luceneReaderScheduler = Schedulers.newBoundedElastic(luceneReaderThreadCount, Integer.MAX_VALUE, "luceneReaderScheduler");
+
         return Flux.using(() -> wrapReader(DirectoryReader.open(FSDirectory.open(indexDirectoryPath)), softDeletesPossible, softDeletesField), reader -> {
             log.atInfo().log(reader.maxDoc() + " documents found in the current Lucene index");
 
             return Flux.fromIterable(reader.leaves()) // Iterate over each segment
-                .flatMap(leaf -> {
-                    LeafReader leafReader = leaf.reader();
-                    Bits liveDocs = leafReader.getLiveDocs(); // Get live docs bits
-
-                    return Flux.range(0, leafReader.maxDoc())
-                        .handle((docId, sink) -> {
-                            // Check if the document is live (not hard deleted/updated)
-                            boolean isLive = liveDocs == null || liveDocs.get(docId);
-                            Document doc = getDocument(leafReader, docId, isLive);
-
-                            if (doc != null) { // Skip malformed docs
-                                sink.next(doc);
-                            }
-                        });
-                })
-                .cast(Document.class);
+                .flatMap(leafReaderContext -> {
+                        var leafReader = leafReaderContext.reader();
+                        var liveDocs = leafReader.getLiveDocs();
+                        return Flux.range(0, leafReader.maxDoc())
+                            .filter(docIdx -> liveDocs == null || liveDocs.get(docIdx)) // Filter for live docs
+                            .map(liveDocIdx -> Tuples.of(leafReader, liveDocIdx)); // Build a Tuple2<LeafReader, Integer>
+                    }
+                )
+                .parallel(luceneReaderThreadCount)
+                .runOn(luceneReaderScheduler)
+                .map(tuple -> getDocument(tuple.getT1(), tuple.getT2(), true)) // Retrieve the document
+                .filter(Objects::nonNull) // Skip malformed docs
+                .sequential() // Merge parallel streams
+                .doFinally(unused -> luceneReaderScheduler.dispose());
         }, reader -> { // Close the DirectoryReader when done
             try {
                 reader.close();
@@ -122,7 +125,7 @@ public class LuceneDocumentsReader {
             String id;
             try {
                 id = Uid.decodeId(document.getBinaryValue("_id").bytes);
-                log.atDebug().log("Reading document " + id);
+                log.atDebug().setMessage("Reading document {}").addArgument(id).log();
             } catch (Exception e) {
                 StringBuilder errorMessage = new StringBuilder();
                 errorMessage.append("Unable to parse Document id from Document.  The Document's Fields: ");
@@ -132,19 +135,19 @@ public class LuceneDocumentsReader {
             }
 
             if (!isLive) {
-                log.atDebug().log("Document " + id + " is not live");
+                log.atDebug().setMessage("Document {} is not live").addArgument(id).log();
                 return null; // Skip these
             }
 
             if (sourceBytes == null || sourceBytes.bytes.length == 0) {
-                log.warn("Document " + id + " doesn't have the _source field enabled");
+                log.atWarn().setMessage("Document {} doesn't have the _source field enabled").addArgument(id).log();
                 return null;  // Skip these
             }
 
-            log.atDebug().log("Document " + id + " read successfully");
+            log.atDebug().setMessage("Document {} read successfully").addArgument(id).log();
             return document;
         } catch (Exception e) {
-            log.atError().setMessage("Failed to read document at Lucene index location " + docId).setCause(e).log();
+            log.atError().setMessage("Failed to read document at Lucene index location {}").addArgument(docId).setCause(e).log();
             return null;
         }
     }

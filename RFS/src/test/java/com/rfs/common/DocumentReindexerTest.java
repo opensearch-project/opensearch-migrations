@@ -146,10 +146,43 @@ class DocumentReindexerTest {
         assertEquals(1, capturedBulkRequests.size(), "Should contain 1 document");
     }
 
+    @Test
+    void reindex_shouldTrimAndRemoveNewlineFromSource() {
+        Flux<Document> documentStream = Flux.just(createTestDocumenWithWhitespace("1"));
+
+        when(mockClient.sendBulkRequest(eq("test-index"), any(), any()))
+            .thenAnswer(invocation -> {
+                List<?> bulkBody = invocation.getArgument(1);
+                long docCount = bulkBody.size();
+                return Mono.just(new OpenSearchClient.BulkResponse(200, "OK", null,
+                    String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
+            });
+
+        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
+            .verifyComplete();
+
+        verify(mockClient, times(1)).sendBulkRequest(eq("test-index"), any(), any());
+
+        @SuppressWarnings("unchecked")
+        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<DocumentReindexer.BulkDocSection>>)(Class<?>) List.class);
+        verify(mockClient).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
+
+        var capturedBulkRequests = bulkRequestCaptor.getValue();
+        assertEquals(1, capturedBulkRequests.size(), "Should contain 1 document");
+        assertEquals("{\"index\":{\"_id\":\"MQAA\"}}\n{\"field\":\"value\"}", capturedBulkRequests.get(0).asBulkIndex());
+    }
+
     private Document createTestDocument(String id) {
         Document doc = new Document();
         doc.add(new StringField("_id", new BytesRef(id), Field.Store.YES));
         doc.add(new StringField("_source", new BytesRef("{\"field\":\"value\"}"), Field.Store.YES));
+        return doc;
+    }
+
+    private Document createTestDocumenWithWhitespace(String id) {
+        Document doc = new Document();
+        doc.add(new StringField("_id", new BytesRef(id), Field.Store.YES));
+        doc.add(new StringField("_source", new BytesRef(" \r\n\t{\"field\"\n:\"value\"}\r\n\t "), Field.Store.YES));
         return doc;
     }
 

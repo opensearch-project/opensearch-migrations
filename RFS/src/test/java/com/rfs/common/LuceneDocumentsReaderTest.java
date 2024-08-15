@@ -3,6 +3,7 @@ package com.rfs.common;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.stream.Stream;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -22,7 +23,10 @@ import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
+import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 @Slf4j
 public class LuceneDocumentsReaderTest {
@@ -78,7 +82,8 @@ public class LuceneDocumentsReaderTest {
             luceneDir,
             ElasticsearchConstants_ES_7_10.SOFT_DELETES_POSSIBLE,
             ElasticsearchConstants_ES_7_10.SOFT_DELETES_FIELD
-        ).readDocuments();
+        ).readDocuments()
+            .sort(Comparator.comparing(doc -> Uid.decodeId(doc.getBinaryValue("_id").bytes))); // Sort for consistent order given LuceneDocumentsReader may interleave
 
         // Verify that the results are as expected
         StepVerifier.create(documents).expectNextMatches(doc -> {
@@ -87,33 +92,33 @@ public class LuceneDocumentsReaderTest {
 
             String expectedSource = "{\"title\":\"This is a doc with complex history\",\"content\":\"Updated!\"}";
             String actualSource = doc.getBinaryValue("_source").utf8ToString();
-
-            return areDocsEqual(expectedId, actualId, expectedSource, actualSource);
-        }).expectNextMatches(doc -> {
-            String expectedId = "updateddoc";
-            String actualId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
-
-            String expectedSource = "{\"title\":\"This is doc that will be updated\",\"content\":\"Updated!\"}";
-            String actualSource = doc.getBinaryValue("_source").utf8ToString();
-
-            return areDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            return true;
         }).expectNextMatches(doc -> {
             String expectedId = "unchangeddoc";
             String actualId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
 
             String expectedSource = "{\"title\":\"This doc will not be changed\\nIt has multiple lines of text\\nIts source doc has extra newlines.\",\"content\":\"bluh bluh\"}";
             String actualSource = doc.getBinaryValue("_source").utf8ToString();
+            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            return true;
+        }).expectNextMatches(doc -> {
+            String expectedId = "updateddoc";
+            String actualId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
 
-            return areDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            String expectedSource = "{\"title\":\"This is doc that will be updated\",\"content\":\"Updated!\"}";
+            String actualSource = doc.getBinaryValue("_source").utf8ToString();
+            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            return true;
         }).expectComplete().verify();
     }
 
-    protected boolean areDocsEqual(String expectedId, String actualId, String expectedSource, String actualSource) {
+    protected void assertDocsEqual(String expectedId, String actualId, String expectedSource, String actualSource) {
         try {
             JsonNode expectedNode = objectMapper.readTree(expectedSource);
             JsonNode actualNode = objectMapper.readTree(actualSource);
-
-            return expectedId.equals(actualId) && expectedNode.equals(actualNode);
+            assertEquals(expectedId, actualId);
+            assertEquals(expectedNode, actualNode);
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
         }
