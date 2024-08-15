@@ -17,7 +17,6 @@ import com.rfs.common.FileSystemRepo;
 import com.rfs.common.FileSystemSnapshotCreator;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.http.ConnectionContextTestParams;
-import com.rfs.framework.ClusterOperations;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.framework.SimpleRestoreFromSnapshot;
 import com.rfs.http.ClusterOperations;
