@@ -14,9 +14,9 @@ import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestCo
 
 import com.rfs.common.DocumentReindexer.BulkDocSection;
 import com.rfs.common.OpenSearchClient;
-import com.rfs.framework.ClusterOperations;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.framework.SimpleRestoreFromSnapshot_ES_7_10;
+import com.rfs.http.ClusterOperations;
 import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
 
