@@ -13,14 +13,14 @@ import static org.mockito.Mockito.mock;
 class MigrateTest {
 
     @Test
-    void migrate_failsInvalidInvalidParameters() {
+    void migrate_failsInvalidParameters() {
         var args = new MetadataArgs();
         var context = mock(RootMetadataMigrationContext.class);
         var meta = new MetadataMigration(args);
 
         var configureSource = meta.migrate().execute(context);
 
-        assertThat(configureSource.getExitCode(), equalTo(999));
+        assertThat(configureSource.getExitCode(), equalTo(Migrate.INVALID_PARAMETER_CODE));
     }
 
     @Test
@@ -32,6 +32,6 @@ class MigrateTest {
 
         var configureSource = meta.migrate().execute(context);
 
-        assertThat(configureSource.getExitCode(), equalTo(888));
+        assertThat(configureSource.getExitCode(), equalTo(Migrate.UNEXPECTED_FAILURE_CODE));
     }
 }

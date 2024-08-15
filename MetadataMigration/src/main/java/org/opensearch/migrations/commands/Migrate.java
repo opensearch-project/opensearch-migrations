@@ -32,8 +32,8 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class Migrate {
 
-    private static final int INVALID_PARAMETER_CODE = 999;
-    private static final int UNEXPECTED_FAILURE_CODE = 888;
+    static final int INVALID_PARAMETER_CODE = 999;
+    static final int UNEXPECTED_FAILURE_CODE = 888;
     private final MetadataArgs arguments;
 
     public Migrate(MetadataArgs arguments) {

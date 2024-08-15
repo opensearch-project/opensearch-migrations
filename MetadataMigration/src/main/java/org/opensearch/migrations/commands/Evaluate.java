@@ -6,7 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 public class Evaluate {
 
     public EvaluateResult execute() {
-        log.atError().setMessage("configure is not supported").log();
+        log.atError().setMessage("evaluate is not supported").log();
         return new EvaluateResult(9999);
     }
 }
