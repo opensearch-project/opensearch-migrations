@@ -1,9 +1,9 @@
 plugins {
     id 'application'
     id 'java'
-    id 'io.freefair.lombok' version '8.6'
+    id 'io.freefair.lombok'
     id 'java-test-fixtures'
-    id 'me.champeau.jmh' version '0.7.2'
+    id 'me.champeau.jmh'
 }
 
 java.sourceCompatibility = JavaVersion.VERSION_11
@@ -64,6 +64,8 @@ dependencies {
 
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
 
+    testImplementation group: 'org.openjdk.jmh', name: 'jmh-core'
+
     // Integration tests
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
@@ -85,9 +87,6 @@ dependencies {
     testFixturesImplementation group: 'org.testcontainers', name: 'testcontainers'
 
     testFixturesImplementation group: 'org.hamcrest', name: 'hamcrest'
-
-    testImplementation 'org.openjdk.jmh:jmh-core:1.36'
-    testImplementation 'org.openjdk.jmh:jmh-generator-annprocess:1.36'
 }
 
 test {
