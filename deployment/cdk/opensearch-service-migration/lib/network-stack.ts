@@ -22,6 +22,7 @@ export interface NetworkStackProps extends StackPropsExt {
     readonly targetClusterProxyServiceEnabled?: boolean;
     readonly captureProxyESServiceEnabled?: boolean;
     readonly migrationAPIEnabled?: boolean;
+    readonly sourceClusterDisabled?: boolean;
     readonly sourceClusterEndpoint?: string;
     readonly targetClusterEndpoint?: string;
     readonly targetClusterUsername?: string;
@@ -234,8 +235,8 @@ export class NetworkStack extends Stack {
                 ...props,
                 parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
             });
-        } else if (!this.albSourceClusterTG) {
-            throw new Error(`Capture Proxy ESService, Elasticsearch Service, or SourceClusterEndpoint must be enabled`);
+        } else if (!props.sourceClusterDisabled && !this.albSourceClusterTG) {
+            throw new Error(`Capture Proxy ESService, Elasticsearch Service, or SourceClusterEndpoint must be enabled, unless the source cluster is disabled.`);
         }
 
         if (!props.addOnMigrationDeployId) {

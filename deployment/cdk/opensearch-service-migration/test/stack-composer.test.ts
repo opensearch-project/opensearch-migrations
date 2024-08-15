@@ -267,4 +267,38 @@ describe('Stack Composer Tests', () => {
 
     expect(createStackFunc).toThrow()
   })
+
+  test('Test that a context with no source cluster details succeeds if sourceClusterDisabled', () => {
+    const sourceClusterDisabledContextOptions = {
+      sourceClusterDisabled: true,
+      otelCollectorEnabled: true,
+      migrationAssistanceEnabled: true,
+      vpcEnabled: true,
+      migrationConsoleServiceEnabled: true,
+
+    }
+    const openSearchStacks = createStackComposer(sourceClusterDisabledContextOptions)
+    expect(openSearchStacks.stacks).toHaveLength(4)
+
+    const sourceClusterNotExplicitlyDisabledContextOptions = {
+      sourceClusterDisabled: false,
+      otelCollectorEnabled: true,
+      migrationAssistanceEnabled: true,
+      vpcEnabled: true,
+      migrationConsoleServiceEnabled: true
+    }
+    const sourceClusterNotExplicitlyDisabledCreateStackFunc = () => createStackComposerOnlyPassedContext(sourceClusterNotExplicitlyDisabledContextOptions)
+    expect(sourceClusterNotExplicitlyDisabledCreateStackFunc).toThrow()
+
+    const sourceClusterDisabledWithEndpointContextOptions = {
+      sourceClusterDisabled: true,
+      sourceClusterEndpoint: "XXXXXXXXXXXXXXXXXXXX",
+      otelCollectorEnabled: true,
+      migrationAssistanceEnabled: true,
+      vpcEnabled: true,
+      migrationConsoleServiceEnabled: true
+    }
+    let sourceClusterDisabledWithEndpointCreateStackFunc = () => createStackComposer(sourceClusterDisabledWithEndpointContextOptions)
+    expect (sourceClusterDisabledWithEndpointCreateStackFunc).toThrow()
+  })
 })

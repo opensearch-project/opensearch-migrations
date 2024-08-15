@@ -14,7 +14,6 @@ import {
     parseAndMergeArgs
 } from "../common-utilities";
 import { ClusterYaml, RFSBackfillYaml, SnapshotYaml } from "../migration-services-yaml";
-import cluster from "cluster";
 import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
 
 
@@ -32,10 +31,6 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
 
     constructor(scope: Construct, id: string, props: ReindexFromSnapshotProps) {
         super(scope, id, props)
-        const sourceEndpoint = getMigrationStringParameterValue(this, {
-            ...props,
-            parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
-        });
 
         let securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceSG", getMigrationStringParameterValue(this, {
