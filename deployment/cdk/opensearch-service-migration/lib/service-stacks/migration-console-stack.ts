@@ -32,6 +32,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly targetGroups: ELBTargetGroup[],
     readonly servicesYaml: ServicesYaml,
     readonly otelCollectorEnabled?: boolean,
+    readonly sourceClusterDisabled?: boolean,
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
@@ -149,7 +150,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ...props,
             parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
         });
-        const sourceClusterEndpoint = getMigrationStringParameterValue(this, {
+        const sourceClusterEndpoint = props.sourceClusterDisabled ? null : getMigrationStringParameterValue(this, {
             ...props,
             parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
         });
@@ -263,10 +264,12 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
         // Upload the services.yaml file to Parameter Store
         let servicesYaml = props.servicesYaml
-        servicesYaml.source_cluster = {
-            'endpoint': sourceClusterEndpoint,
-            // TODO: We're not currently supporting auth here, this may need to be handled on the migration console
-            'no_auth': ''
+        if (!props.sourceClusterDisabled && sourceClusterEndpoint) {
+            servicesYaml.source_cluster = {
+                'endpoint': sourceClusterEndpoint,
+                // TODO: We're not currently supporting auth here, this may need to be handled on the migration console
+                'no_auth': ''
+            }
         }
         servicesYaml.metadata_migration = new MetadataMigrationYaml();
         if (props.otelCollectorEnabled) {
@@ -285,8 +288,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         });
         const environment: { [key: string]: string; } = {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
-            // Temporary fix for source domain endpoint until we move to either alb or migration console yaml configuration
-            "SOURCE_DOMAIN_ENDPOINT": sourceClusterEndpoint,
             "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints,
             "MIGRATION_STAGE": props.stage,
             "MIGRATION_SOLUTION_VERSION": props.migrationsSolutionVersion,
