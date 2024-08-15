@@ -32,15 +32,12 @@ public class DocumentReindexer {
     ) {
         // Create elastic scheduler for long-lived i/o bound tasks
         Scheduler elasticScheduler = Schedulers.newBoundedElastic(maxConcurrentWorkItems, Integer.MAX_VALUE, "documentReindexerElastic");
-        // Create parallel scheduler for short-lived CPU bound tasks
-        Scheduler parallelScheduler = Schedulers.newParallel( "documentReindexerParallel");
+        // Create scheduler for short-lived CPU bound tasks
+        Scheduler genericScheduler = Schedulers.newParallel( "documentReindexer");
 
         return documentStream
-            .parallel()
-            .runOn(parallelScheduler)
+            .publishOn(genericScheduler)
             .map(BulkDocSection::new)
-            .sequential()
-            .publishOn(parallelScheduler)
             .bufferUntil(new Predicate<>() {
                 private int currentItemCount = 0;
                 private long currentSize = 0;
@@ -84,7 +81,7 @@ public class DocumentReindexer {
             .then()
             .doFinally(unused -> {
                 elasticScheduler.dispose();
-                parallelScheduler.dispose();
+                genericScheduler.dispose();
             });
     }
 

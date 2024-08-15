@@ -2,7 +2,6 @@ package com.rfs.common;
 
 import java.io.IOException;
 import java.nio.file.Path;
-import java.util.Objects;
 import java.util.function.Function;
 
 import org.apache.lucene.document.Document;
@@ -16,6 +15,7 @@ import lombok.Lombok;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 import reactor.util.function.Tuples;
@@ -97,8 +97,7 @@ public class LuceneDocumentsReader {
                 )
                 .parallel(luceneReaderThreadCount)
                 .runOn(luceneReaderScheduler)
-                .map(tuple -> getDocument(tuple.getT1(), tuple.getT2(), true)) // Retrieve the document
-                .filter(Objects::nonNull) // Skip malformed docs
+                .flatMap(tuple -> Mono.justOrEmpty(getDocument(tuple.getT1(), tuple.getT2(), true))) // Retrieve the document skipping malformed docs
                 .sequential() // Merge parallel streams
                 .doFinally(unused -> luceneReaderScheduler.dispose());
         }, reader -> { // Close the DirectoryReader when done
@@ -124,14 +123,19 @@ public class LuceneDocumentsReader {
             BytesRef sourceBytes = document.getBinaryValue("_source");
             String id;
             try {
-                id = Uid.decodeId(document.getBinaryValue("_id").bytes);
+                var idValue = document.getBinaryValue("_id");
+                if(idValue == null) {
+                    log.atError().setMessage("Document with index" + docId + " does not have an id. Skipping").log();
+                    return null;  // Skip documents with missing id
+                }
+                id = Uid.decodeId(idValue.bytes);
                 log.atDebug().setMessage("Reading document {}").addArgument(id).log();
             } catch (Exception e) {
                 StringBuilder errorMessage = new StringBuilder();
                 errorMessage.append("Unable to parse Document id from Document.  The Document's Fields: ");
                 document.getFields().forEach(f -> errorMessage.append(f.name()).append(", "));
                 log.atError().setMessage(errorMessage.toString()).setCause(e).log();
-                return null; // Skip documents with missing id
+                return null; // Skip documents with invalid id
             }
 
             if (!isLive) {
