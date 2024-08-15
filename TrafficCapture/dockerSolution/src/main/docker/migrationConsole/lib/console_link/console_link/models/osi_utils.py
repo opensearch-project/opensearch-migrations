@@ -1,5 +1,4 @@
 #!/usr/bin/env python3
-from cerberus import Validator
 from console_link.models.cluster import AuthMethod, Cluster
 from pathlib import Path
 from typing import List, Dict, Optional

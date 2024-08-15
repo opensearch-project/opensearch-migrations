@@ -276,12 +276,13 @@ def test_valid_get_status_pipeline(osi_client_stubber):
     expected_request_body = {'PipelineName': f'{PIPELINE_NAME}'}
     response_status = 'UPDATING'
     response_status_reason = {'Description': 'Pipeline is being updated'}
-    service_response_body = {'Pipeline':
-        {
-            'PipelineName': PIPELINE_NAME,
-            'Status': response_status,
-            'StatusReason': response_status_reason
-        }
+    service_response_body = {
+        'Pipeline':
+            {
+                'PipelineName': PIPELINE_NAME,
+                'Status': response_status,
+                'StatusReason': response_status_reason
+            }
     }
     osi_client_stubber.add_response("get_pipeline", service_response_body, expected_request_body)
     osi_client_stubber.activate()
