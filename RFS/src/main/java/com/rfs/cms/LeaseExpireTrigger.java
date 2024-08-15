@@ -21,11 +21,22 @@ public class LeaseExpireTrigger implements AutoCloseable {
     final ConcurrentHashMap<String, Instant> workItemToLeaseMap;
     final Consumer<String> onLeaseExpired;
     final Clock currentTimeSupplier;
-
+    /**
+     * Constructs a LeaseExpireTrigger with the default system UTC clock.
+     *
+     * @param onLeaseExpired A consumer that will be called when a lease expires.
+     */
     public LeaseExpireTrigger(Consumer<String> onLeaseExpired) {
         this(onLeaseExpired, Clock.systemUTC());
     }
 
+    /**
+     * Constructs a LeaseExpireTrigger with a specified clock.
+     *
+     * @param onLeaseExpired A consumer that will be called when a lease expires.
+     *                       This consumer is expected to be run 0 or 1 times on any thread.
+     * @param currentTimeSupplier The clock to use for time calculations.
+     */
     public LeaseExpireTrigger(Consumer<String> onLeaseExpired, Clock currentTimeSupplier) {
         scheduledExecutorService = Executors.newScheduledThreadPool(
             1,
@@ -38,12 +49,22 @@ public class LeaseExpireTrigger implements AutoCloseable {
 
     public void registerExpiration(String workItemId, Instant killTime) {
         workItemToLeaseMap.put(workItemId, killTime);
-        final var killDuration = Duration.between(currentTimeSupplier.instant(), killTime);
-        scheduledExecutorService.schedule(() -> {
+        final Runnable expirationRunnable = () -> {
             if (workItemToLeaseMap.containsKey(workItemId)) {
                 onLeaseExpired.accept(workItemId);
             }
-        }, killDuration.toMillis(), TimeUnit.MILLISECONDS);
+        };
+        final var killDuration = Duration.between(currentTimeSupplier.instant(), killTime);
+        if (killDuration.isNegative()) {
+            // If lease is already expired, kill the process synchronously so that no work gets completed
+            expirationRunnable.run();
+        } else {
+            scheduledExecutorService.schedule(expirationRunnable,
+                killDuration.toMillis(),
+                TimeUnit.MILLISECONDS
+            );
+
+        }
     }
 
     public void markWorkAsCompleted(String workItemId) {
