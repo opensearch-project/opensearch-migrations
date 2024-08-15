@@ -10,6 +10,16 @@ from console_link.models.cluster import AuthMethod, Cluster
 from tests.utils import create_valid_cluster
 
 
+@pytest.fixture(scope="function")
+def aws_credentials():
+    """Mocked AWS Credentials for moto."""
+    os.environ["AWS_ACCESS_KEY_ID"] = "testing"
+    os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
+    os.environ["AWS_SECURITY_TOKEN"] = "testing"
+    os.environ["AWS_SESSION_TOKEN"] = "testing"
+    os.environ["AWS_DEFAULT_REGION"] = "us-west-1"
+
+
 def test_valid_cluster_config():
     cluster = create_valid_cluster()
     assert isinstance(cluster, Cluster)
@@ -116,6 +126,96 @@ def test_invalid_cluster_with_zero_passwords_refused():
     ]
 
 
+def test_valid_cluster_with_sigv4_auth_created():
+    valid_with_sigv4 = {
+        "endpoint": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+        "allow_insecure": True,
+        "sigv4": {
+            "region": "us-east-1",
+            "service": "aoss"
+        },
+    }
+    cluster = Cluster(valid_with_sigv4)
+    assert isinstance(cluster, Cluster)
+    assert cluster.auth_type == AuthMethod.SIGV4
+    assert cluster._get_sigv4_details() == ("aoss", "us-east-1")
+
+
+def test_valid_cluster_with_sigv4_auth_defaults_to_es_service():
+    valid_with_sigv4 = {
+        "endpoint": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+        "allow_insecure": True,
+        "sigv4": {
+            "region": "us-east-1"
+        }
+    }
+    cluster = Cluster(valid_with_sigv4)
+    assert isinstance(cluster, Cluster)
+    assert cluster.auth_type == AuthMethod.SIGV4
+    assert cluster._get_sigv4_details() == ("es", "us-east-1")
+
+
+def test_valid_cluster_with_sigv4_auth_uses_configured_region(aws_credentials):
+    valid_with_sigv4 = {
+        "endpoint": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+        "allow_insecure": True,
+        "sigv4": None
+    }
+    with mock_aws():
+        cluster = Cluster(valid_with_sigv4)
+        assert isinstance(cluster, Cluster)
+        assert cluster.auth_type == AuthMethod.SIGV4
+        assert cluster._get_sigv4_details() == ("es", None)
+        assert cluster._get_sigv4_details(force_region=True) == ("es", "us-west-1")
+
+
+def test_valid_cluster_with_sigv4_region_overrides_boto_region(aws_credentials):
+    valid_with_sigv4 = {
+        "endpoint": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+        "allow_insecure": True,
+        "sigv4": {
+            "region": "eu-west-1"
+        }
+    }
+    with mock_aws():
+        cluster = Cluster(valid_with_sigv4)
+        assert isinstance(cluster, Cluster)
+        assert cluster.auth_type == AuthMethod.SIGV4
+        assert cluster._get_sigv4_details() == ("es", "eu-west-1")
+        assert cluster._get_sigv4_details(force_region=True) == ("es", "eu-west-1")
+
+
+def test_valid_cluster_with_sigv4_region_doesnt_invoke_boto_client(mocker):
+    # mock `boto3` to be null, which will cause all boto3 sessions in this model to fail
+    mocker.patch("console_link.models.cluster.boto3", None)
+
+    valid_with_sigv4 = {
+        "endpoint": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+        "sigv4": {
+            "region": "eu-west-1"
+        }
+    }
+    cluster = Cluster(valid_with_sigv4)
+    assert isinstance(cluster, Cluster)
+    assert cluster.auth_type == AuthMethod.SIGV4
+    assert cluster._get_sigv4_details() == ("es", "eu-west-1")
+    assert cluster._get_sigv4_details(force_region=True) == ("es", "eu-west-1")
+
+    # For comparison, this one does try to invoke a boto client to get the region and fails
+    valid_with_sigv4_no_region = {
+        "endpoint": "XXXXXXXXXXXXXXXXXXXXXXXXXXXXX",
+        "allow_insecure": True,
+        "sigv4": None
+    }
+    with mock_aws():
+        cluster = Cluster(valid_with_sigv4_no_region)
+        assert isinstance(cluster, Cluster)
+        assert cluster.auth_type == AuthMethod.SIGV4
+        assert cluster._get_sigv4_details() == ("es", None)
+        with pytest.raises(AttributeError):
+            cluster._get_sigv4_details(force_region=True)
+
+
 def test_valid_cluster_api_call_with_no_auth(requests_mock):
     cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
     assert isinstance(cluster, Cluster)
@@ -146,16 +246,6 @@ def test_connection_check_succesful(requests_mock):
     assert result.cluster_version == '2.15'
 
 
-@pytest.fixture(scope="function")
-def aws_credentials():
-    """Mocked AWS Credentials for moto."""
-    os.environ["AWS_ACCESS_KEY_ID"] = "testing"
-    os.environ["AWS_SECRET_ACCESS_KEY"] = "testing"
-    os.environ["AWS_SECURITY_TOKEN"] = "testing"
-    os.environ["AWS_SESSION_TOKEN"] = "testing"
-    os.environ["AWS_DEFAULT_REGION"] = "us-west-1"
-
-
 def test_valid_cluster_api_call_with_secrets_auth(requests_mock, aws_credentials):
     valid_with_secrets = {
         "endpoint": "https://opensearchtarget:9200",
@@ -173,7 +263,6 @@ def test_valid_cluster_api_call_with_secrets_auth(requests_mock, aws_credentials
     requests_mock.get(f"{valid_with_secrets['endpoint']}/test_api", json={'test': True})
 
     with mock_aws():
-        # Create cluster
         secrets_client = boto3.client("secretsmanager")
         secret = secrets_client.create_secret(
             Name="test-cluster-password",
@@ -186,5 +275,33 @@ def test_valid_cluster_api_call_with_secrets_auth(requests_mock, aws_credentials
         response = cluster.call_api("/test_api")
         assert response.status_code == 200
         assert response.json() == {'test': True}
-        print(requests_mock.last_request.headers)
         assert requests_mock.last_request.headers['Authorization'] == auth_header_should_be
+
+
+def test_valid_cluster_api_call_with_sigv4_auth(requests_mock, aws_credentials):
+    valid_with_sigv4 = {
+        "endpoint": "https://opensearchtarget:9200",
+        "allow_insecure": True,
+        "sigv4": {
+            "region": "us-east-2",
+            "service": "es"
+        }
+    }
+    cluster = Cluster(valid_with_sigv4)
+
+    requests_mock.get(f"{cluster.endpoint}/test_api", json={'test': True})
+
+    with mock_aws():
+        assert cluster.auth_type == AuthMethod.SIGV4
+        auth_object = cluster._generate_auth_object()
+        assert auth_object.service == "es"
+        assert auth_object.region == "us-east-2"
+
+        cluster.call_api("/test_api")
+        auth_header = requests_mock.last_request.headers['Authorization']
+        assert auth_header is not None
+        assert "AWS4-HMAC-SHA256" in auth_header
+        assert "SignedHeaders=" in auth_header
+        assert "Signature=" in auth_header
+        assert "es" in auth_header
+        assert "us-east-2" in auth_header

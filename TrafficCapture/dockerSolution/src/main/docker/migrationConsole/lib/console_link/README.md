@@ -99,7 +99,9 @@ Exactly one of the following blocks must be present:
 - `basic_auth`:
     - `username`
     - `password` OR `password_from_secret_arn`
-- `sigv4`: may be empty, not yet implemented
+- `sigv4`:
+    - `region`: Optional, specify a region for the sigv4 signing, the default is the current region.
+    - `service`: Optional, specify a service signing name for the cluster, e.g `es` for Amazon OpenSearch Service and `aoss` for Amazon OpenSearch Serverless. Defaults to `es`
 
 Within a `basic_auth` block, either a password can be provided directly, or it can contain the ARN of a secret in secrets manager which contains the password to use.
 

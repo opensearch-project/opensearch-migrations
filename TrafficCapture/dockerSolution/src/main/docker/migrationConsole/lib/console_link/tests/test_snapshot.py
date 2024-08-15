@@ -271,7 +271,7 @@ def test_s3_snapshot_create_fails_for_clusters_with_auth(mocker):
                                   ], stdout=None, stderr=None, text=True, check=True)
 
 
-def test_fs_snapshot_create_fails_for_clusters_with_auth(mocker):
+def test_fs_snapshot_create_works_for_clusters_with_basic_auth(mocker):
     config = {
         "snapshot": {
             "snapshot_name": "reindex_from_snapshot",
@@ -288,6 +288,33 @@ def test_fs_snapshot_create_fails_for_clusters_with_auth(mocker):
                                   "--source-host", snapshot.source_cluster.endpoint,
                                   "--source-username", snapshot.source_cluster.auth_details.get("username"),
                                   "--source-password", snapshot.source_cluster.get_basic_auth_password(),
+                                  "--source-insecure",
+                                  "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
+                                  ], stdout=None, stderr=None, text=True, check=True)
+
+
+def test_fs_snapshot_create_works_for_clusters_with_sigv4(mocker):
+    config = {
+        "snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "fs": {
+                "repo_path": "/path/to/repo"
+            },
+        }
+    }
+    service_name = "aoss"
+    signing_region = "us-west-1"
+    snapshot = FileSystemSnapshot(config["snapshot"],
+                                  create_valid_cluster(auth_type=AuthMethod.SIGV4,
+                                                       details={"service": service_name,
+                                                                "region": signing_region}))
+    mock = mocker.patch("subprocess.run")
+    snapshot.create()
+    mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
+                                  "--snapshot-name", config["snapshot"]["snapshot_name"],
+                                  "--source-host", snapshot.source_cluster.endpoint,
+                                  "--source-aws-service-signing-name", service_name,
+                                  "--source-aws-region", signing_region,
                                   "--source-insecure",
                                   "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
                                   ], stdout=None, stderr=None, text=True, check=True)

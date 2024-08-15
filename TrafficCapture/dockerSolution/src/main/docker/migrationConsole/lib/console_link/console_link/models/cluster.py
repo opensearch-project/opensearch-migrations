@@ -8,6 +8,7 @@ from cerberus import Validator
 import requests
 import requests.auth
 from requests.auth import HTTPBasicAuth
+from requests_auth_aws_sigv4 import AWSSigV4
 
 from console_link.models.schema_tools import contains_one_of
 
@@ -44,6 +45,11 @@ BASIC_AUTH_SCHEMA = {
 
 SIGV4_SCHEMA = {
     "nullable": True,
+    "type": "dict",
+    "schema": {
+        "region": {"type": "string", "required": False},
+        "service": {"type": "string", "required": False}
+    }
 }
 
 SCHEMA = {
@@ -88,6 +94,7 @@ class Cluster:
             self.auth_details = config["basic_auth"]
         elif 'sigv4' in config:
             self.auth_type = AuthMethod.SIGV4
+            self.auth_details = config["sigv4"] if config["sigv4"] is not None else {}
 
     def get_basic_auth_password(self) -> str:
         """This method will return the basic auth password, if basic auth is enabled.
@@ -103,6 +110,17 @@ class Cluster:
         password = client.get_secret_value(SecretId=self.auth_details["password_from_secret_arn"])
         return password["SecretString"]
 
+    def _get_sigv4_details(self, force_region=False) -> tuple[str, str]:
+        """Return the service signing name and region name. If force_region is true,
+        it will instantiate a boto3 session to guarantee that the region is not None.
+        This will fail if AWS credentials are not available.
+        """
+        assert self.auth_type == AuthMethod.SIGV4
+        if force_region and 'region' not in self.auth_details:
+            session = boto3.session.Session()
+            return self.auth_details.get("service", "es"), self.auth_details.get("region", session.region_name)
+        return self.auth_details.get("service", "es"), self.auth_details.get("region", None)
+
     def _generate_auth_object(self) -> requests.auth.AuthBase | None:
         if self.auth_type == AuthMethod.BASIC_AUTH:
             assert self.auth_details is not None  # for mypy's sake
@@ -111,6 +129,9 @@ class Cluster:
                 self.auth_details.get("username", None),
                 password
             )
+        elif self.auth_type == AuthMethod.SIGV4:
+            sigv4_details = self._get_sigv4_details()
+            return AWSSigV4(sigv4_details[0], region=sigv4_details[1])
         elif self.auth_type is AuthMethod.NO_AUTH:
             return None
         raise NotImplementedError(f"Auth type {self.auth_type} not implemented")
