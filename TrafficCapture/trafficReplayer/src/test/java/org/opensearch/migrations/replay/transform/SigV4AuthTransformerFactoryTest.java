@@ -8,6 +8,7 @@ import java.util.Random;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -17,7 +18,6 @@ import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 
 import io.netty.handler.codec.http.DefaultHttpHeaders;
-import io.netty.util.ResourceLeakDetector;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
@@ -37,16 +37,20 @@ public class SigV4AuthTransformerFactoryTest extends InstrumentationTest {
     @ValueSource(strings = {"content-type", "Content-Type", "CoNteNt-Type"})
     @WrapWithNettyLeakDetection(repetitions = 2)
     public void testSignatureProperlyApplied(String contentTypeHeaderKey) throws Exception {
-        ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
-
         Random r = new Random(2);
         var mockCredentialsProvider = new MockCredentialsProvider();
 
         // Test with payload
         testWithPayload(r, mockCredentialsProvider, contentTypeHeaderKey);
+    }
+
+    @Test
+    @WrapWithNettyLeakDetection(repetitions = 2)
+    public void testSignatureProperlyAppliedNoPayload() throws Exception {
+        var mockCredentialsProvider = new MockCredentialsProvider();
 
         // Test without payload
-        testWithoutPayload(mockCredentialsProvider, contentTypeHeaderKey);
+        testWithoutPayload(mockCredentialsProvider);
     }
 
     private void testWithPayload(Random r, MockCredentialsProvider mockCredentialsProvider, String contentTypeHeaderKey) throws Exception {
@@ -74,21 +78,19 @@ public class SigV4AuthTransformerFactoryTest extends InstrumentationTest {
         runTest(mockCredentialsProvider, contentTypeHeaderKey, contentTypeHeaderValue, expectedRequestHeaders, stringParts);
     }
 
-    private void testWithoutPayload(MockCredentialsProvider mockCredentialsProvider, String contentTypeHeaderKey) throws Exception {
+    private void testWithoutPayload(MockCredentialsProvider mockCredentialsProvider) throws Exception {
         DefaultHttpHeaders expectedRequestHeaders = new DefaultHttpHeaders();
-        var contentTypeHeaderValue = "application/x-www-form-urlencoded";
 
         expectedRequestHeaders.add("Host", "localhost");
-        expectedRequestHeaders.add(contentTypeHeaderKey, contentTypeHeaderValue);
         expectedRequestHeaders.add("Content-Length", "0");
+        expectedRequestHeaders.add("X-Amz-Date", "19700101T000000Z");
         expectedRequestHeaders.add(
             "Authorization",
             "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/19700101/us-east-1/es/aws4_request, "
-                + "SignedHeaders=" + contentTypeHeaderKey.toLowerCase() + ";host;x-amz-date, "
-                + "Signature=e3ccd4a50fa927578ca6de84b138f671d2d57ae3ad2932953ac7f3fc3d0f8a5d"
+                + "SignedHeaders=" + "host;x-amz-date, "
+                + "Signature=0c80b2640a1de42eb5cf957c6bc080731d8f83ccc1d4ebe40e72cd847ed4648e"
         );
-        expectedRequestHeaders.add("X-Amz-Date", "19700101T000000Z");
-        runTest(mockCredentialsProvider, contentTypeHeaderKey, contentTypeHeaderValue, expectedRequestHeaders, List.of());
+        runTest(mockCredentialsProvider, null, null, expectedRequestHeaders, List.of());
     }
 
     private void runTest(MockCredentialsProvider mockCredentialsProvider, String contentTypeHeaderKey, String contentTypeHeaderValue, DefaultHttpHeaders expectedRequestHeaders, java.util.List<String> stringParts) throws Exception {
@@ -102,12 +104,11 @@ public class SigV4AuthTransformerFactoryTest extends InstrumentationTest {
             TestUtils.runPipelineAndValidate(
                 rootContext,
                 factory,
-                contentTypeHeaderKey + ": " + contentTypeHeaderValue + "\r\n",
+                (contentTypeHeaderKey != null) ? contentTypeHeaderKey + ": " + contentTypeHeaderValue + "\r\n" : null,
                 stringParts,
                 expectedRequestHeaders,
                 TestUtils::resolveReferenceString
             );
         }
-
     }
 }
