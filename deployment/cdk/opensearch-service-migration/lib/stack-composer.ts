@@ -407,7 +407,7 @@ export class StackComposer {
         }
 
         let fetchMigrationStack
-        if (fetchMigrationEnabled && networkStack && migrationStack) {
+        if (fetchMigrationEnabled && networkStack && migrationStack && !sourceClusterDisabled) {
             fetchMigrationStack = new FetchMigrationStack(scope, "fetchMigrationStack", {
                 vpc: networkStack.vpc,
                 dpPipelineTemplatePath: dpPipelineTemplatePath,

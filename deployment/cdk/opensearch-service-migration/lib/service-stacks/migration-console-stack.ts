@@ -19,7 +19,6 @@ import {Fn, RemovalPolicy} from "aws-cdk-lib";
 import {MetadataMigrationYaml, ServicesYaml} from "../migration-services-yaml";
 import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
 import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
-import { assert } from "console";
 
 export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationsSolutionVersion: string,
