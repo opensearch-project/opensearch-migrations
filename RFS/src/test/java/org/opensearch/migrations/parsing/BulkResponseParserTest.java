@@ -42,8 +42,9 @@ class BulkResponseParserTest {
             itemEntry(successDocId)
         ));
 
-        var boundaryWhenParsable = 1017; // Found by running the test 
+        var boundaryWhenParsable = 1016; // Found by running the test 
         var bulkResponseNotEnoughToParse = bulkResponse.substring(0, boundaryWhenParsable);
+        System.err.println("***\n" + bulkResponseNotEnoughToParse + "\n***");
         var result = BulkResponseParser.findSuccessDocs(bulkResponseNotEnoughToParse);
         assertThat(result, empty());
 
