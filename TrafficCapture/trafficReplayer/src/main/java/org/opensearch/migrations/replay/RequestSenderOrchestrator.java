@@ -360,6 +360,10 @@ public class RequestSenderOrchestrator {
                            Duration interval,
                            RetryVisitor<T> visitor)
     {
+        if (eventLoop.isShuttingDown()) {
+            return TextTrackedFuture.failedFuture(new IllegalStateException("EventLoop is shutting down"),
+                () -> "sendRequestWithRetries is failing due to the pending shutdown of the EventLoop");
+        }
         return sendPackets(senderSupplier.get(), eventLoop,
             byteBufList.streamRetained().iterator(), startTime, interval, new AtomicInteger())
             .getDeferredFutureThroughHandle((response, t) -> {

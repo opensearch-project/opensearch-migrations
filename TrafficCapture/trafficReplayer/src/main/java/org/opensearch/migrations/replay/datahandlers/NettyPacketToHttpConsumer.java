@@ -10,6 +10,7 @@ import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
@@ -56,17 +57,6 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
      */
     private static final Optional<LogLevel> PIPELINE_LOGGING_OPTIONAL = Optional.empty();
 
-    /**
-     * This value is only applicable for retrying exception issues when creating a socket that were
-     * NOT of type java.net.SocketException.  Socket Exceptions will be retried repeatedly.  This is
-     * intentional so that the messages that are being attempted won't finish with an error,
-     * especially due to a misconfiguration on the client or on the server.
-     *
-     * NB/TODO - IS THIS THE RIGHT THING TO DO?  I suspect NOT because not getting a connection for
-     * any reason still means that you don't want it to propagate up and cause the replayer to
-     * consume the messages from the message stream.
-     */
-    private static final int MAX_RETRIES = 4;
     private static final Duration MAX_WAIT_BETWEEN_CREATE_RETRIES = Duration.ofSeconds(30);
 
     public static final String BACKSIDE_HTTP_WATCHER_HANDLER_NAME = "BACKSIDE_HTTP_WATCHER_HANDLER";
@@ -177,25 +167,9 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         return currentRequestContextUnion.getLogicalEnclosingScope();
     }
 
-    private static boolean exceptionIsRetryable(@NonNull Throwable t) {
-        return t instanceof IOException;
-    }
-
     public static BiFunction<EventLoop, IReplayContexts.IChannelKeyContext, TrackedFuture<String,ChannelFuture>>
     createClientConnectionFactory(SslContext sslContext, URI uri) {
-        AtomicInteger retriesRef = new AtomicInteger(MAX_RETRIES);
-        var waitBetweenRetryDuration = Duration.ofMillis(1);
-        return (eventLoop, ctx) -> NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext, uri, ctx,
-            t -> {
-                if (t == null || // no reason to wait, caller will see no exception and proceed
-                    (!(t instanceof java.net.SocketException) && retriesRef.decrementAndGet() <= 0)) { // need to give up, exhausted retries
-                    return null;
-                }
-                var doubledDuration = waitBetweenRetryDuration.multipliedBy(2);
-                return MAX_WAIT_BETWEEN_CREATE_RETRIES.minus(doubledDuration).isNegative()
-                    ? MAX_WAIT_BETWEEN_CREATE_RETRIES
-                    : doubledDuration;
-            });
+        return (eventLoop, ctx) -> NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext, uri, ctx);
     }
 
     public static class ChannelNotActiveException extends IOException {
@@ -206,9 +180,22 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         EventLoop eventLoop,
         SslContext sslContext,
         URI serverUri,
-        IReplayContexts.IChannelKeyContext channelKeyContext,
-        Function<Throwable, Duration> retryWaitResolver
+        IReplayContexts.IChannelKeyContext channelKeyContext
     ) {
+        return createClientConnection(eventLoop, sslContext, serverUri, channelKeyContext, Duration.ofMillis(1));
+    }
+
+    public static TrackedFuture<String, ChannelFuture> createClientConnection(
+            EventLoop eventLoop,
+            SslContext sslContext,
+            URI serverUri,
+            IReplayContexts.IChannelKeyContext channelKeyContext,
+            Duration nextRetryDuration
+    ) {
+        if (eventLoop.isShuttingDown()) {
+            return TextTrackedFuture.failedFuture(new IllegalStateException("EventLoop is shutting down"),
+                () -> "createClientConnection is failing due to the pending shutdown of the EventLoop");
+        }
         String host = serverUri.getHost();
         int port = serverUri.getPort();
         log.atTrace().setMessage(() -> "Active - setting up backend connection to " + host + ":" + port).log();
@@ -237,13 +224,15 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                 } else if (!outboundChannelFuture.channel().isActive()) {
                     t = new ChannelNotActiveException();
                 }
-                final var retryDuration = retryWaitResolver.apply(t);
-                if (retryDuration != null) { // in come sases, we might not want to retry
-                    return NettyFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop, retryDuration)
-                        .thenCompose(x->createClientConnection(eventLoop, sslContext, serverUri, channelKeyContext, retryWaitResolver), () -> "");
-                } else if (t == null) {
+                if (t == null) {
                     return initializeConnectionHandlers(sslContext, channelKeyContext, outboundChannelFuture);
-                } else {
+                } else if (t instanceof Exception) { // let Throwables propagate
+                    return NettyFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop, nextRetryDuration)
+                        .thenCompose(x->createClientConnection(eventLoop, sslContext, serverUri, channelKeyContext,
+                                Duration.ofMillis(Math.min(MAX_WAIT_BETWEEN_CREATE_RETRIES.toMillis(),
+                                    nextRetryDuration.multipliedBy(2).toMillis()))),
+                            () -> "");
+                } else { // give up
                     channelKeyContext.addTraceException(t, true);
                     return TextTrackedFuture.failedFuture(t, () -> "failed to connect");
                 }

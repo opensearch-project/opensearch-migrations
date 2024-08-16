@@ -362,6 +362,11 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         }
     }
 
+    @Override
+    protected boolean shouldRetry() {
+        return !stopReadingRef.get();
+    }
+
     @SneakyThrows
     @Override
     public @NonNull CompletableFuture<Void> shutdown(Error error) {
@@ -379,6 +384,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         }
         stopReadingRef.set(true);
         liveTrafficStreamLimiter.close();
+
 
         var nettyShutdownFuture = clientConnectionPool.shutdownNow();
         nettyShutdownFuture.whenComplete((v, t) -> {

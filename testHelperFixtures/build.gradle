@@ -33,12 +33,15 @@ dependencies {
 
     testFixturesImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     testFixturesImplementation group: 'com.google.guava', name: 'guava'
+    testFixturesImplementation group: 'eu.rekawek.toxiproxy', name: 'toxiproxy-java'
     testFixturesImplementation group: 'io.netty', name: 'netty-all'
     testFixturesImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
     testFixturesImplementation group: 'org.bouncycastle', name: 'bcprov-jdk18on'
     testFixturesImplementation group: 'org.bouncycastle', name: 'bcpkix-jdk18on'
     testFixturesImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
     testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api'
+    testFixturesApi group: 'org.testcontainers', name: 'testcontainers'
+    testFixturesApi group: 'org.testcontainers', name: 'toxiproxy'
 
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'

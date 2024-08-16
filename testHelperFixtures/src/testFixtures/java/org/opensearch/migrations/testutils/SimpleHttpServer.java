@@ -112,8 +112,11 @@ public class SimpleHttpServer implements AutoCloseable {
             }
 
             httpExchange.sendResponseHeaders(headersAndPayload.statusCode, 0);
-            httpExchange.getResponseBody().write(headersAndPayload.payloadBytes);
-            httpExchange.getResponseBody().flush();
+            var payload = headersAndPayload.payloadBytes;
+            if (payload != null) {
+                httpExchange.getResponseBody().write(headersAndPayload.payloadBytes);
+                httpExchange.getResponseBody().flush();
+            }
             httpExchange.getResponseBody().close();
             httpExchange.close();
         });

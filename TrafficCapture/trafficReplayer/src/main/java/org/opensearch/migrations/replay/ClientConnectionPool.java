@@ -123,9 +123,12 @@ public class ClientConnectionPool {
     }
 
     public CompletableFuture<Void> shutdownNow() {
-        CompletableFuture<Void> shutdownFuture = new CompletableFuture<>();
+        var rval = NettyFutureBinders.bindNettyFutureToCompletableFuture(eventLoopGroup.shutdownGracefully());
+        connectionId2ChannelCache.asMap().forEach((k,v)->{
+            closeClientConnectionChannel(v);
+        });
         connectionId2ChannelCache.invalidateAll();
-        return NettyFutureBinders.bindNettyFutureToCompletableFuture(eventLoopGroup.shutdownGracefully());
+        return rval;
     }
 
     private TrackedFuture<String, Channel> closeClientConnectionChannel(ConnectionReplaySession session) {

@@ -74,7 +74,7 @@ public class TracingTest extends InstrumentationTest {
             }
         }).toArray(String[]::new);
         Stream.of(keys).forEach(spanName -> {
-            Assertions.assertNotNull(byName.get(spanName));
+            Assertions.assertNotNull(byName.get(spanName), "\"" + spanName + "\" not present");
             Assertions.assertEquals(1, byName.get(spanName).size());
             byName.remove(spanName);
         });

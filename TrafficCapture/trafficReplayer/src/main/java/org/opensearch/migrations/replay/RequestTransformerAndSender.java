@@ -1,6 +1,8 @@
 package org.opensearch.migrations.replay;
 
+import java.io.IOException;
 import java.time.Instant;
+import java.util.concurrent.CancellationException;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Stream;
@@ -33,8 +35,15 @@ public class RequestTransformerAndSender<T> {
             retryVisitorFactory.getRetryCheckVisitor(transformedResult, finishedAccumulatingResponseFuture);
         return (requestBytes, aggResponse, t) -> {
             resultsConsumer.accept(aggResponse);
+            if (!shouldRetry()) {
+                return TextTrackedFuture.completedFuture(
+                    new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
+                        RequestSenderOrchestrator.RetryDirective.DONE,
+                        null),
+                    () -> "Returning a future to NOT retry because the class is currently prohibiting retries" +
+                        "");
+            }
             if (t != null) {
-                assert (t instanceof java.net.ConnectException);
                 return TextTrackedFuture.completedFuture(
                     new RequestSenderOrchestrator.DeterminedTransformedResponse<>(
                         RequestSenderOrchestrator.RetryDirective.RETRY,
@@ -42,9 +51,17 @@ public class RequestTransformerAndSender<T> {
                     () -> "Returning a future to retry due to a connection exception");
             } else {
                 assert (aggResponse != null);
-                return perRequestStatefulVisitor.visit(requestBytes, aggResponse, t);
             }
+            return perRequestStatefulVisitor.visit(requestBytes, aggResponse, t);
         };
+    }
+
+    /**
+     * This is called by before passing the response through the visitor returned by the retryVisitorFactory.
+     * This is used to suppress retrying when the system is being shut down.
+     */
+    protected boolean shouldRetry() {
+        return true;
     }
 
     /**
