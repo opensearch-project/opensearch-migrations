@@ -5,9 +5,11 @@ If the Kibana objects are exported from 7.10.2 or later version, it may not be l
 
 ### How to use this tool?
 
+From the parent project, run the following command. The input file should be in *ndjson* format.
 ```shell
-./gradlew dashboard-sanitzer:run --args='--source <<Your kibana object file location>> [--output <<output file location>>]'
+./gradlew dashboardsSanitzer:run --args='--source <<Your kibana object file location>> [--output <<output file location>>]'
 ```
+
 ### Known limitations
 
 * This has not been tested with Kibana version 8.x onwards
