@@ -1,9 +1,9 @@
 package org.opensearch.migrations.dashboards.model;
 
 import java.io.IOException;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonProcessingException;
@@ -12,8 +12,16 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.Data;
 
+/**
+ * This class represents the Dashboard object from the OpenSearch API.
+ * It contains various properties and methods to access and manipulate the dashboard data.
+ */
 @Data
 public class Dashboard {
+    /**
+     * Attributes of the Dashboard object.
+     * @see Attributes
+     */
     @JsonProperty("attributes")
     private Attributes attributes;
 
@@ -33,16 +41,18 @@ public class Dashboard {
     private String type;
 
     @JsonProperty("updated_at")
-    private String updatedAt;
+//    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-ddTHH:mm:ss.SSSZ", timezone = "UTC")
+    private String updated_at;
 
     @JsonProperty("created_at")
-    private String createdAt;
+//    @JsonFormat(shape = JsonFormat.Shape.STRING, pattern = "yyyy-MM-ddTHH:mm:ss.SSSZ", timezone = "UTC")
+    private String created_at;
 
     @JsonProperty("version")
     private String version;
 
     @JsonProperty("sort")
-    private int[] sort;
+    private long[] sort;
 
     @JsonProperty("typeMigrationVersion")
     private String typeMigrationVersion;
@@ -50,6 +60,10 @@ public class Dashboard {
     @JsonProperty("managed")
     private boolean managed;
 
+    /**
+     * Attributes of the Dashboard object.
+     * @see Attributes
+     */
     @Data
     public static class Attributes {
         @JsonProperty("description")
@@ -129,8 +143,19 @@ public class Dashboard {
         @JsonProperty("slug")
         private String slug;
 
+        @JsonProperty("sort")
+        private String[][] sort;
+
     }
 
+    /**
+     * This method makes the dashboard compatible with the OpenSearch,
+     * It sanitizes the panel JSON, removes incompatible object types, and updates the migration version accordingly.
+     * This is tested with kibana v 7.17, and not fully tested with Kibana v8 onwards
+     *
+     * @throws JsonProcessingException
+     * @throws IOException
+     */
     public void makeCompatibleToOS() throws JsonProcessingException, IOException {
         switch (type) {
             case "dashboard":
@@ -143,16 +168,15 @@ public class Dashboard {
                 }
                 sanitizePanelJSON();
                 // fix some visualization references name
-                List<References> temp = new ArrayList<>();
-                for (References ref : references) {
-                    if (isCompatibleObjectType(ref.getType())) {
-                        if (ref.getType().equals("visualization")) {
-                            ref.setName(getNormalizedVizName(ref.getName()));
-                        }
-                        temp.add(ref);
-                    }
-                }
-                references = temp;
+                references = references.stream()
+                        .filter(ref -> isCompatibleObjectType(ref.getType()))
+                        .map(ref -> {
+                            if (ref.getType().equals("visualization")) {
+                                ref.setName(getNormalizedVizName(ref.getName()));
+                            }
+                            return ref;
+                        })
+                        .collect(Collectors.toList());
                 break;
             case "visualization":
                 migrationVersion.setVisualization("7.9.3");
@@ -178,7 +202,13 @@ public class Dashboard {
         return isCompatibleObjectType(type);
     }
 
-    private static boolean isCompatibleObjectType(String objectType) {
+    /**
+     * This method checks if the object type is compatible with the OpenSearch Dashboards.
+     * It excludes the following object types from the dashboard json: "lens", "map", "canvas-workpad", "canvas-element", "graph-workspace", "connector", "rule", "action".
+     * @param objectType
+     * @return
+     */
+    private boolean isCompatibleObjectType(String objectType) {
         switch (objectType) {
             case "":
             case "lens":
@@ -195,25 +225,36 @@ public class Dashboard {
         }
     }
 
-    // SanitizePanelJSON Removes all non-compatible object types from the panel json object
+    /**
+     * This method sanitizes the panel JSON by removing incompatible object types using the isCompatibleObjectType method.
+     * It uses the Jackson ObjectMapper to read and write the JSON data.
+     * @return
+     * @throws JsonProcessingException
+     * @throws IOException
+     */
     private void sanitizePanelJSON() throws JsonProcessingException, IOException {
         ObjectMapper objectMapper = new ObjectMapper();
         List<Map<String, Object>> panels = objectMapper.readValue(attributes.getPanelsJSON(), new TypeReference<List<Map<String, Object>>>() {});
 
-        List<Map<String, Object>> results = new ArrayList<>();
-        for (Map<String, Object> panel : panels) {
-            if (isCompatibleObjectType(panel.get("type").toString())) {
-                results.add(panel);
-            }
-        }
+        List<Map<String, Object>> results = panels.stream()
+                .filter(panel -> panel.get("type") != null)
+                .filter(panel -> isCompatibleObjectType(panel.get("type").toString()))
+                .collect(Collectors.toList());
 
         String resultJson = objectMapper.writeValueAsString(results);
         attributes.setPanelsJSON(resultJson);
     }
 
+    /**
+     * This method sanitizes the location JSON by removing the "url" field from the "state" object.
+     * It uses the Jackson ObjectMapper to read and write the JSON data.
+     * @return
+     * @throws JsonProcessingException
+     * @throws IOException
+     */
     private void sanitizeLocationJSON() throws JsonProcessingException, IOException {
         ObjectMapper objectMapper = new ObjectMapper();
-        if (attributes.getLocatorJSON().isEmpty()) {
+        if (attributes.getLocatorJSON() == null || attributes.getLocatorJSON().isEmpty()) {
             return;
         }
 

@@ -11,6 +11,10 @@ import org.opensearch.migrations.dashboards.model.Dashboard;
 import lombok.Data;
 import lombok.Getter;
 
+/**
+ * This class is used to keep track of the statistics of the processing.
+ * It provides methods to register skipped and processed dashboard objects, and print the statistics in a JSON format.
+ */
 @Data
 public class Stats {
     private int total;
@@ -24,16 +28,22 @@ public class Stats {
 
     }
 
+    public Stats() {
+        skipped = new StatsDetails();
+    }
+
+    /**
+     * This method registers a skipped dashboard object by incrementing the count and updating the details map.
+     * It skips the registration if the dashboard object type is null or empty.
+     * @param dashboardObject
+     */
     public void registerSkipped(Dashboard dashboardObject) {
-        if (dashboardObject.getType().isEmpty()) {
-//            try {
-//                System.out.println(new ObjectMapper().writeValueAsString(dashboardObject));
-//            } catch (JsonProcessingException e) {
-//                e.printStackTrace();
-//            }
+        if (dashboardObject.getType()== null || dashboardObject.getType().isEmpty()) {
+//         it could be a summary line
             return;
         }
         skipped.count++;
+        total++;
         int objectTypeCount = skipped.details.getOrDefault(dashboardObject.getType(), 0);
         if (objectTypeCount == 0) {
             skipped.details.put(dashboardObject.getType(), 1);
@@ -45,6 +55,10 @@ public class Stats {
         processed++;
         total++;
     }
+
+    /**
+     * This method prints the statistics in a JSON format using the Gson library.
+     */
     public void printStats() {
         Gson gson = new GsonBuilder().setPrettyPrinting().create();
         String json = gson.toJson(this);

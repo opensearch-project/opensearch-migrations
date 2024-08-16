@@ -8,10 +8,12 @@ import com.google.gson.Gson;
 import org.opensearch.migrations.dashboards.model.Dashboard;
 import org.opensearch.migrations.dashboards.util.Stats;
 
+import lombok.extern.slf4j.Slf4j;
 import picocli.CommandLine;
 import picocli.CommandLine.Command;
 
 @Command(name = "Dashboard Sanitizer", version = "0.1", mixinStandardHelpOptions = true)
+@Slf4j
 public class Sanitizer implements Runnable{
 
     @CommandLine.Option(names = {"-V", "--version"}, versionHelp = true, description = "display version info")
@@ -35,7 +37,7 @@ public class Sanitizer implements Runnable{
         try {
             Scanner scanner = new Scanner(new BufferedInputStream(new FileInputStream(sourceFile)));
             BufferedWriter writer = new BufferedWriter(new FileWriter(outputFile));
-            Stats stats = processFile(scanner, writer);
+            Stats stats = sanitizeDashboardsFromFile(scanner, writer);
             System.out.printf("%s file is sanitized and output available at %s%n", sourceFile, outputFile);
             stats.printStats();
         } catch (IOException e) {
@@ -57,7 +59,7 @@ public class Sanitizer implements Runnable{
         System.exit(exitCode);
     }
 
-    public static Stats processFile(Scanner source, BufferedWriter writer) throws IOException {
+    public static Stats sanitizeDashboardsFromFile(Scanner source, BufferedWriter writer) throws IOException {
 
         Gson gson = new Gson();
         Stats counter = new Stats();
@@ -67,7 +69,7 @@ public class Sanitizer implements Runnable{
             Dashboard dashboardObject = gson.fromJson(line, Dashboard.class);
             // if dashboard id is null, it could be summary line, skip the line
             if (dashboardObject.getId() == null) {
-//                counter.registerSkipped(dashboardObject);
+                counter.registerSkipped(dashboardObject);
                 continue;
             } else if (!dashboardObject.isCompatibleType()) {
                 counter.registerSkipped(dashboardObject);

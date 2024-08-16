@@ -3,7 +3,11 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 
 import lombok.Data;
 
-//add lombok data annotation
+
+/**
+ * This class represents the MigrationVersion object, which contains the versions of various components
+ * of the OpenSearch Dashboards. It is used to ensure compatibility with different versions of the components.
+ */
 @Data
 public class MigrationVersion {
     @JsonProperty("lens")
