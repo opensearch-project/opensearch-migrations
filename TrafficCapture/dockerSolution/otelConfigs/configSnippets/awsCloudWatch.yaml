@@ -1,6 +1,6 @@
 exporters:
   awsemf:
-    namespace: 'TrafficCaptureReplay'
+    namespace: 'OpenSearchMigrations'
 
 service:
   pipelines:

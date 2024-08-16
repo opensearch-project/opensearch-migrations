@@ -15,7 +15,6 @@ import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
 import com.rfs.common.ClusterVersion;
-import com.rfs.common.ConnectionDetails;
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Repo;
@@ -23,6 +22,7 @@ import com.rfs.common.S3Uri;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SourceRepo;
 import com.rfs.common.TryHandlePhaseFailure;
+import com.rfs.common.http.ConnectionContext;
 import com.rfs.models.GlobalMetadata;
 import com.rfs.models.IndexMetadata;
 import com.rfs.transformers.TransformFunctions;
@@ -40,6 +40,9 @@ import lombok.extern.slf4j.Slf4j;
 public class MetadataMigration {
 
     public static class Args {
+        @Parameter(names = {"--help", "-h"}, help = true, description = "Displays information about how to use this tool")
+        private boolean help;
+
         @Parameter(names = { "--snapshot-name" }, description = "The name of the snapshot to migrate", required = true)
         public String snapshotName;
 
@@ -60,7 +63,7 @@ public class MetadataMigration {
         public String s3Region;
 
         @ParametersDelegate
-        public ConnectionDetails.TargetArgs targetArgs;
+        public ConnectionContext.TargetArgs targetArgs = new ConnectionContext.TargetArgs();
 
         @Parameter(names = { "--index-allowlist" }, description = ("Optional.  List of index names to migrate"
             + " (e.g. 'logs_2024_01, logs_2024_02').  Default: all non-system indices (e.g. those not starting with '.')"), required = false)
@@ -89,9 +92,14 @@ public class MetadataMigration {
     }
 
     public static void main(String[] args) throws Exception {
-        // Grab out args
         Args arguments = new Args();
-        JCommander.newBuilder().addObject(arguments).build().parse(args);
+        JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
+        jCommander.parse(args);
+
+        if (arguments.help) {
+            jCommander.usage();
+            return;
+        }
 
         var rootContext = new RootMetadataMigrationContext(
             RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "rfs"),
@@ -120,7 +128,7 @@ public class MetadataMigration {
         final List<String> componentTemplateAllowlist = arguments.componentTemplateAllowlist;
         final int awarenessDimensionality = arguments.minNumberOfReplicas + 1;
 
-        final ConnectionDetails targetConnection = new ConnectionDetails(arguments.targetArgs);
+        final ConnectionContext targetConnection = arguments.targetArgs.toConnectionContext();
 
         TryHandlePhaseFailure.executeWithTryCatch(() -> {
             log.info("Running RfsWorker");

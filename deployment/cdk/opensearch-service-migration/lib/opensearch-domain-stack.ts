@@ -14,7 +14,7 @@ import {AnyPrincipal, Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {ILogGroup, LogGroup} from "aws-cdk-lib/aws-logs";
 import {ISecret, Secret} from "aws-cdk-lib/aws-secretsmanager";
 import {StackPropsExt} from "./stack-composer";
-import { ClusterYaml } from "./migration-services-yaml";
+import { ClusterBasicAuth, ClusterYaml } from "./migration-services-yaml";
 import { MigrationSSMParameter, createMigrationStringParameter, getMigrationStringParameterValue } from "./common-utilities";
 
 
@@ -115,12 +115,11 @@ export class OpenSearchDomainStack extends Stack {
     }
   }
 
-  generateTargetClusterYaml(domain: Domain, adminUserName: string | undefined) {
+  generateTargetClusterYaml(domain: Domain, adminUserName: string | undefined, adminUserSecret: ISecret|undefined) {
     let targetCluster = new ClusterYaml()
     targetCluster.endpoint = `https://${domain.domainEndpoint}:443`;
-    if (adminUserName && domain.masterUserPassword) {
-      // TODO: need to actually deal with the password as a secret (pass the arn)
-      targetCluster.basic_auth = { user: adminUserName, passsword: domain.masterUserPassword }
+    if (adminUserName) {
+        targetCluster.basic_auth = new ClusterBasicAuth({ username: adminUserName, password_from_secret_arn: adminUserSecret?.secretArn })
     } else {
       targetCluster.no_auth = ''
     }
@@ -230,6 +229,6 @@ export class OpenSearchDomainStack extends Stack {
     });
 
     this.createSSMParameters(domain, adminUserName, adminUserSecret, props.stage, deployId)
-    this.generateTargetClusterYaml(domain, adminUserName)
+    this.generateTargetClusterYaml(domain, adminUserName, adminUserSecret)
   }
 }

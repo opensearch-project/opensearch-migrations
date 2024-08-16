@@ -5,18 +5,19 @@ name = "pypi"
 
 [packages]
 requests = ">=2.32.3"
-opensearch-benchmark = "*"
 boto3 = "*"
 pyyaml = "*"
 Click = "*"
 cerberus = "*"
 awscli = "*"
+requests-auth-aws-sigv4 = ">=0.7"
 
 [dev-packages]
 pytest = "*"
 pytest-mock = "*"
 requests-mock = "*"
 coverage = "*"
+moto = "*"
 
 [requires]
-python_version = "3.10"
+python_version = "3.11"

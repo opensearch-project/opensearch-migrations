@@ -53,7 +53,7 @@ Refer to [AWS Deployment](deployment/README.md) to deploy this solution to AWS.
 
 ### Code Style
 
-There are many different source type unders this project, the overall style is enforced via `./gradlew spotlessCheck` and is verified on all pull requests.  You can ask resolve the issues automatically with `./gradlew spotlessApply`.  For java files an eclipse formatter is avaliable [formatter.xml](./formatter.xml) in the root of the project, consult your IDE extensions/plugins for how to use this formatter during development.
+There are many different source type under this project, the overall style is enforced via `./gradlew spotlessCheck` and is verified on all pull requests.  Spotless can resolve these issues automatically with `./gradlew spotlessApply`.  An recommended eclipse formatter [formatter.xml](./formatter.xml) is available at the root of the project, consult your IDE extensions/plugins for how to use this formatter during development.
 
 ### Pre-commit hooks
 

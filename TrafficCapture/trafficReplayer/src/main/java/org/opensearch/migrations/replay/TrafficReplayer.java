@@ -6,6 +6,7 @@ import java.net.URI;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.List;
@@ -22,10 +23,9 @@ import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
-import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
-import org.opensearch.migrations.transform.IHttpMessage;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
+import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 
 import com.beust.jcommander.JCommander;
@@ -424,19 +424,13 @@ public class TrafficReplayer {
             String serviceName = serviceAndRegion[0];
             String region = serviceAndRegion[1];
 
-            return new IAuthTransformerFactory() {
-                final DefaultCredentialsProvider defaultCredentialsProvider = DefaultCredentialsProvider.create();
-
-                @Override
-                public IAuthTransformer getAuthTransformer(IHttpMessage httpMessage) {
-                    return new SigV4Signer(defaultCredentialsProvider, serviceName, region, "https", null);
-                }
-
-                @Override
-                public void close() {
-                    defaultCredentialsProvider.close();
-                }
-            };
+            return new SigV4AuthTransformerFactory(
+                DefaultCredentialsProvider.create(),
+                serviceName,
+                region,
+                "https",
+                Clock::systemUTC
+            );
         } else if (params.removeAuthHeader) {
             return RemovingAuthTransformerFactory.instance;
         } else {

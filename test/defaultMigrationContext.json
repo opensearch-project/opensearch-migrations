@@ -8,6 +8,7 @@
     "openAccessPolicyEnabled": true,
     "domainRemovalPolicy": "DESTROY",
     "artifactBucketRemovalPolicy": "DESTROY",
+    "trafficReplayerServiceEnabled": true,
     "trafficReplayerExtraArgs": "--speedup-factor 10.0",
     "fetchMigrationEnabled": true,
     "reindexFromSnapshotServiceEnabled": true,

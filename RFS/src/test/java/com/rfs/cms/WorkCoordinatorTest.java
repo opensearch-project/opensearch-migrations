@@ -1,26 +1,24 @@
 package com.rfs.cms;
 
 import java.io.IOException;
-import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
 
-import io.opentelemetry.sdk.metrics.data.LongPointData;
-import io.opentelemetry.sdk.metrics.data.MetricData;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
 import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 
+import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.framework.SearchClusterContainer;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -46,14 +44,17 @@ public class WorkCoordinatorTest {
     public static final String DUMMY_FINISHED_DOC_ID = "dummy_finished_doc";
 
     final SearchClusterContainer container = new SearchClusterContainer(SearchClusterContainer.OS_V1_3_16);
-    private Supplier<ApacheHttpClient> httpClientSupplier;
+    private Supplier<AbstractedHttpClient> httpClientSupplier;
 
     @BeforeEach
     void setupOpenSearchContainer() throws Exception {
         var testContext = WorkCoordinationTestContext.factory().noOtelTracking();
         // Start the container. This step might take some time...
         container.start();
-        httpClientSupplier = () -> new ApacheHttpClient(URI.create(container.getUrl()));
+        httpClientSupplier = () -> new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
+            .host(container.getUrl())
+            .build()
+            .toConnectionContext());
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 2, "testWorker")) {
             workCoordinator.setup(testContext::createCoordinationInitializationStateContext);
         }
@@ -77,15 +78,7 @@ public class WorkCoordinatorTest {
             );
 
         var objectMapper = new ObjectMapper();
-        return objectMapper.readTree(response.getPayloadStream()).path("hits");
-    }
-
-    private long getMetricValueOrZero(Collection<MetricData> metrics, String s) {
-        return metrics.stream()
-            .filter(md -> md.getName().startsWith(s))
-            .reduce((a, b) -> b)
-            .flatMap(md -> md.getLongSumData().getPoints().stream().reduce((a, b) -> b).map(LongPointData::getValue))
-            .orElse(0L);
+        return objectMapper.readTree(response.getPayloadBytes()).path("hits");
     }
 
     @Test
@@ -113,9 +106,12 @@ public class WorkCoordinatorTest {
             Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, rval);
         }
         var metrics = testContext.inMemoryInstrumentationBundle.getFinishedMetrics();
-        Assertions.assertEquals(1, getMetricValueOrZero(metrics, "noNextWorkAvailableCount"));
-        Assertions.assertEquals(0, getMetricValueOrZero(metrics, "acquireNextWorkItemRetries"));
-        Assertions.assertEquals(NUM_DOCS, getMetricValueOrZero(metrics, "nextWorkAssignedCount"));
+        Assertions.assertEquals(1,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "noNextWorkAvailableCount"));
+        Assertions.assertEquals(0,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "acquireNextWorkItemRetries"));
+        Assertions.assertEquals(NUM_DOCS,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "nextWorkAssignedCount"));
 
         Assertions.assertEquals(NUM_DOCS, seenWorkerItems.size());
     }
@@ -184,7 +180,8 @@ public class WorkCoordinatorTest {
             Assertions.assertFalse(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));
         }
         var metrics = testContext.inMemoryInstrumentationBundle.getFinishedMetrics();
-        Assertions.assertNotEquals(0, getMetricValueOrZero(metrics, "acquireNextWorkItemRetries"));
+        Assertions.assertNotEquals(0,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "acquireNextWorkItemRetries"));
     }
 
     static AtomicInteger nonce = new AtomicInteger();

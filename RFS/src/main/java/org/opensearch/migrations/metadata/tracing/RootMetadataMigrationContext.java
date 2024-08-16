@@ -7,14 +7,14 @@ import org.opensearch.migrations.tracing.IContextTracker;
 import com.rfs.tracing.BaseRootRfsContext;
 
 public class RootMetadataMigrationContext extends BaseRootRfsContext {
-    public static final String SCOPE_NAME = "metadata";
+    public static final String SCOPE_NAME = "metadataMigration";
 
     public final MetadataMigrationContexts.ClusterMetadataContext.MetricInstruments metadataMetrics;
     public final MetadataMigrationContexts.MigrateTemplateContext.MetricInstruments indexTemplateInstruments;
     public final MetadataMigrationContexts.CreateIndexContext.MetricInstruments createIndexInstruments;
 
     public RootMetadataMigrationContext(OpenTelemetry sdk, IContextTracker contextTracker) {
-        super(sdk, contextTracker);
+        super(SCOPE_NAME, sdk, contextTracker);
         var meter = this.getMeterProvider().get(SCOPE_NAME);
 
         metadataMetrics = MetadataMigrationContexts.ClusterMetadataContext.makeMetrics(meter);

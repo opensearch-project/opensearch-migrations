@@ -168,7 +168,7 @@ def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
         "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
         "--target-insecure",
-        "--otelCollectorEndpoint", config["otel_endpoint"],
+        "--otel-collector-endpoint", config["otel_endpoint"],
     ], stdout=None, stderr=None, text=True, check=True
     )
 
@@ -196,7 +196,7 @@ def test_metadata_with_fs_snapshot_makes_correct_subprocess_call(mocker):
         "--min-replicas", '0',
         "--file-system-repo-path", config["from_snapshot"]["fs"]["repo_path"],
         "--target-insecure",
-        "--otelCollectorEndpoint", config["otel_endpoint"],
+        "--otel-collector-endpoint", config["otel_endpoint"],
     ], stdout=None, stderr=None, text=True, check=True)
 
 
@@ -256,7 +256,7 @@ def test_metadata_with_allowlists_makes_correct_subprocess_call(mocker):
         "--index-allowlist", "index1,index2",
         "--index-template-allowlist", "index_template1,index_template2",
         "--component-template-allowlist", "component_template1,component_template2",
-        "--otelCollectorEndpoint", config["otel_endpoint"],
+        "--otel-collector-endpoint", config["otel_endpoint"],
     ], stdout=None, stderr=None, text=True, check=True
     )
 
@@ -278,3 +278,70 @@ def test_metadata_migrate_detached_makes_correct_subprocess_call(mocker):
     metadata.migrate(detached_log="/tmp/log_file.log")
 
     mock.assert_called_once()
+
+
+def test_metadata_with_target_config_auth_makes_correct_subprocess_call(mocker):
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "local_dir": "/tmp/s3",
+            "s3": {
+                "repo_uri": "s3://my-bucket",
+                "aws_region": "us-east-1"
+            },
+        }
+    }
+    target = create_valid_cluster(auth_type=AuthMethod.BASIC_AUTH)
+    metadata = Metadata(config, target, None)
+
+    mock = mocker.patch("subprocess.run")
+    metadata.migrate()
+
+    mock.assert_called_once_with([
+        "/root/metadataMigration/bin/MetadataMigration",
+        "--snapshot-name", config["from_snapshot"]["snapshot_name"],
+        "--target-host", target.endpoint,
+        "--min-replicas", '0',
+        "--s3-local-dir", config["from_snapshot"]["local_dir"],
+        "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
+        "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
+        "--target-username", target.auth_details.get("username"),
+        "--target-password", target.get_basic_auth_password(),
+        "--target-insecure",
+    ], stdout=None, stderr=None, text=True, check=True
+    )
+
+
+def test_metadata_with_target_sigv4_makes_correct_subprocess_call(mocker):
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "local_dir": "/tmp/s3",
+            "s3": {
+                "repo_uri": "s3://my-bucket",
+                "aws_region": "us-east-1"
+            },
+        }
+    }
+    service_name = "aoss"
+    signing_region = "us-west-1"
+    target = create_valid_cluster(auth_type=AuthMethod.SIGV4, details={"service": service_name,
+                                                                       "region": signing_region})
+    metadata = Metadata(config, target, None)
+
+    mock = mocker.patch("subprocess.run")
+    metadata.migrate()
+
+    mock.assert_called_once_with([
+        "/root/metadataMigration/bin/MetadataMigration",
+        "--snapshot-name", config["from_snapshot"]["snapshot_name"],
+        "--target-host", target.endpoint,
+        "--min-replicas", '0',
+        "--s3-local-dir", config["from_snapshot"]["local_dir"],
+        "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
+        "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
+        "--target-aws-service-signing-name", service_name,
+        "--target-aws-region", signing_region,
+        "--target-insecure",
+    ], stdout=None, stderr=None, text=True, check=True
+    )

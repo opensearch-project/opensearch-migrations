@@ -27,7 +27,7 @@ public class SearchClusterRequests {
     @SneakyThrows
     public Map<String, Integer> getMapOfIndexAndDocCount(final RestClient client) {
         var catIndicesResponse = client.get("_cat/indices?format=json", context.createUnboundRequestContext());
-        assertThat(catIndicesResponse.code, equalTo(200));
+        assertThat(catIndicesResponse.statusCode, equalTo(200));
 
         var catBodyJson = mapper.readTree(catIndicesResponse.body);
         var allIndices = new ArrayList<String>();
@@ -39,7 +39,7 @@ public class SearchClusterRequests {
          * Why not trust the doc.count from `_cat/indices?
          * Turns out that count can include deleted/updated documents too depending on the search cluster implementation
          * by querying count directly on each index it ensures the number of documents no matter if this bug exists or not
-         * 
+         *
          * See https://github.com/elastic/elasticsearch/issues/25868#issuecomment-317990140
          */
         var mapOfIndexAndDocCount = interestingIndices.stream().collect(Collectors.toMap(i -> i, i -> {

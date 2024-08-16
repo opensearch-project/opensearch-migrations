@@ -82,7 +82,7 @@ class MetricsSource:
         raise NotImplementedError
 
 
-CLOUDWATCH_METRICS_NAMESPACE = "TrafficCaptureReplay"
+CLOUDWATCH_METRICS_NAMESPACE = "OpenSearchMigrations"
 
 
 class CloudwatchMetricMetadata:
@@ -95,7 +95,7 @@ class CloudwatchMetricMetadata:
                              {'Name': 'OTelLib', 'Value': 'replayer'},
                              {'Name': 'statusCodesMatch', 'Value': 'true'}],
               'MetricName': 'tupleComparison',
-              'Namespace': 'TrafficCaptureReplay'},
+              'Namespace': 'OpenSearchMigrations'},
         """
         assert "Namespace" in list_metric_data, "Namespace is missing"
         assert "MetricName" in list_metric_data, "MetricName is missing"

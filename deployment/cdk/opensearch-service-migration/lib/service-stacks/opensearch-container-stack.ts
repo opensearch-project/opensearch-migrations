@@ -101,6 +101,8 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
             ...props
         });
 
-        this.createSSMParameters(props.stage, deployId, adminUserName, adminUserSecret)
+        if (props.enableDemoAdmin) {
+            this.createSSMParameters(props.stage, deployId, adminUserName, adminUserSecret)
+        }
     }
 }

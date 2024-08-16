@@ -7,7 +7,6 @@ import * as defaultValuesJson from "../default-values.json"
 import {NetworkStack} from "./network-stack";
 import {MigrationAssistanceStack} from "./migration-assistance-stack";
 import {FetchMigrationStack} from "./fetch-migration-stack";
-import {MSKUtilityStack} from "./msk-utility-stack";
 import {MigrationConsoleStack} from "./service-stacks/migration-console-stack";
 import {CaptureProxyESStack} from "./service-stacks/capture-proxy-es-stack";
 import {TrafficReplayerStack} from "./service-stacks/traffic-replayer-stack";
@@ -19,7 +18,7 @@ import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-st
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
 import {MigrationSSMParameter, parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
-import {ServicesYaml} from "./migration-services-yaml";
+import {ClusterBasicAuth, ServicesYaml} from "./migration-services-yaml";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -126,7 +125,6 @@ export class StackComposer {
             contextJSON = JSON.parse(JSON.parse(contextJSON))
         }
         return contextJSON
-
     }
 
     constructor(scope: Construct, props: StackComposerProps) {
@@ -180,10 +178,7 @@ export class StackComposer {
         const accessPolicyJson = this.getContextForType('accessPolicies', 'object', defaultValues, contextJSON)
         const migrationAssistanceEnabled = this.getContextForType('migrationAssistanceEnabled', 'boolean', defaultValues, contextJSON)
         const mskARN = this.getContextForType('mskARN', 'string', defaultValues, contextJSON)
-        const mskEnablePublicEndpoints = this.getContextForType('mskEnablePublicEndpoints', 'boolean', defaultValues, contextJSON)
-        const mskRestrictPublicAccessTo = this.getContextForType('mskRestrictPublicAccessTo', 'string', defaultValues, contextJSON)
-        const mskRestrictPublicAccessType = this.getContextForType('mskRestrictPublicAccessType', 'string', defaultValues, contextJSON)
-        const mskBrokerNodeCount = this.getContextForType('mskBrokerNodeCount', 'number', defaultValues, contextJSON)
+        const mskBrokersPerAZCount = this.getContextForType('mskBrokersPerAZCount', 'number', defaultValues, contextJSON)
         const mskSubnetIds = this.getContextForType('mskSubnetIds', 'object', defaultValues, contextJSON)
         const mskAZCount = this.getContextForType('mskAZCount', 'number', defaultValues, contextJSON)
         const replayerOutputEFSRemovalPolicy = this.getContextForType('replayerOutputEFSRemovalPolicy', 'string', defaultValues, contextJSON)
@@ -210,6 +205,7 @@ export class StackComposer {
         const targetClusterEndpoint = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
         const fetchMigrationEnabled = this.getContextForType('fetchMigrationEnabled', 'boolean', defaultValues, contextJSON)
         const dpPipelineTemplatePath = this.getContextForType('dpPipelineTemplatePath', 'string', defaultValues, contextJSON)
+        const sourceClusterDisabled = this.getContextForType('sourceClusterDisabled', 'boolean', defaultValues, contextJSON)
         const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
         const osContainerServiceEnabled = this.getContextForType('osContainerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
@@ -234,7 +230,14 @@ export class StackComposer {
         }
 
         const fargateCpuArch = validateFargateCpuArch(defaultFargateCpuArch)
-        const streamingSourceType = determineStreamingSourceType(kafkaBrokerServiceEnabled)
+
+        let streamingSourceType
+        if (captureProxyServiceEnabled || captureProxyESServiceEnabled || trafficReplayerServiceEnabled || kafkaBrokerServiceEnabled) {
+            streamingSourceType = determineStreamingSourceType(kafkaBrokerServiceEnabled)
+        } else {
+            console.log("MSK is not enabled and will not be deployed.")
+            streamingSourceType = StreamingSourceType.DISABLED
+        }
 
         const engineVersion = this.getContextForType('engineVersion', 'string', defaultValues, contextJSON)
         version = this.getEngineVersion(engineVersion)
@@ -254,6 +257,10 @@ export class StackComposer {
         }
         else {
             trafficReplayerCustomUserAgent = trafficReplayerUserAgentSuffix ? trafficReplayerUserAgentSuffix : props.customReplayerUserAgent
+        }
+
+        if (sourceClusterDisabled && (sourceClusterEndpoint || captureProxyESServiceEnabled || elasticsearchServiceEnabled || captureProxyServiceEnabled)) {
+            throw new Error("sourceClusterDisabled is mutually exclusive with [sourceClusterEndpoint, captureProxyESServiceEnabled, elasticsearchServiceEnabled, captureProxyServiceEnabled]");
         }
 
         const deployId = addOnMigrationDeployId ? addOnMigrationDeployId : defaultDeployId
@@ -276,7 +283,10 @@ export class StackComposer {
                 captureProxyServiceEnabled,
                 targetClusterProxyServiceEnabled,
                 migrationAPIEnabled,
-                sourceClusterEndpoint: sourceClusterEndpoint,
+                sourceClusterDisabled,
+                sourceClusterEndpoint,
+                targetClusterUsername: fineGrainedManagerUserName,
+                targetClusterPasswordSecretArn: fineGrainedManagerUserSecretManagerKeyARN,
                 env: props.env
             })
             this.stacks.push(networkStack)
@@ -330,21 +340,23 @@ export class StackComposer {
             this.stacks.push(openSearchStack)
             servicesYaml.target_cluster = openSearchStack.targetClusterYaml;
         } else {
-            servicesYaml.target_cluster = { endpoint: targetEndpoint, no_auth: '' }
+            servicesYaml.target_cluster = { endpoint: targetEndpoint }
+            if (fineGrainedManagerUserName && fineGrainedManagerUserSecretManagerKeyARN) {
+                servicesYaml.target_cluster.basic_auth = new ClusterBasicAuth({username: fineGrainedManagerUserName,
+                    password_from_secret_arn: fineGrainedManagerUserSecretManagerKeyARN
+                })
+            } else {
+                servicesYaml.target_cluster.no_auth = ""
+            }
         }
 
-        // Currently, placing a requirement on a VPC for a migration stack but this can be revisited
         let migrationStack
-        let mskUtilityStack
         if (migrationAssistanceEnabled && networkStack && !addOnMigrationDeployId) {
             migrationStack = new MigrationAssistanceStack(scope, "migrationInfraStack", {
                 vpc: networkStack.vpc,
                 streamingSourceType: streamingSourceType,
                 mskImportARN: mskARN,
-                mskEnablePublicEndpoints: mskEnablePublicEndpoints,
-                mskRestrictPublicAccessTo: mskRestrictPublicAccessTo,
-                mskRestrictPublicAccessType: mskRestrictPublicAccessType,
-                mskBrokerNodeCount: mskBrokerNodeCount,
+                mskBrokersPerAZCount: mskBrokersPerAZCount,
                 mskSubnetIds: mskSubnetIds,
                 mskAZCount: mskAZCount,
                 replayerOutputEFSRemovalPolicy: replayerOutputEFSRemovalPolicy,
@@ -357,21 +369,7 @@ export class StackComposer {
             })
             this.addDependentStacks(migrationStack, [networkStack])
             this.stacks.push(migrationStack)
-
-            if (streamingSourceType === StreamingSourceType.AWS_MSK) {
-                mskUtilityStack = new MSKUtilityStack(scope, 'mskUtilityStack', {
-                    vpc: networkStack.vpc,
-                    mskEnablePublicEndpoints: mskEnablePublicEndpoints,
-                    stackName: `OSMigrations-${stage}-${region}-MSKUtility`,
-                    description: "This stack contains custom resources to add additional functionality to the MSK L1 construct",
-                    stage: stage,
-                    defaultDeployId: defaultDeployId,
-                    env: props.env
-                })
-                this.addDependentStacks(mskUtilityStack, [migrationStack])
-                this.stacks.push(mskUtilityStack)
-                servicesYaml.kafka = mskUtilityStack.kafkaYaml;
-            }
+            servicesYaml.kafka = migrationStack.kafkaYaml;
         }
 
         let osContainerStack
@@ -408,7 +406,7 @@ export class StackComposer {
         }
 
         let fetchMigrationStack
-        if (fetchMigrationEnabled && networkStack && migrationStack) {
+        if (fetchMigrationEnabled && networkStack && migrationStack && !sourceClusterDisabled) {
             fetchMigrationStack = new FetchMigrationStack(scope, "fetchMigrationStack", {
                 vpc: networkStack.vpc,
                 dpPipelineTemplatePath: dpPipelineTemplatePath,
@@ -428,9 +426,11 @@ export class StackComposer {
             reindexFromSnapshotStack = new ReindexFromSnapshotStack(scope, "reindexFromSnapshotStack", {
                 vpc: networkStack.vpc,
                 extraArgs: reindexFromSnapshotExtraArgs,
+                clusterAuthDetails: servicesYaml.target_cluster,
                 stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
                 description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
                 stage: stage,
+                otelCollectorEnabled: otelCollectorEnabled,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 env: props.env
@@ -457,7 +457,7 @@ export class StackComposer {
                 targetGroups: [networkStack.albSourceProxyTG, networkStack.albSourceClusterTG],
                 env: props.env
             })
-            this.addDependentStacks(captureProxyESStack, [migrationStack, mskUtilityStack, kafkaBrokerStack])
+            this.addDependentStacks(captureProxyESStack, [migrationStack, kafkaBrokerStack])
             this.stacks.push(captureProxyESStack)
         }
 
@@ -480,8 +480,8 @@ export class StackComposer {
                 maxUptime: trafficReplayerMaxUptime ? Duration.parse(trafficReplayerMaxUptime) : undefined,
                 env: props.env
             })
-            this.addDependentStacks(trafficReplayerStack, [networkStack, migrationStack, mskUtilityStack,
-                kafkaBrokerStack, openSearchStack, osContainerStack])
+            this.addDependentStacks(trafficReplayerStack, [networkStack, migrationStack,kafkaBrokerStack,
+                openSearchStack, osContainerStack])
             this.stacks.push(trafficReplayerStack)
             servicesYaml.replayer = trafficReplayerStack.replayerYaml;
         }
@@ -521,7 +521,7 @@ export class StackComposer {
                 env: props.env
             })
             this.addDependentStacks(captureProxyStack, [elasticsearchStack, migrationStack,
-                kafkaBrokerStack, mskUtilityStack])
+                kafkaBrokerStack])
             this.stacks.push(captureProxyStack)
         }
 
@@ -561,6 +561,7 @@ export class StackComposer {
                 targetGroups: [networkStack.albMigrationConsoleTG],
                 servicesYaml: servicesYaml,
                 migrationAPIAllowedHosts: migrationAPIAllowedHosts,
+                sourceClusterDisabled,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,
@@ -572,7 +573,7 @@ export class StackComposer {
             // To enable the Migration Console to make requests to other service endpoints with services,
             // it must be deployed after any connected services
             this.addDependentStacks(migrationConsoleStack, [captureProxyESStack, captureProxyStack, elasticsearchStack,
-                fetchMigrationStack, openSearchStack, osContainerStack, migrationStack, kafkaBrokerStack, mskUtilityStack])
+                fetchMigrationStack, openSearchStack, osContainerStack, migrationStack, kafkaBrokerStack])
             this.stacks.push(migrationConsoleStack)
         }
 

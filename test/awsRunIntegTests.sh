@@ -20,7 +20,7 @@ unique_id="test_${epoch_seconds}_1"
 test_dir="/root/lib/integ_test/integ_test"
 STAGE="aws-integ"
 TEST_RESULT_FILE="${test_dir}/reports/${unique_id}/report.xml"
-COMMAND="pytest --log-file=${test_dir}/reports/${unique_id}/pytest.log --junitxml=${TEST_RESULT_FILE} ${test_dir}/replayer_tests.py --unique_id ${unique_id} -s"
+COMMAND="pipenv run pytest --log-file=${test_dir}/reports/${unique_id}/pytest.log --junitxml=${TEST_RESULT_FILE} ${test_dir}/replayer_tests.py --unique_id ${unique_id} -s"
 
 while [[ $# -gt 0 ]]; do
   case $1 in

@@ -1,7 +1,6 @@
 package com.rfs;
 
 import java.io.IOException;
-import java.net.URI;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
@@ -20,7 +19,8 @@ import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
-import com.rfs.cms.ApacheHttpClient;
+import com.beust.jcommander.ParametersDelegate;
+import com.rfs.cms.CoordinateWorkHttpClient;
 import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.cms.OpenSearchWorkCoordinator;
@@ -36,6 +36,7 @@ import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
 import com.rfs.common.TryHandlePhaseFailure;
+import com.rfs.common.http.ConnectionContext;
 import com.rfs.models.IndexMetadata;
 import com.rfs.models.ShardMetadata;
 import com.rfs.tracing.RootWorkCoordinationContext;
@@ -46,11 +47,13 @@ import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.worker.DocumentsRunner;
 import com.rfs.worker.ShardWorkPreparer;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.MDC;
 
 @Slf4j
 public class RfsMigrateDocuments {
     public static final int PROCESS_TIMED_OUT = 2;
     public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
+    public static final String LOGGING_MDC_WORKER_ID = "workerId";
 
     public static class DurationConverter implements IStringConverter<Duration> {
         @Override
@@ -60,6 +63,9 @@ public class RfsMigrateDocuments {
     }
 
     public static class Args {
+        @Parameter(names = {"--help", "-h"}, help = true, description = "Displays information about how to use this tool")
+        private boolean help;
+
         @Parameter(names = { "--snapshot-name" }, required = true, description = "The name of the snapshot to migrate")
         public String snapshotName;
 
@@ -87,17 +93,8 @@ public class RfsMigrateDocuments {
             "--lucene-dir" }, required = true, description = "The absolute path to the directory where we'll put the Lucene docs")
         public String luceneDir;
 
-        @Parameter(names = {
-            "--target-host" }, required = true, description = "The target host and port (e.g. http://localhost:9200)")
-        public String targetHost;
-
-        @Parameter(names = {
-            "--target-username" }, description = "Optional.  The target username; if not provided, will assume no auth on target")
-        public String targetUser = null;
-
-        @Parameter(names = {
-            "--target-password" }, description = "Optional.  The target password; if not provided, will assume no auth on target")
-        public String targetPass = null;
+        @ParametersDelegate
+        public ConnectionContext.TargetArgs targetArgs = new ConnectionContext.TargetArgs();
 
         @Parameter(names = { "--index-allowlist" }, description = ("Optional.  List of index names to migrate"
             + " (e.g. 'logs_2024_01, logs_2024_02').  Default: all non-system indices (e.g. those not starting with '.')"), required = false)
@@ -105,18 +102,36 @@ public class RfsMigrateDocuments {
 
         @Parameter(names = {
             "--max-shard-size-bytes" }, description = ("Optional. The maximum shard size, in bytes, to allow when"
-                + " performing the document migration.  Useful for preventing disk overflow.  Default: 50 * 1024 * 1024 * 1024 (50 GB)"), required = false)
-        public long maxShardSizeBytes = 50 * 1024 * 1024 * 1024L;
-        @Parameter(names = { "--max-initial-lease-duration" }, description = ("Optional. The maximum time that the "
+                + " performing the document migration.  Useful for preventing disk overflow.  Default: 80 * 1024 * 1024 * 1024 (80 GB)"), required = false)
+        public long maxShardSizeBytes = 80 * 1024 * 1024 * 1024L;
+
+        @Parameter(names = { "--initial-lease-duration" }, description = ("Optional. The time that the "
             + "first attempt to migrate a shard's documents should take.  If a process takes longer than this "
             + "the process will terminate, allowing another process to attempt the migration, but with double the "
             + "amount of time than the last time.  Default: PT10M"), required = false, converter = DurationConverter.class)
-        public Duration maxInitialLeaseDuration = Duration.ofMinutes(10);
+        public Duration initialLeaseDuration = Duration.ofMinutes(10);
 
         @Parameter(required = false, names = {
             "--otel-collector-endpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
                 + "forwarded. If no value is provided, metrics will not be forwarded.")
         String otelCollectorEndpoint;
+
+        @Parameter(required = false,
+        names = "--documents-per-bulk-request",
+        description = "Optional.  The number of documents to be included within each bulk request sent. Default no max (controlled by documents size)")
+        int numDocsPerBulkRequest = Integer.MAX_VALUE;
+
+        @Parameter(required = false,
+            names = "--documents-size-per-bulk-request",
+            description = "Optional. The maximum aggregate document size to be used in bulk requests in bytes. " +
+                "Note does not apply to single document requests. Default 10 MiB")
+        long numBytesPerBulkRequest = 10 * 1024L * 1024L;
+
+        @Parameter(required = false,
+            names = "--max-connections",
+            description = "Optional.  The maximum number of connections to simultaneously " +
+                "used to communicate to the target, default 10")
+        int maxConnections = 10;
     }
 
     public static class NoWorkLeftException extends Exception {
@@ -152,7 +167,13 @@ public class RfsMigrateDocuments {
 
     public static void main(String[] args) throws Exception {
         Args arguments = new Args();
-        JCommander.newBuilder().addObject(arguments).build().parse(args);
+        JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
+        jCommander.parse(args);
+
+        if (arguments.help) {
+            jCommander.usage();
+            return;
+        }
 
         validateArgs(arguments);
 
@@ -164,22 +185,22 @@ public class RfsMigrateDocuments {
             log.error("Terminating RfsMigrateDocuments because the lease has expired for " + workItemId);
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC())) {
+            ConnectionContext connectionContext = arguments.targetArgs.toConnectionContext();
+            final var workerId = UUID.randomUUID().toString();
             var workCoordinator = new OpenSearchWorkCoordinator(
-                new ApacheHttpClient(new URI(arguments.targetHost)),
+                new CoordinateWorkHttpClient(connectionContext),
                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                UUID.randomUUID().toString()
+                workerId
             );
-
+            MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
             TryHandlePhaseFailure.executeWithTryCatch(() -> {
-                log.info("Running RfsWorker");
+                log.info("Running RfsMigrateDocuments with workerId = " + workerId);
 
-                OpenSearchClient targetClient = new OpenSearchClient(
-                    arguments.targetHost,
-                    arguments.targetUser,
-                    arguments.targetPass,
-                    false
-                );
-                DocumentReindexer reindexer = new DocumentReindexer(targetClient);
+                OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
+                DocumentReindexer reindexer = new DocumentReindexer(targetClient,
+                    arguments.numDocsPerBulkRequest,
+                    arguments.numBytesPerBulkRequest,
+                    arguments.maxConnections);
 
                 SourceRepo sourceRepo;
                 if (snapshotLocalDirPath == null) {
@@ -203,10 +224,11 @@ public class RfsMigrateDocuments {
                 );
 
                 run(
-                    LuceneDocumentsReader::new,
+                    LuceneDocumentsReader.getFactory(ElasticsearchConstants_ES_7_10.SOFT_DELETES_POSSIBLE,
+                        ElasticsearchConstants_ES_7_10.SOFT_DELETES_FIELD),
                     reindexer,
                     workCoordinator,
-                    arguments.maxInitialLeaseDuration,
+                    arguments.initialLeaseDuration,
                     processManager,
                     indexMetadataFactory,
                     arguments.snapshotName,

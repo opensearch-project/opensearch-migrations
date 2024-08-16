@@ -1,14 +1,16 @@
 // Note:
-// 1. We are using an existing common VPC that we provide through a 'vpcId' parameter on the pipeline for now until we move
+// 1. We are using an existing common VPC that we provide through a manually created 'VPC_ID' parameter on the pipeline for now until we move
 //    to a proper Jenkins accounts and can create a setup without public subnets as well as request an extension to allow more than 5 VPCs per region
 // 2. There is a still a manual step needed on the EC2 source load balancer to replace its security group rule which allows all traffic (0.0.0.0/0) to
 //    allow traffic for the relevant service security group. This needs a better story around accepting user security groups in our Migration CDK.
 
 def sourceContextId = 'source-single-node-ec2'
 def migrationContextId = 'migration-default'
-def gitUrl = 'https://github.com/opensearch-project/opensearch-migrations.git'
-def gitBranch = 'main'
-def stageId = 'aws-integ'
+// These default values should only be used on the initial Jenkins run in order to load parameter options into the UI,
+// all future runs should use the specified parameters
+def gitBranch = params.GIT_BRANCH ?: 'main'
+def gitUrl = params.GIT_REPO_URL ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
+def vpcId = params.VPC_ID
 def source_cdk_context = """
     {
       "source-single-node-ec2": {
@@ -43,6 +45,7 @@ def migration_cdk_context = """
         "openAccessPolicyEnabled": true,
         "domainRemovalPolicy": "DESTROY",
         "artifactBucketRemovalPolicy": "DESTROY",
+        "trafficReplayerServiceEnabled": true,
         "trafficReplayerExtraArgs": "--speedup-factor 10.0",
         "fetchMigrationEnabled": true,
         "reindexFromSnapshotServiceEnabled": true,
@@ -65,7 +68,7 @@ defaultIntegPipeline(
         migrationContextId: migrationContextId,
         gitUrl: gitUrl,
         gitBranch: gitBranch,
-        stageId: stageId
+        defaultStageId: 'aws-integ',
         //deployStep: {
         //    echo 'Custom Test Step'
         //}

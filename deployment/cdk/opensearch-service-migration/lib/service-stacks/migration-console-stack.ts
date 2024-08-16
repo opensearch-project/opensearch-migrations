@@ -8,7 +8,9 @@ import {
     createMigrationStringParameter,
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy,
+    getTargetPasswordAccessPolicy,
     getMigrationStringParameterValue,
+    hashStringSHA256,
     MigrationSSMParameter
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
@@ -30,6 +32,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly targetGroups: ELBTargetGroup[],
     readonly servicesYaml: ServicesYaml,
     readonly otelCollectorEnabled?: boolean,
+    readonly sourceClusterDisabled?: boolean,
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
@@ -141,20 +144,21 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         );
 
         let servicePortMappings: PortMapping[]|undefined
-        let imageCommand = ['/bin/sh', '-c', '/root/loadServicesFromParameterStore.sh']
+        let imageCommand: string[]|undefined
 
         const osClusterEndpoint = getMigrationStringParameterValue(this, {
             ...props,
             parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
         });
-        const sourceClusterEndpoint = getMigrationStringParameterValue(this, {
+        const sourceClusterEndpoint = props.sourceClusterDisabled ? null : getMigrationStringParameterValue(this, {
             ...props,
             parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
         });
-        const brokerEndpoints = getMigrationStringParameterValue(this, {
-            ...props,
-            parameter: MigrationSSMParameter.KAFKA_BROKERS,
-        });
+        const brokerEndpoints = props.streamingSourceType != StreamingSourceType.DISABLED ?
+            getMigrationStringParameterValue(this, {
+                ...props,
+                parameter: MigrationSSMParameter.KAFKA_BROKERS,
+            }) : "";
 
         const volumeName = "sharedReplayerOutputVolume"
         const volumeId = getMigrationStringParameterValue(this, {
@@ -255,12 +259,17 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
+        const getSecretsPolicy = props.servicesYaml.target_cluster.basic_auth?.password_from_secret_arn ? 
+            getTargetPasswordAccessPolicy(props.servicesYaml.target_cluster.basic_auth.password_from_secret_arn) : null;
+
         // Upload the services.yaml file to Parameter Store
         let servicesYaml = props.servicesYaml
-        servicesYaml.source_cluster = {
-            'endpoint': sourceClusterEndpoint,
-            // TODO: We're not currently supporting auth here, this may need to be handled on the migration console
-            'no_auth': ''
+        if (!props.sourceClusterDisabled && sourceClusterEndpoint) {
+            servicesYaml.source_cluster = {
+                'endpoint': sourceClusterEndpoint,
+                // TODO: We're not currently supporting auth here, this may need to be handled on the migration console
+                'no_auth': ''
+            }
         }
         servicesYaml.metadata_migration = new MetadataMigrationYaml();
         if (props.otelCollectorEnabled) {
@@ -273,24 +282,25 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             }
         }
 
-        createMigrationStringParameter(this, servicesYaml.stringify(), {
+        const parameter = createMigrationStringParameter(this, servicesYaml.stringify(), {
             ...props,
             parameter: MigrationSSMParameter.SERVICES_YAML_FILE,
         });
         const environment: { [key: string]: string; } = {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
-            // Temporary fix for source domain endpoint until we move to either alb or migration console yaml configuration
-            "SOURCE_DOMAIN_ENDPOINT": sourceClusterEndpoint,
             "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints,
             "MIGRATION_STAGE": props.stage,
             "MIGRATION_SOLUTION_VERSION": props.migrationsSolutionVersion,
-            "MIGRATION_SERVICES_YAML_PARAMETER": `/migration/${props.stage}/${props.defaultDeployId}/servicesYamlFile`,
+            "MIGRATION_SERVICES_YAML_PARAMETER": parameter.parameterName,
+            "MIGRATION_SERVICES_YAML_HASH": hashStringSHA256(servicesYaml.stringify()),
         }
 
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
         let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
-            listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy]
+            listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
+            ...(getSecretsPolicy ? [getSecretsPolicy] : []) // only add secrets policy if it's non-null
+        ]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
@@ -341,7 +351,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 protocol: Protocol.TCP
             }]
             imageCommand = ['/bin/sh', '-c',
-                '/root/loadServicesFromParameterStore.sh && python3 /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt'
+                '/root/loadServicesFromParameterStore.sh && pipenv run python /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt'
             ]
 
             const defaultAllowedHosts = 'localhost'
