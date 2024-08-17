@@ -100,13 +100,13 @@ public abstract class ReplayContexts extends IReplayContexts {
 
         public static class MetricInstruments extends CommonScopedMetricInstruments {
             final LongUpDownCounter activeChannelCounter;
-            final LongCounter failedConnectionAttempts;
+            final LongCounter unretryableConnectionFailures;
 
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, activityName);
                 activeChannelCounter = meter.upDownCounterBuilder(MetricNames.ACTIVE_CHANNELS_YET_TO_BE_FULLY_DISCARDED)
                     .build();
-                failedConnectionAttempts = meter.counterBuilder(MetricNames.FAILED_CONNECTION_ATTEMPTS).build();
+                unretryableConnectionFailures = meter.counterBuilder(MetricNames.NONRETRYABLE_CONNECTION_FAILURES).build();
             }
         }
 
@@ -131,7 +131,7 @@ public abstract class ReplayContexts extends IReplayContexts {
 
         @Override
         public void addFailedChannelCreation() {
-            meterIncrementEvent(getMetrics().failedConnectionAttempts);
+            meterIncrementEvent(getMetrics().unretryableConnectionFailures);
         }
     }
 

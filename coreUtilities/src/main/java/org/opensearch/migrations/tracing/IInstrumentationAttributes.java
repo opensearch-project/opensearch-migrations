@@ -13,7 +13,6 @@ import io.opentelemetry.api.metrics.LongUpDownCounter;
 import lombok.NonNull;
 
 public interface IInstrumentationAttributes {
-    AttributeKey<Boolean> HAD_EXCEPTION_KEY = AttributeKey.booleanKey("hadException");
 
     IInstrumentationAttributes getEnclosingScope();
 

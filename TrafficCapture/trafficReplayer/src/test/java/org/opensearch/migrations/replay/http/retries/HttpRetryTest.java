@@ -32,6 +32,7 @@ import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
@@ -100,14 +101,13 @@ public class HttpRetryTest {
     }
 
     private TransformedTargetRequestAndResponseList
-    runServerAndGetResponse(int numFailuresBeforeSuccess) throws Exception
+    runServerAndGetResponse(TestContext rootContext, int numFailuresBeforeSuccess) throws Exception
     {
         var requestsReceivedCounter = new AtomicInteger();
         try (var httpServer = SimpleHttpServer.makeServer(false,
             r -> requestsReceivedCounter.incrementAndGet() > numFailuresBeforeSuccess
                     ? TestHttpServerContext.makeResponse(r, Duration.ofMillis(100))
-                    : makeTransientErrorResponse(Duration.ofMillis(100)));
-             var rootContext = TestContext.noOtelTracking())
+                    : makeTransientErrorResponse(Duration.ofMillis(100))))
         {
             var responseFuture = scheduleSingleRequest(httpServer.localhostEndpoint(), rootContext);
             return Assertions.assertDoesNotThrow(() -> responseFuture.get());
@@ -116,29 +116,38 @@ public class HttpRetryTest {
 
     @Test
     public void testTransientRequestFailuresAreRetriedAndCanSucceed() throws Exception {
-        var response = runServerAndGetResponse(DefaultRetry.MAX_RETRIES-1);
-        Assertions.assertNotNull(response.responses());
-        Assertions.assertFalse(response.responses().isEmpty());
-        Assertions.assertEquals(DefaultRetry.MAX_RETRIES, response.responses().size());
-        Assertions.assertEquals(200,
-            response.responses().get(DefaultRetry.MAX_RETRIES-1).getRawResponse().status().code());
-        Assertions.assertTrue(response.responses().stream()
-            .limit(DefaultRetry.MAX_RETRIES-1)
-            .map(r -> r.getRawResponse().status().code())
-            .allMatch(c -> 404 == c));
+        try (var rootContext = TestContext.withAllTracking()) {
+            var response = runServerAndGetResponse(rootContext, DefaultRetry.MAX_RETRIES - 1);
+            Assertions.assertNotNull(response.responses());
+            Assertions.assertFalse(response.responses().isEmpty());
+            Assertions.assertEquals(DefaultRetry.MAX_RETRIES, response.responses().size());
+            Assertions.assertEquals(200,
+                response.responses().get(DefaultRetry.MAX_RETRIES - 1).getRawResponse().status().code());
+            Assertions.assertTrue(response.responses().stream()
+                .limit(DefaultRetry.MAX_RETRIES - 1)
+                .map(r -> r.getRawResponse().status().code())
+                .allMatch(c -> 404 == c));
+        }
     }
 
     @Test
     public void testPersistentRequestFailuresAreRetriedThenFailed() throws Exception {
-        var response = runServerAndGetResponse(DefaultRetry.MAX_RETRIES+1);
-        Assertions.assertNotNull(response.responses());
-        Assertions.assertFalse(response.responses().isEmpty());
-        Assertions.assertEquals(DefaultRetry.MAX_RETRIES+1, response.responses().size());
-        Assertions.assertTrue(response.responses().stream()
-            .map(r -> r.getRawResponse().status().code())
-            .allMatch(c -> 404 == c));
+        try (var rootContext = TestContext.withAllTracking()) {
+            var response = runServerAndGetResponse(rootContext, DefaultRetry.MAX_RETRIES + 1);
+            Assertions.assertNotNull(response.responses());
+            Assertions.assertFalse(response.responses().isEmpty());
+            Assertions.assertEquals(DefaultRetry.MAX_RETRIES + 1, response.responses().size());
+            Assertions.assertTrue(response.responses().stream()
+                .map(r -> r.getRawResponse().status().code())
+                .allMatch(c -> 404 == c));
+
+            var metrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
+            Assertions.assertEquals(1, InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "requestConnectingCount"));
+            Assertions.assertEquals(0, InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "requestConnectingExceptionCount"));
+        }
     }
 
+    @Tag("longTest")
     @Test
     @WrapWithNettyLeakDetection(disableLeakChecks = true) // code is forcibly terminated so leaks are expected
     public void testConnectionFailuresNeverGiveUp() throws Exception {
@@ -158,7 +167,7 @@ public class HttpRetryTest {
         );
         try (var rootContext = TestContext.withAllTracking()) {
             var f = executor.submit(() -> scheduleSingleRequest(clientConnectionPool, rootContext).get());
-            Thread.sleep(10 * 1000);
+            Thread.sleep(4 * 1000);
             var ccpShutdownFuture = clientConnectionPool.shutdownNow();
 
             var e = Assertions.assertThrows(Exception.class, f::get);
@@ -173,6 +182,10 @@ public class HttpRetryTest {
             // The server won't have any idea which request wasn't able to send, so the reason for the retry is
             // because of a connection retry, not the request
             Assertions.assertEquals(0, checkHttpRetryConsistency(rootContext));
+            var metrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
+            Assertions.assertTrue(InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "requestConnectingCount") > 1);
+            Assertions.assertTrue(InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "requestConnectingExceptionCount") > 1);
+            Assertions.assertEquals(0, InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "nonRetryableConnectionFailures"));
         }
     }
 
@@ -186,6 +199,7 @@ public class HttpRetryTest {
         return retryMetricCount;
     }
 
+    @Tag("longTest")
     @Test
     @WrapWithNettyLeakDetection(disableLeakChecks = true) // code is forcibly terminated so leaks are expected
     public void testMalformedResponseFailuresNeverGiveUp() throws Exception {
@@ -212,6 +226,9 @@ public class HttpRetryTest {
             log.atInfo().setMessage(()->"responses: " + responses).log();
             var retries = checkHttpRetryConsistency(rootContext);
             Assertions.assertTrue(retries > 0);
+            var metrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
+            Assertions.assertTrue(InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "requestConnectingCount") > 1);
+            Assertions.assertEquals(0, InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "requestConnectingExceptionCount"));
         } finally {
             executor.shutdown();
         }

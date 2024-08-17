@@ -59,7 +59,7 @@ public abstract class IReplayContexts {
         public static final String NUM_REQUEST_RETRIES = "numRetriedRequests";
         public static final String SOURCE_TO_TARGET_REQUEST_LAG = "lagBetweenSourceAndTargetRequests";
         public static final String ACTIVE_CHANNELS_YET_TO_BE_FULLY_DISCARDED = "activeReplayerChannels";
-        public static final String FAILED_CONNECTION_ATTEMPTS = "failedConnectionAttempts";
+        public static final String NONRETRYABLE_CONNECTION_FAILURES = "nonRetryableConnectionFailures";
         public static final String ACTIVE_TARGET_CONNECTIONS = "activeTargetConnections";
         public static final String CONNECTIONS_OPENED = "connectionsOpened";
         public static final String CONNECTIONS_CLOSED = "connectionsClosedCount";

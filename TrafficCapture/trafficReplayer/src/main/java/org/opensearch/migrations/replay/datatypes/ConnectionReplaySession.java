@@ -37,7 +37,7 @@ public class ConnectionReplaySession {
     public final EventLoop eventLoop;
     public final OnlineRadixSorter scheduleSequencer;
     @Getter
-    private final BiFunction<EventLoop, IReplayContexts.IChannelKeyContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory;
+    private final BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory;
     private ChannelFuture cachedChannel; // only can be accessed from the eventLoop thread
     public final TimeToResponseFulfillmentFutureMap schedule;
     @Getter
@@ -47,7 +47,7 @@ public class ConnectionReplaySession {
     public ConnectionReplaySession(
         EventLoop eventLoop,
         IReplayContexts.IChannelKeyContext channelKeyContext,
-        BiFunction<EventLoop, IReplayContexts.IChannelKeyContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory
+        BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory
     ) {
         this.eventLoop = eventLoop;
         this.channelKeyContext = channelKeyContext;
@@ -62,13 +62,15 @@ public class ConnectionReplaySession {
         return trigger;
     }
 
-    public TrackedFuture<String, ChannelFuture> getChannelFutureInActiveState() {
+    public TrackedFuture<String, ChannelFuture>
+    getChannelFutureInActiveState(IReplayContexts.ITargetRequestContext ctx)
+    {
         TextTrackedFuture<ChannelFuture> trigger = new TextTrackedFuture<>("procuring a connection");
         eventLoop.submit(() -> {
             if (cachedChannel != null && cachedChannel.channel().isActive()) {
                 trigger.future.complete(cachedChannel);
             } else {
-                channelFutureFutureFactory.apply(eventLoop, channelKeyContext)
+                channelFutureFutureFactory.apply(eventLoop, ctx)
                     .whenComplete((v, t) -> {
                         if (t == null) {
                             trigger.future.complete(v);

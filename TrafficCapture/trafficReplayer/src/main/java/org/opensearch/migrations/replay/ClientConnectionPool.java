@@ -33,7 +33,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ClientConnectionPool {
 
-    private final BiFunction<EventLoop, IReplayContexts.IChannelKeyContext, TrackedFuture<String, ChannelFuture>>
+    private final BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>>
         channelCreator;
     private final NioEventLoopGroup eventLoopGroup;
     private final LoadingCache<Key, ConnectionReplaySession> connectionId2ChannelCache;
@@ -50,7 +50,7 @@ public class ClientConnectionPool {
     }
 
     public ClientConnectionPool(
-        BiFunction<EventLoop, IReplayContexts.IChannelKeyContext, TrackedFuture<String, ChannelFuture>> channelCreator,
+        BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelCreator,
         @NonNull String targetConnectionPoolName,
         int numThreads
     ) {
