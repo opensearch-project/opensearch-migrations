@@ -9,10 +9,7 @@ import java.util.NoSuchElementException;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
-import java.util.function.Function;
 
 import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
@@ -152,10 +149,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             );
     }
 
-    private <
-        T extends IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> & IScopedInstrumentationAttributes>
-        void
-        setCurrentMessageContext(T requestSendingContext) {
+    private <T extends IWithTypedEnclosingScope<IReplayContexts.ITargetRequestContext> & IScopedInstrumentationAttributes>
+    void setCurrentMessageContext(T requestSendingContext) {
         currentRequestContextUnion = requestSendingContext;
     }
 
@@ -336,33 +331,28 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     }
 
     private void deactivateChannel() {
-        try {
-            var pipeline = channel.pipeline();
-            log.atDebug()
-                .setMessage(() -> "Resetting the pipeline for channel " + channel + "currently at: " + pipeline)
-                .log();
-            for (var handlerName : new String[] { WRITE_COUNT_WATCHER_HANDLER_NAME, READ_COUNT_WATCHER_HANDLER_NAME }) {
-                try {
-                    pipeline.remove(handlerName);
-                } catch (NoSuchElementException e) {
-                    log.atWarn()
-                        .setMessage(() -> "Ignoring an exception that the " + handlerName + " wasn't present")
-                        .log();
-                }
+        var pipeline = channel.pipeline();
+        log.atDebug()
+            .setMessage(() -> "Resetting the pipeline for channel " + channel + "currently at: " + pipeline)
+            .log();
+        for (var handlerName : new String[] { WRITE_COUNT_WATCHER_HANDLER_NAME, READ_COUNT_WATCHER_HANDLER_NAME }) {
+            try {
+                pipeline.remove(handlerName);
+            } catch (NoSuchElementException e) {
+                log.atWarn()
+                    .setMessage(() -> "Ignoring an exception that the " + handlerName + " wasn't present")
+                    .log();
             }
-            while (true) {
-                var lastHandler = pipeline.last();
-                if (lastHandler instanceof SslHandler || lastHandler instanceof ConnectionClosedListenerHandler) {
-                    break;
-                }
-                pipeline.removeLast();
-            }
-            channel.config().setAutoRead(false);
-            log.atDebug().setMessage(() -> "Reset the pipeline for channel " + channel + " back to: " + pipeline).log();
-        } finally {
-            getCurrentRequestSpan().close();
-            getParentContext().close();
         }
+        while (true) {
+            var lastHandler = pipeline.last();
+            if (lastHandler instanceof SslHandler || lastHandler instanceof ConnectionClosedListenerHandler) {
+                break;
+            }
+            pipeline.removeLast();
+        }
+        channel.config().setAutoRead(false);
+        log.atDebug().setMessage(() -> "Reset the pipeline for channel " + channel + " back to: " + pipeline).log();
     }
 
     @Override
@@ -444,10 +434,15 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
             return rval;
         }, () -> "Waiting for previous consumes to set the future")
         .map(f -> f.whenComplete((v, t) -> {
-            if (channel == null) {
-                log.atInfo().setMessage(() -> "").log();
-            } else {
-                deactivateChannel();
+            try {
+                if (channel == null) {
+                    log.atInfo().setMessage(() -> "").log();
+                } else {
+                    deactivateChannel();
+                }
+            } finally {
+                getCurrentRequestSpan().close();
+                getParentContext().close();
             }
         }), () -> "clearing pipeline");
         log.atDebug()

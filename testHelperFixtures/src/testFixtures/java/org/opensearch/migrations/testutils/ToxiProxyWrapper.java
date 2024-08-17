@@ -20,12 +20,12 @@ public class ToxiProxyWrapper implements AutoCloseable{
     public ToxiProxyWrapper(Network network) {
         super();
         proxyContainer = new ToxiproxyContainer(TOXIPROXY_IMAGE_NAME).withAccessToHost(true).withNetwork(network);
-        proxyContainer.start();
     }
 
     @SneakyThrows
     public Proxy start(String targetHostname, int targetPort) {
         assert proxy == null : "should only call start() once";
+        proxyContainer.start();
         var toxiproxyClient = new ToxiproxyClient(proxyContainer.getHost(), proxyContainer.getControlPort());
         proxy = toxiproxyClient.createProxy(
             "proxy",

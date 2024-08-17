@@ -36,14 +36,14 @@ import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.wait.strategy.Wait;
-import org.testcontainers.utility.DockerImageName;
 
 import static org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumerTest.REGULAR_RESPONSE_TIMEOUT;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 1)
 public class HttpRetryTest {
-    private static final DockerImageName NGINX_IMAGE = DockerImageName.parse("nginx:1.27.0-alpine3.19-slim");
+
+    public static final String HTTPD_IMAGE = "httpd:alpine";
 
     private ByteBufList makeRequest() {
         return new ByteBufList(Unpooled.wrappedBuffer(TestHttpServerContext.getRequestStringForSimpleGet("/")
@@ -61,25 +61,15 @@ public class HttpRetryTest {
     }
 
     private TrackedFuture<String, TransformedTargetRequestAndResponseList>
-    scheduleSingleRequest(URI testServerUri) {
+    scheduleSingleRequest(URI testServerUri, TestContext rootContext) {
         var clientConnectionPool = TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
             testServerUri,
             false,
             1,
             "targetConnectionPool for testTransientRequestFailuresAreRetried"
         );
-        try {
-            return scheduleSingleRequest(clientConnectionPool);
-        } finally {
-            clientConnectionPool.shutdownNow();
-        }
-    }
-
-    private TrackedFuture<String, TransformedTargetRequestAndResponseList>
-    scheduleSingleRequest(ClientConnectionPool clientConnectionPool) {
-        try (var rootContext = TestContext.noOtelTracking()) {
-            return scheduleSingleRequest(clientConnectionPool, rootContext);
-        }
+        return scheduleSingleRequest(clientConnectionPool, rootContext)
+            .whenComplete((v,t) -> clientConnectionPool.shutdownNow(), () -> "cleaning up connection pool");
     }
 
     private TrackedFuture<String, TransformedTargetRequestAndResponseList>
@@ -106,22 +96,20 @@ public class HttpRetryTest {
             Duration.ofMillis(1),
             sourceRequestPackets,
             retryVisitor
-        );
+        ).whenComplete((v,t) -> requestContext.close(), () -> "test request context closure");
     }
 
     private TransformedTargetRequestAndResponseList
     runServerAndGetResponse(int numFailuresBeforeSuccess) throws Exception
     {
         var requestsReceivedCounter = new AtomicInteger();
-        try (
-            var httpServer = SimpleHttpServer.makeServer(
-                false,
-                r -> requestsReceivedCounter.incrementAndGet() > numFailuresBeforeSuccess
+        try (var httpServer = SimpleHttpServer.makeServer(false,
+            r -> requestsReceivedCounter.incrementAndGet() > numFailuresBeforeSuccess
                     ? TestHttpServerContext.makeResponse(r, Duration.ofMillis(100))
-                    : makeTransientErrorResponse(Duration.ofMillis(100))
-            );
-        ) {
-            var responseFuture = scheduleSingleRequest(httpServer.localhostEndpoint());
+                    : makeTransientErrorResponse(Duration.ofMillis(100)));
+             var rootContext = TestContext.noOtelTracking())
+        {
+            var responseFuture = scheduleSingleRequest(httpServer.localhostEndpoint(), rootContext);
             return Assertions.assertDoesNotThrow(() -> responseFuture.get());
         }
     }
@@ -153,7 +141,7 @@ public class HttpRetryTest {
 
     @Test
     @WrapWithNettyLeakDetection(disableLeakChecks = true) // code is forcibly terminated so leaks are expected
-    public void testConnectionFailuresNeverGiveUp_original() throws Exception {
+    public void testConnectionFailuresNeverGiveUp() throws Exception {
         URI serverUri;
         try (var server = SimpleHttpServer.makeServer(false, r -> makeTransientErrorResponse(Duration.ZERO))) {
             // do nothing but close it back down
@@ -169,45 +157,61 @@ public class HttpRetryTest {
             "targetConnectionPool for testTransientRequestFailuresAreRetried"
         );
         try (var rootContext = TestContext.withAllTracking()) {
-            var f = executor.submit(() -> Assertions.assertThrows(Exception.class,
-                () -> scheduleSingleRequest(clientConnectionPool).get()));
-            Thread.sleep(1 * 1000);
-            clientConnectionPool.shutdownNow().get();
+            var f = executor.submit(() -> scheduleSingleRequest(clientConnectionPool, rootContext).get());
+            Thread.sleep(10 * 1000);
+            var ccpShutdownFuture = clientConnectionPool.shutdownNow();
 
-            var e = f.get();
-            executor.shutdown();
+            var e = Assertions.assertThrows(Exception.class, f::get);
+            var shutdownResult = ccpShutdownFuture.get();
             log.atInfo().setCause(e).setMessage(() -> "exception: ").log();
+            // doubly-nested ExecutionException.  Once for the get() call here and once for the work done in submit,
+            // which wraps the scheduled request's future
+            Assertions.assertInstanceOf(IllegalStateException.class, e.getCause().getCause());
+            executor.shutdown();
 
-//            var metrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
-//
+            // connection issues won't count as retries since they aren't related to resending the data.
+            // The server won't have any idea which request wasn't able to send, so the reason for the retry is
+            // because of a connection retry, not the request
+            Assertions.assertEquals(0, checkHttpRetryConsistency(rootContext));
         }
+    }
+
+    static long checkHttpRetryConsistency(TestContext rootContext) {
+        var metrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
+        final var retryMetricCount =
+            InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "numRetriedRequests");
+        Assertions.assertEquals(retryMetricCount,
+            InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "targetTransactionCount")
+                - InMemoryInstrumentationBundle.getMetricValueOrZero(metrics, "httpTransactionCount"));
+        return retryMetricCount;
     }
 
     @Test
     @WrapWithNettyLeakDetection(disableLeakChecks = true) // code is forcibly terminated so leaks are expected
-    public void testConnectionFailuresNeverGiveUp() throws Exception {
+    public void testMalformedResponseFailuresNeverGiveUp() throws Exception {
 
-        final var SERVERNAME_ALIAS = "nginx";
+        final var SERVERNAME_ALIAS = "webserver";
         var executor = Executors.newSingleThreadScheduledExecutor(new DefaultThreadFactory("HttpRetryTest"));
-        try (var network = Network.newNetwork();
-             var server = new GenericContainer<>("httpd:alpine")
-                 //.withCopyFileToContainer(MountableFile.forHostPath(tmpDirectory), "/usr/share/nginx/html")
+        try (var rootContext = TestContext.withAllTracking();
+            var network = Network.newNetwork();
+             var server = new GenericContainer<>(HTTPD_IMAGE)
                  .withNetwork(network)
-                 .withExposedPorts(80)
                  .withNetworkAliases(SERVERNAME_ALIAS)
                  .waitingFor(Wait.forHttp("/").forStatusCode(200));
              var toxiproxy = new ToxiProxyWrapper(network))
         {
             server.start();
-            executor.schedule(() -> toxiproxy.start(SERVERNAME_ALIAS, 80), 10, TimeUnit.SECONDS);
-            var responseFuture = scheduleSingleRequest(toxiproxy.getProxyURI());
+            toxiproxy.start(SERVERNAME_ALIAS, 80).disable();
+            var responseFuture = scheduleSingleRequest(toxiproxy.getProxyURI(), rootContext);
+            executor.schedule(toxiproxy::enable, 4, TimeUnit.SECONDS);
             var responses = responseFuture.get();
+            var responseList = responses.getResponseList();
+            var lastResponse = responseList.get(responseList.size()-1).getRawResponse();
+            Assertions.assertNotNull(lastResponse);
+            Assertions.assertEquals(200, lastResponse.status().code());
             log.atInfo().setMessage(()->"responses: " + responses).log();
-//        Assertions.assertFalse(response.responses().isEmpty());
-//        Assertions.assertEquals(DefaultRetry.MAX_RETRIES+1, response.responses().size());
-//        Assertions.assertTrue(response.responses().stream()
-//            .map(r -> r.getRawResponse().status().code())
-//            .allMatch(c -> 404 == c));
+            var retries = checkHttpRetryConsistency(rootContext);
+            Assertions.assertTrue(retries > 0);
         } finally {
             executor.shutdown();
         }
