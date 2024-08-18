@@ -1,7 +1,6 @@
 package org.opensearch.migrations.replay.datatypes;
 
 import java.util.ArrayList;
-import java.util.List;
 import java.util.StringJoiner;
 import java.util.stream.Stream;
 

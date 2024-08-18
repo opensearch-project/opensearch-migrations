@@ -11,8 +11,6 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import io.netty.util.concurrent.ScheduledFuture;
-import lombok.AllArgsConstructor;
 import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
@@ -28,6 +26,8 @@ import org.opensearch.migrations.replay.util.TrackedFuture;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.EventLoop;
+import io.netty.util.concurrent.ScheduledFuture;
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 /**

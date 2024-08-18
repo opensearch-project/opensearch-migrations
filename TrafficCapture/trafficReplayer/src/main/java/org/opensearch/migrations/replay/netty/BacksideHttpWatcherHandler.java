@@ -2,12 +2,12 @@ package org.opensearch.migrations.replay.netty;
 
 import java.util.function.Consumer;
 
-import io.netty.handler.codec.http.HttpResponse;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.SimpleChannelInboundHandler;
 import io.netty.handler.codec.http.HttpObject;
+import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.LastHttpContent;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;

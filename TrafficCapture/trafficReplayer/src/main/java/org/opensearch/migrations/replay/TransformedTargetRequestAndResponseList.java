@@ -5,11 +5,10 @@ import java.util.Collections;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 
 import lombok.Getter;
-import lombok.Setter;
 
 public class TransformedTargetRequestAndResponseList {
 

@@ -11,12 +11,13 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.http.HttpResponse;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.replay.datatypes.ByteBufList;
 
 @Slf4j
 public class AggregatedRawResponse {

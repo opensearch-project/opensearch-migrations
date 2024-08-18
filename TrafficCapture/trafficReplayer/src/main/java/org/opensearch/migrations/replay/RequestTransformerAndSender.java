@@ -1,8 +1,6 @@
 package org.opensearch.migrations.replay;
 
-import java.io.IOException;
 import java.time.Instant;
-import java.util.concurrent.CancellationException;
 import java.util.function.Consumer;
 import java.util.function.Supplier;
 import java.util.stream.Stream;

@@ -1,9 +1,23 @@
 package org.opensearch.migrations.replay.http.retries;
 
+import java.io.IOException;
+import java.util.List;
+import java.util.Optional;
+import java.util.regex.Pattern;
+import java.util.stream.Stream;
+
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
 import com.fasterxml.jackson.core.async.ByteBufferFeeder;
+
+import org.opensearch.migrations.replay.AggregatedRawResponse;
+import org.opensearch.migrations.replay.HttpByteBufFormatter;
+import org.opensearch.migrations.replay.IRequestResponsePacketPair;
+import org.opensearch.migrations.replay.RequestSenderOrchestrator;
+import org.opensearch.migrations.replay.util.TextTrackedFuture;
+import org.opensearch.migrations.replay.util.TrackedFuture;
+
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
@@ -13,19 +27,6 @@ import io.netty.handler.codec.http.LastHttpContent;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-
-import org.opensearch.migrations.replay.AggregatedRawResponse;
-import org.opensearch.migrations.replay.HttpByteBufFormatter;
-import org.opensearch.migrations.replay.IRequestResponsePacketPair;
-import org.opensearch.migrations.replay.RequestSenderOrchestrator;
-import org.opensearch.migrations.replay.util.TextTrackedFuture;
-import org.opensearch.migrations.replay.util.TrackedFuture;
-
-import java.io.IOException;
-import java.util.List;
-import java.util.Optional;
-import java.util.regex.Pattern;
-import java.util.stream.Stream;
 
 @Slf4j
 public class OpenSearchDefaultRetry extends DefaultRetry {

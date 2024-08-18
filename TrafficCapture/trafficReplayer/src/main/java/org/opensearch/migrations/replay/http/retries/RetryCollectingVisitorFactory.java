@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay.http.retries;
 
+import java.util.Collections;
+
 import org.opensearch.migrations.replay.IRequestResponsePacketPair;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.TransformedTargetRequestAndResponseList;
@@ -7,8 +9,6 @@ import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import org.opensearch.migrations.replay.util.TrackedFuture;
-
-import java.util.Collections;
 
 public class RetryCollectingVisitorFactory implements IRetryVisitorFactory<TransformedTargetRequestAndResponseList> {
     private final RequestRetryEvaluator shouldRetry;

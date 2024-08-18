@@ -1,13 +1,14 @@
 package org.opensearch.migrations.replay.http.retries;
 
-import io.netty.buffer.ByteBuf;
+import java.util.List;
+
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.IRequestResponsePacketPair;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
 import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import org.opensearch.migrations.replay.util.TrackedFuture;
 
-import java.util.List;
+import io.netty.buffer.ByteBuf;
 
 public class DefaultRetry implements RequestRetryEvaluator {
     static final int MAX_RETRIES = 4;
