@@ -161,6 +161,13 @@ class Metadata:
                 logger.info("Using basic auth for target cluster")
             except KeyError as e:
                 raise ValueError(f"Missing required auth details for target cluster: {e}")
+        elif self._target_cluster.auth_type == AuthMethod.SIGV4:
+            signing_name, region = self._target_cluster._get_sigv4_details(force_region=True)
+            logger.info(f"Using sigv4 auth for target cluster with signing_name {signing_name} and region {region}")
+            command_args.update({
+                "--target-aws-service-signing-name": signing_name,
+                "--target-aws-region": region
+            })
 
         if self._target_cluster.allow_insecure:
             command_args.update({"--target-insecure": FlagOnlyArgument})

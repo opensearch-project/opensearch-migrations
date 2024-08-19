@@ -131,7 +131,7 @@ export class KafkaYaml {
 }
 
 export class ServicesYaml {
-    source_cluster: ClusterYaml;
+    source_cluster?: ClusterYaml;
     target_cluster: ClusterYaml;
     metrics_source: MetricsSourceYaml = new MetricsSourceYaml();
     backfill: RFSBackfillYaml | OSIBackfillYaml;

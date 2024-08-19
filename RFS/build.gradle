@@ -1,8 +1,9 @@
 plugins {
     id 'application'
     id 'java'
-    id 'io.freefair.lombok' version '8.6'
+    id 'io.freefair.lombok'
     id 'java-test-fixtures'
+    id 'me.champeau.jmh'
 }
 
 java.sourceCompatibility = JavaVersion.VERSION_11
@@ -63,6 +64,8 @@ dependencies {
 
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
 
+    testImplementation group: 'org.openjdk.jmh', name: 'jmh-core'
+
     // Integration tests
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
@@ -106,4 +109,12 @@ task slowTest(type: Test) {
     jacoco {
         enabled = true
     }
+}
+
+jmh {
+    includeTests = true // Benchmarks should be in test code, not product code
+    failOnError = true
+    fork = 0
+    humanOutputFile = project.file("${project.buildDir}/reports/jmh/human.txt")
+    resultsFile = project.file("${project.buildDir}/reports/jmh/results.txt")
 }

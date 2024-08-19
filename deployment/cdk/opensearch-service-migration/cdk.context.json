@@ -11,7 +11,7 @@
     "trafficReplayerServiceEnabled": true,
     "trafficReplayerEnableClusterFGACAuth": true,
     "captureProxyESServiceEnabled": true,
-    "reindexFromSnapshotEnabled": true,
+    "reindexFromSnapshotServiceEnabled": true,
     "otelCollectorEnabled": true
   }
 }
