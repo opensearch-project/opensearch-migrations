@@ -202,7 +202,7 @@ public class LuceneDocumentsReaderTest {
 
             // Verify results
             var expectedConcurrentSegments = 5;
-            var expectedConcurrentDocReads = Schedulers.DEFAULT_BOUNDED_ELASTIC_SIZE -  Schedulers.DEFAULT_BOUNDED_ELASTIC_SIZE % expectedConcurrentSegments;
+            var expectedConcurrentDocReads = 100;
             assertNotNull(actualDocuments);
             assertEquals(numSegments * docsPerSegment, actualDocuments.size());
             assertEquals(expectedConcurrentDocReads, observedConcurrentDocReads.get(), "Expected concurrent document reads to equal DEFAULT_BOUNDED_ELASTIC_SIZE");
