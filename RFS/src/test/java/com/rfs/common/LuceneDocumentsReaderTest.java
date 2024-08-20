@@ -30,7 +30,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
-import org.mockito.MockedStatic;
 
 import com.rfs.common.TestResources.Snapshot;
 import com.rfs.models.ShardMetadata;
@@ -38,6 +37,7 @@ import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
 import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import lombok.extern.slf4j.Slf4j;
+import org.mockito.MockedStatic;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
