@@ -9,6 +9,8 @@ import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.SoftDeletesDirectoryReaderWrapper;
 import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.store.MMapDirectory;
+import org.apache.lucene.store.NativeFSLockFactory;
 import org.apache.lucene.util.BytesRef;
 
 import lombok.Lombok;
@@ -76,36 +78,42 @@ public class LuceneDocumentsReader {
      *    present in the Lucene Index.  This wrapper will filter out documents that are marked as "soft deleted" in the
      *    Lucene Index.
 
-    */
+     */
     public Flux<Document> readDocuments() {
-        int luceneSegmentConcurrency = 4;
-        int luceneReaderThreadCount = Schedulers.DEFAULT_BOUNDED_ELASTIC_SIZE;
+        int luceneSegmentsToReadFromAtOnce = 5; // Arbitrary value
+        int luceneDocumentsToReadFromAtOnceForEachSegment = Schedulers.DEFAULT_BOUNDED_ELASTIC_SIZE / luceneSegmentsToReadFromAtOnce;
+
+        int luceneReaderThreadCount = luceneSegmentsToReadFromAtOnce * luceneDocumentsToReadFromAtOnceForEachSegment;
         // Create elastic scheduler for i/o bound lucene document reading
         Scheduler luceneReaderScheduler = Schedulers.newBoundedElastic(luceneReaderThreadCount, Integer.MAX_VALUE, "luceneReaderScheduler");
 
         return Flux.using(() -> wrapReader(DirectoryReader.open(FSDirectory.open(indexDirectoryPath)), softDeletesPossible, softDeletesField), reader -> {
             log.atInfo().log(reader.maxDoc() + " documents found in the current Lucene index");
-
             return Flux.fromIterable(reader.leaves()) // Iterate over each segment
-                .parallel(luceneSegmentConcurrency) // Run Segments in Parallel
-                .runOn(luceneReaderScheduler)
-                .flatMap(leafReaderContext -> {
-                        var leafReader = leafReaderContext.reader();
-                        var liveDocs = leafReader.getLiveDocs();
-                        return Flux.range(0, leafReader.maxDoc())
-                            .filter(docIdx -> liveDocs == null || liveDocs.get(docIdx)) // Filter for live docs
-                            .flatMap(liveDocIdx -> Mono.justOrEmpty(getDocument(leafReader, liveDocIdx, true))); // Retrieve the document skipping malformed docs
-                    }, false, Schedulers.DEFAULT_BOUNDED_ELASTIC_SIZE / luceneSegmentConcurrency, 100
-                )
-                .sequential() // Merge parallel streams
-                .doFinally(unused -> luceneReaderScheduler.dispose());
-        }, reader -> { // Close the DirectoryReader when done
+                .parallel(luceneSegmentsToReadFromAtOnce) // Specify Segment Concurrency
+                .concatMapDelayError(leafReaderContext ->
+                    Flux.using(leafReaderContext::reader, segmentReader -> {
+                        var liveDocs = segmentReader.getLiveDocs();
+                        return Flux.range(0, segmentReader.maxDoc())
+                            .parallel(luceneDocumentsToReadFromAtOnceForEachSegment)
+                            .runOn(luceneReaderScheduler) // Specify thread to use on read calls on, disable prefetch
+                            .concatMapDelayError( // Delay errors to attempt reading all documents before exiting
+                                docIdx -> Mono.justOrEmpty((liveDocs == null || liveDocs.get(docIdx)) ? // Filter for live docs
+                                    getDocument(segmentReader, docIdx, true) : // Get document, returns null to skip malformed docs
+                                    null));
+                    }, segmentReader -> {
+                        // NO-OP, closed by top level reader.close()
+                    })
+                );
+        }, reader -> {
             try {
                 reader.close();
             } catch (IOException e) {
                 log.atError().setMessage("Failed to close DirectoryReader").setCause(e).log();
                 throw Lombok.sneakyThrow(e);
             }
+            // Close scheduler
+            luceneReaderScheduler.dispose();
         });
     }
 
@@ -123,7 +131,7 @@ public class LuceneDocumentsReader {
             String id;
             try {
                 var idValue = document.getBinaryValue("_id");
-                if(idValue == null) {
+                if (idValue == null) {
                     log.atError().setMessage("Document with index" + docId + " does not have an id. Skipping").log();
                     return null;  // Skip documents with missing id
                 }
