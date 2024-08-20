@@ -45,12 +45,12 @@ public class DocumentReindexer {
         var maxGroupsToPrefetch = 1;
 
         return bulkDocsBatches
-            .parallel(maxConcurrentWorkItems, maxConcurrentWorkItems /* ??? how is the related to the second arg on the next line ??? */)
+            .parallel(maxConcurrentWorkItems, maxConcurrentWorkItems)
             .runOn(scheduler, maxGroupsToPrefetch)
             .concatMapDelayError(docsGroup -> sendBulkRequest(UUID.randomUUID(), docsGroup, indexName, context))
             .doOnTerminate(scheduler::dispose)
             .then();
-        }
+    }
 
     Mono<Void> sendBulkRequest(UUID batchId, List<BulkDocSection> docsBatch, String indexName, IDocumentReindexContext context) {
         return client.sendBulkRequest(indexName, docsBatch, context.createBulkRequest()) // Send the request
