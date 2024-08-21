@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.IntFunction;
+import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Assertions;
 
@@ -132,6 +133,9 @@ public class TestUtils {
 
         Assertions.assertEquals((expectedPayloadString), getStringFromContent(fullRequest));
         Assertions.assertEquals(expectedRequestHeaders, fullRequest.headers());
+        // Test casing on keys match
+        Assertions.assertEquals(expectedRequestHeaders.names().stream().sorted().collect(Collectors.toList()),
+            fullRequest.headers().names().stream().sorted().collect(Collectors.toList()));
         fullRequest.release();
     }
 

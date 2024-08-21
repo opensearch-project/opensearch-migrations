@@ -2,7 +2,7 @@ version: '3.7'
 services:
 
   elasticsearchsource:
-    image: 'migrations/elasticsearch_rfs_source:latest'
+    image: 'migrations/empty_elasticsearch_source_7_10:latest'
     networks:
       - migrations
     environment:
