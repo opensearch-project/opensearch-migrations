@@ -102,7 +102,7 @@ public class PerformanceVerificationTest {
         reindexThread.start();
 
         // Wait for some time to allow buffering to occur
-        Thread.sleep(500);
+        Thread.sleep(2000);
 
         // Check the number of ingested documents
         int ingestedDocs = ingestedDocuments.get();
