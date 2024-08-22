@@ -101,16 +101,29 @@ public class PerformanceVerificationTest {
         });
         reindexThread.start();
 
-        // Wait for some time to allow buffering to occur
-        Thread.sleep(2000);
+        // Wait until ingested and sent document counts stabilize
+        int previousIngestedDocs = 0;
+        int previousSentDocs = 0;
+        int ingestedDocs = 0;
+        int sentDocs = 0;
+        boolean stabilized = false;
 
-        // Check the number of ingested documents
-        int ingestedDocs = ingestedDocuments.get();
-        int sentDocs = sentDocuments.get();
+        while (!stabilized) {
+            Thread.sleep(250);
+            ingestedDocs = ingestedDocuments.get();
+            sentDocs = sentDocuments.get();
+
+            if (ingestedDocs == previousIngestedDocs && sentDocs == previousSentDocs) {
+                stabilized = true;
+            } else {
+                previousIngestedDocs = ingestedDocs;
+                previousSentDocs = sentDocs;
+            }
+        }
 
         // Release the pause and wait for the reindex to complete
         pauseLatch.countDown();
-        reindexThread.join(5000);
+        reindexThread.join(30000); // fail if not complete in 30 seconds
 
         // Assert that we had buffered expected number of documents
         int bufferedDocs = ingestedDocs - sentDocs;
