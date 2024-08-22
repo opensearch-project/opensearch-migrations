@@ -200,7 +200,7 @@ def construct_pipeline_config(pipeline_config_file_path: str, source_endpoint: s
     return pipeline_config
 
 
-# TODO We will want to reconcile the status from OSI with our internal Backfill status, but these are in flux right now
+# TODO: Reconcile status with internal status (https://opensearch.atlassian.net/browse/MIGRATIONS-1958)
 def get_status(osi_client, pipeline_name: str):
     name = pipeline_name if pipeline_name is not None else DEFAULT_PIPELINE_NAME
     logger.info(f"Getting status of pipeline: {name}")

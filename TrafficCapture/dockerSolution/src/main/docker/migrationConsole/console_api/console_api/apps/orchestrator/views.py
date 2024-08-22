@@ -55,16 +55,17 @@ def osi_update_workflow(request, osi_action_func: Callable, action_name: str):
     osi_serializer = OpenSearchIngestionDefaultRequestSerializer(data=request_data)
     osi_serializer.is_valid(raise_exception=True)
     pipeline_name = request_data.get('PipelineName')
+    response_data = {
+        'timestamp': datetime.datetime.now(datetime.timezone.utc)
+    }
     try:
         osi_action_func(osi_client=determine_osi_client(request_data=request_data, action_name=action_name),
                         pipeline_name=pipeline_name)
     except Exception as e:
         logger.error(f'Error performing OSI {action_name} Pipeline API: {e}')
-        return Response(str(e), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        response_data['error'] = str(e)
+        return Response(response_data, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    response_data = {
-        'timestamp': datetime.datetime.now(datetime.timezone.utc)
-    }
     return Response(response_data, status=status.HTTP_200_OK)
 
 
@@ -77,20 +78,22 @@ def osi_create_migration(request):
 
     osi_serializer = OpenSearchIngestionCreateRequestSerializer(data=request_data)
     osi_serializer.is_valid(raise_exception=True)
+    response_data = {
+        'timestamp': datetime.datetime.now(datetime.timezone.utc)
+    }
     try:
         create_pipeline_from_json(osi_client=determine_osi_client(request_data=request_data, action_name=action_name),
                                   input_json=request_data,
                                   pipeline_template_path=PIPELINE_TEMPLATE_PATH)
     except InvalidAuthParameters as i:
         logger.error(f'Error performing OSI {action_name} Pipeline API: {i}')
-        return Response(str(i), status=status.HTTP_400_BAD_REQUEST)
+        response_data['error'] = str(i)
+        return Response(response_data, status=status.HTTP_400_BAD_REQUEST)
     except Exception as e:
         logger.error(f'Error performing OSI {action_name} Pipeline API: {e}')
-        return Response(str(e), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        response_data['error'] = str(e)
+        return Response(response_data, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    response_data = {
-        'timestamp': datetime.datetime.now(datetime.timezone.utc)
-    }
     return Response(response_data, status=status.HTTP_200_OK)
 
 
@@ -127,7 +130,11 @@ def osi_get_status_migration(request):
                                  pipeline_name=pipeline_name)
     except Exception as e:
         logger.error(f'Error performing OSI {action_name} Pipeline API: {e}')
-        return Response(str(e), status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        response_data = {
+            'timestamp': datetime.datetime.now(datetime.timezone.utc),
+            'error': str(e)
+        }
+        return Response(response_data, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     response_data = {
         'timestamp': datetime.datetime.now(datetime.timezone.utc),
