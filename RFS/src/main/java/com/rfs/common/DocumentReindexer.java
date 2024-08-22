@@ -30,7 +30,8 @@ public class DocumentReindexer {
     public Mono<Void> reindex(String indexName, Flux<Document> documentStream, IDocumentReindexContext context) {
         // Create scheduler for short-lived CPU bound tasks
         var scheduler = Schedulers.newParallel("DocumentReader");
-        var bulkDocs = documentStream.publishOn(scheduler).map(BulkDocSection::new);
+        var docsToBuffer = 2000;
+        var bulkDocs = documentStream.publishOn(scheduler, docsToBuffer).map(BulkDocSection::new);
 
         return this.reindexDocsInParallelBatches(bulkDocs, indexName, context)
             .doOnSuccess(unused -> log.debug("All batches processed"))
@@ -42,12 +43,12 @@ public class DocumentReindexer {
         // Create elastic scheduler for long-lived i/o bound tasks
         var scheduler = Schedulers.newBoundedElastic(maxConcurrentWorkItems, Integer.MAX_VALUE, "DocumentBatchReindexer");
         var bulkDocsBatches = batchDocsBySizeOrCount(docs);
-        var maxGroupsToPrefetch = 1;
 
         return bulkDocsBatches
-            .parallel(maxConcurrentWorkItems, maxConcurrentWorkItems)
-            .runOn(scheduler, maxGroupsToPrefetch)
-            .concatMapDelayError(docsGroup -> sendBulkRequest(UUID.randomUUID(), docsGroup, indexName, context))
+            .publishOn(scheduler, maxConcurrentWorkItems)
+            .flatMap(docsGroup -> sendBulkRequest(UUID.randomUUID(), docsGroup, indexName, context)
+                .subscribeOn(scheduler),
+                maxConcurrentWorkItems, 1)
             .doOnTerminate(scheduler::dispose)
             .then();
     }

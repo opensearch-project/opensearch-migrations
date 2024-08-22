@@ -2,6 +2,7 @@ package com.rfs.common;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.concurrent.Callable;
 import java.util.function.Function;
 
 import org.apache.lucene.document.Document;
@@ -18,7 +19,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
-import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 @RequiredArgsConstructor
@@ -81,7 +81,7 @@ public class LuceneDocumentsReader {
      */
     public Flux<Document> readDocuments() {
         return Flux.using(
-            () -> wrapReader(DirectoryReader.open(FSDirectory.open(indexDirectoryPath)), softDeletesPossible, softDeletesField),
+            () -> wrapReader(getReader(), softDeletesPossible, softDeletesField),
             this::readDocsByLeavesInParallel,
             reader -> {
                 try {
@@ -93,6 +93,10 @@ public class LuceneDocumentsReader {
         });
     }
 
+    protected DirectoryReader getReader() throws IOException {
+        return DirectoryReader.open(FSDirectory.open(indexDirectoryPath));
+    }
+
     Publisher<Document> readDocsByLeavesInParallel(DirectoryReader reader) {
         var segmentsToReadAtOnce = 5; // Arbitrary value
         var maxDocumentsToReadAtOnce = 100; // Arbitrary value
@@ -100,25 +104,28 @@ public class LuceneDocumentsReader {
             .addArgument(reader::maxDoc)
             .addArgument(reader.leaves()::size)
             .log();
-    
+
         // Create shared scheduler for i/o bound document reading
         var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
 
         return Flux.fromIterable(reader.leaves())
-            .parallel(segmentsToReadAtOnce)
-            .concatMapDelayError(leaf -> readDocsFromSegments(leaf, sharedSegmentReaderScheduler));
+            .flatMap(this::getReadDocCallablesFromSegments, segmentsToReadAtOnce)
+            .flatMap(c -> Mono.fromCallable(c)
+                    .subscribeOn(sharedSegmentReaderScheduler), // Scheduler to read documents on
+                maxDocumentsToReadAtOnce) // Don't need to worry about prefetch before this step as documents aren't realized
+            .doOnTerminate(sharedSegmentReaderScheduler::dispose);
     }
 
-    Publisher<Document> readDocsFromSegments(LeafReaderContext leafReaderContext, Scheduler scheduler) {
-        var documentsToReadAtOnceForEachSegment = 50; // Arbitrary value
+    Publisher<Callable<Document>> getReadDocCallablesFromSegments(LeafReaderContext leafReaderContext) {
+        @SuppressWarnings("resource") // segmentReader will be closed by parent DirectoryReader
         var segmentReader = leafReaderContext.reader();
         var liveDocs = segmentReader.getLiveDocs();
 
         return Flux.range(0, segmentReader.maxDoc())
-            .parallel(documentsToReadAtOnceForEachSegment)
-            .runOn(scheduler) // Specify thread to use on read calls on, disable prefetch
-            .filter(docIdx -> (liveDocs == null || liveDocs.get(docIdx)))
-            .concatMapDelayError(docIdx -> Mono.just(getDocument(segmentReader, docIdx, true)));
+            .subscribeOn(Schedulers.parallel())
+            .map(docIdx -> () -> ((liveDocs == null || liveDocs.get(docIdx)) ? // Filter for live docs
+                getDocument(segmentReader, docIdx, true) : // Get document, returns null to skip malformed docs
+                null));
     }
 
     protected DirectoryReader wrapReader(DirectoryReader reader, boolean softDeletesEnabled, String softDeletesField) throws IOException {
@@ -128,7 +135,7 @@ public class LuceneDocumentsReader {
         return reader;
     }
 
-    Document getDocument(IndexReader reader, int docId, boolean isLive) {
+    protected Document getDocument(IndexReader reader, int docId, boolean isLive) {
         try {
             Document document = reader.document(docId);
             BytesRef sourceBytes = document.getBinaryValue("_source");

@@ -22,7 +22,6 @@ import org.apache.lucene.document.StoredField;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
-import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
@@ -37,17 +36,14 @@ import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
 import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import lombok.extern.slf4j.Slf4j;
-import org.mockito.MockedStatic;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
 import reactor.test.StepVerifier;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
-import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.mockStatic;
 import static org.mockito.Mockito.when;
 
 @Slf4j
@@ -172,43 +168,39 @@ public class LuceneDocumentsReaderTest {
         when(mockReader.maxDoc()).thenReturn(docsPerSegment * numSegments);
 
         // Create a custom LuceneDocumentsReader for testing
-        try (MockedStatic<DirectoryReader> mockedDirectoryReader = mockStatic(DirectoryReader.class);
-             MockedStatic<FSDirectory> mockedFSDirectory = mockStatic(FSDirectory.class)) {
+        LuceneDocumentsReader reader = new LuceneDocumentsReader(Paths.get("dummy"), false, "dummy_field") {
+            @Override
+            protected DirectoryReader getReader() {
+                return mockReader;
+            }
+        };
 
-            mockedFSDirectory.when(() -> FSDirectory.open(any(Path.class))).thenReturn(mock(FSDirectory.class));
+        AtomicInteger observedConcurrentDocReads = new AtomicInteger(0);
+        AtomicInteger observedConcurrentSegments = new AtomicInteger(0);
 
-            LuceneDocumentsReader reader = new LuceneDocumentsReader(Paths.get("dummy"), true, "dummy_field") {
-                @Override
-                protected DirectoryReader wrapReader(DirectoryReader reader, boolean softDeletesEnabled, String softDeletesField) throws IOException {
-                    return mockReader; // Return the mock reader directly
-                }
-            };
+        // Release the latch after a short delay to allow all threads to be ready
+        Schedulers.parallel().schedule(() -> {
+            observedConcurrentSegments.set(concurrentSegmentReads.get());
+            observedConcurrentDocReads.set(concurrentDocReads.get());
+            startLatch.countDown();
 
-            AtomicInteger observedConcurrentDocReads = new AtomicInteger(0);
-            AtomicInteger observedConcurrentSegments = new AtomicInteger(0);
+        }, 500, TimeUnit.MILLISECONDS);
 
-            // Release the latch after a short delay to allow all threads to be ready
-            Schedulers.parallel().schedule(() -> {
-                observedConcurrentSegments.set(concurrentSegmentReads.get());
-                observedConcurrentDocReads.set(concurrentDocReads.get());
-                startLatch.countDown();
+        // Read documents
+        List<Document> actualDocuments = reader.readDocuments()
+            .subscribeOn(Schedulers.parallel())
+            .collectList()
+            .block(Duration.ofSeconds(2));
 
-            }, 500, TimeUnit.MILLISECONDS);
+        // Verify results
+        var expectedConcurrentSegments = 5;
+        var expectedConcurrentDocReads = 100;
+        assertNotNull(actualDocuments);
+        assertEquals(numSegments * docsPerSegment, actualDocuments.size());
+        assertEquals(expectedConcurrentDocReads, observedConcurrentDocReads.get(), "Expected concurrent document reads to equal DEFAULT_BOUNDED_ELASTIC_SIZE");
+        assertEquals(expectedConcurrentSegments, observedConcurrentSegments.get(), "Expected concurrent open segments equal to 5");
 
-            // Read documents
-            List<Document> actualDocuments = reader.readDocuments()
-                .collectList()
-                .block(Duration.ofSeconds(5));
 
-            // Verify results
-            var expectedConcurrentSegments = 5;
-            var expectedConcurrentDocReads = 100;
-            assertNotNull(actualDocuments);
-            assertEquals(numSegments * docsPerSegment, actualDocuments.size());
-            assertEquals(expectedConcurrentDocReads, observedConcurrentDocReads.get(), "Expected concurrent document reads to equal DEFAULT_BOUNDED_ELASTIC_SIZE");
-            assertEquals(expectedConcurrentSegments, observedConcurrentSegments.get(), "Expected concurrent open segments equal to 5");
-
-        }
     }
 
     protected void assertDocsEqual(String expectedId, String actualId, String expectedSource, String actualSource) {
