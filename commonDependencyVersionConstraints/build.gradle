@@ -132,6 +132,7 @@ dependencies {
     implementation group: 'org.apache.tika', name: 'tika-core', version: '1.28.4'
     implementation group: 'com.jayway.jsonpath', name: 'json-path', version: '2.9.0'
     implementation group: 'dnsjava', name: 'dnsjava', version: '3.6.0'
+    api group: 'org.glassfish.jersey.core', name: 'jersey-common', version: '2.34'
     api group: 'org.apache.httpcomponents', 'name': 'httpclient', version: '4.5.13'
 
   }
