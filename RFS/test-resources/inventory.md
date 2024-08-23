@@ -4,6 +4,118 @@ This directory tree contains a number of different resources for use in testing 
 
 ### Snapshots
 
+#### ES_5_6_Updates_Deletes_w_Soft
+An Elastic 5.6 snapshot repo containing a single index with a collection of documents that variously been updated, deleted, or both.  It contains multiple type mappings.  The commands used to generate the snapshot are as follows:
+
+curl -X PUT "localhost:19200/test_updates_deletes" -H "Content-Type: application/json" -d '
+{
+  "settings": {
+    "index": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    }
+  },
+  "mappings": {
+    "type1": {
+      "properties": {
+        "title": { "type": "text" }
+      }
+    },
+    "type2": {
+      "properties": {
+        "contents": { "type": "text" }
+      }
+    }
+  }
+}'
+
+curl -X PUT "localhost:19200/test_updates_deletes/type1/complexdoc" -H "Content-Type: application/json" -d '
+{
+  "title": "This is a doc with complex history"
+}
+'
+
+curl -X POST "localhost:19200/test_updates_deletes/_flush"
+
+curl -X DELETE "localhost:19200/test_updates_deletes/type1/complexdoc"
+
+curl -X POST "localhost:19200/test_updates_deletes/_flush"
+
+curl -X PUT "localhost:19200/test_updates_deletes/type1/complexdoc" -H "Content-Type: application/json" -d '
+{
+  "title": "This is a doc with complex history"
+}
+'
+
+curl -X POST "localhost:19200/test_updates_deletes/_flush"
+
+curl -X POST "localhost:19200/test_updates_deletes/type1/complexdoc/_update" -H "Content-Type: application/json" -d '
+{
+  "doc": {
+    "title": "This is a doc with complex history. Updated!"
+  }
+}
+'
+
+curl -X POST "localhost:19200/test_updates_deletes/_flush"
+
+curl -X PUT "localhost:19200/test_updates_deletes/type1/deleteddoc" -H "Content-Type: application/json" -d '
+{
+  "title": "This doc that will be deleted"
+}
+'
+
+curl -X POST "localhost:19200/test_updates_deletes/_flush"
+
+curl -X DELETE "localhost:19200/test_updates_deletes/type1/deleteddoc"
+
+curl -X POST "localhost:19200/test_updates_deletes/_flush"
+
+curl -X PUT "localhost:19200/test_updates_deletes/type2/updateddoc" -H "Content-Type: application/json" -d '
+{
+  "content": "blah blah"
+}
+'
+
+curl -X POST "localhost:19200/test_updates_deletes/_flush"
+
+curl -X POST "localhost:19200/test_updates_deletes/type2/updateddoc/_update" -H "Content-Type: application/json" -d '
+{
+  "doc": {
+    "content": "Updated!"
+  }
+}
+'
+
+curl -X POST "localhost:19200/test_updates_deletes/_flush"
+
+curl -X PUT "localhost:19200/test_updates_deletes/type2/unchangeddoc" -H "Content-Type: application/json" -d '
+
+
+{
+  "content": "This doc will not be changed\nIt has multiple lines of text\nIts source doc has extra newlines."
+}
+
+'
+
+curl -X POST "localhost:19200/test_updates_deletes/_flush"
+
+curl -X PUT "localhost:19200/_snapshot/test_s3_repository" -H "Content-Type: application/json" -d '{
+  "type": "fs",
+  "settings": {
+    "location": "/snapshots",
+    "compress": false
+  }
+}'
+
+curl -X PUT "localhost:19200/_snapshot/test_s3_repository/rfs_snapshot" -H "Content-Type: application/json" -d '{
+  "indices": "test_updates_deletes",
+  "ignore_unavailable": true,
+  "include_global_state": true
+}'
+
+
+
 #### ES_6_8_Single
 An Elasticsearch 6.8 snapshot repo containing a single snapshot, `global_state_snapshot`.  Contains two indices (`posts_2023_02_25`, `posts_2024_01_01`), each with few documents in them.  Contains a template, `posts_index_template`.
 
