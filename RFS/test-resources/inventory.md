@@ -4,9 +4,10 @@ This directory tree contains a number of different resources for use in testing 
 
 ### Snapshots
 
-#### ES_5_6_Updates_Deletes_w_Soft
+#### ES_5_6_Updates_Deletes
 An Elastic 5.6 snapshot repo containing a single index with a collection of documents that variously been updated, deleted, or both.  It contains multiple type mappings.  The commands used to generate the snapshot are as follows:
 
+```
 curl -X PUT "localhost:19200/test_updates_deletes" -H "Content-Type: application/json" -d '
 {
   "settings": {
@@ -100,7 +101,7 @@ curl -X PUT "localhost:19200/test_updates_deletes/type2/unchangeddoc" -H "Conten
 
 curl -X POST "localhost:19200/test_updates_deletes/_flush"
 
-curl -X PUT "localhost:19200/_snapshot/test_s3_repository" -H "Content-Type: application/json" -d '{
+curl -X PUT "localhost:19200/_snapshot/test_repository" -H "Content-Type: application/json" -d '{
   "type": "fs",
   "settings": {
     "location": "/snapshots",
@@ -108,16 +109,27 @@ curl -X PUT "localhost:19200/_snapshot/test_s3_repository" -H "Content-Type: app
   }
 }'
 
-curl -X PUT "localhost:19200/_snapshot/test_s3_repository/rfs_snapshot" -H "Content-Type: application/json" -d '{
+curl -X PUT "localhost:19200/_snapshot/test_repository/rfs_snapshot" -H "Content-Type: application/json" -d '{
   "indices": "test_updates_deletes",
   "ignore_unavailable": true,
   "include_global_state": true
 }'
-
-
+```
 
 #### ES_6_8_Single
 An Elasticsearch 6.8 snapshot repo containing a single snapshot, `global_state_snapshot`.  Contains two indices (`posts_2023_02_25`, `posts_2024_01_01`), each with few documents in them.  Contains a template, `posts_index_template`.
+
+#### ES_6_8_Updates_Deletes_Merged
+This snapshot is the result of taking the [ES_5_6_Updates_Deletes](#es_5_6_updates_deletes) snapshot, restoring in an Elasticsearch 6.8 cluster, and performing a force-merge on its single index, and taking a new snapshot:
+
+```
+curl -X POST "localhost:19200/test_updates_deletes/_forcemerge?max_num_segments=1"
+```
+
+This process forces the original Lucene 6 segment files from the ES 5.6 snapshot to be re-written as a single Lucene 7 segment, but leaves the index settings untouched.  As a result, it will be readable by a Lucene 8 reader also compatible with snapshots created by ES 7 clusters.  However - it also contains a multi-type mapping in its single index, which could not be created in ES 6.8 alone.
+
+#### ES_6_8_Updates_Deletes_Restored
+This snapshot is the result of taking the [ES_5_6_Updates_Deletes](#es_5_6_updates_deletes) snapshot, restoring in an Elasticsearch 6.8 cluster, and then taking a new snapshot.  This process retains the original Lucene files and index settings from ES 5.6 but re-writes the format of the snapshot itself to match the ES 6.8 standard.  As a result, this snapshot contains both Lucene 6 segment files and a multi-type mappings in its single index; both of these would not be possible to create in ES 6.8 by itself.
 
 #### ES_7_10_Single
 An Elasticsearch 7.10 snapshot repo containing a single snapshot (`global_state_snapshot`).  Contains two indices (`posts_2023_02_25`, `posts_2024_01_01`), each with few documents in them.  Contains an index template, `posts_index_template`, and a composite template, `posts_template`.
