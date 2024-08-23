@@ -1,5 +1,6 @@
 package com.rfs;
 
+import com.rfs.common.OpenSearchClient.BulkResponse;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -23,6 +24,7 @@ import com.rfs.common.OpenSearchClient;
 import com.rfs.tracing.IRfsContexts;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.ArgumentMatchers.any;
@@ -78,11 +80,16 @@ public class PerformanceVerificationTest {
         OpenSearchClient mockClient = mock(OpenSearchClient.class);
         when(mockClient.sendBulkRequest(anyString(), anyList(), any())).thenAnswer(invocation -> {
             List<DocumentReindexer.BulkDocSection> docs = invocation.getArgument(1);
+            sentDocuments.addAndGet(docs.size());
+            var response = new BulkResponse(200, "OK", null, null);
+            var blockingScheduler = Schedulers.newSingle("TestWaiting");
             return Mono.fromCallable(() -> {
-                sentDocuments.addAndGet(docs.size());
-                pauseLatch.await(); // Pause here
-                return null;
-            });
+                    // Perform wait on separate thread to simulate nio behavior
+                    pauseLatch.await();
+                    return null;
+                }).subscribeOn(blockingScheduler)
+                .then(Mono.just(response))
+                .doOnTerminate(blockingScheduler::dispose);
         });
 
         // Create DocumentReindexer
@@ -108,8 +115,12 @@ public class PerformanceVerificationTest {
         int sentDocs = 0;
         boolean stabilized = false;
 
+        long startTime = System.currentTimeMillis();
         while (!stabilized) {
-            Thread.sleep(250);
+            if (System.currentTimeMillis() - startTime > 30000) {
+                throw new AssertionError("Test timed out after 30 seconds");
+            }
+            Thread.sleep(500);
             ingestedDocs = ingestedDocuments.get();
             sentDocs = sentDocuments.get();
 
@@ -133,10 +144,11 @@ public class PerformanceVerificationTest {
         assertEquals(expectedSentDocs, sentDocs, "Expected sent docs to equal maxDocsPerBulkRequest * maxConcurrentWorkItems");
 
         int expectedConcurrentDocReads = 100;
-        int expectedDocBufferBeforeBatching = 2000;
-        int strictExpectedBufferedDocs = maxConcurrentWorkItems * maxDocsPerBulkRequest + expectedConcurrentDocReads + expectedDocBufferBeforeBatching;
-        // Not sure why this isn't adding up exactly, not behaving deterministically. Checking within delta of 5000 to get the tests to pass
-        assertEquals(strictExpectedBufferedDocs, bufferedDocs, 5000);
+        int expectedBulkDocsBuffered = 50;
+        int docsFromBuffers = expectedBulkDocsBuffered * maxDocsPerBulkRequest;
+        int numberOfSingleBufferSteps = 2; // calls like publishOn(scheduler, 1) holds a 1 item buffer
+        int strictExpectedBufferedDocs = docsFromBuffers + expectedConcurrentDocReads + numberOfSingleBufferSteps;
+        assertEquals(strictExpectedBufferedDocs, bufferedDocs);
 
         // Verify the total number of ingested documents
         assertEquals(500_000, ingestedDocuments.get(), "Not all documents were ingested");

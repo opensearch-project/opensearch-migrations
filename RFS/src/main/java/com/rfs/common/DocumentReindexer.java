@@ -16,6 +16,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 @Slf4j
@@ -28,10 +29,10 @@ public class DocumentReindexer {
     private final int maxConcurrentWorkItems;
 
     public Mono<Void> reindex(String indexName, Flux<Document> documentStream, IDocumentReindexContext context) {
-        // Create scheduler for short-lived CPU bound tasks
-        var scheduler = Schedulers.newParallel("DocumentReader");
-        var docsToBuffer = 2000;
-        var bulkDocs = documentStream.publishOn(scheduler, docsToBuffer).map(BulkDocSection::new);
+        var scheduler = Schedulers.newParallel("DocumentBulkAggregator");
+        var bulkDocs = documentStream
+            .publishOn(scheduler, 1)
+            .map(BulkDocSection::new);
 
         return this.reindexDocsInParallelBatches(bulkDocs, indexName, context)
             .doOnSuccess(unused -> log.debug("All batches processed"))
@@ -40,27 +41,29 @@ public class DocumentReindexer {
     }
 
     Mono<Void> reindexDocsInParallelBatches(Flux<BulkDocSection> docs, String indexName, IDocumentReindexContext context) {
-        // Create elastic scheduler for long-lived i/o bound tasks
-        var scheduler = Schedulers.newBoundedElastic(maxConcurrentWorkItems, Integer.MAX_VALUE, "DocumentBatchReindexer");
+        // Use parallel scheduler for send subscription due on non-blocking io client
+        var scheduler = Schedulers.newParallel("DocumentBatchReindexer");
         var bulkDocsBatches = batchDocsBySizeOrCount(docs);
+        var bulkDocsToBuffer = 50; // Arbitrary, takes up 500MB at default settings
 
         return bulkDocsBatches
-            .publishOn(scheduler, maxConcurrentWorkItems)
-            .flatMap(docsGroup -> sendBulkRequest(UUID.randomUUID(), docsGroup, indexName, context)
-                .subscribeOn(scheduler),
-                maxConcurrentWorkItems, 1)
+            .limitRate(bulkDocsToBuffer, 1) // Bulk Doc Buffer, Keep Full
+            .publishOn(scheduler, 1) // Switch scheduler
+            .flatMap(docsGroup -> sendBulkRequest(UUID.randomUUID(), docsGroup, indexName, context, scheduler),
+                maxConcurrentWorkItems)
             .doOnTerminate(scheduler::dispose)
             .then();
     }
 
-    Mono<Void> sendBulkRequest(UUID batchId, List<BulkDocSection> docsBatch, String indexName, IDocumentReindexContext context) {
+    Mono<Void> sendBulkRequest(UUID batchId, List<BulkDocSection> docsBatch, String indexName, IDocumentReindexContext context, Scheduler scheduler) {
         return client.sendBulkRequest(indexName, docsBatch, context.createBulkRequest()) // Send the request
             .doFirst(() -> log.atInfo().log("Batch Id:{}, {} documents in current bulk request.", batchId, docsBatch.size()))
             .doOnSuccess(unused -> log.atDebug().log("Batch Id:{}, succeeded", batchId))
             .doOnError(error -> log.atError().log("Batch Id:{}, failed {}", batchId, error.getMessage()))
             // Prevent the error from stopping the entire stream, retries occurring within sendBulkRequest
             .onErrorResume(e -> Mono.empty())
-            .then(); // Discard the response object
+            .then() // Discard the response object
+            .subscribeOn(scheduler);
     }
 
     Flux<List<BulkDocSection>> batchDocsBySizeOrCount(Flux<BulkDocSection> docs) {
