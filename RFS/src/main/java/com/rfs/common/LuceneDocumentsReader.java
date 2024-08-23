@@ -2,21 +2,24 @@ package com.rfs.common;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.concurrent.Callable;
 import java.util.function.Function;
 
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexReader;
-import org.apache.lucene.index.LeafReader;
+import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.SoftDeletesDirectoryReaderWrapper;
 import org.apache.lucene.store.FSDirectory;
-import org.apache.lucene.util.Bits;
 import org.apache.lucene.util.BytesRef;
 
 import lombok.Lombok;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Schedulers;
 
 @RequiredArgsConstructor
 @Slf4j
@@ -24,7 +27,6 @@ public class LuceneDocumentsReader {
     public static Function<Path, LuceneDocumentsReader> getFactory(boolean softDeletesPossible, String softDeletesField) {
         return path -> new LuceneDocumentsReader(path, softDeletesPossible, softDeletesField);
     }
-    public static final int NUM_DOCUMENTS_BUFFERED = 1024;
 
     protected final Path indexDirectoryPath;
     protected final boolean softDeletesPossible;
@@ -76,36 +78,54 @@ public class LuceneDocumentsReader {
      *    present in the Lucene Index.  This wrapper will filter out documents that are marked as "soft deleted" in the
      *    Lucene Index.
 
-    */
+     */
     public Flux<Document> readDocuments() {
-        return Flux.using(() -> wrapReader(DirectoryReader.open(FSDirectory.open(indexDirectoryPath)), softDeletesPossible, softDeletesField), reader -> {
-            log.atInfo().log(reader.maxDoc() + " documents found in the current Lucene index");
-
-            return Flux.fromIterable(reader.leaves()) // Iterate over each segment
-                .flatMap(leaf -> {
-                    LeafReader leafReader = leaf.reader();
-                    Bits liveDocs = leafReader.getLiveDocs(); // Get live docs bits
-
-                    return Flux.range(0, leafReader.maxDoc())
-                        .handle((docId, sink) -> {
-                            // Check if the document is live (not hard deleted/updated)
-                            boolean isLive = liveDocs == null || liveDocs.get(docId);
-                            Document doc = getDocument(leafReader, docId, isLive);
-
-                            if (doc != null) { // Skip malformed docs
-                                sink.next(doc);
-                            }
-                        });
-                })
-                .cast(Document.class);
-        }, reader -> { // Close the DirectoryReader when done
-            try {
-                reader.close();
-            } catch (IOException e) {
-                log.atError().setMessage("Failed to close DirectoryReader").setCause(e).log();
-                throw Lombok.sneakyThrow(e);
-            }
+        return Flux.using(
+            () -> wrapReader(getReader(), softDeletesPossible, softDeletesField),
+            this::readDocsByLeavesInParallel,
+            reader -> {
+                try {
+                    reader.close();
+                } catch (IOException e) {
+                    log.atError().setMessage("Failed to close DirectoryReader").setCause(e).log();
+                    throw Lombok.sneakyThrow(e);
+                }
         });
+    }
+
+    protected DirectoryReader getReader() throws IOException {
+        return DirectoryReader.open(FSDirectory.open(indexDirectoryPath));
+    }
+
+    Publisher<Document> readDocsByLeavesInParallel(DirectoryReader reader) {
+        var segmentsToReadAtOnce = 5; // Arbitrary value
+        var maxDocumentsToReadAtOnce = 100; // Arbitrary value
+        log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
+            .addArgument(reader::maxDoc)
+            .addArgument(reader.leaves()::size)
+            .log();
+
+        // Create shared scheduler for i/o bound document reading
+        var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
+
+        return Flux.fromIterable(reader.leaves())
+            .flatMap(this::getReadDocCallablesFromSegments, segmentsToReadAtOnce)
+            .flatMap(c -> Mono.fromCallable(c)
+                    .subscribeOn(sharedSegmentReaderScheduler), // Scheduler to read documents on
+                maxDocumentsToReadAtOnce) // Don't need to worry about prefetch before this step as documents aren't realized
+            .doOnTerminate(sharedSegmentReaderScheduler::dispose);
+    }
+
+    Publisher<Callable<Document>> getReadDocCallablesFromSegments(LeafReaderContext leafReaderContext) {
+        @SuppressWarnings("resource") // segmentReader will be closed by parent DirectoryReader
+        var segmentReader = leafReaderContext.reader();
+        var liveDocs = segmentReader.getLiveDocs();
+
+        return Flux.range(0, segmentReader.maxDoc())
+            .subscribeOn(Schedulers.parallel())
+            .map(docIdx -> () -> ((liveDocs == null || liveDocs.get(docIdx)) ? // Filter for live docs
+                getDocument(segmentReader, docIdx, true) : // Get document, returns null to skip malformed docs
+                null));
     }
 
     protected DirectoryReader wrapReader(DirectoryReader reader, boolean softDeletesEnabled, String softDeletesField) throws IOException {
@@ -121,30 +141,35 @@ public class LuceneDocumentsReader {
             BytesRef sourceBytes = document.getBinaryValue("_source");
             String id;
             try {
-                id = Uid.decodeId(document.getBinaryValue("_id").bytes);
-                log.atDebug().log("Reading document " + id);
+                var idValue = document.getBinaryValue("_id");
+                if (idValue == null) {
+                    log.atError().setMessage("Document with index" + docId + " does not have an id. Skipping").log();
+                    return null;  // Skip documents with missing id
+                }
+                id = Uid.decodeId(idValue.bytes);
+                log.atDebug().setMessage("Reading document {}").addArgument(id).log();
             } catch (Exception e) {
                 StringBuilder errorMessage = new StringBuilder();
                 errorMessage.append("Unable to parse Document id from Document.  The Document's Fields: ");
                 document.getFields().forEach(f -> errorMessage.append(f.name()).append(", "));
                 log.atError().setMessage(errorMessage.toString()).setCause(e).log();
-                return null; // Skip documents with missing id
+                return null; // Skip documents with invalid id
             }
 
             if (!isLive) {
-                log.atDebug().log("Document " + id + " is not live");
+                log.atDebug().setMessage("Document {} is not live").addArgument(id).log();
                 return null; // Skip these
             }
 
             if (sourceBytes == null || sourceBytes.bytes.length == 0) {
-                log.warn("Document " + id + " doesn't have the _source field enabled");
+                log.atWarn().setMessage("Document {} doesn't have the _source field enabled").addArgument(id).log();
                 return null;  // Skip these
             }
 
-            log.atDebug().log("Document " + id + " read successfully");
+            log.atDebug().setMessage("Document {} read successfully").addArgument(id).log();
             return document;
         } catch (Exception e) {
-            log.atError().setMessage("Failed to read document at Lucene index location " + docId).setCause(e).log();
+            log.atError().setMessage("Failed to read document at Lucene index location {}").addArgument(docId).setCause(e).log();
             return null;
         }
     }

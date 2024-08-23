@@ -71,7 +71,7 @@ public class SnapshotStateTest {
         final var testContext = DocumentMigrationTestContext.factory(workCoordinationContext).noOtelTracking();
         final var indexName = "my-index";
         final var document1Id = "doc1";
-        final var document1Body = "   \n {\n\t\"fo$o\":\"bar\"\n} \n"; // Wacky whitespace added to ensure we can handle it
+        final var document1Body = "   \n {\n\"fo$o\":\"bar\"\n}\t \n"; // Verify that we trim and remove newlines
         operations.createDocument(indexName, document1Id, document1Body);
 
         final var snapshotName = "snapshot-1";
