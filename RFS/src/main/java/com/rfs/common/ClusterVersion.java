@@ -1,5 +1,8 @@
 package com.rfs.common;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.ParameterException;
 
@@ -9,16 +12,23 @@ import com.beust.jcommander.ParameterException;
 public enum ClusterVersion {
     ES_6_8,
     ES_7_10,
+    ES_7_17,
     OS_2_11;
+
+    public static final List<ClusterVersion> SOURCE_VERSIONS = List.of(ES_6_8, ES_7_10, ES_7_17);
+    public static final List<ClusterVersion> TARGET_VERSIONS = List.of(OS_2_11);
 
     public static class ArgsConverter implements IStringConverter<ClusterVersion> {
         @Override
         public ClusterVersion convert(String value) {
-            switch (value) {
+            String lowerCasedValue = value.toLowerCase();
+            switch (lowerCasedValue) {
                 case "es_6_8":
                     return ClusterVersion.ES_6_8;
                 case "es_7_10":
                     return ClusterVersion.ES_7_10;
+                case "es_7_17":
+                    return ClusterVersion.ES_7_17;
                 case "os_2_11":
                     return ClusterVersion.OS_2_11;
                 default:
