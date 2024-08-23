@@ -1,6 +1,5 @@
 package com.rfs;
 
-import com.rfs.common.OpenSearchClient.BulkResponse;
 import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
@@ -21,6 +20,7 @@ import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
+import com.rfs.common.OpenSearchClient.BulkResponse;
 import com.rfs.tracing.IRfsContexts;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
