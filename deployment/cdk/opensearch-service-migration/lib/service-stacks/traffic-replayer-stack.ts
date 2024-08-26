@@ -42,7 +42,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             { id: "serviceSG", param: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID },
             { id: "trafficStreamSourceAccessSG", param: MigrationSSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID },
             { id: "defaultDomainAccessSG", param: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID },
-            { id: "replayerOutputAccessSG", param: MigrationSSMParameter.REPLAYER_OUTPUT_ACCESS_SECURITY_GROUP_ID }
+            { id: "sharedLogsAccessSG", param: MigrationSSMParameter.SHARED_LOGS_SECURITY_GROUP_ID }
         ].map(({ id, param }) =>
             SecurityGroup.fromSecurityGroupId(this, id, getMigrationStringParameterValue(this, {
                 ...props,

@@ -42,6 +42,10 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
                 ...props,
                 parameter: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID,
             })),
+            SecurityGroup.fromSecurityGroupId(this, "sharedLogsAccessSG", getMigrationStringParameterValue(this, {
+                ...props,
+                parameter: MigrationSSMParameter.SHARED_LOGS_SECURITY_GROUP_ID,
+            })),
         ]
 
         const artifactS3Arn = getMigrationStringParameterValue(this, {

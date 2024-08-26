@@ -12,7 +12,7 @@ export class SharedLogFileSystem {
         this.volumeId = getMigrationStringParameterValue(stack, {
             stage,
             defaultDeployId,
-            parameter: MigrationSSMParameter.REPLAYER_OUTPUT_EFS_ID,
+            parameter: MigrationSSMParameter.SHARED_LOGS_EFS_ID,
         })
     }
 
