@@ -15,6 +15,7 @@ import {
 } from "../common-utilities";
 import { ClusterYaml, RFSBackfillYaml, SnapshotYaml } from "../migration-services-yaml";
 import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
+import { SharedLogFileSystem } from "../components/shared-log-file-system";
 
 
 export interface ReindexFromSnapshotProps extends StackPropsExt {
@@ -74,10 +75,10 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             targetPassword = props.clusterAuthDetails.basic_auth.password? props.clusterAuthDetails.basic_auth.password : "",
             targetPasswordArn = props.clusterAuthDetails.basic_auth.password_from_secret_arn? props.clusterAuthDetails.basic_auth.password_from_secret_arn : ""
         };
-
+        const sharedLogFileSystem = new SharedLogFileSystem(this, props.stage, props.defaultDeployId);
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account);
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account);
-        let servicePolicies = [artifactS3PublishPolicy, openSearchPolicy, openSearchServerlessPolicy];
+        let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), artifactS3PublishPolicy, openSearchPolicy, openSearchServerlessPolicy];
 
         const getSecretsPolicy = props.clusterAuthDetails.basic_auth?.password_from_secret_arn ?
             getTargetPasswordAccessPolicy(props.clusterAuthDetails.basic_auth.password_from_secret_arn) : null;
@@ -91,6 +92,8 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             dockerDirectoryPath: join(__dirname, "../../../../../", "DocumentsFromSnapshotMigration/docker"),
             dockerImageCommand: ['/bin/sh', '-c', "/rfs-app/entrypoint.sh"],
             securityGroups: securityGroups,
+            volumes: [sharedLogFileSystem.asVolume()],
+            mountPoints: [sharedLogFileSystem.asMountPoint()],
             taskRolePolicies: servicePolicies,
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 2048,

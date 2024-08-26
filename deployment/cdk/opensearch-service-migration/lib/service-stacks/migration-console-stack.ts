@@ -19,6 +19,7 @@ import {Fn, RemovalPolicy} from "aws-cdk-lib";
 import {MetadataMigrationYaml, ServicesYaml} from "../migration-services-yaml";
 import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
 import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
+import { SharedLogFileSystem } from "../components/shared-log-file-system";
 
 export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationsSolutionVersion: string,
@@ -160,32 +161,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 parameter: MigrationSSMParameter.KAFKA_BROKERS,
             }) : "";
 
-        const volumeName = "sharedReplayerOutputVolume"
-        const volumeId = getMigrationStringParameterValue(this, {
-            ...props,
-            parameter: MigrationSSMParameter.REPLAYER_OUTPUT_EFS_ID,
-        });
-        const replayerOutputEFSVolume: Volume = {
-            name: volumeName,
-            efsVolumeConfiguration: {
-                fileSystemId: volumeId,
-                transitEncryption: "ENABLED"
-            }
-        };
-        const replayerOutputMountPoint: MountPoint = {
-            containerPath: "/shared-replayer-output",
-            readOnly: false,
-            sourceVolume: volumeName
-        }
-        const replayerOutputEFSArn = `arn:${this.partition}:elasticfilesystem:${this.region}:${this.account}:file-system/${volumeId}`
-        const replayerOutputMountPolicy = new PolicyStatement( {
-            effect: Effect.ALLOW,
-            resources: [replayerOutputEFSArn],
-            actions: [
-                "elasticfilesystem:ClientMount",
-                "elasticfilesystem:ClientWrite"
-            ]
-        })
+        const sharedLogFileSystem = new SharedLogFileSystem(this, props.stage, props.defaultDeployId);
+        
 
         const ecsClusterArn = `arn:${this.partition}:ecs:${this.region}:${this.account}:service/migration-${props.stage}-ecs-cluster`
         const allReplayerServiceArn = `${ecsClusterArn}/migration-${props.stage}-traffic-replayer*`
@@ -297,7 +274,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
-        let servicePolicies = [replayerOutputMountPolicy, openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
+        let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
             listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
             ...(getSecretsPolicy ? [getSecretsPolicy] : []) // only add secrets policy if it's non-null
         ]
@@ -388,8 +365,8 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             securityGroups: securityGroups,
             portMappings: servicePortMappings,
             dockerImageCommand: imageCommand,
-            volumes: [replayerOutputEFSVolume],
-            mountPoints: [replayerOutputMountPoint],
+            volumes: [sharedLogFileSystem.asVolume()],
+            mountPoints: [sharedLogFileSystem.asMountPoint()],
             environment: environment,
             taskRolePolicies: servicePolicies,
             cpuArchitecture: props.fargateCpuArch,

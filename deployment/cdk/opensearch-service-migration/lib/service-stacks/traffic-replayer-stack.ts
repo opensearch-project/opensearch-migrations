@@ -16,6 +16,7 @@ import {StreamingSourceType} from "../streaming-source-type";
 import { Duration } from "aws-cdk-lib";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { ECSReplayerYaml } from "../migration-services-yaml";
+import { SharedLogFileSystem } from "../components/shared-log-file-system";
 
 
 export interface TrafficReplayerProps extends StackPropsExt {
@@ -49,32 +50,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             }))
         );
 
-        const volumeName = "sharedReplayerOutputVolume"
-        const volumeId = getMigrationStringParameterValue(this, {
-            ...props,
-            parameter: MigrationSSMParameter.REPLAYER_OUTPUT_EFS_ID,
-        })
-        const replayerOutputEFSVolume: Volume = {
-            name: volumeName,
-            efsVolumeConfiguration: {
-                fileSystemId: volumeId,
-                transitEncryption: "ENABLED"
-            }
-        };
-        const replayerOutputMountPoint: MountPoint = {
-            containerPath: "/shared-replayer-output",
-            readOnly: false,
-            sourceVolume: volumeName
-        }
-        const replayerOutputEFSArn = `arn:${this.partition}:elasticfilesystem:${this.region}:${this.account}:file-system/${volumeId}`
-        const replayerOutputMountPolicy = new PolicyStatement( {
-            effect: Effect.ALLOW,
-            resources: [replayerOutputEFSArn],
-            actions: [
-                "elasticfilesystem:ClientMount",
-                "elasticfilesystem:ClientWrite"
-            ]
-        })
+        const sharedLogFileSystem = new SharedLogFileSystem(this, props.stage, props.defaultDeployId);
 
         const secretAccessPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
@@ -86,7 +62,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         })
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
-        let servicePolicies = [replayerOutputMountPolicy, secretAccessPolicy, openSearchPolicy, openSearchServerlessPolicy]
+        let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), secretAccessPolicy, openSearchPolicy, openSearchServerlessPolicy]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskConsumerPolicies = createMSKConsumerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskConsumerPolicies)
@@ -122,8 +98,8 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficReplayer"),
             dockerImageCommand: ['/bin/sh', '-c', replayerCommand],
             securityGroups: securityGroups,
-            volumes: [replayerOutputEFSVolume],
-            mountPoints: [replayerOutputMountPoint],
+            volumes: [sharedLogFileSystem.asVolume()],
+            mountPoints: [sharedLogFileSystem.asMountPoint()],
             taskRolePolicies: servicePolicies,
             environment: {
                 "TUPLE_DIR_PATH": `/shared-replayer-output/traffic-replayer-${deployId}`
