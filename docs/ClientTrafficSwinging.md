@@ -76,10 +76,12 @@ graph TD
     end
 
     subgraph MigrationAssistantInfrastructure
-        ALB
-        L1[Weighted Listener :9200]
-        L2[Source Listener :9201]
-        L3[Target Listener :9202]
+        ALB[Application Load Balancer]
+        subgraph ALB
+            L1[Weighted Listener :9200]
+            L2[Source Listener :9201]
+            L3[Target Listener :9202]
+        end
         CP[Capture Proxy]
         TCP[Target Cluster Proxy]
     end
@@ -96,10 +98,6 @@ graph TD
     Client --> NLB
     NLB --> L1
     Client -.->|Optional Direct Routing| L1
-
-    ALB --> L1
-    ALB --> L2
-    ALB --> L3
 
     L1 -.->|Weight X%| CP
     L1 ==>|Weight Y%| TCP
