@@ -67,6 +67,52 @@ public class GzipRequestTransformerTest {
         assertEquals(initialLimit, inputBuffer.limit(), "Input buffer limit should not change");
     }
 
+    @ParameterizedTest
+    @ValueSource(ints = {100, 1024, 10 * 1024, 1024 * 1024}) // 100B, 1KB, 10KB, 1MB
+    public void testGzipCompressionWithDirectBuffer(int size) throws Exception {
+        // Generate test data in a direct ByteBuffer
+        ByteBuffer inputBuffer = ByteBuffer.allocateDirect(size);
+        Random random = new Random(42); // Fixed seed for reproducibility
+        for (int i = 0; i < size; i++) {
+            inputBuffer.put((byte) random.nextInt(48));
+        }
+        inputBuffer.flip();
+
+        Map<String, List<String>> headers = new HashMap<>();
+
+        // Store initial position and limit
+        int initialPosition = inputBuffer.position();
+        int initialLimit = inputBuffer.limit();
+
+        // Compress
+        TransformedRequest result = gzipTransformer.transform("POST", "/test", headers, Mono.just(inputBuffer)).block();
+
+        // Check headers
+        assertTrue(result.getHeaders().containsKey("content-encoding"));
+        assertEquals("gzip", result.getHeaders().get("content-encoding").get(0));
+
+        // Decompress and verify
+        ByteBuffer compressedBuffer = result.getBody().block();
+        byte[] decompressed = decompress(compressedBuffer);
+
+        // Create a byte array from the direct buffer for comparison
+        byte[] inputArray = new byte[inputBuffer.limit()];
+        inputBuffer.get(inputArray);
+        inputBuffer.position(initialPosition); // Reset position after reading
+
+        assertArrayEquals(inputArray, decompressed);
+
+        // Verify size decreased (except for very small inputs where gzip overhead might increase size)
+        if (size > 100) {
+            assertTrue(compressedBuffer.remaining() < inputBuffer.remaining(),
+                "Compressed size should be smaller than input size for inputs larger than 100 bytes");
+        }
+
+        // Verify that the input buffer wasn't read by the transformation
+        assertEquals(initialPosition, inputBuffer.position(), "Input buffer position should not change");
+        assertEquals(initialLimit, inputBuffer.limit(), "Input buffer limit should not change");
+    }
+
     @Test
     public void testEmptyInput() {
         Map<String, List<String>> headers = new HashMap<>();
@@ -93,6 +139,43 @@ public class GzipRequestTransformerTest {
         byte[] decompressed = decompress(compressedBuffer);
 
         assertArrayEquals(largeBuffer.array(), decompressed);
+
+        // Verify size decreased
+        assertTrue(compressedBuffer.remaining() < largeBuffer.remaining(),
+            "Compressed size should be smaller than input size for large inputs");
+
+        // Verify that the input buffer wasn't read by the transformation
+        assertEquals(initialPosition, largeBuffer.position(), "Input buffer position should not change");
+        assertEquals(initialLimit, largeBuffer.limit(), "Input buffer limit should not change");
+    }
+
+    @Test
+    public void testLargeInputWithDirectBuffer() throws Exception {
+        int largeSize = 50 * 1024 * 1024; // 50MB
+        ByteBuffer largeBuffer = ByteBuffer.allocateDirect(largeSize);
+        Random random = new Random(42); // Fixed seed for reproducibility
+        for (int i = 0; i < largeSize; i++) {
+            largeBuffer.put((byte) random.nextInt(48));
+        }
+        largeBuffer.flip();
+
+        Map<String, List<String>> headers = new HashMap<>();
+
+        // Store initial position and limit
+        int initialPosition = largeBuffer.position();
+        int initialLimit = largeBuffer.limit();
+
+        TransformedRequest result = gzipTransformer.transform("POST", "/test", headers, Mono.just(largeBuffer)).block();
+
+        ByteBuffer compressedBuffer = result.getBody().block();
+        byte[] decompressed = decompress(compressedBuffer);
+
+        // Create a byte array from the direct buffer for comparison
+        byte[] inputArray = new byte[largeBuffer.limit()];
+        largeBuffer.get(inputArray);
+        largeBuffer.position(initialPosition); // Reset position after reading
+
+        assertArrayEquals(inputArray, decompressed);
 
         // Verify size decreased
         assertTrue(compressedBuffer.remaining() < largeBuffer.remaining(),
