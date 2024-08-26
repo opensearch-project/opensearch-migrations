@@ -85,19 +85,24 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
             .map(SearchClusterContainer.Version::getImageName)
             .collect(Collectors.toList());
         var numWorkersList = List.of(1, 3, 40);
+        var compressionEnabledList = List.of(true, false);
         return sourceImageArgs.stream()
             .flatMap(
                 sourceParams -> targetImageNames.stream()
                     .flatMap(
                         targetImage -> numWorkersList.stream()
-                            .map(
-                                numWorkers -> Arguments.of(
-                                    numWorkers,
-                                    targetImage,
-                                    sourceParams[0],
-                                    sourceParams[1],
-                                    sourceParams[2]
-                                )
+                            .flatMap(
+                                numWorkers -> compressionEnabledList.stream()
+                                    .map(
+                                        compressionEnabled -> Arguments.of(
+                                            numWorkers,
+                                            targetImage,
+                                            sourceParams[0],
+                                            sourceParams[1],
+                                            sourceParams[2],
+                                            compressionEnabled
+                                        )
+                                    )
                             )
                     )
             );
@@ -110,7 +115,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         String targetImageName,
         SearchClusterContainer.Version baseSourceImageVersion,
         String generatorImage,
-        String[] generatorArgs
+        String[] generatorArgs,
+        boolean compressionEnabled
     ) throws Exception {
         var executorService = Executors.newFixedThreadPool(numWorkers);
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
@@ -176,7 +182,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                                 osTargetContainer.getHttpHostAddress(),
                                 runCounter,
                                 clockJitter,
-                                testDocMigrationContext
+                                testDocMigrationContext,
+                                compressionEnabled
                             ),
                             executorService
                         )
@@ -304,7 +311,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         String targetAddress,
         AtomicInteger runCounter,
         Random clockJitter,
-        DocumentMigrationTestContext testContext
+        DocumentMigrationTestContext testContext,
+        boolean compressionEnabled
     ) {
         for (int runNumber = 1;; ++runNumber) {
             try {
@@ -314,7 +322,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                     indexAllowlist,
                     targetAddress,
                     clockJitter,
-                    testContext
+                    testContext,
+                    compressionEnabled
                 );
                 if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
                     return runNumber;
@@ -362,7 +371,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         List<String> indexAllowlist,
         String targetAddress,
         Random clockJitter,
-        DocumentMigrationTestContext context
+        DocumentMigrationTestContext context,
+        boolean compressionEnabled
     ) throws RfsMigrateDocuments.NoWorkLeftException {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
         var shouldThrow = new AtomicBoolean();
@@ -399,6 +409,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                 readerFactory,
                 new DocumentReindexer(new OpenSearchClient(ConnectionContextTestParams.builder()
                     .host(targetAddress)
+                    .compressionEnabled(compressionEnabled)
                     .build()
                     .toConnectionContext()), 1000, Long.MAX_VALUE, 1),
                 new OpenSearchWorkCoordinator(

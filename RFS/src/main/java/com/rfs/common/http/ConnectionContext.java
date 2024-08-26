@@ -56,11 +56,12 @@ public class ConnectionContext {
             throw new IllegalArgumentException("Cannot have both Basic Auth and SigV4 Auth enabled.");
         }
 
+        RequestTransformer authTransformer;
         if (basicAuthEnabled) {
-            this.requestTransformer = new BasicAuthTransformer(params.getUsername(), params.getPassword());
+            authTransformer = new BasicAuthTransformer(params.getUsername(), params.getPassword());
         }
         else if (sigv4Enabled) {
-            this.requestTransformer = new SigV4AuthTransformer(
+            authTransformer = new SigV4AuthTransformer(
                 DefaultCredentialsProvider.create(),
                 params.getAwsServiceSigningName(),
                 params.getAwsRegion(),
@@ -68,7 +69,13 @@ public class ConnectionContext {
                 Clock::systemUTC);
         }
         else {
-            this.requestTransformer = NoAuthTransformer.INSTANCE;
+            authTransformer = NoAuthTransformer.INSTANCE;
+        }
+
+        if (!params.isCompressionEnabled()) {
+            this.requestTransformer = authTransformer;
+        } else {
+            this.requestTransformer = new CompositeTransformer(new GzipRequestTransformer(), authTransformer);
         }
     }
 
@@ -82,6 +89,8 @@ public class ConnectionContext {
         String getAwsRegion();
 
         String getAwsServiceSigningName();
+
+        boolean isCompressionEnabled();
 
         boolean isInsecure();
 
@@ -115,6 +124,10 @@ public class ConnectionContext {
         @Parameter(names = {
             "--target-insecure" }, description = "Allow untrusted SSL certificates for target", required = false)
         public boolean insecure = false;
+
+        @Parameter(names = {
+            "--target-compression" }, description = "Allow request compression to target", required = false)
+        public boolean compressionEnabled = false;
     }
 
     @Getter
@@ -142,5 +155,10 @@ public class ConnectionContext {
         @Parameter(names = {
             "--source-insecure" }, description = "Allow untrusted SSL certificates for source", required = false)
         public boolean insecure = false;
+
+        public boolean isCompressionEnabled() {
+            // No compression on source due to no ingestion
+            return false;
+        }
     }
 }
