@@ -102,7 +102,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
             mountPoints: [sharedLogFileSystem.asMountPoint()],
             taskRolePolicies: servicePolicies,
             environment: {
-                "TUPLE_DIR_PATH": `/shared-replayer-output/traffic-replayer-${deployId}`
+                "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/traffic-replayer-${deployId}`
             },
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 1024,
