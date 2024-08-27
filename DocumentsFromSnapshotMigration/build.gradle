@@ -59,6 +59,8 @@ dependencies {
     testImplementation group: 'org.opensearch', name: 'opensearch-testcontainers'
     testImplementation group: 'org.testcontainers', name: 'testcontainers'
     testImplementation group: 'org.testcontainers', name: 'toxiproxy'
+    testImplementation group: 'org.mockito', name: 'mockito-core'
+    testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter'
 
     testImplementation platform('io.projectreactor:reactor-bom:2023.0.5')
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
@@ -93,16 +95,15 @@ DockerServiceProps[] dockerServices = [
                                 dockerImageName:"reindex_from_snapshot",
                                 inputDir:"./docker",
                                 taskDependencies:["copyDockerRuntimeJars"]]),
+        new DockerServiceProps([projectName:"emptyElasticsearchSource_6_8",
+                                dockerImageName:"empty_elasticsearch_source_6_8",
+                                inputDir:"./docker/TestSource_ES_6_8"]),
         new DockerServiceProps([projectName:"emptyElasticsearchSource_7_10",
                                 dockerImageName:"empty_elasticsearch_source_7_10",
                                 inputDir:"./docker/TestSource_ES_7_10"]),
         new DockerServiceProps([projectName:"emptyElasticsearchSource_7_17",
                                 dockerImageName:"empty_elasticsearch_source_7_17",
-                                inputDir:"./docker/TestSource_ES_7_17"]),
-        new DockerServiceProps([projectName:"trafficGenerator",
-                                dockerImageName:"osb_traffic_generator",
-                                inputDir:"./docker/TrafficGenerator",
-                                taskDependencies:[":TrafficCapture:dockerSolution:buildDockerImage_elasticsearchTestConsole"]]),
+                                inputDir:"./docker/TestSource_ES_7_17"])
 ] as DockerServiceProps[]
 
 for (dockerService in dockerServices) {
@@ -120,8 +121,12 @@ for (dockerService in dockerServices) {
 }
 
 dockerCompose {
-    useComposeFiles = ['docker/docker-compose.yml']
+    useComposeFiles = ['docker/docker-compose-es710.yml']
     projectName = 'rfs-compose'
+
+    es68 {
+        useComposeFiles = ['docker/docker-compose-es68.yml']
+    }
 }
 
 task buildDockerImages {
