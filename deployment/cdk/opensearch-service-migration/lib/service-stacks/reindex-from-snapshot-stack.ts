@@ -108,6 +108,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
                 "RFS_TARGET_USER": targetUser,
                 "RFS_TARGET_PASSWORD": targetPassword,
                 "RFS_TARGET_PASSWORD_ARN": targetPasswordArn,
+                "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/reindex-from-snapshot-${props.defaultDeployId}`,
             },
             ...props
         });
