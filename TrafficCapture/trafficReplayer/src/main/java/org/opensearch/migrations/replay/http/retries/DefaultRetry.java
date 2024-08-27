@@ -45,10 +45,7 @@ public class DefaultRetry implements RequestRetryEvaluator {
           AggregatedRawResponse currentResponse,
           TrackedFuture<String, ? extends IRequestResponsePacketPair> reconstructedSourceTransactionFuture) {
         var rr = currentResponse.getRawResponse();
-        if (rr == null) {
-            return makeDeterminationFuture(RequestSenderOrchestrator.RetryDirective.RETRY,
-                "returning RETRY (unconditionally) because the response code was null");
-        } else if (retryIsUnnecessaryGivenStatusCode(rr.status().code())) {
+        if (rr != null && retryIsUnnecessaryGivenStatusCode(rr.status().code())) {
             return makeDeterminationFuture(RequestSenderOrchestrator.RetryDirective.DONE,
                 "returning DONE because response code was terminal");
         }
