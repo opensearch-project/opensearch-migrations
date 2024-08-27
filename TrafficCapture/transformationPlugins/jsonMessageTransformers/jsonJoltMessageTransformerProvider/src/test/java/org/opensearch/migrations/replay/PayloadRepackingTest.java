@@ -62,8 +62,13 @@ public class PayloadRepackingTest extends InstrumentationTest {
 
         DefaultHttpHeaders expectedRequestHeaders = new DefaultHttpHeaders();
         // netty's decompressor and aggregator remove some header values (& add others)
-        expectedRequestHeaders.add("host", "localhost");
-        expectedRequestHeaders.add("Content-Length", "46");
+        expectedRequestHeaders.add("Host", "localhost");
+        if (!doGzip && !doChunked) {
+            expectedRequestHeaders.add("Content-Length", "46");
+        } else {
+            // Content-Length added with different casing with netty
+            expectedRequestHeaders.add("content-length", "46");
+        }
 
         TestUtils.runPipelineAndValidate(
             rootContext,
@@ -115,7 +120,7 @@ public class PayloadRepackingTest extends InstrumentationTest {
 
         DefaultHttpHeaders expectedRequestHeaders = new DefaultHttpHeaders();
         // netty's decompressor and aggregator remove some header values (& add others)
-        expectedRequestHeaders.add("host", "localhost");
+        expectedRequestHeaders.add("Host", "localhost");
         expectedRequestHeaders.add("content-type", "application/json; charset=UTF-8");
         expectedRequestHeaders.add("Content-Length", "55");
 
