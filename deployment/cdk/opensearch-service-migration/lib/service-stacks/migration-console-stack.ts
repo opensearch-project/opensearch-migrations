@@ -270,6 +270,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             "MIGRATION_SOLUTION_VERSION": props.migrationsSolutionVersion,
             "MIGRATION_SERVICES_YAML_PARAMETER": parameter.parameterName,
             "MIGRATION_SERVICES_YAML_HASH": hashStringSHA256(servicesYaml.stringify()),
+            "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/migration-console-${props.defaultDeployId}`,
         }
 
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
