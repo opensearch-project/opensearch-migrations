@@ -143,11 +143,11 @@ class ConnectionContextTest {
     void testCompressionEnabledBeforeAuth(ConnectionContextTestParams params, Class<?> expectedAuthTransformerClass) {
         ConnectionContext context = params.toConnectionContext();
         assertTrue(context.getRequestTransformer() instanceof CompositeTransformer);
-        
+
         CompositeTransformer compositeTransformer = (CompositeTransformer) context.getRequestTransformer();
-        assertEquals(2, compositeTransformer.getTransformers().size());
-        assertTrue(compositeTransformer.getTransformers().get(0) instanceof GzipRequestTransformer);
-        assertTrue(expectedAuthTransformerClass.isInstance(compositeTransformer.getTransformers().get(1)));
+
+        assertTrue(compositeTransformer.getFirstTransformer() instanceof GzipRequestTransformer);
+        assertTrue(expectedAuthTransformerClass.isInstance(compositeTransformer.getSecondTransformer()));
     }
 
     private static Stream<Arguments> compressionEnabledParams() {
