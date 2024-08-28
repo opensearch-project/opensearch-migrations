@@ -70,9 +70,9 @@ services:
     networks:
       - migrations
     volumes:
-      - sharedReplayerOutput:/shared-replayer-output
+      - sharedLogsVolume:/shared-logs-output
     environment:
-      - TUPLE_DIR_PATH=/shared-replayer-output/traffic-replayer-default
+      - SHARED_LOGS_DIR_PATH=/shared-logs-output/traffic-replayer-default
     depends_on:
       kafka:
         condition: service_started
@@ -96,7 +96,7 @@ services:
     networks:
       - migrations
     volumes:
-      - sharedReplayerOutput:/shared-replayer-output
+      - sharedLogsVolume:/shared-logs-output
       - ./migrationConsole/lib/console_link/services.yaml:/etc/migration_services.yaml
       # this is a convenience thing for testing -- it should be removed before this makes it to prod.
       # - ./migrationConsole/lib/console_link:/root/lib/console_link
@@ -113,7 +113,7 @@ services:
 volumes:
   sharedComparatorSqlResults:
     driver: local
-  sharedReplayerOutput:
+  sharedLogsVolume:
     driver: local
   grafana_data:
     driver: local
