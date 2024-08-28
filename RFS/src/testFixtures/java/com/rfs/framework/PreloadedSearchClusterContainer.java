@@ -14,7 +14,7 @@ public class PreloadedSearchClusterContainer extends SearchClusterContainer {
             new ElasticsearchVersion(
                 new PreloadedDataContainerOrchestrator(baseVersion, serverAlias, dataLoaderImageName, generatorArgs)
                     .getReadyImageName(pullIfUnavailable),
-                baseVersion.getParserVersion(),
+                baseVersion.getSourceVersion(),
                 baseVersion.prettyName + "_preloaded"
             )
         );

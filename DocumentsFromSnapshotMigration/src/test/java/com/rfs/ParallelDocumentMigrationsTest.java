@@ -176,7 +176,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                                 runCounter,
                                 clockJitter,
                                 testDocMigrationContext,
-                                baseSourceImageVersion.getParserVersion()
+                                baseSourceImageVersion.getSourceVersion()
                             ),
                             executorService
                         )

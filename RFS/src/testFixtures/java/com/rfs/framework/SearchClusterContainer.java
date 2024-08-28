@@ -117,14 +117,14 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     @ToString(onlyExplicitlyIncluded = true, includeFieldNames = false)
     public static class Version {
         final String imageName;
-        final ClusterVersion parserVersion;
+        final ClusterVersion sourceVersion;
         @ToString.Include
         final String prettyName;
         final INITIALIZATION_FLAVOR initializationType;
 
         public Version(final String imageName, final ClusterVersion parserVersion, final String prettyName, INITIALIZATION_FLAVOR initializationType) {
             this.imageName = imageName;
-            this.parserVersion = parserVersion;
+            this.sourceVersion = parserVersion;
             this.prettyName = prettyName;
             this.initializationType = initializationType;
         }
