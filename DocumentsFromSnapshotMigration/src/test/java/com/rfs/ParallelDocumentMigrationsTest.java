@@ -39,6 +39,7 @@ import org.opensearch.testcontainers.OpensearchContainer;
 import com.rfs.cms.CoordinateWorkHttpClient;
 import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.cms.OpenSearchWorkCoordinator;
+import com.rfs.common.ClusterVersion;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
@@ -49,16 +50,14 @@ import com.rfs.common.RestClient;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
+import com.rfs.common.SourceResourceProvider;
+import com.rfs.common.SourceResourceProviderFactory;
 import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.framework.PreloadedSearchClusterContainer;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.http.SearchClusterRequests;
 import com.rfs.models.IndexMetadata;
 import com.rfs.models.ShardMetadata;
-import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
-import com.rfs.version_es_7_10.IndexMetadataFactory_ES_7_10;
-import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
-import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.worker.DocumentsRunner;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
@@ -176,7 +175,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                                 osTargetContainer.getHttpHostAddress(),
                                 runCounter,
                                 clockJitter,
-                                testDocMigrationContext
+                                testDocMigrationContext,
+                                baseSourceImageVersion.getParserVersion()
                             ),
                             executorService
                         )
@@ -304,7 +304,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         String targetAddress,
         AtomicInteger runCounter,
         Random clockJitter,
-        DocumentMigrationTestContext testContext
+        DocumentMigrationTestContext testContext,
+        ClusterVersion parserVersion
     ) {
         for (int runNumber = 1;; ++runNumber) {
             try {
@@ -314,7 +315,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                     indexAllowlist,
                     targetAddress,
                     clockJitter,
-                    testContext
+                    testContext,
+                    parserVersion
                 );
                 if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
                     return runNumber;
@@ -362,7 +364,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         List<String> indexAllowlist,
         String targetAddress,
         Random clockJitter,
-        DocumentMigrationTestContext context
+        DocumentMigrationTestContext context,
+        ClusterVersion parserVersion
     ) throws RfsMigrateDocuments.NoWorkLeftException {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
         var shouldThrow = new AtomicBoolean();
@@ -377,23 +380,25 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                 return d;
             };
 
+            SourceResourceProvider sourceResourceProvider = SourceResourceProviderFactory.getProvider(parserVersion);
+
             DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
             SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(
                 repoAccessor,
                 tempDir,
-                ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES
+                sourceResourceProvider.getBufferSizeInBytes()
             );
 
-            SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
-            IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
-            ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
+            SnapshotRepo.Provider repoDataProvider = sourceResourceProvider.getSnapshotRepoProvider(sourceRepo);
+            IndexMetadata.Factory indexMetadataFactory = sourceResourceProvider.getIndexMetadataFactory(repoDataProvider);
+            ShardMetadata.Factory shardMetadataFactory = sourceResourceProvider.getShardMetadataFactory(repoDataProvider);
             final int ms_window = 1000;
             final var nextClockShift = (int) (clockJitter.nextDouble() * ms_window) - (ms_window / 2);
             log.info("nextClockShift=" + nextClockShift);
 
 
-            Function<Path, LuceneDocumentsReader> readerFactory = path -> new FilteredLuceneDocumentsReader(path, ElasticsearchConstants_ES_7_10.SOFT_DELETES_POSSIBLE,
-                    ElasticsearchConstants_ES_7_10.SOFT_DELETES_FIELD, terminatingDocumentFilter);
+            Function<Path, LuceneDocumentsReader> readerFactory = path -> new FilteredLuceneDocumentsReader(path, sourceResourceProvider.getSoftDeletesPossible(),
+                sourceResourceProvider.getSoftDeletesFieldData(), terminatingDocumentFilter);
 
             return RfsMigrateDocuments.run(
                 readerFactory,

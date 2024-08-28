@@ -13,6 +13,7 @@ public enum ClusterVersion {
     ES_6_8,
     ES_7_10,
     ES_7_17,
+    OS_1_3,
     OS_2_11;
 
     public static final List<ClusterVersion> SOURCE_VERSIONS = List.of(ES_6_8, ES_7_10, ES_7_17);
@@ -29,10 +30,12 @@ public enum ClusterVersion {
                     return ClusterVersion.ES_7_10;
                 case "es_7_17":
                     return ClusterVersion.ES_7_17;
+                case "os_1_3":
+                    return ClusterVersion.OS_1_3;
                 case "os_2_11":
                     return ClusterVersion.OS_2_11;
                 default:
-                    throw new ParameterException("Invalid source version: " + value);
+                    throw new ParameterException("Invalid cluster version: " + value);
             }
         }
     }

@@ -236,7 +236,6 @@ curl -X PUT "localhost:19200/_snapshot/test_repository/rfs_snapshot" -H "Content
 }'
 ```
 
-
 #### ES_7_10_Single
 An Elasticsearch 7.10 snapshot repo containing a single snapshot (`global_state_snapshot`).  Contains two indices (`posts_2023_02_25`, `posts_2024_01_01`), each with few documents in them.  Contains an index template, `posts_index_template`, and a composite template, `posts_template`.
 
