@@ -5,8 +5,8 @@ import java.time.Duration;
 import java.util.Map;
 
 import com.google.common.collect.ImmutableMap;
-import com.rfs.common.ClusterVersion;
 
+import com.rfs.common.ClusterVersion;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
