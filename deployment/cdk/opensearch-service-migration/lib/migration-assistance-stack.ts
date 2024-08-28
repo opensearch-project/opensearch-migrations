@@ -173,26 +173,26 @@ export class MigrationAssistanceStack extends Stack {
             this.createMSKResources(props, streamingSecurityGroup)
         }
 
-        const replayerOutputSG = new SecurityGroup(this, 'replayerOutputSG', {
+        const sharedLogsSG = new SecurityGroup(this, 'sharedLogsSG', {
             vpc: props.vpc,
             allowAllOutbound: false,
         });
-        replayerOutputSG.addIngressRule(replayerOutputSG, Port.allTraffic());
+        sharedLogsSG.addIngressRule(sharedLogsSG, Port.allTraffic());
 
-        createMigrationStringParameter(this, replayerOutputSG.securityGroupId, {
+        createMigrationStringParameter(this, sharedLogsSG.securityGroupId, {
             ...props,
-            parameter: MigrationSSMParameter.REPLAYER_OUTPUT_ACCESS_SECURITY_GROUP_ID
+            parameter: MigrationSSMParameter.SHARED_LOGS_SECURITY_GROUP_ID
         });
 
         // Create an EFS file system for Traffic Replayer output
-        const replayerOutputEFS = new FileSystem(this, 'replayerOutputEFS', {
+        const sharedLogsEFS = new FileSystem(this, 'sharedLogsEFS', {
             vpc: props.vpc,
-            securityGroup: replayerOutputSG,
+            securityGroup: sharedLogsSG,
             removalPolicy: replayerEFSRemovalPolicy
         });
-        createMigrationStringParameter(this, replayerOutputEFS.fileSystemId, {
+        createMigrationStringParameter(this, sharedLogsEFS.fileSystemId, {
             ...props,
-            parameter: MigrationSSMParameter.REPLAYER_OUTPUT_EFS_ID
+            parameter: MigrationSSMParameter.SHARED_LOGS_EFS_ID
         });
 
         const serviceSecurityGroup = new SecurityGroup(this, 'serviceSecurityGroup', {
