@@ -2,6 +2,7 @@ package org.opensearch.migrations.replay;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 
 import com.google.common.cache.CacheBuilder;
@@ -119,16 +120,34 @@ public class ClientConnectionPool {
     }
 
     public CompletableFuture<Void> shutdownNow() {
+        log.atInfo().setMessage("Shutting down ClientConnectionPool").log();
         var rval = NettyFutureBinders.bindNettyFutureToCompletableFuture(eventLoopGroup.shutdownGracefully());
-        connectionId2ChannelCache.asMap().forEach((k,v)->{
-            closeClientConnectionChannel(v);
-        });
-        connectionId2ChannelCache.invalidateAll();
+        try {
+            connectionId2ChannelCache.asMap().forEach((k, v) -> {
+                log.atDebug().setMessage("closing client connection for " + k + " -> " + v).log();
+                try {
+                    closeClientConnectionChannel(v);
+                    log.atTrace().setMessage("done closing client connection for " + k + " -> " + v).log();
+                } catch (Exception t) {
+                    log.atError().setCause(t).setMessage("Caught while calling closeClientConnectionChannel").log();
+                }
+            });
+        } catch (Throwable t) {
+            log.atError().setCause(t).setMessage("Caught while calling closeClientConnectionChannel, " +
+                "propagating Throwable (exceptionally) through the returned CompletableFuture").log();
+            rval.completeExceptionally(t);
+            return rval;
+        } finally {
+            connectionId2ChannelCache.invalidateAll();
+            log.atDebug().setMessage(() -> "Invalidated cache and returning eventLoopGroup shutdown future").log();
+        }
+        log.atDebug().setMessage(() -> "Done closing client connections for all cached entries").log();
         return rval;
     }
 
     private TrackedFuture<String, Channel> closeClientConnectionChannel(ConnectionReplaySession session) {
-        return session.getChannelFutureInAnyState()
+        return session
+            .getChannelFutureInAnyState() // this could throw, especially if the even loop has begun to shut down
             .thenCompose(channelFuture -> {
                 if (channelFuture == null) {
                     log.atTrace().setMessage(() ->

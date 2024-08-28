@@ -191,6 +191,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("targetTransaction"));
         Assertions.assertEquals(numRequests * 2, traceProcessor.getCountAndRemoveSpan("scheduled"));
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("requestSending"));
+        Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("requestConnecting"));
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("comparingResults"));
 
         Assertions.assertTrue(traceProcessor.getCountAndRemoveSpan("waitingForResponse") > 0);
