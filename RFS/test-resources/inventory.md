@@ -128,9 +128,6 @@ curl -X POST "localhost:19200/test_updates_deletes/_forcemerge?max_num_segments=
 
 This process forces the original Lucene 6 segment files from the ES 5.6 snapshot to be re-written as a single Lucene 7 segment, but leaves the index settings untouched.  As a result, it will be readable by a Lucene 8 reader also compatible with snapshots created by ES 7 clusters.  However - it also contains a multi-type mapping in its single index, which could not be created in ES 6.8 alone.
 
-#### ES_6_8_Updates_Deletes_Restored
-This snapshot is the result of taking the [ES_5_6_Updates_Deletes](#es_5_6_updates_deletes) snapshot, restoring in an Elasticsearch 6.8 cluster, and then taking a new snapshot.  This process retains the original Lucene files and index settings from ES 5.6 but re-writes the format of the snapshot itself to match the ES 6.8 standard.  As a result, this snapshot contains both Lucene 6 segment files and a multi-type mappings in its single index; both of these would not be possible to create in ES 6.8 by itself.
-
 #### ES_6_8_Updates_Deletes_Native
 An Elastic 6.8 snapshot repo containing a single index that was created natively on a ES 6.8 cluster, with a collection of documents that variously been updated, deleted, or both.  `_flush`'s were used after each operation to try to ensure the maximum number of segments possible.  The commands used to generate the snapshot are as follows:
 
