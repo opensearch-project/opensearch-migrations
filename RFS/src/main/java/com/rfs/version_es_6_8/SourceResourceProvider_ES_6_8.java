@@ -1,12 +1,20 @@
 package com.rfs.version_es_6_8;
 
+import com.rfs.common.ClusterVersion;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SourceRepo;
 import com.rfs.common.SourceResourceProvider;
+import com.rfs.models.GlobalMetadata;
 import com.rfs.models.IndexMetadata;
 import com.rfs.models.ShardMetadata;
 
 public class SourceResourceProvider_ES_6_8 implements SourceResourceProvider {
+
+    @Override
+    public GlobalMetadata.Factory getGlobalMetadataFactory(SnapshotRepo.Provider repoDataProvider) {
+        return new GlobalMetadataFactory_ES_6_8(repoDataProvider);
+    }
+
     @Override
     public SnapshotRepo.Provider getSnapshotRepoProvider(SourceRepo sourceRepo) {
         return new SnapshotRepoProvider_ES_6_8(sourceRepo);
@@ -35,6 +43,11 @@ public class SourceResourceProvider_ES_6_8 implements SourceResourceProvider {
     @Override
     public String getSoftDeletesFieldData() {
         return ElasticsearchConstants_ES_6_8.SOFT_DELETES_FIELD;
+    }
+
+    @Override
+    public ClusterVersion getVersion() {
+        return ClusterVersion.ES_6_8;
     }
 
 }
