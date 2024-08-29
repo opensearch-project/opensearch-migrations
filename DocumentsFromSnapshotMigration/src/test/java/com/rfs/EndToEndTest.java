@@ -4,9 +4,6 @@ import java.io.File;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.Executors;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.io.TempDir;
@@ -24,8 +21,8 @@ import com.rfs.common.OpenSearchClient;
 import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.http.ClusterOperations;
+import com.rfs.worker.DocumentsRunner;
 import com.rfs.worker.SnapshotRunner;
-import lombok.Lombok;
 import lombok.SneakyThrows;
 
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -38,7 +35,6 @@ public class EndToEndTest extends SourceTestBase {
     @ParameterizedTest(name = "Target OpenSearch {0}")
     @ArgumentsSource(SupportedTargetCluster.class)
     public void migrateFrom_ES_v6_8(final SearchClusterContainer.Version targetVersion) throws Exception {
-        var executorService = Executors.newFixedThreadPool(1);
         final var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
         final var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();
         final var workCoordinationContext = WorkCoordinationTestContext.factory().noOtelTracking();
@@ -107,39 +103,22 @@ public class EndToEndTest extends SourceTestBase {
             assertThat(res.getValue(), Matchers.containsString("mappings\":{"));
 
             // === ACTION: Migrate the documents ===
-            var runCounter = new AtomicInteger();
             final var clockJitter = new Random(1);
-            var workerFuture = CompletableFuture.supplyAsync(
-                () -> migrateDocumentsSequentially(
-                    sourceRepo,
-                    snapshotName,
-                    List.of(),
-                    targetCluster.getUrl(),
-                    runCounter,
-                    clockJitter,
-                    testDocMigrationContext,
-                    sourceCluster.getVersion().getSourceVersion()
-                ),
-                executorService
+            var result = migrateDocumentsWithOneWorker(
+                sourceRepo,
+                snapshotName,
+                List.of(),
+                targetCluster.getUrl(),
+                clockJitter,
+                testDocMigrationContext,
+                sourceCluster.getVersion().getSourceVersion()
             );
-            try {
-                workerFuture.get();
-            } catch (ExecutionException e) {
-                var child = e.getCause();
-                if (child instanceof ExpectedMigrationWorkTerminationException) {
-                    // This is what we expect to happen
-                } else {
-                    throw Lombok.sneakyThrow(child);
-                }
-            } catch (InterruptedException e) {
-                throw Lombok.sneakyThrow(e);
-            }
+            assertThat(result, equalTo(DocumentsRunner.CompletionStatus.WORK_COMPLETED));
 
             // Check that the docs were migrated
             checkClusterMigrationOnFinished(sourceCluster, targetCluster, testDocMigrationContext);
         } finally {
             deleteTree(localDirectory.toPath());
-            executorService.shutdown();
         }
     }
 
@@ -170,7 +149,6 @@ public class EndToEndTest extends SourceTestBase {
         final SearchClusterContainer sourceCluster,
         final SearchClusterContainer targetCluster
     ) {
-        var executorService = Executors.newFixedThreadPool(1);
         final var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
         final var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();
         final var workCoordinationContext = WorkCoordinationTestContext.factory().noOtelTracking();
@@ -238,39 +216,22 @@ public class EndToEndTest extends SourceTestBase {
             assertThat(res.getValue(), Matchers.containsString("composed_of\":[\"" + compoTemplateName + "\"]"));
 
             // === ACTION: Migrate the documents ===
-            var runCounter = new AtomicInteger();
             final var clockJitter = new Random(1);
-            var workerFuture = CompletableFuture.supplyAsync(
-                () -> migrateDocumentsSequentially(
-                    sourceRepo,
-                    snapshotName,
-                    List.of(),
-                    targetCluster.getUrl(),
-                    runCounter,
-                    clockJitter,
-                    testDocMigrationContext,
-                    sourceCluster.getVersion().getSourceVersion()
-                ),
-                executorService
+            var result = migrateDocumentsWithOneWorker(
+                sourceRepo,
+                snapshotName,
+                List.of(),
+                targetCluster.getUrl(),
+                clockJitter,
+                testDocMigrationContext,
+                sourceCluster.getVersion().getSourceVersion()
             );
-            try {
-                workerFuture.get();
-            } catch (ExecutionException e) {
-                var child = e.getCause();
-                if (child instanceof ExpectedMigrationWorkTerminationException) {
-                    // This is what we expect to happen
-                } else {
-                    throw Lombok.sneakyThrow(child);
-                }
-            } catch (InterruptedException e) {
-                throw Lombok.sneakyThrow(e);
-            }
+            assertThat(result, equalTo(DocumentsRunner.CompletionStatus.WORK_COMPLETED));
 
             // Check that the docs were migrated
             checkClusterMigrationOnFinished(sourceCluster, targetCluster, testDocMigrationContext);
         } finally {
             deleteTree(localDirectory.toPath());
-            executorService.shutdown();
         }
     }
 
