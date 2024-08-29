@@ -32,9 +32,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import com.rfs.common.TestResources.Snapshot;
 import com.rfs.models.ShardMetadata;
-import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
-import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
-import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.scheduler.Schedulers;
@@ -71,21 +68,22 @@ public class LuceneDocumentsReaderTest {
         log.atDebug().log("Temporary directory deleted.");
     }
 
-    static Stream<Arguments> provideSnapshots_ES_7_10() {
+    static Stream<Arguments> provideSnapshots() {
         return Stream.of(
-            Arguments.of(TestResources.SNAPSHOT_ES_7_10_W_SOFT),
-            Arguments.of(TestResources.SNAPSHOT_ES_7_10_WO_SOFT)
+            Arguments.of(TestResources.SNAPSHOT_ES_6_8, SourceResourceProviderFactory.getProvider(ClusterVersion.ES_6_8)),
+            Arguments.of(TestResources.SNAPSHOT_ES_7_10_W_SOFT, SourceResourceProviderFactory.getProvider(ClusterVersion.ES_7_10)),
+            Arguments.of(TestResources.SNAPSHOT_ES_7_10_WO_SOFT, SourceResourceProviderFactory.getProvider(ClusterVersion.ES_7_10))
         );
     }
 
     @ParameterizedTest
-    @MethodSource("provideSnapshots_ES_7_10")
-    public void ReadDocuments_ES_7_10_AsExpected(Snapshot snapshot) {
+    @MethodSource("provideSnapshots")
+    public void ReadDocuments_AsExpected(Snapshot snapshot, SourceResourceProvider sourceResourceProvider) throws Exception {
         final var repo = new FileSystemRepo(snapshot.dir);
-        SnapshotRepo.Provider snapShotProvider = new SnapshotRepoProvider_ES_7_10(repo);
+        SnapshotRepo.Provider snapShotProvider = sourceResourceProvider.getSnapshotRepoProvider(repo);
         DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
 
-        final ShardMetadata shardMetadata = new ShardMetadataFactory_ES_7_10(snapShotProvider).fromRepo(snapshot.name, "test_updates_deletes", 0);
+        final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadataFactory(snapShotProvider).fromRepo(snapshot.name, "test_updates_deletes", 0);
 
         SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(
                     repoAccessor,
@@ -98,8 +96,8 @@ public class LuceneDocumentsReaderTest {
         // Use the LuceneDocumentsReader to get the documents
         Flux<Document> documents = new LuceneDocumentsReader(
             luceneDir,
-            ElasticsearchConstants_ES_7_10.SOFT_DELETES_POSSIBLE,
-            ElasticsearchConstants_ES_7_10.SOFT_DELETES_FIELD
+            sourceResourceProvider.getSoftDeletesPossible(),
+            sourceResourceProvider.getSoftDeletesFieldData()
         ).readDocuments()
             .sort(Comparator.comparing(doc -> Uid.decodeId(doc.getBinaryValue("_id").bytes))); // Sort for consistent order given LuceneDocumentsReader may interleave
 

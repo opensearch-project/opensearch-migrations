@@ -2,7 +2,8 @@ version: '3.7'
 services:
 
   elasticsearchsource:
-    image: 'migrations/empty_elasticsearch_source_6_8:latest'
+    image: 'migrations/empty_elasticsearch_source_5_6:latest'
+    platform: linux/amd64
     networks:
       - migrations
     environment:
