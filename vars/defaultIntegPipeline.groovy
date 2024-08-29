@@ -58,7 +58,14 @@ def call(Map config = [:]) {
             stage('Build') {
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
-                        sh 'sudo ./gradlew clean build --no-daemon'
+                        script {
+                            // Allow overwriting this step
+                            if (config.buildStep) {
+                                config.buildStep()
+                            } else {
+                                sh 'sudo ./gradlew clean build --no-daemon'
+                            }
+                        }
                     }
                 }
             }
