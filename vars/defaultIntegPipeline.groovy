@@ -32,9 +32,17 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Test Caller Identity') {
+            stage('Assume Deployment Role') {
                 steps {
-                    sh 'aws sts get-caller-identity'
+                    script {
+                        // Allow overwriting this step
+                        if (config.assumeRoleStep) {
+                            config.assumeRoleStep()
+                        } else {
+                            sh "aws sts assume-role --role-arn arn:aws:iam::863518433585:role/JenkinsDeploymentRole --role-session-name JenkinsSession --duration-seconds 7200"
+                            sh 'aws sts get-caller-identity'
+                        }
+                    }
                 }
             }
 
