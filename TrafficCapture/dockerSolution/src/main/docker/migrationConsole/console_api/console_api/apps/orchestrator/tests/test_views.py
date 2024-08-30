@@ -2,10 +2,13 @@ import os
 import botocore
 from django.test import Client, SimpleTestCase
 from moto import mock_aws
+import json
 from rest_framework import status
 from unittest.mock import patch
 
 PIPELINE_NAME = 'test-pipeline'
+RESPONSE_STATUS = 'STARTING'
+RESPONSE_STATUS_REASON = {'Description': 'Pipeline is starting'}
 VALID_CREATE_PAYLOAD = {
     'PipelineRoleArn': 'arn:aws:iam::123456789012:role/pipeline-access-role',
     'PipelineName': PIPELINE_NAME,
@@ -46,6 +49,10 @@ def mock_make_api_call(self, operation_name, kwarg):
     if (operation_name == 'CreatePipeline' or operation_name == 'DeletePipeline' or
             operation_name == 'StartPipeline' or operation_name == 'StopPipeline'):
         return {'Pipeline': {'PipelineName': PIPELINE_NAME}}
+    elif operation_name == 'GetPipeline':
+        return {'Pipeline': {'PipelineName': PIPELINE_NAME,
+                             'Status': RESPONSE_STATUS,
+                             'StatusReason': RESPONSE_STATUS_REASON}}
     # If we don't want to patch the API call
     return orig(self, operation_name, kwarg)
 
@@ -61,7 +68,7 @@ class OrchestratorViewsTest(SimpleTestCase):
         response = self.client.post('/orchestrator/osi-create-migration', data=VALID_CREATE_PAYLOAD,
                                     content_type='application/json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn('Timestamp', response.data)
+        self.assertIn('timestamp', response.json())
 
     @mock_aws
     @patch('botocore.client.BaseClient._make_api_call', new=mock_make_api_call)
@@ -71,7 +78,7 @@ class OrchestratorViewsTest(SimpleTestCase):
         response = self.client.post('/orchestrator/osi-create-migration', data=payload,
                                     content_type='application/json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn('Timestamp', response.data)
+        self.assertIn('timestamp', response.json())
 
     @patch('botocore.client.BaseClient._make_api_call', new=mock_make_api_call)
     def test_osi_create_migration_fails_for_missing_field(self):
@@ -95,7 +102,7 @@ class OrchestratorViewsTest(SimpleTestCase):
                                     content_type='application/json')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn('Timestamp', response.data)
+        self.assertIn('timestamp', response.json())
 
     @mock_aws
     @patch('botocore.client.BaseClient._make_api_call', new=mock_make_api_call)
@@ -104,14 +111,14 @@ class OrchestratorViewsTest(SimpleTestCase):
                                     content_type='application/json')
 
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn('Timestamp', response.data)
+        self.assertIn('timestamp', response.json())
 
     @patch('botocore.client.BaseClient._make_api_call', new=mock_make_api_call)
     def test_osi_stop_migration(self):
         response = self.client.post('/orchestrator/osi-stop-migration', data=VALID_UPDATE_PAYLOAD,
                                     content_type='application/json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn('Timestamp', response.data)
+        self.assertIn('timestamp', response.json())
 
     @mock_aws
     @patch('botocore.client.BaseClient._make_api_call', new=mock_make_api_call)
@@ -119,14 +126,14 @@ class OrchestratorViewsTest(SimpleTestCase):
         response = self.client.post('/orchestrator/osi-stop-migration', data=VALID_ASSUME_ROLE_UPDATE_PAYLOAD,
                                     content_type='application/json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn('Timestamp', response.data)
+        self.assertIn('timestamp', response.json())
 
     @patch('botocore.client.BaseClient._make_api_call', new=mock_make_api_call)
     def test_osi_delete_migration(self):
         response = self.client.post('/orchestrator/osi-delete-migration', data=VALID_UPDATE_PAYLOAD,
                                     content_type='application/json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn('Timestamp', response.data)
+        self.assertIn('timestamp', response.json())
 
     @mock_aws
     @patch('botocore.client.BaseClient._make_api_call', new=mock_make_api_call)
@@ -134,4 +141,29 @@ class OrchestratorViewsTest(SimpleTestCase):
         response = self.client.post('/orchestrator/osi-delete-migration', data=VALID_ASSUME_ROLE_UPDATE_PAYLOAD,
                                     content_type='application/json')
         self.assertEqual(response.status_code, status.HTTP_200_OK)
-        self.assertIn('Timestamp', response.data)
+        self.assertIn('timestamp', response.json())
+
+    @patch('botocore.client.BaseClient._make_api_call', new=mock_make_api_call)
+    def test_osi_get_status_migration(self):
+        response = self.client.generic(method='GET',
+                                       path='/orchestrator/osi-get-status-migration',
+                                       data=json.dumps(VALID_UPDATE_PAYLOAD),
+                                       content_type='application/json')
+        data = response.json()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('timestamp', data)
+        self.assertEqual(data['status'], RESPONSE_STATUS)
+        self.assertEqual(data['statusMessage'], RESPONSE_STATUS_REASON['Description'])
+
+    @mock_aws
+    @patch('botocore.client.BaseClient._make_api_call', new=mock_make_api_call)
+    def test_osi_get_status_assume_role(self):
+        response = self.client.generic(method='GET',
+                                       path='/orchestrator/osi-get-status-migration',
+                                       data=json.dumps(VALID_ASSUME_ROLE_UPDATE_PAYLOAD),
+                                       content_type='application/json')
+        data = response.json()
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertIn('timestamp', data)
+        self.assertEqual(data['status'], RESPONSE_STATUS)
+        self.assertEqual(data['statusMessage'], RESPONSE_STATUS_REASON['Description'])

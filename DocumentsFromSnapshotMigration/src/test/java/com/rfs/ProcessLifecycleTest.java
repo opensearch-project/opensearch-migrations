@@ -21,6 +21,7 @@ import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.testcontainers.OpensearchContainer;
 
+import com.rfs.common.ClusterVersion;
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.FileSystemSnapshotCreator;
 import com.rfs.common.OpenSearchClient;
@@ -118,7 +119,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
             );
             esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
-            migrateMetadata(osTargetContainer, tempDirSnapshot, testMetadataMigrationContext);
+            migrateMetadata(osTargetContainer, tempDirSnapshot, testMetadataMigrationContext, baseSourceImageVersion.getSourceVersion());
 
             int actualExitCode = runProcessAgainstToxicTarget(tempDirSnapshot, tempDirLucene, proxyContainer, failHow);
             log.atInfo().setMessage("Process exited with code: " + actualExitCode).log();
@@ -138,7 +139,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
     private static void migrateMetadata(
         OpensearchContainer targetContainer,
         Path tempDirSnapshot,
-        MetadataMigrationTestContext testMetadataMigrationContext
+        MetadataMigrationTestContext testMetadataMigrationContext,
+        ClusterVersion sourceVersion
     ) {
         String targetAddress = "http://"
             + targetContainer.getHost()
@@ -149,7 +151,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
             .build()
             .toConnectionContext());
         var sourceRepo = new FileSystemRepo(tempDirSnapshot);
-        migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, INDEX_ALLOWLIST, testMetadataMigrationContext);
+        migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, List.of(), List.of(), List.of(), INDEX_ALLOWLIST, testMetadataMigrationContext, sourceVersion);
     }
 
     private static int runProcessAgainstToxicTarget(

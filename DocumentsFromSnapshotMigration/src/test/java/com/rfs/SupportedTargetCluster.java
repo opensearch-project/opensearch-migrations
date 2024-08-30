@@ -1,4 +1,4 @@
-package com.rfs.integration;
+package com.rfs;
 
 import java.util.stream.Stream;
 

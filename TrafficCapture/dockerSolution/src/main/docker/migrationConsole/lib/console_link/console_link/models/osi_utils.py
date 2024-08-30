@@ -200,6 +200,20 @@ def construct_pipeline_config(pipeline_config_file_path: str, source_endpoint: s
     return pipeline_config
 
 
+# TODO: Reconcile status with internal status (https://opensearch.atlassian.net/browse/MIGRATIONS-1958)
+def get_status(osi_client, pipeline_name: str):
+    name = pipeline_name if pipeline_name is not None else DEFAULT_PIPELINE_NAME
+    logger.info(f"Getting status of pipeline: {name}")
+    get_pipeline_response = osi_client.get_pipeline(
+        PipelineName=name
+    )
+
+    return {
+        'status': get_pipeline_response['Pipeline']['Status'],
+        'statusMessage': get_pipeline_response['Pipeline']['StatusReason']['Description']
+    }
+
+
 def start_pipeline(osi_client, pipeline_name: str):
     name = pipeline_name if pipeline_name is not None else DEFAULT_PIPELINE_NAME
     logger.info(f"Starting pipeline: {name}")

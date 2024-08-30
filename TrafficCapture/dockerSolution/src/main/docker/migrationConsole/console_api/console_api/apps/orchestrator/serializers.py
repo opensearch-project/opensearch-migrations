@@ -32,6 +32,6 @@ class OpenSearchIngestionCreateRequestSerializer(serializers.Serializer):
     )
 
 
-class OpenSearchIngestionUpdateRequestSerializer(serializers.Serializer):
+class OpenSearchIngestionDefaultRequestSerializer(serializers.Serializer):
     PipelineName = serializers.CharField(max_length=28)
     PipelineManagerAssumeRoleArn = serializers.CharField(max_length=2048, required=False)
