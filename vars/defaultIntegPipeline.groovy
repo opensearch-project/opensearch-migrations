@@ -2,6 +2,7 @@ def call(Map config = [:]) {
     def sourceContext = config.sourceContext
     def migrationContext = config.migrationContext
     def defaultStageId = config.defaultStageId
+    def deploymentAccount = config.deploymentAccount
     if(sourceContext == null || sourceContext.isEmpty()){
         throw new RuntimeException("The sourceContext argument must be provided");
     }
@@ -9,7 +10,10 @@ def call(Map config = [:]) {
         throw new RuntimeException("The migrationContext argument must be provided");
     }
     if(defaultStageId == null || defaultStageId.isEmpty()){
-        throw new RuntimeException("The migrationContext argument must be provided");
+        throw new RuntimeException("The defaultStageId argument must be provided");
+    }
+    if(deploymentAccount == null || deploymentAccount.isEmpty()){
+        throw new RuntimeException("The deploymentAccount argument must be provided");
     }
     def source_context_id = config.sourceContextId ?: 'source-single-node-ec2'
     def migration_context_id = config.migrationContextId ?: 'migration-default'
@@ -28,18 +32,24 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout') {
                 steps {
-                    git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
+                    script {
+                        // Allow overwriting this step
+                        if (config.checkoutStep) {
+                            config.checkoutStep()
+                        } else {
+                            git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
+                        }
+                    }
                 }
             }
 
-            stage('Assume Deployment Role') {
+            stage('Test Caller Identity') {
                 steps {
                     script {
                         // Allow overwriting this step
-                        if (config.assumeRoleStep) {
-                            config.assumeRoleStep()
+                        if (config.awsIdentityCheckStep) {
+                            config.awsIdentityCheckStep()
                         } else {
-                            sh "aws sts assume-role --role-arn arn:aws:iam::863518433585:role/JenkinsDeploymentRole --role-session-name JenkinsSession --duration-seconds 7200"
                             sh 'aws sts get-caller-identity'
                         }
                     }
@@ -48,10 +58,17 @@ def call(Map config = [:]) {
 
             stage('Setup E2E CDK Context') {
                 steps {
-                    writeFile (file: "test/$source_context_file_name", text: sourceContext)
-                    sh "echo 'Using source context file options: ' && cat test/$source_context_file_name"
-                    writeFile (file: "test/$migration_context_file_name", text: migrationContext)
-                    sh "echo 'Using migration context file options: ' && cat test/$migration_context_file_name"
+                    script {
+                        // Allow overwriting this step
+                        if (config.cdkContextStep) {
+                            config.cdkContextStep()
+                        } else {
+                            writeFile (file: "test/$source_context_file_name", text: sourceContext)
+                            sh "echo 'Using source context file options: ' && cat test/$source_context_file_name"
+                            writeFile (file: "test/$migration_context_file_name", text: migrationContext)
+                            sh "echo 'Using migration context file options: ' && cat test/$migration_context_file_name"
+                        }
+                    }
                 }
             }
 
@@ -91,7 +108,9 @@ def call(Map config = [:]) {
                                     if (skipCaptureProxyOnNodeSetup) {
                                         baseCommand += " --skip-capture-proxy"
                                     }
-                                    sh baseCommand
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: deploymentAccount, duration: 5400, roleSessionName: 'jenkins-session') {
+                                        sh baseCommand
+                                    }
                                 }
                             }
                         }
@@ -116,9 +135,11 @@ def call(Map config = [:]) {
                                             "--junitxml=${test_result_file} ${test_dir}/replayer_tests.py " +
                                             "--unique_id ${uniqueId} " +
                                             "-s"
-                                    sh "sudo ./awsRunIntegTests.sh --command '${command}' " +
-                                            "--test-result-file ${test_result_file} " +
-                                            "--stage ${params.STAGE}"
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: deploymentAccount, duration: 3600, roleSessionName: 'jenkins-session') {
+                                        sh "sudo ./awsRunIntegTests.sh --command '${command}' " +
+                                                "--test-result-file ${test_result_file} " +
+                                                "--stage ${params.STAGE}"
+                                    }
                                 }
                             }
                         }
