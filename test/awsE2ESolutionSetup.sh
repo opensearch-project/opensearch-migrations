@@ -222,6 +222,8 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+source ./assumeRole.sh arn:aws:iam::863518433585:role/JenkinsDeploymentRole JenkinsSession
+
 SOURCE_NETWORK_STACK_NAME="opensearch-network-stack-ec2-source-$STAGE"
 SOURCE_INFRA_STACK_NAME="opensearch-infra-stack-ec2-source-$STAGE"
 SOURCE_GEN_CONTEXT_FILE="$TMP_DIR_PATH/generatedSourceContext.json"
