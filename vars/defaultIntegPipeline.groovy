@@ -32,14 +32,7 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout') {
                 steps {
-                    script {
-                        // Allow overwriting this step
-                        if (config.checkoutStep) {
-                            config.checkoutStep()
-                        } else {
-                            git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
-                        }
-                    }
+                    git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
                 }
             }
 
