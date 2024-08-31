@@ -223,6 +223,7 @@ while [[ $# -gt 0 ]]; do
 done
 
 #source ./assumeRole.sh arn:aws:iam::863518433585:role/JenkinsDeploymentRole JenkinsSession
+printenv
 
 SOURCE_NETWORK_STACK_NAME="opensearch-network-stack-ec2-source-$STAGE"
 SOURCE_INFRA_STACK_NAME="opensearch-infra-stack-ec2-source-$STAGE"
