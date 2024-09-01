@@ -2,7 +2,6 @@ def call(Map config = [:]) {
     def sourceContext = config.sourceContext
     def migrationContext = config.migrationContext
     def defaultStageId = config.defaultStageId
-    def deploymentAccount = config.deploymentAccount
     if(sourceContext == null || sourceContext.isEmpty()){
         throw new RuntimeException("The sourceContext argument must be provided");
     }
@@ -11,9 +10,6 @@ def call(Map config = [:]) {
     }
     if(defaultStageId == null || defaultStageId.isEmpty()){
         throw new RuntimeException("The defaultStageId argument must be provided");
-    }
-    if(deploymentAccount == null || deploymentAccount.isEmpty()){
-        throw new RuntimeException("The deploymentAccount argument must be provided");
     }
     def source_context_id = config.sourceContextId ?: 'source-single-node-ec2'
     def migration_context_id = config.migrationContextId ?: 'migration-default'
@@ -37,7 +33,7 @@ def call(Map config = [:]) {
                         if (config.checkoutStep) {
                             config.checkoutStep()
                         } else {
-                            git branch: "jenkins-aug29", url: "https://github.com/lewijacn/opensearch-migrations.git"
+                            git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
                         }
                     }
                 }
@@ -80,7 +76,7 @@ def call(Map config = [:]) {
                             if (config.buildStep) {
                                 config.buildStep()
                             } else {
-                                sh 'sudo ./gradlew clean build --no-daemon'
+                                sh 'sudo --preserve-env ./gradlew clean build --no-daemon'
                             }
                         }
                     }
@@ -98,7 +94,7 @@ def call(Map config = [:]) {
                                 } else {
                                     sh 'sudo usermod -aG docker $USER'
                                     sh 'sudo newgrp docker'
-                                    def baseCommand = "sudo ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' " +
+                                    def baseCommand = "sudo --preserve-env ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' " +
                                             "--migration-context-file './$migration_context_file_name' " +
                                             "--source-context-id $source_context_id " +
                                             "--migration-context-id $migration_context_id " +
@@ -108,8 +104,10 @@ def call(Map config = [:]) {
                                     if (skipCaptureProxyOnNodeSetup) {
                                         baseCommand += " --skip-capture-proxy"
                                     }
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: deploymentAccount, duration: 5400, roleSessionName: 'jenkins-session') {
-                                        sh baseCommand
+                                    withCredentials([string(credentialsId: 'deployment-account-id', variable: 'DEPLOYMENT_ACCOUNT_ID')]) {
+                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${DEPLOYMENT_ACCOUNT_ID}", duration: 5400, roleSessionName: 'jenkins-session') {
+                                            sh baseCommand
+                                        }
                                     }
                                 }
                             }
@@ -135,10 +133,12 @@ def call(Map config = [:]) {
                                             "--junitxml=${test_result_file} ${test_dir}/replayer_tests.py " +
                                             "--unique_id ${uniqueId} " +
                                             "-s"
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: deploymentAccount, duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "sudo ./awsRunIntegTests.sh --command '${command}' " +
-                                                "--test-result-file ${test_result_file} " +
-                                                "--stage ${params.STAGE}"
+                                    withCredentials([string(credentialsId: 'deployment-account-id', variable: 'DEPLOYMENT_ACCOUNT_ID')]) {
+                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${DEPLOYMENT_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
+                                            sh "sudo --preserve-env ./awsRunIntegTests.sh --command '${command}' " +
+                                                    "--test-result-file ${test_result_file} " +
+                                                    "--stage ${params.STAGE}"
+                                        }
                                     }
                                 }
                             }
