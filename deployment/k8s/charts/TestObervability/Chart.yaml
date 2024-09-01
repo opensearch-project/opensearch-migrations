@@ -1,0 +1,18 @@
+name: observability
+version: 0.1.0
+dependencies:
+  - name: grafana
+    version: "6.1.4"
+    repository: "https://grafana.github.io/helm-charts"
+  - name: prometheus
+    version: "14.0.0"
+    repository: "https://prometheus-community.github.io/helm-charts"
+  - name: jaeger
+    version: "0.42.0"
+    repository: "https://jaegertracing.github.io/helm-charts"
+  - name: kafka
+    version: "12.0.0"
+    repository: "https://charts.bitnami.com/bitnami"
+  - name: my-service
+    version: "0.1.0"
+    repository: "https://my-helm-repo.com/charts"
