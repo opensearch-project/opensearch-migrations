@@ -162,7 +162,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             }) : "";
 
         const sharedLogFileSystem = new SharedLogFileSystem(this, props.stage, props.defaultDeployId);
-        
+
 
         const ecsClusterArn = `arn:${this.partition}:ecs:${this.region}:${this.account}:service/migration-${props.stage}-ecs-cluster`
         const allReplayerServiceArn = `${ecsClusterArn}/migration-${props.stage}-traffic-replayer*`
@@ -236,7 +236,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
-        const getSecretsPolicy = props.servicesYaml.target_cluster.basic_auth?.password_from_secret_arn ? 
+        const getSecretsPolicy = props.servicesYaml.target_cluster.basic_auth?.password_from_secret_arn ?
             getTargetPasswordAccessPolicy(props.servicesYaml.target_cluster.basic_auth.password_from_secret_arn) : null;
 
         // Upload the services.yaml file to Parameter Store
@@ -334,16 +334,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
             const defaultAllowedHosts = 'localhost'
             environment["API_ALLOWED_HOSTS"] = props.migrationAPIAllowedHosts ? `${defaultAllowedHosts},${props.migrationAPIAllowedHosts}` : defaultAllowedHosts
-            const migrationApiUrl = getMigrationStringParameterValue(this, {
-                ...props,
-                parameter: MigrationSSMParameter.MIGRATION_API_URL
-            });
-            const migrationApiUrlAlias = getMigrationStringParameterValue(this, {
-                ...props,
-                parameter: MigrationSSMParameter.MIGRATION_API_URL_ALIAS
-            });
-            environment["API_ALLOWED_HOSTS"] += migrationApiUrl ? `,${this.getHostname(migrationApiUrl)}` : ""
-            environment["API_ALLOWED_HOSTS"] += migrationApiUrlAlias ? `,${this.getHostname(migrationApiUrlAlias)}` : ""
         }
 
         if (props.migrationConsoleEnableOSI) {
