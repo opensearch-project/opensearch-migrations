@@ -1,6 +1,5 @@
 package com.rfs.common.http;
 
-import io.netty.handler.codec.http.HttpHeaderNames;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.OutputStream;
@@ -10,6 +9,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.zip.Deflater;
 import java.util.zip.GZIPOutputStream;
+
+import io.netty.handler.codec.http.HttpHeaderNames;
 import lombok.AllArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
