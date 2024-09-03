@@ -287,8 +287,6 @@ export function getMigrationStringParameterName(props: MigrationSSMConfig): stri
 }
 
 export enum MigrationSSMParameter {
-    MIGRATION_API_URL = 'albMigrationApiUrl',
-    MIGRATION_API_URL_ALIAS = 'albMigrationApiUrlAlias',
     SOURCE_PROXY_URL = 'albSourceProxyUrl',
     SOURCE_PROXY_URL_ALIAS = 'albSourceProxyUrlAlias',
     TARGET_PROXY_URL = 'albTargetProxyUrl',

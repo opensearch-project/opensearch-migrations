@@ -558,7 +558,7 @@ export class StackComposer {
                 fetchMigrationEnabled: fetchMigrationEnabled,
                 migrationConsoleEnableOSI: migrationConsoleEnableOSI,
                 migrationAPIEnabled: migrationAPIEnabled,
-                targetGroups: [networkStack.albMigrationConsoleTG],
+                targetGroups: [networkStack.migrationConsoleTG],
                 servicesYaml: servicesYaml,
                 migrationAPIAllowedHosts: migrationAPIAllowedHosts,
                 sourceClusterDisabled,
