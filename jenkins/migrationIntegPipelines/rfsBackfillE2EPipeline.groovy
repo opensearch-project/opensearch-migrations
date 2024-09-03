@@ -40,7 +40,6 @@ def migration_cdk_context = """
         "openAccessPolicyEnabled": true,
         "domainRemovalPolicy": "DESTROY",
         "artifactBucketRemovalPolicy": "DESTROY",
-        "kafkaBrokerServiceEnabled": true,
         "trafficReplayerServiceEnabled": false,
         "reindexFromSnapshotServiceEnabled": true,
         "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>"
@@ -68,8 +67,12 @@ defaultIntegPipeline(
                     "--junitxml=${test_result_file} ${test_dir}/backfill_tests.py " +
                     "--unique_id ${uniqueId} " +
                     "-s"
-            sh "sudo --preserve-env ./awsRunIntegTests.sh --command '${command}' " +
-                    "--test-result-file ${test_result_file} " +
-                    "--stage ${params.STAGE}"
+            withCredentials([string(credentialsId: 'migration-test-account-id', variable: 'MIGRATION_TEST_ACCOUNT_ID')]) {
+                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATION_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
+                    sh "sudo --preserve-env ./awsRunIntegTests.sh --command '${command}' " +
+                            "--test-result-file ${test_result_file} " +
+                            "--stage ${params.STAGE}"
+                }
+            }
         }
 )
