@@ -104,8 +104,8 @@ def call(Map config = [:]) {
                                     if (skipCaptureProxyOnNodeSetup) {
                                         baseCommand += " --skip-capture-proxy"
                                     }
-                                    withCredentials([string(credentialsId: 'migration-test-account-id', variable: 'MIGRATION_TEST_ACCOUNT_ID')]) {
-                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATION_TEST_ACCOUNT_ID}", duration: 5400, roleSessionName: 'jenkins-session') {
+                                    withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 5400, roleSessionName: 'jenkins-session') {
                                             sh baseCommand
                                         }
                                     }
@@ -133,8 +133,8 @@ def call(Map config = [:]) {
                                             "--junitxml=${test_result_file} ${test_dir}/replayer_tests.py " +
                                             "--unique_id ${uniqueId} " +
                                             "-s"
-                                    withCredentials([string(credentialsId: 'migration-test-account-id', variable: 'MIGRATION_TEST_ACCOUNT_ID')]) {
-                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATION_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
                                             sh "sudo --preserve-env ./awsRunIntegTests.sh --command '${command}' " +
                                                     "--test-result-file ${test_result_file} " +
                                                     "--stage ${params.STAGE}"
