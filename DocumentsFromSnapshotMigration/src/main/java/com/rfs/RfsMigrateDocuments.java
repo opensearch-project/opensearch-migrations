@@ -25,6 +25,7 @@ import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.cms.OpenSearchWorkCoordinator;
 import com.rfs.cms.ScopedWorkCoordinator;
+import com.rfs.common.ClusterVersion;
 import com.rfs.common.DefaultSourceRepoAccessor;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.FileSystemRepo;
@@ -35,15 +36,13 @@ import com.rfs.common.S3Uri;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
+import com.rfs.common.SourceResourceProvider;
+import com.rfs.common.SourceResourceProviderFactory;
 import com.rfs.common.TryHandlePhaseFailure;
 import com.rfs.common.http.ConnectionContext;
 import com.rfs.models.IndexMetadata;
 import com.rfs.models.ShardMetadata;
 import com.rfs.tracing.RootWorkCoordinationContext;
-import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
-import com.rfs.version_es_7_10.IndexMetadataFactory_ES_7_10;
-import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
-import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.worker.DocumentsRunner;
 import com.rfs.worker.ShardWorkPreparer;
 import lombok.extern.slf4j.Slf4j;
@@ -132,6 +131,11 @@ public class RfsMigrateDocuments {
             description = "Optional.  The maximum number of connections to simultaneously " +
                 "used to communicate to the target, default 10")
         int maxConnections = 10;
+
+        @Parameter(names = { "--source-version" }, description = ("Optional. Version of the source cluster.  Possible "
+            + "values include: ES_6_8, ES_7_10, ES_7_17.  Default: ES_7_10"), required = false,
+            converter = ClusterVersion.ArgsConverter.class)
+        public ClusterVersion sourceVersion = ClusterVersion.ES_7_10;
     }
 
     public static class NoWorkLeftException extends Exception {
@@ -212,20 +216,22 @@ public class RfsMigrateDocuments {
                 } else {
                     sourceRepo = new FileSystemRepo(snapshotLocalDirPath);
                 }
-                SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
-
-                IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
-                ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
                 DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
+
+                SourceResourceProvider sourceResourceProvider = SourceResourceProviderFactory.getProvider(arguments.sourceVersion);
+
+                SnapshotRepo.Provider repoDataProvider = sourceResourceProvider.getSnapshotRepoProvider(sourceRepo);
+                IndexMetadata.Factory indexMetadataFactory = sourceResourceProvider.getIndexMetadataFactory(repoDataProvider);
+                ShardMetadata.Factory shardMetadataFactory = sourceResourceProvider.getShardMetadataFactory(repoDataProvider);
                 SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(
                     repoAccessor,
                     luceneDirPath,
-                    ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES
+                    sourceResourceProvider.getBufferSizeInBytes()
                 );
 
                 run(
-                    LuceneDocumentsReader.getFactory(ElasticsearchConstants_ES_7_10.SOFT_DELETES_POSSIBLE,
-                        ElasticsearchConstants_ES_7_10.SOFT_DELETES_FIELD),
+                    LuceneDocumentsReader.getFactory(sourceResourceProvider.getSoftDeletesPossible(),
+                        sourceResourceProvider.getSoftDeletesFieldData()),
                     reindexer,
                     workCoordinator,
                     arguments.initialLeaseDuration,

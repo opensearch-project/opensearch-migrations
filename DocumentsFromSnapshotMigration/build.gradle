@@ -94,6 +94,9 @@ DockerServiceProps[] dockerServices = [
                                 dockerImageName:"reindex_from_snapshot",
                                 inputDir:"./docker",
                                 taskDependencies:["copyDockerRuntimeJars"]]),
+        new DockerServiceProps([projectName:"emptyElasticsearchSource_5_6",
+                                dockerImageName:"empty_elasticsearch_source_5_6",
+                                inputDir:"./docker/TestSource_ES_5_6"]),
         new DockerServiceProps([projectName:"emptyElasticsearchSource_6_8",
                                 dockerImageName:"empty_elasticsearch_source_6_8",
                                 inputDir:"./docker/TestSource_ES_6_8"]),
@@ -112,6 +115,7 @@ for (dockerService in dockerServices) {
             dependsOn dep
         }
         inputDir = project.file(dockerService.inputDir)
+        // platform.set("linux/amd64")
         buildArgs = dockerService.buildArgs
         images.add("migrations/${dockerService.dockerImageName}:${hash}")
         images.add("migrations/${dockerService.dockerImageName}:${version}")
@@ -122,6 +126,10 @@ for (dockerService in dockerServices) {
 dockerCompose {
     useComposeFiles = ['docker/docker-compose-es710.yml']
     projectName = 'rfs-compose'
+
+    es56 {
+        useComposeFiles = ['docker/docker-compose-es56.yml']
+    }
 
     es68 {
         useComposeFiles = ['docker/docker-compose-es68.yml']

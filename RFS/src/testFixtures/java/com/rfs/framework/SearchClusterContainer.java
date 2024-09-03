@@ -6,6 +6,7 @@ import java.util.Map;
 
 import com.google.common.collect.ImmutableMap;
 
+import com.rfs.common.ClusterVersion;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
@@ -22,19 +23,22 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     public static final String CLUSTER_SNAPSHOT_DIR = "/tmp/snapshots";
     public static final Version ES_V7_10_2 = new ElasticsearchVersion(
         "docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2",
+        ClusterVersion.ES_7_10,
         "ES 7.10.2"
     );
     public static final Version ES_V7_17 = new ElasticsearchVersion(
         "docker.elastic.co/elasticsearch/elasticsearch:7.17.22",
+        ClusterVersion.ES_7_17,
         "ES 7.17.22"
     );
     public static final Version ES_V6_8_23 = new ElasticsearchVersion(
         "docker.elastic.co/elasticsearch/elasticsearch:6.8.23",
+        ClusterVersion.ES_6_8,
         "ES 6.8.23"
     );
 
-    public static final Version OS_V1_3_16 = new OpenSearchVersion("opensearchproject/opensearch:1.3.16", "OS 1.3.16");
-    public static final Version OS_V2_14_0 = new OpenSearchVersion("opensearchproject/opensearch:2.14.0", "OS 2.14.0");
+    public static final Version OS_V1_3_16 = new OpenSearchVersion("opensearchproject/opensearch:1.3.16", ClusterVersion.OS_1_3, "OS 1.3.16");
+    public static final Version OS_V2_14_0 = new OpenSearchVersion("opensearchproject/opensearch:2.14.0", ClusterVersion.OS_2_11, "OS 2.14.0");
 
     private enum INITIALIZATION_FLAVOR {
         ELASTICSEARCH(Map.of("discovery.type", "single-node", "path.repo", CLUSTER_SNAPSHOT_DIR)),
@@ -113,12 +117,14 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     @ToString(onlyExplicitlyIncluded = true, includeFieldNames = false)
     public static class Version {
         final String imageName;
+        final ClusterVersion sourceVersion;
         @ToString.Include
         final String prettyName;
         final INITIALIZATION_FLAVOR initializationType;
 
-        public Version(final String imageName, final String prettyName, INITIALIZATION_FLAVOR initializationType) {
+        public Version(final String imageName, final ClusterVersion parserVersion, final String prettyName, INITIALIZATION_FLAVOR initializationType) {
             this.imageName = imageName;
+            this.sourceVersion = parserVersion;
             this.prettyName = prettyName;
             this.initializationType = initializationType;
         }
@@ -126,14 +132,14 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     }
 
     public static class ElasticsearchVersion extends Version {
-        public ElasticsearchVersion(String imageName, String prettyName) {
-            super(imageName, prettyName, INITIALIZATION_FLAVOR.ELASTICSEARCH);
+        public ElasticsearchVersion(String imageName, ClusterVersion parserVersion, String prettyName) {
+            super(imageName, parserVersion, prettyName, INITIALIZATION_FLAVOR.ELASTICSEARCH);
         }
     }
 
     public static class OpenSearchVersion extends Version {
-        public OpenSearchVersion(String imageName, String prettyName) {
-            super(imageName, prettyName, INITIALIZATION_FLAVOR.OPENSEARCH);
+        public OpenSearchVersion(String imageName, ClusterVersion parserVersion, String prettyName) {
+            super(imageName, parserVersion, prettyName, INITIALIZATION_FLAVOR.OPENSEARCH);
         }
     }
 }
