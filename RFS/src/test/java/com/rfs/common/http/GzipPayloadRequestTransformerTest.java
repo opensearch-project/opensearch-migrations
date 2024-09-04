@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Random;
 import java.util.zip.GZIPInputStream;
+import java.util.zip.GZIPOutputStream;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -22,19 +23,19 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
-public class GzipRequestTransformerTest {
+class GzipPayloadRequestTransformerTest {
 
     private static final int RANDOM_SEED = 42; // Fixed seed for reproducibility
-    private GzipRequestTransformer gzipTransformer;
+    private GzipPayloadRequestTransformer gzipTransformer;
 
     @BeforeEach
     public void setup() {
-        gzipTransformer = new GzipRequestTransformer();
+        gzipTransformer = new GzipPayloadRequestTransformer();
     }
 
     @ParameterizedTest
     @ValueSource(ints = { 0, 100, 1024, 10 * 1024, 1024 * 1024 }) // 0B, 100B, 1KB, 10KB, 1MB
-    public void testGzipCompression(int size) throws Exception {
+    void testGzipCompression(int size) throws Exception {
         // Generate test data
         ByteBuffer inputBuffer = generateTestData(size);
         Map<String, List<String>> headers = new HashMap<>();
@@ -71,7 +72,7 @@ public class GzipRequestTransformerTest {
 
     @ParameterizedTest
     @ValueSource(ints = { 100, 1024, 10 * 1024, 1024 * 1024 }) // 100B, 1KB, 10KB, 1MB
-    public void testGzipCompressionWithDirectBuffer(int size) throws Exception {
+    void testGzipCompressionWithDirectBuffer(int size) throws Exception {
         // Generate test data in a direct ByteBuffer
         ByteBuffer inputBuffer = ByteBuffer.allocateDirect(size);
         Random random = new Random(RANDOM_SEED);
@@ -118,7 +119,7 @@ public class GzipRequestTransformerTest {
     }
 
     @Test
-    public void testEmptyInput() {
+    void testEmptyInput() {
         Map<String, List<String>> headers = new HashMap<>();
 
         TransformedRequest result = gzipTransformer.transform("GET", "/test", headers, Mono.empty()).block();
@@ -128,7 +129,7 @@ public class GzipRequestTransformerTest {
     }
 
     @Test
-    public void testLargeInput() throws Exception {
+    void testLargeInput() throws Exception {
         int largeSize = 50 * 1024 * 1024; // 50MB
         ByteBuffer largeBuffer = generateTestData(largeSize);
         Map<String, List<String>> headers = new HashMap<>();
@@ -214,6 +215,44 @@ public class GzipRequestTransformerTest {
             while ((len = gzipInputStream.read(buffer)) > 0) {
                 baos.write(buffer, 0, len);
             }
+        }
+        return baos.toByteArray();
+    }
+
+    @Test
+    public void testAlreadyCompressedPayload() throws Exception {
+        // Generate test data and compress it
+        ByteBuffer originalBuffer = generateTestData(1024); // 1KB of test data
+        byte[] compressedData = compress(originalBuffer);
+        ByteBuffer compressedBuffer = ByteBuffer.wrap(compressedData);
+
+        // Set headers to indicate that the content should be gzipped
+        Map<String, List<String>> headers = new HashMap<>();
+        headers.put("content-encoding", List.of("gzip"));
+
+        // Store initial position and limit
+        int initialPosition = compressedBuffer.position();
+        int initialLimit = compressedBuffer.limit();
+
+        // Transform
+        TransformedRequest result =
+            gzipTransformer.transform("POST", "/test", headers, Mono.just(compressedBuffer)).block();
+
+        // Check headers
+        assertTrue(result.getHeaders().containsKey("content-encoding"));
+        assertEquals("gzip", result.getHeaders().get("content-encoding").get(0));
+
+        // Verify that the body is unchanged
+        ByteBuffer resultBuffer = result.getBody().block();
+        assertEquals(initialPosition, resultBuffer.position(), "Compressed buffer position should not change");
+        assertEquals(initialLimit, resultBuffer.limit(), "Compressed buffer limit should not change");
+        assertArrayEquals(compressedBuffer.array(), resultBuffer.array(), "Compressed payload should remain unchanged");
+    }
+
+    private byte[] compress(ByteBuffer inputBuffer) throws Exception {
+        ByteArrayOutputStream baos = new ByteArrayOutputStream();
+        try (GZIPOutputStream gzipOutputStream = new GZIPOutputStream(baos)) {
+            gzipOutputStream.write(inputBuffer.array(), inputBuffer.position(), inputBuffer.remaining());
         }
         return baos.toByteArray();
     }

@@ -16,30 +16,61 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 
+/**
+ * The {@code GzipPayloadRequestTransformer} class implements the {@link RequestTransformer} interface and
+ * provides functionality to transform HTTP request payloads by applying GZIP compression if needed.
+ *
+ * <p>This class checks the request headers to determine if the payload should be compressed using GZIP.
+ * If the "Content-Encoding" header is set to "gzip" and the payload is not already compressed, the
+ * payload is compressed using GZIP. Otherwise, the payload remains unchanged.</p>
+ *
+ * @see RequestTransformer
+ */
 @AllArgsConstructor
 @Slf4j
-public class GzipRequestTransformer implements RequestTransformer {
-    private static final String CONTENT_ENCODING_HEADER_NAME = HttpHeaderNames.CONTENT_ENCODING.toString();
-    private static final String GZIP_CONTENT_ENCODING_HEADER_VALUE = "gzip";
+public class GzipPayloadRequestTransformer implements RequestTransformer {
+    public static final String CONTENT_ENCODING_HEADER_NAME = HttpHeaderNames.CONTENT_ENCODING.toString();
+    public static final String GZIP_CONTENT_ENCODING_HEADER_VALUE = "gzip";
+
     private static final int READ_BUFFER_SIZE = 256 * 1024;  // Arbitrary, 256KB
 
     // Local benchmarks show 15% throughput improvement with this setting
     private static final int COMPRESSION_LEVEL = Deflater.BEST_SPEED;
 
+    private static final int GZIP_MAGIC_NUMBER = 0x8b1f; // 0x1F8B in little-endian for gzip starting bytes
+
+    private static boolean headersUseGzipContentEncoding(final Map<String, List<String>> headers) {
+        return headers.getOrDefault(CONTENT_ENCODING_HEADER_NAME, List.of())
+            .contains(GZIP_CONTENT_ENCODING_HEADER_VALUE);
+    }
+
+    private static boolean isGzipped(ByteBuffer buffer) {
+        if (buffer == null || buffer.remaining() < 2) {
+            return false;
+        }
+
+        // Mark the current position so we can reset after reading
+        buffer.mark();
+
+        // Read the first two bytes
+        byte firstByte = buffer.get();
+        byte secondByte = buffer.get();
+
+        // Reset the buffer to its original position
+        buffer.reset();
+
+        int magic = Byte.toUnsignedInt(firstByte) | (Byte.toUnsignedInt(secondByte) << 8);
+        return magic == GZIP_MAGIC_NUMBER;
+    }
+
     @Override
     public Mono<TransformedRequest> transform(
-        String method,
-        String path,
-        Map<String, List<String>> headers,
-        Mono<ByteBuffer> body
+        String method, String path, Map<String, List<String>> headers, Mono<ByteBuffer> body
     ) {
-        return body.map(this::gzipByteBufferSimple).singleOptional().flatMap(bodyOp -> {
-            Map<String, List<String>> newHeaders = new HashMap<>(headers);
-            if (bodyOp.isPresent()) {
-                newHeaders.put(CONTENT_ENCODING_HEADER_NAME, List.of(GZIP_CONTENT_ENCODING_HEADER_VALUE));
-            }
-            return Mono.just(new TransformedRequest(newHeaders, Mono.justOrEmpty(bodyOp)));
-        });
+        return Mono.just(new TransformedRequest(new HashMap<>(headers),
+            body.map(bodyBuf -> (headersUseGzipContentEncoding(headers) && !isGzipped(bodyBuf)) ? gzipByteBufferSimple(
+                bodyBuf) : bodyBuf)
+        ));
     }
 
     @SneakyThrows
@@ -48,8 +79,7 @@ public class GzipRequestTransformer implements RequestTransformer {
         var baos = new ByteArrayOutputStream();
         try (GZIPOutputStream gzipOutputStream = new FastGzipOutputStream(baos, READ_BUFFER_SIZE, false)) {
             if (readbuffer.hasArray()) {
-                gzipOutputStream.write(
-                    readbuffer.array(),
+                gzipOutputStream.write(readbuffer.array(),
                     readbuffer.arrayOffset() + readbuffer.position(),
                     readbuffer.remaining()
                 );

@@ -22,6 +22,7 @@ public class ConnectionContext {
     private final Protocol protocol;
     private final boolean insecure;
     private final RequestTransformer requestTransformer;
+    private final boolean compressionSupported;
 
     private ConnectionContext(IParams params) {
         assert params.getHost() != null : "host is null";
@@ -56,12 +57,11 @@ public class ConnectionContext {
             throw new IllegalArgumentException("Cannot have both Basic Auth and SigV4 Auth enabled.");
         }
 
-        RequestTransformer authTransformer;
         if (basicAuthEnabled) {
-            authTransformer = new BasicAuthTransformer(params.getUsername(), params.getPassword());
+            requestTransformer = new BasicAuthTransformer(params.getUsername(), params.getPassword());
         }
         else if (sigv4Enabled) {
-            authTransformer = new SigV4AuthTransformer(
+            requestTransformer = new SigV4AuthTransformer(
                 DefaultCredentialsProvider.create(),
                 params.getAwsServiceSigningName(),
                 params.getAwsRegion(),
@@ -69,14 +69,9 @@ public class ConnectionContext {
                 Clock::systemUTC);
         }
         else {
-            authTransformer = NoAuthTransformer.INSTANCE;
+            requestTransformer = new NoAuthTransformer();
         }
-
-        if (!params.isCompressionEnabled()) {
-            this.requestTransformer = authTransformer;
-        } else {
-            this.requestTransformer = new CompositeTransformer(new GzipRequestTransformer(), authTransformer);
-        }
+        compressionSupported = params.isCompressionEnabled();
     }
 
     public interface IParams {

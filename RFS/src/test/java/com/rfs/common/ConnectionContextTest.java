@@ -7,10 +7,8 @@ import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
 import com.rfs.common.http.BasicAuthTransformer;
-import com.rfs.common.http.CompositeTransformer;
 import com.rfs.common.http.ConnectionContext;
 import com.rfs.common.http.ConnectionContextTestParams;
-import com.rfs.common.http.GzipRequestTransformer;
 import com.rfs.common.http.NoAuthTransformer;
 import com.rfs.common.http.SigV4AuthTransformer;
 
@@ -134,48 +132,6 @@ class ConnectionContextTest {
                     .awsServiceSigningName("es")
                     .build(),
                 IllegalArgumentException.class
-            )
-        );
-    }
-
-    @ParameterizedTest
-    @MethodSource("compressionEnabledParams")
-    void testCompressionEnabledBeforeAuth(ConnectionContextTestParams params, Class<?> expectedAuthTransformerClass) {
-        ConnectionContext context = params.toConnectionContext();
-        assertTrue(context.getRequestTransformer() instanceof CompositeTransformer);
-
-        CompositeTransformer compositeTransformer = (CompositeTransformer) context.getRequestTransformer();
-
-        assertTrue(compositeTransformer.getFirstTransformer() instanceof GzipRequestTransformer);
-        assertTrue(expectedAuthTransformerClass.isInstance(compositeTransformer.getSecondTransformer()));
-    }
-
-    private static Stream<Arguments> compressionEnabledParams() {
-        return Stream.of(
-            Arguments.of(
-                ConnectionContextTestParams.builder()
-                    .host("http://localhost:9200")
-                    .compressionEnabled(true)
-                    .build(),
-                NoAuthTransformer.class
-            ),
-            Arguments.of(
-                ConnectionContextTestParams.builder()
-                    .host("https://example.com:443")
-                    .username("user")
-                    .password("pass")
-                    .compressionEnabled(true)
-                    .build(),
-                BasicAuthTransformer.class
-            ),
-            Arguments.of(
-                ConnectionContextTestParams.builder()
-                    .host("https://opensearch.us-east-1.amazonaws.com")
-                    .awsRegion("us-east-1")
-                    .awsServiceSigningName("es")
-                    .compressionEnabled(true)
-                    .build(),
-                SigV4AuthTransformer.class
             )
         );
     }
