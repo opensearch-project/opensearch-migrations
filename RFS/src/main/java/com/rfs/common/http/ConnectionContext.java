@@ -5,6 +5,7 @@ import java.net.URISyntaxException;
 import java.time.Clock;
 
 import com.beust.jcommander.Parameter;
+import com.beust.jcommander.ParametersDelegate;
 import lombok.Getter;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 
@@ -120,12 +121,24 @@ public class ConnectionContext {
             "--target-insecure" }, description = "Allow untrusted SSL certificates for target", required = false)
         public boolean insecure = false;
 
+        @ParametersDelegate
+        TargetAdvancedArgs advancedArgs = new TargetAdvancedArgs();
+
+        @Override
+        public boolean isCompressionEnabled() {
+            return advancedArgs.isCompressionEnabled();
+        }
+    }
+
+    // Flags that require more testing and validation before recommendations are made
+    @Getter
+    public static class TargetAdvancedArgs {
         @Parameter(names = {
-            "--target-compression" }, description = "Allow request compression to target", required = false)
+            "--target-compression" }, description = "**Advanced**. Allow request compression to target", required = false)
         public boolean compressionEnabled = false;
     }
 
-    @Getter
+        @Getter
     public static class SourceArgs implements IParams {
         @Parameter(names = {
             "--source-host" }, description = "The source host and port (e.g. http://localhost:9200)", required = false)
