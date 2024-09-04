@@ -32,9 +32,9 @@ public class EndToEndTest extends SourceTestBase {
     @TempDir
     private File localDirectory;
 
-    @ParameterizedTest(name = "Target OpenSearch {0}")
+    @ParameterizedTest(name = "Target {0}")
     @ArgumentsSource(SupportedTargetCluster.class)
-    public void migrateFrom_ES_v6_8(final SearchClusterContainer.Version targetVersion) throws Exception {
+    public void migrateFrom_ES_v6_8(final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
         final var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
         final var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();
         final var workCoordinationContext = WorkCoordinationTestContext.factory().noOtelTracking();
@@ -93,7 +93,7 @@ public class EndToEndTest extends SourceTestBase {
                 List.of(),
                 List.of(),
                 metadataContext,
-                sourceCluster.getVersion().getSourceVersion()
+                sourceCluster.getContainerVersion().getVersion()
             );
 
             // Check that the templates were migrated
@@ -111,7 +111,7 @@ public class EndToEndTest extends SourceTestBase {
                 targetCluster.getUrl(),
                 clockJitter,
                 testDocMigrationContext,
-                sourceCluster.getVersion().getSourceVersion(),
+                sourceCluster.getContainerVersion().getVersion(),
                 false
             );
             assertThat(result, equalTo(DocumentsRunner.CompletionStatus.WORK_COMPLETED));
@@ -123,9 +123,9 @@ public class EndToEndTest extends SourceTestBase {
         }
     }
 
-    @ParameterizedTest(name = "Target OpenSearch {0}")
+    @ParameterizedTest(name = "Target {0}")
     @ArgumentsSource(SupportedTargetCluster.class)
-    public void migrateFrom_ES_v7_10(final SearchClusterContainer.Version targetVersion) throws Exception {
+    public void migrateFrom_ES_v7_10(final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
         try (
             final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
             final var targetCluster = new SearchClusterContainer(targetVersion)
@@ -134,9 +134,9 @@ public class EndToEndTest extends SourceTestBase {
         }
     }
 
-    @ParameterizedTest(name = "Target OpenSearch {0}")
+    @ParameterizedTest(name = "Target {0}")
     @ArgumentsSource(SupportedTargetCluster.class)
-    public void migrateFrom_ES_v7_17(final SearchClusterContainer.Version targetVersion) throws Exception {
+    public void migrateFrom_ES_v7_17(final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
         try (
             final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_17);
             final var targetCluster = new SearchClusterContainer(targetVersion)
@@ -207,7 +207,7 @@ public class EndToEndTest extends SourceTestBase {
                 List.of(indexTemplateName),
                 List.of(),
                 metadataContext,
-                sourceCluster.getVersion().getSourceVersion()
+                sourceCluster.getContainerVersion().getVersion()
             );
 
             // Check that the templates were migrated
@@ -225,7 +225,7 @@ public class EndToEndTest extends SourceTestBase {
                 targetCluster.getUrl(),
                 clockJitter,
                 testDocMigrationContext,
-                sourceCluster.getVersion().getSourceVersion(),
+                sourceCluster.getContainerVersion().getVersion(),
                 false
             );
             assertThat(result, equalTo(DocumentsRunner.CompletionStatus.WORK_COMPLETED));

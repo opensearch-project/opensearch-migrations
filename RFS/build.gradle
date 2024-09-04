@@ -80,6 +80,7 @@ dependencies {
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
 
     testFixturesImplementation project(":commonDependencyVersionConstraints")
+    testFixturesImplementation project(':transformation')
     testFixturesImplementation testFixtures(project(":coreUtilities"))
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java'
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java-core'

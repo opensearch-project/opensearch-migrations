@@ -133,7 +133,7 @@ class Metadata:
         self._snapshot_location = "fs"
         self._repo_path = snapshot.repo_path
 
-    def migrate(self, detached_log=None) -> CommandResult:
+    def migrate(self, detached_log=None, extra_args=None) -> CommandResult:
         logger.info("Starting metadata migration")
         command_base = "/root/metadataMigration/bin/MetadataMigration"
         command_args = {
@@ -183,6 +183,18 @@ class Metadata:
 
         if self._otel_endpoint:
             command_args.update({"--otel-collector-endpoint": self._otel_endpoint})
+
+        # Extra args might not be represented with dictionary, so convert args to list and append commands
+        cmd_args = []
+        for key, value in command_args.items():
+            cmd_args.append(key)
+            if value is not None:
+                cmd_args.append(value)
+
+        if extra_args:
+            it = iter(extra_args)
+            for arg in it:
+                cmd_args.append(arg)
 
         command_runner = CommandRunner(command_base, command_args,
                                        sensitive_fields=["--target-password"],

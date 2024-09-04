@@ -31,18 +31,17 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
 
     @Override
     public GlobalMetadata transformGlobalMetadata(GlobalMetadata globalData) {
-        var root = globalData.toObjectNode();
         ObjectNode newRoot = mapper.createObjectNode();
 
         // Transform the original "templates", but put them into the legacy "templates" bucket on the target
-        var originalTemplates = root.get("templates");
-        if (originalTemplates != null) {
+        var templatesRoot = globalData.getTemplates();
+        if (templatesRoot != null) {
             var templates = mapper.createObjectNode();
-            originalTemplates.fieldNames().forEachRemaining(templateName -> {
-                var templateCopy = (ObjectNode) originalTemplates.get(templateName).deepCopy();
+            templatesRoot.fields().forEachRemaining(template -> {
+                var templateCopy = (ObjectNode) template.getValue().deepCopy();
                 var indexTemplate = (Index) () -> templateCopy;
                 transformIndex(indexTemplate, IndexType.Template);
-                templates.set(templateName, indexTemplate.rawJson());
+                templates.set(template.getKey(), indexTemplate.rawJson());
             });
             newRoot.set("templates", templates);
         }

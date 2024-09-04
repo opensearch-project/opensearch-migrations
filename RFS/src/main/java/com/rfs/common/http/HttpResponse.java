@@ -3,8 +3,10 @@ package com.rfs.common.http;
 import java.util.Map;
 
 import lombok.AllArgsConstructor;
+import lombok.ToString;
 
 @AllArgsConstructor
+@ToString
 public class HttpResponse {
     public final int statusCode;
     public final String statusText;

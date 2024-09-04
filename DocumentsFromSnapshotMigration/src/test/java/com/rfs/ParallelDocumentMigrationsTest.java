@@ -37,11 +37,12 @@ import lombok.extern.slf4j.Slf4j;
 @Tag("longTest")
 @Slf4j
 public class ParallelDocumentMigrationsTest extends SourceTestBase {
-    final static List<SearchClusterContainer.Version> SOURCE_IMAGES = List.of(
+
+    final static List<SearchClusterContainer.ContainerVersion> SOURCE_IMAGES = List.of(
         SearchClusterContainer.ES_V7_10_2,
         SearchClusterContainer.ES_V7_17
     );
-    final static List<SearchClusterContainer.Version> TARGET_IMAGES = List.of(SearchClusterContainer.OS_V2_14_0);
+    final static List<SearchClusterContainer.ContainerVersion> TARGET_IMAGES = List.of(SearchClusterContainer.OS_V2_14_0);
 
     public static Stream<Arguments> makeDocumentMigrationArgs() {
         List<Object[]> sourceImageArgs = SOURCE_IMAGES.stream()
@@ -73,8 +74,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
     @MethodSource("makeDocumentMigrationArgs")
     public void testDocumentMigration(
         int numWorkers,
-        SearchClusterContainer.Version targetVersion,
-        SearchClusterContainer.Version baseSourceImageVersion,
+        SearchClusterContainer.ContainerVersion targetVersion,
+        SearchClusterContainer.ContainerVersion baseSourceImageVersion,
         String generatorImage,
         String[] generatorArgs,
         boolean compressionEnabled
@@ -127,7 +128,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                     .build()
                     .toConnectionContext());
                 var sourceRepo = new FileSystemRepo(tempDir);
-                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, List.of(), List.of(), List.of(), INDEX_ALLOWLIST, testMetadataMigrationContext, baseSourceImageVersion.getSourceVersion());
+                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, List.of(), List.of(), List.of(), INDEX_ALLOWLIST, testMetadataMigrationContext, baseSourceImageVersion.getVersion());
 
                 var workerFutures = new ArrayList<CompletableFuture<Integer>>();
                 var runCounter = new AtomicInteger();
@@ -144,7 +145,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                                 runCounter,
                                 clockJitter,
                                 testDocMigrationContext,
-                                baseSourceImageVersion.getSourceVersion(),
+                                baseSourceImageVersion.getVersion(),
                                 compressionEnabled
                             ),
                             executorService

@@ -33,6 +33,7 @@ dependencies {
 
     implementation project(":coreUtilities")
     implementation project(":RFS")
+    implementation project(":transformation")
 
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
