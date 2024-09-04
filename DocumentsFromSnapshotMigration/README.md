@@ -70,8 +70,15 @@ To see the default shard size, use the `--help` CLI option:
 | --target-password                 | The password for target cluster authentication                                                                                                           |
 | --target-aws-region               | The AWS region for the target cluster. Required if using SigV4 authentication                                                                            |
 | --target-aws-service-signing-name | The AWS service signing name (e.g. 'es' for Amazon OpenSearch Service, 'aoss' for Amazon OpenSearch Serverless). Required if using SigV4 authentication  |
-| --target-insecure                 | Flag to allow untrusted SSL certificates for target cluster                                                                                              |
-| --target-compression              | Flag to enable request compression for target cluster                                                                                                    |
-| --documents-per-bulk-request      | Optional. The number of documents to be included within each bulk request sent. Default: no max (controlled by documents size)                           |
 | --documents-size-per-bulk-request | Optional. The maximum aggregate document size to be used in bulk requests in bytes. Default: 10 MiB                                                      |
-| --max-connections                 | Optional. The maximum number of connections to simultaneously used to communicate to the target. Default: 10                                             |
+
+## Advanced Arguments
+
+These arguments should be carefully considered before setting, can include experimental features, and can impact security posture of the solution. Tread with caution.
+
+| Argument                          | Description                                                                                                            |
+|-----------------------------------|:-----------------------------------------------------------------------------------------------------------------------|
+| --target-compression              | Flag to enable request compression for target cluster. Default: false                                                  |
+| --documents-per-bulk-request      | The number of documents to be included within each bulk request sent. Default: no max (controlled by documents size)   |
+| --max-connections                 | The maximum number of connections to simultaneously used to communicate to the target. Default: 10                     |
+| --target-insecure                 | Flag to allow untrusted SSL certificates for target cluster. Default: false                                            |
