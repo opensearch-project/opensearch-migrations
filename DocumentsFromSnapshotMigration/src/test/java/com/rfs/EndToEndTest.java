@@ -111,7 +111,8 @@ public class EndToEndTest extends SourceTestBase {
                 targetCluster.getUrl(),
                 clockJitter,
                 testDocMigrationContext,
-                sourceCluster.getVersion().getSourceVersion()
+                sourceCluster.getVersion().getSourceVersion(),
+                false
             );
             assertThat(result, equalTo(DocumentsRunner.CompletionStatus.WORK_COMPLETED));
 
@@ -224,7 +225,8 @@ public class EndToEndTest extends SourceTestBase {
                 targetCluster.getUrl(),
                 clockJitter,
                 testDocMigrationContext,
-                sourceCluster.getVersion().getSourceVersion()
+                sourceCluster.getVersion().getSourceVersion(),
+                false
             );
             assertThat(result, equalTo(DocumentsRunner.CompletionStatus.WORK_COMPLETED));
 

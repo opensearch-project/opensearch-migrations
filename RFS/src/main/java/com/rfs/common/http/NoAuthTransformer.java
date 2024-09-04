@@ -5,12 +5,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+import lombok.AllArgsConstructor;
 import reactor.core.publisher.Mono;
 
+@AllArgsConstructor
 public class NoAuthTransformer implements RequestTransformer {
-    public static NoAuthTransformer INSTANCE = new NoAuthTransformer();
-
-    private NoAuthTransformer() {}
 
     @Override
     public Mono<TransformedRequest> transform(String method, String path, Map<String, List<String>> headers, Mono<ByteBuffer> body) {

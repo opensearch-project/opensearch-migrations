@@ -146,7 +146,8 @@ public class SourceTestBase {
         AtomicInteger runCounter,
         Random clockJitter,
         DocumentMigrationTestContext testContext,
-        ClusterVersion parserVersion
+        ClusterVersion parserVersion,
+        boolean compressionEnabled
     ) {
         for (int runNumber = 1;; ++runNumber) {
             try {
@@ -157,7 +158,8 @@ public class SourceTestBase {
                     targetAddress,
                     clockJitter,
                     testContext,
-                    parserVersion
+                    parserVersion,
+                    compressionEnabled
                 );
                 if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
                     return runNumber;
@@ -206,7 +208,8 @@ public class SourceTestBase {
         String targetAddress,
         Random clockJitter,
         DocumentMigrationTestContext context,
-        ClusterVersion parserVersion
+        ClusterVersion parserVersion,
+        boolean compressionEnabled
     ) throws RfsMigrateDocuments.NoWorkLeftException {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
         var shouldThrow = new AtomicBoolean();
@@ -245,6 +248,7 @@ public class SourceTestBase {
                 readerFactory,
                 new DocumentReindexer(new OpenSearchClient(ConnectionContextTestParams.builder()
                     .host(targetAddress)
+                    .compressionEnabled(compressionEnabled)
                     .build()
                     .toConnectionContext()), 1000, Long.MAX_VALUE, 1),
                 new OpenSearchWorkCoordinator(

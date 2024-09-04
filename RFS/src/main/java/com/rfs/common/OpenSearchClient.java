@@ -3,6 +3,7 @@ package com.rfs.common;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -293,7 +294,13 @@ public class OpenSearchClient {
                 .addArgument(() -> docsMap.keySet())
                 .log();
             var body = BulkDocSection.convertToBulkRequestBody(docsMap.values());
-            return client.postAsync(targetPath, body, context)
+            var additionalHeaders = new HashMap<String, List<String>>();
+            // Reduce network bandwidth by attempting request and response compression
+            if (client.supportsGzipCompression()) {
+                RestClient.addGzipRequestHeaders(additionalHeaders);
+                RestClient.addGzipResponseHeaders(additionalHeaders);
+            }
+            return client.postAsync(targetPath, body, additionalHeaders, context)
                 .flatMap(response -> {
                     var resp = new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
                     if (!resp.hasBadStatusCode() && !resp.hasFailedOperations()) {

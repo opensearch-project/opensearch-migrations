@@ -5,6 +5,7 @@ import java.net.URISyntaxException;
 import java.time.Clock;
 
 import com.beust.jcommander.Parameter;
+import com.beust.jcommander.ParametersDelegate;
 import lombok.Getter;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 
@@ -22,6 +23,7 @@ public class ConnectionContext {
     private final Protocol protocol;
     private final boolean insecure;
     private final RequestTransformer requestTransformer;
+    private final boolean compressionSupported;
 
     private ConnectionContext(IParams params) {
         assert params.getHost() != null : "host is null";
@@ -57,10 +59,10 @@ public class ConnectionContext {
         }
 
         if (basicAuthEnabled) {
-            this.requestTransformer = new BasicAuthTransformer(params.getUsername(), params.getPassword());
+            requestTransformer = new BasicAuthTransformer(params.getUsername(), params.getPassword());
         }
         else if (sigv4Enabled) {
-            this.requestTransformer = new SigV4AuthTransformer(
+            requestTransformer = new SigV4AuthTransformer(
                 DefaultCredentialsProvider.create(),
                 params.getAwsServiceSigningName(),
                 params.getAwsRegion(),
@@ -68,8 +70,9 @@ public class ConnectionContext {
                 Clock::systemUTC);
         }
         else {
-            this.requestTransformer = NoAuthTransformer.INSTANCE;
+            requestTransformer = new NoAuthTransformer();
         }
+        compressionSupported = params.isCompressionEnabled();
     }
 
     public interface IParams {
@@ -82,6 +85,8 @@ public class ConnectionContext {
         String getAwsRegion();
 
         String getAwsServiceSigningName();
+
+        boolean isCompressionEnabled();
 
         boolean isInsecure();
 
@@ -115,9 +120,25 @@ public class ConnectionContext {
         @Parameter(names = {
             "--target-insecure" }, description = "Allow untrusted SSL certificates for target", required = false)
         public boolean insecure = false;
+
+        @ParametersDelegate
+        TargetAdvancedArgs advancedArgs = new TargetAdvancedArgs();
+
+        @Override
+        public boolean isCompressionEnabled() {
+            return advancedArgs.isCompressionEnabled();
+        }
     }
 
+    // Flags that require more testing and validation before recommendations are made
     @Getter
+    public static class TargetAdvancedArgs {
+        @Parameter(names = {
+            "--target-compression" }, description = "**Advanced**. Allow request compression to target", required = false)
+        public boolean compressionEnabled = false;
+    }
+
+        @Getter
     public static class SourceArgs implements IParams {
         @Parameter(names = {
             "--source-host" }, description = "The source host and port (e.g. http://localhost:9200)", required = false)
@@ -142,5 +163,10 @@ public class ConnectionContext {
         @Parameter(names = {
             "--source-insecure" }, description = "Allow untrusted SSL certificates for source", required = false)
         public boolean insecure = false;
+
+        public boolean isCompressionEnabled() {
+            // No compression on source due to no ingestion
+            return false;
+        }
     }
 }
