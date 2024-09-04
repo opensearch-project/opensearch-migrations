@@ -30,7 +30,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationConsoleEnableOSI: boolean,
     readonly migrationAPIEnabled?: boolean,
     readonly migrationAPIAllowedHosts?: string,
-    readonly targetGroups: ELBTargetGroup[],
+    readonly targetGroups?: ELBTargetGroup[],
     readonly servicesYaml: ServicesYaml,
     readonly otelCollectorEnabled?: boolean,
     readonly sourceClusterDisabled?: boolean,

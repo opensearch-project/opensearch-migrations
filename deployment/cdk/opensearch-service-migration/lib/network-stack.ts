@@ -36,7 +36,6 @@ export class NetworkStack extends Stack {
     public readonly albSourceProxyTG: IApplicationTargetGroup;
     public readonly albTargetProxyTG: IApplicationTargetGroup;
     public readonly albSourceClusterTG: IApplicationTargetGroup;
-    public readonly migrationConsoleTG: IApplicationTargetGroup;
 
     // Validate a proper url string is provided and return an url string which contains a protocol, host name, and port.
     // If a port is not provided, the default protocol port (e.g. 443, 80) will be explicitly added
@@ -218,11 +217,6 @@ export class NetworkStack extends Stack {
                 createALBListenerUrlParameter(9200, MigrationSSMParameter.MIGRATION_LISTENER_URL);
                 createALBListenerUrlParameterAlias(9200, MigrationSSMParameter.MIGRATION_LISTENER_URL_ALIAS);
             }
-        }
-
-        // TG for Migration Console on ecs when migration API is enabled
-        if (props.migrationAPIEnabled) {
-            this.migrationConsoleTG = this.createSecureTargetGroup('MigrationConsole', props.stage, 8000, this.vpc);
         }
 
         // Create Source SSM Parameter
