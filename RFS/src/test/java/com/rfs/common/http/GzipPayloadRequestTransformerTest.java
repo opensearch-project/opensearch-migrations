@@ -39,7 +39,7 @@ class GzipPayloadRequestTransformerTest {
         // Generate test data
         ByteBuffer inputBuffer = generateTestData(size);
         Map<String, List<String>> headers = new HashMap<>();
-
+        headers.put("content-encoding", List.of("gzip"));
         // Store initial position and limit
         int initialPosition = inputBuffer.position();
         int initialLimit = inputBuffer.limit();
@@ -82,6 +82,7 @@ class GzipPayloadRequestTransformerTest {
         inputBuffer.flip();
 
         Map<String, List<String>> headers = new HashMap<>();
+        headers.put("content-encoding", List.of("gzip"));
 
         // Store initial position and limit
         int initialPosition = inputBuffer.position();
@@ -133,6 +134,7 @@ class GzipPayloadRequestTransformerTest {
         int largeSize = 50 * 1024 * 1024; // 50MB
         ByteBuffer largeBuffer = generateTestData(largeSize);
         Map<String, List<String>> headers = new HashMap<>();
+        headers.put("content-encoding", List.of("gzip"));
 
         // Store initial position and limit
         int initialPosition = largeBuffer.position();
@@ -167,6 +169,7 @@ class GzipPayloadRequestTransformerTest {
         largeBuffer.flip();
 
         Map<String, List<String>> headers = new HashMap<>();
+        headers.put("content-encoding", List.of("gzip"));
 
         // Store initial position and limit
         int initialPosition = largeBuffer.position();
@@ -208,8 +211,11 @@ class GzipPayloadRequestTransformerTest {
     }
 
     private byte[] decompress(ByteBuffer compressedBuffer) throws Exception {
+        ByteBuffer readArray = compressedBuffer.duplicate();
         ByteArrayOutputStream baos = new ByteArrayOutputStream();
-        try (GZIPInputStream gzipInputStream = new GZIPInputStream(new ByteArrayInputStream(compressedBuffer.array()))) {
+        byte[] compressedArray = new byte[readArray.remaining()];
+        readArray.get(compressedArray);
+        try (GZIPInputStream gzipInputStream = new GZIPInputStream(new ByteArrayInputStream(compressedArray))) {
             byte[] buffer = new byte[1024];
             int len;
             while ((len = gzipInputStream.read(buffer)) > 0) {

@@ -137,7 +137,7 @@ class OpenSearchClientTest {
         var server500 = new HttpResponse(500, "", null, "{\"error\":\"Cannot Process Error!\"}");
 
         var restClient = mock(RestClient.class);
-        when(restClient.postAsync(any(), any(), any())).thenReturn(Mono.just(bothDocsFail))
+        when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(bothDocsFail))
             .thenReturn(Mono.just(oneFailure))
             .thenReturn(Mono.just(server500))
             .thenReturn(Mono.just(finalDocSuccess));
@@ -159,7 +159,7 @@ class OpenSearchClientTest {
         // Assertions
         // StepVerifier.create(responseMono).expectComplete().verify();
 
-        verify(restClient, times(4)).postAsync(any(), any(), any());
+        verify(restClient, times(4)).postAsync(any(), any(), any(), any());
         verifyNoInteractions(failedRequestLogger);
     }
 
@@ -169,7 +169,7 @@ class OpenSearchClientTest {
         var docFails = bulkItemResponse(true, List.of(itemEntryFailure(docId1)));
 
         var restClient = mock(RestClient.class);
-        when(restClient.postAsync(any(), any(), any())).thenReturn(Mono.just(docFails));
+        when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
 
         var failedRequestLogger = mock(FailedRequestsLogger.class);
         var openSearchClient = spy(new OpenSearchClient(restClient, failedRequestLogger));
@@ -192,7 +192,7 @@ class OpenSearchClientTest {
         assertThat(exception.getMessage(), containsString("Retries exhausted"));
 
         var maxAttempts = maxRetries + 1;
-        verify(restClient, times(maxAttempts)).postAsync(any(), any(), any());
+        verify(restClient, times(maxAttempts)).postAsync(any(), any(), any(), any());
         verify(failedRequestLogger).logBulkFailure(any(), any(), any(), any());
         verifyNoMoreInteractions(failedRequestLogger);
     }
