@@ -1,0 +1,27 @@
+name: RFS E2E AWS Test
+
+on:
+  push:
+  pull_request:
+
+env:
+  python-version: '3.11'
+
+jobs:
+  rfs-e2e-aws-test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./jenkins/webhookTriggers
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.python-version }}
+      - name: Install dependencies for python webhook
+        run: |
+          python3 -m pip install --upgrade pipenv
+          pipenv install --deploy
+      - name: Trigger jenkins job and wait for completion
+        run: |
+          pipenv run python3 default_webhook_trigger.py --pipeline_token=${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }} --payload='{"pipeline_name": "test-select-pipeline"}' --job_name=test-select-pipeline
