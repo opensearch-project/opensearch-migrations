@@ -1,3 +1,5 @@
+minikube start
+eval $(minikube docker-env)
 
 helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
 helm repo add grafana https://grafana.github.io/helm-charts
@@ -9,7 +11,8 @@ helm repo update
 
 # just the operator, not any clusters
 helm install strimzi-cluster-operator --set replicas=1 --version 0.43.0 oci://quay.io/strimzi-helm/strimzi-kafka-operator
-helm install capture-traffic-kafka-cluster ./captured-traffic-kafka-cluster --set environment=test
+helm install capture-traffic-kafka-cluster ./capturedTrafficKafkaCluster --set environment=test
+helm install replayer ./replayer
 
 helm install prometheus prometheus-community/prometheus
 helm install grafana grafana/grafana

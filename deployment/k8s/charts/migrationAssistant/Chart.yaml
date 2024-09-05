@@ -1,0 +1,10 @@
+apiVersion: v2
+name: migration-assistant
+version: 0.1.0
+type: application
+appVersion: "1.16.0"
+dependencies:
+  - name: replayer
+    version: "0.1.0"
+    repository: "file://../replayer"
+

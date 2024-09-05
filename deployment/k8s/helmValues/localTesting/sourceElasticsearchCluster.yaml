@@ -1,0 +1,35 @@
+source:
+  imageTag: 7.10.2
+  image: docker.elastic.co/elasticsearch/elasticsearch-oss
+  replicas: 1
+  minimumMasterNodes: 1
+  roles: [master, data, ingest]
+  antiAffinity: "soft"
+  esJavaOpts: "-Xmx128m -Xms128m"
+  protocol: http
+#  esConfig:
+#    elasticsearch.yml: |
+#      discovery.type: single-node
+  createCert: false
+  fullnameOverride: "elasticsearch"
+  
+#  extraEnvs:
+#    - name: "xpack.security.enabled"
+#      value: "false"
+#    - name: "xpack.security.transport.ssl.enabled"
+#      value: "false"
+#    - name: "xpack.security.http.ssl.enabled"
+#      value: "false"
+#    - name: "xpack.security.transport.ssl.verification_mode"
+#      value: null
+#    - name: "xpack.security.transport.ssl.key"
+#      value: null
+#    - name: "xpack.security.transport.ssl.certificate"
+#      value: null
+#    - name: "xpack.security.transport.ssl.certificate_authorities"
+#      value: null
+#    - name: "xpack.security.http.ssl.key"
+#      value: null
+#    - name: "xpack.security.http.ssl.certificate"
+#      value: null
+#    - name: "xpack.security.http.ssl.certificate_authorities"
