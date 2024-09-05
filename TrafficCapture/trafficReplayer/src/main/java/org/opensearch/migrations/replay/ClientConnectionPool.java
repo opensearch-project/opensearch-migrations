@@ -102,18 +102,16 @@ public class ClientConnectionPool {
 
     public void closeConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
         var connId = ctx.getConnectionId();
-        log.atInfo().setMessage(() -> "closing connection for " + connId).log();
+        log.atTrace().setMessage(() -> "closing connection for " + connId).log();
         var connectionReplaySession = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber));
         if (connectionReplaySession != null) {
             closeClientConnectionChannel(connectionReplaySession);
             connectionId2ChannelCache.invalidate(connId);
         } else {
-            log.atInfo()
+            log.atTrace()
                 .setMessage(
-                    () -> "No ChannelFuture for "
-                        + ctx
-                        + " in closeConnection.  The connection may have already been closed"
-                )
+                    () -> "No ChannelFuture for " + ctx + " in closeConnection.  " +
+                        "The connection may have already been closed")
                 .log();
         }
     }
