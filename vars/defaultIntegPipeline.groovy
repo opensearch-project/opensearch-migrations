@@ -9,7 +9,7 @@ def call(Map config = [:]) {
         throw new RuntimeException("The migrationContext argument must be provided");
     }
     if(defaultStageId == null || defaultStageId.isEmpty()){
-        throw new RuntimeException("The migrationContext argument must be provided");
+        throw new RuntimeException("The defaultStageId argument must be provided");
     }
     def source_context_id = config.sourceContextId ?: 'source-single-node-ec2'
     def migration_context_id = config.migrationContextId ?: 'migration-default'
@@ -28,29 +28,57 @@ def call(Map config = [:]) {
         stages {
             stage('Checkout') {
                 steps {
-                    git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
+                    script {
+                        // Allow overwriting this step
+                        if (config.checkoutStep) {
+                            config.checkoutStep()
+                        } else {
+                            git branch: "${params.GIT_BRANCH}", url: "${params.GIT_REPO_URL}"
+                        }
+                    }
                 }
             }
 
             stage('Test Caller Identity') {
                 steps {
-                    sh 'aws sts get-caller-identity'
+                    script {
+                        // Allow overwriting this step
+                        if (config.awsIdentityCheckStep) {
+                            config.awsIdentityCheckStep()
+                        } else {
+                            sh 'aws sts get-caller-identity'
+                        }
+                    }
                 }
             }
 
             stage('Setup E2E CDK Context') {
                 steps {
-                    writeFile (file: "test/$source_context_file_name", text: sourceContext)
-                    sh "echo 'Using source context file options: ' && cat test/$source_context_file_name"
-                    writeFile (file: "test/$migration_context_file_name", text: migrationContext)
-                    sh "echo 'Using migration context file options: ' && cat test/$migration_context_file_name"
+                    script {
+                        // Allow overwriting this step
+                        if (config.cdkContextStep) {
+                            config.cdkContextStep()
+                        } else {
+                            writeFile (file: "test/$source_context_file_name", text: sourceContext)
+                            sh "echo 'Using source context file options: ' && cat test/$source_context_file_name"
+                            writeFile (file: "test/$migration_context_file_name", text: migrationContext)
+                            sh "echo 'Using migration context file options: ' && cat test/$migration_context_file_name"
+                        }
+                    }
                 }
             }
 
             stage('Build') {
                 steps {
                     timeout(time: 1, unit: 'HOURS') {
-                        sh 'sudo ./gradlew clean build --no-daemon'
+                        script {
+                            // Allow overwriting this step
+                            if (config.buildStep) {
+                                config.buildStep()
+                            } else {
+                                sh 'sudo --preserve-env ./gradlew clean build --no-daemon'
+                            }
+                        }
                     }
                 }
             }
@@ -66,7 +94,7 @@ def call(Map config = [:]) {
                                 } else {
                                     sh 'sudo usermod -aG docker $USER'
                                     sh 'sudo newgrp docker'
-                                    def baseCommand = "sudo ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' " +
+                                    def baseCommand = "sudo --preserve-env ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' " +
                                             "--migration-context-file './$migration_context_file_name' " +
                                             "--source-context-id $source_context_id " +
                                             "--migration-context-id $migration_context_id " +
@@ -76,7 +104,11 @@ def call(Map config = [:]) {
                                     if (skipCaptureProxyOnNodeSetup) {
                                         baseCommand += " --skip-capture-proxy"
                                     }
-                                    sh baseCommand
+                                    withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 5400, roleSessionName: 'jenkins-session') {
+                                            sh baseCommand
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -101,9 +133,13 @@ def call(Map config = [:]) {
                                             "--junitxml=${test_result_file} ${test_dir}/replayer_tests.py " +
                                             "--unique_id ${uniqueId} " +
                                             "-s"
-                                    sh "sudo ./awsRunIntegTests.sh --command '${command}' " +
-                                            "--test-result-file ${test_result_file} " +
-                                            "--stage ${params.STAGE}"
+                                    withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
+                                            sh "sudo --preserve-env ./awsRunIntegTests.sh --command '${command}' " +
+                                                    "--test-result-file ${test_result_file} " +
+                                                    "--stage ${params.STAGE}"
+                                        }
+                                    }
                                 }
                             }
                         }

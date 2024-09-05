@@ -30,6 +30,9 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import org.opensearch.migrations.Version;
+import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+
 import com.rfs.common.TestResources.Snapshot;
 import com.rfs.models.ShardMetadata;
 import lombok.extern.slf4j.Slf4j;
@@ -70,20 +73,20 @@ public class LuceneDocumentsReaderTest {
 
     static Stream<Arguments> provideSnapshots() {
         return Stream.of(
-            Arguments.of(TestResources.SNAPSHOT_ES_6_8, SourceResourceProviderFactory.getProvider(ClusterVersion.ES_6_8)),
-            Arguments.of(TestResources.SNAPSHOT_ES_7_10_W_SOFT, SourceResourceProviderFactory.getProvider(ClusterVersion.ES_7_10)),
-            Arguments.of(TestResources.SNAPSHOT_ES_7_10_WO_SOFT, SourceResourceProviderFactory.getProvider(ClusterVersion.ES_7_10))
+            Arguments.of(TestResources.SNAPSHOT_ES_6_8, Version.fromString("ES 6.8")),
+            Arguments.of(TestResources.SNAPSHOT_ES_7_10_W_SOFT, Version.fromString("ES 7.10")),
+            Arguments.of(TestResources.SNAPSHOT_ES_7_10_WO_SOFT, Version.fromString("ES 7.10"))
         );
     }
 
     @ParameterizedTest
     @MethodSource("provideSnapshots")
-    public void ReadDocuments_AsExpected(Snapshot snapshot, SourceResourceProvider sourceResourceProvider) throws Exception {
+    public void ReadDocuments_AsExpected(Snapshot snapshot, Version version) throws Exception {
         final var repo = new FileSystemRepo(snapshot.dir);
-        SnapshotRepo.Provider snapShotProvider = sourceResourceProvider.getSnapshotRepoProvider(repo);
+        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo);
         DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
 
-        final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadataFactory(snapShotProvider).fromRepo(snapshot.name, "test_updates_deletes", 0);
+        final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
 
         SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(
                     repoAccessor,

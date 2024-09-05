@@ -43,15 +43,23 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
     public CanApplyResult canApply(final Index index) {
         final var mappingNode = index.rawJson().get("mappings");
 
-        if (mappingNode == null || mappingNode.isObject()) {
+        if (mappingNode == null) {
             return CanApplyResult.NO;
         }
 
         // Detect unsupported multiple type mappings, eg:
         // { "mappings": [{ "foo": {...}}, { "bar": {...} }] }
         // { "mappings": [{ "foo": {...}, "bar": {...} }] }
-        if (mappingNode.size() > 1 || mappingNode.get(0).size() > 1) {
-            return new Unsupported("Multiple mapping types are not supported");
+        if (mappingNode.isArray()) {
+            if (mappingNode.size() > 1 || mappingNode.get(0).size() > 1) {
+                return new Unsupported("Multiple mapping types are not supported");
+            }
+        }
+
+        // Detect if there is no intermediate type node
+        // { "mappings": { "_doc": { "properties": { } } } }
+        if (mappingNode.isObject() && mappingNode.get("properties") != null) {
+            return CanApplyResult.NO;
         }
 
         // There is a type under mappings, e.g. { "mappings": [{ "foo": {...} }] }
@@ -65,14 +73,26 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
         }
 
         final var mappingsNode = index.rawJson().get("mappings");
-        final var mappingsInnerNode = (ObjectNode) mappingsNode.get(0);
+        // Handle array case
+        if (mappingsNode.isArray()) {
+            final var mappingsInnerNode = (ObjectNode) mappingsNode.get(0);
 
-        final var typeName = mappingsInnerNode.properties().stream().map(Entry::getKey).findFirst().orElseThrow();
-        final var typeNode = mappingsInnerNode.get(typeName);
+            final var typeName = mappingsInnerNode.properties().stream().map(Entry::getKey).findFirst().orElseThrow();
+            final var typeNode = mappingsInnerNode.get(typeName);
 
-        mappingsInnerNode.remove(typeName);
-        typeNode.fields().forEachRemaining(node -> mappingsInnerNode.set(node.getKey(), node.getValue()));
-        index.rawJson().set("mappings", mappingsInnerNode);
+            mappingsInnerNode.remove(typeName);
+            typeNode.fields().forEachRemaining(node -> mappingsInnerNode.set(node.getKey(), node.getValue()));
+            index.rawJson().set("mappings", mappingsInnerNode);
+        }
+
+        if (mappingsNode.isObject()) {
+            var mappingsObjectNode = (ObjectNode) mappingsNode;
+            var typeNode = mappingsNode.fields().next();
+            var propertiesNode = typeNode.getValue().fields().next();
+
+            mappingsObjectNode.remove(typeNode.getKey());
+            mappingsObjectNode.set(propertiesNode.getKey(), propertiesNode.getValue());
+        }
 
         return true;
     }

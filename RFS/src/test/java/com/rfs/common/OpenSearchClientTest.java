@@ -2,6 +2,7 @@ package com.rfs.common;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import com.fasterxml.jackson.core.StreamReadFeature;
@@ -19,6 +20,7 @@ import com.rfs.http.BulkRequestGenerator.BulkItemResponseEntry;
 import com.rfs.tracing.IRfsContexts;
 import com.rfs.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
 import lombok.SneakyThrows;
+import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
@@ -30,6 +32,7 @@ import static com.rfs.http.BulkRequestGenerator.itemEntry;
 import static com.rfs.http.BulkRequestGenerator.itemEntryFailure;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
@@ -137,7 +140,7 @@ class OpenSearchClientTest {
         var server500 = new HttpResponse(500, "", null, "{\"error\":\"Cannot Process Error!\"}");
 
         var restClient = mock(RestClient.class);
-        when(restClient.postAsync(any(), any(), any())).thenReturn(Mono.just(bothDocsFail))
+        when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(bothDocsFail))
             .thenReturn(Mono.just(oneFailure))
             .thenReturn(Mono.just(server500))
             .thenReturn(Mono.just(finalDocSuccess));
@@ -159,7 +162,7 @@ class OpenSearchClientTest {
         // Assertions
         // StepVerifier.create(responseMono).expectComplete().verify();
 
-        verify(restClient, times(4)).postAsync(any(), any(), any());
+        verify(restClient, times(4)).postAsync(any(), any(), any(), any());
         verifyNoInteractions(failedRequestLogger);
     }
 
@@ -169,7 +172,7 @@ class OpenSearchClientTest {
         var docFails = bulkItemResponse(true, List.of(itemEntryFailure(docId1)));
 
         var restClient = mock(RestClient.class);
-        when(restClient.postAsync(any(), any(), any())).thenReturn(Mono.just(docFails));
+        when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
 
         var failedRequestLogger = mock(FailedRequestsLogger.class);
         var openSearchClient = spy(new OpenSearchClient(restClient, failedRequestLogger));
@@ -192,7 +195,7 @@ class OpenSearchClientTest {
         assertThat(exception.getMessage(), containsString("Retries exhausted"));
 
         var maxAttempts = maxRetries + 1;
-        verify(restClient, times(maxAttempts)).postAsync(any(), any(), any());
+        verify(restClient, times(maxAttempts)).postAsync(any(), any(), any(), any());
         verify(failedRequestLogger).logBulkFailure(any(), any(), any(), any());
         verifyNoMoreInteractions(failedRequestLogger);
     }
@@ -215,5 +218,86 @@ class OpenSearchClientTest {
 
         var body = (ObjectNode) OBJECT_MAPPER.readTree(rawJson);
         return openSearchClient.createIndex("indexName", body, mock(ICheckedIdempotentPutRequestContext.class));
+    }
+
+    @Test
+    void testBulkRequest_addsGzipHeaders_whenSupported() {
+        var docId = "tt1979320";
+        var bulkSuccess = bulkItemResponse(false, List.of(itemEntry(docId)));
+
+        var restClient = mock(RestClient.class);
+        when(restClient.supportsGzipCompression()).thenReturn(true);
+        when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(bulkSuccess));
+
+        var failedRequestLogger = mock(FailedRequestsLogger.class);
+        var openSearchClient = new OpenSearchClient(restClient, failedRequestLogger);
+
+        var bulkDoc = createBulkDoc(docId);
+        var indexName = "testIndex";
+
+        // Action
+        openSearchClient.sendBulkRequest(
+            indexName,
+            List.of(bulkDoc),
+            mock(IRfsContexts.IRequestContext.class)
+        ).block();
+
+        // Assertions
+        ArgumentCaptor<Map<String, List<String>>> headersCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(restClient).postAsync(eq(indexName + "/_bulk"), any(), headersCaptor.capture(), any());
+
+        Map<String, List<String>> capturedHeaders = headersCaptor.getValue();
+        assertThat(capturedHeaders.get("accept-encoding"), equalTo(List.of("gzip")));
+        assertThat(capturedHeaders.get("content-encoding"), equalTo(List.of("gzip")));
+    }
+
+    @Test
+    void testBulkRequest_doesNotAddGzipHeaders_whenNotSupported() {
+        var docId = "tt1979320";
+        var bulkSuccess = bulkItemResponse(false, List.of(itemEntry(docId)));
+
+        var restClient = mock(RestClient.class);
+        when(restClient.supportsGzipCompression()).thenReturn(false);
+        when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(bulkSuccess));
+
+        var failedRequestLogger = mock(FailedRequestsLogger.class);
+        var openSearchClient = new OpenSearchClient(restClient, failedRequestLogger);
+
+        var bulkDoc = createBulkDoc(docId);
+        var indexName = "testIndex";
+
+        // Action
+        openSearchClient.sendBulkRequest(
+            indexName,
+            List.of(bulkDoc),
+            mock(IRfsContexts.IRequestContext.class)
+        ).block();
+
+        // Assertions
+        ArgumentCaptor<Map<String, List<String>>> headersCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(restClient).postAsync(eq(indexName + "/_bulk"), any(), headersCaptor.capture(), any());
+
+        Map<String, List<String>> capturedHeaders = headersCaptor.getValue();
+        assertThat(capturedHeaders.get("accept-encoding"), equalTo(null));
+        assertThat(capturedHeaders.get("content-encoding"), equalTo(null));
+    }
+
+    @Test
+    void testNonBulkRequest_doesNotAddGzipHeaders() {
+        var restClient = mock(RestClient.class);
+        when(restClient.supportsGzipCompression()).thenReturn(true);
+        when(restClient.getAsync(any(), any())).thenReturn(Mono.just(new HttpResponse(404, "", null, "does not exist")));
+        when(restClient.putAsync(any(), any(), any())).thenReturn(Mono.just(new HttpResponse(200, "", null, "{\"created\":\"yup!\"}")));
+
+        var failedRequestLogger = mock(FailedRequestsLogger.class);
+        var openSearchClient = new OpenSearchClient(restClient, failedRequestLogger);
+
+        // Action
+        openSearchClient.createIndex("testIndex", OBJECT_MAPPER.createObjectNode(), mock(IRfsContexts.ICheckedIdempotentPutRequestContext.class));
+
+        // Assertions
+        verify(restClient).getAsync(any(), any());
+        verify(restClient).putAsync(any(), any(), any());
+        verifyNoMoreInteractions(restClient);
     }
 }

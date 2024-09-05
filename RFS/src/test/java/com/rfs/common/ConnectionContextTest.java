@@ -1,6 +1,7 @@
 package com.rfs.common;
 import java.util.stream.Stream;
 
+import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -133,5 +134,28 @@ class ConnectionContextTest {
                 IllegalArgumentException.class
             )
         );
+    }
+
+    @Test
+    void testTargetArgsDefaultValues() {
+        ConnectionContext.TargetArgs targetArgs = new ConnectionContext.TargetArgs();
+        assertNull(targetArgs.getUsername());
+        assertNull(targetArgs.getPassword());
+        assertNull(targetArgs.getAwsRegion());
+        assertNull(targetArgs.getAwsServiceSigningName());
+        assertFalse(targetArgs.isInsecure());
+        assertFalse(targetArgs.isCompressionEnabled());
+    }
+
+    @Test
+    void testSourceArgsDefaultValues() {
+        ConnectionContext.SourceArgs sourceArgs = new ConnectionContext.SourceArgs();
+        assertNull(sourceArgs.getHost());
+        assertNull(sourceArgs.getUsername());
+        assertNull(sourceArgs.getPassword());
+        assertNull(sourceArgs.getAwsRegion());
+        assertNull(sourceArgs.getAwsServiceSigningName());
+        assertFalse(sourceArgs.isInsecure());
+        assertFalse(sourceArgs.isCompressionEnabled());
     }
 }

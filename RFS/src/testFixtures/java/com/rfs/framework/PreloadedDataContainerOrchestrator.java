@@ -53,13 +53,13 @@ public class PreloadedDataContainerOrchestrator {
         String[] dataLoaderArgs;
     }
 
-    private final SearchClusterContainer.Version baseSourceVersion;
+    private final SearchClusterContainer.ContainerVersion baseSourceVersion;
     private final String serverNameAlias;
     private final String dataLoaderImageName;
     private final String[] generatorContainerArgs;
 
     public PreloadedDataContainerOrchestrator(
-        SearchClusterContainer.Version baseSourceVersion,
+        SearchClusterContainer.ContainerVersion baseSourceVersion,
         String serverNameAlias,
         String dataLoaderImageName,
         String[] generatorContainerArgs
@@ -123,7 +123,7 @@ public class PreloadedDataContainerOrchestrator {
     }
 
     private String getImageName() {
-        return PRELOADED_IMAGE_BASE_NAME + baseSourceVersion.prettyName.replace(" ", "_").toLowerCase();
+        return PRELOADED_IMAGE_BASE_NAME + baseSourceVersion.getVersion().toString().replace(" ", "_").toLowerCase();
     }
 
     private static DockerClient createDockerClient() {

@@ -37,13 +37,11 @@ import lombok.extern.slf4j.Slf4j;
 @Tag("longTest")
 @Slf4j
 public class ParallelDocumentMigrationsTest extends SourceTestBase {
-    final static long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
-    final static List<SearchClusterContainer.Version> SOURCE_IMAGES = List.of(
-        SearchClusterContainer.ES_V7_10_2,
-        SearchClusterContainer.ES_V7_17
+
+    final static List<SearchClusterContainer.ContainerVersion> SOURCE_IMAGES = List.of(
+        SearchClusterContainer.ES_V7_10_2
     );
-    final static List<SearchClusterContainer.Version> TARGET_IMAGES = List.of(SearchClusterContainer.OS_V2_14_0);
-    public static final int MAX_SHARD_SIZE_BYTES = 64 * 1024 * 1024;
+    final static List<SearchClusterContainer.ContainerVersion> TARGET_IMAGES = List.of(SearchClusterContainer.OS_V2_14_0);
 
     public static Stream<Arguments> makeDocumentMigrationArgs() {
         List<Object[]> sourceImageArgs = SOURCE_IMAGES.stream()
@@ -52,19 +50,20 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         var targetImageNames = TARGET_IMAGES.stream()
             .collect(Collectors.toList());
         var numWorkersList = List.of(1, 3, 40);
+        var compressionEnabledList = List.of(true, false);
         return sourceImageArgs.stream()
             .flatMap(
                 sourceParams -> targetImageNames.stream()
                     .flatMap(
                         targetImage -> numWorkersList.stream()
-                            .map(
-                                numWorkers -> Arguments.of(
+                            .flatMap(numWorkers -> compressionEnabledList.stream().map(compression -> Arguments.of(
                                     numWorkers,
                                     targetImage,
                                     sourceParams[0],
                                     sourceParams[1],
-                                    sourceParams[2]
-                                )
+                                    sourceParams[2],
+                                    compression
+                                ))
                             )
                     )
             );
@@ -74,10 +73,11 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
     @MethodSource("makeDocumentMigrationArgs")
     public void testDocumentMigration(
         int numWorkers,
-        SearchClusterContainer.Version targetVersion,
-        SearchClusterContainer.Version baseSourceImageVersion,
+        SearchClusterContainer.ContainerVersion targetVersion,
+        SearchClusterContainer.ContainerVersion baseSourceImageVersion,
         String generatorImage,
-        String[] generatorArgs
+        String[] generatorArgs,
+        boolean compressionEnabled
     ) throws Exception {
         var executorService = Executors.newFixedThreadPool(numWorkers);
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
@@ -127,7 +127,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                     .build()
                     .toConnectionContext());
                 var sourceRepo = new FileSystemRepo(tempDir);
-                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, List.of(), List.of(), List.of(), INDEX_ALLOWLIST, testMetadataMigrationContext, baseSourceImageVersion.getSourceVersion());
+                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, List.of(), List.of(), List.of(), INDEX_ALLOWLIST, testMetadataMigrationContext, baseSourceImageVersion.getVersion());
 
                 var workerFutures = new ArrayList<CompletableFuture<Integer>>();
                 var runCounter = new AtomicInteger();
@@ -144,7 +144,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                                 runCounter,
                                 clockJitter,
                                 testDocMigrationContext,
-                                baseSourceImageVersion.getSourceVersion()
+                                baseSourceImageVersion.getVersion(),
+                                compressionEnabled
                             ),
                             executorService
                         )

@@ -8,7 +8,9 @@ import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 import com.rfs.models.ShardMetadata;
+import lombok.ToString;
 
+@ToString
 public class FileSystemRepo implements SourceRepo {
     private final Path repoRootDir;
 

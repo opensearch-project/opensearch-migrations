@@ -4,6 +4,7 @@ import org.junit.jupiter.api.Test;
 
 import org.opensearch.migrations.MetadataArgs;
 import org.opensearch.migrations.MetadataMigration;
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -26,6 +27,7 @@ class MigrateTest {
     @Test
     void migrate_failsUnexpectedException() {
         var args = new MetadataArgs();
+        args.sourceVersion = Version.fromString("ES 7.10");
         args.fileSystemRepoPath = "";
         var context = mock(RootMetadataMigrationContext.class);
         var meta = new MetadataMigration(args);
