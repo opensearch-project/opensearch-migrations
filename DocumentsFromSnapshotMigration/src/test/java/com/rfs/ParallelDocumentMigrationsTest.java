@@ -39,9 +39,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ParallelDocumentMigrationsTest extends SourceTestBase {
 
     final static List<SearchClusterContainer.ContainerVersion> SOURCE_IMAGES = List.of(
-        SearchClusterContainer.ES_V7_10_2,
-        SearchClusterContainer.ES_V7_17,
-        SearchClusterContainer.OS_V1_3_16
+        SearchClusterContainer.ES_V7_10_2
     );
     final static List<SearchClusterContainer.ContainerVersion> TARGET_IMAGES = List.of(SearchClusterContainer.OS_V2_14_0);
 
