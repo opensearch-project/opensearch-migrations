@@ -69,6 +69,17 @@ class EndToEndTest {
         }
     }
 
+    @ParameterizedTest(name = "Medium of transfer {0}")
+    @EnumSource(TransferMedium.class)
+    void metadataMigrateFrom_OS_v1_3(TransferMedium medium) throws Exception {
+        try (
+            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.OS_V1_3_16);
+            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
+        ) {
+            migrateFrom_ES(sourceCluster, targetCluster, medium);
+        }
+    }
+
     private enum TransferMedium {
         SnapshotImage,
         Http
@@ -89,7 +100,7 @@ class EndToEndTest {
 
         Version sourceVersion = sourceCluster.getContainerVersion().getVersion();
         var sourceIsES6_8 = VersionMatchers.isES_6_8.test(sourceVersion);
-        var sourceIsES7_X = VersionMatchers.isES_7_X.test(sourceVersion);
+        var sourceIsES7_X = VersionMatchers.isES_7_X.test(sourceVersion) || VersionMatchers.isOS_1_X.test(sourceVersion);
 
         if (!(sourceIsES6_8 || sourceIsES7_X)) {
             throw new RuntimeException("This test cannot handle the source cluster version" + sourceVersion);
