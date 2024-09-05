@@ -17,7 +17,7 @@ spec:
         - name: captureproxy
           image: migrations/capture_proxy:latest
           imagePullPolicy: IfNotPresent
-          command: ["/bin/sh", "-c", "/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --noCapture --destinationUri  https://elasticsearch:9200  --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml --otelCollectorEndpoint http://otel-collector:4317"]
+          command: ["/bin/sh", "-c", "/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy  --noCapture --destinationUri  {{ .Values.destinationUrl }}  --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml --otelCollectorEndpoint http://otel-collector:4317"]
           ports:
             - containerPort: 9200
 ---

@@ -12,7 +12,7 @@ source:
 #      discovery.type: single-node
   createCert: false
   fullnameOverride: "elasticsearch"
-  
+
 #  extraEnvs:
 #    - name: "xpack.security.enabled"
 #      value: "false"
