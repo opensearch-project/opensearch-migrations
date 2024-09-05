@@ -7,12 +7,14 @@ import java.time.Clock;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
 import lombok.Getter;
+import lombok.ToString;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 
 /**
  * Stores the connection context for an Elasticsearch/OpenSearch cluster
  */
 @Getter
+@ToString(exclude={"requestTransformer"})
 public class ConnectionContext {
     public enum Protocol {
         HTTP,

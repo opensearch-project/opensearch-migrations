@@ -16,11 +16,11 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.testcontainers.OpensearchContainer;
 
-import com.rfs.common.ClusterVersion;
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.FileSystemSnapshotCreator;
 import com.rfs.common.OpenSearchClient;
@@ -74,7 +74,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
         final var testMetadataMigrationContext = MetadataMigrationTestContext.factory().noOtelTracking();
 
         var sourceImageArgs = makeParamsForBase(SearchClusterContainer.ES_V7_10_2);
-        var baseSourceImageVersion = (SearchClusterContainer.Version) sourceImageArgs[0];
+        var baseSourceImageVersion = (SearchClusterContainer.ContainerVersion) sourceImageArgs[0];
         var generatorImage = (String) sourceImageArgs[1];
         var generatorArgs = (String[]) sourceImageArgs[2];
         var targetImageName = SearchClusterContainer.OS_V2_14_0.getImageName();
@@ -122,7 +122,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
             );
             esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
-            migrateMetadata(osTargetContainer, tempDirSnapshot, testMetadataMigrationContext, baseSourceImageVersion.getSourceVersion());
+            migrateMetadata(osTargetContainer, tempDirSnapshot, testMetadataMigrationContext, baseSourceImageVersion.getVersion());
 
             int actualExitCode = runProcessAgainstToxicTarget(tempDirSnapshot, tempDirLucene, proxyContainer, failHow);
             log.atInfo().setMessage("Process exited with code: " + actualExitCode).log();
@@ -143,7 +143,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
         OpensearchContainer targetContainer,
         Path tempDirSnapshot,
         MetadataMigrationTestContext testMetadataMigrationContext,
-        ClusterVersion sourceVersion
+        Version sourceVersion
     ) {
         String targetAddress = "http://"
             + targetContainer.getHost()

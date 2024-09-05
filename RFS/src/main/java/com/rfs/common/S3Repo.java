@@ -10,6 +10,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
 import com.rfs.models.ShardMetadata;
+import lombok.ToString;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.regions.Region;
@@ -23,6 +24,7 @@ import software.amazon.awssdk.transfer.s3.model.CompletedDirectoryDownload;
 import software.amazon.awssdk.transfer.s3.model.DirectoryDownload;
 import software.amazon.awssdk.transfer.s3.model.DownloadDirectoryRequest;
 
+@ToString(onlyExplicitlyIncluded = true)
 public class S3Repo implements SourceRepo {
     private static final Logger logger = LogManager.getLogger(S3Repo.class);
     private static final double S3_TARGET_THROUGHPUT_GIBPS = 8.0; // Arbitrarily chosen
@@ -30,6 +32,7 @@ public class S3Repo implements SourceRepo {
     private static final long S3_MINIMUM_PART_SIZE_BYTES = 8L * 1024 * 1024; // Default, but be explicit
 
     private final Path s3LocalDir;
+    @ToString.Include
     private final S3Uri s3RepoUri;
     private final String s3Region;
     private final S3AsyncClient s3Client;

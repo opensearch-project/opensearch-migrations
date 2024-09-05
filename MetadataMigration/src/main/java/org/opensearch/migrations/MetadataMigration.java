@@ -31,7 +31,12 @@ public class MetadataMigration {
         );
 
         var meta = new MetadataMigration(arguments);
+
+        log.info("Starting Metadata Migration");
+
         var result = meta.migrate().execute(context);
+
+        log.info(result.toString());
         System.exit(result.getExitCode());
     }
 
