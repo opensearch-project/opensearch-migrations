@@ -145,6 +145,17 @@ public class EndToEndTest extends SourceTestBase {
         }
     }
 
+    @ParameterizedTest(name = "Target {0}")
+    @ArgumentsSource(SupportedTargetCluster.class)
+    public void migrateFrom_OS_v1_3(final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
+        try (
+            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.OS_V1_3_16);
+            final var targetCluster = new SearchClusterContainer(targetVersion)
+        ) {
+            migrateFrom_ES_v7_X(sourceCluster, targetCluster);
+        }
+    }
+
     @SneakyThrows
     private void migrateFrom_ES_v7_X(
         final SearchClusterContainer sourceCluster,
