@@ -59,7 +59,7 @@ public class S3Repo implements SourceRepo {
             .max(Comparator.comparingInt(s3Object -> extractVersion(s3Object.key())));
 
         String rawUri = highestVersionedIndexFile.map(s3Object -> "s3://" + s3RepoUri.bucketName + "/" + s3Object.key())
-            .orElse("");
+            .orElseThrow(() -> new CannotFindSnapshotRepoRoot(s3RepoUri.bucketName, s3RepoUri.key));
         return new S3Uri(rawUri);
     }
 
@@ -213,6 +213,12 @@ public class S3Repo implements SourceRepo {
 
         // Print out any failed downloads
         completedDirectoryDownload.failedTransfers().forEach(logger::error);
+    }
+
+    public static class CannotFindSnapshotRepoRoot extends RfsException {
+        public CannotFindSnapshotRepoRoot(String bucket, String prefix) {
+            super("Cannot find the snapshot repository root in S3 bucket: " + bucket + ", prefix: " + prefix);
+        }
     }
 
     public static class CantCreateS3LocalDir extends RfsException {
