@@ -3,10 +3,8 @@ package org.opensearch.migrations.dashboards.util;
 import java.util.HashMap;
 import java.util.Map;
 
-import com.google.gson.Gson;
-import com.google.gson.GsonBuilder;
-
-import org.opensearch.migrations.dashboards.model.Dashboard;
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 
 import lombok.Data;
 import lombok.Getter;
@@ -35,34 +33,35 @@ public class Stats {
     /**
      * This method registers a skipped dashboard object by incrementing the count and updating the details map.
      * It skips the registration if the dashboard object type is null or empty.
-     * @param dashboardObject
+     * @param type The type of the exported object.
      */
-    public void registerSkipped(Dashboard dashboardObject) {
-        if (dashboardObject.getType()== null || dashboardObject.getType().isEmpty()) {
-//         it could be a summary line
-            return;
-        }
+    public void registerSkipped(String type) {
         skipped.count++;
         total++;
-        int objectTypeCount = skipped.details.getOrDefault(dashboardObject.getType(), 0);
+        int objectTypeCount = skipped.details.getOrDefault(type, 0);
         if (objectTypeCount == 0) {
-            skipped.details.put(dashboardObject.getType(), 1);
+            skipped.details.put(type, 1);
         } else {
-            skipped.details.put(dashboardObject.getType(), objectTypeCount + 1);
+            skipped.details.put(type, objectTypeCount + 1);
         }
     }
-    public void registerProcessed(Dashboard dashboardObject) {
+    public void registerProcessed() {
         processed++;
         total++;
     }
 
     /**
      * This method prints the statistics in a JSON format using the Gson library.
+     * @throws IllegalArgumentException 
+     * @throws JsonProcessingException 
      */
-    public void printStats() {
-        Gson gson = new GsonBuilder().setPrettyPrinting().create();
-        String json = gson.toJson(this);
-        System.out.println(json);
+    public String printStats() throws JsonProcessingException, IllegalArgumentException {
+        ObjectMapper mapper = new ObjectMapper();
+        return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(
+            mapper.createObjectNode()
+                .put("total", total)
+                .put("processed", processed)
+                .set("skipped", mapper.valueToTree(skipped)));
     }
 
 }

@@ -1,87 +1,121 @@
 package org.opensearch.migrations.dashboards;
 
-import java.io.*;
-import java.util.Scanner;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.Map;
+import java.util.Queue;
+import java.util.Set;
 
-import com.google.gson.Gson;
-
-import org.opensearch.migrations.dashboards.model.Dashboard;
+import org.opensearch.migrations.dashboards.converter.DashboardConverter;
+import org.opensearch.migrations.dashboards.converter.IndexPatternConverter;
+import org.opensearch.migrations.dashboards.converter.QueryConverter;
+import org.opensearch.migrations.dashboards.converter.SavedObjectConverter;
+import org.opensearch.migrations.dashboards.converter.SearchConverter;
+import org.opensearch.migrations.dashboards.converter.UrlConverter;
+import org.opensearch.migrations.dashboards.converter.VisualizationConverter;
+import org.opensearch.migrations.dashboards.savedobjects.SavedObject;
+import org.opensearch.migrations.dashboards.savedobjects.SavedObjectParser;
 import org.opensearch.migrations.dashboards.util.Stats;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-import picocli.CommandLine;
-import picocli.CommandLine.Command;
 
-@Command(name = "Dashboard Sanitizer", version = "0.1", mixinStandardHelpOptions = true)
 @Slf4j
-public class Sanitizer implements Runnable{
+public class Sanitizer {
 
-    @CommandLine.Option(names = {"-V", "--version"}, versionHelp = true, description = "display version info")
-    boolean versionInfoRequested;
+    private static final Sanitizer INSTANCE = new Sanitizer();
 
-    @CommandLine.Option(names = {"?", "-h", "--help"}, usageHelp = true, description = "display this help message")
-    boolean usageHelpRequested;
+    private final SavedObjectParser savedObjectParser = new SavedObjectParser();
 
-    @CommandLine.Option(names = {"-s", "--source"}, required = true, description = "The Elastic dashboard object file in ndjson.")
-    private String sourceFile;
+    private Queue<SavedObject> processingQueue = new java.util.LinkedList<>();
 
-    @CommandLine.Option(names = {"-o", "--output"}, required = true, description = "The sanitized OpenSearch dashboard object file in ndjson.", defaultValue = "os-dashboards.ndjson")
-    private String outputFile;
+    @Getter
+    private Stats stats = new Stats();
 
-    @Override
-    public void run() {
-        //check for sourceFile, if empty, print usage and return
-        if (sourceFile.isEmpty()) {
-            CommandLine.usage(this, System.out);
-        }
+    @SuppressWarnings("rawtypes")
+    private Map<String, SavedObjectConverter> typeConverters = new HashMap<>() {{
+        put("index-pattern", new IndexPatternConverter());
+        put("search", new SearchConverter());
+        put("dashboard", new DashboardConverter());
+        put("visualization", new VisualizationConverter());
+        put("url", new UrlConverter());
+        put("query", new QueryConverter());
+    }};
+
+    private Set<String> notSupportedTypes = new HashSet<>() {{
+        add("map");
+        add("canvas-workpad");
+        add("canvas-element");
+        add("graph-workspace");
+        add("connector");
+        add("rule");
+        add("action");
+        add("config");
+        add("lens");
+    }};
+
+    public static Sanitizer getInstance() {
+        return INSTANCE;
+    }
+
+    @SuppressWarnings({"unchecked", "rawtypes"})
+    public String sanitize(String jsonString) {
+        String result = null;
         try {
-            Scanner scanner = new Scanner(new BufferedInputStream(new FileInputStream(sourceFile)));
-            BufferedWriter writer = new BufferedWriter(new FileWriter(outputFile));
-            Stats stats = sanitizeDashboardsFromFile(scanner, writer);
-            System.out.printf("%s file is sanitized and output available at %s%n", sourceFile, outputFile);
-            stats.printStats();
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
+            final SavedObject savedObject = savedObjectParser.load(jsonString);
 
-    public static void main(String[] args) {
-        CommandLine cmd = new CommandLine(new Sanitizer());
-        cmd.parseArgs(args);
-        if (cmd.isUsageHelpRequested() ) {
-            cmd.usage(System.out);
-            return;
-        } else if (cmd.isVersionHelpRequested()) {
-            cmd.printVersionHelp(System.out);
-            return;
-        }
-        int exitCode = cmd.execute(args);
-        System.exit(exitCode);
-    }
-
-    public static Stats sanitizeDashboardsFromFile(Scanner source, BufferedWriter writer) throws IOException {
-
-        Gson gson = new Gson();
-        Stats counter = new Stats();
-
-        while (source.hasNextLine()) {
-            String line = source.nextLine();
-            Dashboard dashboardObject = gson.fromJson(line, Dashboard.class);
-            // if dashboard id is null, it could be summary line, skip the line
-            if (dashboardObject.getId() == null) {
-                counter.registerSkipped(dashboardObject);
-                continue;
-            } else if (!dashboardObject.isCompatibleType()) {
-                counter.registerSkipped(dashboardObject);
-                continue;
+            if (savedObject == null) {
+                return null;
             }
 
-            dashboardObject.makeCompatibleToOS();
-            writer.write(gson.toJson(dashboardObject));
-            writer.newLine();
-            writer.flush();
-            counter.registerProcessed(dashboardObject);
+            if (typeConverters.containsKey(savedObject.getObjectType())) {
+                this.addNewObjectToQueue(savedObject);
+                result = this.processQueue();
+                
+                stats.registerProcessed();
+                
+            } else if (notSupportedTypes.contains(savedObject.getObjectType())) {
+                log.warn("The object type {} is not supported.", savedObject.getObjectType());
+                stats.registerSkipped(savedObject.getObjectType());
+            } else {
+                log.warn("No converter found for the object type {}.", savedObject.getObjectType());
+                stats.registerSkipped(savedObject.getObjectType());
+            }
+        } catch (JsonProcessingException e) {
+            log.error("Failed to parse the provided string as a json.", e);
+        } catch (IllegalArgumentException e) {
+            log.error("Failed to load the saved object.", e);
         }
-        return counter;
+        return result;
+    }
+
+
+    @SuppressWarnings("unchecked")
+    public String processQueue() {
+        final StringBuffer buffer = new StringBuffer();
+        while (!processingQueue.isEmpty()) {
+            final SavedObject savedObject = processingQueue.poll();
+
+            buffer.append(typeConverters.get(savedObject.getObjectType()).convert(savedObject).jsonAsString());
+            buffer.append(System.lineSeparator());      
+        }
+
+        buffer.deleteCharAt(buffer.length() - System.lineSeparator().length());
+        return buffer.toString();
+    }
+
+    public void addNewObjectToQueue(SavedObject savedObject) {
+        processingQueue.add(savedObject);
+    }
+
+    // supporting Unit testing
+    public void clearQueue() {
+        processingQueue.clear();
+    }
+    // supporting Unit testing
+    public int getQueueSize() {
+        return processingQueue.size();
     }
 }
