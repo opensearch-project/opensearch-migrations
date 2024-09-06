@@ -11,6 +11,12 @@ logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logg
 JENKINS_URL = "https://migrations.ci.opensearch.org"
 
 
+class JobResult:
+    def __init__(self, status: str, workflow_url: str):
+        self.status = status
+        self.workflow_url = workflow_url
+
+
 def perform_request(jenkins_webhook_url: str, payload: dict, headers: dict, retries=3, backoff_factor=1):
     retry_strategy = Retry(
         total=retries,  # Maximum number of retries
@@ -29,11 +35,11 @@ def perform_request(jenkins_webhook_url: str, payload: dict, headers: dict, retr
 
 
 # TODO add basic retry for requests
-# TODO print workflow url at end to check for logs
-def wait_for_job_completion(trigger_job_response_body: dict, job_name: str, job_timeout_minutes: int) -> str:
+def wait_for_job_completion(trigger_job_response_body: dict, job_name: str, job_timeout_minutes: int) -> JobResult:
     total_wait_time = 0
     timeout_seconds = job_timeout_minutes * 60
     result_status = None
+    workflow_url = None
 
     # Parse Jenkins request and get the queue URL
     queue_url = trigger_job_response_body.get("jobs", {}).get(job_name, {}).get("url", None)
@@ -47,8 +53,12 @@ def wait_for_job_completion(trigger_job_response_body: dict, job_name: str, job_
     while result_status is None and total_wait_time <= timeout_seconds:
         logging.info("Using queue information to find build number in Jenkins if available")
 
-        response = requests.get(f"{JENKINS_URL}/{queue_url}api/json")
-        workflow_url = response.json().get("executable", {}).get("url", None)
+        full_queue_url = f"{JENKINS_URL}/{queue_url}api/json"
+        queue_response = requests.get(full_queue_url)
+        if not queue_response.ok:
+            raise RuntimeError(f"Unable to retrieve queue entry for request: {full_queue_url}. Does queue entry exist "
+                               f"and worker have read permission for Jenkins jobs? ")
+        workflow_url = queue_response.json().get("executable", {}).get("url", None)
         logging.info(f"Jenkins workflow_url: {workflow_url}")
 
         if workflow_url:
@@ -78,10 +88,10 @@ def wait_for_job_completion(trigger_job_response_body: dict, job_name: str, job_
             total_wait_time += 60
             logging.info(f"Total time waiting: {total_wait_time}")
             time.sleep(60)
-    return result_status
+    return JobResult(status=result_status, workflow_url=workflow_url)
 
 
-def handle_job_monitoring(response, target_job_name, job_timeout_minutes) -> str:
+def handle_job_monitoring(response, target_job_name, job_timeout_minutes) -> JobResult:
     logging.info(f"Webhook triggered successfully: {response.status_code}")
     body = response.json()
     logging.info(f"Received response body: {body}")
@@ -111,18 +121,18 @@ def trigger_and_wait_for_job(pipeline_token, payload, target_job_name, job_timeo
 
     response = None
     action_result_name = "Action Result"
-    action_result_status = "SUCCESS"
     try:
         response = perform_request(jenkins_webhook_url, payload, headers)
 
         if response.ok:
-            action_result_status = handle_job_monitoring(response=response, target_job_name=target_job_name,
-                                                         job_timeout_minutes=job_timeout_minutes)
+            job_result = handle_job_monitoring(response=response, target_job_name=target_job_name,
+                                               job_timeout_minutes=job_timeout_minutes)
+            logging.info(f"{action_result_name}: {job_result.status}. Please check jenkins url for "
+                         f"logs: {job_result.workflow_url}")
+            if job_result.status != "SUCCESS":
+                exit(1)
         else:
             response.raise_for_status()
-        logging.info(f"{action_result_name}: {action_result_status}")
-        if action_result_status != "SUCCESS":
-            exit(1)
 
     except requests.exceptions.RequestException as e:
         response_body = "{}" if response is None else response.json()

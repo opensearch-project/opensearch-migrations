@@ -1,4 +1,4 @@
-name: RFS E2E AWS Test
+name: Jenkins E2E
 
 on:
   push:
@@ -24,4 +24,6 @@ jobs:
           pipenv install --deploy
       - name: Trigger jenkins job and wait for completion
         run: |
-          pipenv run python3 default_webhook_trigger.py --pipeline_token=${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }} --payload='{"pipeline_name": "test-select-pipeline"}' --job_name=test-select-pipeline
+          echo "branch_name=$(jq --raw-output .pull_request.base.ref $GITHUB_EVENT_PATH)"
+          echo "pr_from_clone_url=$(jq --raw-output .pull_request.head.repo.clone_url $GITHUB_EVENT_PATH)"
+          pipenv run python3 default_webhook_trigger.py --pipeline_token=${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }} --payload='{"pipeline_name": "rfs-default-e2e-test"}' --job_name=rfs-default-e2e-test
