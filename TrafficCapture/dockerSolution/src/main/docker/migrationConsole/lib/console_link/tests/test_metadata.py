@@ -345,3 +345,42 @@ def test_metadata_with_target_sigv4_makes_correct_subprocess_call(mocker):
         "--target-insecure",
     ], stdout=None, stderr=None, text=True, check=True
     )
+
+def test_metadata_init_with_minimal_config_and_extra_args(mocker):
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "s3": {
+                "repo_uri": "s3://my-bucket",
+                "aws_region": "us-east-1"
+            },
+        }
+    }
+    metadata = Metadata(config, create_valid_cluster(), None)
+
+    mock = mocker.patch("subprocess.run")
+    metadata.migrate(extra_args=[
+        "--foo", "bar", # Pair of command and value
+        "--flag", # Flag with no value afterward 
+        "--bar", "baz", # Another pair of command and value
+        "bazzy" # Lone value, will be ignored
+    ])
+
+    print(mock.call_args_list)
+
+
+    mock.assert_called_once_with([
+        '/root/metadataMigration/bin/MetadataMigration',
+        "--snapshot-name", config["from_snapshot"]["snapshot_name"],
+        '--target-host', 'https://opensearchtarget:9200',
+        '--min-replicas', '0',
+        "--s3-local-dir", mocker.ANY,
+        "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
+        "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
+        '--target-username', 'admin',
+        '--target-password', 'myStrongPassword123!',
+        '--target-insecure',
+        '--foo', 'bar',
+        '--flag',
+        '--bar', 'baz'
+    ], stdout=None, stderr=None, text=True, check=True)

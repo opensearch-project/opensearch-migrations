@@ -9,6 +9,7 @@ from console_link.models.command_runner import CommandRunner, CommandRunnerError
 from console_link.models.schema_tools import list_schema
 from console_link.models.cluster import AuthMethod, Cluster
 from console_link.models.snapshot import S3Snapshot, Snapshot, FileSystemSnapshot
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -133,6 +134,35 @@ class Metadata:
         self._snapshot_location = "fs"
         self._repo_path = snapshot.repo_path
 
+    def _appendArgs(self, commands: Dict[str, Any], args_to_add: List[str]) -> None:
+        if args_to_add == None:
+            return
+
+        def isCommand(arg: str) -> bool:
+            if arg == None:
+                return False
+            return arg.startswith('--') or arg.startswith('-')
+
+        def isValue(arg: str) -> bool:
+            if arg == None:
+                return False
+            return not isCommand(arg)
+
+        i = 0
+        while i < len(args_to_add):
+            arg = args_to_add[i]
+            nextArg = args_to_add[i + 1] if (i + 1 < len(args_to_add)) else None
+
+            if isCommand(arg) and isValue(nextArg):
+                commands[arg] = nextArg
+                i += 2  # Move past the command and value
+            elif isCommand(arg):
+                commands[arg] = None
+                i += 1  # Move past the command, its a flag
+            else:
+                logger.warning(f"Ignoring extra value {arg}, there was no command name before it")
+                i += 1
+
     def migrate(self, detached_log=None, extra_args=None) -> CommandResult:
         logger.info("Starting metadata migration")
         command_base = "/root/metadataMigration/bin/MetadataMigration"
@@ -185,16 +215,7 @@ class Metadata:
             command_args.update({"--otel-collector-endpoint": self._otel_endpoint})
 
         # Extra args might not be represented with dictionary, so convert args to list and append commands
-        cmd_args = []
-        for key, value in command_args.items():
-            cmd_args.append(key)
-            if value is not None:
-                cmd_args.append(value)
-
-        if extra_args:
-            it = iter(extra_args)
-            for arg in it:
-                cmd_args.append(arg)
+        self._appendArgs(command_args, extra_args)
 
         command_runner = CommandRunner(command_base, command_args,
                                        sensitive_fields=["--target-password"],
