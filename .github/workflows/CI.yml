@@ -112,14 +112,15 @@ jobs:
         with:
           name: test-reports
           path: |
-            **/build/reports/tests/
+            **/reports/jacoco/mergedReport/
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
         with:
-          files: "**/reports/jacoco/mergedReport/jacocoMergedReport.xml"
+          file: "./build/reports/jacoco/mergedReport/jacocoMergedReport.xml"
           flags: gradle-test
-          fail_ci_if_error: false
+          fail_ci_if_error: true
+          disable_search: true
 
   python-e2e-tests:
     runs-on: ubuntu-latest
