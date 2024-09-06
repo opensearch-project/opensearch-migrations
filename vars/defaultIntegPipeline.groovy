@@ -83,30 +83,47 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Deploy') {
+            stage('Integ Test') {
                 steps {
                     timeout(time: 90, unit: 'MINUTES') {
                         dir('test') {
                             script {
                                 // Allow overwriting this step
-                                if (config.deployStep) {
-                                    config.deployStep()
+                                if (config.integTestStep) {
+                                    config.integTestStep()
                                 } else {
                                     sh 'sudo usermod -aG docker $USER'
                                     sh 'sudo newgrp docker'
-                                    def baseCommand = "sudo --preserve-env ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' " +
-                                            "--migration-context-file './$migration_context_file_name' " +
-                                            "--source-context-id $source_context_id " +
-                                            "--migration-context-id $migration_context_id " +
-                                            "--stage ${params.STAGE} " +
-                                            "--migrations-git-url ${params.GIT_REPO_URL} " +
-                                            "--migrations-git-branch ${params.GIT_BRANCH}"
-                                    if (skipCaptureProxyOnNodeSetup) {
-                                        baseCommand += " --skip-capture-proxy"
-                                    }
-                                    withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 5400, roleSessionName: 'jenkins-session') {
-                                            sh baseCommand
+                                    lock(label: params.STAGE, quantity: 1, variable: 'stage') {
+                                        echo "Acquired deployment stage: ${stage}"
+                                        def baseCommand = "sudo --preserve-env ./awsE2ESolutionSetup.sh --source-context-file './$source_context_file_name' " +
+                                                "--migration-context-file './$migration_context_file_name' " +
+                                                "--source-context-id $source_context_id " +
+                                                "--migration-context-id $migration_context_id " +
+                                                "--stage ${stage} " +
+                                                "--migrations-git-url ${params.GIT_REPO_URL} " +
+                                                "--migrations-git-branch ${params.GIT_BRANCH}"
+                                        if (skipCaptureProxyOnNodeSetup) {
+                                            baseCommand += " --skip-capture-proxy"
+                                        }
+
+                                        def time = new Date().getTime()
+                                        def uniqueId = "integ_min_${time}_${currentBuild.number}"
+                                        def test_dir = "/root/lib/integ_test/integ_test"
+                                        def test_result_file = "${test_dir}/reports/${uniqueId}/report.xml"
+                                        def command = "pipenv run pytest --log-file=${test_dir}/reports/${uniqueId}/pytest.log " +
+                                                "--junitxml=${test_result_file} ${test_dir}/backfill_tests.py " +
+                                                "--unique_id ${uniqueId} " +
+                                                "-s"
+
+
+                                        withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                            withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 5400, roleSessionName: 'jenkins-session') {
+                                                sh baseCommand
+                                                sh "sudo --preserve-env ./awsRunIntegTests.sh --command '${command}' " +
+                                                        "--test-result-file ${test_result_file} " +
+                                                        "--stage ${stage}"
+                                            }
                                         }
                                     }
                                 }
@@ -116,37 +133,37 @@ def call(Map config = [:]) {
                 }
             }
 
-            stage('Integ Tests') {
-                steps {
-                    timeout(time: 1, unit: 'HOURS') {
-                        dir('test') {
-                            script {
-                                // Allow overwriting this step
-                                if (config.integTestStep) {
-                                    config.integTestStep()
-                                } else {
-                                    def time = new Date().getTime()
-                                    def uniqueId = "integ_min_${time}_${currentBuild.number}"
-                                    def test_dir = "/root/lib/integ_test/integ_test"
-                                    def test_result_file = "${test_dir}/reports/${uniqueId}/report.xml"
-                                    def command = "pipenv run pytest --log-file=${test_dir}/reports/${uniqueId}/pytest.log " +
-                                            "--junitxml=${test_result_file} ${test_dir}/replayer_tests.py " +
-                                            "--unique_id ${uniqueId} " +
-                                            "-s"
-                                    withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
-                                            sh "sudo --preserve-env ./awsRunIntegTests.sh --command '${command}' " +
-                                                    "--test-result-file ${test_result_file} " +
-                                                    "--stage ${params.STAGE}"
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
+//            stage('Integ Tests') {
+//                steps {
+//                    timeout(time: 1, unit: 'HOURS') {
+//                        dir('test') {
+//                            script {
+//                                // Allow overwriting this step
+//                                if (config.integTestStep) {
+//                                    config.integTestStep()
+//                                } else {
+//                                    def time = new Date().getTime()
+//                                    def uniqueId = "integ_min_${time}_${currentBuild.number}"
+//                                    def test_dir = "/root/lib/integ_test/integ_test"
+//                                    def test_result_file = "${test_dir}/reports/${uniqueId}/report.xml"
+//                                    def command = "pipenv run pytest --log-file=${test_dir}/reports/${uniqueId}/pytest.log " +
+//                                            "--junitxml=${test_result_file} ${test_dir}/replayer_tests.py " +
+//                                            "--unique_id ${uniqueId} " +
+//                                            "-s"
+//                                    withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+//                                        withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
+//                                            sh "sudo --preserve-env ./awsRunIntegTests.sh --command '${command}' " +
+//                                                    "--test-result-file ${test_result_file} " +
+//                                                    "--stage ${params.STAGE}"
+//                                        }
+//                                    }
+//                                }
+//                            }
+//                        }
+//                    }
+//                }
+//            }
+//        }
         post {
             always {
                 timeout(time: 10, unit: 'MINUTES') {
