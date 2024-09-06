@@ -45,8 +45,8 @@ def call(Map config = [:]) {
                     ],
                     tokenCredentialId: 'jenkins-migrations-generic-webhook-token',
                     causeString: 'Triggered by PR on opensearch-migrations repository',
-                    regexpFilterExpression("^$jobName\$"),
-                    regexpFilterText("\$job_name"),
+                    regexpFilterExpression: "^$jobName\$",
+                    regexpFilterText: "\$job_name",
             )
         }
 
