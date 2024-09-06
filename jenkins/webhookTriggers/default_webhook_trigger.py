@@ -1,14 +1,13 @@
 import argparse
-import json
 import logging
 import requests
 import time
+
+from requests import Response
 from requests.adapters import HTTPAdapter
 from urllib3.util import Retry
 
 logging.basicConfig(format='%(asctime)s [%(levelname)s] %(message)s', level=logging.INFO)
-
-JENKINS_URL = "https://migrations.ci.opensearch.org"
 
 
 class JobResult:
@@ -34,8 +33,8 @@ def perform_request(jenkins_webhook_url: str, payload: dict, headers: dict, retr
     return response
 
 
-# TODO add basic retry for requests
-def wait_for_job_completion(trigger_job_response_body: dict, job_name: str, job_timeout_minutes: int) -> JobResult:
+def wait_for_job_completion(jenkins_url: str, trigger_job_response_body: dict, job_name: str,
+                            job_timeout_minutes: int) -> JobResult:
     total_wait_time = 0
     timeout_seconds = job_timeout_minutes * 60
     result_status = None
@@ -53,7 +52,7 @@ def wait_for_job_completion(trigger_job_response_body: dict, job_name: str, job_
     while result_status is None and total_wait_time <= timeout_seconds:
         logging.info("Using queue information to find build number in Jenkins if available")
 
-        full_queue_url = f"{JENKINS_URL}/{queue_url}api/json"
+        full_queue_url = f"{jenkins_url}/{queue_url}api/json"
         queue_response = requests.get(full_queue_url)
         if not queue_response.ok:
             raise RuntimeError(f"Unable to retrieve queue entry for request: {full_queue_url}. Does queue entry exist "
@@ -91,7 +90,7 @@ def wait_for_job_completion(trigger_job_response_body: dict, job_name: str, job_
     return JobResult(status=result_status, workflow_url=workflow_url)
 
 
-def handle_job_monitoring(response, target_job_name, job_timeout_minutes) -> JobResult:
+def handle_job_monitoring(response: Response, target_job_name: str, job_timeout_minutes: int, jenkins_url: str) -> JobResult:
     logging.info(f"Webhook triggered successfully: {response.status_code}")
     body = response.json()
     logging.info(f"Received response body: {body}")
@@ -109,11 +108,12 @@ def handle_job_monitoring(response, target_job_name, job_timeout_minutes) -> Job
                             f"pipelines were triggered: {triggered_jobs}. Only the specified job will be "
                             f"checked.")
         return wait_for_job_completion(trigger_job_response_body=body, job_name=target_job_name,
-                                       job_timeout_minutes=job_timeout_minutes)
+                                       job_timeout_minutes=job_timeout_minutes, jenkins_url=jenkins_url)
 
 
-def trigger_and_wait_for_job(pipeline_token, payload, target_job_name, job_timeout_minutes):
-    jenkins_webhook_url = f"{JENKINS_URL}/generic-webhook-trigger/invoke"
+def trigger_and_wait_for_job(jenkins_url: str, pipeline_token: str, payload: dict, target_job_name: str,
+                             job_timeout_minutes: int):
+    jenkins_webhook_url = f"{jenkins_url}/generic-webhook-trigger/invoke"
     headers = {
         "Content-Type": "application/json",
         "Authorization": f"Bearer {pipeline_token}"
@@ -126,7 +126,7 @@ def trigger_and_wait_for_job(pipeline_token, payload, target_job_name, job_timeo
 
         if response.ok:
             job_result = handle_job_monitoring(response=response, target_job_name=target_job_name,
-                                               job_timeout_minutes=job_timeout_minutes)
+                                               job_timeout_minutes=job_timeout_minutes, jenkins_url=jenkins_url)
             logging.info(f"{action_result_name}: {job_result.status}. Please check jenkins url for "
                          f"logs: {job_result.workflow_url}")
             if job_result.status != "SUCCESS":
@@ -145,24 +145,30 @@ def trigger_and_wait_for_job(pipeline_token, payload, target_job_name, job_timeo
         raise e
 
 
+def parse_key_value(arg_string):
+    key, value = arg_string.split('=')
+    return key, value
+
+
 def main():
-    parser = argparse.ArgumentParser(description="Trigger a Jenkins webhook with retry.")
+    parser = argparse.ArgumentParser(description="Trigger a Jenkins workflow with a generic webhook.")
     parser.add_argument("--pipeline_token", type=str, help="The token for authenticating with the Jenkins webhook.")
-    parser.add_argument("--payload", type=str, help="The payload to send in JSON format.")
-    parser.add_argument("--job_name", type=str, help="The job name to trigger in Jenkins.")
+    parser.add_argument("--jenkins_url", type=str, help="The Jenkins server URL.")
+    parser.add_argument("--job_name", type=str, help="The job name to trigger in Jenkins. This will "
+                                                     "automatically be added as a job_param.")
+    parser.add_argument('--job_param', action='append', type=parse_key_value, required=False,
+                        help="A job parameter to provide to a Jenkins workflow (format: key=value). Can be used "
+                             "multiple times")
     parser.add_argument("--job_timeout_minutes", default=60, type=int,
                         help="The amount of time in minutes to wait for job completion")
 
     args = parser.parse_args()
-
-    try:
-        payload = json.loads(args.payload)
-    except json.JSONDecodeError as e:
-        print(f"Invalid JSON format for payload: {e}")
-        return
+    payload = dict(args.job_param) if args.job_param else {}
+    payload['job_name'] = args.job_name
+    logging.info(f"Using following payload for workflow trigger: {payload}")
 
     trigger_and_wait_for_job(pipeline_token=args.pipeline_token, payload=payload, target_job_name=args.job_name,
-                             job_timeout_minutes=args.job_timeout_minutes)
+                             job_timeout_minutes=args.job_timeout_minutes, jenkins_url=args.jenkins_url)
 
 
 if __name__ == "__main__":

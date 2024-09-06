@@ -25,6 +25,10 @@ def call(Map config = [:]) {
             string(name: 'STAGE', defaultValue: "${defaultStageId}", description: 'Stage name for deployment environment')
         }
 
+        options {
+            lock(label: params.STAGE, quantity: 1, variable: 'stage')
+        }
+
         stages {
             stage('Checkout') {
                 steps {
