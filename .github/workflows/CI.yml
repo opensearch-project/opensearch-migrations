@@ -112,12 +112,13 @@ jobs:
         with:
           name: test-reports
           path: |
+            **/build/reports/tests/
             **/reports/jacoco/mergedReport/
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
         with:
-          file: "./build/reports/jacoco/mergedReport/jacocoMergedReport.xml"
+          files: ${{ github.workspace }}/build/reports/jacoco/mergedReport/jacocoMergedReport.xml
           flags: gradle-test
           fail_ci_if_error: true
           disable_search: true
