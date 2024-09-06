@@ -33,6 +33,7 @@ def call(Map config = [:]) {
             stage('Checkout') {
                 steps {
                     script {
+                        echo "Acquired deployment stage: ${stage}"
                         // Allow overwriting this step
                         if (config.checkoutStep) {
                             config.checkoutStep()
