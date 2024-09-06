@@ -62,6 +62,7 @@ defaultIntegPipeline(
         sourceContextId: sourceContextId,
         migrationContextId: migrationContextId,
         defaultStageId: 'aws-integ',
+        jobName: 'traffic-replay-default-e2e-test',
         //deployStep: {
         //    echo 'Custom Test Step'
         //}
