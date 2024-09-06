@@ -102,7 +102,7 @@ def handle_job_monitoring(response, target_job_name, job_timeout_minutes) -> Job
             triggered_jobs.append(job_name)
     logging.info(f"The following pipelines were started: {triggered_jobs}")
     if not triggered_jobs:
-        return "NO_JOBS_TRIGGERED"
+        return JobResult(status="NO_JOBS_TRIGGERED", workflow_url="None")
     else:
         if len(triggered_jobs) > 1:
             logging.warning(f"This tool currently only supports triggering a single pipeline, but these "

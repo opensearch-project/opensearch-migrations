@@ -26,4 +26,6 @@ jobs:
         run: |
           echo "branch_name=$(jq --raw-output .pull_request.base.ref $GITHUB_EVENT_PATH)"
           echo "pr_from_clone_url=$(jq --raw-output .pull_request.head.repo.clone_url $GITHUB_EVENT_PATH)"
+          echo "pr_to_clone_url=$(jq --raw-output .pull_request.base.repo.clone_url $GITHUB_EVENT_PATH)"
+          echo "${{github.ref_name}}"
           pipenv run python3 default_webhook_trigger.py --pipeline_token=${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }} --payload='{"pipeline_name": "rfs-default-e2e-test"}' --job_name=rfs-default-e2e-test
