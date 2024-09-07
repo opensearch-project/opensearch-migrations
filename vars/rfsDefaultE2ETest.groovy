@@ -2,7 +2,7 @@
 // 1. There is a still a manual step needed on the EC2 source load balancer to replace its security group rule which allows all traffic (0.0.0.0/0) to
 //    allow traffic for the relevant service security group. This needs a better story around accepting user security groups in our Migration CDK.
 
-def executeRFSDefaultE2ETest() {
+def call(Map config = [:]) {
     def sourceContextId = 'source-single-node-ec2'
     def migrationContextId = 'migration-rfs'
     def source_cdk_context = """

@@ -5,4 +5,4 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
         [$class: 'GitSCMSource',
          remote: "${gitUrl}"])
 
-executeRFSDefaultE2ETest()
+rfsDefaultE2ETest()
