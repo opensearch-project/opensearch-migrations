@@ -1,9 +1,0 @@
-apiVersion: kafka.strimzi.io/v1beta1
-kind: KafkaTopic
-metadata:
-  name: {{ .Values.kafka.topicName }}
-  labels:
-    strimzi.io/cluster: captured-traffic
-spec:
-  partitions: {{ .Values.kafka.numPartitions }}
-  replicas: {{ .Values.kafka.numReplicas }}

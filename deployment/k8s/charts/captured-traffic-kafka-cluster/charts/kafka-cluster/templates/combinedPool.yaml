@@ -1,4 +1,4 @@
-{{- if eq .Values.environment "test" }}
+{{- if eq .Values.poolType "never" }}
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaNodePool
 metadata:

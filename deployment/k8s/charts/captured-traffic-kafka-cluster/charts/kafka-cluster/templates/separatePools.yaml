@@ -1,4 +1,4 @@
-{{- if eq .Values.environment "prod" }}
+{{- if eq .Values.poolType "never" }}
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaNodePool
 metadata:
@@ -9,6 +9,9 @@ spec:
   replicas: 3
   roles:
     - controller
+    {{- if not eq .Values.poolType "separatePools" }}
+    - broker
+    {{ end }}
   storage:
     type: jbod
     volumes:
@@ -18,7 +21,7 @@ spec:
         kraftMetadata: shared
         deleteClaim: false
 ---
-
+{{- if eq .Values.poolType "separatePools" }}
 apiVersion: kafka.strimzi.io/v1beta2
 kind: KafkaNodePool
 metadata:
@@ -38,7 +41,7 @@ spec:
         kraftMetadata: shared
         deleteClaim: false
 ---
-
+{{- end }}
 apiVersion: kafka.strimzi.io/v1beta2
 kind: Kafka
 metadata:
