@@ -117,7 +117,9 @@ public abstract class TrafficReplayerCore {
             );
             finishedAccumulatingResponseFuture.future.whenComplete(
                 (v, t) -> log.atDebug()
-                    .setMessage(() -> "Done receiving captured stream for " + ctx + ":" + v.requestData)
+                    .setMessage(() -> "Done receiving captured stream for {}:{}")
+                    .addArgument(ctx)
+                    .addArgument(v.requestData)
                     .log()
             );
 

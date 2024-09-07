@@ -1,9 +1,13 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+import java.nio.charset.StandardCharsets;
+
 import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
+import io.netty.buffer.CompositeByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
@@ -22,15 +26,16 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
 
     private final IReplayContexts.IRequestTransformationContext context;
 
-    public static class IncompleteJsonBodyException extends NoContentException {}
-
     JsonAccumulator jsonAccumulator;
     HttpJsonMessageWithFaultingPayload capturedHttpJsonMessage;
+    Object parsedJsonObject;
+    CompositeByteBuf accumulatedBody;
 
     @SneakyThrows
     public NettyJsonBodyAccumulateHandler(IReplayContexts.IRequestTransformationContext context) {
         this.context = context;
         this.jsonAccumulator = new JsonAccumulator();
+        this.accumulatedBody = Unpooled.compositeBuffer();
     }
 
     @Override
@@ -38,14 +43,21 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
         if (msg instanceof HttpJsonMessageWithFaultingPayload) {
             capturedHttpJsonMessage = (HttpJsonMessageWithFaultingPayload) msg;
         } else if (msg instanceof HttpContent) {
-            var jsonObject = jsonAccumulator.consumeByteBuffer(((HttpContent) msg).content().nioBuffer());
-            if (jsonObject != null) {
-                capturedHttpJsonMessage.payload()
-                    .put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, jsonObject);
-                context.onJsonPayloadParseSucceeded();
+            var contentBuf = ((HttpContent) msg).content();
+            accumulatedBody.addComponent(true, contentBuf.retainedDuplicate());
+            parsedJsonObject = jsonAccumulator.consumeByteBuffer(contentBuf.nioBuffer());
+            if (msg instanceof LastHttpContent) {
+                if (parsedJsonObject != null) {
+                    capturedHttpJsonMessage.payload()
+                        .put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, parsedJsonObject);
+                    context.onJsonPayloadParseSucceeded();
+                    accumulatedBody.release();
+                    accumulatedBody = null;
+                } else {
+                    capturedHttpJsonMessage.payload()
+                        .put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY, accumulatedBody);
+                }
                 ctx.fireChannelRead(capturedHttpJsonMessage);
-            } else if (msg instanceof LastHttpContent) {
-                throw new IncompleteJsonBodyException();
             }
         } else {
             super.channelRead(ctx, msg);

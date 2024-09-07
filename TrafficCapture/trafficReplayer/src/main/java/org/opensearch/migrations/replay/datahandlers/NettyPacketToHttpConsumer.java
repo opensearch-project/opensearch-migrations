@@ -282,7 +282,9 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         try {
             var pipeline = channel.pipeline();
             log.atDebug()
-                .setMessage(() -> "Resetting the pipeline for channel " + channel + "currently at: " + pipeline)
+                .setMessage(() -> "Resetting the pipeline for channel {} currently at: {}")
+                .addArgument(channel)
+                .addArgument(pipeline)
                 .log();
             for (var handlerName : new String[] { WRITE_COUNT_WATCHER_HANDLER_NAME, READ_COUNT_WATCHER_HANDLER_NAME }) {
                 try {

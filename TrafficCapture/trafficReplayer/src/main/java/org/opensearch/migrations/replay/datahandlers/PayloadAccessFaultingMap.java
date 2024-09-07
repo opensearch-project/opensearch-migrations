@@ -10,7 +10,11 @@ import java.util.Set;
 import org.opensearch.migrations.replay.datahandlers.http.StrictCaseInsensitiveHttpHeadersMap;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
+import io.netty.buffer.ByteBuf;
 import lombok.EqualsAndHashCode;
+import lombok.Getter;
+import lombok.NonNull;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -25,7 +29,11 @@ import lombok.extern.slf4j.Slf4j;
 public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
 
     private final boolean isJson;
-    private Object onlyValue;
+    private Object jsonValue;
+    private ByteBuf binaryValue;
+    @Getter
+    @Setter
+    private boolean disableThrowingPayloadNotLoaded;
 
     public PayloadAccessFaultingMap(StrictCaseInsensitiveHttpHeadersMap headers) {
         isJson = Optional.ofNullable(headers.get("content-type"))
@@ -34,24 +42,48 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
     }
 
     @Override
-    public Object get(Object key) {
-        if (!JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY.equals(key) || !isJson) {
+    public boolean containsKey(Object key) {
+        return (JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY.equals(key) && jsonValue != null) ||
+            (JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY.equals(key) && binaryValue != null);
+    }
+
+    private Object nullOrThrow() {
+        if (disableThrowingPayloadNotLoaded) {
             return null;
         }
-        if (onlyValue == null) {
-            throw PayloadNotLoadedException.getInstance();
+        throw PayloadNotLoadedException.getInstance();
+    }
+
+    @Override
+    public Object get(Object key) {
+        if (JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY.equals(key)) {
+            if (jsonValue == null) {
+                return nullOrThrow();
+            } else {
+                return jsonValue;
+            }
+        } else if (JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY.equals(key)) {
+            if (binaryValue == null) {
+                return nullOrThrow();
+            } else {
+                return binaryValue;
+            }
         } else {
-            return onlyValue;
+            return null;
         }
     }
 
     @Override
+    @NonNull
     public Set<Entry<String, Object>> entrySet() {
-        if (onlyValue != null) {
-            return Set.of(new SimpleEntry<>(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, onlyValue));
+        if (jsonValue != null) {
+            return Set.of(new SimpleEntry<>(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, jsonValue));
+        } else if (binaryValue != null) {
+            return Set.of(new SimpleEntry<>(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY, binaryValue));
         } else {
-            return new AbstractSet<Entry<String, Object>>() {
+            return new AbstractSet<>() {
                 @Override
+                @NonNull
                 public Iterator<Entry<String, Object>> iterator() {
                     return new Iterator<>() {
                         private int count;
@@ -65,17 +97,23 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
                         public Entry<String, Object> next() {
                             if (isJson && count == 0) {
                                 ++count;
-                                if (onlyValue != null) {
+                                if (jsonValue != null) {
                                     return new SimpleEntry<>(
                                         JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY,
-                                        onlyValue
+                                        jsonValue
+                                    );
+                                } else if (binaryValue != null) {
+                                    return new SimpleEntry<>(
+                                        JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
+                                        binaryValue
                                     );
                                 } else {
-                                    throw PayloadNotLoadedException.getInstance();
+                                    if (!disableThrowingPayloadNotLoaded) {
+                                        throw PayloadNotLoadedException.getInstance();
+                                    }
                                 }
-                            } else {
-                                throw new NoSuchElementException();
                             }
+                            throw new NoSuchElementException();
                         }
                     };
                 }
@@ -90,19 +128,25 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
 
     @Override
     public Object put(String key, Object value) {
-        if (!JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY.equals(key)) {
+        if (JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY.equals(key)) {
+            Object old = jsonValue;
+            jsonValue = value;
+            return old;
+        } else if (JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY.equals(key)) {
+            Object old = binaryValue;
+            binaryValue = (ByteBuf) value;
+            return old;
+        } else {
             return null;
         }
-        Object old = onlyValue;
-        onlyValue = value;
-        return old;
     }
 
     @Override
     public String toString() {
-        final StringBuilder sb = new StringBuilder("PayloadFaultMap{");
+        final var sb = new StringBuilder("PayloadFaultMap{");
         sb.append("isJson=").append(isJson);
-        sb.append(", onlyValue=").append(onlyValue);
+        sb.append(", jsonValue=").append(jsonValue);
+        sb.append(", binaryValue=").append(binaryValue);
         sb.append('}');
         return sb.toString();
     }

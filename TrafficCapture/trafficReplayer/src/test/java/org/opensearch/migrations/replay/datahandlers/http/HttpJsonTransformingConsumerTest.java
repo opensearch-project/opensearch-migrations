@@ -125,12 +125,14 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
     }
 
     @Test
-    public void testPartialBodyThrowsAndIsRedriven() throws Exception {
+    public void testPartialBodyIsPassedThrough() throws Exception {
         final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var complexTransformer = new JsonCompositeTransformer(new IJsonTransformer() {
             @Override
             public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
+                ((Map) incomingJson.get("headers"))
+                    .put("extraKey", "extraValue");
                 // just walk everything - that's enough to touch the payload and throw
                 walkMaps(incomingJson);
                 return incomingJson;
@@ -162,13 +164,13 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         }
         transformingHandler.consumeBytes(testBytes);
         var returnedResponse = transformingHandler.finalizeRequest().get();
-        Assertions.assertEquals(new String(testBytes, StandardCharsets.UTF_8), testPacketCapture.getCapturedAsString());
-        Assertions.assertArrayEquals(testBytes, testPacketCapture.getBytesCaptured());
-        Assertions.assertEquals(HttpRequestTransformationStatus.ERROR, returnedResponse.transformationStatus);
-        Assertions.assertInstanceOf(
-            NettyJsonBodyAccumulateHandler.IncompleteJsonBodyException.class,
-            returnedResponse.error
-        );
+        var expectedString = new String(testBytes, StandardCharsets.UTF_8)
+            .replace("\r\n\r\n","\r\nextraKey: extraValue\r\n\r\n");
+        Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
+        Assertions.assertArrayEquals(expectedString.getBytes(StandardCharsets.UTF_8),
+            testPacketCapture.getBytesCaptured());
+        Assertions.assertEquals(HttpRequestTransformationStatus.COMPLETED, returnedResponse.transformationStatus);
+        Assertions.assertNull(returnedResponse.error);
     }
 
     public static List<byte[]> sliceRandomChunks(byte[] bytes, int numChunks) {

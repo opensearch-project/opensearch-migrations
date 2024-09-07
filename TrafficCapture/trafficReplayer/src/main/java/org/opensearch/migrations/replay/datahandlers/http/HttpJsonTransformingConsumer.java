@@ -125,9 +125,8 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
             }
         } catch (Exception e) {
             this.transformationContext.addCaughtException(e);
-            log.atLevel(
-                e instanceof NettyJsonBodyAccumulateHandler.IncompleteJsonBodyException ? Level.DEBUG : Level.WARN
-            ).setMessage("Caught IncompleteJsonBodyException when sending the end of content").setCause(e).log();
+            log.atWarn().setCause(e)
+                .setMessage("Caught IncompleteJsonBodyException when sending the end of content").log();
             return redriveWithoutTransformation(pipelineOrchestrator.packetReceiver, e);
         } finally {
             channel.finishAndReleaseAll();
