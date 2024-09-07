@@ -24,10 +24,11 @@ jobs:
           pipenv install --deploy
       - name: Trigger jenkins job and wait for completion
         run: |
-          branch_name=$(jq --raw-output .pull_request.head.ref $GITHUB_EVENT_PATH)
-          pr_repo_url=$(jq --raw-output .pull_request.head.repo.clone_url $GITHUB_EVENT_PATH)
-          echo "Branch name: ${GITHUB_REF##*/}"
-          echo "Repository URL: https://github.com/${GITHUB_REPOSITORY}.git"
+          branch_name="${GITHUB_REF##*/}"
+          pr_repo_url="https://github.com/${GITHUB_REPOSITORY}.git"
+          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
+            branch_name="${{ github.event.pull_request.head.ref }}"
+          fi
           echo "Running jenkins test on repo: $pr_repo_url and branch: $branch_name"
           pipenv run python3 default_webhook_trigger.py \
             --jenkins_url="https://migrations.ci.opensearch.org" \
