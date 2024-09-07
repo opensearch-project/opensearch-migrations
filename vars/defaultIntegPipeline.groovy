@@ -36,6 +36,7 @@ def call(Map config = [:]) {
             lock(label: params.STAGE, quantity: 1, variable: 'stage')
             timeout(time: 3, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
+            skipDefaultCheckout(true)
         }
 
         triggers {
@@ -53,7 +54,25 @@ def call(Map config = [:]) {
         }
 
         stages {
-            stage('Checkout') {
+            stage('Checkout Jenkinsfile') {
+                steps {
+                    script {
+                        // Checkout the branch the pipeline is triggered from
+                        checkout([
+                                $class                           : 'GitSCM',
+                                branches                         : [[name: "${params.GIT_BRANCH}"]],
+                                doGenerateSubmoduleConfigurations: false,
+                                extensions                       : [],
+                                submoduleCfg                     : [],
+                                userRemoteConfigs                : [[url: "${params.GIT_REPO_URL}"]]
+                        ])
+
+                        // Load the Jenkinsfile from the branch and execute it
+                        load 'jenkins/migrationIntegPipelines/rfsBackfillE2EPipeline.groovy'
+                    }
+                }
+            }
+            stage('Checkout Repo') {
                 steps {
                     script {
                         // Allow overwriting this step
