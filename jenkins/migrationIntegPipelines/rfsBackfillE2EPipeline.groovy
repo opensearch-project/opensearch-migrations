@@ -59,21 +59,5 @@ defaultIntegPipeline(
         defaultStageId: 'rfs-integ',
         skipCaptureProxyOnNodeSetup: true,
         jobName: 'rfs-default-e2e-test',
-        integTestStep: {
-            def time = new Date().getTime()
-            def uniqueId = "integ_min_${time}_${currentBuild.number}"
-            def test_dir = "/root/lib/integ_test/integ_test"
-            def test_result_file = "${test_dir}/reports/${uniqueId}/report.xml"
-            def command = "pipenv run pytest --log-file=${test_dir}/reports/${uniqueId}/pytest.log " +
-                    "--junitxml=${test_result_file} ${test_dir}/backfill_tests.py " +
-                    "--unique_id ${uniqueId} " +
-                    "-s"
-            withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
-                    sh "sudo --preserve-env ./awsRunIntegTests.sh --command '${command}' " +
-                            "--test-result-file ${test_result_file} " +
-                            "--stage ${params.STAGE}"
-                }
-            }
-        }
+        integTestCommand: '/root/lib/integ_test/integ_test/backfill_tests.py'
 )

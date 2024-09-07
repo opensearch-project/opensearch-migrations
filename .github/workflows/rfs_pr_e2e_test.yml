@@ -26,6 +26,8 @@ jobs:
         run: |
           branch_name=$(jq --raw-output .pull_request.head.ref $GITHUB_EVENT_PATH)
           pr_repo_url=$(jq --raw-output .pull_request.head.repo.clone_url $GITHUB_EVENT_PATH)
+          echo "Branch name: ${GITHUB_REF##*/}"
+          echo "Repository URL: https://github.com/${GITHUB_REPOSITORY}.git"
           echo "Running jenkins test on repo: $pr_repo_url and branch: $branch_name"
           pipenv run python3 default_webhook_trigger.py \
             --jenkins_url="https://migrations.ci.opensearch.org" \
