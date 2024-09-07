@@ -2,13 +2,10 @@
 // 1. There is a still a manual step needed on the EC2 source load balancer to replace its security group rule which allows all traffic (0.0.0.0/0) to
 //    allow traffic for the relevant service security group. This needs a better story around accepting user security groups in our Migration CDK.
 
-def sourceContextId = 'source-single-node-ec2'
-def migrationContextId = 'migration-default'
-// These default values should only be used on the initial Jenkins run in order to load parameter options into the UI,
-// all future runs should use the specified parameters
-def gitBranch = params.GIT_BRANCH ?: 'main'
-def gitUrl = params.GIT_REPO_URL ?: 'https://github.com/opensearch-project/opensearch-migrations.git'
-def source_cdk_context = """
+def call(Map config = [:]) {
+    def sourceContextId = 'source-single-node-ec2'
+    def migrationContextId = 'migration-default'
+    def source_cdk_context = """
     {
       "source-single-node-ec2": {
         "suffix": "ec2-source-<STAGE>",
@@ -29,8 +26,8 @@ def source_cdk_context = """
         "restrictServerAccessTo": "0.0.0.0/0"
       }
     }
-"""
-def migration_cdk_context = """
+    """
+    def migration_cdk_context = """
     {
       "migration-default": {
         "stage": "<STAGE>",
@@ -50,20 +47,17 @@ def migration_cdk_context = """
         "migrationAPIEnabled": true
       }
     }
-"""
+    """
 
-library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
-    [$class: 'GitSCMSource',
-    remote: "${gitUrl}"])
-
-defaultIntegPipeline(
-        sourceContext: source_cdk_context,
-        migrationContext: migration_cdk_context,
-        sourceContextId: sourceContextId,
-        migrationContextId: migrationContextId,
-        defaultStageId: 'aws-integ',
-        jobName: 'traffic-replay-default-e2e-test',
-        //deployStep: {
-        //    echo 'Custom Test Step'
-        //}
-)
+    defaultIntegPipeline(
+            sourceContext: source_cdk_context,
+            migrationContext: migration_cdk_context,
+            sourceContextId: sourceContextId,
+            migrationContextId: migrationContextId,
+            defaultStageId: 'aws-integ',
+            jobName: 'traffic-replay-default-e2e-test',
+            //deployStep: {
+            //    echo 'Custom Test Step'
+            //}
+    )
+}
