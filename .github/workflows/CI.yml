@@ -103,7 +103,7 @@ jobs:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
       - name: Run Tests with Coverage
-        run: ./gradlew test -x TrafficCapture:dockerSolution:build -x spotlessCheck jacocoTestReport --scan --stacktrace
+        run: ./gradlew mergeJacocoReports -x TrafficCapture:dockerSolution:build -x spotlessCheck --scan --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
@@ -113,13 +113,15 @@ jobs:
           name: test-reports
           path: |
             **/build/reports/tests/
+            **/reports/jacoco/mergedReport/
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
         with:
-          files: "**/jacocoTestReport.xml"
+          files: ${{ github.workspace }}/build/reports/jacoco/mergedReport/jacocoMergedReport.xml
           flags: gradle-test
-          fail_ci_if_error: false
+          fail_ci_if_error: true
+          disable_search: true
 
   python-e2e-tests:
     runs-on: ubuntu-latest

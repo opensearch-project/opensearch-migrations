@@ -7,10 +7,6 @@ plugins {
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     implementation project(":commonDependencyVersionConstraints")
 
@@ -37,33 +33,4 @@ dependencies {
 
 application {
     mainClassName = 'org.opensearch.migrations.MetadataMigration'
-}
-
-test {
-    useJUnitPlatform {
-        excludeTags 'longTest'
-    }
-    testLogging {
-        events "passed", "skipped", "failed"
-        exceptionFormat "full"
-        showExceptions true
-        showCauses true
-    }
-}
-
-task slowTest(type: Test) {
-    useJUnitPlatform {}
-    jacoco {
-        enabled = true
-    }
-    testLogging {
-        events "passed", "skipped", "failed"
-        exceptionFormat "full"
-        showExceptions true
-        showCauses true
-    }
-}
-
-tasks.named('jacocoTestReport').configure {
-    dependsOn slowTest
 }

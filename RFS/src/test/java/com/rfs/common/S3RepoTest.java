@@ -3,12 +3,14 @@ package com.rfs.common;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 
+import com.rfs.common.S3Repo.CannotFindSnapshotRepoRoot;
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
@@ -16,8 +18,13 @@ import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.services.s3.S3AsyncClient;
 import software.amazon.awssdk.services.s3.model.GetObjectRequest;
 import software.amazon.awssdk.services.s3.model.GetObjectResponse;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
 
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.*;
@@ -94,6 +101,27 @@ public class S3RepoTest {
             .build();
 
         verify(mockS3Client).getObject(eq(expectedRequest), any(AsyncResponseTransformer.class));
+    }
+
+    
+    @Test
+    void GetSnapshotRepoDataFilePath_DoesNotExist() throws IOException {
+        // Set up the test
+        var response = mock(ListObjectsV2Response.class);
+        when(response.contents())
+            .thenReturn(List.of());
+        when(mockS3Client.listObjectsV2(any(ListObjectsV2Request.class)))
+            .thenReturn(CompletableFuture.supplyAsync(() -> response));
+
+        var nonExistentFileName = "does-not-exist";
+        var bucket = new S3Uri("s3://bucket-name/directory" + nonExistentFileName);
+        var testRepo = Mockito.spy(new S3Repo(testDir, bucket, testRegion, mockS3Client));
+
+        // Run the test
+        var thrown = assertThrows(CannotFindSnapshotRepoRoot.class, () -> testRepo.getSnapshotRepoDataFilePath());
+
+        // Check the results
+        assertThat(thrown.getMessage(), containsString(nonExistentFileName));
     }
 
     @Test

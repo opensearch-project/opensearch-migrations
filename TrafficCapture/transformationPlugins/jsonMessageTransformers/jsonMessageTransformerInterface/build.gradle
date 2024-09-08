@@ -22,14 +22,6 @@ plugins {
     id 'io.freefair.lombok'
 }
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     api project(":commonDependencyVersionConstraints")
-}
-
-tasks.named('test') {
-    useJUnitPlatform()
 }
