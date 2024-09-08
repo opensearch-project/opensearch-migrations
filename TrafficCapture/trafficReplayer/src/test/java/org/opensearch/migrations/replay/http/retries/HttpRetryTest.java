@@ -138,7 +138,7 @@ public class HttpRetryTest {
             var response = runServerAndGetResponse(rootContext, DefaultRetry.MAX_RETRIES + 1);
             Assertions.assertNotNull(response.responses());
             Assertions.assertFalse(response.responses().isEmpty());
-            Assertions.assertEquals(DefaultRetry.MAX_RETRIES + 1, response.responses().size());
+            Assertions.assertEquals(DefaultRetry.MAX_RETRIES, response.responses().size());
             Assertions.assertTrue(response.responses().stream()
                 .map(r -> r.getRawResponse().status().code())
                 .allMatch(c -> 404 == c));

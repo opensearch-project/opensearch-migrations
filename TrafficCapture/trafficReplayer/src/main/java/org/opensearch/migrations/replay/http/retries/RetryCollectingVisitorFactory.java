@@ -34,7 +34,7 @@ public class RetryCollectingVisitorFactory implements IRetryVisitorFactory<Trans
             } else {
                 assert (aggResponse != null);
                 collector.addResponse(aggResponse);
-                return shouldRetry.apply(requestBytes, Collections.unmodifiableList(collector.getResponseList()),
+                return shouldRetry.shouldRetry(requestBytes, Collections.unmodifiableList(collector.getResponseList()),
                         aggResponse, finishedAccumulatingResponseFuture)
                     .thenCompose(d -> TextTrackedFuture.completedFuture(
                             new RequestSenderOrchestrator.DeterminedTransformedResponse<>(d, collector),
