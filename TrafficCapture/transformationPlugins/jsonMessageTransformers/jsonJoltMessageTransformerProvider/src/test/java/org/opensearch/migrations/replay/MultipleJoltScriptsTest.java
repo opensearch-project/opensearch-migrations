@@ -58,15 +58,13 @@ public class MultipleJoltScriptsTest {
 
     @Test
     public void testExciseWhenPresent() throws Exception {
-        var script = "[{ \"JsonJoltTransformerProvider\":\n" +
+        var script =
+            "[{ \"JsonJoltTransformerProvider\":\n" +
             "[\n" +
             "  {\n" +
             "    \"script\": {\n" +
             "      \"operation\": \"shift\",\n" +
             "      \"spec\": {\n" +
-            "        \"method\": \"method\",\n" +
-            "        \"URI\": \"URI\",\n" +
-            "        \"headers\": \"headers\",\n" +
             "        \"payload\": {\n" +
             "          \"inlinedJsonBody\": {\n" +
             "            \"top\": {\n" +
@@ -75,9 +73,11 @@ public class MultipleJoltScriptsTest {
             "              },\n" +
             "              \"*\": \"payload.inlinedJsonBody.top.&\"\n" +
             "            },\n" +
-            "          \"*\": \"payload.inlinedJsonBody.&\"\n" +
-            "          }\n" +
-            "        }\n" +
+            "            \"*\": \"payload.inlinedJsonBody.&\"\n" +
+            "          },\n" +
+            "          \"*\": \"payload.&\"\n" +
+            "        },\n" +
+            "        \"*\": \"&\"\n" +
             "      }\n" +
             "    }\n" +
             "  }, \n" +
@@ -108,6 +108,7 @@ public class MultipleJoltScriptsTest {
         );
         var origDocStr = "{\n" +
             "  \"method\": \"PUT\",\n" +
+            "  \"protocol\": \"HTTP/1.0\",\n" +
             "  \"URI\": \"/oldStyleIndex/extraThingToRemove/moreStuff\",\n" +
             "  \"headers\": {\n" +
             "    \"host\": \"127.0.0.1\"\n" +
@@ -129,7 +130,7 @@ public class MultipleJoltScriptsTest {
             "    }\n" +
             "  }\n" +
             "}";
-        var expectedDocStr = "{\"method\":\"PUT\",\"URI\":\"/oldStyleIndex/moreStuff\",\"headers\":{\"host\":\"testhostname\"},\"payload\":{\"inlinedJsonBody\":{\"top\":{\"properties\":{\"field1\":{\"type\":\"text\"},\"field2\":{\"type\":\"keyword\"}}}}}}";
+        var expectedDocStr = "{\"method\":\"PUT\",\"protocol\":\"HTTP/1.0\",\"URI\":\"/oldStyleIndex/moreStuff\",\"headers\":{\"host\":\"testhostname\"},\"payload\":{\"inlinedJsonBody\":{\"top\":{\"properties\":{\"field1\":{\"type\":\"text\"},\"field2\":{\"type\":\"keyword\"}}}}}}";
         var origDoc = parseAsMap(origDocStr);
         var newDoc = excisingTransformer.transformJson(origDoc);
         var newAsStr = mapper.writeValueAsString(newDoc);
