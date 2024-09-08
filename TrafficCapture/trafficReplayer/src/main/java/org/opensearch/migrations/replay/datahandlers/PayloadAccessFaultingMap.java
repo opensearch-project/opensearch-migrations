@@ -1,12 +1,18 @@
 package org.opensearch.migrations.replay.datahandlers;
 
+import java.util.AbstractMap;
+import java.util.AbstractSet;
+import java.util.Iterator;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.TreeMap;
 
 import org.opensearch.migrations.replay.datahandlers.http.StrictCaseInsensitiveHttpHeadersMap;
 
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
+import lombok.NonNull;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 
@@ -19,24 +25,54 @@ import lombok.extern.slf4j.Slf4j;
  */
 @EqualsAndHashCode(callSuper = false)
 @Slf4j
-public class PayloadAccessFaultingMap extends TreeMap<String, Object> {
+public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
 
     private final boolean isJson;
+    TreeMap<String, Object> underlyingMap;
     @Getter
     @Setter
     private boolean disableThrowingPayloadNotLoaded;
 
     public PayloadAccessFaultingMap(StrictCaseInsensitiveHttpHeadersMap headers) {
+        underlyingMap = new TreeMap<>();
         isJson = Optional.ofNullable(headers.get("content-type"))
             .map(list -> list.stream().anyMatch(s -> s.startsWith("application/json")))
             .orElse(false);
     }
 
-    private Object nullOrThrow() {
-        if (disableThrowingPayloadNotLoaded) {
-            return null;
+    @Override
+    @NonNull
+    public Set<Map.Entry<String, Object>> entrySet() {
+        if (underlyingMap.isEmpty() && !disableThrowingPayloadNotLoaded) {
+            return new AbstractSet<>() {
+                @Override
+                @NonNull
+                public Iterator<Map.Entry<String, Object>> iterator() {
+                    return new Iterator<>() {
+                        @Override
+                        public boolean hasNext() {
+                            throw PayloadNotLoadedException.getInstance();
+                        }
+
+                        @Override
+                        public Map.Entry<String, Object> next() {
+                            throw PayloadNotLoadedException.getInstance();
+                        }
+                    };
+                }
+
+                @Override
+                public int size() {
+                    throw PayloadNotLoadedException.getInstance();
+                }
+            };
+        } else {
+            return underlyingMap.entrySet();
         }
-        throw PayloadNotLoadedException.getInstance();
+    }
+    @Override
+    public Object put(String key, Object value) {
+        return underlyingMap.put(key, value);
     }
 
     @Override

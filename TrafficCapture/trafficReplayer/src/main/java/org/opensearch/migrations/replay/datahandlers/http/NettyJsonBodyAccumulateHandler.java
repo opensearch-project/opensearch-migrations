@@ -68,7 +68,7 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
                         context.onJsonPayloadParseSucceeded();
                     }
                 }
-                if (jsonAccumulator.hasPartialValues()) {
+                if (jsonAccumulator.hasPartialValues() || parsedJsonObjects.isEmpty()) {
                     if (jsonAccumulator.getTotalBytesFullyConsumed() > Integer.MAX_VALUE) {
                         throw new IndexOutOfBoundsException("JSON contents were too large " +
                             jsonAccumulator.getTotalBytesFullyConsumed() + " for a single composite ByteBuf");
