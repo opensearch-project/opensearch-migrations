@@ -20,7 +20,6 @@ import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.http.HttpRequestDecoder;
 import lombok.extern.slf4j.Slf4j;
-import org.slf4j.event.Level;
 
 /**
  * This class implements a packet consuming interface by using an EmbeddedChannel to write individual

@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 
 import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -28,14 +29,18 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
 
     JsonAccumulator jsonAccumulator;
     HttpJsonMessageWithFaultingPayload capturedHttpJsonMessage;
-    Object parsedJsonObject;
+    List<Object> parsedJsonObjects;
     CompositeByteBuf accumulatedBody;
 
     @SneakyThrows
     public NettyJsonBodyAccumulateHandler(IReplayContexts.IRequestTransformationContext context) {
         this.context = context;
         this.jsonAccumulator = new JsonAccumulator();
-        this.accumulatedBody = Unpooled.compositeBuffer();
+        // use 1024 (as opposed to the default of 16) because we really don't ever want the hit of a consolidation.
+        // For this buffer to continue to be used, we are far-off the happy-path.
+        // Consolidating will likely burn more cycles
+        this.accumulatedBody = Unpooled.compositeBuffer(1024);
+        this.parsedJsonObjects = new ArrayList<>();
     }
 
     @Override
@@ -45,17 +50,37 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
         } else if (msg instanceof HttpContent) {
             var contentBuf = ((HttpContent) msg).content();
             accumulatedBody.addComponent(true, contentBuf.retainedDuplicate());
-            parsedJsonObject = jsonAccumulator.consumeByteBuffer(contentBuf.nioBuffer());
+            var nioBuf = contentBuf.nioBuffer();
+            jsonAccumulator.consumeByteBuffer(nioBuf);
+            Object nextObj;
+            while ((nextObj = jsonAccumulator.getNextTopLevelObject()) != null) {
+                parsedJsonObjects.add(nextObj);
+            }
             if (msg instanceof LastHttpContent) {
-                if (parsedJsonObject != null) {
-                    capturedHttpJsonMessage.payload()
-                        .put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, parsedJsonObject);
-                    context.onJsonPayloadParseSucceeded();
-                    accumulatedBody.release();
-                    accumulatedBody = null;
-                } else {
+                if (!parsedJsonObjects.isEmpty()) {
+                    var payload = capturedHttpJsonMessage.payload();
+                    if (parsedJsonObjects.size() > 1) {
+                        payload.put(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY, parsedJsonObjects);
+                    } else {
+                        payload.put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, parsedJsonObjects.get(0));
+                    }
+                    if (!jsonAccumulator.hasPartialValues()) {
+                        context.onJsonPayloadParseSucceeded();
+                    }
+                }
+                if (jsonAccumulator.hasPartialValues()) {
+                    if (jsonAccumulator.getTotalBytesFullyConsumed() > Integer.MAX_VALUE) {
+                        throw new IndexOutOfBoundsException("JSON contents were too large " +
+                            jsonAccumulator.getTotalBytesFullyConsumed() + " for a single composite ByteBuf");
+                    }
+                    // skip the contents that were already parsed and included in the payload as parsed json
+                    accumulatedBody.readerIndex((int) jsonAccumulator.getTotalBytesFullyConsumed());
+                    // and pass the remaining stream
                     capturedHttpJsonMessage.payload()
                         .put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY, accumulatedBody);
+                } else {
+                    accumulatedBody.release();
+                    accumulatedBody = null;
                 }
                 ctx.fireChannelRead(capturedHttpJsonMessage);
             }

@@ -12,6 +12,7 @@ import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.async.ByteBufferFeeder;
 
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -30,15 +31,23 @@ public class JsonAccumulator {
      * Name in the stack.
      */
     private final Deque<Object> jsonObjectStack;
+    private final ByteBufferFeeder feeder;
+    @Getter
+    private long totalBytesFullyConsumed;
 
     public JsonAccumulator() throws IOException {
         jsonObjectStack = new ArrayDeque<>();
         JsonFactory factory = new JsonFactory();
         parser = factory.createNonBlockingByteBufferParser();
+        feeder = (ByteBufferFeeder) parser.getNonBlockingInputFeeder();
     }
 
     protected Map<String, Object> createMap() {
         return new LinkedHashMap<>();
+    }
+
+    public boolean hasPartialValues() {
+        return !jsonObjectStack.isEmpty();
     }
 
     /**
@@ -47,11 +56,17 @@ public class JsonAccumulator {
      * @return
      * @throws IOException
      */
-    public Object consumeByteBuffer(ByteBuffer byteBuffer) throws IOException {
-        ByteBufferFeeder feeder = (ByteBufferFeeder) parser.getNonBlockingInputFeeder();
+    public Object consumeByteBufferForSingleObject(ByteBuffer byteBuffer) throws IOException {
+        consumeByteBuffer(byteBuffer);
+        return getNextTopLevelObject();
+    }
+
+    public void consumeByteBuffer(ByteBuffer byteBuffer) throws IOException {
         log.trace("Consuming bytes: " + byteBuffer.toString());
         feeder.feedInput(byteBuffer);
-
+    }
+    
+    public Object getNextTopLevelObject() throws IOException {
         while (!parser.isClosed()) {
             var token = parser.nextToken();
             if (token == null) {
@@ -71,6 +86,7 @@ public class JsonAccumulator {
                     var array = ((ArrayList) jsonObjectStack.pop()).toArray();
                     pushCompletedValue(array);
                     if (jsonObjectStack.isEmpty()) {
+                        totalBytesFullyConsumed = parser.currentLocation().getByteOffset();
                         return array;
                     }
                     break;
@@ -81,6 +97,7 @@ public class JsonAccumulator {
                 case END_OBJECT: {
                     var popped = jsonObjectStack.pop();
                     if (jsonObjectStack.isEmpty()) {
+                        totalBytesFullyConsumed = parser.currentLocation().getByteOffset();
                         return popped;
                     } else {
                         pushCompletedValue(popped);

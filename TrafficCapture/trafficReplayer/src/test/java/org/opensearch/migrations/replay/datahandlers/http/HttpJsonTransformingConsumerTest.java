@@ -24,10 +24,23 @@ import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JsonCompositeTransformer;
+import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
+
+import io.netty.buffer.ByteBuf;
 
 @WrapWithNettyLeakDetection
 class HttpJsonTransformingConsumerTest extends InstrumentationTest {
+
+    private final static String NDJSON_TEST_REQUEST = (
+        "POST /test HTTP/1.1\r\n" +
+            "Host: foo.example\r\n" +
+            "Content-Type: application/json\r\n" +
+            "Content-Length: 97\r\n" +
+            "\r\n" +
+            "{\"index\":{\"_index\":\"test\",\"_id\":\"2\"}}\n" +
+            "{\"field1\":\"value1\"}\n" +
+            "{\"delete\":{\"_index\":\"test\",\"_id\":\"1\"}}\n");
 
     private static Stream<Arguments> provideTestParameters() {
         Integer[] attemptedChunks = { 1, 2, 4, 8, 100, 1000, Integer.MAX_VALUE };
@@ -131,6 +144,9 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         var complexTransformer = new JsonCompositeTransformer(new IJsonTransformer() {
             @Override
             public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
+                var payload = (Map) incomingJson.get("payload");
+                Assertions.assertNull(payload.get(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY));
+                Assertions.assertNull(payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
                 ((Map) incomingJson.get("headers"))
                     .put("extraKey", "extraValue");
                 // just walk everything - that's enough to touch the payload and throw
@@ -169,6 +185,69 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
         Assertions.assertArrayEquals(expectedString.getBytes(StandardCharsets.UTF_8),
             testPacketCapture.getBytesCaptured());
+        Assertions.assertEquals(HttpRequestTransformationStatus.COMPLETED, returnedResponse.transformationStatus);
+        Assertions.assertNull(returnedResponse.error);
+    }
+
+    @Test
+    public void testNewlineDelimitedJsonBodyIsHandled() throws Exception {
+        final var dummyAggregatedResponse = new AggregatedRawResponse(19, null, null, null);
+        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
+        var sizeCalculatingTransformer = new JsonCompositeTransformer(incomingJson -> {
+            var payload = (Map) incomingJson.get("payload");
+            Assertions.assertNull(payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
+            Assertions.assertNull(payload.get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY));
+            var list = (List) payload.get(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY);
+            ((Map) incomingJson.get("headers"))
+                .put("listSize", ""+list.size());
+            return incomingJson;
+        });
+        var transformingHandler = new HttpJsonTransformingConsumer<AggregatedRawResponse>(
+            sizeCalculatingTransformer,
+            null,
+            testPacketCapture,
+            rootContext.getTestConnectionRequestContext(0)
+        );
+
+        transformingHandler.consumeBytes(NDJSON_TEST_REQUEST.getBytes(StandardCharsets.UTF_8));
+        var returnedResponse = transformingHandler.finalizeRequest().get();
+        var expectedString = NDJSON_TEST_REQUEST.replace("\r\n\r\n","\r\nlistSize: 3\r\n\r\n");
+        Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
+        Assertions.assertEquals(HttpRequestTransformationStatus.COMPLETED, returnedResponse.transformationStatus);
+        Assertions.assertNull(returnedResponse.error);
+    }
+
+    @Test
+    public void testPartialNewlineDelimitedJsonBodyIsHandled() throws Exception {
+        final var dummyAggregatedResponse = new AggregatedRawResponse(19, null, null, null);
+        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
+        var sizeCalculatingTransformer = new JsonCompositeTransformer(incomingJson -> {
+            var payload = (Map) incomingJson.get("payload");
+            Assertions.assertNull(payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
+            Assertions.assertNotNull(payload.get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY));
+            var list = (List) payload.get(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY);
+            var leftoverBytes = (ByteBuf) payload.get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
+            var headers = (Map<String,Object>) incomingJson.get("headers");
+            headers.put("listSize", "" + list.size());
+            headers.put("leftover", "" + leftoverBytes.readableBytes());
+            return incomingJson;
+        });
+        var transformingHandler = new HttpJsonTransformingConsumer<AggregatedRawResponse>(
+            sizeCalculatingTransformer,
+            null,
+            testPacketCapture,
+            rootContext.getTestConnectionRequestContext(0)
+        );
+
+        var testString = NDJSON_TEST_REQUEST
+            .replace("Content-Length: 97", "Content-Length: 87")
+            .substring(0, NDJSON_TEST_REQUEST.length()-10);
+        var testBytes = testString.getBytes(StandardCharsets.UTF_8);
+        transformingHandler.consumeBytes(testBytes);
+        var returnedResponse = transformingHandler.finalizeRequest().get();
+        var expectedString = new String(testBytes, StandardCharsets.UTF_8)
+            .replace("\r\n\r\n","\r\nlistSize: 2\r\nleftover: 30\r\n\r\n");
+        Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
         Assertions.assertEquals(HttpRequestTransformationStatus.COMPLETED, returnedResponse.transformationStatus);
         Assertions.assertNull(returnedResponse.error);
     }
