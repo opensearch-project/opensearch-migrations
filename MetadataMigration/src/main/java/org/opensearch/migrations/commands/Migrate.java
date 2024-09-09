@@ -67,14 +67,15 @@ public class Migrate {
 
             log.info("Metadata copy complete.");
 
-            var indexes = new IndexRunner(
+            var indexResults = new IndexRunner(
                 arguments.snapshotName,
                 sourceCluster.getIndexMetadata(),
                 targetCluster.getIndexCreator(),
                 transformer,
                 arguments.dataFilterArgs.indexAllowlist
             ).migrateIndices(context.createIndexContext());
-            items.indexes(indexes);
+            items.indexes(indexResults.getIndexNames());
+            items.aliases(indexResults.getAliases());
             migrateResult.items(items.build());
             log.info("Index copy complete.");
         } catch (ParameterException pe) {

@@ -16,6 +16,7 @@ public class Items {
     public List<String> indexTemplates;
     public List<String> componentTemplates;
     public List<String> indexes;
+    public List<String> aliases;
 
     public String toString() {
         var sb = new StringBuilder();
@@ -33,6 +34,9 @@ public class Items {
         sb.append("   Indexes:" + System.lineSeparator());
         sb.append("      " + getPrintableList(getIndexes()) + System.lineSeparator());
         sb.append(System.lineSeparator());
+        sb.append("   Aliases:" + System.lineSeparator());
+        sb.append("      " + getPrintableList(getAliases()) + System.lineSeparator());
+        sb.append(System.lineSeparator());
         return sb.toString();
     }
 
@@ -40,6 +44,6 @@ public class Items {
         if (list == null || list.isEmpty()) {
             return "<NONE FOUND>";
         }
-        return list.stream().collect(Collectors.joining(", "));
+        return list.stream().sorted().collect(Collectors.joining(", "));
     }
 }
