@@ -2,7 +2,11 @@ name: Jenkins E2E
 
 on:
   push:
-  pull_request:
+    branches-ignore:
+      - 'backport/**'
+      - 'dependabot/**'
+  pull_request_target:
+    types: [opened, synchronize, reopened]
 
 env:
   python-version: '3.11'
@@ -26,8 +30,6 @@ jobs:
           python3 -m pip install --upgrade pipenv
           pipenv install --deploy
       - name: Trigger jenkins job and wait for completion
-        env:
-          WEBHOOK_TOKEN: ${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}
         run: |
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
             branch_name="${{ github.event.pull_request.head.ref }}"
@@ -39,7 +41,7 @@ jobs:
           echo "Running jenkins test on repo: $pr_repo_url and branch: $branch_name"
           pipenv run python3 default_webhook_trigger.py \
             --jenkins_url="https://migrations.ci.opensearch.org" \
-            --pipeline_token="$WEBHOOK_TOKEN" \
+            --pipeline_token="${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}" \
             --job_name=rfs-default-e2e-test \
             --job_param="GIT_REPO_URL=$pr_repo_url" \
             --job_param="GIT_BRANCH=$branch_name"
