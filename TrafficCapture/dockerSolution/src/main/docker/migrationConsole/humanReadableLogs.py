@@ -23,12 +23,12 @@ CONTENT_ENCODING_PATH = {
 }
 CONTENT_TYPE_PATH = {
     BASE64_ENCODED_TUPLE_PATHS[0]: "sourceRequest.Content-Type",
-    BASE64_ENCODED_TUPLE_PATHS[1]: "targetRequest.Content-Encoding",
+    BASE64_ENCODED_TUPLE_PATHS[1]: "targetRequest.Content-Type",
     BASE64_ENCODED_TUPLE_PATHS[2]: "sourceResponse.Content-Type"
 }
 TRANSFER_ENCODING_PATH = {
     BASE64_ENCODED_TUPLE_PATHS[0]: "sourceRequest.Transfer-Encoding",
-    BASE64_ENCODED_TUPLE_PATHS[1]: "targetRequest.Content-Encoding",
+    BASE64_ENCODED_TUPLE_PATHS[1]: "targetRequest.Transfer-Encoding",
     BASE64_ENCODED_TUPLE_PATHS[2]: "sourceResponse.Transfer-Encoding"
 }
 
@@ -176,7 +176,7 @@ def decode_base64_http_message(base64value, content_encoding, content_type, tran
     is_chunked_transfer = get_element(transfer_encoding,
                                       tuple, try_lowercase_keys=True) == TRANSFER_ENCODING_CHUNKED
     return parse_body_value(base64value, content_encoding, content_type, is_bulk_path,
-                             is_chunked_transfer, line_no)
+                            is_chunked_transfer, line_no)
 
 
 if __name__ == "__main__":
