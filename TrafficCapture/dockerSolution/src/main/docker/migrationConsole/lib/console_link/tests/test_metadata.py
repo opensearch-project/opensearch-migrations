@@ -346,6 +346,7 @@ def test_metadata_with_target_sigv4_makes_correct_subprocess_call(mocker):
     ], stdout=None, stderr=None, text=True, check=True
     )
 
+
 def test_metadata_init_with_minimal_config_and_extra_args(mocker):
     config = {
         "from_snapshot": {
@@ -360,14 +361,13 @@ def test_metadata_init_with_minimal_config_and_extra_args(mocker):
 
     mock = mocker.patch("subprocess.run")
     metadata.migrate(extra_args=[
-        "--foo", "bar", # Pair of command and value
-        "--flag", # Flag with no value afterward 
-        "--bar", "baz", # Another pair of command and value
-        "bazzy" # Lone value, will be ignored
+        "--foo", "bar",  # Pair of command and value
+        "--flag",  # Flag with no value afterward
+        "--bar", "baz",  # Another pair of command and value
+        "bazzy"  # Lone value, will be ignored
     ])
 
     print(mock.call_args_list)
-
 
     mock.assert_called_once_with([
         '/root/metadataMigration/bin/MetadataMigration',

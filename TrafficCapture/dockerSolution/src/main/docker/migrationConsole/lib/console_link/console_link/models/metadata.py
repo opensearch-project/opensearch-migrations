@@ -135,16 +135,16 @@ class Metadata:
         self._repo_path = snapshot.repo_path
 
     def _appendArgs(self, commands: Dict[str, Any], args_to_add: List[str]) -> None:
-        if args_to_add == None:
+        if args_to_add is None:
             return
 
         def isCommand(arg: str) -> bool:
-            if arg == None:
+            if arg is None:
                 return False
             return arg.startswith('--') or arg.startswith('-')
 
         def isValue(arg: str) -> bool:
-            if arg == None:
+            if arg is None:
                 return False
             return not isCommand(arg)
 
