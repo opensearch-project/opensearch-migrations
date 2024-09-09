@@ -4,10 +4,6 @@ plugins {
     id 'io.freefair.lombok'
 }
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     api project(":commonDependencyVersionConstraints")
     implementation project(':TrafficCapture:captureOffloader')

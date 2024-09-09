@@ -9,10 +9,6 @@ import org.opensearch.migrations.common.CommonUtils
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     implementation project(":commonDependencyVersionConstraints")
 
@@ -26,8 +22,4 @@ dependencies {
 
 application {
     mainClassName = 'com.rfs.CreateSnapshot'
-}
-
-test {
-    useJUnitPlatform()
 }

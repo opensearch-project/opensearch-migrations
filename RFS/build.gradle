@@ -9,11 +9,6 @@ plugins {
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
 
-
-repositories {
-    mavenCentral()
-}
-
 ext {
     awsSdkVersion = '2.25.16'
     dataset = findProperty('dataset') ?: 'skip_dataset'
@@ -88,28 +83,6 @@ dependencies {
     testFixturesImplementation group: 'org.testcontainers', name: 'testcontainers'
 
     testFixturesImplementation group: 'org.hamcrest', name: 'hamcrest'
-}
-
-test {
-    useJUnitPlatform {
-        excludeTags 'longTest'
-    }
-
-    testLogging {
-        events "passed", "skipped", "failed"
-        exceptionFormat "full"
-        showExceptions true
-        showCauses true
-        showStackTraces true
-        showStandardStreams = true
-    }
-}
-
-task slowTest(type: Test) {
-    // include longTest
-    jacoco {
-        enabled = true
-    }
 }
 
 jmh {

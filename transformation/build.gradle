@@ -26,10 +26,6 @@ plugins {
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     api project(":commonDependencyVersionConstraints")
 
@@ -49,8 +45,4 @@ dependencies {
 
     testImplementation group: 'org.mockito', name: 'mockito-core'
     testImplementation group: 'org.hamcrest', name: 'hamcrest'
-}
-
-tasks.named('test') {
-    useJUnitPlatform()
 }
