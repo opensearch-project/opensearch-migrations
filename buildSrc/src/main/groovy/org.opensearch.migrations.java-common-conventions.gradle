@@ -7,11 +7,6 @@ plugins {
     id 'java'
 }
 
-repositories {
-    // Use Maven Central for resolving dependencies.
-    mavenCentral()
-}
-
 dependencies {
     constraints {
         // Define dependency versions as constraints
