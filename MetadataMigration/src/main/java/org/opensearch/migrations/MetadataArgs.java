@@ -49,6 +49,6 @@ public class MetadataArgs {
             + "forwarded. If no value is provided, metrics will not be forwarded.")
     String otelCollectorEndpoint;
 
-    @Parameter(names = {"--source-version" }, description = "Version of the source cluster, for example: Elasticsearch 7.10 or OS 1.3", converter = VersionConverter.class)
-    public Version sourceVersion;
+    @Parameter(names = {"--source-version" }, description = "Version of the source cluster, for example: Elasticsearch 7.10 or OS 1.3.  Defaults to: ES_7.10", converter = VersionConverter.class)
+    public Version sourceVersion = Version.fromString("ES 7.10");
 }
