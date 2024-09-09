@@ -2,7 +2,6 @@ package org.opensearch.migrations.dashboards.savedobjects;
 
 import java.util.ArrayList;
 import java.util.List;
-import org.semver4j.Semver;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -13,6 +12,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.Getter;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
+import org.semver4j.Semver;
 
 @Slf4j
 public class SavedObject {

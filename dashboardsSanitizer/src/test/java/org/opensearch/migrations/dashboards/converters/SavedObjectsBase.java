@@ -3,11 +3,11 @@ package org.opensearch.migrations.dashboards.converters;
 import java.io.IOException;
 import java.io.InputStream;
 
-import org.junit.jupiter.api.BeforeEach;
-import org.opensearch.migrations.dashboards.Sanitizer;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.junit.jupiter.api.BeforeEach;
+
+import org.opensearch.migrations.dashboards.Sanitizer;
 
 public abstract class SavedObjectsBase {
 

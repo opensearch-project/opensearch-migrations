@@ -7,7 +7,7 @@ If the Kibana objects are exported from 7.10.2 or later version, it may not be l
 
 From the parent project, run the following command. The input file should be in *ndjson* format.
 ```shell
-./gradlew dashboardsSanitzer:run --args='--source <<Your kibana object file location>> [--output <<output file location>>]'
+./gradlew dashboardsSanitizer:run --args='--source <<Your kibana object file location>> [--output <<output file location>>]'
 ```
 
 ### Known limitations

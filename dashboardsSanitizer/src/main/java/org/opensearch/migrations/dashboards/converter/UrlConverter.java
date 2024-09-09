@@ -1,8 +1,8 @@
 package org.opensearch.migrations.dashboards.converter;
 
-import org.opensearch.migrations.dashboards.savedobjects.SavedObject;
-
 import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import org.opensearch.migrations.dashboards.savedobjects.SavedObject;
 
 import lombok.extern.slf4j.Slf4j;
 
@@ -39,4 +39,3 @@ public class UrlConverter extends SavedObjectConverter<SavedObject> {
 
     }
 }
-

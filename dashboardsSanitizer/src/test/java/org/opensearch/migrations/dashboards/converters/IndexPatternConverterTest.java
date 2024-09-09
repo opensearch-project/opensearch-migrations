@@ -1,16 +1,16 @@
 package org.opensearch.migrations.dashboards.converters;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertNull;
-
-import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.dashboards.converter.IndexPatternConverter;
-import org.opensearch.migrations.dashboards.savedobjects.SavedObject;
-
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.junit.jupiter.api.Test;
+
+import org.opensearch.migrations.dashboards.converter.IndexPatternConverter;
+import org.opensearch.migrations.dashboards.savedobjects.SavedObject;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNull;
 
 
 public class IndexPatternConverterTest extends SavedObjectsBase {

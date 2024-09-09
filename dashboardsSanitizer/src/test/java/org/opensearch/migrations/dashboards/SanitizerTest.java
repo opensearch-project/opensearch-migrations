@@ -1,15 +1,14 @@
 package org.opensearch.migrations.dashboards;
 
-import static org.junit.jupiter.api.Assertions.*;
-
 import java.io.IOException;
 import java.net.URISyntaxException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
+import static org.junit.jupiter.api.Assertions.*;
 
 class SanitizerTest {
 

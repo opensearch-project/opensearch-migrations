@@ -1,21 +1,21 @@
 package org.opensearch.migrations.dashboards.converters;
 
-import static org.junit.jupiter.api.Assertions.*;
-
 import java.util.ArrayList;
 import java.util.List;
-
-import org.junit.jupiter.api.Test;
-import org.opensearch.migrations.dashboards.Sanitizer;
-import org.opensearch.migrations.dashboards.converter.DashboardConverter;
-import org.opensearch.migrations.dashboards.savedobjects.Dashboard;
-import org.opensearch.migrations.dashboards.savedobjects.SavedObject;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonMappingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import org.junit.jupiter.api.Test;
+
+import org.opensearch.migrations.dashboards.Sanitizer;
+import org.opensearch.migrations.dashboards.converter.DashboardConverter;
+import org.opensearch.migrations.dashboards.savedobjects.Dashboard;
+import org.opensearch.migrations.dashboards.savedobjects.SavedObject;
+
+import static org.junit.jupiter.api.Assertions.*;
 
 public class DashboardConverterTest extends SavedObjectsBase {
 

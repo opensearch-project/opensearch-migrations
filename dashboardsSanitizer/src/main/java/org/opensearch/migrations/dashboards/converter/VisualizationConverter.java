@@ -3,9 +3,9 @@ package org.opensearch.migrations.dashboards.converter;
 import java.util.HashMap;
 import java.util.Map;
 
-import org.opensearch.migrations.dashboards.savedobjects.SavedObject;
-
 import com.fasterxml.jackson.databind.node.ObjectNode;
+
+import org.opensearch.migrations.dashboards.savedobjects.SavedObject;
 
 // 
 // Class Visualization defined the migration for the search object type between ES and OpenSearch
