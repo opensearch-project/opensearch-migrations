@@ -16,5 +16,10 @@ pipenv install --deploy
 
 Run default webhook trigger
 ```shell
-pipenv run python3 default_webhook_trigger.py --pipeline_token=<PIPELINE_TOKEN> --payload='{"pipeline_name": "test-select-pipeline"}'
+pipenv run python3 default_webhook_trigger.py \
+  --jenkins_url="https://migrations.ci.opensearch.org" \
+  --pipeline_token=<JENKINS_TOKEN> \
+  --job_name=rfs-default-e2e-test \
+  --job_param="GIT_REPO_URL=https://github.com/opensearch-project/opensearch-migrations.git" \
+  --job_param="GIT_BRANCH=main"
 ```

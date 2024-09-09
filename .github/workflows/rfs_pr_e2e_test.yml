@@ -24,10 +24,12 @@ jobs:
           pipenv install --deploy
       - name: Trigger jenkins job and wait for completion
         run: |
-          branch_name="${GITHUB_REF##*/}"
-          pr_repo_url="https://github.com/${GITHUB_REPOSITORY}.git"
           if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
             branch_name="${{ github.event.pull_request.head.ref }}"
+            pr_repo_url="${{ github.event.pull_request.head.repo.full_name }}"
+          else
+            branch_name="${{ github.ref_name }}"
+            pr_repo_url="${{ github.repository }}"
           fi
           echo "Running jenkins test on repo: $pr_repo_url and branch: $branch_name"
           pipenv run python3 default_webhook_trigger.py \
