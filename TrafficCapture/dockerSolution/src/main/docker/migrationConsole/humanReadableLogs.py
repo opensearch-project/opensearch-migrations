@@ -13,26 +13,23 @@ from tqdm.contrib.logging import logging_redirect_tqdm
 
 logger = logging.getLogger(__name__)
 
-BASE64_ENCODED_TUPLE_PATHS = ["sourceRequest.body", "targetRequest.body", "sourceResponse.body", "targetResponse.body"]
+BASE64_ENCODED_TUPLE_PATHS = ["sourceRequest.body", "targetRequest.body", "sourceResponse.body"]
 # TODO: I'm not positive about the capitalization of the Content-Encoding and Content-Type headers.
 # This version worked on my test cases, but not guaranteed to work in all cases.
 CONTENT_ENCODING_PATH = {
     BASE64_ENCODED_TUPLE_PATHS[0]: "sourceRequest.Content-Encoding",
     BASE64_ENCODED_TUPLE_PATHS[1]: "targetRequest.Content-Encoding",
-    BASE64_ENCODED_TUPLE_PATHS[2]: "sourceResponse.Content-Encoding",
-    BASE64_ENCODED_TUPLE_PATHS[3]: "targetResponse.Content-Encoding"
+    BASE64_ENCODED_TUPLE_PATHS[2]: "sourceResponse.Content-Encoding"
 }
 CONTENT_TYPE_PATH = {
     BASE64_ENCODED_TUPLE_PATHS[0]: "sourceRequest.Content-Type",
     BASE64_ENCODED_TUPLE_PATHS[1]: "targetRequest.Content-Encoding",
-    BASE64_ENCODED_TUPLE_PATHS[2]: "sourceResponse.Content-Type",
-    BASE64_ENCODED_TUPLE_PATHS[3]: "targetResponse.Content-Type"
+    BASE64_ENCODED_TUPLE_PATHS[2]: "sourceResponse.Content-Type"
 }
 TRANSFER_ENCODING_PATH = {
     BASE64_ENCODED_TUPLE_PATHS[0]: "sourceRequest.Transfer-Encoding",
     BASE64_ENCODED_TUPLE_PATHS[1]: "targetRequest.Content-Encoding",
-    BASE64_ENCODED_TUPLE_PATHS[2]: "sourceResponse.Transfer-Encoding",
-    BASE64_ENCODED_TUPLE_PATHS[3]: "targetResponse.Transfer-Encoding"
+    BASE64_ENCODED_TUPLE_PATHS[2]: "sourceResponse.Transfer-Encoding"
 }
 
 CONTENT_TYPE_JSON = "application/json"
@@ -160,15 +157,26 @@ def parse_tuple(line: str, line_no: int) -> dict:
         if base64value is None:
             # This component has no body element, which is potentially valid.
             continue
-        content_encoding = get_element(CONTENT_ENCODING_PATH[body_path], tuple, try_lowercase_keys=True)
-        content_type = get_element(CONTENT_TYPE_PATH[body_path], tuple, try_lowercase_keys=True)
-        is_chunked_transfer = get_element(TRANSFER_ENCODING_PATH[body_path],
-                                          tuple, try_lowercase_keys=True) == TRANSFER_ENCODING_CHUNKED
-        value = parse_body_value(base64value, content_encoding, content_type, is_bulk_path,
-                                 is_chunked_transfer, line_no)
+        value = decode_base64_http_message(base64value, CONTENT_ENCODING_PATH[body_path], CONTENT_TYPE_PATH[body_path],
+                                           TRANSFER_ENCODING_PATH[body_path], is_bulk_path, line_no, tuple)
         if value and type(value) is not bytes:
             set_element(body_path, tuple, value)
+    for target_response in get_element("targetResponses", tuple):
+        value = decode_base64_http_message(base64value, "Content-Encoding", "Content-Type",
+                                           "Transfer-Encoding", is_bulk_path, line_no, target_response)
+        if value and type(value) is not bytes:
+            set_element("body", target_response, value)
     return tuple
+
+
+def decode_base64_http_message(base64value, content_encoding, content_type, transfer_encoding,
+                               is_bulk_path, line_no, tuple):
+    content_encoding = get_element(content_encoding, tuple, try_lowercase_keys=True)
+    content_type = get_element(content_type, tuple, try_lowercase_keys=True)
+    is_chunked_transfer = get_element(transfer_encoding,
+                                      tuple, try_lowercase_keys=True) == TRANSFER_ENCODING_CHUNKED
+    return parse_body_value(base64value, content_encoding, content_type, is_bulk_path,
+                             is_chunked_transfer, line_no)
 
 
 if __name__ == "__main__":
