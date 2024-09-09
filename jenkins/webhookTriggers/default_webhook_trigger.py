@@ -90,7 +90,8 @@ def wait_for_job_completion(jenkins_url: str, trigger_job_response_body: dict, j
     return JobResult(status=result_status, workflow_url=workflow_url)
 
 
-def handle_job_monitoring(response: Response, target_job_name: str, job_timeout_minutes: int, jenkins_url: str) -> JobResult:
+def handle_job_monitoring(response: Response, target_job_name: str, job_timeout_minutes: int,
+                          jenkins_url: str) -> JobResult:
     logging.info(f"Webhook triggered successfully: {response.status_code}")
     body = response.json()
     logging.info(f"Received response body: {body}")

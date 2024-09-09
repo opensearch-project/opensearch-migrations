@@ -36,7 +36,7 @@ jobs:
             pr_repo_url="https://github.com/${{ github.event.pull_request.head.repo.full_name }}.git"
           else
             branch_name="${{ github.ref_name }}"
-            pr_repo_url="${{ github.repository }}"
+            pr_repo_url="https://github.com/${{ github.repository }}.git"
           fi
           echo "Running jenkins test on repo: $pr_repo_url and branch: $branch_name"
           pipenv run python3 default_webhook_trigger.py \
