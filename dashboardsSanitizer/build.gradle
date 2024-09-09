@@ -31,6 +31,8 @@ dependencies {
 
     implementation group: 'com.beust', name: 'jcommander'
     implementation group: 'org.semver4j', name: 'semver4j'
+
+    testImplementation group: 'org.mockito', name: 'mockito-core'
 }
 
 application {
