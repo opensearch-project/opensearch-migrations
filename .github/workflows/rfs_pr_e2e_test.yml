@@ -7,6 +7,9 @@ on:
 env:
   python-version: '3.11'
 
+permissions:
+  contents: read # to fetch code (actions/checkout)
+
 jobs:
   rfs-e2e-aws-test:
     runs-on: ubuntu-latest
