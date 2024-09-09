@@ -22,10 +22,6 @@ class DockerServiceProps {
     List<String> taskDependencies = []
 }
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     implementation project(":commonDependencyVersionConstraints")
     implementation platform('io.projectreactor:reactor-bom:2023.0.5')
@@ -144,39 +140,11 @@ task buildDockerImages {
     }
 }
 
-tasks.getByName('composeUp')
-        .dependsOn(tasks.getByName('buildDockerImages'))
-
-
-test {
-    useJUnitPlatform {
-        excludeTags 'longTest'
-    }
-    jacoco {
-        enabled = false
-    }
+tasks.named('composeUp') {
+    dependsOn(tasks.named('buildDockerImages'))
 }
 
-task slowTest(type: Test) {
-    useJUnitPlatform()
+tasks.named('slowTest') {
     dependsOn(':TrafficCapture:dockerSolution:buildDockerImage_elasticsearchTestConsole')
-    jacoco {
-        enabled = true
-    }
-    testLogging {
-        events "passed", "skipped", "failed"
-        exceptionFormat "full"
-        showExceptions true
-        showCauses true
-        showStackTraces true
-        // showStandardStreams true
-    }
-    reports {
-        html.required = true
-        html.destination file("${buildDir}/reports/tests/slowTest")
-    }
-}
-
-tasks.named('jacocoTestReport').configure {
-    dependsOn slowTest
+    testLogging.showStandardStreams = false
 }

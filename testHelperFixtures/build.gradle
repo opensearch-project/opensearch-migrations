@@ -24,10 +24,6 @@ plugins {
     id 'java-test-fixtures'
 }
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     api project(":commonDependencyVersionConstraints")
 
@@ -49,8 +45,4 @@ dependencies {
     testFixturesImplementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     testFixturesImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     testFixturesImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
-}
-
-tasks.named('test') {
-    useJUnitPlatform()
 }
