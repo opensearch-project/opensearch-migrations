@@ -167,6 +167,10 @@ public class RfsMigrateDocuments {
     }
 
     public static void main(String[] args) throws Exception {
+        System.err.println("Got args: " + String.join("; ", args));
+        var workerId = ProcessHelpers.getNodeInstanceName();
+        log.info("Starting RfsMigrateDocuments with workerId =" + workerId);
+
         Args arguments = new Args();
         JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
@@ -178,7 +182,6 @@ public class RfsMigrateDocuments {
 
         validateArgs(arguments);
 
-        var workerId = ProcessHelpers.getNodeInstanceName();
         var rootDocumentContext = makeRootContext(arguments, workerId);
         var luceneDirPath = Paths.get(arguments.luceneDir);
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
@@ -195,8 +198,6 @@ public class RfsMigrateDocuments {
             );
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
             TryHandlePhaseFailure.executeWithTryCatch(() -> {
-                log.info("Running RfsMigrateDocuments");
-
                 OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
                 DocumentReindexer reindexer = new DocumentReindexer(targetClient,
                     arguments.numDocsPerBulkRequest,

@@ -307,8 +307,8 @@ public class CaptureProxy {
     }
 
     public static void main(String[] args) throws InterruptedException, IOException {
-        System.err.println("Starting Capture Proxy");
         System.err.println("Got args: " + String.join("; ", args));
+        log.info("Starting Capture Proxy on " + ProcessHelpers.getNodeInstanceName());
 
         var params = parseArgs(args);
         var backsideUri = convertStringToUri(params.backsideUriString);

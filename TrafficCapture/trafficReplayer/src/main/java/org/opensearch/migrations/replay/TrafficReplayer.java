@@ -223,12 +223,13 @@ public class TrafficReplayer {
     }
 
     public static void main(String[] args) throws Exception {
+        System.err.println("Got args: " + String.join("; ", args));
+        final var workerId = ProcessHelpers.getNodeInstanceName();
+        log.info("Starting Traffic Replayer with id=" + workerId);
+
         var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
         var params = parseArgs(args);
         URI uri;
-        final var workerId = UUID.randomUUID().toString();
-        System.err.println("Starting Traffic Replayer with id=" + workerId);
-        System.err.println("Got args: " + String.join("; ", args));
         try {
             uri = new URI(params.targetUriString);
         } catch (Exception e) {
