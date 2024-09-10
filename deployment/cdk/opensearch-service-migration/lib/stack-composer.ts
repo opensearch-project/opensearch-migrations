@@ -213,7 +213,7 @@ export class StackComposer {
         const reindexFromSnapshotExtraArgs = this.getContextForType('reindexFromSnapshotExtraArgs', 'string', defaultValues, contextJSON)
         const albAcmCertArn = this.getContextForType('albAcmCertArn', 'string', defaultValues, contextJSON);
 
-        const requiredFields: { [key: string]: any; } = {"stage":stage, "domainName":domainName}
+        const requiredFields: { [key: string]: any; } = {"stage":stage}
         for (let key in requiredFields) {
             if (!requiredFields[key]) {
                 throw new Error(`Required CDK context field ${key} is not present`)
@@ -222,6 +222,10 @@ export class StackComposer {
         if (addOnMigrationDeployId && vpcId) {
             console.warn("Addon deployments will use the original deployment 'vpcId' regardless of passed 'vpcId' values")
         }
+        if (stage.length > 15) {
+            throw new Error(`Maximum allowed stage character length is 15 but received ${stage}`)
+        }
+        const clusterDomainName = domainName ? domainName : `os-cluster-${stage}`
         let targetEndpoint
         if (targetClusterEndpoint && osContainerServiceEnabled) {
             throw new Error("The following options are mutually exclusive as only one target cluster can be specified for a given deployment: [targetClusterEndpoint, osContainerServiceEnabled]")
@@ -299,7 +303,7 @@ export class StackComposer {
         if (!targetEndpoint) {
             openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
                 version: version,
-                domainName: domainName,
+                domainName: clusterDomainName,
                 dataNodeInstanceType: dataNodeType,
                 dataNodes: dataNodeCount,
                 dedicatedManagerNodeType: dedicatedManagerNodeType,
