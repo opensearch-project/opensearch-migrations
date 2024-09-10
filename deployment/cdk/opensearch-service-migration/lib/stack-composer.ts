@@ -223,7 +223,7 @@ export class StackComposer {
             console.warn("Addon deployments will use the original deployment 'vpcId' regardless of passed 'vpcId' values")
         }
         if (stage.length > 15) {
-            throw new Error(`Maximum allowed stage character length is 15 but received ${stage}`)
+            throw new Error(`Maximum allowed stage name length is 15 characters but received ${stage}`)
         }
         const clusterDomainName = domainName ? domainName : `os-cluster-${stage}`
         let targetEndpoint
