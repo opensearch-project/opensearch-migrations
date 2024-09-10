@@ -157,6 +157,8 @@ class ExpiringSubstitutableItemPoolTest {
         Assertions.assertTrue(
             pool.getStats().averageWaitTime().toMillis() < pool.getStats().averageBuildTime().toMillis()
         );
+
+        eventLoop.shutdownGracefully().sync();
     }
 
     private static Integer getNextItem(ExpiringSubstitutableItemPool<Future<Integer>, Integer> pool)
