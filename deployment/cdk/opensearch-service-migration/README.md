@@ -87,6 +87,12 @@ Depending on your use-case, you may choose to provide options from both the `cdk
 2. Created `cdk.context.json` in the same directory as this README
 3. Existing `default-values.json` in the same directory as this README
 
+## Which CDK context options should I use?
+See the [wiki - Configuration Options](https://github.com/opensearch-project/opensearch-migrations/wiki/Configuration-Options) for guidance on which context options should be used for different migrations.
+
+## How to use the deployed Migration tools?
+See the [wiki](https://github.com/opensearch-project/opensearch-migrations/wiki) for steps on how to use this tooling to perform different migrations.
+
 ## Accessing the Migration Console Hub
 
 The Migration Console is a deployed ECS service container in this solution that should be accessed for managing/executing different phases of a migration
@@ -112,12 +118,6 @@ To be able to execute this command the user will need to have their AWS credenti
     ]
 }
 ```
-
-## Which CDK context options should I use?
-See the [wiki - Configuration Options]("https://github.com/opensearch-project/opensearch-migrations/wiki/Configuration-Options") for guidance on which context options should be used for different migrations.
-
-## How to use the deployed Migration tools?
-See the [wiki]("https://github.com/opensearch-project/opensearch-migrations/wiki") for steps on how to use this tooling to perform different migrations.
 
 ## Tearing down CDK
 To remove all the CDK stack(s) which get created during a deployment we can execute a command similar to below
