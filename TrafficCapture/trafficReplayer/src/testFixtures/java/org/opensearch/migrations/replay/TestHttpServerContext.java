@@ -18,11 +18,7 @@ public class TestHttpServerContext {
 
     public static final String SERVER_RESPONSE_BODY_PREFIX = "Boring Response to ";
 
-    static String getUriForIthRequest(int i) {
-        return String.format("/%04d", i);
-    }
-
-    static String getRequestString(int i) {
+    public static String getRequestStringForSimpleGet(String uriPath) {
         return String.format(
             "GET %s HTTP/1.1\r\n"
                 + "Connection: Keep-Alive\r\n"
@@ -30,7 +26,7 @@ public class TestHttpServerContext {
                 + "User-Agent: UnitTest\r\n"
                 + "Connection: Keep-Alive\r\n"
                 + "\r\n",
-            getUriForIthRequest(i)
+            uriPath
         );
     }
 

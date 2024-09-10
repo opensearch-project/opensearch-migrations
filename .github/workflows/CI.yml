@@ -55,16 +55,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-         python-version: ${{ env.python-version }}
+          python-version: ${{ env.python-version }}
       - run: |
           python3 -m pip install --upgrade pipenv
           pipenv install --deploy --dev
           pipenv run coverage run -m pytest
           pipenv run coverage xml
-      - uses: codecov/codecov-action@v4
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: python-test
+          fail_ci_if_error: true
 
   console-api-tests:
     runs-on: ubuntu-latest
@@ -81,9 +84,12 @@ jobs:
           pipenv install --deploy --dev
           pipenv run coverage run --source='.' manage.py test console_api
           pipenv run coverage xml
-      - uses: codecov/codecov-action@v4
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
+          fail_ci_if_error: true
 
   gradle-tests:
     runs-on: ubuntu-latest
@@ -118,6 +124,7 @@ jobs:
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: ${{ github.workspace }}/build/reports/jacoco/mergedReport/jacocoMergedReport.xml
           flags: gradle-test
           fail_ci_if_error: true

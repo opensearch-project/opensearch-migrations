@@ -26,6 +26,7 @@ public abstract class IReplayContexts {
         public static final String TRANSFORMATION = "transformation";
         public static final String SCHEDULED = "scheduled";
         public static final String TARGET_TRANSACTION = "targetTransaction";
+        public static final String REQUEST_CONNECTING = "requestConnecting";
         public static final String REQUEST_SENDING = "requestSending";
         public static final String WAITING_FOR_RESPONSE = "waitingForResponse";
         public static final String RECEIVING_RESPONSE = "receivingResponse";
@@ -55,9 +56,10 @@ public abstract class IReplayContexts {
         public static final String TRANSFORM_CHUNKS_IN = "transformChunksIn";
         public static final String TRANSFORM_CHUNKS_OUT = "transformChunksOut";
         public static final String NETTY_SCHEDULE_LAG = "scheduleLag";
+        public static final String NUM_REQUEST_RETRIES = "numRetriedRequests";
         public static final String SOURCE_TO_TARGET_REQUEST_LAG = "lagBetweenSourceAndTargetRequests";
         public static final String ACTIVE_CHANNELS_YET_TO_BE_FULLY_DISCARDED = "activeReplayerChannels";
-        public static final String FAILED_CONNECTION_ATTEMPTS = "failedConnectionAttempts";
+        public static final String NONRETRYABLE_CONNECTION_FAILURES = "nonRetryableConnectionFailures";
         public static final String ACTIVE_TARGET_CONNECTIONS = "activeTargetConnections";
         public static final String CONNECTIONS_OPENED = "connectionsOpened";
         public static final String CONNECTIONS_CLOSED = "connectionsClosedCount";
@@ -301,6 +303,8 @@ public abstract class IReplayContexts {
 
         void onBytesReceived(int size);
 
+        IRequestConnectingContext createHttpConnectingContext();
+
         IRequestSendingContext createHttpSendingContext();
 
         IWaitingForHttpResponseContext createWaitingForResponseContext();
@@ -308,10 +312,22 @@ public abstract class IReplayContexts {
         IReceivingHttpResponseContext createHttpReceivingContext();
     }
 
+    public interface IRequestConnectingContext
+        extends
+        IAccumulationScope,
+        IWithTypedEnclosingScope<ITargetRequestContext> {
+        String ACTIVITY_NAME = ActivityNames.REQUEST_CONNECTING;
+
+        @Override
+        default String getActivityName() {
+            return ACTIVITY_NAME;
+        }
+    }
+
     public interface IRequestSendingContext
         extends
-            IAccumulationScope,
-            IWithTypedEnclosingScope<ITargetRequestContext> {
+        IAccumulationScope,
+        IWithTypedEnclosingScope<ITargetRequestContext> {
         String ACTIVITY_NAME = ActivityNames.REQUEST_SENDING;
 
         @Override

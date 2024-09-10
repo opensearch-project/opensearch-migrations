@@ -271,21 +271,22 @@ public class TrafficReplayer {
             );
             var authTransformer = buildAuthTransformerFactory(params)
         ) {
+            var timeShifter = new TimeShifter(params.speedupFactor);
+            var serverTimeout = Duration.ofSeconds(params.targetServerResponseTimeoutSeconds);
+
             String transformerConfig = getTransformerConfig(params);
             if (transformerConfig != null) {
                 log.atInfo().setMessage(() -> "Transformations config string: " + transformerConfig).log();
             }
-            var orderedRequestTracker = new OrderedWorkerTracker<Void>();
+            final var orderedRequestTracker = new OrderedWorkerTracker<Void>();
+            final var hostname = uri.getHost();
+
             var tr = new TrafficReplayerTopLevel(
                 topContext,
                 uri,
                 authTransformer,
-                new TransformationLoader().getTransformerFactoryLoader(
-                    uri.getHost(),
-                    params.userAgent,
-                    transformerConfig
-                ),
-                TrafficReplayerTopLevel.makeClientConnectionPool(
+                new TransformationLoader().getTransformerFactoryLoader(hostname, params.userAgent, transformerConfig),
+                TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                     uri,
                     params.allowInsecureConnections,
                     params.numClientThreads
@@ -313,10 +314,9 @@ public class TrafficReplayer {
 
             setupShutdownHookForReplayer(tr);
             var tupleWriter = new TupleParserChainConsumer(new ResultsToLogsConsumer());
-            var timeShifter = new TimeShifter(params.speedupFactor);
             tr.setupRunAndWaitForReplayWithShutdownChecks(
                 Duration.ofSeconds(params.observedPacketConnectionTimeout),
-                Duration.ofSeconds(params.targetServerResponseTimeoutSeconds),
+                serverTimeout,
                 blockingTrafficSource,
                 timeShifter,
                 tupleWriter

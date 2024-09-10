@@ -1,15 +1,19 @@
 package org.opensearch.migrations.replay;
 
 import java.time.Duration;
+import java.util.AbstractMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.StringJoiner;
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
-import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 
+import lombok.AllArgsConstructor;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
@@ -17,35 +21,64 @@ import static org.opensearch.migrations.replay.HttpByteBufFormatter.LF_LINE_DELI
 
 @Slf4j
 public class SourceTargetCaptureTuple implements AutoCloseable {
+    @AllArgsConstructor
+    public static class Response {
+        List<byte[]> targetResponseData;
+        Throwable errorCause;
+        Duration targetResponseDuration;
+
+        public String toString() {
+            final var sj = new StringJoiner("\n");
+            if (targetResponseDuration != null) {
+                sj.add("targetResponseDuration=").add(targetResponseDuration + "");
+            }
+            Optional.ofNullable(targetResponseData)
+                .filter(d -> !d.isEmpty())
+                .ifPresent(
+                    d -> sj.add("targetResponseData=")
+                        .add(
+                            HttpByteBufFormatter.httpPacketBytesToString(
+                                HttpByteBufFormatter.HttpMessageType.RESPONSE,
+                                d,
+                                LF_LINE_DELIMITER
+                            )
+                        )
+                );
+            sj.add("errorCause=").add(errorCause == null ? "none" : errorCause.toString());
+            return sj.toString();
+        }
+    }
+
     public final RequestResponsePacketPair sourcePair;
-    public final TransformedPackets targetRequestData;
-    public final List<byte[]> targetResponseData;
+    public final ByteBufList targetRequestData;
     public final HttpRequestTransformationStatus transformationStatus;
-    public final Throwable errorCause;
-    public final Duration targetResponseDuration;
     public final IReplayContexts.ITupleHandlingContext context;
+    public final List<Response> responseList;
+    public final Throwable topLevelErrorCause;
 
     public SourceTargetCaptureTuple(
         @NonNull IReplayContexts.ITupleHandlingContext tupleHandlingContext,
         RequestResponsePacketPair sourcePair,
-        TransformedPackets targetRequestData,
-        List<byte[]> targetResponseData,
-        HttpRequestTransformationStatus transformationStatus,
-        Throwable errorCause,
-        Duration targetResponseDuration
+        TransformedTargetRequestAndResponseList transformedTargetRequestAndResponseList,
+        Exception topLevelErrorCause
     ) {
         this.context = tupleHandlingContext;
         this.sourcePair = sourcePair;
-        this.targetRequestData = targetRequestData;
-        this.targetResponseData = targetResponseData;
-        this.transformationStatus = transformationStatus;
-        this.errorCause = errorCause;
-        this.targetResponseDuration = targetResponseDuration;
+        this.targetRequestData = transformedTargetRequestAndResponseList == null ? null :
+            transformedTargetRequestAndResponseList.requestPackets;
+        this.transformationStatus = transformedTargetRequestAndResponseList == null ? null :
+            transformedTargetRequestAndResponseList.getTransformationStatus();
+        this.responseList = transformedTargetRequestAndResponseList == null ? List.of() :
+            transformedTargetRequestAndResponseList.responses().stream()
+            .map(arr -> new Response(arr.responsePackets.stream().map(AbstractMap.SimpleEntry::getValue)
+                .collect(Collectors.toList()), arr.error, arr.responseDuration))
+            .collect(Collectors.toList());
+        this.topLevelErrorCause = topLevelErrorCause;
     }
 
     @Override
     public void close() {
-        Optional.ofNullable(targetRequestData).ifPresent(TransformedPackets::close);
+        Optional.ofNullable(targetRequestData).ifPresent(ByteBufList::release);
     }
 
     @Override
@@ -56,9 +89,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
             if (sourcePair != null) {
                 sj.add("sourcePair=").add(sourcePair.toString());
             }
-            if (targetResponseDuration != null) {
-                sj.add("targetResponseDuration=").add(targetResponseDuration + "");
-            }
+            sj.add("transformStatus=").add(transformationStatus + "");
             Optional.ofNullable(targetRequestData)
                 .ifPresent(
                     d -> sj.add("targetRequestData=")
@@ -72,20 +103,8 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
                                 )
                         )
                 );
-            Optional.ofNullable(targetResponseData)
-                .filter(d -> !d.isEmpty())
-                .ifPresent(
-                    d -> sj.add("targetResponseData=")
-                        .add(
-                            HttpByteBufFormatter.httpPacketBytesToString(
-                                HttpByteBufFormatter.HttpMessageType.RESPONSE,
-                                d,
-                                LF_LINE_DELIMITER
-                            )
-                        )
-                );
-            sj.add("transformStatus=").add(transformationStatus + "");
-            sj.add("errorCause=").add(errorCause == null ? "none" : errorCause.toString());
+            var counter = new AtomicInteger();
+            responseList.forEach(r -> sj.add("response_"+counter.incrementAndGet()).add(r.toString()));
             return sj.toString();
         });
     }

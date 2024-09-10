@@ -26,14 +26,15 @@ import org.junit.jupiter.params.provider.ValueSource;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
-import org.opensearch.migrations.replay.ReplayEngine;
+import org.opensearch.migrations.replay.ReplayEngineFactory;
 import org.opensearch.migrations.replay.ReplayUtils;
-import org.opensearch.migrations.replay.RequestSenderOrchestrator;
+import org.opensearch.migrations.replay.RequestTransformerAndSender;
 import org.opensearch.migrations.replay.TimeShifter;
-import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
 import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
+import org.opensearch.migrations.replay.http.retries.NoRetryEvaluatorFactory;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
+import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import org.opensearch.migrations.testutils.HttpRequestFirstLine;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
@@ -169,13 +170,9 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 var replaySession = new ConnectionReplaySession(
                     eventLoop,
                     channelContext,
-                    () -> NettyPacketToHttpConsumer.createClientConnection(
-                        eventLoop,
+                    NettyPacketToHttpConsumer.createClientConnectionFactory(
                         sslContext,
-                        testServer.localhostEndpoint(),
-                        channelContext
-                    )
-                );
+                        testServer.localhostEndpoint()));
                 var nphc = new NettyPacketToHttpConsumer(replaySession, httpContext, REGULAR_RESPONSE_TIMEOUT);
                 nphc.consumeBytes((EXPECTED_REQUEST_STRING).getBytes(StandardCharsets.UTF_8));
                 var aggregatedResponse = nphc.finalizeRequest().get();
@@ -239,8 +236,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             var timeShifter = new TimeShifter();
             timeShifter.setFirstTimestamp(Instant.now());
             clientConnectionPool = new ClientConnectionPool(
-                testServer.localhostEndpoint(),
-                sslContext,
+                NettyPacketToHttpConsumer.createClientConnectionFactory(sslContext, testServer.localhostEndpoint()),
                 "targetPool for testThatConnectionsAreKeptAliveAndShared",
                 1
             );
@@ -309,34 +305,26 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             var timeShifter = new TimeShifter();
             timeShifter.setFirstTimestamp(Instant.now());
             var clientConnectionPool = new ClientConnectionPool(
-                testServer.localhostEndpoint(),
-                sslContext,
+                NettyPacketToHttpConsumer.createClientConnectionFactory(sslContext, testServer.localhostEndpoint()),
                 "targetPool for testThatConnectionsAreKeptAliveAndShared",
                 1
             );
-            var sendingFactory = new ReplayEngine(
-                new RequestSenderOrchestrator(
-                    clientConnectionPool,
-                    (replaySession, ctx1) -> new NettyPacketToHttpConsumer(
-                        replaySession,
-                        ctx1,
-                        REGULAR_RESPONSE_TIMEOUT
-                    )
-                ),
-                new TestFlowController(),
-                timeShifter
-            );
+            var replayEngineFactory = new ReplayEngineFactory(REGULAR_RESPONSE_TIMEOUT,
+                new TestFlowController(), timeShifter);
             for (int j = 0; j < 2; ++j) {
                 for (int i = 0; i < 2; ++i) {
                     var ctx = rootContext.getTestConnectionRequestContext("TEST_" + i, j);
-                    var requestFinishFuture = TrafficReplayerTopLevel.transformAndSendRequest(
+
+                    var tr = new RequestTransformerAndSender<>(new NoRetryEvaluatorFactory());
+
+                    var requestFinishFuture = tr.transformAndSendRequest(
                         transformingHttpHandlerFactory,
-                        sendingFactory,
+                        replayEngineFactory.apply(clientConnectionPool),
+                        TextTrackedFuture.completedFuture(null, () -> "do nothing"),
                         ctx,
                         Instant.now(),
                         Instant.now(),
-                        () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8))
-                    );
+                        () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
                     log.info("requestFinishFuture=" + requestFinishFuture);
                     var aggregatedResponse = requestFinishFuture.get();
                     log.debug("Got aggregated response=" + aggregatedResponse);
@@ -349,7 +337,6 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                             LARGE_RESPONSE_LENGTH,
                             responseAsString.getBytes(StandardCharsets.UTF_8).length
                         );
-
                     }
                 }
             }
@@ -427,8 +414,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             );
 
             var clientConnectionPool = new ClientConnectionPool(
-                testServer.localhostEndpoint(),
-                sslContext,
+                NettyPacketToHttpConsumer.createClientConnectionFactory(sslContext, testServer.localhostEndpoint()),
                 "targetPool for testReadTimeoutHandler_responseTakesLongerThanTimeout",
                 1
             );
@@ -438,24 +424,21 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             timeShifter.setFirstTimestamp(firstRequestTime);
             log.atInfo().setMessage("Initial Timestamp: " + firstRequestTime).log();
 
-            var sendingFactory = new ReplayEngine(
-                new RequestSenderOrchestrator(
-                    clientConnectionPool,
-                    (replaySession, ctx1) -> new NettyPacketToHttpConsumer(replaySession, ctx1, responseTimeout)
-                ),
+            var replayEngineFactory = new ReplayEngineFactory(responseTimeout,
                 new TestFlowController(),
                 timeShifter
             );
 
             var ctx = rootContext.getTestConnectionRequestContext("TEST", 0);
-            var requestFinishFuture = TrafficReplayerTopLevel.transformAndSendRequest(
+            var tr = new RequestTransformerAndSender<>(new NoRetryEvaluatorFactory());
+            var requestFinishFuture = tr.transformAndSendRequest(
                 transformingHttpHandlerFactory,
-                sendingFactory,
+                replayEngineFactory.apply(clientConnectionPool),
+                TextTrackedFuture.completedFuture(null, () -> "do nothing"),
                 ctx,
                 Instant.now(),
                 Instant.now(),
-                () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8))
-            );
+                () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
             var maxTimeToWaitForTimeoutOrResponse = Duration.ofSeconds(10);
             var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
             log.atInfo().setMessage("RequestFinishFuture finished").log();
@@ -491,8 +474,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             );
 
             var clientConnectionPool = new ClientConnectionPool(
-                testServer.localhostEndpoint(),
-                sslContext,
+                NettyPacketToHttpConsumer.createClientConnectionFactory(sslContext, testServer.localhostEndpoint()),
                 "targetPool for testTimeBetweenRequestsLongerThanResponseTimeout",
                 1
             );
@@ -501,11 +483,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             var firstRequestTime = Instant.now();
             timeShifter.setFirstTimestamp(firstRequestTime);
             log.atInfo().setMessage("Initial Timestamp: " + firstRequestTime).log();
-            var sendingFactory = new ReplayEngine(
-                new RequestSenderOrchestrator(
-                    clientConnectionPool,
-                    (replaySession, ctx1) -> new NettyPacketToHttpConsumer(replaySession, ctx1, responseTimeout)
-                ),
+            var replayEngineFactory = new ReplayEngineFactory(responseTimeout,
                 new TestFlowController(),
                 timeShifter
             );
@@ -513,14 +491,16 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
             while (true) {
                 var ctx = rootContext.getTestConnectionRequestContext("TEST", i);
                 log.atInfo().setMessage("Starting transformAndSendRequest for request " + i).log();
-                var requestFinishFuture = TrafficReplayerTopLevel.transformAndSendRequest(
+
+                var tr = new RequestTransformerAndSender<>(new NoRetryEvaluatorFactory());
+                var requestFinishFuture = tr.transformAndSendRequest(
                     transformingHttpHandlerFactory,
-                    sendingFactory,
+                    replayEngineFactory.apply(clientConnectionPool),
+                    TextTrackedFuture.completedFuture(null, () -> "do nothing"),
                     ctx,
                     Instant.now(),
                     Instant.now(),
-                    () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8))
-                );
+                    () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
                 var maxTimeToWaitForTimeoutOrResponse = Duration.ofSeconds(10);
                 var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
                 log.atInfo().setMessage("RequestFinishFuture finished for request " + i).log();

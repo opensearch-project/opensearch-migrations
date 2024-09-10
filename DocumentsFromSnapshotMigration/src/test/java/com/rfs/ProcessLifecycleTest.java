@@ -19,6 +19,7 @@ import org.junit.jupiter.params.provider.CsvSource;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.testcontainers.OpensearchContainer;
 
 import com.rfs.common.FileSystemRepo;
@@ -27,12 +28,10 @@ import com.rfs.common.OpenSearchClient;
 import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.framework.PreloadedSearchClusterContainer;
 import com.rfs.framework.SearchClusterContainer;
-import eu.rekawek.toxiproxy.ToxiproxyClient;
 import eu.rekawek.toxiproxy.model.ToxicDirection;
 import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
 import org.testcontainers.containers.Network;
-import org.testcontainers.containers.ToxiproxyContainer;
 
 /**
  * TODO - the code in this test was lifted from FullTest.java (now named ParallelDocumentMigrationsTest.java).
@@ -42,11 +41,9 @@ import org.testcontainers.containers.ToxiproxyContainer;
 @Tag("longTest")
 public class ProcessLifecycleTest extends SourceTestBase {
 
-    public static final String TOXIPROXY_IMAGE_NAME = "ghcr.io/shopify/toxiproxy:2.9.0";
     public static final String TARGET_DOCKER_HOSTNAME = "target";
     public static final String SNAPSHOT_NAME = "test_snapshot";
     public static final List<String> INDEX_ALLOWLIST = List.of();
-    public static final int TOXIPROXY_PORT = 8666;
     public static final int OPENSEARCH_PORT = 9200;
 
     enum FailHow {
@@ -93,7 +90,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
             var osTargetContainer = new OpensearchContainer<>(targetImageName).withExposedPorts(OPENSEARCH_PORT)
                 .withNetwork(network)
                 .withNetworkAliases(TARGET_DOCKER_HOSTNAME);
-            var proxyContainer = new ToxiproxyContainer(TOXIPROXY_IMAGE_NAME).withNetwork(network)
+            var proxyContainer = new ToxiProxyWrapper(network)
         ) {
 
             CompletableFuture.allOf(CompletableFuture.supplyAsync(() -> {
@@ -103,7 +100,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
                 osTargetContainer.start();
                 return null;
             }), CompletableFuture.supplyAsync(() -> {
-                proxyContainer.start();
+                proxyContainer.start(TARGET_DOCKER_HOSTNAME, OPENSEARCH_PORT);
                 return null;
             })).join();
 
@@ -160,10 +157,16 @@ public class ProcessLifecycleTest extends SourceTestBase {
     private static int runProcessAgainstToxicTarget(
         Path tempDirSnapshot,
         Path tempDirLucene,
-        ToxiproxyContainer proxyContainer,
+        ToxiProxyWrapper proxyContainer,
         FailHow failHow
     ) throws IOException, InterruptedException {
-        String targetAddress = setupProxyAndGetAddress(proxyContainer, failHow);
+        String targetAddress = proxyContainer.getProxyUriAsString();
+        var tp = proxyContainer.getProxy();
+        if (failHow == FailHow.AT_STARTUP) {
+            tp.disable();
+        } else if (failHow == FailHow.WITH_DELAYS) {
+            tp.toxics().latency("latency-toxic", ToxicDirection.DOWNSTREAM, 100);
+        }
 
         int timeoutSeconds = 90;
         ProcessBuilder processBuilder = setupProcess(tempDirSnapshot, tempDirLucene, targetAddress, failHow);
@@ -183,26 +186,6 @@ public class ProcessLifecycleTest extends SourceTestBase {
         return process.exitValue();
     }
 
-    @NotNull
-    private static String setupProxyAndGetAddress(ToxiproxyContainer proxyContainer, FailHow failHow)
-        throws IOException {
-        var toxiproxyClient = new ToxiproxyClient(proxyContainer.getHost(), proxyContainer.getControlPort());
-        var proxy = toxiproxyClient.createProxy(
-            "proxy",
-            "0.0.0.0:" + TOXIPROXY_PORT,
-            TARGET_DOCKER_HOSTNAME + ":" + OPENSEARCH_PORT
-        );
-        String targetAddress = "http://"
-            + proxyContainer.getHost()
-            + ":"
-            + proxyContainer.getMappedPort(TOXIPROXY_PORT);
-        if (failHow == FailHow.AT_STARTUP) {
-            proxy.disable();
-        } else if (failHow == FailHow.WITH_DELAYS) {
-            proxy.toxics().latency("latency-toxic", ToxicDirection.DOWNSTREAM, 100);
-        }
-        return targetAddress;
-    }
 
     @NotNull
     private static ProcessBuilder setupProcess(
