@@ -69,4 +69,10 @@ if (System.getenv().containsKey("OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED
             termsOfUseAgree = "yes"
         }
     }
+} else {
+    develocity {
+        buildScan {
+            publishing.onlyIf { false }
+        }
+    }
 }

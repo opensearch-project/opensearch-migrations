@@ -24,6 +24,8 @@ jobs:
           gradle-version: ${{ env.gradle-version }}
       - name: Run Gradle Build
         run: ./gradlew spotlessCheck
+        env:
+          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
   python-lint:
     runs-on: ubuntu-latest
