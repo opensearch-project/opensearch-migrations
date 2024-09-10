@@ -83,7 +83,6 @@ public class WorkCoordinatorTest {
 
     @Test
     public void testAcquireLeaseHasNoUnnecessaryConflicts() throws Exception {
-        log.error("Hello");
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         final var NUM_DOCS = 100;
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
@@ -134,7 +133,7 @@ public class WorkCoordinatorTest {
         for (int run = 0; run < MAX_RUNS; ++run) {
             final var seenWorkerItems = new ConcurrentHashMap<String, String>();
             var allFutures = new ArrayList<CompletableFuture<String>>();
-            final var expiration = Duration.ofSeconds(5);
+            final var expiration = Duration.ofSeconds(10);
             var markAsComplete = run + 1 == MAX_RUNS;
             for (int i = 0; i < NUM_DOCS; ++i) {
                 var label = run + "-" + i;
@@ -173,8 +172,10 @@ public class WorkCoordinatorTest {
                     )
                     .log();
             }
-
-            Thread.sleep(expiration.multipliedBy(2).toMillis());
+            if (run < MAX_RUNS - 1) {
+                // Allow all leases to expire between runs
+                Thread.sleep(expiration.toMillis());
+            }
         }
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));

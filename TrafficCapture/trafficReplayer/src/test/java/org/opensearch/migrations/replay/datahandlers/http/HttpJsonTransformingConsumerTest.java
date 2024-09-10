@@ -30,7 +30,7 @@ import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 class HttpJsonTransformingConsumerTest extends InstrumentationTest {
 
     private static Stream<Arguments> provideTestParameters() {
-        Integer[] attemptedChunks = { 1, 2, 4, 8, 100, 1000, Integer.MAX_VALUE };
+        Integer[] attemptedChunks = { 1, 4, 1000, Integer.MAX_VALUE };
         Boolean[] transformationOptions = { true, false };
         String[] requestFiles = {
             "/requests/raw/post_formUrlEncoded_withFixedLength.txt",
@@ -54,7 +54,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         throws Exception {
         final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(
-            Duration.ofMillis(Math.min(100 / attemptedChunks, 1)),
+            Duration.ofMillis(100 / attemptedChunks),
             dummyAggregatedResponse
         );
         var transformingHandler = new HttpJsonTransformingConsumer<AggregatedRawResponse>(

@@ -129,17 +129,30 @@ public class KafkaConfigurationCaptureProxyTest {
             captureProxy.start();
             final int numberOfTests = 20;
 
-            // Performance is different for first few calls so throw them away
-            assertBasicCalls(captureProxy, 3);
+            // Performance is different for first call so throw away
+            assertBasicCalls(captureProxy, 1);
 
-            var averageBaselineDuration = assertBasicCalls(captureProxy, numberOfTests);
+            var totalBaselineDuration = Duration.ZERO;
+            var totalImpairedDuration = Duration.ZERO;
 
-            failureMode.apply(kafkaProxy);
+            for (int i = 0; i < numberOfTests; i++) {
+                // Run baseline case
+                totalBaselineDuration = totalBaselineDuration.plus(assertBasicCalls(captureProxy, 1));
 
-            // Calculate average duration of impaired calls
-            var averageImpairedDuration = assertBasicCalls(captureProxy, numberOfTests);
+                // Apply failure mode
+                failureMode.apply(kafkaProxy);
 
-            long acceptableDifference = Duration.ofMillis(25).toMillis();
+                // Run impaired case
+                totalImpairedDuration = totalImpairedDuration.plus(assertBasicCalls(captureProxy, 1));
+
+                // Reset failure mode
+                removeAllFailureModes(kafkaProxy);
+            }
+
+            var averageBaselineDuration = totalBaselineDuration.dividedBy(numberOfTests);
+            var averageImpairedDuration = totalImpairedDuration.dividedBy(numberOfTests);
+
+            long acceptableDifference = Duration.ofMillis(20).toMillis();
 
             log.info(
                 "Baseline Duration: {}ms, Impaired Duration: {}ms",
@@ -236,6 +249,23 @@ public class KafkaConfigurationCaptureProxyTest {
             } catch (Throwable t) {
                 throw new RuntimeException(t);
             }
+        }
+    }
+
+    public static void removeAllFailureModes(Proxy proxy) {
+        try {
+            proxy.toxics().getAll().forEach(toxic -> {
+                try {
+                    toxic.remove();
+                } catch (IOException e) {
+                    throw new RuntimeException("Failed to remove toxic: " + toxic.getName(), e);
+                }
+            });
+            if (!proxy.isEnabled()) {
+                proxy.enable();
+            }
+        } catch (IOException e) {
+            throw new RuntimeException("Failed to get all toxics", e);
         }
     }
 }

@@ -78,6 +78,9 @@ subprojects {
             exclude project.property('excludeTests')
         }
 
+        // Allow running different test classes in the same project in parallel
+        maxParallelForks = Runtime.runtime.availableProcessors()
+
         useJUnitPlatform()
         //  Disable parallel test execution, see MIGRATIONS-1666
         systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
@@ -95,6 +98,10 @@ subprojects {
     }
 
     tasks.register('slowTest', Test) {
+        // Limit maxParallelForks to half the CPU cores or 1
+        maxParallelForks = Math.min(maxParallelForks as Integer, Runtime.runtime.availableProcessors() / 2 as Integer)
+        maxParallelForks = Math.max(maxParallelForks, 1)
+
         useJUnitPlatform {
             includeTags 'longTest'
         }

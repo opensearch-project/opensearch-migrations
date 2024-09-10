@@ -103,13 +103,9 @@ jobs:
         with:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
-      - name: Run Gradle Build
-        run: ./gradlew build -x test -x TrafficCapture:dockerSolution:build -x spotlessCheck --scan --stacktrace
-        env:
-          OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
       - name: Run Tests with Coverage
-        run: ./gradlew mergeJacocoReports -x TrafficCapture:dockerSolution:build -x spotlessCheck --scan --stacktrace
+        run: ./gradlew test --fail-fast slowTest --fail-fast mergeJacocoReports -x spotlessCheck --scan --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
