@@ -19,12 +19,11 @@ public class RootDocumentMigrationContext extends BaseRootRfsContext implements 
 
     public RootDocumentMigrationContext(
         OpenTelemetry sdk,
-        IContextTracker contextTracker,
-        RootWorkCoordinationContext workCoordinationContext
+        IContextTracker contextTracker
     ) {
         super(SCOPE_NAME, sdk, contextTracker);
         var meter = this.getMeterProvider().get(SCOPE_NAME);
-        this.workCoordinationContext = workCoordinationContext;
+        workCoordinationContext = new RootWorkCoordinationContext(sdk, contextTracker, this);
         documentReindexInstruments = DocumentMigrationContexts.DocumentReindexContext.makeMetrics(meter);
         shardSetupMetrics = DocumentMigrationContexts.ShardSetupAttemptContext.makeMetrics(meter);
         addShardWorkItemMetrics = DocumentMigrationContexts.AddShardWorkItemContext.makeMetrics(meter);

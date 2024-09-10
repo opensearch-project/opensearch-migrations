@@ -13,7 +13,6 @@ import org.junit.jupiter.params.provider.ArgumentsSource;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
-import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.FileSystemSnapshotCreator;
@@ -37,8 +36,7 @@ public class EndToEndTest extends SourceTestBase {
     public void migrateFrom_ES_v6_8(final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
         final var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
         final var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();
-        final var workCoordinationContext = WorkCoordinationTestContext.factory().noOtelTracking();
-        final var testDocMigrationContext = DocumentMigrationTestContext.factory(workCoordinationContext).noOtelTracking();
+        final var testDocMigrationContext = DocumentMigrationTestContext.factory().noOtelTracking();
 
         try (
             final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23);
@@ -163,8 +161,7 @@ public class EndToEndTest extends SourceTestBase {
     ) {
         final var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
         final var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();
-        final var workCoordinationContext = WorkCoordinationTestContext.factory().noOtelTracking();
-        final var testDocMigrationContext = DocumentMigrationTestContext.factory(workCoordinationContext).noOtelTracking();
+        final var testDocMigrationContext = DocumentMigrationTestContext.factory().noOtelTracking();
 
         try {
 
