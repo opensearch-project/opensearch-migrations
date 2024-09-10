@@ -104,12 +104,12 @@ jobs:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
       - name: Run Gradle Build
-        run: ./gradlew build -x test -x TrafficCapture:dockerSolution:build -x spotlessCheck --scan --stacktrace
+        run: ./gradlew build -x test -x TrafficCapture:dockerSolution:build -x spotlessCheck --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
       - name: Run Tests with Coverage
-        run: ./gradlew mergeJacocoReports -x TrafficCapture:dockerSolution:build -x spotlessCheck --scan --stacktrace
+        run: ./gradlew mergeJacocoReports -x TrafficCapture:dockerSolution:build -x spotlessCheck --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
@@ -156,7 +156,7 @@ jobs:
         with:
           key: docker-${{ runner.os }}-${{ steps.generate_cache_key.outputs.key }}
       - name: Start Docker Solution
-        run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --scan --info --stacktrace
+        run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
       - name: Run E2E test script
