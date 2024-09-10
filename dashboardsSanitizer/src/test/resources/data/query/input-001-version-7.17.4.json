@@ -1,0 +1,127 @@
+{
+    "attributes": {
+        "description": "",
+        "filters": [
+            {
+                "$state": {
+                    "store": "appState"
+                },
+                "meta": {
+                    "alias": null,
+                    "disabled": false,
+                    "index": "3f780515-40c6-4478-9921-b2a1055f26a8",
+                    "key": "field01",
+                    "negate": false,
+                    "params": {
+                        "query": "value01"
+                    },
+                    "type": "phrase"
+                },
+                "query": {
+                    "match_phrase": {
+                        "field01": "value01"
+                    }
+                }
+            },
+            {
+                "$state": {
+                    "store": "appState"
+                },
+                "meta": {
+                    "alias": null,
+                    "disabled": false,
+                    "index": "5df1858d-98fd-47b8-adf3-45ef379eff13",
+                    "key": "field02",
+                    "negate": true,
+                    "params": {
+                        "query": "DEBUG"
+                    },
+                    "type": "phrase"
+                },
+                "query": {
+                    "match_phrase": {
+                        "field02": "DEBUG"
+                    }
+                }
+            },
+            {
+                "$state": {
+                    "store": "appState"
+                },
+                "meta": {
+                    "alias": null,
+                    "disabled": false,
+                    "index": "568465e2-04c6-42c5-869e-c1e439cfc1a5",
+                    "key": "field02",
+                    "negate": true,
+                    "params": {
+                        "query": "INFO"
+                    },
+                    "type": "phrase"
+                },
+                "query": {
+                    "match_phrase": {
+                        "field02": "INFO"
+                    }
+                }
+            },
+            {
+                "$state": {
+                    "store": "appState"
+                },
+                "meta": {
+                    "alias": null,
+                    "disabled": false,
+                    "index": "87384260-5550-4f59-b69c-b22d7cae3efa",
+                    "key": "field03",
+                    "negate": false,
+                    "params": {
+                        "query": "qa"
+                    },
+                    "type": "phrase"
+                },
+                "query": {
+                    "match_phrase": {
+                        "field03": "qa"
+                    }
+                }
+            }
+        ],
+        "query": {
+            "language": "kuery",
+            "query": ""
+        },
+        "title": "Test Query"
+    },
+    "coreMigrationVersion": "7.17.4",
+    "id": "0455c0b0-76cf-11ed-878b-bdc9e0071a41",
+    "references": [
+        {
+            "id": "186ce9a0-4ca0-11e9-a2fc-99ea72140d6a",
+            "name": "3f780515-40c6-4478-9921-b2a1055f26a8",
+            "type": "index-pattern"
+        },
+        {
+            "id": "186ce9a0-4ca0-11e9-a2fc-99ea72140d6a",
+            "name": "5df1858d-98fd-47b8-adf3-45ef379eff13",
+            "type": "index-pattern"
+        },
+        {
+            "id": "186ce9a0-4ca0-11e9-a2fc-99ea72140d6a",
+            "name": "568465e2-04c6-42c5-869e-c1e439cfc1a5",
+            "type": "index-pattern"
+        },
+        {
+            "id": "186ce9a0-4ca0-11e9-a2fc-99ea72140d6a",
+            "name": "87384260-5550-4f59-b69c-b22d7cae3efa",
+            "type": "index-pattern"
+        }
+    ],
+    "sort": [
+        1670486702146,
+        31129
+    ],
+    "type": "query",
+    "updated_at": "2022-12-08T08:05:02.146Z",
+    "version": "WzE2MjI4MzA4LDEyXQ=="
+}
