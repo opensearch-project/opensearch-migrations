@@ -396,6 +396,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     }
 
     @ParameterizedTest
+    @Tag("longTest")
     @CsvSource({ "false", "true" })
     public void testResponseTakesLongerThanTimeout(boolean useTls) throws Exception {
         var responseTimeout = Duration.ofMillis(50);
@@ -447,6 +448,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     }
 
     @ParameterizedTest
+    @Tag("longTest")
     @CsvSource({ "false", "true" })
     public void testTimeBetweenRequestsLongerThanResponseTimeout(boolean useTls) throws Exception {
         var responseTimeout = Duration.ofMillis(100);
