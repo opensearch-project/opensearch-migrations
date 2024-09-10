@@ -36,7 +36,7 @@ public class RootOtelContext implements IRootOtelContext {
     public static OpenTelemetry initializeOpenTelemetryForCollector(
         @NonNull String collectorEndpoint,
         @NonNull String serviceName,
-        String nodeName
+        @NonNull String nodeName
     ) {
         final var spanProcessor = BatchSpanProcessor.builder(
             OtlpGrpcSpanExporter.builder().setEndpoint(collectorEndpoint).setTimeout(2, TimeUnit.SECONDS).build()
@@ -89,8 +89,8 @@ public class RootOtelContext implements IRootOtelContext {
      */
     public static OpenTelemetry initializeOpenTelemetryWithCollectorOrAsNoop(
         String collectorEndpoint,
-        String serviceName,
-        String instanceName
+        @NonNull String serviceName,
+        @NonNull String instanceName
     ) {
         return Optional.ofNullable(collectorEndpoint)
             .map(endpoint -> initializeOpenTelemetryForCollector(endpoint, serviceName, instanceName))
@@ -123,12 +123,15 @@ public class RootOtelContext implements IRootOtelContext {
         return null;
     }
 
-    public RootOtelContext(String scopeName, IContextTracker contextTracker, String instanceName) {
+    public RootOtelContext(@NonNull String scopeName,
+                           IContextTracker contextTracker,
+                           @NonNull String serviceName,
+                           @NonNull String instanceName) {
         this(scopeName, contextTracker,
-            initializeOpenTelemetryWithCollectorOrAsNoop(null, null, instanceName));
+            initializeOpenTelemetryWithCollectorOrAsNoop(null, serviceName, instanceName));
     }
 
-    public RootOtelContext(String scopeName, IContextTracker contextTracker, @NonNull  OpenTelemetry sdk) {
+    public RootOtelContext(String scopeName, IContextTracker contextTracker, @NonNull OpenTelemetry sdk) {
         openTelemetryImpl = sdk;
         this.scopeName = scopeName;
         this.contextTracker = contextTracker;

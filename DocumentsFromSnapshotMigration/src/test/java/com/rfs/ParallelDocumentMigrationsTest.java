@@ -194,15 +194,6 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         }
     }
 
-//    @Test
-//    public void testDocumentMigrationForBigMonolithicShardWorks() throws Exception {
-//        testDocumentMigration(1,
-//            SearchClusterContainer.OS_V2_14_0.getImageName(),
-//            SearchClusterContainer.OS_V2_14_0,
-//            GENERATOR_BASE_IMAGE,
-//            new String[]{"tail", "-f", "/dev/null"});
-//    }
-
     private void verifyWorkMetrics(DocumentMigrationTestContext rootContext, int numWorkers, int numRuns) {
         var workMetrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         var migrationMetrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
