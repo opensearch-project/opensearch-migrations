@@ -1,0 +1,20 @@
+{
+    "attributes": {
+        "accessCount": 0,
+        "accessDate": 1661433371717,
+        "createDate": 1661433371717,
+        "locatorJSON": "{\"id\":\"LEGACY_SHORT_URL_LOCATOR\",\"version\":\"7.17.4\",\"state\":{\"url\":\"/test/url\",\"slug\":\"atk8\"}}",
+        "slug": "atk8",
+        "url": ""
+    },
+    "coreMigrationVersion": "8.8.0",
+    "id": "16e58750-2478-11ed-ab67-d584aeb7180b",
+    "references": [],
+    "sort": [
+        1661433371722,
+        40019
+    ],
+    "type": "url",
+    "updated_at": "2022-08-25T13:16:11.722Z",
+    "version": "WzE3Mjk2MDMzLDEyXQ=="
+}
