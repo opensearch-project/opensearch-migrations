@@ -2,11 +2,8 @@ package org.opensearch.migrations.replay;
 
 import java.io.EOFException;
 import java.net.URI;
-import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.CompletionException;
@@ -15,15 +12,12 @@ import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
-import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
 
-import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
-import org.opensearch.migrations.replay.datatypes.TransformedPackets;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
@@ -35,7 +29,6 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
-import io.netty.buffer.Unpooled;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.NonNull;
@@ -43,7 +36,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public abstract class TrafficReplayerCore {
+public abstract class TrafficReplayerCore extends RequestTransformerAndSender<TransformedTargetRequestAndResponseList> {
 
     public interface IWorkTracker<T> {
         void put(UniqueReplayerRequestKey uniqueReplayerRequestKey, TrackedFuture<String, T> completableFuture);
@@ -56,12 +49,12 @@ public abstract class TrafficReplayerCore {
     }
 
     private final PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory;
-    protected final ClientConnectionPool clientConnectionPool;
     protected final TrafficStreamLimiter liveTrafficStreamLimiter;
     protected final AtomicInteger successfulRequestCount;
     protected final AtomicInteger exceptionRequestCount;
     public final IRootReplayerContext topLevelContext;
     protected final IWorkTracker<Void> requestWorkTracker;
+
 
     protected final AtomicBoolean stopReadingRef;
     protected final AtomicReference<CompletableFuture<List<ITrafficStreamWithKey>>> nextChunkFutureRef;
@@ -71,11 +64,13 @@ public abstract class TrafficReplayerCore {
         URI serverUri,
         IAuthTransformerFactory authTransformer,
         IJsonTransformer jsonTransformer,
-        ClientConnectionPool clientConnectionPool,
         TrafficStreamLimiter trafficStreamLimiter,
-        IWorkTracker<Void> requestWorkTracker
+        IWorkTracker<Void> requestWorkTracker,
+        IRetryVisitorFactory retryVisitorFactory
     ) {
+        super(retryVisitorFactory);
         this.topLevelContext = context;
+
         if (serverUri.getPort() < 0) {
             throw new IllegalArgumentException("Port not present for URI: " + serverUri);
         }
@@ -86,7 +81,6 @@ public abstract class TrafficReplayerCore {
             throw new IllegalArgumentException("Scheme (http|https) is not present for URI: " + serverUri);
         }
         this.liveTrafficStreamLimiter = trafficStreamLimiter;
-        this.clientConnectionPool = clientConnectionPool;
         this.requestWorkTracker = requestWorkTracker;
         inputRequestTransformerFactory = new PacketToTransformingHttpHandlerFactory(jsonTransformer, authTransformer);
         successfulRequestCount = new AtomicInteger();
@@ -121,17 +115,19 @@ public abstract class TrafficReplayerCore {
                     .log()
             );
 
-            var allWorkFinishedForTransactionFuture = sendRequestAfterGoingThroughWorkQueue(ctx, request, requestKey)
-                .getDeferredFutureThroughHandle(
-                    (arr, httpRequestException) -> finishedAccumulatingResponseFuture.thenCompose(
-                        rrPair -> TextTrackedFuture.completedFuture(
-                            handleCompletedTransaction(ctx, rrPair, arr, httpRequestException),
-                            () -> "Synchronously committed results"
+            var allWorkFinishedForTransactionFuture =
+                sendRequestAfterGoingThroughWorkQueue(ctx, request, requestKey, finishedAccumulatingResponseFuture)
+                    .getDeferredFutureThroughHandle(
+                        // TODO - what if finishedAccumulatingResponseFuture completed exceptionally?
+                        (arr, httpRequestException) -> finishedAccumulatingResponseFuture.thenCompose(
+                            rrPair -> TextTrackedFuture.completedFuture(
+                                handleCompletedTransaction(ctx, rrPair, arr, httpRequestException),
+                                () -> "Synchronously committed results"
+                            ),
+                            () -> "logging summary"
                         ),
-                        () -> "logging summary"
-                    ),
-                    () -> "waiting for accumulation to combine with target response"
-                );
+                        () -> "waiting for accumulation to combine with target response"
+                    );
 
             assert !allWorkFinishedForTransactionFuture.future.isDone();
             log.trace("Adding " + requestKey + " to targetTransactionInProgressMap");
@@ -140,19 +136,22 @@ public abstract class TrafficReplayerCore {
             return finishedAccumulatingResponseFuture.future::complete;
         }
 
-        private TrackedFuture<String, TransformedTargetRequestAndResponse> sendRequestAfterGoingThroughWorkQueue(
+        /**
+         * @see RequestTransformerAndSender#transformAndSendRequest
+         */
+        private TrackedFuture<String, TransformedTargetRequestAndResponseList> sendRequestAfterGoingThroughWorkQueue(
             IReplayContexts.IReplayerHttpTransactionContext ctx,
             HttpMessageAndTimestamp request,
-            UniqueReplayerRequestKey requestKey
-        ) {
+            UniqueReplayerRequestKey requestKey,
+            TextTrackedFuture<RequestResponsePacketPair> finishedAccumulatingResponseFuture) {
             var workDequeuedByLimiterFuture = new TextTrackedFuture<TrafficStreamLimiter.WorkItem>(
                 () -> "waiting for " + ctx + " to be queued and run through TrafficStreamLimiter"
             );
             var wi = liveTrafficStreamLimiter.queueWork(1, ctx, workDequeuedByLimiterFuture.future::complete);
             var httpSentRequestFuture = workDequeuedByLimiterFuture.thenCompose(
-                ignored -> transformAndSendRequest(replayEngine, request, ctx),
-                () -> "Waiting to get response from target"
-            )
+                    ignored -> transformAndSendRequest(replayEngine, request, finishedAccumulatingResponseFuture, ctx),
+                    () -> "Waiting to get response from target"
+                )
                 .whenComplete(
                     (v, t) -> liveTrafficStreamLimiter.doneProcessing(wi),
                     () -> "releasing work item for the traffic limiter"
@@ -168,7 +167,7 @@ public abstract class TrafficReplayerCore {
         Void handleCompletedTransaction(
             @NonNull IReplayContexts.IReplayerHttpTransactionContext context,
             RequestResponsePacketPair rrPair,
-            TransformedTargetRequestAndResponse summary,
+            TransformedTargetRequestAndResponseList summary,
             Throwable t
         ) {
             try (var httpContext = rrPair.getHttpTransactionContext()) {
@@ -275,12 +274,16 @@ public abstract class TrafficReplayerCore {
             IReplayContexts.ITupleHandlingContext tupleHandlingContext,
             Consumer<SourceTargetCaptureTuple> tupleWriter,
             RequestResponsePacketPair rrPair,
-            TransformedTargetRequestAndResponse summary,
+            TransformedTargetRequestAndResponseList summary,
             Exception t
         ) {
             log.trace("done sending and finalizing data to the packet handler");
 
-            try (var requestResponseTuple = getSourceTargetCaptureTuple(tupleHandlingContext, rrPair, summary, t)) {
+            SourceTargetCaptureTuple requestResponseTuple1;
+            if (t != null) {
+                log.error("Got exception in CompletableFuture callback: ", t);
+            }
+            try (var requestResponseTuple = new SourceTargetCaptureTuple(tupleHandlingContext, rrPair, summary, t)) {
                 log.atDebug()
                     .setMessage("{}")
                     .addArgument(() -> "Source/Target Request/Response tuple: " + requestResponseTuple)
@@ -291,164 +294,52 @@ public abstract class TrafficReplayerCore {
             if (t != null) {
                 throw new CompletionException(t);
             }
-            if (summary.getError() != null) {
-                log.atInfo()
-                    .setCause(summary.getError())
-                    .setMessage("Exception for {}: ")
-                    .addArgument(tupleHandlingContext)
-                    .log();
-                exceptionRequestCount.incrementAndGet();
-            } else if (summary.getTransformationStatus() == HttpRequestTransformationStatus.ERROR) {
-                log.atInfo()
-                    .setCause(summary.getError())
-                    .setMessage("Unknown error transforming {}: ")
-                    .addArgument(tupleHandlingContext)
-                    .log();
-                exceptionRequestCount.incrementAndGet();
-            } else {
-                successfulRequestCount.incrementAndGet();
-            }
         }
     }
 
-    private static SourceTargetCaptureTuple getSourceTargetCaptureTuple(
-        @NonNull IReplayContexts.ITupleHandlingContext tupleHandlingContext,
-        RequestResponsePacketPair rrPair,
-        TransformedTargetRequestAndResponse summary,
-        Exception t
-    ) {
-        SourceTargetCaptureTuple requestResponseTuple;
-        if (t != null) {
-            log.error("Got exception in CompletableFuture callback: ", t);
-            requestResponseTuple = new SourceTargetCaptureTuple(
-                tupleHandlingContext,
-                rrPair,
-                new TransformedPackets(),
-                new ArrayList<>(),
-                HttpRequestTransformationStatus.ERROR,
-                t,
-                Duration.ZERO
-            );
-        } else {
-            requestResponseTuple = new SourceTargetCaptureTuple(
-                tupleHandlingContext,
-                rrPair,
-                summary.requestPackets,
-                summary.getReceiptTimeAndResponsePackets().map(Map.Entry::getValue).collect(Collectors.toList()),
-                summary.getTransformationStatus(),
-                summary.getError(),
-                summary.getResponseDuration()
-            );
-        }
-        return requestResponseTuple;
-    }
-
-    public TrackedFuture<String, TransformedTargetRequestAndResponse> transformAndSendRequest(
+    /**
+     * @see RequestTransformerAndSender#transformAndSendRequest
+     */
+    public TrackedFuture<String, TransformedTargetRequestAndResponseList> transformAndSendRequest(
         ReplayEngine replayEngine,
         HttpMessageAndTimestamp request,
+        TrackedFuture<String, RequestResponsePacketPair> finishedAccumulatingResponseFuture,
         IReplayContexts.IReplayerHttpTransactionContext ctx
     ) {
         return transformAndSendRequest(
             inputRequestTransformerFactory,
             replayEngine,
+            finishedAccumulatingResponseFuture,
             ctx,
             request.getFirstPacketTimestamp(),
             request.getLastPacketTimestamp(),
-            request.packetBytes::stream
-        );
+            request.packetBytes::stream);
     }
 
-    public static TrackedFuture<String, TransformedTargetRequestAndResponse> transformAndSendRequest(
-        PacketToTransformingHttpHandlerFactory inputRequestTransformerFactory,
-        ReplayEngine replayEngine,
-        IReplayContexts.IReplayerHttpTransactionContext ctx,
-        @NonNull Instant start,
-        @NonNull Instant end,
-        Supplier<Stream<byte[]>> packetsSupplier
-    ) {
-        try {
-            var transformationCompleteFuture = replayEngine.scheduleTransformationWork(
-                ctx,
-                start,
-                () -> transformAllData(inputRequestTransformerFactory.create(ctx), packetsSupplier)
-            );
-            log.atDebug()
-                .setMessage(
-                    () -> "finalizeRequest future for transformation of " + ctx + " = " + transformationCompleteFuture
-                )
-                .log();
-            // It might be safer to chain this work directly inside the scheduleWork call above so that the
-            // read buffer horizons aren't set after the transformation work finishes, but after the packets
-            // are fully handled
-            return transformationCompleteFuture.thenCompose(
-                transformedResult -> replayEngine.scheduleRequest(
-                    ctx,
-                    start,
-                    end,
-                    transformedResult.transformedOutput.size(),
-                    transformedResult.transformedOutput.streamRetained()
-                )
-                    .map(
-                        future -> future.thenApply(
-                            t -> new TransformedTargetRequestAndResponse(
-                                transformedResult.transformedOutput,
-                                t,
-                                transformedResult.transformationStatus,
-                                t.error
-                            )
-                        ),
-                        () -> "(if applicable) packaging transformed result into a completed TransformedTargetRequestAndResponse object"
-                    )
-                    .map(
-                        future -> future.exceptionally(
-                            t -> new TransformedTargetRequestAndResponse(
-                                transformedResult.transformedOutput,
-                                transformedResult.transformationStatus,
-                                t
-                            )
-                        ),
-                        () -> "(if applicable) packaging transformed result into a failed TransformedTargetRequestAndResponse object"
-                    ),
-                () -> "transitioning transformed packets onto the wire"
-            )
-                .map(
-                    future -> future.exceptionally(t -> new TransformedTargetRequestAndResponse(null, null, t)),
-                    () -> "Checking for exception out of sending data to the target server"
-                );
-        } catch (Exception e) {
-            log.debug("Caught exception in writeToSocket, so failing future");
-            return TextTrackedFuture.failedFuture(e, () -> "TrafficReplayer.writeToSocketAndClose");
-        }
-    }
-
-    private static <R> TrackedFuture<String, R> transformAllData(
-        IPacketFinalizingConsumer<R> packetHandler,
-        Supplier<Stream<byte[]>> packetSupplier
-    ) {
-        try {
-            var logLabel = packetHandler.getClass().getSimpleName();
-            var packets = packetSupplier.get().map(Unpooled::wrappedBuffer);
-            packets.forEach(packetData -> {
-                log.atDebug()
-                    .setMessage(
-                        () -> logLabel + " sending " + packetData.readableBytes() + " bytes to the packetHandler"
-                    )
-                    .log();
-                var consumeFuture = packetHandler.consumeBytes(packetData);
-                log.atDebug().setMessage(() -> logLabel + " consumeFuture = " + consumeFuture).log();
-            });
-            log.atDebug().setMessage(() -> logLabel + "  done sending bytes, now finalizing the request").log();
-            return packetHandler.finalizeRequest();
-        } catch (Exception e) {
+    protected void perResponseConsumer(AggregatedRawResponse summary,
+                                       HttpRequestTransformationStatus transformationStatus,
+                                       IReplayContexts.IReplayerHttpTransactionContext context) {
+        if (summary != null && summary.getError() != null) {
             log.atInfo()
-                .setCause(e)
-                .setMessage(
-                    "Encountered an exception while transforming the http request.  "
-                        + "The base64 gzipped traffic stream, for later diagnostic purposes, is: "
-                        + Utils.packetsToCompressedTrafficStream(packetSupplier.get())
-                )
+                .setCause(summary.getError())
+                .setMessage("Exception for {}: ")
+                .addArgument(context)
                 .log();
-            throw e;
+            exceptionRequestCount.incrementAndGet();
+        } else if (transformationStatus.isError()) {
+            log.atInfo()
+                .setCause(summary.getError())
+                .setMessage("Unknown error transforming {}: ")
+                .addArgument(context)
+                .log();
+            exceptionRequestCount.incrementAndGet();
+        } else if (summary == null) {
+            log.atInfo()
+                .setMessage("Not counting this response.  No result at all for {}: ")
+                .addArgument(context)
+                .log();
+        } else {
+            successfulRequestCount.incrementAndGet();
         }
     }
 

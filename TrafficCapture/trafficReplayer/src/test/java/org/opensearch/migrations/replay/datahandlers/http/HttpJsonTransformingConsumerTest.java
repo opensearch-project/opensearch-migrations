@@ -52,7 +52,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
     @MethodSource("provideTestParameters")
     public void testRequestProcessing(Integer attemptedChunks, Boolean hostTransformation, String requestFile)
         throws Exception {
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(
             Duration.ofMillis(Math.min(100 / attemptedChunks, 1)),
             dummyAggregatedResponse
@@ -79,8 +79,8 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
             : testBytes;
 
         var expectedTransformationStatus = (hostTransformation)
-            ? HttpRequestTransformationStatus.COMPLETED
-            : HttpRequestTransformationStatus.SKIPPED;
+            ? HttpRequestTransformationStatus.completed()
+            : HttpRequestTransformationStatus.skipped();
 
         Assertions.assertEquals(
             new String(expectedBytes, StandardCharsets.UTF_8),
@@ -98,7 +98,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
 
     @Test
     public void testRemoveAuthHeadersWorks() throws Exception {
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformingConsumer<AggregatedRawResponse>(
             new TransformationLoader().getTransformerFactoryLoader("test.domain"),
@@ -121,12 +121,12 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         var returnedResponse = transformingHandler.finalizeRequest().get();
         Assertions.assertEquals(new String(testBytes, StandardCharsets.UTF_8), testPacketCapture.getCapturedAsString());
         Assertions.assertArrayEquals(testBytes, testPacketCapture.getBytesCaptured());
-        Assertions.assertEquals(HttpRequestTransformationStatus.SKIPPED, returnedResponse.transformationStatus);
+        Assertions.assertEquals(HttpRequestTransformationStatus.skipped(), returnedResponse.transformationStatus);
     }
 
     @Test
     public void testPartialBodyThrowsAndIsRedriven() throws Exception {
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var complexTransformer = new JsonCompositeTransformer(new IJsonTransformer() {
             @Override
@@ -164,10 +164,10 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         var returnedResponse = transformingHandler.finalizeRequest().get();
         Assertions.assertEquals(new String(testBytes, StandardCharsets.UTF_8), testPacketCapture.getCapturedAsString());
         Assertions.assertArrayEquals(testBytes, testPacketCapture.getBytesCaptured());
-        Assertions.assertEquals(HttpRequestTransformationStatus.ERROR, returnedResponse.transformationStatus);
+        Assertions.assertTrue(returnedResponse.transformationStatus.isError());
         Assertions.assertInstanceOf(
             NettyJsonBodyAccumulateHandler.IncompleteJsonBodyException.class,
-            returnedResponse.error
+            returnedResponse.transformationStatus.getException()
         );
     }
 

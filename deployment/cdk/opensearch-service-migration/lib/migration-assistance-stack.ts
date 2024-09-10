@@ -1,32 +1,30 @@
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
-import {
-    IPeer,
-    IVpc,
-    Peer,
-    Port,
-    SecurityGroup,
-    SubnetFilter,
-    SubnetType
-} from "aws-cdk-lib/aws-ec2";
+import {IVpc, Port, SecurityGroup, SubnetFilter, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {FileSystem} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
-import {CfnCluster, CfnConfiguration} from "aws-cdk-lib/aws-msk";
+import {CfnConfiguration} from "aws-cdk-lib/aws-msk";
 import {Cluster} from "aws-cdk-lib/aws-ecs";
 import {StackPropsExt} from "./stack-composer";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {StreamingSourceType} from "./streaming-source-type";
 import {Bucket, BucketEncryption} from "aws-cdk-lib/aws-s3";
 import {createMigrationStringParameter, MigrationSSMParameter, parseRemovalPolicy} from "./common-utilities";
+import {
+    ClientAuthentication,
+    ClientBrokerEncryption,
+    Cluster as MSKCluster,
+    ClusterMonitoringLevel,
+    KafkaVersion
+} from "@aws-cdk/aws-msk-alpha";
+import {SelectedSubnets} from "aws-cdk-lib/aws-ec2/lib/vpc";
+import {KafkaYaml} from "./migration-services-yaml";
 
 export interface MigrationStackProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly streamingSourceType: StreamingSourceType,
     // Future support needed to allow importing an existing MSK cluster
     readonly mskImportARN?: string,
-    readonly mskEnablePublicEndpoints?: boolean,
-    readonly mskRestrictPublicAccessTo?: string,
-    readonly mskRestrictPublicAccessType?: string,
-    readonly mskBrokerNodeCount?: number,
+    readonly mskBrokersPerAZCount?: number,
     readonly mskSubnetIds?: string[],
     readonly mskAZCount?: number,
     readonly replayerOutputEFSRemovalPolicy?: string
@@ -35,26 +33,12 @@ export interface MigrationStackProps extends StackPropsExt {
 
 
 export class MigrationAssistanceStack extends Stack {
-
-    getPublicEndpointAccess(restrictPublicAccessTo: string, restrictPublicAccessType: string): IPeer {
-        switch (restrictPublicAccessType) {
-            case 'ipv4':
-                return Peer.ipv4(restrictPublicAccessTo);
-            case 'ipv6':
-                return Peer.ipv6(restrictPublicAccessTo);
-            case 'prefixList':
-                return Peer.prefixList(restrictPublicAccessTo);
-            case 'securityGroupId':
-                return Peer.securityGroupId(restrictPublicAccessTo);
-            default:
-                throw new Error('mskRestrictPublicAccessType should be one of the below values: ipv4, ipv6, prefixList or securityGroupId');
-        }
-    }
+    kafkaYaml: KafkaYaml;
 
     // This function exists to overcome the limitation on the vpc.selectSubnets() call which requires the subnet
     // type to be provided or else an empty list will be returned if public subnets are provided, thus this function
     // tries different subnet types if unable to select the provided subnetIds
-    selectSubnetsFromTypes(vpc: IVpc, subnetIds: string[]): string[] {
+    selectSubnetsFromTypes(vpc: IVpc, subnetIds: string[]): SelectedSubnets {
         const subnetsTypeList = [SubnetType.PRIVATE_WITH_EGRESS, SubnetType.PUBLIC, SubnetType.PRIVATE_ISOLATED]
         for (const subnetType of subnetsTypeList) {
             const subnets = vpc.selectSubnets({
@@ -62,20 +46,20 @@ export class MigrationAssistanceStack extends Stack {
                 subnetFilters: [SubnetFilter.byIds(subnetIds)]
             })
             if (subnets.subnetIds.length == subnetIds.length) {
-                return subnets.subnetIds
+                return subnets
             }
         }
         throw Error(`Unable to find subnet ids: ${subnetIds} in VPC: ${vpc.vpcId}. Please ensure all subnet ids exist and are of the same subnet type`)
     }
 
-    validateAndReturnVPCSubnetsForMSK(vpc: IVpc, brokerNodeCount: number, azCount: number, specifiedSubnetIds?: string[]): string[] {
+    validateAndReturnVPCSubnetsForMSK(vpc: IVpc, brokerNodeCount: number, azCount: number, specifiedSubnetIds?: string[]): SelectedSubnets {
         if (specifiedSubnetIds) {
             if (specifiedSubnetIds.length !== 2 && specifiedSubnetIds.length !== 3) {
                 throw new Error(`MSK requires subnets for 2 or 3 AZs, but have detected ${specifiedSubnetIds.length} subnet ids provided with 'mskSubnetIds'`)
             }
             if (brokerNodeCount < 2 || brokerNodeCount % specifiedSubnetIds.length !== 0) {
                 throw new Error(`The MSK broker node count (${brokerNodeCount} nodes inferred) must be a multiple of the number of 
-                    AZs (${specifiedSubnetIds.length} AZs inferred from provided 'mskSubnetIds'). The node count can be set with the 'mskBrokerNodeCount' context option.`)
+                    AZs (${specifiedSubnetIds.length} AZs inferred from provided 'mskSubnetIds'). The node count can be set with the 'mskBrokersPerAZCount' context option.`)
             }
             return this.selectSubnetsFromTypes(vpc, specifiedSubnetIds)
         }
@@ -84,24 +68,27 @@ export class MigrationAssistanceStack extends Stack {
         }
         if (brokerNodeCount < 2 || brokerNodeCount % azCount !== 0) {
             throw new Error(`The MSK broker node count (${brokerNodeCount} nodes inferred) must be a multiple of the number of 
-                AZs (${azCount} AZs inferred from provided 'mskAZCount'). The node count can be set with the 'mskBrokerNodeCount' context option.`)
+                AZs (${azCount} AZs inferred from provided 'mskAZCount'). The node count can be set with the 'mskBrokersPerAZCount' context option.`)
         }
 
-        let uniqueAzPrivateSubnets: string[] = []
+        let uniqueAzPrivateSubnets: SelectedSubnets|undefined
         if (vpc.privateSubnets.length > 0) {
             uniqueAzPrivateSubnets = vpc.selectSubnets({
                 subnetType: SubnetType.PRIVATE_WITH_EGRESS,
                 onePerAz: true
-            }).subnetIds
+            })
         }
-        let desiredSubnets
-        if (uniqueAzPrivateSubnets.length >= azCount) {
-            desiredSubnets = uniqueAzPrivateSubnets.sort().slice(0, azCount)
+        if (uniqueAzPrivateSubnets && uniqueAzPrivateSubnets.subnetIds.length >= azCount) {
+            const desiredSubnetIds = uniqueAzPrivateSubnets.subnetIds.sort().slice(0, azCount)
+            return vpc.selectSubnets({
+                subnetFilters: [
+                    SubnetFilter.byIds(desiredSubnetIds)
+                ]
+            })
         }
         else {
             throw new Error(`Not enough AZs available for private subnets in VPC to meet desired ${azCount} AZs. The AZ count can be specified with the 'mskAZCount' context option`)
         }
-        return desiredSubnets
     }
 
     createMSKResources(props: MigrationStackProps, streamingSecurityGroup: SecurityGroup) {
@@ -111,66 +98,43 @@ export class MigrationAssistanceStack extends Stack {
             serverProperties: "auto.create.topics.enable=true"
         })
 
-        if (props.mskEnablePublicEndpoints && props.mskRestrictPublicAccessTo && props.mskRestrictPublicAccessType) {
-            streamingSecurityGroup.addIngressRule(this.getPublicEndpointAccess(props.mskRestrictPublicAccessTo, props.mskRestrictPublicAccessType), Port.allTcp())
-        }
-
         const mskLogGroup = new LogGroup(this, 'migrationMSKBrokerLogGroup',  {
             retention: RetentionDays.THREE_MONTHS
         });
 
-        const brokerNodes = props.mskBrokerNodeCount ? props.mskBrokerNodeCount : 2
+        const brokerNodesPerAZ = props.mskBrokersPerAZCount ? props.mskBrokersPerAZCount : 1
         const mskAZs = props.mskAZCount ? props.mskAZCount : 2
-        const subnets = this.validateAndReturnVPCSubnetsForMSK(props.vpc, brokerNodes, mskAZs, props.mskSubnetIds)
+        const subnets = this.validateAndReturnVPCSubnetsForMSK(props.vpc, brokerNodesPerAZ * mskAZs, mskAZs, props.mskSubnetIds)
 
-        // Create an MSK cluster
-        const mskCluster = new CfnCluster(this, 'migrationMSKCluster', {
+        const mskCluster = new MSKCluster(this, 'mskCluster', {
             clusterName: `migration-msk-cluster-${props.stage}`,
-            kafkaVersion: '3.6.0',
-            numberOfBrokerNodes: brokerNodes,
-            brokerNodeGroupInfo: {
-                instanceType: 'kafka.m5.large',
-                clientSubnets: subnets,
-                connectivityInfo: {
-                    // Public access cannot be enabled on cluster creation
-                    publicAccess: {
-                        type: "DISABLED"
-                    }
-                },
-                securityGroups: [streamingSecurityGroup.securityGroupId]
-            },
+            kafkaVersion: KafkaVersion.V3_6_0,
+            numberOfBrokerNodes: brokerNodesPerAZ,
+            vpc: props.vpc,
+            vpcSubnets: subnets,
+            securityGroups: [streamingSecurityGroup],
             configurationInfo: {
                 arn: mskClusterConfig.attrArn,
-                // Current limitation of using L1 construct, would like to get latest revision dynamically
+                // Current limitation of alpha construct, would like to get latest revision dynamically
                 revision: 1
             },
-            encryptionInfo: {
-                encryptionInTransit: {
-                    clientBroker: 'TLS',
-                    inCluster: true
-                },
+            encryptionInTransit: {
+                clientBroker: ClientBrokerEncryption.TLS,
+                enableInCluster: true
             },
-            enhancedMonitoring: 'DEFAULT',
-            clientAuthentication: {
-                sasl: {
-                    iam: {
-                        enabled: true
-                    }
-                },
-                unauthenticated: {
-                    enabled: false
-                }
+            clientAuthentication: ClientAuthentication.sasl({
+                iam: true,
+            }),
+            logging: {
+                cloudwatchLogGroup: mskLogGroup
             },
-            loggingInfo: {
-                brokerLogs: {
-                    cloudWatchLogs: {
-                        enabled: true,
-                        logGroup: mskLogGroup.logGroupName
-                    }
-                }
-            }
+            monitoring: {
+                clusterMonitoringLevel: ClusterMonitoringLevel.DEFAULT
+            },
+            removalPolicy: RemovalPolicy.DESTROY
         });
-        createMigrationStringParameter(this, mskCluster.attrArn, {
+
+        createMigrationStringParameter(this, mskCluster.clusterArn, {
             ...props,
             parameter: MigrationSSMParameter.MSK_CLUSTER_ARN
         });
@@ -178,14 +142,19 @@ export class MigrationAssistanceStack extends Stack {
             ...props,
             parameter: MigrationSSMParameter.MSK_CLUSTER_NAME
         });
+        createMigrationStringParameter(this, mskCluster.bootstrapBrokersSaslIam, {
+            ...props,
+            parameter: MigrationSSMParameter.KAFKA_BROKERS
+        });
+
+        this.kafkaYaml = new KafkaYaml();
+        this.kafkaYaml.msk = '';
+        this.kafkaYaml.broker_endpoints = mskCluster.bootstrapBrokersSaslIam;
+
     }
 
     constructor(scope: Construct, id: string, props: MigrationStackProps) {
         super(scope, id, props);
-
-        if (props.mskEnablePublicEndpoints && (!props.mskRestrictPublicAccessTo || !props.mskRestrictPublicAccessType)) {
-            throw new Error("The 'mskEnablePublicEndpoints' option requires both 'mskRestrictPublicAccessTo' and 'mskRestrictPublicAccessType' options to be provided")
-        }
 
         const bucketRemovalPolicy = parseRemovalPolicy('artifactBucketRemovalPolicy', props.artifactBucketRemovalPolicy)
         const replayerEFSRemovalPolicy = parseRemovalPolicy('replayerOutputEFSRemovalPolicy', props.replayerOutputEFSRemovalPolicy)
@@ -204,26 +173,26 @@ export class MigrationAssistanceStack extends Stack {
             this.createMSKResources(props, streamingSecurityGroup)
         }
 
-        const replayerOutputSG = new SecurityGroup(this, 'replayerOutputSG', {
+        const sharedLogsSG = new SecurityGroup(this, 'sharedLogsSG', {
             vpc: props.vpc,
             allowAllOutbound: false,
         });
-        replayerOutputSG.addIngressRule(replayerOutputSG, Port.allTraffic());
+        sharedLogsSG.addIngressRule(sharedLogsSG, Port.allTraffic());
 
-        createMigrationStringParameter(this, replayerOutputSG.securityGroupId, {
+        createMigrationStringParameter(this, sharedLogsSG.securityGroupId, {
             ...props,
-            parameter: MigrationSSMParameter.REPLAYER_OUTPUT_ACCESS_SECURITY_GROUP_ID
+            parameter: MigrationSSMParameter.SHARED_LOGS_SECURITY_GROUP_ID
         });
 
         // Create an EFS file system for Traffic Replayer output
-        const replayerOutputEFS = new FileSystem(this, 'replayerOutputEFS', {
+        const sharedLogsEFS = new FileSystem(this, 'sharedLogsEFS', {
             vpc: props.vpc,
-            securityGroup: replayerOutputSG,
+            securityGroup: sharedLogsSG,
             removalPolicy: replayerEFSRemovalPolicy
         });
-        createMigrationStringParameter(this, replayerOutputEFS.fileSystemId, {
+        createMigrationStringParameter(this, sharedLogsEFS.fileSystemId, {
             ...props,
-            parameter: MigrationSSMParameter.REPLAYER_OUTPUT_EFS_ID
+            parameter: MigrationSSMParameter.SHARED_LOGS_EFS_ID
         });
 
         const serviceSecurityGroup = new SecurityGroup(this, 'serviceSecurityGroup', {

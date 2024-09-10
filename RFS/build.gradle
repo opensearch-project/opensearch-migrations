@@ -1,17 +1,13 @@
 plugins {
     id 'application'
     id 'java'
-    id 'io.freefair.lombok' version '8.6'
+    id 'io.freefair.lombok'
     id 'java-test-fixtures'
+    id 'me.champeau.jmh'
 }
 
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
-
-
-repositories {
-    mavenCentral()
-}
 
 ext {
     awsSdkVersion = '2.25.16'
@@ -63,6 +59,8 @@ dependencies {
 
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
 
+    testImplementation group: 'org.openjdk.jmh', name: 'jmh-core'
+
     // Integration tests
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':coreUtilities'))
@@ -77,6 +75,7 @@ dependencies {
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
 
     testFixturesImplementation project(":commonDependencyVersionConstraints")
+    testFixturesImplementation project(':transformation')
     testFixturesImplementation testFixtures(project(":coreUtilities"))
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java'
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java-core'
@@ -86,24 +85,10 @@ dependencies {
     testFixturesImplementation group: 'org.hamcrest', name: 'hamcrest'
 }
 
-test {
-    useJUnitPlatform {
-        excludeTags 'longTest'
-    }
-
-    testLogging {
-        events "passed", "skipped", "failed"
-        exceptionFormat "full"
-        showExceptions true
-        showCauses true
-        showStackTraces true
-        showStandardStreams = true
-    }
-}
-
-task slowTest(type: Test) {
-    // include longTest
-    jacoco {
-        enabled = true
-    }
+jmh {
+    includeTests = true // Benchmarks should be in test code, not product code
+    failOnError = true
+    fork = 0
+    humanOutputFile = project.file("${project.buildDir}/reports/jmh/human.txt")
+    resultsFile = project.file("${project.buildDir}/reports/jmh/results.txt")
 }

@@ -287,8 +287,6 @@ export function getMigrationStringParameterName(props: MigrationSSMConfig): stri
 }
 
 export enum MigrationSSMParameter {
-    MIGRATION_API_URL = 'albMigrationApiUrl',
-    MIGRATION_API_URL_ALIAS = 'albMigrationApiUrlAlias',
     SOURCE_PROXY_URL = 'albSourceProxyUrl',
     SOURCE_PROXY_URL_ALIAS = 'albSourceProxyUrlAlias',
     TARGET_PROXY_URL = 'albTargetProxyUrl',
@@ -308,8 +306,8 @@ export enum MigrationSSMParameter {
     OS_USER_AND_SECRET_ARN = 'osUserAndSecretArn',
     OSI_PIPELINE_LOG_GROUP_NAME = 'osiPipelineLogGroupName',
     OSI_PIPELINE_ROLE_ARN = 'osiPipelineRoleArn',
-    REPLAYER_OUTPUT_ACCESS_SECURITY_GROUP_ID = 'replayerOutputAccessSecurityGroupId',
-    REPLAYER_OUTPUT_EFS_ID = 'replayerOutputEfsId',
+    SHARED_LOGS_SECURITY_GROUP_ID = 'sharedLogsSecurityGroupId',
+    SHARED_LOGS_EFS_ID = 'sharedLogsEfsId',
     SOURCE_CLUSTER_ENDPOINT = 'sourceClusterEndpoint',
     SERVICE_SECURITY_GROUP_ID = 'serviceSecurityGroupId',
     SERVICES_YAML_FILE = 'servicesYamlFile',

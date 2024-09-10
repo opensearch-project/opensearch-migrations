@@ -8,7 +8,6 @@ import java.util.AbstractMap.SimpleEntry;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Semaphore;
@@ -24,6 +23,8 @@ import org.junit.jupiter.api.parallel.ExecutionMode;
 
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.http.retries.NoRetryEvaluatorFactory;
 import org.opensearch.migrations.replay.util.NettyUtils;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 import org.opensearch.migrations.replay.util.TextTrackedFuture;
@@ -84,9 +85,17 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                 } catch (InterruptedException e) {
                     throw Lombok.sneakyThrow(e);
                 }
-                return new AggregatedRawResponse(0, Duration.ZERO, null, null);
+                return new AggregatedRawResponse(null, 0, Duration.ZERO, null, null);
             }), () -> "finalizeRequest waiting on test-gate semaphore release");
         }
+    }
+
+    static String getUriForIthRequest(int i) {
+        return String.format("/%04d", i);
+    }
+
+    static String getRequestString(int i) {
+        return TestHttpServerContext.getRequestStringForSimpleGet(getUriForIthRequest(i));
     }
 
     @Test
@@ -95,7 +104,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
         final int NUM_REPEATS = 1;
         final int NUM_PACKETS = 3;
 
-        var clientConnectionPool = TrafficReplayerTopLevel.makeClientConnectionPool(
+        var clientConnectionPool = TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
             new URI("http://localhost"),
             false,
             1,
@@ -116,15 +125,16 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
             // half the time schedule at the same time as the last one, the other half, 10ms later than the previous
             var perPacketShift = Duration.ofMillis(10 * i / NUM_REPEATS);
             var startTimeForThisRequest = baseTime.plus(perPacketShift);
-            var requestPackets = IntStream.range(0, NUM_PACKETS)
+            var requestPackets = new ByteBufList(IntStream.range(0, NUM_PACKETS)
                 .mapToObj(b -> Unpooled.wrappedBuffer(new byte[] { (byte) b }))  // TODO refCnt issue
-                .collect(Collectors.toList());
+                .toArray(ByteBuf[]::new));
             var arrCf = senderOrchestrator.scheduleRequest(
                 requestContext.getReplayerRequestKey(),
                 requestContext,
                 startTimeForThisRequest,
                 Duration.ofMillis(1),
-                requestPackets.stream()
+                requestPackets,
+                new NoRetryEvaluatorFactory.NoRetryVisitor()
             );
 
             log.info("Scheduled item to run at " + startTimeForThisRequest);
@@ -203,7 +213,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
             )
         ) {
             var testServerUri = httpServer.localhostEndpoint();
-            var clientConnectionPool = TrafficReplayerTopLevel.makeClientConnectionPool(
+            var clientConnectionPool = TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                 testServerUri,
                 false,
                 1,
@@ -227,7 +237,8 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                     requestContext,
                     startTimeForThisRequest,
                     Duration.ofMillis(1),
-                    requestPackets.stream()
+                    requestPackets,
+                    new NoRetryEvaluatorFactory.NoRetryVisitor()
                 );
                 log.info("Scheduled item to run at " + startTimeForThisRequest);
                 scheduledItems.add(arr);
@@ -243,6 +254,7 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
 
             Assertions.assertEquals(NUM_REQUESTS_TO_SCHEDULE, scheduledItems.size());
             for (int i = 0; i < scheduledItems.size(); ++i) {
+                log.error("Checking item="+i);
                 var cf = scheduledItems.get(i);
                 var arr = cf.get();
                 Assertions.assertNull(arr.error);
@@ -255,9 +267,8 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                     var messageHolder = RefSafeHolder.create(
                         HttpByteBufFormatter.parseHttpMessageFromBufs(
                             HttpByteBufFormatter.HttpMessageType.RESPONSE,
-                            bufStream
-                        )
-                    )
+                            bufStream,
+                            1024*1024))
                 ) {
                     var message = messageHolder.get();
                     Assertions.assertNotNull(message);
@@ -265,23 +276,29 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                     Assertions.assertEquals(200, response.status().code());
                     var body = response.content();
                     Assertions.assertEquals(
-                        TestHttpServerContext.SERVER_RESPONSE_BODY_PREFIX + TestHttpServerContext.getUriForIthRequest(
+                        TestHttpServerContext.SERVER_RESPONSE_BODY_PREFIX + getUriForIthRequest(
                             i / NUM_REPEATS
                         ),
                         body.toString(StandardCharsets.UTF_8)
                     );
+                } catch (Throwable e) {
+                    log.atError().setMessage(()->"caught exception(1)").setCause(e).log();
+                    throw e;
                 }
             }
             closeFuture.get();
+            log.error("Done running loop");
+        } catch (Throwable e) {
+            log.atError().setMessage(()->"caught exception(2)").setCause(e).log();
+            throw e;
         }
     }
 
-    private List<ByteBuf> makeRequest(int i) {
+    private ByteBufList makeRequest(int i) {
         // uncomment/swap for a simpler test case to run
-        return // List.of(Unpooled.wrappedBuffer(getRequestString(i).getBytes()));
-        TestHttpServerContext.getRequestString(i)
+        return new ByteBufList(getRequestString(i)
             .chars()
             .mapToObj(c -> Unpooled.wrappedBuffer(new byte[] { (byte) c }))
-            .collect(Collectors.toList());
+            .toArray(ByteBuf[]::new));
     }
 }

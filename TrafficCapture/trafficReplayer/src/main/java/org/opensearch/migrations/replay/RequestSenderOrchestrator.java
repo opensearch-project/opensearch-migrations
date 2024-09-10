@@ -5,70 +5,92 @@ import java.time.Instant;
 import java.util.Iterator;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
-import java.util.stream.Stream;
 
 import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.datatypes.ChannelTask;
 import org.opensearch.migrations.replay.datatypes.ChannelTaskType;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
+import org.opensearch.migrations.replay.util.RefSafeHolder;
 import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import org.opensearch.migrations.replay.util.TrackedFuture;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.EventLoop;
+import io.netty.util.concurrent.ScheduledFuture;
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
+/**
+ * This class deals with scheduling different HTTP connection/request activities on a Netty Event Loop.
+ * There are 4 public methods for this class.  scheduleAtFixedRate serves as a utility function and the
+ * other 3 schedule methods.  scheduleWork handles any preparatory work that may need to be performed
+ * (like transformation).  scheduleRequest will send the request and wait for the response, retrying
+ * as necessary (with the same pacing, though it should probably be as fast as possible for retries - TODO).
+ * scheduleClose will close the connection, if still open, used to send requests for the specified channel.<br><br>
+ *
+ * Notice that if the channel doesn't exist or isn't active when sending any request, a new one will be
+ * created.  That channel (a socket connection to the server) is managed by theClientConnectionPool that's
+ * passed into the constructor.  The pool itself will create a connection (Channel/ChannelFuture) via a
+ * static factory method.  That connection is ready to hand off to packet consumer that's created from
+ * the IPacketConsumer factory passed to the constructor.  Of course, the connection may be reused by multiple
+ * IPacketConsumer objects (multiple requests on one connection) OR there could be multiple retries with new
+ * connections for one request.  So the coupling is actually between the IPacketConsumer, which is for a single
+ * request, and the ConnectionReplaySession, which can recreate (reconnect) a channel if it hasn't already or
+ * if its previously created one is no longer functional.<br><br>
+ *
+ *
+ */
 @Slf4j
 public class RequestSenderOrchestrator {
 
-    public TrackedFuture<String, Void> bindNettyScheduleToCompletableFuture(EventLoop eventLoop, Instant timestamp) {
-        return NettyFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop, getDelayFromNowMs(timestamp));
-    }
+    private final ClientConnectionPool clientConnectionPool;
+    private final Duration initialRetryDelay;
+    private final Duration maxRetryDelay;
+    private final BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory;
 
-    public TextTrackedFuture<Void> bindNettyScheduleToCompletableFuture(
-        EventLoop eventLoop,
-        Instant timestamp,
-        TrackedFuture<String, Void> existingFuture
+    /**
+     * Notice that the two arguments need to be in agreement with each other.  The clientConnectionPool will need to
+     * be able to create/return ConnectionReplaySession objects with Channels (or, to be more exact, ChannelFutures
+     * that resolve Channels) that can be utilized by the IPacketFinalizingConsumer objects.  For example, it TLS
+     * is being used, either the clientConnectionPool will be responsible for configuring the channel with handlers
+     * to do that or that functionality will need to be provided by the factory/packet consumer.
+     * @param clientConnectionPool
+     * @param packetConsumerFactory
+     */
+    public RequestSenderOrchestrator(
+        ClientConnectionPool clientConnectionPool,
+        BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory
     ) {
-        var delayMs = getDelayFromNowMs(timestamp);
-        NettyFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop, delayMs, existingFuture.future);
-        return new TextTrackedFuture<>(
-            existingFuture.future,
-            "scheduling to run next send at " + timestamp + " in " + delayMs + "ms"
-        );
+        this(clientConnectionPool, Duration.ofMillis(100), Duration.ofSeconds(300), packetConsumerFactory);
     }
-
-    public CompletableFuture<Void> bindNettyScheduleToCompletableFuture(
-        EventLoop eventLoop,
-        Instant timestamp,
-        CompletableFuture<Void> cf
-    ) {
-        return NettyFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop, getDelayFromNowMs(timestamp), cf);
-    }
-
-    public final ClientConnectionPool clientConnectionPool;
-    public final BiFunction<
-        ConnectionReplaySession,
-        IReplayContexts.IReplayerHttpTransactionContext,
-        IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory;
 
     public RequestSenderOrchestrator(
         ClientConnectionPool clientConnectionPool,
-        BiFunction<
-            ConnectionReplaySession,
-            IReplayContexts.IReplayerHttpTransactionContext,
-            IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory
+        Duration initialRetryDelay,
+        Duration maxRetryDelay,
+        BiFunction<ConnectionReplaySession, IReplayContexts.IReplayerHttpTransactionContext, IPacketFinalizingConsumer<AggregatedRawResponse>> packetConsumerFactory
     ) {
         this.clientConnectionPool = clientConnectionPool;
+        this.initialRetryDelay = initialRetryDelay;
+        this.maxRetryDelay = maxRetryDelay;
         this.packetConsumerFactory = packetConsumerFactory;
+    }
+
+    public ScheduledFuture<?> scheduleAtFixedRate(Runnable runnable,
+                                                  long initialDelay,
+                                                  long delay,
+                                                  TimeUnit timeUnit) {
+        return clientConnectionPool.scheduleAtFixedRate(runnable, initialDelay, delay, timeUnit);
     }
 
     public <T> TrackedFuture<String, T> scheduleWork(
@@ -106,12 +128,33 @@ public class RequestSenderOrchestrator {
             }, () -> "The scheduled callback is running work for " + ctx);
     }
 
-    public TrackedFuture<String, AggregatedRawResponse> scheduleRequest(
+    public enum RetryDirective {
+        DONE, RETRY
+    }
+
+    @AllArgsConstructor
+    public static class DeterminedTransformedResponse<T> {
+        RetryDirective directive;
+        T value;
+    }
+
+    public interface RetryVisitor<T> {
+        /**
+         * Return null to continue trying according to
+         * @param arr
+         * @return
+         */
+        TrackedFuture<String,DeterminedTransformedResponse<T>>
+        visit(ByteBuf requestBytes, AggregatedRawResponse arr, Throwable t);
+    }
+
+    public <T> TrackedFuture<String, T> scheduleRequest(
         UniqueReplayerRequestKey requestKey,
         IReplayContexts.IReplayerHttpTransactionContext ctx,
         Instant start,
         Duration interval,
-        Stream<ByteBuf> packets
+        ByteBufList packets,
+        RetryVisitor<T> visitor
     ) {
         var sessionNumber = requestKey.sourceRequestIndexSessionIdentifier;
         var channelInteractionNum = requestKey.getReplayerRequestIndex();
@@ -130,7 +173,8 @@ public class RequestSenderOrchestrator {
                 connectionReplaySession,
                 start,
                 interval,
-                packets
+                packets,
+                visitor
             )
         );
     }
@@ -157,6 +201,31 @@ public class RequestSenderOrchestrator {
                 channelInteraction
             )
         );
+    }
+
+    private TrackedFuture<String, Void> bindNettyScheduleToCompletableFuture(EventLoop eventLoop, Instant timestamp) {
+        return NettyFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop, getDelayFromNowMs(timestamp));
+    }
+
+    private TextTrackedFuture<Void> bindNettyScheduleToCompletableFuture(
+        EventLoop eventLoop,
+        Instant timestamp,
+        TrackedFuture<String, Void> existingFuture
+    ) {
+        var delayMs = getDelayFromNowMs(timestamp);
+        NettyFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop, delayMs, existingFuture.future);
+        return new TextTrackedFuture<>(
+            existingFuture.future,
+            "scheduling to run next send at " + timestamp + " in " + delayMs + "ms"
+        );
+    }
+
+    private CompletableFuture<Void> bindNettyScheduleToCompletableFuture(
+        EventLoop eventLoop,
+        Instant timestamp,
+        CompletableFuture<Void> cf
+    ) {
+        return NettyFutureBinders.bindNettyScheduleToCompletableFuture(eventLoop, getDelayFromNowMs(timestamp), cf);
     }
 
     /**
@@ -197,12 +266,13 @@ public class RequestSenderOrchestrator {
             }, () -> "Waiting for sequencer to finish for slot " + channelInteractionNumber);
     }
 
-    private TrackedFuture<String, AggregatedRawResponse> scheduleSendRequestOnConnectionReplaySession(
+    private <T> TrackedFuture<String, T> scheduleSendRequestOnConnectionReplaySession(
         IReplayContexts.IReplayerHttpTransactionContext ctx,
         ConnectionReplaySession connectionReplaySession,
         Instant startTime,
         Duration interval,
-        Stream<ByteBuf> packets
+        ByteBufList packets,
+        RetryVisitor<T> visitor
     ) {
         var eventLoop = connectionReplaySession.eventLoop;
         var scheduledContext = ctx.createScheduledContext(startTime);
@@ -211,22 +281,20 @@ public class RequestSenderOrchestrator {
             ctx.getLogicalEnclosingScope().getChannelKey(),
             channelInterationNum
         );
+        packets.retain();
         return scheduleOnConnectionReplaySession(
             diagnosticCtx,
             connectionReplaySession,
             startTime,
             new ChannelTask<>(ChannelTaskType.TRANSMIT, trigger -> trigger.thenCompose(voidVal -> {
                 scheduledContext.close();
-                return sendSendingRestOfPackets(
-                    packetConsumerFactory.apply(connectionReplaySession, ctx),
-                    eventLoop,
-                    packets.iterator(),
-                    startTime,
-                    interval,
-                    new AtomicInteger()
-                );
+                final Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier =
+                    () -> packetConsumerFactory.apply(connectionReplaySession, ctx);
+                return sendRequestWithRetries(senderSupplier, eventLoop, packets, startTime, initialRetryDelay,
+                    interval, visitor);
             }, () -> "sending packets for request"))
-        );
+        )
+            .whenComplete((v,t) -> packets.release(), () -> "waiting for request to be sent to release ByteBufList");
     }
 
     private TrackedFuture<String, Void> scheduleCloseOnConnectionReplaySession(
@@ -300,27 +368,73 @@ public class RequestSenderOrchestrator {
         return Duration.ofMillis(Math.max(0, Duration.between(now(), to).toMillis()));
     }
 
-    private TrackedFuture<String, AggregatedRawResponse> sendSendingRestOfPackets(
+    private Duration doubleRetryDelayCapped(Duration d) {
+        return Duration.ofMillis(Math.min(d.multipliedBy(2).toMillis(), maxRetryDelay.toMillis()));
+    }
+
+    private <T> TrackedFuture<String, T>
+    sendRequestWithRetries(Supplier<IPacketFinalizingConsumer<AggregatedRawResponse>> senderSupplier,
+                           EventLoop eventLoop,
+                           ByteBufList byteBufList,
+                           Instant referenceStartTime,
+                           Duration nextRetryDelay,
+                           Duration interval,
+                           RetryVisitor<T> visitor)
+    {
+        if (eventLoop.isShuttingDown()) {
+            return TextTrackedFuture.failedFuture(new IllegalStateException("EventLoop is shutting down"),
+                () -> "sendRequestWithRetries is failing due to the pending shutdown of the EventLoop");
+        }
+        return sendPackets(senderSupplier.get(), eventLoop,
+            byteBufList.streamUnretained().iterator(), referenceStartTime, interval, new AtomicInteger())
+            .getDeferredFutureThroughHandle((response, t) -> {
+                    try (var requestBytesHolder = RefSafeHolder.create(byteBufList.asCompositeByteBufRetained())) {
+                        return visitor.visit(requestBytesHolder.get(), response, t);
+                    }
+                },
+                () -> "checking response to determine if the request should be retried")
+            .getDeferredFutureThroughHandle((dtr,t) -> {
+                if (t != null) {
+                    return TextTrackedFuture.failedFuture(t, () -> "failed future");
+                }
+                if (dtr.directive == RetryDirective.RETRY) {
+                    var newStartTime = referenceStartTime.plus(nextRetryDelay);
+                    log.atInfo().setMessage(() -> "Making request scheduled at " + newStartTime).log();
+                    var schedulingDelay = Duration.between(now(), newStartTime);
+                    return NettyFutureBinders.bindNettyScheduleToCompletableFuture(
+                        eventLoop, schedulingDelay)
+                        .thenCompose(
+                            v -> sendRequestWithRetries(senderSupplier, eventLoop, byteBufList, newStartTime,
+                                doubleRetryDelayCapped(nextRetryDelay), interval, visitor),
+                            () -> "retrying request with delay of " + schedulingDelay);
+                } else {
+                    return TextTrackedFuture.completedFuture(dtr.value,
+                        () -> "done retrying and returning received response");
+                }
+            }, () -> "determining if the response must be retried or if it should be returned now");
+    }
+
+    private TrackedFuture<String, AggregatedRawResponse> sendPackets(
         IPacketFinalizingConsumer<AggregatedRawResponse> packetReceiver,
         EventLoop eventLoop,
         Iterator<ByteBuf> iterator,
-        Instant startAt,
+        Instant referenceStartAt,
         Duration interval,
-        AtomicInteger counter
+        AtomicInteger requestPacketCounter
     ) {
-        final var oldCounter = counter.getAndIncrement();
-        log.atTrace().setMessage(() -> "sendNextPartAndContinue: counter=" + oldCounter).log();
+        final var oldCounter = requestPacketCounter.getAndIncrement();
+        log.atTrace().setMessage(() -> "sendNextPartAndContinue: packetCounter=" + oldCounter).log();
         assert iterator.hasNext() : "Should not have called this with no items to send";
 
-        var consumeFuture = packetReceiver.consumeBytes(iterator.next());
+        var consumeFuture = packetReceiver.consumeBytes(iterator.next().retainedDuplicate());
         if (iterator.hasNext()) {
             return consumeFuture.thenCompose(
                 tf -> NettyFutureBinders.bindNettyScheduleToCompletableFuture(
-                    eventLoop,
-                    Duration.between(now(), startAt.plus(interval.multipliedBy(counter.get())))
-                )
+                        eventLoop,
+                        Duration.between(now(), referenceStartAt.plus(interval.multipliedBy(requestPacketCounter.get())))
+                    )
                     .thenCompose(
-                        v -> sendSendingRestOfPackets(packetReceiver, eventLoop, iterator, startAt, interval, counter),
+                        v -> sendPackets(packetReceiver, eventLoop, iterator, referenceStartAt, interval, requestPacketCounter),
                         () -> "sending next packet"
                     ),
                 () -> "recursing, once ready"

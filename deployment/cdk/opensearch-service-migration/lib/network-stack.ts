@@ -22,6 +22,7 @@ export interface NetworkStackProps extends StackPropsExt {
     readonly targetClusterProxyServiceEnabled?: boolean;
     readonly captureProxyESServiceEnabled?: boolean;
     readonly migrationAPIEnabled?: boolean;
+    readonly sourceClusterDisabled?: boolean;
     readonly sourceClusterEndpoint?: string;
     readonly targetClusterEndpoint?: string;
     readonly targetClusterUsername?: string;
@@ -35,7 +36,6 @@ export class NetworkStack extends Stack {
     public readonly albSourceProxyTG: IApplicationTargetGroup;
     public readonly albTargetProxyTG: IApplicationTargetGroup;
     public readonly albSourceClusterTG: IApplicationTargetGroup;
-    public readonly albMigrationConsoleTG: IApplicationTargetGroup;
 
     // Validate a proper url string is provided and return an url string which contains a protocol, host name, and port.
     // If a port is not provided, the default protocol port (e.g. 443, 80) will be explicitly added
@@ -138,7 +138,6 @@ export class NetworkStack extends Stack {
 
         const needAlb = props.captureProxyServiceEnabled ||
             props.elasticsearchServiceEnabled ||
-            props.migrationAPIEnabled ||
             props.captureProxyESServiceEnabled ||
             props.targetClusterProxyServiceEnabled;
 
@@ -190,14 +189,6 @@ export class NetworkStack extends Stack {
                 createALBListenerUrlParameter(9999, MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT);
             }
 
-            // Setup when deploying migration console api on ecs
-            if (props.migrationAPIEnabled) {
-                this.albMigrationConsoleTG = this.createSecureTargetGroup('ALBMigrationConsole', props.stage, 8000, this.vpc);
-                this.createSecureListener('MigrationConsole', 8000, alb, cert, this.albMigrationConsoleTG);
-                createALBListenerUrlParameter(8000, MigrationSSMParameter.MIGRATION_API_URL);
-                createALBListenerUrlParameterAlias(8000, MigrationSSMParameter.MIGRATION_API_URL_ALIAS);
-            }
-
             // Setup when deploying capture proxy in ECS
             if (props.captureProxyServiceEnabled || props.captureProxyESServiceEnabled) {
                 this.albSourceProxyTG = this.createSecureTargetGroup('ALBSourceProxy', props.stage, 9200, this.vpc);
@@ -234,8 +225,8 @@ export class NetworkStack extends Stack {
                 ...props,
                 parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT
             });
-        } else if (!this.albSourceClusterTG) {
-            throw new Error(`Capture Proxy ESService, Elasticsearch Service, or SourceClusterEndpoint must be enabled`);
+        } else if (!props.sourceClusterDisabled && !this.albSourceClusterTG) {
+            throw new Error(`Capture Proxy ESService, Elasticsearch Service, or SourceClusterEndpoint must be enabled, unless the source cluster is disabled.`);
         }
 
         if (!props.addOnMigrationDeployId) {

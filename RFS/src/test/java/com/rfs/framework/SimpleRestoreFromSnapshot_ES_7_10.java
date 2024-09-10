@@ -18,6 +18,7 @@ import com.rfs.common.OpenSearchClient;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.models.IndexMetadata;
+import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
 import com.rfs.version_es_7_10.IndexMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
 import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
@@ -76,11 +77,13 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
         for (final IndexMetadata index : indices) {
             for (int shardId = 0; shardId < index.getNumberOfShards(); shardId++) {
                 final var documents = new LuceneDocumentsReader(
-                    unpackedShardDataDir.resolve(index.getName()).resolve("" + shardId)
+                    unpackedShardDataDir.resolve(index.getName()).resolve("" + shardId),
+                    ElasticsearchConstants_ES_7_10.SOFT_DELETES_POSSIBLE,
+                    ElasticsearchConstants_ES_7_10.SOFT_DELETES_FIELD
                 ).readDocuments();
 
                 final var finalShardId = shardId;
-                new DocumentReindexer(client, 1000, 1).reindex(index.getName(), documents, context)
+                new DocumentReindexer(client, 100, Long.MAX_VALUE, 1).reindex(index.getName(), documents, context)
                     .doOnError(error -> logger.error("Error during reindexing: " + error))
                     .doOnSuccess(
                         done -> logger.info(

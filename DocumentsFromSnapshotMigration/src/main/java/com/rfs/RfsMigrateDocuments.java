@@ -8,6 +8,9 @@ import java.time.Duration;
 import java.util.List;
 import java.util.function.Function;
 
+import org.opensearch.migrations.Version;
+import org.opensearch.migrations.VersionConverter;
+import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -32,17 +35,12 @@ import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3Repo;
 import com.rfs.common.S3Uri;
-import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
 import com.rfs.common.TryHandlePhaseFailure;
 import com.rfs.common.http.ConnectionContext;
 import com.rfs.models.IndexMetadata;
 import com.rfs.models.ShardMetadata;
-import com.rfs.version_es_7_10.ElasticsearchConstants_ES_7_10;
-import com.rfs.version_es_7_10.IndexMetadataFactory_ES_7_10;
-import com.rfs.version_es_7_10.ShardMetadataFactory_ES_7_10;
-import com.rfs.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import com.rfs.worker.DocumentsRunner;
 import com.rfs.worker.ShardWorkPreparer;
 import lombok.extern.slf4j.Slf4j;
@@ -117,14 +115,24 @@ public class RfsMigrateDocuments {
 
         @Parameter(required = false,
         names = "--documents-per-bulk-request",
-        description = "Optional.  The number of documents to be included within each bulk request sent, default 1000")
-        int numDocsPerBulkRequest = 1000;
+        description = "Optional.  The number of documents to be included within each bulk request sent. Default no max (controlled by documents size)")
+        int numDocsPerBulkRequest = Integer.MAX_VALUE;
+
+        @Parameter(required = false,
+            names = "--documents-size-per-bulk-request",
+            description = "Optional. The maximum aggregate document size to be used in bulk requests in bytes. " +
+                "Note does not apply to single document requests. Default 10 MiB")
+        long numBytesPerBulkRequest = 10 * 1024L * 1024L;
 
         @Parameter(required = false,
             names = "--max-connections",
             description = "Optional.  The maximum number of connections to simultaneously " +
-                "used to communicate to the target, default 50")
-        int maxConnections = 50;
+                "used to communicate to the target, default 10")
+        int maxConnections = 10;
+
+        @Parameter(names = { "--source-version" }, description = ("Optional. Version of the source cluster.  Default: ES_7.10"), required = false,
+            converter = VersionConverter.class)
+        public Version sourceVersion = Version.fromString("ES 7.10");
     }
 
     public static class NoWorkLeftException extends Exception {
@@ -190,7 +198,9 @@ public class RfsMigrateDocuments {
                 log.info("Running RfsMigrateDocuments");
 
                 OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
-                DocumentReindexer reindexer = new DocumentReindexer(targetClient, arguments.numDocsPerBulkRequest,
+                DocumentReindexer reindexer = new DocumentReindexer(targetClient,
+                    arguments.numDocsPerBulkRequest,
+                    arguments.numBytesPerBulkRequest,
                     arguments.maxConnections);
 
                 SourceRepo sourceRepo;
@@ -203,27 +213,27 @@ public class RfsMigrateDocuments {
                 } else {
                     sourceRepo = new FileSystemRepo(snapshotLocalDirPath);
                 }
-                SnapshotRepo.Provider repoDataProvider = new SnapshotRepoProvider_ES_7_10(sourceRepo);
-
-                IndexMetadata.Factory indexMetadataFactory = new IndexMetadataFactory_ES_7_10(repoDataProvider);
-                ShardMetadata.Factory shardMetadataFactory = new ShardMetadataFactory_ES_7_10(repoDataProvider);
                 DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
+
+                var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, sourceRepo);
+
                 SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(
                     repoAccessor,
                     luceneDirPath,
-                    ElasticsearchConstants_ES_7_10.BUFFER_SIZE_IN_BYTES
+                    sourceResourceProvider.getBufferSizeInBytes()
                 );
 
                 run(
-                    LuceneDocumentsReader::new,
+                    LuceneDocumentsReader.getFactory(sourceResourceProvider.getSoftDeletesPossible(),
+                        sourceResourceProvider.getSoftDeletesFieldData()),
                     reindexer,
                     workCoordinator,
                     arguments.initialLeaseDuration,
                     processManager,
-                    indexMetadataFactory,
+                    sourceResourceProvider.getIndexMetadata(),
                     arguments.snapshotName,
                     arguments.indexAllowlist,
-                    shardMetadataFactory,
+                    sourceResourceProvider.getShardMetadata(),
                     unpackerFactory,
                     arguments.maxShardSizeBytes,
                     rootDocumentContext

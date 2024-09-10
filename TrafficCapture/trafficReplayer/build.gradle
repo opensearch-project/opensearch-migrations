@@ -15,10 +15,6 @@ plugins {
     id 'java-test-fixtures'
 }
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     implementation project(":commonDependencyVersionConstraints")
 
@@ -35,8 +31,6 @@ dependencies {
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     implementation group: 'com.google.guava', name: 'guava'
     implementation group: 'com.google.protobuf', name: 'protobuf-java'
-    implementation group: 'io.github.resilience4j', name: 'resilience4j-ratelimiter'
-    implementation group: 'io.github.resilience4j', name: 'resilience4j-retry'
     implementation group: 'io.netty', name: 'netty-all'
     implementation group: 'org.apache.kafka', name: 'kafka-clients'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'

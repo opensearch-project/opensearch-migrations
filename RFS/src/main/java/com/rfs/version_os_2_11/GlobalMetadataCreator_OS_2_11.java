@@ -7,54 +7,47 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
-import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts;
+import org.opensearch.migrations.metadata.GlobalMetadataCreator;
+import org.opensearch.migrations.metadata.GlobalMetadataCreatorResults;
+import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.IClusterMetadataContext;
 
 import com.rfs.common.OpenSearchClient;
 import com.rfs.models.GlobalMetadata;
+import lombok.AllArgsConstructor;
 
-public class GlobalMetadataCreator_OS_2_11 {
+@AllArgsConstructor
+public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
     private static final Logger logger = LogManager.getLogger(GlobalMetadataCreator_OS_2_11.class);
 
     private final OpenSearchClient client;
     private final List<String> legacyTemplateAllowlist;
     private final List<String> componentTemplateAllowlist;
     private final List<String> indexTemplateAllowlist;
-    private final IMetadataMigrationContexts.IClusterMetadataContext context;
 
-    public GlobalMetadataCreator_OS_2_11(
-        OpenSearchClient client,
-        List<String> legacyTemplateAllowlist,
-        List<String> componentTemplateAllowlist,
-        List<String> indexTemplateAllowlist,
-        IMetadataMigrationContexts.IClusterMetadataContext context
-    ) {
-        this.client = client;
-        this.legacyTemplateAllowlist = legacyTemplateAllowlist;
-        this.componentTemplateAllowlist = componentTemplateAllowlist;
-        this.indexTemplateAllowlist = indexTemplateAllowlist;
-        this.context = context;
-    }
-
-    public void create(GlobalMetadata root) {
+    public GlobalMetadataCreatorResults create(GlobalMetadata root, IClusterMetadataContext context) {
         logger.info("Setting Global Metadata");
 
+        var results = GlobalMetadataCreatorResults.builder();
         GlobalMetadataData_OS_2_11 globalMetadata = new GlobalMetadataData_OS_2_11(root.toObjectNode());
-        createLegacyTemplates(globalMetadata, client, legacyTemplateAllowlist);
-        createComponentTemplates(globalMetadata, client, componentTemplateAllowlist);
-        createIndexTemplates(globalMetadata, client, indexTemplateAllowlist);
+        results.legacyTemplates(createLegacyTemplates(globalMetadata, client, legacyTemplateAllowlist, context));
+        results.componentTemplates(createComponentTemplates(globalMetadata, client, componentTemplateAllowlist, context));
+        results.indexTemplates(createIndexTemplates(globalMetadata, client, indexTemplateAllowlist, context));
+        return results.build();
     }
 
-    protected void createLegacyTemplates(
+    protected List<String> createLegacyTemplates(
         GlobalMetadataData_OS_2_11 globalMetadata,
         OpenSearchClient client,
-        List<String> templateAllowlist
+        List<String> templateAllowlist,
+        IClusterMetadataContext context
     ) {
+        var legacyTemplates = new ArrayList<String>();
         logger.info("Setting Legacy Templates...");
         ObjectNode templates = globalMetadata.getTemplates();
 
         if (templates == null) {
             logger.info("No Legacy Templates in Snapshot");
-            return;
+            return legacyTemplates;
         }
 
         if (templateAllowlist != null && templateAllowlist.size() == 0) {
@@ -68,14 +61,8 @@ public class GlobalMetadataCreator_OS_2_11 {
 
                 logger.info("Setting Legacy Template: " + templateName);
                 ObjectNode settings = (ObjectNode) globalMetadata.getTemplates().get(templateName);
-                client.createLegacyTemplate(templateName, settings, context.createMigrateLegacyTemplateContext()); // purposefully
-                                                                                                                   // make
-                                                                                                                   // a
-                                                                                                                   // new
-                                                                                                                   // one
-                                                                                                                   // each
-                                                                                                                   // loop
-                                                                                                                   // iteration
+                client.createLegacyTemplate(templateName, settings, context.createMigrateLegacyTemplateContext());
+                legacyTemplates.add(templateName);
             }
         } else {
             // Get the template names
@@ -86,34 +73,31 @@ public class GlobalMetadataCreator_OS_2_11 {
             for (String templateName : templateKeys) {
                 logger.info("Setting Legacy Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
-                client.createLegacyTemplate(templateName, settings, context.createMigrateLegacyTemplateContext()); // purposefully
-                                                                                                                   // make
-                                                                                                                   // a
-                                                                                                                   // new
-                                                                                                                   // one
-                                                                                                                   // each
-                                                                                                                   // loop
-                                                                                                                   // iteration
+                client.createLegacyTemplate(templateName, settings, context.createMigrateLegacyTemplateContext());
+                legacyTemplates.add(templateName);
             }
         }
+        return legacyTemplates;
     }
 
-    protected void createComponentTemplates(
+    protected List<String> createComponentTemplates(
         GlobalMetadataData_OS_2_11 globalMetadata,
         OpenSearchClient client,
-        List<String> templateAllowlist
+        List<String> templateAllowlist,
+        IClusterMetadataContext context
     ) {
+        var componentTemplates = new ArrayList<String>();
         logger.info("Setting Component Templates...");
         ObjectNode templates = globalMetadata.getComponentTemplates();
 
         if (templates == null) {
             logger.info("No Component Templates in Snapshot");
-            return;
+            return componentTemplates;
         }
 
         if (templateAllowlist != null && templateAllowlist.size() == 0) {
             logger.info("No Component Templates in specified allowlist");
-            return;
+            return componentTemplates;
         } else if (templateAllowlist != null) {
             for (String templateName : templateAllowlist) {
                 if (!templates.has(templateName) || templates.get(templateName) == null) {
@@ -123,14 +107,8 @@ public class GlobalMetadataCreator_OS_2_11 {
 
                 logger.info("Setting Component Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
-                client.createComponentTemplate(templateName, settings, context.createComponentTemplateContext()); // purposefully
-                                                                                                                  // make
-                                                                                                                  // a
-                                                                                                                  // new
-                                                                                                                  // one
-                                                                                                                  // each
-                                                                                                                  // loop
-                                                                                                                  // iteration
+                client.createComponentTemplate(templateName, settings, context.createComponentTemplateContext());
+                componentTemplates.add(templateName);
             }
         } else {
             // Get the template names
@@ -141,34 +119,31 @@ public class GlobalMetadataCreator_OS_2_11 {
             for (String templateName : templateKeys) {
                 logger.info("Setting Component Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
-                client.createComponentTemplate(templateName, settings, context.createComponentTemplateContext()); // purposefully
-                                                                                                                  // make
-                                                                                                                  // a
-                                                                                                                  // new
-                                                                                                                  // one
-                                                                                                                  // each
-                                                                                                                  // loop
-                                                                                                                  // iteration
+                client.createComponentTemplate(templateName, settings, context.createComponentTemplateContext());
+                componentTemplates.add(templateName);
             }
         }
+        return componentTemplates;
     }
 
-    protected void createIndexTemplates(
+    protected List<String> createIndexTemplates(
         GlobalMetadataData_OS_2_11 globalMetadata,
         OpenSearchClient client,
-        List<String> templateAllowlist
+        List<String> templateAllowlist,
+        IClusterMetadataContext context
     ) {
+        var indexTemplates = new ArrayList<String>();
         logger.info("Setting Index Templates...");
         ObjectNode templates = globalMetadata.getIndexTemplates();
 
         if (templates == null) {
             logger.info("No Index Templates in Snapshot");
-            return;
+            return indexTemplates;
         }
 
         if (templateAllowlist != null && templateAllowlist.size() == 0) {
             logger.info("No Index Templates in specified allowlist");
-            return;
+            return indexTemplates;
         } else if (templateAllowlist != null) {
             for (String templateName : templateAllowlist) {
                 if (!templates.has(templateName) || templates.get(templateName) == null) {
@@ -178,11 +153,8 @@ public class GlobalMetadataCreator_OS_2_11 {
 
                 logger.info("Setting Index Template: " + templateName);
                 ObjectNode settings = (ObjectNode) globalMetadata.getIndexTemplates().get(templateName);
-                client.createIndexTemplate(templateName, settings, context.createMigrateTemplateContext()); // purposefully
-                                                                                                            // make a
-                                                                                                            // new one
-                                                                                                            // each loop
-                                                                                                            // iteration
+                client.createIndexTemplate(templateName, settings, context.createMigrateTemplateContext());
+                indexTemplates.add(templateName);
             }
         } else {
             // Get the template names
@@ -193,12 +165,10 @@ public class GlobalMetadataCreator_OS_2_11 {
             for (String templateName : templateKeys) {
                 logger.info("Setting Index Template: " + templateName);
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
-                client.createIndexTemplate(templateName, settings, context.createMigrateTemplateContext()); // purposefully
-                                                                                                            // make a
-                                                                                                            // new one
-                                                                                                            // each loop
-                                                                                                            // iteration
+                client.createIndexTemplate(templateName, settings, context.createMigrateTemplateContext());
+                indexTemplates.add(templateName);
             }
         }
+        return indexTemplates;
     }
 }

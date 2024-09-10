@@ -15,14 +15,24 @@ import org.opensearch.migrations.replay.util.NettyUtils;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.CompositeByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.ChannelHandler;
+import io.netty.channel.ChannelHandlerContext;
+import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.handler.codec.http.DefaultFullHttpRequest;
+import io.netty.handler.codec.http.DefaultFullHttpResponse;
 import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.FullHttpResponse;
 import io.netty.handler.codec.http.HttpClientCodec;
+import io.netty.handler.codec.http.HttpContent;
 import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpMessage;
-import io.netty.handler.codec.http.HttpObjectAggregator;
+import io.netty.handler.codec.http.HttpRequest;
+import io.netty.handler.codec.http.HttpResponse;
 import io.netty.handler.codec.http.HttpServerCodec;
+import io.netty.handler.codec.http.LastHttpContent;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
@@ -93,22 +103,28 @@ public class HttpByteBufFormatter {
             case FULL_BYTES:
                 return httpPacketBufsToString(byteBufStream, Long.MAX_VALUE);
             case PARSED_HTTP:
-                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, false, lineDelimiter);
+                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, false, lineDelimiter,
+                    Utils.MAX_PAYLOAD_BYTES_TO_PRINT);
             case PARSED_HTTP_SORTED_HEADERS:
-                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, true, lineDelimiter);
+                return httpPacketsToPrettyPrintedString(msgType, byteBufStream, true, lineDelimiter,
+                    Utils.MAX_PAYLOAD_BYTES_TO_PRINT);
             default:
                 throw new IllegalStateException("Unknown PacketPrintFormat: " + printStyle.get());
         }
     }
 
+    /**
+     * @see HttpByteBufFormatter#parseHttpMessageFromBufs
+     */
     public static String httpPacketsToPrettyPrintedString(
         HttpMessageType msgType,
         Stream<ByteBuf> byteBufStream,
         boolean sortHeaders,
-        String lineDelimiter
+        String lineDelimiter,
+        int maxPayloadBytes
     ) {
-        try (var messageHolder = RefSafeHolder.create(parseHttpMessageFromBufs(msgType, byteBufStream))) {
-            final HttpMessage httpMessage = messageHolder.get();
+        try (var messageHolder = RefSafeHolder.create(parseHttpMessageFromBufs(msgType, byteBufStream, maxPayloadBytes))) {
+            final var httpMessage = messageHolder.get();
             if (httpMessage != null) {
                 if (httpMessage instanceof FullHttpRequest) {
                     return prettyPrintNettyRequest((FullHttpRequest) httpMessage, sortHeaders, lineDelimiter);
@@ -152,20 +168,92 @@ public class HttpByteBufFormatter {
         return sj.toString();
     }
 
+    private static class TruncatingAggregator extends ChannelInboundHandlerAdapter {
+        HttpMessage message;
+        CompositeByteBuf aggregatedContents;
+        private int bytesLeftToRead;
+        private int bytesDropped;
+
+        public TruncatingAggregator(int payloadSize) {
+            bytesLeftToRead = payloadSize;
+            this.aggregatedContents = Unpooled.compositeBuffer();
+        }
+
+        @Override
+        public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+            if (msg instanceof HttpContent) {
+                HttpContent httpContent = (HttpContent) msg;
+                ByteBuf content = httpContent.content();
+                var contentSize = content.readableBytes();
+                if (contentSize > bytesLeftToRead) {
+                    var bytesToTruncate = contentSize - bytesLeftToRead;
+                    bytesDropped += bytesToTruncate;
+                    content.writerIndex(content.writerIndex() - bytesToTruncate);
+                    contentSize = content.readableBytes();
+                }
+                if (contentSize > 0) {
+                    bytesLeftToRead -= contentSize;
+                    aggregatedContents.addComponent(true, content);
+                } else {
+                    content.release();
+                }
+            } else if (msg instanceof HttpMessage) {
+                message = (HttpMessage) msg;
+            }
+            if (msg instanceof LastHttpContent) {
+                if (bytesDropped > 0) {
+                    message.headers().add("payloadBytesDropped", bytesDropped);
+                }
+                var finalMsg = (message instanceof HttpRequest)
+                    ? new DefaultFullHttpRequest(message.protocolVersion(),
+                    ((HttpRequest) message).method(),
+                    ((HttpRequest) message).uri(),
+                    aggregatedContents,
+                    message.headers(),
+                    ((LastHttpContent) msg).trailingHeaders())
+                    : new DefaultFullHttpResponse(message.protocolVersion(),
+                    ((HttpResponse)message).status(),
+                    aggregatedContents,
+                    message.headers(),
+                    ((LastHttpContent) msg).trailingHeaders());
+                super.channelRead(ctx, finalMsg);
+            }
+        }
+    }
+
     /**
      * This won't alter the incoming byteBufStream at all - all buffers are duplicated as they're
      * passed into the parsing channel.  The output message MAY be a ByteBufHolder, in which case,
      * releasing the content() is the caller's responsibility.
-     * @param msgType
-     * @param byteBufStream
-     * @return
+     *
+     * Standard headers won't be removed or changed (like the content-length was in the HttpObjectAggregator).
+     * The exact headers should be used except when the contents are truncated.  When the contents are
+     * truncated a new "payloadBytesDropped" header will be added with the number of bytes that were truncated.
+     * Generally, the actual length of the returned contents ByteBuf won't be available.
+     * If it was a chunked encoding, no indication will be present.
+     * If the content-length header was used and the message wasn't truncated, the header value will be
+     * consistent with the length.  However, if the message WAS truncated for content-length delimited
+     * messages, the content-length header value will remain as it was in the original message and the
+     * length of the contents will be shortened by payloadBytesDropped.
      */
-    public static HttpMessage parseHttpMessageFromBufs(HttpMessageType msgType, Stream<ByteBuf> byteBufStream) {
+    public static HttpMessage parseHttpMessageFromBufs(HttpMessageType msgType,
+                                                       Stream<ByteBuf> byteBufStream,
+                                                       int payloadCeilingBytes) {
+        return processHttpMessageFromBufs(msgType,
+            byteBufStream,
+            new TruncatingAggregator(payloadCeilingBytes));
+    }
+
+    public static <T> T processHttpMessageFromBufs(HttpMessageType msgType,
+                                                   Stream<ByteBuf> byteBufStream,
+                                                   ChannelHandler... handlers) {
         EmbeddedChannel channel = new EmbeddedChannel(
             msgType == HttpMessageType.REQUEST ? new HttpServerCodec() : new HttpClientCodec(),
-            new HttpContentDecompressor(),
-            new HttpObjectAggregator(Utils.MAX_PAYLOAD_BYTES_TO_PRINT)  // Set max content length if needed
+            new HttpContentDecompressor()
         );
+        for (var h : handlers) {
+            channel.pipeline().addLast(h);
+        }
         try {
             byteBufStream.forEachOrdered(b -> channel.writeInbound(b.retainedDuplicate()));
             return channel.readInbound();
@@ -174,12 +262,18 @@ public class HttpByteBufFormatter {
         }
     }
 
-    public static FullHttpRequest parseHttpRequestFromBufs(Stream<ByteBuf> byteBufStream) {
-        return (FullHttpRequest) parseHttpMessageFromBufs(HttpMessageType.REQUEST, byteBufStream);
+    /**
+     * @see HttpByteBufFormatter#parseHttpMessageFromBufs
+     */
+    public static FullHttpRequest parseHttpRequestFromBufs(Stream<ByteBuf> byteBufStream, int maxPayloadBytes) {
+        return (FullHttpRequest) parseHttpMessageFromBufs(HttpMessageType.REQUEST, byteBufStream, maxPayloadBytes);
     }
 
-    public static FullHttpResponse parseHttpResponseFromBufs(Stream<ByteBuf> byteBufStream) {
-        return (FullHttpResponse) parseHttpMessageFromBufs(HttpMessageType.RESPONSE, byteBufStream);
+    /**
+     * @see HttpByteBufFormatter#parseHttpMessageFromBufs
+     */
+    public static FullHttpResponse parseHttpResponseFromBufs(Stream<ByteBuf> byteBufStream, int maxPayloadBytes) {
+        return (FullHttpResponse) parseHttpMessageFromBufs(HttpMessageType.RESPONSE, byteBufStream, maxPayloadBytes);
     }
 
     public static String httpPacketBufsToString(Stream<ByteBuf> byteBufStream, long maxBytesToShow) {

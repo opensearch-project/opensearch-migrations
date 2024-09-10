@@ -22,10 +22,6 @@ class DockerServiceProps {
     List<String> taskDependencies = []
 }
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     implementation project(":commonDependencyVersionConstraints")
     implementation platform('io.projectreactor:reactor-bom:2023.0.5')
@@ -33,6 +29,7 @@ dependencies {
 
     implementation project(":coreUtilities")
     implementation project(":RFS")
+    implementation project(":transformation")
 
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
@@ -49,6 +46,7 @@ dependencies {
 
     testImplementation testFixtures(project(":RFS"))
     testImplementation testFixtures(project(":coreUtilities"))
+    testImplementation testFixtures(project(":testHelperFixtures"))
     testImplementation project(":CreateSnapshot")
     testImplementation project(":MetadataMigration")
     testImplementation group: 'org.apache.lucene', name: 'lucene-core'
@@ -58,6 +56,8 @@ dependencies {
     testImplementation group: 'org.opensearch', name: 'opensearch-testcontainers'
     testImplementation group: 'org.testcontainers', name: 'testcontainers'
     testImplementation group: 'org.testcontainers', name: 'toxiproxy'
+    testImplementation group: 'org.mockito', name: 'mockito-core'
+    testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter'
 
     testImplementation platform('io.projectreactor:reactor-bom:2023.0.5')
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
@@ -92,16 +92,18 @@ DockerServiceProps[] dockerServices = [
                                 dockerImageName:"reindex_from_snapshot",
                                 inputDir:"./docker",
                                 taskDependencies:["copyDockerRuntimeJars"]]),
+        new DockerServiceProps([projectName:"emptyElasticsearchSource_5_6",
+                                dockerImageName:"empty_elasticsearch_source_5_6",
+                                inputDir:"./docker/TestSource_ES_5_6"]),
+        new DockerServiceProps([projectName:"emptyElasticsearchSource_6_8",
+                                dockerImageName:"empty_elasticsearch_source_6_8",
+                                inputDir:"./docker/TestSource_ES_6_8"]),
         new DockerServiceProps([projectName:"emptyElasticsearchSource_7_10",
                                 dockerImageName:"empty_elasticsearch_source_7_10",
                                 inputDir:"./docker/TestSource_ES_7_10"]),
         new DockerServiceProps([projectName:"emptyElasticsearchSource_7_17",
                                 dockerImageName:"empty_elasticsearch_source_7_17",
-                                inputDir:"./docker/TestSource_ES_7_17"]),
-        new DockerServiceProps([projectName:"trafficGenerator",
-                                dockerImageName:"osb_traffic_generator",
-                                inputDir:"./docker/TrafficGenerator",
-                                taskDependencies:[":TrafficCapture:dockerSolution:buildDockerImage_elasticsearchTestConsole"]]),
+                                inputDir:"./docker/TestSource_ES_7_17"])
 ] as DockerServiceProps[]
 
 for (dockerService in dockerServices) {
@@ -111,6 +113,7 @@ for (dockerService in dockerServices) {
             dependsOn dep
         }
         inputDir = project.file(dockerService.inputDir)
+        // platform.set("linux/amd64")
         buildArgs = dockerService.buildArgs
         images.add("migrations/${dockerService.dockerImageName}:${hash}")
         images.add("migrations/${dockerService.dockerImageName}:${version}")
@@ -119,8 +122,16 @@ for (dockerService in dockerServices) {
 }
 
 dockerCompose {
-    useComposeFiles = ['docker/docker-compose.yml']
+    useComposeFiles = ['docker/docker-compose-es710.yml']
     projectName = 'rfs-compose'
+
+    es56 {
+        useComposeFiles = ['docker/docker-compose-es56.yml']
+    }
+
+    es68 {
+        useComposeFiles = ['docker/docker-compose-es68.yml']
+    }
 }
 
 task buildDockerImages {
@@ -129,39 +140,11 @@ task buildDockerImages {
     }
 }
 
-tasks.getByName('composeUp')
-        .dependsOn(tasks.getByName('buildDockerImages'))
-
-
-test {
-    useJUnitPlatform {
-        excludeTags 'longTest'
-    }
-    jacoco {
-        enabled = false
-    }
+tasks.named('composeUp') {
+    dependsOn(tasks.named('buildDockerImages'))
 }
 
-task slowTest(type: Test) {
-    useJUnitPlatform()
+tasks.named('slowTest') {
     dependsOn(':TrafficCapture:dockerSolution:buildDockerImage_elasticsearchTestConsole')
-    jacoco {
-        enabled = true
-    }
-    testLogging {
-        events "passed", "skipped", "failed"
-        exceptionFormat "full"
-        showExceptions true
-        showCauses true
-        showStackTraces true
-        // showStandardStreams true
-    }
-    reports {
-        html.required = true
-        html.destination file("${buildDir}/reports/tests/slowTest")
-    }
-}
-
-tasks.named('jacocoTestReport').configure {
-    dependsOn slowTest
+    testLogging.showStandardStreams = false
 }

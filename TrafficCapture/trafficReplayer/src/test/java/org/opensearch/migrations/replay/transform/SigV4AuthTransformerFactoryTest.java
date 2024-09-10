@@ -3,11 +3,14 @@ package org.opensearch.migrations.replay.transform;
 import java.time.Clock;
 import java.time.Instant;
 import java.time.ZoneOffset;
+import java.util.List;
 import java.util.Random;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 import org.opensearch.migrations.replay.TestUtils;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -15,7 +18,6 @@ import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 
 import io.netty.handler.codec.http.DefaultHttpHeaders;
-import io.netty.util.ResourceLeakDetector;
 import software.amazon.awssdk.auth.credentials.AwsBasicCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentials;
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
@@ -31,22 +33,32 @@ public class SigV4AuthTransformerFactoryTest extends InstrumentationTest {
         }
     }
 
+    @ParameterizedTest
+    @ValueSource(strings = {"content-type", "Content-Type", "CoNteNt-Type"})
+    @WrapWithNettyLeakDetection(repetitions = 2)
+    public void testSignatureProperlyApplied(String contentTypeHeaderKey) throws Exception {
+        Random r = new Random(2);
+        var mockCredentialsProvider = new MockCredentialsProvider();
+
+        // Test with payload
+        testWithPayload(r, mockCredentialsProvider, contentTypeHeaderKey);
+    }
+
     @Test
     @WrapWithNettyLeakDetection(repetitions = 2)
-    public void testSignatureProperlyApplied() throws Exception {
-        ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.PARANOID);
+    public void testSignatureProperlyAppliedNoPayload() throws Exception {
+        var mockCredentialsProvider = new MockCredentialsProvider();
 
-        Random r = new Random(2);
+        // Test without payload
+        testWithoutPayload(mockCredentialsProvider);
+    }
+
+    private void testWithPayload(Random r, MockCredentialsProvider mockCredentialsProvider, String contentTypeHeaderKey) throws Exception {
         var stringParts = IntStream.range(0, 1)
             .mapToObj(i -> TestUtils.makeRandomString(r, 64))
             .collect(Collectors.toList());
 
-        var mockCredentialsProvider = new MockCredentialsProvider();
         DefaultHttpHeaders expectedRequestHeaders = new DefaultHttpHeaders();
-        // netty's decompressor and aggregator remove some header values (& add others)
-
-        // Using unusual spelling to verify SigV4 signer behavior with list insensitive map
-        var contentTypeHeaderKey = "CoNteNt-Type";
         var contentTypeHeaderValue = "application/json";
 
         expectedRequestHeaders.add("Host", "localhost");
@@ -62,9 +74,26 @@ public class SigV4AuthTransformerFactoryTest extends InstrumentationTest {
             "x-amz-content-sha256",
             "fc0e8e9a1f7697f510bfdd4d55b8612df8a0140b4210967efd87ee9cb7104362"
         );
+        expectedRequestHeaders.add("X-Amz-Date", "19700101T000000Z");
+        runTest(mockCredentialsProvider, contentTypeHeaderKey, contentTypeHeaderValue, expectedRequestHeaders, stringParts);
+    }
 
-        expectedRequestHeaders.add("x-amz-date", "19700101T000000Z");
+    private void testWithoutPayload(MockCredentialsProvider mockCredentialsProvider) throws Exception {
+        DefaultHttpHeaders expectedRequestHeaders = new DefaultHttpHeaders();
 
+        expectedRequestHeaders.add("Host", "localhost");
+        expectedRequestHeaders.add("Content-Length", "0");
+        expectedRequestHeaders.add("X-Amz-Date", "19700101T000000Z");
+        expectedRequestHeaders.add(
+            "Authorization",
+            "AWS4-HMAC-SHA256 Credential=AKIAIOSFODNN7EXAMPLE/19700101/us-east-1/es/aws4_request, "
+                + "SignedHeaders=" + "host;x-amz-date, "
+                + "Signature=0c80b2640a1de42eb5cf957c6bc080731d8f83ccc1d4ebe40e72cd847ed4648e"
+        );
+        runTest(mockCredentialsProvider, null, null, expectedRequestHeaders, List.of());
+    }
+
+    private void runTest(MockCredentialsProvider mockCredentialsProvider, String contentTypeHeaderKey, String contentTypeHeaderValue, DefaultHttpHeaders expectedRequestHeaders, java.util.List<String> stringParts) throws Exception {
         try (var factory = new SigV4AuthTransformerFactory(
             mockCredentialsProvider,
             "es",
@@ -75,12 +104,11 @@ public class SigV4AuthTransformerFactoryTest extends InstrumentationTest {
             TestUtils.runPipelineAndValidate(
                 rootContext,
                 factory,
-                contentTypeHeaderKey + ": "+ contentTypeHeaderValue + "\r\n",
+                (contentTypeHeaderKey != null) ? contentTypeHeaderKey + ": " + contentTypeHeaderValue + "\r\n" : null,
                 stringParts,
                 expectedRequestHeaders,
                 TestUtils::resolveReferenceString
             );
         }
-
     }
 }

@@ -5,10 +5,6 @@ plugins {
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
 
-repositories {
-  mavenCentral()
-}
-
 dependencies {
 
   constraints {
@@ -52,10 +48,6 @@ dependencies {
     api group: 'com.beust', name: 'jcommander', version: '1.82'
 
     api group: 'org.projectlombok', name: 'lombok', version: '1.18.28'
-
-    def resilience4j = '1.7.0'
-    api group: 'io.github.resilience4j', name: 'resilience4j-ratelimiter', version: resilience4j
-    api group: 'io.github.resilience4j', name: 'resilience4j-retry', version: resilience4j
 
     def jackson = '2.16.2'
     api group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: jackson
@@ -119,6 +111,8 @@ dependencies {
 
     api group: 'org.hamcrest', name: 'hamcrest', version: '2.2'
 
+    api group: 'org.openjdk.jmh', name: 'jmh-core', version: '1.36'
+
     // ************************************************************
     // The following constraints are for mitigating transitive CVEs
     // ************************************************************
@@ -130,6 +124,7 @@ dependencies {
     implementation group: 'org.apache.tika', name: 'tika-core', version: '1.28.4'
     implementation group: 'com.jayway.jsonpath', name: 'json-path', version: '2.9.0'
     implementation group: 'dnsjava', name: 'dnsjava', version: '3.6.0'
+    api group: 'org.glassfish.jersey.core', name: 'jersey-common', version: '2.34'
     api group: 'org.apache.httpcomponents', 'name': 'httpclient', version: '4.5.13'
 
   }

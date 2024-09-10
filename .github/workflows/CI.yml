@@ -55,16 +55,19 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
-         python-version: ${{ env.python-version }}
+          python-version: ${{ env.python-version }}
       - run: |
           python3 -m pip install --upgrade pipenv
           pipenv install --deploy --dev
           pipenv run coverage run -m pytest
           pipenv run coverage xml
-      - uses: codecov/codecov-action@v4
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
           flags: python-test
+          fail_ci_if_error: true
 
   console-api-tests:
     runs-on: ubuntu-latest
@@ -81,9 +84,12 @@ jobs:
           pipenv install --deploy --dev
           pipenv run coverage run --source='.' manage.py test console_api
           pipenv run coverage xml
-      - uses: codecov/codecov-action@v4
+      - name: Upload to Codecov
+        uses: codecov/codecov-action@v4
         with:
+          token: ${{ secrets.CODECOV_TOKEN }}
           files: ./coverage.xml
+          fail_ci_if_error: true
 
   gradle-tests:
     runs-on: ubuntu-latest
@@ -103,7 +109,7 @@ jobs:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
       - name: Run Tests with Coverage
-        run: ./gradlew test -x TrafficCapture:dockerSolution:build -x spotlessCheck jacocoTestReport --scan --stacktrace
+        run: ./gradlew mergeJacocoReports -x TrafficCapture:dockerSolution:build -x spotlessCheck --scan --stacktrace
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
@@ -113,13 +119,16 @@ jobs:
           name: test-reports
           path: |
             **/build/reports/tests/
+            **/reports/jacoco/mergedReport/
 
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4
         with:
-          files: "**/jacocoTestReport.xml"
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ${{ github.workspace }}/build/reports/jacoco/mergedReport/jacocoMergedReport.xml
           flags: gradle-test
-          fail_ci_if_error: false
+          fail_ci_if_error: true
+          disable_search: true
 
   python-e2e-tests:
     runs-on: ubuntu-latest
@@ -154,6 +163,25 @@ jobs:
         working-directory: TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/integ_test
         run: |
           docker exec $(docker ps --filter "name=migration-console" -q) pipenv run pytest /root/lib/integ_test/integ_test/replayer_tests.py --unique_id="testindex" -s
+      - name: Collect Docker, OpenSearch Benchmark, and Shared Logs
+        if: always()
+        run: |
+          mkdir -p logs/docker logs/opensearch_benchmark_logs logs/shared_logs_output
+          for container in $(docker ps -aq); do
+            container_name=$(docker inspect --format '{{.Name}}' $container | sed 's/\///')
+            docker logs $container > logs/docker/${container_name}_logs.txt 2>&1
+          done
+          docker cp $(docker ps --filter "name=migration-console" -q):/root/.benchmark/logs logs/opensearch_benchmark_logs
+          docker cp $(docker ps --filter "name=migration-console" -q):/shared-logs-output logs/shared_logs_output
+      - name: Upload Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-test-logs
+          path: |
+            logs/docker
+            logs/opensearch_benchmark_logs
+            logs/shared_logs_output
       - name: Clean up migrations docker images before caching
         run: |
           docker stop $(docker ps -q) && docker system prune --volumes -f

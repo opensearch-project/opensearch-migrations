@@ -12,7 +12,9 @@ import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLException;
 import javax.net.ssl.SSLParameters;
 
+import com.rfs.common.http.CompositeTransformer;
 import com.rfs.common.http.ConnectionContext;
+import com.rfs.common.http.GzipPayloadRequestTransformer;
 import com.rfs.common.http.HttpResponse;
 import com.rfs.netty.ReadMeteringHandler;
 import com.rfs.netty.WriteMeteringHandler;
@@ -45,10 +47,13 @@ public class RestClient {
 
     private static final String USER_AGENT_HEADER_NAME = HttpHeaderNames.USER_AGENT.toString();
     private static final String CONTENT_TYPE_HEADER_NAME = HttpHeaderNames.CONTENT_TYPE.toString();
+    private static final String CONTENT_ENCODING_HEADER_NAME = HttpHeaderNames.CONTENT_ENCODING.toString();
+    private static final String ACCEPT_ENCODING_HEADER_NAME = HttpHeaderNames.ACCEPT_ENCODING.toString();
     private static final String HOST_HEADER_NAME = HttpHeaderNames.HOST.toString();
 
     private static final String USER_AGENT = "RfsWorker-1.0";
     private static final String JSON_CONTENT_TYPE = "application/json";
+    private static final String GZIP_TYPE = "gzip";
 
     public RestClient(ConnectionContext connectionContext) {
         this(connectionContext, 0);
@@ -140,12 +145,17 @@ public class RestClient {
                 });
         }
         var contextCleanupRef = new AtomicReference<Runnable>(() -> {});
-        return connectionContext.getRequestTransformer().transform(method.name(), path, headers, Mono.justOrEmpty(body)
+        // Support auto compressing payload if headers indicate support and payload is not compressed
+        return new CompositeTransformer(
+            new GzipPayloadRequestTransformer(),
+            connectionContext.getRequestTransformer()
+        ).transform(method.name(), path, headers, Mono.justOrEmpty(body)
                 .map(b -> ByteBuffer.wrap(b.getBytes(StandardCharsets.UTF_8)))
             )
             .flatMap(transformedRequest ->
                 client.doOnRequest((r, conn) -> contextCleanupRef.set(addSizeMetricsHandlersAndGetCleanup(context).apply(r, conn)))
                 .headers(h -> transformedRequest.getHeaders().forEach(h::add))
+                .compress(hasGzipResponseHeaders(transformedRequest.getHeaders()))
                 .request(method)
                 .uri("/" + path)
                 .send(transformedRequest.getBody().map(Unpooled::wrappedBuffer))
@@ -158,7 +168,8 @@ public class RestClient {
                             extractHeaders(response.responseHeaders()),
                             bodyOp.orElse(null)
                             ))
-                ))
+                )
+            )
             .doOnError(t -> {
                 if (context != null) {
                     context.addTraceException(t, true);
@@ -166,6 +177,27 @@ public class RestClient {
             })
             .doOnTerminate(() -> contextCleanupRef.get().run());
     }
+
+
+    public boolean supportsGzipCompression() {
+        return connectionContext.isCompressionSupported();
+    }
+
+    public static void addGzipResponseHeaders(Map<String, List<String>> headers) {
+        headers.put(ACCEPT_ENCODING_HEADER_NAME, List.of(GZIP_TYPE));
+    }
+    public static boolean hasGzipResponseHeaders(Map<String, List<String>> headers) {
+        return headers.getOrDefault(ACCEPT_ENCODING_HEADER_NAME, List.of()).contains(GZIP_TYPE);
+    }
+    public static void addGzipRequestHeaders(Map<String, List<String>> headers) {
+        headers.put(GzipPayloadRequestTransformer.CONTENT_ENCODING_HEADER_NAME,
+            List.of(GzipPayloadRequestTransformer.GZIP_CONTENT_ENCODING_HEADER_VALUE));
+    }
+    public static boolean hasGzipRequestHeaders(Map<String, List<String>> headers) {
+        return headers.getOrDefault(GzipPayloadRequestTransformer.CONTENT_ENCODING_HEADER_NAME, List.of())
+            .contains(GzipPayloadRequestTransformer.GZIP_CONTENT_ENCODING_HEADER_VALUE);
+    }
+
 
     private Map<String, String> extractHeaders(HttpHeaders headers) {
         return headers.entries().stream()
@@ -182,6 +214,15 @@ public class RestClient {
 
     public Mono<HttpResponse> getAsync(String path, IRfsContexts.IRequestContext context) {
         return asyncRequest(HttpMethod.GET, path, null, null, context);
+    }
+
+    public Mono<HttpResponse> postAsync(
+        String path,
+        String body,
+        Map<String, List<String>> additionalHeaders,
+        IRfsContexts.IRequestContext context
+    ) {
+        return asyncRequest(HttpMethod.POST, path, body, additionalHeaders, context);
     }
 
     public Mono<HttpResponse> postAsync(String path, String body, IRfsContexts.IRequestContext context) {

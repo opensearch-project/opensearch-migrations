@@ -3,6 +3,7 @@ package org.opensearch.migrations.replay.util;
 import java.time.Duration;
 import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -74,6 +75,13 @@ public class TrackedFuture<D, T> {
 
     public TrackedFuture(@NonNull CompletableFuture<T> future, @NonNull Supplier<D> diagnosticSupplier) {
         this(future, diagnosticSupplier, null);
+    }
+
+    public static Throwable unwindPossibleCompletionException(Throwable t) {
+        while (t instanceof CompletionException) {
+            t = t.getCause();
+        }
+        return t;
     }
 
     public TrackedFuture<D, ?> getParentDiagnosticFuture() {
