@@ -6,7 +6,6 @@ import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
-import java.util.UUID;
 import java.util.function.Function;
 
 import org.opensearch.migrations.Version;
@@ -17,6 +16,7 @@ import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
+import org.opensearch.migrations.utils.ProcessHelpers;
 
 import com.beust.jcommander.IStringConverter;
 import com.beust.jcommander.JCommander;
@@ -41,7 +41,6 @@ import com.rfs.common.TryHandlePhaseFailure;
 import com.rfs.common.http.ConnectionContext;
 import com.rfs.models.IndexMetadata;
 import com.rfs.models.ShardMetadata;
-import com.rfs.tracing.RootWorkCoordinationContext;
 import com.rfs.worker.DocumentsRunner;
 import com.rfs.worker.ShardWorkPreparer;
 import lombok.extern.slf4j.Slf4j;
@@ -168,6 +167,10 @@ public class RfsMigrateDocuments {
     }
 
     public static void main(String[] args) throws Exception {
+        System.err.println("Got args: " + String.join("; ", args));
+        var workerId = ProcessHelpers.getNodeInstanceName();
+        log.info("Starting RfsMigrateDocuments with workerId =" + workerId);
+
         Args arguments = new Args();
         JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
@@ -179,7 +182,7 @@ public class RfsMigrateDocuments {
 
         validateArgs(arguments);
 
-        var rootDocumentContext = makeRootContext(arguments);
+        var rootDocumentContext = makeRootContext(arguments, workerId);
         var luceneDirPath = Paths.get(arguments.luceneDir);
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
@@ -188,7 +191,6 @@ public class RfsMigrateDocuments {
             System.exit(PROCESS_TIMED_OUT);
         }, Clock.systemUTC())) {
             ConnectionContext connectionContext = arguments.targetArgs.toConnectionContext();
-            final var workerId = UUID.randomUUID().toString();
             var workCoordinator = new OpenSearchWorkCoordinator(
                 new CoordinateWorkHttpClient(connectionContext),
                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
@@ -196,8 +198,6 @@ public class RfsMigrateDocuments {
             );
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
             TryHandlePhaseFailure.executeWithTryCatch(() -> {
-                log.info("Running RfsMigrateDocuments with workerId = " + workerId);
-
                 OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
                 DocumentReindexer reindexer = new DocumentReindexer(targetClient,
                     arguments.numDocsPerBulkRequest,
@@ -243,17 +243,17 @@ public class RfsMigrateDocuments {
         }
     }
 
-    private static RootDocumentMigrationContext makeRootContext(Args arguments) {
+    private static RootDocumentMigrationContext makeRootContext(Args arguments, String workerId) {
         var compositeContextTracker = new CompositeContextTracker(
             new ActiveContextTracker(),
             new ActiveContextTrackerByActivityType()
         );
         var otelSdk = RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(
             arguments.otelCollectorEndpoint,
-            "docMigration"
+            RootDocumentMigrationContext.SCOPE_NAME,
+            workerId
         );
-        var workContext = new RootWorkCoordinationContext(otelSdk, compositeContextTracker);
-        return new RootDocumentMigrationContext(otelSdk, compositeContextTracker, workContext);
+        return new RootDocumentMigrationContext(otelSdk, compositeContextTracker);
     }
 
     public static DocumentsRunner.CompletionStatus run(

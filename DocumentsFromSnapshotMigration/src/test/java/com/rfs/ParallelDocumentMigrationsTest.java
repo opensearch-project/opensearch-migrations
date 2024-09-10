@@ -23,7 +23,6 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
-import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.FileSystemSnapshotCreator;
@@ -45,7 +44,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
 
     public static Stream<Arguments> makeDocumentMigrationArgs() {
         List<Object[]> sourceImageArgs = SOURCE_IMAGES.stream()
-            .map(name -> makeParamsForBase(name))
+            .map(SourceTestBase::makeParamsForBase)
             .collect(Collectors.toList());
         var targetImageNames = TARGET_IMAGES.stream()
             .collect(Collectors.toList());
@@ -82,8 +81,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         var executorService = Executors.newFixedThreadPool(numWorkers);
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
         final var testMetadataMigrationContext = MetadataMigrationTestContext.factory().noOtelTracking();
-        final var workCoordinationContext = WorkCoordinationTestContext.factory().withAllTracking();
-        final var testDocMigrationContext = DocumentMigrationTestContext.factory(workCoordinationContext)
+        final var testDocMigrationContext = DocumentMigrationTestContext.factory()
             .withAllTracking();
 
         try (
@@ -197,7 +195,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
     }
 
     private void verifyWorkMetrics(DocumentMigrationTestContext rootContext, int numWorkers, int numRuns) {
-        var workMetrics = rootContext.getWorkCoordinationContext().inMemoryInstrumentationBundle.getFinishedMetrics();
+        var workMetrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         var migrationMetrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
 
         verifyCoordinatorBehavior(workMetrics, numRuns);

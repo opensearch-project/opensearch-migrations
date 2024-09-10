@@ -9,6 +9,8 @@ import org.opensearch.migrations.tracing.RootOtelContext;
 public class RootWorkCoordinationContext extends RootOtelContext {
     private static final String SCOPE_NAME = "workCoordination";
 
+    public final RootOtelContext enclosingScope;
+
     public final WorkCoordinationContexts.InitializeCoordinatorStateContext.MetricInstruments initializeMetrics;
     public final WorkCoordinationContexts.CreateUnassignedWorkItemContext.MetricInstruments createUnassignedWorkMetrics;
     public final WorkCoordinationContexts.Refresh.MetricInstruments refreshMetrics;
@@ -18,7 +20,15 @@ public class RootWorkCoordinationContext extends RootOtelContext {
     public final WorkCoordinationContexts.AcquireNextWorkItemContext.MetricInstruments acquireNextWorkMetrics;
 
     public RootWorkCoordinationContext(OpenTelemetry sdk, IContextTracker contextTracker) {
+        this(sdk, contextTracker, null);
+    }
+
+    public RootWorkCoordinationContext(OpenTelemetry sdk,
+                                       IContextTracker contextTracker,
+                                       RootOtelContext enclosingScope)
+    {
         super(SCOPE_NAME, contextTracker, sdk);
+        this.enclosingScope = enclosingScope;
         var meter = this.getMeterProvider().get(SCOPE_NAME);
 
         initializeMetrics = WorkCoordinationContexts.InitializeCoordinatorStateContext.makeMetrics(meter);

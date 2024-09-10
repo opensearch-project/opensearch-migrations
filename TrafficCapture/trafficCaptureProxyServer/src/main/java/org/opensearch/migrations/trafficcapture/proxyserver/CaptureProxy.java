@@ -40,6 +40,7 @@ import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFacto
 import org.opensearch.migrations.trafficcapture.netty.HeaderValueFilteringCapturePredicate;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.BacksideConnectionPool;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
+import org.opensearch.migrations.utils.ProcessHelpers;
 import org.opensearch.security.ssl.DefaultSecurityKeyStore;
 import org.opensearch.security.ssl.util.SSLConfigConstants;
 
@@ -306,14 +307,15 @@ public class CaptureProxy {
     }
 
     public static void main(String[] args) throws InterruptedException, IOException {
-        System.err.println("Starting Capture Proxy");
         System.err.println("Got args: " + String.join("; ", args));
+        log.info("Starting Capture Proxy on " + ProcessHelpers.getNodeInstanceName());
 
         var params = parseArgs(args);
         var backsideUri = convertStringToUri(params.backsideUriString);
 
         var rootContext = new RootCaptureContext(
-            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "capture"),
+            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "capture",
+                ProcessHelpers.getNodeInstanceName()),
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
         );
 
