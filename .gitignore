@@ -25,3 +25,6 @@ TrafficCapture/**/out/
 opensearch-cluster-cdk/
 test/opensearch-cluster-cdk/
 TrafficCapture/dockerSolution/src/main/docker/migrationConsole/staging
+
+# Directory used to temporarily store snapshots during testing
+DocumentsFromSnapshotMigration/docker/snapshots/

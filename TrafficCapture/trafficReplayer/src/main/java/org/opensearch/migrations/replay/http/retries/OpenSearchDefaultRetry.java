@@ -1,7 +1,6 @@
 package org.opensearch.migrations.replay.http.retries;
 
 import java.io.IOException;
-import java.util.List;
 import java.util.Optional;
 import java.util.regex.Pattern;
 import java.util.stream.Stream;
@@ -100,12 +99,12 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         return errorFieldFinderHandler.hadNoErrors();
     }
 
+
     @Override
     public TrackedFuture<String, RequestSenderOrchestrator.RetryDirective>
-    apply(@NonNull ByteBuf targetRequestBytes,
-          @NonNull List<AggregatedRawResponse> previousResponses,
-          @NonNull AggregatedRawResponse currentResponse,
-          @NonNull TrackedFuture<String, ? extends IRequestResponsePacketPair> reconstructedSourceTransactionFuture) {
+    shouldRetry(@NonNull ByteBuf targetRequestBytes,
+                @NonNull AggregatedRawResponse currentResponse,
+                @NonNull TrackedFuture<String, ? extends IRequestResponsePacketPair> reconstructedSourceTransactionFuture) {
 
         var targetRequestByteBuf = Unpooled.wrappedBuffer(targetRequestBytes);
         var parsedRequest = HttpByteBufFormatter.parseHttpRequestFromBufs(Stream.of(targetRequestByteBuf), 0);
@@ -128,6 +127,6 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
                 }
             }
         }
-        return super.apply(targetRequestBytes, previousResponses, currentResponse, reconstructedSourceTransactionFuture);
+        return super.shouldRetry(targetRequestBytes, currentResponse, reconstructedSourceTransactionFuture);
     }
 }

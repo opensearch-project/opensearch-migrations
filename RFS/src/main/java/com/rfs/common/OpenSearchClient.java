@@ -3,6 +3,7 @@ package com.rfs.common;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -14,6 +15,8 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import org.opensearch.migrations.Flavor;
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.parsing.BulkResponseParser;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 
@@ -28,14 +31,14 @@ import reactor.util.retry.Retry;
 @Slf4j
 public class OpenSearchClient {
 
-    private static final ObjectMapper objectMapper = new ObjectMapper();
+    protected static final ObjectMapper objectMapper = new ObjectMapper();
 
     private static final int defaultMaxRetryAttempts = 3;
     private static final Duration defaultBackoff = Duration.ofSeconds(1);
     private static final Duration defaultMaxBackoff = Duration.ofSeconds(10);
     private static final Retry snapshotRetryStrategy = Retry.backoff(defaultMaxRetryAttempts, defaultBackoff)
         .maxBackoff(defaultMaxBackoff);
-    private static final Retry checkIfItemExistsRetryStrategy = Retry.backoff(defaultMaxRetryAttempts, defaultBackoff)
+    protected static final Retry checkIfItemExistsRetryStrategy = Retry.backoff(defaultMaxRetryAttempts, defaultBackoff)
         .maxBackoff(defaultMaxBackoff);
     private static final Retry createItemExistsRetryStrategy = Retry.backoff(defaultMaxRetryAttempts, defaultBackoff)
         .maxBackoff(defaultMaxBackoff)
@@ -52,16 +55,58 @@ public class OpenSearchClient {
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
     }
 
-    private final RestClient client;
-    private final FailedRequestsLogger failedRequestsLogger;
+    protected final RestClient client;
+    protected final FailedRequestsLogger failedRequestsLogger;
 
     public OpenSearchClient(ConnectionContext connectionContext) {
         this(new RestClient(connectionContext), new FailedRequestsLogger());
     }
 
-    OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger) {
+    protected OpenSearchClient(RestClient client, FailedRequestsLogger failedRequestsLogger) {
         this.client = client;
         this.failedRequestsLogger = failedRequestsLogger;
+    }
+
+    public Version getClusterVersion() {
+        return client.getAsync("/", null)
+            .flatMap(resp -> {
+                try {
+                    return Mono.just(versionFromResponse(resp));
+                } catch (Exception e) {
+                    return Mono.error(new OperationFailed(e.getMessage(), resp));
+                }
+            })
+            .doOnError(e -> log.error(e.getMessage()))
+            .retryWhen(checkIfItemExistsRetryStrategy)
+            .block();
+    }
+
+    private Version versionFromResponse(HttpResponse resp) {
+        if (resp.statusCode != 200) {
+            throw new OperationFailed("Unexpected status code " + resp.statusCode, resp);
+        }
+        try {
+            var body = objectMapper.readTree(resp.body);
+            var versionNode = body.get("version");
+
+            var versionNumberString = versionNode.get("number").asText();
+            var parts = versionNumberString.split("\\.");
+            var versionBuilder = Version.builder()
+                .major(Integer.parseInt(parts[0]))
+                .minor(Integer.parseInt(parts[1]))
+                .patch(parts.length > 2 ? Integer.parseInt(parts[2]) : 0);
+            
+            var distroNode = versionNode.get("distribution");
+            if (distroNode != null && distroNode.asText().equalsIgnoreCase("opensearch")) {
+                versionBuilder.flavor(Flavor.OpenSearch);
+            } else { 
+                versionBuilder.flavor(Flavor.Elasticsearch);
+            }
+            return versionBuilder.build();
+        } catch (Exception e) {
+            log.error("Unable to parse version from response", e);
+            throw new OperationFailed("Unable to parse version from response: " + e.getMessage(), resp);
+        }
     }
 
     /*
@@ -293,7 +338,13 @@ public class OpenSearchClient {
                 .addArgument(() -> docsMap.keySet())
                 .log();
             var body = BulkDocSection.convertToBulkRequestBody(docsMap.values());
-            return client.postAsync(targetPath, body, context)
+            var additionalHeaders = new HashMap<String, List<String>>();
+            // Reduce network bandwidth by attempting request and response compression
+            if (client.supportsGzipCompression()) {
+                RestClient.addGzipRequestHeaders(additionalHeaders);
+                RestClient.addGzipResponseHeaders(additionalHeaders);
+            }
+            return client.postAsync(targetPath, body, additionalHeaders, context)
                 .flatMap(response -> {
                     var resp = new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
                     if (!resp.hasBadStatusCode() && !resp.hasFailedOperations()) {
@@ -380,7 +431,7 @@ public class OpenSearchClient {
         public final HttpResponse response;
 
         public OperationFailed(String message, HttpResponse response) {
-            super(message);
+            super(message +"\nBody:\n" + response);
 
             this.response = response;
         }

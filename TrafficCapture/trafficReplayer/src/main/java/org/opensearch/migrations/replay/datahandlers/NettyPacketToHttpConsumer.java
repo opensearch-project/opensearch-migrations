@@ -441,7 +441,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         .map(f -> f.whenComplete((v, t) -> {
             try {
                 if (channel == null) {
-                    log.atInfo().setMessage(() -> "").log();
+                    log.atTrace().setMessage(() ->
+                        "finalizeRequest().whenComplete has no channel present that needs to be to deactivated.").log();
                 } else {
                     deactivateChannel();
                 }

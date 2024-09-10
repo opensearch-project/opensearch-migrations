@@ -281,6 +281,7 @@ public class RequestSenderOrchestrator {
             ctx.getLogicalEnclosingScope().getChannelKey(),
             channelInterationNum
         );
+        packets.retain();
         return scheduleOnConnectionReplaySession(
             diagnosticCtx,
             connectionReplaySession,
@@ -292,7 +293,8 @@ public class RequestSenderOrchestrator {
                 return sendRequestWithRetries(senderSupplier, eventLoop, packets, startTime, initialRetryDelay,
                     interval, visitor);
             }, () -> "sending packets for request"))
-        );
+        )
+            .whenComplete((v,t) -> packets.release(), () -> "waiting for request to be sent to release ByteBufList");
     }
 
     private TrackedFuture<String, Void> scheduleCloseOnConnectionReplaySession(
@@ -384,7 +386,7 @@ public class RequestSenderOrchestrator {
                 () -> "sendRequestWithRetries is failing due to the pending shutdown of the EventLoop");
         }
         return sendPackets(senderSupplier.get(), eventLoop,
-            byteBufList.streamRetained().iterator(), referenceStartTime, interval, new AtomicInteger())
+            byteBufList.streamUnretained().iterator(), referenceStartTime, interval, new AtomicInteger())
             .getDeferredFutureThroughHandle((response, t) -> {
                     try (var requestBytesHolder = RefSafeHolder.create(byteBufList.asCompositeByteBufRetained())) {
                         return visitor.visit(requestBytesHolder.get(), response, t);
@@ -424,8 +426,7 @@ public class RequestSenderOrchestrator {
         log.atTrace().setMessage(() -> "sendNextPartAndContinue: packetCounter=" + oldCounter).log();
         assert iterator.hasNext() : "Should not have called this with no items to send";
 
-        var packet = iterator.next();
-        var consumeFuture = packetReceiver.consumeBytes(packet);
+        var consumeFuture = packetReceiver.consumeBytes(iterator.next().retainedDuplicate());
         if (iterator.hasNext()) {
             return consumeFuture.thenCompose(
                 tf -> NettyFutureBinders.bindNettyScheduleToCompletableFuture(

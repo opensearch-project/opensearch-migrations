@@ -7,9 +7,10 @@ import java.util.stream.Stream;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
+import io.netty.util.AbstractReferenceCounted;
 import io.netty.util.ReferenceCounted;
 
-public class ByteBufList implements AutoCloseable {
+public class ByteBufList extends AbstractReferenceCounted {
 
     ArrayList<ByteBuf> data = new ArrayList<>();
 
@@ -39,10 +40,6 @@ public class ByteBufList implements AutoCloseable {
         return data.stream().map(ByteBuf::duplicate);
     }
 
-    public Stream<ByteBuf> streamRetained() {
-        return data.stream().map(ByteBuf::retainedDuplicate);
-    }
-
     public Stream<byte[]> asByteArrayStream() {
         return streamUnretained().map(bb -> {
             byte[] bArr = new byte[bb.readableBytes()];
@@ -52,7 +49,7 @@ public class ByteBufList implements AutoCloseable {
     }
 
     public CompositeByteBuf asCompositeByteBufRetained() {
-        return asCompositeByteBufRetained(streamRetained());
+        return asCompositeByteBufRetained(data.stream().map(ByteBuf::retainedDuplicate));
     }
 
     public static CompositeByteBuf asCompositeByteBufRetained(Stream<ByteBuf> byteBufs) {
@@ -62,13 +59,18 @@ public class ByteBufList implements AutoCloseable {
     }
 
     @Override
-    public void close() {
+    public void deallocate() {
         data.forEach(ReferenceCounted::release);
         // Once we're closed, I'd rather see an NPE rather than refCnt errors from netty, which
         // could cause us to look in many places before finding out that it was just localize
         // to how callers were handling this object
         data.clear();
         data = null;
+    }
+
+    @Override
+    public ReferenceCounted touch(Object o) {
+        return this;
     }
 
     @Override

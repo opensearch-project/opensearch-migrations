@@ -10,6 +10,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
@@ -137,7 +138,7 @@ public class HttpRetryTest {
             var response = runServerAndGetResponse(rootContext, DefaultRetry.MAX_RETRIES + 1);
             Assertions.assertNotNull(response.responses());
             Assertions.assertFalse(response.responses().isEmpty());
-            Assertions.assertEquals(DefaultRetry.MAX_RETRIES + 1, response.responses().size());
+            Assertions.assertEquals(DefaultRetry.MAX_RETRIES, response.responses().size());
             Assertions.assertTrue(response.responses().stream()
                 .map(r -> r.getRawResponse().status().code())
                 .allMatch(c -> 404 == c));
@@ -200,6 +201,11 @@ public class HttpRetryTest {
         return retryMetricCount;
     }
 
+    @Disabled(value = "This policy opens the replayer up to easy DOS patterns that would halt the replayer.  " +
+        "Specifically, if a request is ill-defined and that causes a prematurely closed connection from the server," +
+        "that single request would cause the replayer to spin on it indefinitely.  Clearly, malformed requests " +
+        "shouldn't have such a great impact.  Other options need to be considered to compensate for a other " +
+        "premature connection closed errors.")
     @Tag("longTest")
     @Test
     @WrapWithNettyLeakDetection(disableLeakChecks = true) // code is forcibly terminated so leaks are expected

@@ -78,7 +78,7 @@ public class SourceTargetCaptureTuple implements AutoCloseable {
 
     @Override
     public void close() {
-        Optional.ofNullable(targetRequestData).ifPresent(ByteBufList::close);
+        Optional.ofNullable(targetRequestData).ifPresent(ByteBufList::release);
     }
 
     @Override

@@ -12,7 +12,7 @@ import io.netty.buffer.ByteBuf;
 public interface RequestRetryEvaluator {
 
     TrackedFuture<String, RequestSenderOrchestrator.RetryDirective>
-    apply(
+    shouldRetry(
         ByteBuf targetRequestBytes,
         List<AggregatedRawResponse> previousResponses,
         AggregatedRawResponse currentResponse,

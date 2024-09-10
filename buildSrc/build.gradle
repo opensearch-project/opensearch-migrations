@@ -14,7 +14,6 @@ java.targetCompatibility = JavaVersion.VERSION_11
 repositories {
     // Use the plugin portal to apply community plugins in convention plugins.
     gradlePluginPortal()
-    mavenCentral()
 }
 
 dependencies {

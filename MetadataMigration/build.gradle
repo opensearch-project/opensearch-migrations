@@ -7,15 +7,12 @@ plugins {
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     implementation project(":commonDependencyVersionConstraints")
 
     implementation project(":coreUtilities")
     implementation project(":RFS")
+    implementation project(':transformation')
 
     implementation group: 'com.beust', name: 'jcommander'
     implementation group: 'org.slf4j', name: 'slf4j-api'
@@ -36,23 +33,4 @@ dependencies {
 
 application {
     mainClassName = 'org.opensearch.migrations.MetadataMigration'
-}
-
-test {
-    useJUnitPlatform {
-        excludeTags 'longTest'
-    }
-    testLogging {
-        events "passed", "skipped", "failed"
-        exceptionFormat "full"
-        showExceptions true
-        showCauses true
-    }
-}
-
-task slowTest(type: Test) {
-    // include longTest
-    jacoco {
-        enabled = true
-    }
 }
