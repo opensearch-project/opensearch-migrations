@@ -1,7 +1,6 @@
 package org.opensearch.migrations.replay.datatypes;
 
-import java.io.IOException;
-import java.util.function.Supplier;
+import java.util.function.BiFunction;
 
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.util.OnlineRadixSorter;
@@ -11,7 +10,6 @@ import org.opensearch.migrations.replay.util.TrackedFuture;
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
 import lombok.Getter;
-import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
@@ -25,8 +23,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ConnectionReplaySession {
 
-    private static final int MAX_CHANNEL_CREATE_RETRIES = 16;
-
     /**
      * We need to store this separately from the channelFuture because the channelFuture itself is
      * vended by a CompletableFuture (e.g. possibly a rate limiter).  If the ChannelFuture hasn't
@@ -36,7 +32,7 @@ public class ConnectionReplaySession {
     public final EventLoop eventLoop;
     public final OnlineRadixSorter scheduleSequencer;
     @Getter
-    private Supplier<TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory;
+    private final BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory;
     private ChannelFuture cachedChannel; // only can be accessed from the eventLoop thread
     public final TimeToResponseFulfillmentFutureMap schedule;
     @Getter
@@ -46,7 +42,7 @@ public class ConnectionReplaySession {
     public ConnectionReplaySession(
         EventLoop eventLoop,
         IReplayContexts.IChannelKeyContext channelKeyContext,
-        Supplier<TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory
+        BiFunction<EventLoop, IReplayContexts.ITargetRequestContext, TrackedFuture<String, ChannelFuture>> channelFutureFutureFactory
     ) {
         this.eventLoop = eventLoop;
         this.channelKeyContext = channelKeyContext;
@@ -55,58 +51,32 @@ public class ConnectionReplaySession {
         this.channelFutureFutureFactory = channelFutureFutureFactory;
     }
 
-    public TrackedFuture<String, ChannelFuture> getFutureThatReturnsChannelFutureInAnyState(
-        boolean requireActiveChannel
-    ) {
-        TextTrackedFuture<ChannelFuture> eventLoopFuture = new TextTrackedFuture<>("procuring a connection");
+    public TrackedFuture<String, ChannelFuture> getChannelFutureInAnyState() {
+        TextTrackedFuture<ChannelFuture> trigger = new TextTrackedFuture<>("procuring a connection");
+        eventLoop.submit(() -> trigger.future.complete(cachedChannel));
+        return trigger;
+    }
+
+    public TrackedFuture<String, ChannelFuture>
+    getChannelFutureInActiveState(IReplayContexts.ITargetRequestContext ctx)
+    {
+        TextTrackedFuture<ChannelFuture> trigger = new TextTrackedFuture<>("procuring a connection");
         eventLoop.submit(() -> {
-            if (!requireActiveChannel || (cachedChannel != null && cachedChannel.channel().isActive())) {
-                eventLoopFuture.future.complete(cachedChannel);
+            if (cachedChannel != null && cachedChannel.channel().isActive()) {
+                trigger.future.complete(cachedChannel);
             } else {
-                createNewChannelFuture(requireActiveChannel, eventLoopFuture);
+                channelFutureFutureFactory.apply(eventLoop, ctx)
+                    .whenComplete((v, t) -> {
+                        if (t == null) {
+                            trigger.future.complete(v);
+                        } else {
+                            trigger.future.completeExceptionally(TrackedFuture.unwindPossibleCompletionException(t));
+                        }
+                    }, () -> "working to signal back to an event loop trigger")
+                    .whenComplete((v,t) -> cachedChannel = v, () -> "Setting cached channel");
             }
         });
-        return eventLoopFuture;
-    }
-
-    private void createNewChannelFuture(
-        boolean requireActiveChannel,
-        TextTrackedFuture<ChannelFuture> eventLoopFuture
-    ) {
-        createNewChannelFuture(requireActiveChannel, MAX_CHANNEL_CREATE_RETRIES, eventLoopFuture);
-    }
-
-    private void createNewChannelFuture(
-        boolean requireActiveChannel,
-        int retries,
-        TextTrackedFuture<ChannelFuture> eventLoopFuture
-    ) {
-        channelFutureFutureFactory.get().future.whenComplete((v, t) -> {
-            if (requireActiveChannel && retries > 0 && (t == null || exceptionIsRetryable(t))) {
-                if (t != null || !v.channel().isActive()) {
-                    if (t != null) {
-                        channelKeyContext.addCaughtException(t);
-                        log.atWarn()
-                            .setMessage(() -> "Caught exception while trying to get an active channel")
-                            .setCause(t)
-                            .log();
-                    }
-                    createNewChannelFuture(requireActiveChannel, retries - 1, eventLoopFuture);
-                } else {
-                    cachedChannel = v;
-                    eventLoopFuture.future.complete(v);
-                }
-            } else if (t != null) {
-                channelKeyContext.addTraceException(t, true);
-                eventLoopFuture.future.completeExceptionally(t);
-            } else {
-                eventLoopFuture.future.complete(v);
-            }
-        });
-    }
-
-    private static boolean exceptionIsRetryable(@NonNull Throwable t) {
-        return t instanceof IOException;
+        return trigger;
     }
 
     public boolean hasWorkRemaining() {

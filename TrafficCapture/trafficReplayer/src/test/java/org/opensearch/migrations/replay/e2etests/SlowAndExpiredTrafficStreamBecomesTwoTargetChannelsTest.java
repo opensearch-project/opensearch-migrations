@@ -121,7 +121,7 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
                 httpServer.localhostEndpoint(),
                 new StaticAuthTransformerFactory("TEST"),
                 new TransformationLoader().getTransformerFactoryLoader("localhost"),
-                RootReplayerConstructorExtensions.makeClientConnectionPool(
+                RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(
                     httpServer.localhostEndpoint(),
                     true,
                     0,

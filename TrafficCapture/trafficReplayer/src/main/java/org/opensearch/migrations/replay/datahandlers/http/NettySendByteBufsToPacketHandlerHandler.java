@@ -78,9 +78,11 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
         var packetReceiverCompletionFuture = currentFuture.getDeferredFutureThroughHandle((v1, t1) -> {
             assert v1 != null
                 : "expected in progress Boolean to be not null since null should signal that work was never started";
-            var transformationStatus = v1.booleanValue()
-                ? HttpRequestTransformationStatus.COMPLETED
-                : HttpRequestTransformationStatus.ERROR;
+            // TODO - spend some more time on this block of code.  I'm not sure what the error would be
+            var transformationStatus = v1
+                ? HttpRequestTransformationStatus.completed()
+                : HttpRequestTransformationStatus.makeError(
+                    new IllegalStateException("current future failed when inspected by the handlerRemoved callback"));
             return packetReceiver.finalizeRequest()
                 .getDeferredFutureThroughHandle(
                     (v2, t2) -> wrapFinalizedResultWithExceptionHandling(t1, v2, t2, transformationStatus),
@@ -120,7 +122,7 @@ public class NettySendByteBufsToPacketHandlerHandler<R> extends ChannelInboundHa
         } else {
             return TextTrackedFuture.completedFuture(
                 Optional.ofNullable(v2)
-                    .map(r -> new TransformedOutputAndResult<R>(r, transformationStatus, null))
+                    .map(r -> new TransformedOutputAndResult<R>(r, transformationStatus))
                     .orElse(null),
                 () -> "fixed value from packetReceiver.finalizeRequest()"
             );

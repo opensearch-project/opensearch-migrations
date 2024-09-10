@@ -80,7 +80,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                                             + i
                                             + " HTTP/1.1\r\n"
                                             + "Connection: Keep-Alive\r\n"
-                                            + "Host: localhost\r\n").getBytes(StandardCharsets.UTF_8)
+                                            + "Host: localhost\r\n\r\n").getBytes(StandardCharsets.UTF_8)
                                     )
                                 )
                                 .build()
@@ -127,7 +127,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                     serverUri,
                     new StaticAuthTransformerFactory("TEST"),
                     new TransformationLoader().getTransformerFactoryLoader(serverUri.getHost()),
-                    RootReplayerConstructorExtensions.makeClientConnectionPool(serverUri, 10),
+                    RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(serverUri, 10),
                     10 * 1024
                 );
                 var blockingTrafficSource = new BlockingTrafficSource(trafficSource, Duration.ofMinutes(2))
@@ -191,6 +191,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("targetTransaction"));
         Assertions.assertEquals(numRequests * 2, traceProcessor.getCountAndRemoveSpan("scheduled"));
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("requestSending"));
+        Assertions.assertEquals(1, traceProcessor.getCountAndRemoveSpan("requestConnecting"));
         Assertions.assertEquals(numRequests, traceProcessor.getCountAndRemoveSpan("comparingResults"));
 
         Assertions.assertTrue(traceProcessor.getCountAndRemoveSpan("waitingForResponse") > 0);

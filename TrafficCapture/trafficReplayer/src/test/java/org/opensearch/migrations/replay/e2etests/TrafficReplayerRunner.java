@@ -78,7 +78,7 @@ public class TrafficReplayerRunner {
                     endpoint,
                     new StaticAuthTransformerFactory("TEST"),
                     new TransformationLoader().getTransformerFactoryLoader(endpoint.getHost()),
-                    RootReplayerConstructorExtensions.makeClientConnectionPool(endpoint, targetConnectionPoolPrefix)
+                    RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(endpoint, targetConnectionPoolPrefix)
                 );
             } catch (SSLException e) {
                 throw new RuntimeException(e);
