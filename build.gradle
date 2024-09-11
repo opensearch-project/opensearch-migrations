@@ -69,7 +69,6 @@ subprojects {
             showExceptions true
             showCauses true
             showStackTraces true
-            showStandardStreams = true
         }
 
         // Provide way to exclude particular tests from CLI
