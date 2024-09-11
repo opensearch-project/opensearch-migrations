@@ -154,7 +154,7 @@ This command compiles the source code and runs the quick unit tests, ensuring th
 For a comprehensive test run, including both quick unit tests and more extensive slow tests, execute:
 
 ```sh
-../gradlew test slowTest --rerun
+../gradlew allTests --rerun
 ```
 
 This command initiates all tests, ensuring thorough validation of the project. The `--rerun` option is used to ignore existing task output cache for the specified tasks.

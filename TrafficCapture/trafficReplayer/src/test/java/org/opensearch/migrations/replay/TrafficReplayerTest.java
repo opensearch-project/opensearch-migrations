@@ -257,6 +257,7 @@ class TrafficReplayerTest extends InstrumentationTest {
 
     @Test
     @Tag("longTest")
+    @WrapWithNettyLeakDetection(repetitions = 2)
     public void testCapturedReadsAfterCloseAreHandledAsNew() throws Exception {
         var uri = new URI("http://localhost:9200");
         try (

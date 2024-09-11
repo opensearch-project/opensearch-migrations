@@ -195,7 +195,6 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     @CsvSource({ "false, false", "false, true", "true, false", "true, true" })
     @Tag("longTest")
     @WrapWithNettyLeakDetection(repetitions = 1)
-    @Tag("longTest")
     public void testThatPeerResetTriggersFinalizeFuture(boolean useTls, boolean withServerReadTimeout)
         throws Exception {
         final var RESPONSE_TIMEOUT_FOR_HUNG_TEST = Duration.ofMillis(500);
@@ -285,6 +284,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
 
     @ParameterizedTest
     @CsvSource({ "false, false", "false, true", "true, false", "true, true" })
+    @WrapWithNettyLeakDetection(repetitions = 1)
     @Tag("longTest")
     public void testThatConnectionsAreKeptAliveAndShared(boolean useTls, boolean largeResponse) throws Exception {
         try (

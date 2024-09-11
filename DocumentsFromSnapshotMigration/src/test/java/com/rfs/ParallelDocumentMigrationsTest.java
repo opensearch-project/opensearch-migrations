@@ -33,7 +33,7 @@ import com.rfs.framework.SearchClusterContainer;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 
-@Tag("longTest")
+@Tag("isolatedTest")
 @Slf4j
 public class ParallelDocumentMigrationsTest extends SourceTestBase {
 

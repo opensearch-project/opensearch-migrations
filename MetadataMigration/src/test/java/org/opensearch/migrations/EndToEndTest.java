@@ -29,7 +29,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 /**
  * Tests focused on setting up whole source clusters, performing a migration, and validation on the target cluster
  */
-@Tag("longTest")
+@Tag("isolatedTest")
 @Slf4j
 class EndToEndTest {
 
