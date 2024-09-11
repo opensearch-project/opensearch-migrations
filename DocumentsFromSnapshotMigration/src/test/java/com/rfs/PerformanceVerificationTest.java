@@ -13,6 +13,7 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.util.BytesRef;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
@@ -37,6 +38,7 @@ import static org.mockito.Mockito.when;
 public class PerformanceVerificationTest {
 
     @Test
+    @Tag("isolatedTest")
     void testDocumentBuffering() throws Exception {
         // Create an in-memory directory for the test
         ByteBuffersDirectory inMemoryDir = new ByteBuffersDirectory();
