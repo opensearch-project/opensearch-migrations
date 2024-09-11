@@ -230,7 +230,7 @@ export class StackComposer {
 
         const targetClusterEndpointField = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
         let targetClusterDefinition = this.getContextForType('targetCluster', 'object', defaultValues, contextJSON)
-        const usePreexistingTargetCluster = targetClusterEndpointField | targetClusterDefinition
+        const usePreexistingTargetCluster = !!(targetClusterEndpointField || targetClusterDefinition)
         if (!targetClusterDefinition && usePreexistingTargetCluster) {
             console.warn("`targetClusterEndpoint` is being deprecated in favor of a `targetCluster` object.")
             console.warn("Please update your CDK context block to use the `targetCluster` object.")
@@ -241,7 +241,7 @@ export class StackComposer {
                 auth = {
                     "type": "basic",
                     "username": fineGrainedManagerUserName,
-                    "password_from_arn": fineGrainedManagerUserSecretManagerKeyARN
+                    "passwordFromSecretArn": fineGrainedManagerUserSecretManagerKeyARN
                 }
             }
             targetClusterDefinition = {"endpoint": targetClusterEndpointField, "auth": auth}
@@ -254,10 +254,12 @@ export class StackComposer {
                 "provisioned by this tooling, which is contraindicated by `targetCluster` being provided.")
         }
 
-        // Ensure that target version is not defined in multiple places
+        // Ensure that target version is not defined in multiple places, but `engineVersion` is set as a default value, so this is
+        // a warning instead of an error.
         if (usePreexistingTargetCluster && engineVersion) {
-            throw new Error("The `engineVersion` can only be used when a domain is being provisioned by this tooling, which is contraindicated " +
-                "by `targetCluster` being provided.")
+            console.warn("The `engineVersion` value will be ignored because it's only used when a domain is being provisioned by this tooling" +
+                "and in this case, `targetCluster` was provided to define an existing target cluster."
+            )
         }
         
         const targetClusterEndpoint = targetCluster?.endpoint

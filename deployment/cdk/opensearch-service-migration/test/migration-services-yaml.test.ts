@@ -168,75 +168,59 @@ test('Test that services yaml parameter is created by migration console stack wi
     expect(Object.keys(parsedFromYaml).length).toEqual(expectedFields.length)
     expect(new Set(Object.keys(parsedFromYaml))).toEqual(new Set(expectedFields))
   });
-});
 
 
-test('Test that services yaml parameter is created by migration console stack with provided target domain', () => {
-  // const contextOptions = {
-  //     vpcEnabled: true,
-  //     migrationAssistanceEnabled: true,
-  //     migrationConsoleServiceEnabled: true,
-  //     sourceCluster: {
-  //       "endpoint": "https://test-cluster",
-  //       "auth": {"type": "none"}
-  //     },
-  //     targetCluster: {
-  //       "endpoint": "https://target-cluster",
-  //       "auth": {
-  //         "type": "basic",
-  //         "username": "admin",
-  //         "password_from_arn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc"
-  //       }
-  //     },
-  //     reindexFromSnapshotServiceEnabled: true,
-  //     trafficReplayerServiceEnabled: true,
-  // }
-  const contextOptions = {
-    vpcEnabled: true,
-    migrationAssistanceEnabled: true,
-    migrationConsoleServiceEnabled: true,
-    sourceClusterEndpoint: "https://test-cluster",
-    sourceClusterAuth: {"no_auth": null},
-    reindexFromSnapshotServiceEnabled: true,
-    trafficReplayerServiceEnabled: true,
-    fineGrainedManagerUserName: "admin",
-    fineGrainedManagerUserSecretManagerKeyARN: "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc",
-    nodeToNodeEncryptionEnabled: true, // required if FGAC is being used
-    encryptionAtRestEnabled: true, // required if FGAC is being used
-    enforceHTTPS: true // required if FGAC is being used
-}
+  test('Test that services yaml parameter is created by migration console stack with provided target domain', () => {
+    const contextOptions = {
+        vpcEnabled: true,
+        migrationAssistanceEnabled: true,
+        migrationConsoleServiceEnabled: true,
+        sourceCluster: {
+          "endpoint": "https://test-cluster",
+          "auth": {"type": "none"}
+        },
+        targetCluster: {
+          "endpoint": "https://target-cluster",
+          "auth": {
+            "type": "basic",
+            "username": "admin",
+            "passwordFromSecretArn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc"
+          }
+        },
+        reindexFromSnapshotServiceEnabled: true,
+        trafficReplayerServiceEnabled: true,
+    }
 
-  const stacks = createStackComposer(contextOptions)
+    const stacks = createStackComposer(contextOptions)
 
-  const migrationConsoleStack: MigrationConsoleStack = (stacks.stacks.filter((s) => s instanceof MigrationConsoleStack)[0]) as MigrationConsoleStack
-  const migrationConsoleStackTemplate = Template.fromStack(migrationConsoleStack)
+    const migrationConsoleStack: MigrationConsoleStack = (stacks.stacks.filter((s) => s instanceof MigrationConsoleStack)[0]) as MigrationConsoleStack
+    const migrationConsoleStackTemplate = Template.fromStack(migrationConsoleStack)
 
-  const valueCapture = new Capture();
-  migrationConsoleStackTemplate.hasResourceProperties("AWS::SSM::Parameter", {
-    Type: "String",
-    Name: Match.stringLikeRegexp("/migration/.*/.*/servicesYamlFile"),
-    Value: valueCapture,
+    const valueCapture = new Capture();
+    migrationConsoleStackTemplate.hasResourceProperties("AWS::SSM::Parameter", {
+      Type: "String",
+      Name: Match.stringLikeRegexp("/migration/.*/.*/servicesYamlFile"),
+      Value: valueCapture,
+    });
+    const value = valueCapture.asObject()
+    expect(value).toBeDefined();
+    expect(value['Fn::Join']).toBeInstanceOf(Array);
+    expect(value['Fn::Join'][1]).toBeInstanceOf(Array)
+    // join the strings together to get the yaml file contents
+    const yamlFileContents = value['Fn::Join'][1].join('')
+    expect(yamlFileContents).toContain('source_cluster')
+    expect(yamlFileContents).toContain('target_cluster')
+
+    expect(yamlFileContents).toContain('basic_auth')
+    expect(yamlFileContents).toContain(`username: ${contextOptions.targetCluster.auth.username}`)
+    expect(yamlFileContents).toContain(`password_from_secret_arn: ${contextOptions.targetCluster.auth.passwordFromSecretArn}`)
+    expect(yamlFileContents).toContain('metrics_source:\n  cloudwatch:')
+    expect(yamlFileContents).toContain('kafka')
+    // Validates that the file can be parsed as valid yaml and has the expected fields
+    const parsedFromYaml = yaml.parse(yamlFileContents);
+    // Validates that the file has the expected fields
+    const expectedFields = ['source_cluster', 'target_cluster', 'metrics_source', 'backfill', 'snapshot', 'metadata_migration', 'replay', 'kafka'];
+    expect(Object.keys(parsedFromYaml).length).toEqual(expectedFields.length)
+    expect(new Set(Object.keys(parsedFromYaml))).toEqual(new Set(expectedFields))
   });
-  const value = valueCapture.asObject()
-  expect(value).toBeDefined();
-  expect(value['Fn::Join']).toBeInstanceOf(Array);
-  expect(value['Fn::Join'][1]).toBeInstanceOf(Array)
-  // join the strings together to get the yaml file contents
-  const yamlFileContents = value['Fn::Join'][1].join('')
-  expect(yamlFileContents).toContain('source_cluster')
-  expect(yamlFileContents).toContain('target_cluster')
-
-  expect(yamlFileContents).toContain('basic_auth')
-  // expect(yamlFileContents).toContain(`username: ${contextOptions.targetCluster.auth.username}`)
-  // expect(yamlFileContents).toContain(`password_from_secret_arn: ${contextOptions.targetCluster.auth.password_from_arn}`)
-  expect(yamlFileContents).toContain(`username: ${contextOptions.fineGrainedManagerUserName}`)
-  expect(yamlFileContents).toContain(`password_from_secret_arn: ${contextOptions.fineGrainedManagerUserSecretManagerKeyARN}`)
-  expect(yamlFileContents).toContain('metrics_source:\n  cloudwatch:')
-  expect(yamlFileContents).toContain('kafka')
-  // Validates that the file can be parsed as valid yaml and has the expected fields
-  const parsedFromYaml = yaml.parse(yamlFileContents);
-  // Validates that the file has the expected fields
-  const expectedFields = ['source_cluster', 'target_cluster', 'metrics_source', 'backfill', 'snapshot', 'metadata_migration', 'replay', 'kafka'];
-  expect(Object.keys(parsedFromYaml).length).toEqual(expectedFields.length)
-  expect(new Set(Object.keys(parsedFromYaml))).toEqual(new Set(expectedFields))
 });

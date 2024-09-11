@@ -387,21 +387,21 @@ export class ClusterAuth {
 
 function getBasicClusterAuth(basicAuthObject: { [key: string]: any }): ClusterBasicAuth {
     // Destructure and validate the input object
-    const { username, password, password_from_secret_arn } = basicAuthObject;
+    const { username, password, passwordFromSecretArn } = basicAuthObject;
     // Ensure the required 'username' field is present
     if (typeof username !== 'string' || !username) {
         throw new Error('Invalid input: "username" must be a non-empty string');
     }
-    // Ensure that exactly one of 'password' or 'password_from_secret_arn' is provided
+    // Ensure that exactly one of 'password' or 'passwordFromSecretArn' is provided
     const hasPassword = typeof password === 'string' && password.trim() !== '';
-    const hasPasswordFromSecretArn = typeof password_from_secret_arn === 'string' && password_from_secret_arn.trim() !== '';
+    const hasPasswordFromSecretArn = typeof passwordFromSecretArn === 'string' && passwordFromSecretArn.trim() !== '';
     if ((hasPassword && hasPasswordFromSecretArn) || (!hasPassword && !hasPasswordFromSecretArn)) {
-        throw new Error('Exactly one of "password" or "password_from_secret_arn" must be provided');
+        throw new Error('Exactly one of "password" or "passwordFromSecretArn" must be provided');
     }
     return new ClusterBasicAuth({
         username,
         password: hasPassword ? password : undefined,
-        password_from_secret_arn: hasPasswordFromSecretArn ? password_from_secret_arn : undefined,
+        password_from_secret_arn: hasPasswordFromSecretArn ? passwordFromSecretArn : undefined,
     });
 }
 
@@ -415,7 +415,7 @@ function getSigV4ClusterAuth(sigv4AuthObject: { [key: string]: any }): ClusterSi
 
 // Function to parse and validate auth object
 function parseAuth(json: any): ClusterAuth | null {
-    if (json.type === 'basic' && typeof json.username === 'string' && (typeof json.password === 'string' || typeof json.passwordFromArn === 'string') && !(typeof json.password === 'string' && typeof json.passwordFromArn === 'string')) {
+    if (json.type === 'basic' && typeof json.username === 'string' && (typeof json.password === 'string' || typeof json.passwordFromSecretArn === 'string') && !(typeof json.password === 'string' && typeof json.passwordFromSecretArn === 'string')) {
         return new ClusterAuth({basicAuth: getBasicClusterAuth(json)});
     } else if (json.type === 'sigv4' && typeof json.region === 'string' && typeof json.serviceSigningName === 'string') {
         return new ClusterAuth({sigv4: getSigV4ClusterAuth(json)});

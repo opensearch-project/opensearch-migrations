@@ -307,4 +307,26 @@ describe('Stack Composer Tests', () => {
     let sourceClusterDisabledWithEndpointCreateStackFunc = () => createStackComposer(sourceClusterDisabledWithEndpointContextOptions)
     expect (sourceClusterDisabledWithEndpointCreateStackFunc).toThrow()
   })
+
+
+  test('Test backwards compatibility of source/target cluster params', () => {
+    // This is effectively a smoke test with the "old-style" flat source and target cluster parameters.
+    const contextOptions = {
+      vpcEnabled: true,
+      migrationAssistanceEnabled: true,
+      migrationConsoleServiceEnabled: true,
+      sourceClusterEndpoint: "https://test-cluster",
+      reindexFromSnapshotServiceEnabled: true,
+      trafficReplayerServiceEnabled: true,
+      fineGrainedManagerUserName: "admin",
+      fineGrainedManagerUserSecretManagerKeyARN: "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc",
+      nodeToNodeEncryptionEnabled: true, // required if FGAC is being used
+      encryptionAtRestEnabled: true, // required if FGAC is being used
+      enforceHTTPS: true // required if FGAC is being used
+  }
+
+    const stacks = createStackComposer(contextOptions)
+    expect(stacks.stacks).toHaveLength(6)
+
+  });
 })
