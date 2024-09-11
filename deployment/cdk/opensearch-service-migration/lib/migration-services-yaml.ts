@@ -1,4 +1,16 @@
+import { EngineVersion } from 'aws-cdk-lib/aws-opensearchservice';
 import * as yaml from 'yaml';
+
+export class ClusterNoAuth {};
+
+export class ClusterSigV4Auth {
+    region?: string;
+    service?: string;
+    constructor({region, service}: {region: string, service: string}) {
+        this.region = region;
+        this.service = service;
+    }
+}
 
 export class ClusterBasicAuth {
     username: string;
@@ -25,10 +37,45 @@ export class ClusterBasicAuth {
     }
 }
 
+export class ClusterAuth {
+    basicAuth?: ClusterBasicAuth
+    noAuth?: ClusterNoAuth
+    sigv4?: ClusterSigV4Auth
+
+    validate() {
+        const numDefined = (this.basicAuth? 1 : 0) + (this.noAuth? 1 : 0) + (this.sigv4? 1 : 0)
+        if (numDefined != 1) {
+            throw new Error(`Exactly one authentication method can be defined. ${numDefined} are currently set.`)
+        }
+    }
+
+    toDict() {
+        return {
+            // This will only include the keys for values that are defined
+            ...(this.basicAuth && { basic_auth: this.basicAuth }),
+            ...(this.noAuth && { no_auth: this.noAuth }),
+            ...(this.sigv4 && { sigv4: this.sigv4 })
+        }
+    }
+}
+
 export class ClusterYaml {
     endpoint: string = '';
-    no_auth?: string | null;
-    basic_auth?: ClusterBasicAuth | null;
+    version?: EngineVersion;
+    auth: ClusterAuth;
+
+    constructor({endpoint, auth, version} : {endpoint: string, auth: ClusterAuth, version: EngineVersion}) {
+        this.endpoint = endpoint;
+        this.auth = auth;
+        this.version = version;
+    }
+    toDict() {
+        return {
+            endpoint: this.endpoint,
+            version: this.version?.version,
+            ...this.auth.toDict()
+        };
+    }
 }
 
 export class MetricsSourceYaml {

@@ -18,7 +18,7 @@ import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-st
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
 import {MigrationSSMParameter, parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
-import {ClusterBasicAuth, ServicesYaml} from "./migration-services-yaml";
+import {ClusterAuth, ClusterBasicAuth, ClusterNoAuth, ClusterSigV4Auth, ClusterYaml, ServicesYaml} from "./migration-services-yaml";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -90,6 +90,46 @@ export class StackComposer {
         return version
     }
 
+    private getBasicClusterAuth(basicAuthObject: { [key: string]: any }): ClusterBasicAuth {
+        // Destructure and validate the input object
+        const { username, password, password_from_secret_arn } = basicAuthObject;
+        // Ensure the required 'username' field is present
+        if (typeof username !== 'string' || !username) {
+            throw new Error('Invalid input: "username" must be a non-empty string');
+        }
+        // Ensure that exactly one of 'password' or 'password_from_secret_arn' is provided
+        const hasPassword = typeof password === 'string' && password.trim() !== '';
+        const hasPasswordFromSecretArn = typeof password_from_secret_arn === 'string' && password_from_secret_arn.trim() !== '';
+        if ((hasPassword && hasPasswordFromSecretArn) || (!hasPassword && !hasPasswordFromSecretArn)) {
+            throw new Error('Exactly one of "password" or "password_from_secret_arn" must be provided');
+        }
+        return new ClusterBasicAuth({
+            username,
+            password: hasPassword ? password : undefined,
+            password_from_secret_arn: hasPasswordFromSecretArn ? password_from_secret_arn : undefined,
+        });
+    }
+
+    private getSigV4ClusterAuth(sigv4AuthObject: { [key: string]: any }): ClusterSigV4Auth {
+        // Destructure and validate the input object
+        const { service, region } = sigv4AuthObject;
+
+        // Create and return the ClusterSigV4Auth object
+        return new ClusterSigV4Auth({service, region});
+    }
+
+    private getClusterAuth(clusterAuthObject: {string: object}) : ClusterAuth {
+        const auth = new ClusterAuth()
+        if ('basic' in clusterAuthObject) {
+            auth.basicAuth = this.getBasicClusterAuth(clusterAuthObject.basic as { [key: string]: any })
+        } else if ('sigv4' in clusterAuthObject) {
+            auth.sigv4 = this.getSigV4ClusterAuth(clusterAuthObject.sigv4 as { [key: string]: any })
+        } else {
+            auth.noAuth = new ClusterNoAuth()
+        }
+        return auth
+    }
+
     private addDependentStacks(primaryStack: Stack, dependantStacks: any[]) {
         for (let stack of dependantStacks) {
             if (stack) {
@@ -144,9 +184,8 @@ export class StackComposer {
 
         const stage = this.getContextForType('stage', 'string', defaultValues, contextJSON)
 
-        let version: EngineVersion
-
         const domainName = this.getContextForType('domainName', 'string', defaultValues, contextJSON)
+        const engineVersion = this.getContextForType('engineVersion', 'string', defaultValues, contextJSON)
         const domainAZCount = this.getContextForType('domainAZCount', 'number', defaultValues, contextJSON)
         const dataNodeType = this.getContextForType('dataNodeType', 'string', defaultValues, contextJSON)
         const dataNodeCount = this.getContextForType('dataNodeCount', 'number', defaultValues, contextJSON)
@@ -202,16 +241,40 @@ export class StackComposer {
         const captureProxyExtraArgs = this.getContextForType('captureProxyExtraArgs', 'string', defaultValues, contextJSON)
         const elasticsearchServiceEnabled = this.getContextForType('elasticsearchServiceEnabled', 'boolean', defaultValues, contextJSON)
         const kafkaBrokerServiceEnabled = this.getContextForType('kafkaBrokerServiceEnabled', 'boolean', defaultValues, contextJSON)
-        const targetClusterEndpoint = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
         const fetchMigrationEnabled = this.getContextForType('fetchMigrationEnabled', 'boolean', defaultValues, contextJSON)
         const dpPipelineTemplatePath = this.getContextForType('dpPipelineTemplatePath', 'string', defaultValues, contextJSON)
-        const sourceClusterDisabled = this.getContextForType('sourceClusterDisabled', 'boolean', defaultValues, contextJSON)
-        const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
         const osContainerServiceEnabled = this.getContextForType('osContainerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotServiceEnabled = this.getContextForType('reindexFromSnapshotServiceEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotExtraArgs = this.getContextForType('reindexFromSnapshotExtraArgs', 'string', defaultValues, contextJSON)
         const albAcmCertArn = this.getContextForType('albAcmCertArn', 'string', defaultValues, contextJSON);
+
+        const sourceClusterDisabled = this.getContextForType('sourceClusterDisabled', 'boolean', defaultValues, contextJSON)
+        const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
+        const sourceClusterVersion = this.getContextForType('sourceClusterVersion', 'string', defaultValues, contextJSON)
+        const sourceVersion = this.getEngineVersion(sourceClusterVersion)
+        const sourceClusterAuthObject = this.getContextForType('sourceClusterAuth', 'object', defaultValues, contextJSON)
+        const sourceClusterAuth = this.getClusterAuth(sourceClusterAuthObject)
+
+        const targetClusterEndpoint = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
+        const targetClusterVersion = this.getContextForType('targetClusterVersion', 'string', defaultValues, contextJSON)
+        const targetClusterAuthObject = this.getContextForType('targetClusterAuth', 'object', defaultValues, contextJSON)
+        const targetClusterAuth = this.getClusterAuth(targetClusterAuthObject)
+
+        // Ensure that target cluster username and password are not defined in multiple places
+        if (targetClusterEndpoint && (fineGrainedManagerUserName || fineGrainedManagerUserSecretManagerKeyARN)) {
+            throw new Error("The `fineGrainedManagerUserName` and `fineGrainedManagerUserSecretManagerKeyARN` can only be used when a domain is being " +
+                "provisioned by this tooling, which is contraindicated by the `targetClusterEndpoint` being provided.")
+        }
+
+        // Ensure that target version is not defined in multiple places
+        if (targetClusterEndpoint && engineVersion) {
+            throw new Error("The `engineVersion` can only be used when a domain is being provisioned by this tooling, which is contraindicated " +
+                "by the `targetClusterEndpoint` being provided.")
+        }
+        const targetVersion = this.getEngineVersion(targetClusterVersion || engineVersion)
+
+        const sourceCluster = !sourceClusterDisabled ?? new ClusterYaml({endpoint: sourceClusterEndpoint, version: sourceVersion, auth: sourceClusterAuth})
 
         const requiredFields: { [key: string]: any; } = {"stage":stage, "domainName":domainName}
         for (let key in requiredFields) {
@@ -226,7 +289,7 @@ export class StackComposer {
         if (targetClusterEndpoint && osContainerServiceEnabled) {
             throw new Error("The following options are mutually exclusive as only one target cluster can be specified for a given deployment: [targetClusterEndpoint, osContainerServiceEnabled]")
         } else if (targetClusterEndpoint || osContainerServiceEnabled) {
-            targetEndpoint = targetClusterEndpoint ? targetClusterEndpoint : "https://opensearch:9200"
+            targetEndpoint = targetClusterEndpoint || "https://opensearch:9200"
         }
 
         const fargateCpuArch = validateFargateCpuArch(defaultFargateCpuArch)
@@ -239,8 +302,6 @@ export class StackComposer {
             streamingSourceType = StreamingSourceType.DISABLED
         }
 
-        const engineVersion = this.getContextForType('engineVersion', 'string', defaultValues, contextJSON)
-        version = this.getEngineVersion(engineVersion)
 
         const tlsSecurityPolicyName = this.getContextForType('tlsSecurityPolicy', 'string', defaultValues, contextJSON)
         const tlsSecurityPolicy: TLSSecurityPolicy|undefined = tlsSecurityPolicyName ? TLSSecurityPolicy[tlsSecurityPolicyName as keyof typeof TLSSecurityPolicy] : undefined
@@ -285,8 +346,8 @@ export class StackComposer {
                 migrationAPIEnabled,
                 sourceClusterDisabled,
                 sourceClusterEndpoint,
-                targetClusterUsername: fineGrainedManagerUserName,
-                targetClusterPasswordSecretArn: fineGrainedManagerUserSecretManagerKeyARN,
+                targetClusterUsername: targetClusterEndpoint ? targetClusterAuth.basicAuth?.username : fineGrainedManagerUserName,
+                targetClusterPasswordSecretArn: targetClusterEndpoint ? targetClusterAuth.basicAuth?.password_from_secret_arn : fineGrainedManagerUserSecretManagerKeyARN,
                 env: props.env
             })
             this.stacks.push(networkStack)
@@ -298,7 +359,7 @@ export class StackComposer {
         let openSearchStack
         if (!targetEndpoint) {
             openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
-                version: version,
+                version: targetVersion,
                 domainName: domainName,
                 dataNodeInstanceType: dataNodeType,
                 dataNodes: dataNodeCount,
@@ -340,14 +401,7 @@ export class StackComposer {
             this.stacks.push(openSearchStack)
             servicesYaml.target_cluster = openSearchStack.targetClusterYaml;
         } else {
-            servicesYaml.target_cluster = { endpoint: targetEndpoint }
-            if (fineGrainedManagerUserName && fineGrainedManagerUserSecretManagerKeyARN) {
-                servicesYaml.target_cluster.basic_auth = new ClusterBasicAuth({username: fineGrainedManagerUserName,
-                    password_from_secret_arn: fineGrainedManagerUserSecretManagerKeyARN
-                })
-            } else {
-                servicesYaml.target_cluster.no_auth = ""
-            }
+            servicesYaml.target_cluster = new ClusterYaml({ endpoint: targetEndpoint, auth: targetClusterAuth, version: targetVersion })
         }
 
         let migrationStack
@@ -426,7 +480,7 @@ export class StackComposer {
             reindexFromSnapshotStack = new ReindexFromSnapshotStack(scope, "reindexFromSnapshotStack", {
                 vpc: networkStack.vpc,
                 extraArgs: reindexFromSnapshotExtraArgs,
-                clusterAuthDetails: servicesYaml.target_cluster,
+                clusterAuthDetails: servicesYaml.target_cluster.auth,
                 stackName: `OSMigrations-${stage}-${region}-ReindexFromSnapshot`,
                 description: "This stack contains resources to assist migrating historical data, via Reindex from Snapshot, to a target cluster",
                 stage: stage,
@@ -560,7 +614,7 @@ export class StackComposer {
                 migrationAPIEnabled: migrationAPIEnabled,
                 servicesYaml: servicesYaml,
                 migrationAPIAllowedHosts: migrationAPIAllowedHosts,
-                sourceClusterDisabled,
+                sourceCluster,
                 stackName: `OSMigrations-${stage}-${region}-MigrationConsole`,
                 description: "This stack contains resources for the Migration Console ECS service",
                 stage: stage,

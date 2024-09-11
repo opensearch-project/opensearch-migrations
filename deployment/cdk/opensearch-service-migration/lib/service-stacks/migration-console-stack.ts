@@ -16,7 +16,7 @@ import {
 import {StreamingSourceType} from "../streaming-source-type";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {Fn, RemovalPolicy} from "aws-cdk-lib";
-import {MetadataMigrationYaml, ServicesYaml} from "../migration-services-yaml";
+import {ClusterYaml, MetadataMigrationYaml, ServicesYaml} from "../migration-services-yaml";
 import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
 import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
 import { SharedLogFileSystem } from "../components/shared-log-file-system";
@@ -33,7 +33,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly targetGroups?: ELBTargetGroup[],
     readonly servicesYaml: ServicesYaml,
     readonly otelCollectorEnabled?: boolean,
-    readonly sourceClusterDisabled?: boolean,
+    readonly sourceCluster?: ClusterYaml,
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
@@ -151,10 +151,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ...props,
             parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
         });
-        const sourceClusterEndpoint = props.sourceClusterDisabled ? null : getMigrationStringParameterValue(this, {
-            ...props,
-            parameter: MigrationSSMParameter.SOURCE_CLUSTER_ENDPOINT,
-        });
         const brokerEndpoints = props.streamingSourceType != StreamingSourceType.DISABLED ?
             getMigrationStringParameterValue(this, {
                 ...props,
@@ -236,18 +232,12 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
-        const getSecretsPolicy = props.servicesYaml.target_cluster.basic_auth?.password_from_secret_arn ?
-            getTargetPasswordAccessPolicy(props.servicesYaml.target_cluster.basic_auth.password_from_secret_arn) : null;
+        const getSecretsPolicy = props.servicesYaml.target_cluster.auth.basicAuth?.password_from_secret_arn ?
+            getTargetPasswordAccessPolicy(props.servicesYaml.target_cluster.auth.basicAuth?.password_from_secret_arn) : null;
 
         // Upload the services.yaml file to Parameter Store
         let servicesYaml = props.servicesYaml
-        if (!props.sourceClusterDisabled && sourceClusterEndpoint) {
-            servicesYaml.source_cluster = {
-                'endpoint': sourceClusterEndpoint,
-                // TODO: We're not currently supporting auth here, this may need to be handled on the migration console
-                'no_auth': ''
-            }
-        }
+        servicesYaml.source_cluster = props.sourceCluster
         servicesYaml.metadata_migration = new MetadataMigrationYaml();
         if (props.otelCollectorEnabled) {
             const otelSidecarEndpoint = OtelCollectorSidecar.getOtelLocalhostEndpoint();
