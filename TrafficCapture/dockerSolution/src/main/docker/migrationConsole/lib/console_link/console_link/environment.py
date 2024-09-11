@@ -57,7 +57,8 @@ class Environment:
             self.client_options: ClientOptions = ClientOptions(self.config["client_options"])
 
         if 'source_cluster' in self.config:
-            self.source_cluster = Cluster(self.config["source_cluster"])
+            self.source_cluster = Cluster(config=self.config["source_cluster"],
+                                          client_options=self.client_options)
             logger.info(f"Source cluster initialized: {self.source_cluster.endpoint}")
         else:
             logger.info("No source cluster provided")
@@ -65,14 +66,16 @@ class Environment:
         # At some point, target and replayers should be stored as pairs, but for the time being
         # we can probably assume one target cluster.
         if 'target_cluster' in self.config:
-            self.target_cluster: Cluster = Cluster(self.config["target_cluster"])
+            self.target_cluster: Cluster = Cluster(config=self.config["target_cluster"],
+                                                   client_options=self.client_options)
             logger.info(f"Target cluster initialized: {self.target_cluster.endpoint}")
         else:
             logger.warning("No target cluster provided. This may prevent other actions from proceeding.")
 
         if 'metrics_source' in self.config:
             self.metrics_source: MetricsSource = get_metrics_source(
-                self.config["metrics_source"]
+                config=self.config["metrics_source"],
+                client_options=self.client_options
             )
             logger.info(f"Metrics source initialized: {self.metrics_source}")
         else:

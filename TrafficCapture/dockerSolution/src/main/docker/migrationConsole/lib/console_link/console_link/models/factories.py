@@ -81,7 +81,8 @@ def get_backfill(config: Dict, source_cluster: Optional[Cluster], target_cluster
         logger.debug("Creating OpenSearch Ingestion backfill instance")
         return OpenSearchIngestionBackfill(config=config,
                                            source_cluster=source_cluster,
-                                           target_cluster=target_cluster)
+                                           target_cluster=target_cluster,
+                                           client_options=client_options)
     elif BackfillType.reindex_from_snapshot.name in config:
         if target_cluster is None:
             raise ValueError("target_cluster must be provided for RFS backfill")
@@ -102,11 +103,11 @@ def get_backfill(config: Dict, source_cluster: Optional[Cluster], target_cluster
     raise UnsupportedBackfillTypeError(next(iter(config.keys())))
 
 
-def get_metrics_source(config):
+def get_metrics_source(config, client_options: Optional[ClientOptions]):
     if 'prometheus' in config:
-        return PrometheusMetricsSource(config)
+        return PrometheusMetricsSource(config=config, client_options=client_options)
     elif 'cloudwatch' in config:
-        return CloudwatchMetricsSource(config)
+        return CloudwatchMetricsSource(config=config, client_options=client_options)
     else:
         logger.error(f"An unsupported metrics source type was provided: {config.keys()}")
         if len(config.keys()) > 1:

@@ -16,7 +16,7 @@ SCHEMA = {
 
 class ClientOptions:
     """
-    Options that can be configured for boto3 clients.
+    Options that can be configured for boto3 and request library clients.
     """
 
     user_agent_extra: Optional[str] = None

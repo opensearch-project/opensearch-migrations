@@ -3,6 +3,7 @@ from enum import Enum
 from typing import Dict, Optional
 from datetime import datetime
 import boto3
+import requests.utils
 
 from console_link.models.client_options import ClientOptions
 
@@ -44,3 +45,12 @@ def create_boto3_client(aws_service_name: str, region: Optional[str] = None,
         user_agent_extra_param = { "user_agent_extra": client_options.user_agent_extra }
         client_config = config.Config(**user_agent_extra_param)
     return boto3.client(aws_service_name, region_name=region, config=client_config)
+
+
+def append_user_agent_header_for_requests(headers: Optional[dict], user_agent_extra: str):
+    adjusted_headers = dict(headers) if headers else {}
+    if "User-Agent" in adjusted_headers:
+        adjusted_headers["User-Agent"] = f"{adjusted_headers['User-Agent']} {user_agent_extra}"
+    else:
+        adjusted_headers["User-Agent"] = f"{requests.utils.default_user_agent()} {user_agent_extra}"
+    return adjusted_headers

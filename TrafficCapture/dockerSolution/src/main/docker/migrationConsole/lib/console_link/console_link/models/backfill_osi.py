@@ -1,12 +1,13 @@
+from console_link.models.client_options import ClientOptions
 from console_link.models.osi_utils import (create_pipeline_from_env, start_pipeline, stop_pipeline,
                                            OpenSearchIngestionMigrationProps)
 from console_link.models.cluster import Cluster
 from console_link.models.backfill_base import Backfill
 from console_link.models.command_result import CommandResult
-from typing import Dict
+from typing import Dict, Optional
 from cerberus import Validator
-import boto3
 
+from console_link.models.utils import create_boto3_client
 
 OSI_SCHEMA = {
     'pipeline_role_arn': {
@@ -61,7 +62,8 @@ class OpenSearchIngestionBackfill(Backfill):
     A migration manager for an OpenSearch Ingestion pipeline.
     """
 
-    def __init__(self, config: Dict, source_cluster: Cluster, target_cluster: Cluster) -> None:
+    def __init__(self, config: Dict, source_cluster: Cluster, target_cluster: Cluster,
+                 client_options: Optional[ClientOptions] = None) -> None:
         super().__init__(config)
         config = config["opensearch_ingestion"]
 
@@ -69,7 +71,7 @@ class OpenSearchIngestionBackfill(Backfill):
         if not v.validate(config):
             raise ValueError("Invalid config file for OpenSearchIngestion migration", v.errors)
         self.osi_props = OpenSearchIngestionMigrationProps(config=config)
-        self.osi_client = boto3.client('osis')
+        self.osi_client = create_boto3_client(aws_service_name='osis', client_options=client_options)
         self.source_cluster = source_cluster
         self.target_cluster = target_cluster
 
