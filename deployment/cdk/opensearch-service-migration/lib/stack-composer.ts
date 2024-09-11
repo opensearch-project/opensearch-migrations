@@ -514,7 +514,7 @@ export class StackComposer {
         if ((trafficReplayerServiceEnabled && networkStack && migrationStack) || (addOnMigrationDeployId && networkStack)) {
             trafficReplayerStack = new TrafficReplayerStack(scope, `traffic-replayer-${deployId}`, {
                 vpc: networkStack.vpc,
-                enableClusterFGACAuth: trafficReplayerEnableClusterFGACAuth,
+                clusterAuthDetails: servicesYaml.target_cluster.auth,
                 addOnMigrationDeployId: addOnMigrationDeployId,
                 customKafkaGroupId: trafficReplayerGroupId,
                 userAgentSuffix: trafficReplayerCustomUserAgent,
