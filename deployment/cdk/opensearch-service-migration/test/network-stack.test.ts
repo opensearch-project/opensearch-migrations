@@ -37,7 +37,10 @@ describe('NetworkStack Tests', () => {
             vpcEnabled: true,
             // This setting could be left out, but provides clarity into the subnets for this test case
             vpcAZCount: 2,
-            sourceClusterEndpoint: "https://test-cluster",
+            sourceCluster: {
+                "endpoint": "https://test-cluster",
+                "auth": {"type": "none"}
+            }
         }
 
         const openSearchStacks = createStackComposer(contextOptions)
@@ -60,7 +63,10 @@ describe('NetworkStack Tests', () => {
             addOnMigrationDeployId: "junit-addon",
             vpcEnabled: true,
             vpcAZCount: 2,
-            sourceClusterEndpoint: "https://test-cluster",
+            sourceCluster: {
+                "endpoint": "https://test-cluster",
+                "auth": {"type": "none"}
+            }
         }
 
         const stacks = createStackComposer(contextOptions)

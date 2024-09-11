@@ -38,7 +38,10 @@ describe('ReindexFromSnapshotStack Tests', () => {
   test('ReindexFromSnapshotStack creates expected resources', () => {
     const contextOptions = {
       vpcEnabled: true,
-      sourceClusterEndpoint: "https://test-cluster",
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"}
+      },
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
       migrationAssistanceEnabled: true,
@@ -75,7 +78,10 @@ describe('ReindexFromSnapshotStack Tests', () => {
   test('ReindexFromSnapshotStack sets correct RFS command', () => {
     const contextOptions = {
       vpcEnabled: true,
-      sourceClusterEndpoint: "https://test-cluster",
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"}
+      },
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
       migrationAssistanceEnabled: true,
@@ -141,7 +147,10 @@ describe('ReindexFromSnapshotStack Tests', () => {
       vpcEnabled: true,
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
-      sourceClusterEndpoint: 'https://test-cluster',
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"}
+      },
       migrationAssistanceEnabled: true,
     };
 
@@ -163,7 +172,10 @@ describe('ReindexFromSnapshotStack Tests', () => {
       vpcEnabled: true,
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
-      sourceClusterEndpoint: 'https://test-cluster',
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"}
+      },
       reindexFromSnapshotExtraArgs: '--custom-arg value --flag --snapshot-name custom-snapshot',
       migrationAssistanceEnabled: true,
     };

@@ -14,7 +14,8 @@ import {AnyPrincipal, Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {ILogGroup, LogGroup} from "aws-cdk-lib/aws-logs";
 import {ISecret, Secret} from "aws-cdk-lib/aws-secretsmanager";
 import {StackPropsExt} from "./stack-composer";
-import { ClusterAuth, ClusterBasicAuth, ClusterNoAuth, ClusterYaml } from "./migration-services-yaml";
+import { ClusterYaml } from "./migration-services-yaml";
+import { ClusterAuth, ClusterBasicAuth, ClusterNoAuth } from "./common-utilities"
 import { MigrationSSMParameter, createMigrationStringParameter, getMigrationStringParameterValue } from "./common-utilities";
 
 

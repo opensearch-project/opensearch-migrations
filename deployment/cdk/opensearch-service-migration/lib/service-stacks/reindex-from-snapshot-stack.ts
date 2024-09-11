@@ -11,9 +11,10 @@ import {
     createOpenSearchServerlessIAMAccessPolicy,
     getTargetPasswordAccessPolicy,
     getMigrationStringParameterValue,
-    parseAndMergeArgs
+    parseAndMergeArgs,
+    ClusterAuth
 } from "../common-utilities";
-import { ClusterAuth, RFSBackfillYaml, SnapshotYaml } from "../migration-services-yaml";
+import { RFSBackfillYaml, SnapshotYaml } from "../migration-services-yaml";
 import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
 import { SharedLogFileSystem } from "../components/shared-log-file-system";
 

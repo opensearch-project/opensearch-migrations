@@ -217,7 +217,10 @@ describe('Stack Composer Tests', () => {
       migrationAssistanceEnabled: true,
       vpcEnabled: true,
       migrationConsoleServiceEnabled: true,
-      sourceClusterEndpoint: "https://test-cluster",
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"}
+      }
     }
 
     const openSearchStacks = createStackComposer(contextOptions)
@@ -270,7 +273,9 @@ describe('Stack Composer Tests', () => {
 
   test('Test that a context with no source cluster details succeeds if sourceClusterDisabled', () => {
     const sourceClusterDisabledContextOptions = {
-      sourceClusterDisabled: true,
+      sourceCluster: {
+        "disabled": true
+      },
       otelCollectorEnabled: true,
       migrationAssistanceEnabled: true,
       vpcEnabled: true,
@@ -281,7 +286,6 @@ describe('Stack Composer Tests', () => {
     expect(openSearchStacks.stacks).toHaveLength(4)
 
     const sourceClusterNotExplicitlyDisabledContextOptions = {
-      sourceClusterDisabled: false,
       otelCollectorEnabled: true,
       migrationAssistanceEnabled: true,
       vpcEnabled: true,
@@ -291,8 +295,10 @@ describe('Stack Composer Tests', () => {
     expect(sourceClusterNotExplicitlyDisabledCreateStackFunc).toThrow()
 
     const sourceClusterDisabledWithEndpointContextOptions = {
-      sourceClusterDisabled: true,
-      sourceClusterEndpoint: "XXXXXXXXXXXXXXXXXXXX",
+      sourceClusterDisabled: {
+        "disabled": true,
+        "endpoint": "XXXXXXXXXXXXXXXXXXXX"
+      },
       otelCollectorEnabled: true,
       migrationAssistanceEnabled: true,
       vpcEnabled: true,
