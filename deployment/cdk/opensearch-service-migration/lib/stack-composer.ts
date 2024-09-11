@@ -85,7 +85,7 @@ export class StackComposer {
         } else if (engineVersionString && engineVersionString.startsWith("ES_")) {
             version = EngineVersion.elasticsearch(engineVersionString.substring(3))
         } else {
-            throw new Error("Engine version is not present or does not match the expected format, i.e. OS_1.3 or ES_7.9")
+            throw new Error(`Engine version (${engineVersionString}) is not present or does not match the expected format, i.e. OS_1.3 or ES_7.9`)
         }
         return version
     }
@@ -119,7 +119,8 @@ export class StackComposer {
     }
 
     private getClusterAuth(clusterAuthObject: {string: object}) : ClusterAuth {
-        const auth = new ClusterAuth()
+        if (!clusterAuthObject) { return new ClusterAuth(new ClusterNoAuth()) }
+        const auth = new ClusterAuth({})
         if ('basic' in clusterAuthObject) {
             auth.basicAuth = this.getBasicClusterAuth(clusterAuthObject.basic as { [key: string]: any })
         } else if ('sigv4' in clusterAuthObject) {
@@ -252,14 +253,18 @@ export class StackComposer {
         const sourceClusterDisabled = this.getContextForType('sourceClusterDisabled', 'boolean', defaultValues, contextJSON)
         const sourceClusterEndpoint = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
         const sourceClusterVersion = this.getContextForType('sourceClusterVersion', 'string', defaultValues, contextJSON)
-        const sourceVersion = this.getEngineVersion(sourceClusterVersion)
+        const sourceVersion = sourceClusterVersion ? this.getEngineVersion(sourceClusterVersion) : undefined
         const sourceClusterAuthObject = this.getContextForType('sourceClusterAuth', 'object', defaultValues, contextJSON)
+        console.log(`sourceClusterAuthObject: ${sourceClusterAuthObject}`)
         const sourceClusterAuth = this.getClusterAuth(sourceClusterAuthObject)
+        console.log(sourceClusterAuth.toDict())
 
         const targetClusterEndpoint = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
         const targetClusterVersion = this.getContextForType('targetClusterVersion', 'string', defaultValues, contextJSON)
         const targetClusterAuthObject = this.getContextForType('targetClusterAuth', 'object', defaultValues, contextJSON)
+        console.log(`targetClusterAuthObject: ${targetClusterAuthObject}`)
         const targetClusterAuth = this.getClusterAuth(targetClusterAuthObject)
+        console.log(`targetClusterAuth: ${targetClusterAuth}`)
 
         // Ensure that target cluster username and password are not defined in multiple places
         if (targetClusterEndpoint && (fineGrainedManagerUserName || fineGrainedManagerUserSecretManagerKeyARN)) {
@@ -272,9 +277,9 @@ export class StackComposer {
             throw new Error("The `engineVersion` can only be used when a domain is being provisioned by this tooling, which is contraindicated " +
                 "by the `targetClusterEndpoint` being provided.")
         }
-        const targetVersion = this.getEngineVersion(targetClusterVersion || engineVersion)
+        const targetVersion = this.getEngineVersion(targetClusterEndpoint ? targetClusterVersion : engineVersion)
 
-        const sourceCluster = !sourceClusterDisabled ?? new ClusterYaml({endpoint: sourceClusterEndpoint, version: sourceVersion, auth: sourceClusterAuth})
+        const sourceCluster = !sourceClusterDisabled ? new ClusterYaml({endpoint: sourceClusterEndpoint, version: sourceVersion, auth: sourceClusterAuth}) : undefined
 
         const requiredFields: { [key: string]: any; } = {"stage":stage, "domainName":domainName}
         for (let key in requiredFields) {

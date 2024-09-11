@@ -1,10 +1,11 @@
 import { ContainerImage } from "aws-cdk-lib/aws-ecs";
-import { ClusterBasicAuth, ClusterYaml, RFSBackfillYaml, ServicesYaml, SnapshotYaml } from "../lib/migration-services-yaml"
+import { ClusterAuth, ClusterBasicAuth, ClusterNoAuth, ClusterYaml, RFSBackfillYaml, ServicesYaml, SnapshotYaml } from "../lib/migration-services-yaml"
 import { Template, Capture, Match } from "aws-cdk-lib/assertions";
 import { MigrationConsoleStack } from "../lib/service-stacks/migration-console-stack";
 import { createStackComposer } from "./test-utils";
 import * as yaml from 'yaml';
 import {describe, afterEach, beforeEach, test, expect, jest} from '@jest/globals';
+import { EngineVersion } from "aws-cdk-lib/aws-opensearchservice";
 
 jest.mock('aws-cdk-lib/aws-ecr-assets');
 describe('Migration Services YAML Tests', () => {
@@ -27,9 +28,23 @@ describe('Migration Services YAML Tests', () => {
     expect(yaml).toBe("metrics_source:\n  cloudwatch:\n");
   });
 
+  test('Test ClusterAuth.toDict', () => {
+    const clusterAuth = new ClusterAuth({noAuth: new ClusterNoAuth()});
+    const dict = clusterAuth.toDict();
+    expect(dict).toEqual({no_auth: ""});
+
+    const basicAuth = new ClusterAuth({basicAuth: new ClusterBasicAuth({username: "XXX", password: "123"})});
+    const basicAuthDict = basicAuth.toDict();
+    expect(basicAuthDict).toEqual({basic_auth: {username: "XXX", password: "123"}});
+  })
+
   test('Test servicesYaml with target cluster can be stringified', () => {
     let servicesYaml = new ServicesYaml();
-    const cluster: ClusterYaml = { 'endpoint': 'https://abc.com', 'no_auth': '' };
+
+    const cluster = new ClusterYaml({
+      'endpoint': 'https://abc.com',
+      auth: new ClusterAuth({noAuth: new ClusterNoAuth()})
+    });
     servicesYaml.target_cluster = cluster;
 
     expect(servicesYaml.target_cluster).toBeDefined();
@@ -39,13 +54,17 @@ describe('Migration Services YAML Tests', () => {
 
   test('Test servicesYaml with source and target cluster can be stringified', () => {
     let servicesYaml = new ServicesYaml();
-    const targetCluster: ClusterYaml = { 'endpoint': 'https://abc.com', 'no_auth': '' };
+    const targetCluster = new ClusterYaml({
+      'endpoint': 'https://abc.com',
+      auth: new ClusterAuth({noAuth: new ClusterNoAuth()})
+    });
     servicesYaml.target_cluster = targetCluster;
     const sourceClusterUser = "abc";
     const sourceClusterPassword = "XXXXX";
-    const sourceCluster: ClusterYaml = { 'endpoint': 'https://xyz.com:9200',
-        'basic_auth': new ClusterBasicAuth({ username: sourceClusterUser, password: sourceClusterPassword })
-    };
+    const basicAuth = new ClusterBasicAuth({ username: sourceClusterUser, password: sourceClusterPassword });
+    const sourceCluster = new ClusterYaml({ 'endpoint': 'https://xyz.com:9200',
+        'auth': new ClusterAuth({basicAuth: basicAuth}),
+    });
     servicesYaml.source_cluster = sourceCluster;
 
     expect(servicesYaml.target_cluster).toBeDefined();
@@ -65,7 +84,6 @@ describe('Migration Services YAML Tests', () => {
     rfsBackfillYaml.ecs.service_name = serviceName;
     rfsBackfillYaml.ecs.aws_region = region;
     servicesYaml.backfill = rfsBackfillYaml;
-
 
     expect(servicesYaml.backfill).toBeDefined();
     expect(servicesYaml.backfill).toBeDefined();
@@ -106,6 +124,7 @@ test('Test that services yaml parameter is created by migration console stack', 
         migrationAssistanceEnabled: true,
         migrationConsoleServiceEnabled: true,
         sourceClusterEndpoint: "https://test-cluster",
+        sourceClusterAuth: {"no_auth": null},
         reindexFromSnapshotServiceEnabled: true,
         trafficReplayerServiceEnabled: true,
         fineGrainedManagerUserName: "admin",

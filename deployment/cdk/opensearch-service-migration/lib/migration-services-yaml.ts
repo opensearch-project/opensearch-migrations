@@ -42,6 +42,12 @@ export class ClusterAuth {
     noAuth?: ClusterNoAuth
     sigv4?: ClusterSigV4Auth
 
+    constructor({basicAuth, noAuth, sigv4}: {basicAuth?: ClusterBasicAuth, noAuth?: ClusterNoAuth, sigv4?: ClusterSigV4Auth}) {
+        this.basicAuth = basicAuth;
+        this.noAuth = noAuth;
+        this.sigv4 = sigv4;
+    }
+
     validate() {
         const numDefined = (this.basicAuth? 1 : 0) + (this.noAuth? 1 : 0) + (this.sigv4? 1 : 0)
         if (numDefined != 1) {
@@ -50,12 +56,16 @@ export class ClusterAuth {
     }
 
     toDict() {
-        return {
-            // This will only include the keys for values that are defined
-            ...(this.basicAuth && { basic_auth: this.basicAuth }),
-            ...(this.noAuth && { no_auth: this.noAuth }),
-            ...(this.sigv4 && { sigv4: this.sigv4 })
+        if (this.basicAuth) {
+            return {basic_auth: this.basicAuth};
         }
+        if (this.noAuth) {
+            return {no_auth: ""};
+        }
+        if (this.sigv4) {
+            return {sigv4: this.sigv4};
+        }
+        return {};
     }
 }
 
@@ -64,7 +74,7 @@ export class ClusterYaml {
     version?: EngineVersion;
     auth: ClusterAuth;
 
-    constructor({endpoint, auth, version} : {endpoint: string, auth: ClusterAuth, version: EngineVersion}) {
+    constructor({endpoint, auth, version} : {endpoint: string, auth: ClusterAuth, version?: EngineVersion}) {
         this.endpoint = endpoint;
         this.auth = auth;
         this.version = version;
@@ -72,8 +82,9 @@ export class ClusterYaml {
     toDict() {
         return {
             endpoint: this.endpoint,
-            version: this.version?.version,
-            ...this.auth.toDict()
+            ...this.auth.toDict(),
+            // TODO: figure out how version should be incorporated
+            // version: this.version?.version
         };
     }
 }
@@ -189,8 +200,8 @@ export class ServicesYaml {
 
     stringify(): string {
         return yaml.stringify({
-            source_cluster: this.source_cluster,
-            target_cluster: this.target_cluster,
+            source_cluster: this.source_cluster?.toDict(),
+            target_cluster: this.target_cluster?.toDict(),
             metrics_source: this.metrics_source,
             backfill: this.backfill?.toDict(),
             snapshot: this.snapshot?.toDict(),

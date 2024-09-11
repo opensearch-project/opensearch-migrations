@@ -116,7 +116,7 @@ export class OpenSearchDomainStack extends Stack {
   }
 
   generateTargetClusterYaml(domain: Domain, adminUserName: string | undefined, adminUserSecret: ISecret|undefined, version: EngineVersion) {
-    let clusterAuth = new ClusterAuth();
+    let clusterAuth = new ClusterAuth({});
     if (adminUserName) {
       clusterAuth.basicAuth = new ClusterBasicAuth({ username: adminUserName, password_from_secret_arn: adminUserSecret?.secretArn })
     } else {
