@@ -1,7 +1,8 @@
 from enum import Enum
-from typing import Dict, Tuple
+from typing import Dict, Tuple, Optional
 from abc import ABC, abstractmethod
 
+from console_link.models.client_options import ClientOptions
 from console_link.models.schema_tools import contains_one_of
 from console_link.models.command_result import CommandResult
 
@@ -26,9 +27,10 @@ class Backfill(ABC):
     """
     Interface for backfilling data from a source to target cluster.
     """
-    def __init__(self, config: Dict) -> None:
+    def __init__(self, config: Dict, client_options: Optional[ClientOptions] = None) -> None:
         v = Validator(SCHEMA)
         self.config = config
+        self.client_options = client_options
         if not v.validate({"backfill": self.config}):
             raise ValueError("Invalid config file for backfill", v.errors)
 
