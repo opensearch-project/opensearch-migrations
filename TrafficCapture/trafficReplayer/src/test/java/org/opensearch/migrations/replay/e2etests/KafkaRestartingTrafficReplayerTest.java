@@ -90,7 +90,7 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
 
     @ParameterizedTest
     @CsvSource(value = { "3,false", "-1,false", "3,true", "-1,true", })
-    @Tag("isolatedTest")
+    @Tag("longTest")
     @ResourceLock("TrafficReplayerRunner")
     public void fullTest(int testSize, boolean randomize) throws Throwable {
         var random = new Random(1);
