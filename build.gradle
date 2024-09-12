@@ -103,12 +103,16 @@ subprojects {
     }
 
     tasks.register('isolatedTest', Test) {
-        dependsOn test
-        dependsOn slowTest
         maxParallelForks = 1
         useJUnitPlatform {
             includeTags 'isolatedTest'
         }
+    }
+
+    tasks.register('fullTest') {
+        dependsOn test
+        dependsOn slowTest
+        dependsOn isolatedTest
     }
 
     task javadocJar(type: Jar, dependsOn: javadoc) {
@@ -235,6 +239,7 @@ gradle.projectsEvaluated {
     }
 
     tasks.register("allTests") {
+        dependsOn sharedProcessTestsTasks
         dependsOn isolatedTestsTasks
     }
 }
