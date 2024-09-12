@@ -23,8 +23,10 @@ import com.rfs.worker.SnapshotRunner;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
+import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
+import static org.hamcrest.Matchers.containsInAnyOrder;
 
 /**
  * Tests focused on setting up whole source clusters, performing a migration, and validation on the target cluster
@@ -110,6 +112,7 @@ class EndToEndTest {
         var sourceClusterOperations = new ClusterOperations(sourceCluster.getUrl());
         var compoTemplateName = "simple_component_template";
         var indexTemplateName = "simple_index_template";
+        var aliasInTemplate = "alias1";
         if (sourceIsES7_X) {
             sourceClusterOperations.createES7Templates(compoTemplateName, indexTemplateName, "author", "blog*");
         } else if (sourceIsES6_8) {
@@ -121,6 +124,9 @@ class EndToEndTest {
         sourceClusterOperations.createDocument(blogIndexName, "222", "{\"author\":\"Tobias Funke\"}");
         var movieIndexName = "movies_2023";
         sourceClusterOperations.createDocument(movieIndexName,"123", "{\"title\":\"This is spinal tap\"}");
+
+        var aliasName = "movies-alias";
+        sourceClusterOperations.createAlias(aliasName, "movies*");
 
         var arguments = new MetadataArgs();
 
@@ -168,6 +174,12 @@ class EndToEndTest {
         log.info(result.toString());
         assertThat(result.getExitCode(), equalTo(0));
 
+        var migratedItems = result.getItems();
+        assertThat(migratedItems.getIndexTemplates(), containsInAnyOrder(indexTemplateName));
+        assertThat(migratedItems.getComponentTemplates(), equalTo(sourceIsES6_8 ? List.of() : List.of(compoTemplateName)));
+        assertThat(migratedItems.getIndexes(), containsInAnyOrder(blogIndexName, movieIndexName));
+        assertThat(migratedItems.getAliases(), containsInAnyOrder(aliasInTemplate, aliasName));
+
         // Check that the index was migrated
         var targetClusterOperations = new ClusterOperations(targetCluster.getUrl());
         var res = targetClusterOperations.get("/" + blogIndexName);
@@ -175,7 +187,16 @@ class EndToEndTest {
 
         res = targetClusterOperations.get("/" + movieIndexName);
         assertThat(res.getValue(), res.getKey(), equalTo(200));
-        
+
+        res = targetClusterOperations.get("/" + aliasName);
+        assertThat(res.getValue(), res.getKey(), equalTo(200));
+        assertThat(res.getValue(), containsString(movieIndexName));
+
+        res = targetClusterOperations.get("/_aliases");
+        assertThat(res.getValue(), res.getKey(), equalTo(200));
+        assertThat(res.getValue(), containsString(aliasName));
+
+
         // Check that the templates were migrated
         if (sourceIsES7_X) {
             res = targetClusterOperations.get("/_index_template/" + indexTemplateName);
