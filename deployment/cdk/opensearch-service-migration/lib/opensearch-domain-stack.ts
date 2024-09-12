@@ -14,7 +14,8 @@ import {AnyPrincipal, Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {ILogGroup, LogGroup} from "aws-cdk-lib/aws-logs";
 import {ISecret, Secret} from "aws-cdk-lib/aws-secretsmanager";
 import {StackPropsExt} from "./stack-composer";
-import { ClusterBasicAuth, ClusterYaml } from "./migration-services-yaml";
+import { ClusterYaml } from "./migration-services-yaml";
+import { ClusterAuth, ClusterBasicAuth, ClusterNoAuth } from "./common-utilities"
 import { MigrationSSMParameter, createMigrationStringParameter, getMigrationStringParameterValue } from "./common-utilities";
 
 
@@ -115,15 +116,15 @@ export class OpenSearchDomainStack extends Stack {
     }
   }
 
-  generateTargetClusterYaml(domain: Domain, adminUserName: string | undefined, adminUserSecret: ISecret|undefined) {
-    let targetCluster = new ClusterYaml()
-    targetCluster.endpoint = `https://${domain.domainEndpoint}:443`;
+  generateTargetClusterYaml(domain: Domain, adminUserName: string | undefined, adminUserSecret: ISecret|undefined, version: EngineVersion) {
+    let clusterAuth = new ClusterAuth({});
     if (adminUserName) {
-        targetCluster.basic_auth = new ClusterBasicAuth({ username: adminUserName, password_from_secret_arn: adminUserSecret?.secretArn })
+      clusterAuth.basicAuth = new ClusterBasicAuth({ username: adminUserName, password_from_secret_arn: adminUserSecret?.secretArn })
     } else {
-      targetCluster.no_auth = ''
+      clusterAuth.noAuth = new ClusterNoAuth();
     }
-    this.targetClusterYaml = targetCluster;
+     this.targetClusterYaml = new ClusterYaml({endpoint: `https://${domain.domainEndpoint}:443`, auth: clusterAuth, version})
+
   }
 
   constructor(scope: Construct, id: string, props: OpensearchDomainStackProps) {
@@ -229,6 +230,6 @@ export class OpenSearchDomainStack extends Stack {
     });
 
     this.createSSMParameters(domain, adminUserName, adminUserSecret, props.stage, deployId)
-    this.generateTargetClusterYaml(domain, adminUserName, adminUserSecret)
+    this.generateTargetClusterYaml(domain, adminUserName, adminUserSecret, props.version)
   }
 }

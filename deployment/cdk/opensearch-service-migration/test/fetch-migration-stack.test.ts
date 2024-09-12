@@ -39,7 +39,10 @@ describe('FetchMigrationStack Tests', () => {
             migrationAssistanceEnabled: true,
             migrationConsoleServiceEnabled: true,
             fetchMigrationEnabled: true,
-            sourceClusterEndpoint: "https://test-cluster",
+            sourceCluster: {
+              "endpoint": "https://test-cluster",
+              "auth": {"type": "none"}
+            }
         };
 
         const stacks = createStackComposer(contextOptions);
@@ -66,7 +69,10 @@ describe('FetchMigrationStack Tests', () => {
             vpcEnabled: true,
             migrationAssistanceEnabled: true,
             migrationConsoleServiceEnabled: true,
-            sourceClusterEndpoint: "https://test-cluster",
+            sourceCluster: {
+              "endpoint": "https://test-cluster",
+              "auth": {"type": "none"}
+            }
         };
 
         const stacks = createStackComposer(contextOptions);

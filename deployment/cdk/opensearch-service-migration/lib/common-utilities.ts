@@ -7,6 +7,7 @@ import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
 import * as forge from 'node-forge';
 import * as yargs from 'yargs';
+import { ClusterYaml } from "./migration-services-yaml";
 
 
 // parseAndMergeArgs, see @common-utilities.test.ts for an example of different cases
@@ -313,4 +314,126 @@ export enum MigrationSSMParameter {
     SERVICES_YAML_FILE = 'servicesYamlFile',
     TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID = 'trafficStreamSourceAccessSecurityGroupId',
     VPC_ID = 'vpcId',
+}
+
+
+export class ClusterNoAuth {};
+
+export class ClusterSigV4Auth {
+    region?: string;
+    serviceSigningName?: string;
+    constructor({region, serviceSigningName: service}: {region: string, serviceSigningName: string}) {
+        this.region = region;
+        this.serviceSigningName = service;
+    }
+}
+
+export class ClusterBasicAuth {
+    username: string;
+    password?: string;
+    password_from_secret_arn?: string;
+
+    constructor({
+        username,
+        password,
+        password_from_secret_arn,
+    }: {
+        username: string;
+        password?: string;
+        password_from_secret_arn?: string;
+    }) {
+        this.username = username;
+        this.password = password;
+        this.password_from_secret_arn = password_from_secret_arn;
+
+        // Validation: Exactly one of password or password_from_secret_arn must be provided
+        if ((password && password_from_secret_arn) || (!password && !password_from_secret_arn)) {
+            throw new Error('Exactly one of password or password_from_secret_arn must be provided');
+        }
+    }
+}
+
+export class ClusterAuth {
+    basicAuth?: ClusterBasicAuth
+    noAuth?: ClusterNoAuth
+    sigv4?: ClusterSigV4Auth
+
+    constructor({basicAuth, noAuth, sigv4}: {basicAuth?: ClusterBasicAuth, noAuth?: ClusterNoAuth, sigv4?: ClusterSigV4Auth}) {
+        this.basicAuth = basicAuth;
+        this.noAuth = noAuth;
+        this.sigv4 = sigv4;
+    }
+
+    validate() {
+        const numDefined = (this.basicAuth? 1 : 0) + (this.noAuth? 1 : 0) + (this.sigv4? 1 : 0)
+        if (numDefined != 1) {
+            throw new Error(`Exactly one authentication method can be defined. ${numDefined} are currently set.`)
+        }
+    }
+
+    toDict() {
+        if (this.basicAuth) {
+            return {basic_auth: this.basicAuth};
+        }
+        if (this.noAuth) {
+            return {no_auth: ""};
+        }
+        if (this.sigv4) {
+            return {sigv4: this.sigv4};
+        }
+        return {};
+    }
+}
+
+function getBasicClusterAuth(basicAuthObject: { [key: string]: any }): ClusterBasicAuth {
+    // Destructure and validate the input object
+    const { username, password, passwordFromSecretArn } = basicAuthObject;
+    // Ensure the required 'username' field is present
+    if (typeof username !== 'string' || !username) {
+        throw new Error('Invalid input: "username" must be a non-empty string');
+    }
+    // Ensure that exactly one of 'password' or 'passwordFromSecretArn' is provided
+    const hasPassword = typeof password === 'string' && password.trim() !== '';
+    const hasPasswordFromSecretArn = typeof passwordFromSecretArn === 'string' && passwordFromSecretArn.trim() !== '';
+    if ((hasPassword && hasPasswordFromSecretArn) || (!hasPassword && !hasPasswordFromSecretArn)) {
+        throw new Error('Exactly one of "password" or "passwordFromSecretArn" must be provided');
+    }
+    return new ClusterBasicAuth({
+        username,
+        password: hasPassword ? password : undefined,
+        password_from_secret_arn: hasPasswordFromSecretArn ? passwordFromSecretArn : undefined,
+    });
+}
+
+function getSigV4ClusterAuth(sigv4AuthObject: { [key: string]: any }): ClusterSigV4Auth {
+    // Destructure and validate the input object
+    const { serviceSigningName, region } = sigv4AuthObject;
+
+    // Create and return the ClusterSigV4Auth object
+    return new ClusterSigV4Auth({serviceSigningName, region});
+}
+
+// Function to parse and validate auth object
+function parseAuth(json: any): ClusterAuth | null {
+    if (json.type === 'basic' && typeof json.username === 'string' && (typeof json.password === 'string' || typeof json.passwordFromSecretArn === 'string') && !(typeof json.password === 'string' && typeof json.passwordFromSecretArn === 'string')) {
+        return new ClusterAuth({basicAuth: getBasicClusterAuth(json)});
+    } else if (json.type === 'sigv4' && typeof json.region === 'string' && typeof json.serviceSigningName === 'string') {
+        return new ClusterAuth({sigv4: getSigV4ClusterAuth(json)});
+    } else if (json.type === 'none') {
+        return new ClusterAuth({noAuth: new ClusterNoAuth()});
+    }
+    return null; // Invalid auth type
+}
+
+export function parseClusterDefinition(json: any): ClusterYaml {
+    const endpoint = json.endpoint
+    const version = json.version
+    if (!endpoint) {
+        throw new Error('Missing required field in cluster definition: endpoint')
+    }
+    const auth = parseAuth(json.auth)
+    if (!auth) {
+        throw new Error(`Invalid auth type when parsing cluster definition: ${json.auth.type}`)
+    }
+    return new ClusterYaml({endpoint, version, auth})
 }

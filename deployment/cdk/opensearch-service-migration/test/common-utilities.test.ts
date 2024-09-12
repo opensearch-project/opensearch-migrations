@@ -1,5 +1,5 @@
 import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
-import {parseAndMergeArgs, validateFargateCpuArch} from "../lib/common-utilities";
+import {parseAndMergeArgs, parseClusterDefinition, validateFargateCpuArch} from "../lib/common-utilities";
 import {describe, test, expect} from '@jest/globals';
 
 describe('validateFargateCpuArch', () => {
@@ -114,4 +114,49 @@ describe('validateFargateCpuArch', () => {
 
         expect(result).toBe('node script.js');
     });
+
+    test('parseClusterDefinition with basic auth parameters', () => {
+        const clusterDefinition = {
+            endpoint: 'https://target-cluster',
+            auth: {
+              type: 'basic',
+              username: 'admin',
+              passwordFromSecretArn: 'arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc'
+            }
+          }
+        const parsed = parseClusterDefinition(clusterDefinition);
+        expect(parsed).toBeDefined();
+        expect(parsed.endpoint).toBe(clusterDefinition.endpoint);
+        expect(parsed.auth.basicAuth).toBeDefined();
+        expect(parsed.auth.basicAuth?.username).toBe(clusterDefinition.auth.username);
+        expect(parsed.auth.basicAuth?.password_from_secret_arn).toBe(clusterDefinition.auth.passwordFromSecretArn);
+    })
+
+    test('parseClusterDefinition with no auth', () => {
+        const clusterDefinition = {
+            endpoint: 'XXXXXXXXXXXXXXXXXXXXXX',
+            auth: {"type": "none"}
+          }
+        const parsed = parseClusterDefinition(clusterDefinition);
+        expect(parsed).toBeDefined();
+        expect(parsed.endpoint).toBe(clusterDefinition.endpoint);
+        expect(parsed.auth.noAuth).toBeDefined();
+    })
+
+    test('parseClusterDefinition with sigv4 auth', () => {
+        const clusterDefinition = {
+            endpoint: 'XXXXXXXXXXXXXXXXXXXXXX',
+            auth: {
+              type: 'sigv4',
+              region: 'us-east-1',
+              serviceSigningName: 'es'
+            }
+          }
+        const parsed = parseClusterDefinition(clusterDefinition);
+        expect(parsed).toBeDefined();
+        expect(parsed.endpoint).toBe(clusterDefinition.endpoint);
+        expect(parsed.auth.sigv4).toBeDefined();
+        expect(parsed.auth.sigv4?.region).toBe(clusterDefinition.auth.region);
+        expect(parsed.auth.sigv4?.serviceSigningName).toBe(clusterDefinition.auth.serviceSigningName);
+    })
 })
