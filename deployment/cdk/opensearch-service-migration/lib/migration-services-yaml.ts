@@ -17,6 +17,7 @@ export class ClusterYaml {
             endpoint: this.endpoint,
             ...this.auth.toDict(),
             // TODO: figure out how version should be incorporated
+            // https://opensearch.atlassian.net/browse/MIGRATIONS-1951
             // version: this.version?.version
         };
     }

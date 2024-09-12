@@ -232,8 +232,11 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ]
         })
 
-        const getSecretsPolicy = props.servicesYaml.target_cluster.auth.basicAuth?.password_from_secret_arn ?
+        const getTargetSecretsPolicy = props.servicesYaml.target_cluster.auth.basicAuth?.password_from_secret_arn ?
             getTargetPasswordAccessPolicy(props.servicesYaml.target_cluster.auth.basicAuth?.password_from_secret_arn) : null;
+
+        const getSourceSecretsPolicy = props.servicesYaml.source_cluster?.auth.basicAuth?.password_from_secret_arn ?
+            getTargetPasswordAccessPolicy(props.servicesYaml.source_cluster?.auth.basicAuth?.password_from_secret_arn) : null;
 
         // Upload the services.yaml file to Parameter Store
         let servicesYaml = props.servicesYaml
@@ -267,7 +270,9 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
         let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
             listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
-            ...(getSecretsPolicy ? [getSecretsPolicy] : []) // only add secrets policy if it's non-null
+            // only add secrets policies if they're non-null
+            ...(getTargetSecretsPolicy ? [getTargetSecretsPolicy] : []),
+            ...(getSourceSecretsPolicy ? [getSourceSecretsPolicy] : [])
         ]
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)

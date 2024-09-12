@@ -38,14 +38,14 @@ These tables list all CDK context configuration values a user can specify for th
 
 #### Structure of the cluster objects
 
-If there is no source cluster (in the case of RFS working directly off of a preexisting snapshot), the source cluster object should be `{"disabled": true} and no other fields are necessary.
+If no source cluster is being configured, the source cluster object should be `{"disabled": true} and no other fields are necessary.
 
 In all other cases, the required components of each cluster object are:
 
 - `endpoint` -- the fully specified endpoint for the cluster
-- `auth` -- what, if any, authorization strategy the cluster has. The supported options are:
+- `auth` -- what authorization strategy the cluster has. The supported options are:
     1. No auth: `{"type": "none"}`
-    2. Sigv4 Signing: `{"type": "sigv4", "region": "us-east-1", "serviceSigningName": "es"}`
+    2. Sigv4 Signing: `{"type": "sigv4", "region": "us-east-1", "serviceSigningName": "es"}` The serviceSigningName is `es` for Elasticsearch and OpenSearch managed service domains, and `aoss` for Amazon OpenSearch Serverless
     3. Basic auth with plaintext password (only supported for the source cluster and not recommended): `{"type": "basic", "username": "admin", "password": "admin123"}`
     4. Basic auth with password in secrets manager (recommended): `{"type": "basic", "username": "admin", "passwordFromSecretArn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc"}`
 
@@ -80,7 +80,7 @@ The optional component is:
 
 ## Options being deprecated
 
-A number of options are currently available but in the process of being deprecated. While they function now, we do not recommend using them, and they may be removed without warning in future versions.
+A number of options are currently available but deprecated. While they function now, we do not recommend using them, and they may be removed without warning in a future version.
 
 ### OpenSearch Domain Options
 
