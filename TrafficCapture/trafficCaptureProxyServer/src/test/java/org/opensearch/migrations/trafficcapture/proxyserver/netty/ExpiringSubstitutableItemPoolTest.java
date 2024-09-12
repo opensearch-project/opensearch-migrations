@@ -13,6 +13,7 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.Isolated;
 
@@ -25,6 +26,7 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 @Isolated("Isolation based on temporal checks")
+@Tag("isolatedTest")
 class ExpiringSubstitutableItemPoolTest {
 
     public static final int NUM_POOLED_ITEMS = 5;

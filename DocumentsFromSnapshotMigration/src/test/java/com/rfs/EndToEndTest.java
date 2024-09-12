@@ -6,6 +6,7 @@ import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 
 import org.hamcrest.Matchers;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ArgumentsSource;
@@ -27,6 +28,7 @@ import lombok.SneakyThrows;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 
+@Tag("isolatedTest")
 public class EndToEndTest extends SourceTestBase {
     @TempDir
     private File localDirectory;

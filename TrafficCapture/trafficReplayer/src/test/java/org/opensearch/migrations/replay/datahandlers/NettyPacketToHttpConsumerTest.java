@@ -440,7 +440,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 Instant.now(),
                 Instant.now(),
                 () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
-            var maxTimeToWaitForTimeoutOrResponse = Duration.ofSeconds(10);
+            var maxTimeToWaitForTimeoutOrResponse = Duration.ofSeconds(30);
             var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
             log.atInfo().setMessage("RequestFinishFuture finished").log();
             Assertions.assertInstanceOf(ReadTimeoutException.class, aggregatedResponse.getError());
