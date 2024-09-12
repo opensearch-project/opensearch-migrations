@@ -262,7 +262,6 @@ export class StackComposer {
             )
         }
         
-        const targetClusterEndpoint = targetCluster?.endpoint
         const targetClusterAuth = targetCluster?.auth
         const targetVersion = this.getEngineVersion(targetCluster?.version || engineVersion)
 
@@ -279,7 +278,7 @@ export class StackComposer {
         if (targetCluster && osContainerServiceEnabled) {
             throw new Error("The following options are mutually exclusive as only one target cluster can be specified for a given deployment: [targetCluster, osContainerServiceEnabled]")
         } else if (targetCluster || osContainerServiceEnabled) {
-            preexistingOrContainerTargetEndpoint = targetClusterEndpoint || "https://opensearch:9200"
+            preexistingOrContainerTargetEndpoint = targetCluster?.endpoint || "https://opensearch:9200"
         }
 
         const fargateCpuArch = validateFargateCpuArch(defaultFargateCpuArch)
@@ -310,7 +309,7 @@ export class StackComposer {
         }
 
         if (sourceClusterDisabled && (sourceCluster || captureProxyESServiceEnabled || elasticsearchServiceEnabled || captureProxyServiceEnabled)) {
-            throw new Error("A source cluster must be  [sourceCluster, captureProxyESServiceEnabled, elasticsearchServiceEnabled, captureProxyServiceEnabled]");
+            throw new Error("A source cluster must be specified by one of: [sourceCluster, captureProxyESServiceEnabled, elasticsearchServiceEnabled, captureProxyServiceEnabled]");
         }
 
         const deployId = addOnMigrationDeployId ? addOnMigrationDeployId : defaultDeployId
