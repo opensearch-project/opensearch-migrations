@@ -90,6 +90,7 @@ class DockerRFSBackfill(RFSBackfill):
 class ECSRFSBackfill(RFSBackfill):
     def __init__(self, config: Dict, target_cluster: Cluster, client_options: Optional[ClientOptions] = None) -> None:
         super().__init__(config)
+        self.client_options = client_options
         self.target_cluster = target_cluster
         self.default_scale = self.config["reindex_from_snapshot"].get("scale", 1)
 
@@ -97,7 +98,7 @@ class ECSRFSBackfill(RFSBackfill):
         self.ecs_client = ECSService(cluster_name=self.ecs_config["cluster_name"],
                                      service_name=self.ecs_config["service_name"],
                                      aws_region=self.ecs_config.get("aws_region", None),
-                                     client_options=client_options)
+                                     client_options=self.client_options)
 
     def start(self, *args, **kwargs) -> CommandResult:
         logger.info(f"Starting RFS backfill by setting desired count to {self.default_scale} instances")

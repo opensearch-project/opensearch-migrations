@@ -24,7 +24,7 @@ class ClientOptions:
     def __init__(self, config: Dict) -> None:
         logger.info(f"Initializing client options with config: {config}")
         v = Validator(SCHEMA)
-        if not v.validate({'cluster': config}):
+        if not v.validate({'client_options': config}):
             raise ValueError("Invalid config file for client options", v.errors)
 
         self.user_agent_extra = config.get("user_agent_extra", None)

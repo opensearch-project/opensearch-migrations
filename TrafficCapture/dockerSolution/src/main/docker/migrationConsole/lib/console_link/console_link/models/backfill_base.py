@@ -27,10 +27,9 @@ class Backfill(ABC):
     """
     Interface for backfilling data from a source to target cluster.
     """
-    def __init__(self, config: Dict, client_options: Optional[ClientOptions] = None) -> None:
+    def __init__(self, config: Dict) -> None:
         v = Validator(SCHEMA)
         self.config = config
-        self.client_options = client_options
         if not v.validate({"backfill": self.config}):
             raise ValueError("Invalid config file for backfill", v.errors)
 

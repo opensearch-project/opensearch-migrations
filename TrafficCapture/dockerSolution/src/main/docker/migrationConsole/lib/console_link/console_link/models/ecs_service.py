@@ -21,9 +21,11 @@ class ECSService:
         self.cluster_name = cluster_name
         self.service_name = service_name
         self.aws_region = aws_region
+        self.client_options = client_options
 
         logger.info(f"Creating ECS client for region {aws_region}, if specified")
-        self.client = create_boto3_client(aws_service_name="ecs", region=self.aws_region, client_options=client_options)
+        self.client = create_boto3_client(aws_service_name="ecs", region=self.aws_region,
+                                          client_options=self.client_options)
 
     def set_desired_count(self, desired_count: int) -> CommandResult:
         logger.info(f"Setting desired count for service {self.service_name} to {desired_count}")

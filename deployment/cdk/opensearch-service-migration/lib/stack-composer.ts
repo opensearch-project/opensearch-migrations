@@ -16,7 +16,14 @@ import {KafkaStack} from "./service-stacks/kafka-stack";
 import {Application} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-stack";
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
-import {MigrationSSMParameter, parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
+import {
+    ClusterAuth,
+    ClusterNoAuth,
+    MigrationSSMParameter,
+    parseClusterDefinition,
+    parseRemovalPolicy,
+    validateFargateCpuArch
+} from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
 import {ClientOptions, ClusterYaml, ServicesYaml} from "./migration-services-yaml";
 

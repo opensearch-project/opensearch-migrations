@@ -113,12 +113,13 @@ class CloudwatchMetricMetadata:
 class CloudwatchMetricsSource(MetricsSource):
     def __init__(self, config: Dict, client_options: Optional[ClientOptions] = None) -> None:
         super().__init__(config)
+        self.client_options = client_options
         logger.info(f"Initializing CloudwatchMetricsSource from config {config}")
         self.aws_region = None
         if type(config["cloudwatch"]) is dict and "aws_region" in config["cloudwatch"]:
             self.aws_region = config["cloudwatch"]["aws_region"]
         self.client = create_boto3_client(aws_service_name="cloudwatch", region=self.aws_region,
-                                          client_options=client_options)
+                                          client_options=self.client_options)
 
     def get_metrics(self, recent=True) -> Dict[str, List[str]]:
         logger.info(f"{self.__class__.__name__}.get_metrics called with {recent=}")
@@ -203,10 +204,10 @@ def prometheus_component_names(c: Component) -> str:
 class PrometheusMetricsSource(MetricsSource):
     def __init__(self, config: Dict, client_options: Optional[ClientOptions] = None) -> None:
         super().__init__(config)
+        self.client_options = client_options
         logger.info(f"Initializing PrometheusMetricsSource from config {config}")
 
         self.endpoint = config["prometheus"]["endpoint"]
-        self.client_options = client_options
 
     def get_metrics(self, recent=False) -> Dict[str, List[str]]:
         logger.info(f"{self.__class__.__name__}.get_metrics called with {recent=}")

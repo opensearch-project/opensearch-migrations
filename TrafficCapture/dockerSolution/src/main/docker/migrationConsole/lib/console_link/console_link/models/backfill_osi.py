@@ -65,13 +65,14 @@ class OpenSearchIngestionBackfill(Backfill):
     def __init__(self, config: Dict, source_cluster: Cluster, target_cluster: Cluster,
                  client_options: Optional[ClientOptions] = None) -> None:
         super().__init__(config)
+        self.client_options = client_options
         config = config["opensearch_ingestion"]
 
         v = Validator(OSI_SCHEMA)
         if not v.validate(config):
             raise ValueError("Invalid config file for OpenSearchIngestion migration", v.errors)
         self.osi_props = OpenSearchIngestionMigrationProps(config=config)
-        self.osi_client = create_boto3_client(aws_service_name='osis', client_options=client_options)
+        self.osi_client = create_boto3_client(aws_service_name='osis', client_options=self.client_options)
         self.source_cluster = source_cluster
         self.target_cluster = target_cluster
 
