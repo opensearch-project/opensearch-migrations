@@ -38,7 +38,10 @@ describe('ReindexFromSnapshotStack Tests', () => {
   test('ReindexFromSnapshotStack creates expected resources', () => {
     const contextOptions = {
       vpcEnabled: true,
-      sourceClusterEndpoint: "https://test-cluster",
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"}
+      },
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
       migrationAssistanceEnabled: true,
@@ -75,7 +78,10 @@ describe('ReindexFromSnapshotStack Tests', () => {
   test('ReindexFromSnapshotStack sets correct RFS command', () => {
     const contextOptions = {
       vpcEnabled: true,
-      sourceClusterEndpoint: "https://test-cluster",
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"}
+      },
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
       migrationAssistanceEnabled: true,
@@ -136,12 +142,83 @@ describe('ReindexFromSnapshotStack Tests', () => {
     ]);
   });
 
+  test('ReindexFromSnapshotStack sets correct command for sigv4 auth', () => {
+    const contextOptions = {
+      vpcEnabled: true,
+      reindexFromSnapshotServiceEnabled: true,
+      stage: 'unit-test',
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"}
+      },
+      targetCluster: {
+        "endpoint": "https://target-cluster",
+        "auth": {"type": "sigv4", "region": "eu-west-1", "serviceSigningName": "aoss"}
+      },
+      migrationAssistanceEnabled: true,
+    };
+
+
+    const stacks = createStackComposer(contextOptions);
+    const reindexStack = stacks.stacks.find(s => s instanceof ReindexFromSnapshotStack) as ReindexFromSnapshotStack;
+    expect(reindexStack).toBeDefined();
+    const template = Template.fromStack(reindexStack);
+
+    const taskDefinitionCapture = new Capture();
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: taskDefinitionCapture,
+    });
+
+    const containerDefinitions = taskDefinitionCapture.asArray();
+    expect(containerDefinitions.length).toBe(1);
+    expect(containerDefinitions[0].Command).toEqual([
+      '/bin/sh',
+      '-c',
+      '/rfs-app/entrypoint.sh'
+    ]);
+    expect(containerDefinitions[0].Environment).toEqual([
+      {
+        Name: 'RFS_COMMAND',
+        Value: {
+          "Fn::Join": [
+            "",
+            [ "/rfs-app/runJavaWithClasspath.sh com.rfs.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir '/lucene' --target-host ",
+              {
+                "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
+              },
+              "--target-aws-service-signing-name aoss --target-aws-region eu-west-1",
+            ],
+          ],
+        }
+      },
+      {
+        Name: 'RFS_TARGET_USER',
+        Value: ''
+      },
+      {
+        Name: 'RFS_TARGET_PASSWORD',
+        Value: ''
+      },
+      {
+        Name: 'RFS_TARGET_PASSWORD_ARN',
+        Value: ''
+      },
+      {
+        Name: 'SHARED_LOGS_DIR_PATH',
+        Value: '/shared-logs-output/reindex-from-snapshot-default'
+      }
+    ]);
+  });
+
   test('ReindexFromSnapshotStack sets correct YAML configurations', () => {
     const contextOptions = {
       vpcEnabled: true,
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
-      sourceClusterEndpoint: 'https://test-cluster',
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"}
+      },
       migrationAssistanceEnabled: true,
     };
 
@@ -163,7 +240,10 @@ describe('ReindexFromSnapshotStack Tests', () => {
       vpcEnabled: true,
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
-      sourceClusterEndpoint: 'https://test-cluster',
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"}
+      },
       reindexFromSnapshotExtraArgs: '--custom-arg value --flag --snapshot-name custom-snapshot',
       migrationAssistanceEnabled: true,
     };
