@@ -130,6 +130,10 @@ export class KafkaYaml {
     standard?: string | null;
 }
 
+export class ClientOptions {
+    user_agent_extra?: string | null;
+}
+
 export class ServicesYaml {
     source_cluster?: ClusterYaml;
     target_cluster: ClusterYaml;
@@ -139,6 +143,7 @@ export class ServicesYaml {
     metadata_migration?: MetadataMigrationYaml;
     replayer?: ECSReplayerYaml;
     kafka?: KafkaYaml;
+    client_options?: ClientOptions;
 
     stringify(): string {
         return yaml.stringify({
@@ -149,7 +154,8 @@ export class ServicesYaml {
             snapshot: this.snapshot?.toDict(),
             metadata_migration: this.metadata_migration,
             replay: this.replayer?.toDict(),
-            kafka: this.kafka
+            kafka: this.kafka,
+            client_options: this.client_options
         },
         {
             'nullStr': ''

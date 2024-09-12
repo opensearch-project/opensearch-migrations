@@ -56,7 +56,7 @@ def get_snapshot(config: Dict, source_cluster: Cluster):
     raise UnsupportedSnapshotError(next(iter(config.keys())))
 
 
-def get_replayer(config: Dict, client_options: Optional[ClientOptions]):
+def get_replayer(config: Dict, client_options: Optional[ClientOptions] = None):
     if 'ecs' in config:
         return ECSReplayer(config=config, client_options=client_options)
     if 'docker' in config:
@@ -72,7 +72,7 @@ def get_kafka(config: Dict):
 
 
 def get_backfill(config: Dict, source_cluster: Optional[Cluster], target_cluster: Optional[Cluster],
-                 client_options: Optional[ClientOptions]) -> Backfill:
+                 client_options: Optional[ClientOptions] = None) -> Backfill:
     if BackfillType.opensearch_ingestion.name in config:
         if source_cluster is None:
             raise ValueError("source_cluster must be provided for OpenSearch Ingestion backfill")
@@ -103,7 +103,7 @@ def get_backfill(config: Dict, source_cluster: Optional[Cluster], target_cluster
     raise UnsupportedBackfillTypeError(next(iter(config.keys())))
 
 
-def get_metrics_source(config, client_options: Optional[ClientOptions]):
+def get_metrics_source(config, client_options: Optional[ClientOptions] = None):
     if 'prometheus' in config:
         return PrometheusMetricsSource(config=config, client_options=client_options)
     elif 'cloudwatch' in config:

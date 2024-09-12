@@ -18,7 +18,7 @@ import {OpenSearchContainerStack} from "./service-stacks/opensearch-container-st
 import {determineStreamingSourceType, StreamingSourceType} from "./streaming-source-type";
 import {MigrationSSMParameter, parseRemovalPolicy, validateFargateCpuArch} from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
-import {ClusterBasicAuth, ServicesYaml} from "./migration-services-yaml";
+import {ClientOptions, ClusterBasicAuth, ServicesYaml} from "./migration-services-yaml";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -27,9 +27,9 @@ export interface StackPropsExt extends StackProps {
 }
 
 export interface StackComposerProps extends StackProps {
-    readonly migrationsSolutionVersion: string
+    readonly migrationsSolutionVersion: string,
     readonly migrationsAppRegistryARN?: string,
-    readonly customReplayerUserAgent?: string
+    readonly migrationsUserAgent?: string
 }
 
 export class StackComposer {
@@ -252,11 +252,11 @@ export class StackComposer {
         const domainRemovalPolicy = parseRemovalPolicy("domainRemovalPolicy", domainRemovalPolicyName)
 
         let trafficReplayerCustomUserAgent
-        if (props.customReplayerUserAgent && trafficReplayerUserAgentSuffix) {
-            trafficReplayerCustomUserAgent = `${props.customReplayerUserAgent};${trafficReplayerUserAgentSuffix}`
+        if (props.migrationsUserAgent && trafficReplayerUserAgentSuffix) {
+            trafficReplayerCustomUserAgent = `${props.migrationsUserAgent};${trafficReplayerUserAgentSuffix}`
         }
         else {
-            trafficReplayerCustomUserAgent = trafficReplayerUserAgentSuffix ? trafficReplayerUserAgentSuffix : props.customReplayerUserAgent
+            trafficReplayerCustomUserAgent = trafficReplayerUserAgentSuffix ? trafficReplayerUserAgentSuffix : props.migrationsUserAgent
         }
 
         if (sourceClusterDisabled && (sourceClusterEndpoint || captureProxyESServiceEnabled || elasticsearchServiceEnabled || captureProxyServiceEnabled)) {
@@ -292,6 +292,11 @@ export class StackComposer {
             this.stacks.push(networkStack)
         }
         let servicesYaml = new ServicesYaml();
+
+        if (props.migrationsUserAgent) {
+            servicesYaml.client_options = new ClientOptions()
+            servicesYaml.client_options.user_agent_extra = props.migrationsUserAgent
+        }
 
         // There is an assumption here that for any deployment we will always have a target cluster, whether that be a
         // created Domain like below or an imported one
