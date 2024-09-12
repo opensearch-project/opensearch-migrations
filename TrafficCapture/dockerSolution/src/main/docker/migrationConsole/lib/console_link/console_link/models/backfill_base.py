@@ -1,8 +1,7 @@
 from enum import Enum
-from typing import Dict, Tuple, Optional
+from typing import Dict, Tuple
 from abc import ABC, abstractmethod
 
-from console_link.models.client_options import ClientOptions
 from console_link.models.schema_tools import contains_one_of
 from console_link.models.command_result import CommandResult
 

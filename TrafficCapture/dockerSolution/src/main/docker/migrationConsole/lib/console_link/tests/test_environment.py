@@ -35,6 +35,7 @@ def test_valid_services_yaml_to_environment_succeeds():
     assert isinstance(env.metrics_source, MetricsSource)
     assert env.client_options is None
 
+
 def test_valid_services_yaml_with_client_options_are_propagated():
     env = Environment(VALID_SERVICES_CLIENT_OPTIONS_YAML)
     stored_client_options_user_agent_extra = env.client_options.user_agent_extra
@@ -44,7 +45,6 @@ def test_valid_services_yaml_with_client_options_are_propagated():
     assert env.replay.client_options.user_agent_extra == stored_client_options_user_agent_extra
     assert env.backfill.client_options.user_agent_extra == stored_client_options_user_agent_extra
     assert env.metrics_source.client_options.user_agent_extra == stored_client_options_user_agent_extra
-
 
 
 MINIMAL_YAML = """
