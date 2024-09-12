@@ -22,7 +22,6 @@ import org.junit.jupiter.api.Assertions;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
-import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
 import com.rfs.cms.CoordinateWorkHttpClient;
@@ -39,13 +38,7 @@ import com.rfs.common.SourceRepo;
 import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.http.SearchClusterRequests;
-import com.rfs.transformers.TransformFunctions;
-import com.rfs.transformers.Transformer;
-import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
-import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 import com.rfs.worker.DocumentsRunner;
-import com.rfs.worker.IndexRunner;
-import com.rfs.worker.MetadataRunner;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.SneakyThrows;
@@ -64,43 +57,6 @@ public class SourceTestBase {
             baseSourceImage,
             GENERATOR_BASE_IMAGE,
             new String[] { "/root/runTestBenchmarks.sh", "--endpoint", "http://" + SOURCE_SERVER_ALIAS + ":9200/" } };
-    }
-
-    protected static void migrateMetadata(
-        SourceRepo sourceRepo,
-        OpenSearchClient targetClient,
-        String snapshotName,
-        List<String> legacyTemplateAllowlist,
-        List<String> componentTemplateAllowlist,
-        List<String> indexTemplateAllowlist,
-        List<String> indexAllowlist,
-        MetadataMigrationTestContext context,
-        Version sourceVersion
-    ) {
-        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(sourceVersion, sourceRepo);
-        var targetVersion = Version.fromString("OS 2.11");
-        GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(
-            targetClient,
-            legacyTemplateAllowlist,
-            componentTemplateAllowlist,
-            indexTemplateAllowlist
-        );
-        Transformer transformer = TransformFunctions.getTransformer(sourceVersion, targetVersion, 1);
-        new MetadataRunner(
-            snapshotName,
-            sourceResourceProvider.getGlobalMetadata(),
-            metadataCreator,
-            transformer
-        ).migrateMetadata(context.createMetadataMigrationContext());
-
-        IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
-        new IndexRunner(
-            snapshotName,
-            sourceResourceProvider.getIndexMetadata(),
-            indexCreator,
-            transformer,
-            indexAllowlist
-        ).migrateIndices(context.createIndexContext());
     }
 
     @AllArgsConstructor

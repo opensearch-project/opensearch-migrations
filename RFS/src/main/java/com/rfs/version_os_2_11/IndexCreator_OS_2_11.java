@@ -1,10 +1,9 @@
 package com.rfs.version_os_2_11;
 
-import java.util.Optional;
-
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.metadata.IndexCreator;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 
@@ -20,8 +19,9 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
     private static final ObjectMapper mapper = new ObjectMapper();
     protected final OpenSearchClient client;
 
-    public Optional<ObjectNode> create(
+    public boolean create(
         IndexMetadata index,
+        MigrationMode mode,
         ICreateIndexContext context
     ) {
         IndexMetadataData_OS_2_11 indexMetadata = new IndexMetadataData_OS_2_11(index.rawJson(), index.getId(), index.getName());
@@ -42,7 +42,12 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
 
         // Create the index; it's fine if it already exists
         try {
-            return client.createIndex(index.getName(), body, context);
+            switch (mode) {
+                case SIMULATE:
+                    return !client.hasIndex(index.getName());
+                case PERFORM:
+                    return client.createIndex(index.getName(), body, context).isPresent();
+            }
         } catch (InvalidResponse invalidResponse) {
             var illegalArguments = invalidResponse.getIllegalArguments();
 
@@ -62,8 +67,9 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
             }
 
             log.info("Reattempting creation of index '" + index.getName() + "' after removing illegal arguments; " + illegalArguments);
-            return client.createIndex(index.getName(), body, context);
+            return client.createIndex(index.getName(), body, context).isPresent();
         }
+        return false;
     }
 
     private void removeFieldsByPath(ObjectNode node, String path) {

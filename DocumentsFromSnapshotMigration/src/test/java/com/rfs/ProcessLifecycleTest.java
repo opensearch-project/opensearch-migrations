@@ -16,13 +16,10 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-import org.opensearch.migrations.Version;
-import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.testcontainers.OpensearchContainer;
 
-import com.rfs.common.FileSystemRepo;
 import com.rfs.common.FileSystemSnapshotCreator;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.http.ConnectionContextTestParams;
@@ -68,7 +65,6 @@ public class ProcessLifecycleTest extends SourceTestBase {
     public void testProcessExitsAsExpected(String failAfterString, int expectedExitCode) throws Exception {
         final var failHow = FailHow.valueOf(failAfterString);
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
-        final var testMetadataMigrationContext = MetadataMigrationTestContext.factory().noOtelTracking();
 
         var sourceImageArgs = makeParamsForBase(SearchClusterContainer.ES_V7_10_2);
         var baseSourceImageVersion = (SearchClusterContainer.ContainerVersion) sourceImageArgs[0];
@@ -119,8 +115,6 @@ public class ProcessLifecycleTest extends SourceTestBase {
             );
             esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
-            migrateMetadata(osTargetContainer, tempDirSnapshot, testMetadataMigrationContext, baseSourceImageVersion.getVersion());
-
             int actualExitCode = runProcessAgainstToxicTarget(tempDirSnapshot, tempDirLucene, proxyContainer, failHow);
             log.atInfo().setMessage("Process exited with code: " + actualExitCode).log();
 
@@ -134,24 +128,6 @@ public class ProcessLifecycleTest extends SourceTestBase {
             deleteTree(tempDirSnapshot);
             deleteTree(tempDirLucene);
         }
-    }
-
-    private static void migrateMetadata(
-        OpensearchContainer targetContainer,
-        Path tempDirSnapshot,
-        MetadataMigrationTestContext testMetadataMigrationContext,
-        Version sourceVersion
-    ) {
-        String targetAddress = "http://"
-            + targetContainer.getHost()
-            + ":"
-            + targetContainer.getMappedPort(OPENSEARCH_PORT);
-        var targetClient = new OpenSearchClient(ConnectionContextTestParams.builder()
-            .host(targetAddress)
-            .build()
-            .toConnectionContext());
-        var sourceRepo = new FileSystemRepo(tempDirSnapshot);
-        migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, List.of(), List.of(), List.of(), INDEX_ALLOWLIST, testMetadataMigrationContext, sourceVersion);
     }
 
     private static int runProcessAgainstToxicTarget(

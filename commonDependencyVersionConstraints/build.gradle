@@ -45,7 +45,7 @@ dependencies {
     api group: 'org.apache.jmeter', name: 'ApacheJMeter_http', version: jmeter
     api group: 'org.apache.jmeter', name: 'ApacheJMeter_config', version: jmeter
 
-    api group: 'com.beust', name: 'jcommander', version: '1.82'
+    api group: 'org.jcommander', name: 'jcommander', version: '1.85'
 
     api group: 'org.projectlombok', name: 'lombok', version: '1.18.28'
 

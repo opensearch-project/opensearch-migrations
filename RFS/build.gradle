@@ -20,7 +20,7 @@ dependencies {
     implementation project(':coreUtilities')
     implementation project(':transformation')
 
-    implementation group: 'com.beust', name: 'jcommander'
+    implementation group: 'org.jcommander', name: 'jcommander'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'

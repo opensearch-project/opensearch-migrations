@@ -1,8 +1,13 @@
 package org.opensearch.migrations;
 
+import java.util.Optional;
+
 import org.opensearch.migrations.commands.Configure;
 import org.opensearch.migrations.commands.Evaluate;
+import org.opensearch.migrations.commands.EvaluateArgs;
 import org.opensearch.migrations.commands.Migrate;
+import org.opensearch.migrations.commands.MigrateArgs;
+import org.opensearch.migrations.commands.Result;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -17,46 +22,95 @@ import lombok.extern.slf4j.Slf4j;
 public class MetadataMigration {
 
     public static void main(String[] args) throws Exception {
-        var arguments = new MetadataArgs();
-        var jCommander = JCommander.newBuilder().addObject(arguments).build();
+        var metadataArgs = new MetadataArgs();
+        var migrateArgs = new MigrateArgs();
+        var evaluateArgs = new EvaluateArgs(); 
+        var jCommander = JCommander.newBuilder()
+            .addObject(metadataArgs)
+            .addCommand(migrateArgs)
+            .addCommand(evaluateArgs)
+            .build();
         jCommander.parse(args);
 
-        if (arguments.help) {
-            jCommander.usage();
-            return;
-        }
-
         var context = new RootMetadataMigrationContext(
-            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(arguments.otelCollectorEndpoint, "metadata",
+            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(metadataArgs.otelCollectorEndpoint, "metadata",
                 ProcessHelpers.getNodeInstanceName()),
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
         );
 
-        var meta = new MetadataMigration(arguments);
+        var meta = new MetadataMigration();
 
-        log.info("Starting Metadata Migration");
+        log.atInfo().setMessage("Command line arguments: {}\n").addArgument(String.join(" ", args)).log();
 
-        var result = meta.migrate().execute(context);
+        if (metadataArgs.help || jCommander.getParsedCommand() == null) {
+            printTopLevelHelp(jCommander);
+            return;
+        }
 
+        if (migrateArgs.help || evaluateArgs.help) {
+            printCommandUsage(jCommander);
+            return;
+        }
+
+        var command = Optional.ofNullable(jCommander.getParsedCommand())
+            .map(MetadataCommands::fromString)
+            .orElse(MetadataCommands.Migrate);
+        Result result;
+        switch (command) {
+            default:
+            case Migrate:
+                if (migrateArgs.help) {
+                    printCommandUsage(jCommander);
+                    return;
+                }
+
+                log.info("Starting Metadata Migration");
+                result = meta.migrate(migrateArgs).execute(context);
+                break;
+            case Evaluate:
+                if (evaluateArgs.help) {
+                    printCommandUsage(jCommander);
+                    return;
+                }
+
+                log.info("Starting Metadata Evaluation");
+                result = meta.evaluate(evaluateArgs).execute(context);
+                break;
+        }
         log.info(result.toString());
         System.exit(result.getExitCode());
-    }
-
-    private final MetadataArgs arguments;
-
-    public MetadataMigration(MetadataArgs arguments) {
-        this.arguments = arguments;
     }
 
     public Configure configure() {
         return new Configure();
     }
 
-    public Evaluate evaluate() {
-        return new Evaluate();
+    public Evaluate evaluate(MigrateOrEvaluateArgs arguments) {
+        return new Evaluate(arguments);
     }
 
-    public Migrate migrate() {
+    public Migrate migrate(MigrateOrEvaluateArgs arguments) {
         return new Migrate(arguments);
+    }
+
+    private static void printTopLevelHelp(JCommander commander) {
+        log.info("Usage: [options] [command] [commandOptions]");
+        log.info("Options:");
+        for (var parameter : commander.getParameters()) {
+            log.info("  " + parameter.getNames());
+            log.info("    " + parameter.getDescription());
+        }
+
+        log.info("Commands:");
+        for (var command : commander.getCommands().entrySet()) {
+            log.info("  " + command.getKey());
+        }
+        log.info("\nUse --help with a specific command for more information.");
+    }
+
+    private static void printCommandUsage(JCommander jCommander) {
+        var sb = new StringBuilder();
+        jCommander.getUsageFormatter().usage(jCommander.getParsedCommand(), sb);
+        log.info(sb.toString());
     }
 }
