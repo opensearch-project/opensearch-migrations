@@ -62,59 +62,92 @@ public class CaptureProxy {
     public static final String DEFAULT_KAFKA_CLIENT_ID = "HttpCaptureProxyProducer";
 
     public static class Parameters {
-        @Parameter(required = false, names = {
-            "--traceDirectory" }, arity = 1, description = "Directory to store trace files in.")
+        @Parameter(required = false,
+            names = { "--traceDirectory" },
+            arity = 1,
+            description = "Directory to store trace files in.")
         public String traceDirectory;
-        @Parameter(required = false, names = {
-            "--noCapture" }, arity = 0, description = "If enabled, Does NOT capture traffic to ANY sink.")
+        @Parameter(required = false,
+            names = { "--noCapture" },
+            arity = 0,
+            description = "If enabled, Does NOT capture traffic to ANY sink.")
         public boolean noCapture;
-        @Parameter(required = false, names = {
-            "--kafkaConfigFile" }, arity = 1, description = "Kafka properties file for additional client customization.")
+        @Parameter(required = false,
+            names = { "--kafkaConfigFile" },
+            arity = 1,
+            description = "Kafka properties file for additional client customization.")
         public String kafkaPropertiesFile;
-        @Parameter(required = false, names = {
-            "--kafkaClientId" }, arity = 1, description = "clientId to use for interfacing with Kafka.")
+        @Parameter(required = false,
+            names = { "--kafkaClientId" },
+            arity = 1,
+            description = "clientId to use for interfacing with Kafka.")
         public String kafkaClientId = DEFAULT_KAFKA_CLIENT_ID;
-        @Parameter(required = false, names = {
-            "--kafkaConnection" }, arity = 1, description = "Sequence of <HOSTNAME:PORT> values delimited by ','.")
+        @Parameter(required = false,
+            names = { "--kafkaConnection" },
+            arity = 1,
+            description = "Sequence of <HOSTNAME:PORT> values delimited by ','.")
         public String kafkaConnection;
-        @Parameter(required = false, names = {
-            "--enableMSKAuth" }, arity = 0, description = "Enables SASL Kafka properties required for connecting to MSK with IAM auth.")
+        @Parameter(required = false,
+            names = { "--enableMSKAuth" },
+            arity = 0,
+            description = "Enables SASL Kafka properties required for connecting to MSK with IAM auth.")
         public boolean mskAuthEnabled = false;
-        @Parameter(required = false, names = {
-            "--sslConfigFile" }, arity = 1, description = "YAML configuration of the HTTPS settings.  When this is not set, the proxy will not use TLS.")
+        @Parameter(required = false,
+            names = { "--sslConfigFile" },
+            arity = 1,
+            description = "YAML configuration of the HTTPS settings.  When this is not set, the proxy will not use TLS.")
         public String sslConfigFilePath;
-        @Parameter(required = false, names = {
-            "--maxTrafficBufferSize" }, arity = 1, description = "The maximum number of bytes that will be written to a single TrafficStream object.")
+        @Parameter(required = false,
+            names = { "--maxTrafficBufferSize" },
+            arity = 1,
+            description = "The maximum number of bytes that will be written to a single TrafficStream object.")
         public int maximumTrafficStreamSize = 1024 * 1024;
-        @Parameter(required = false, names = {
-            "--insecureDestination" }, arity = 0, description = "Do not check the destination server's certificate")
+        @Parameter(required = false,
+            names = { "--insecureDestination" },
+            arity = 0,
+            description = "Do not check the destination server's certificate")
         public boolean allowInsecureConnectionsToBackside;
-        @Parameter(required = true, names = {
-            "--destinationUri" }, arity = 1, description = "URI of the server that the proxy is capturing traffic for.")
+        @Parameter(required = true,
+            names = { "--destinationUri" },
+            arity = 1,
+            description = "URI of the server that the proxy is capturing traffic for.")
         public String backsideUriString;
-        @Parameter(required = true, names = {
-            "--listenPort" }, arity = 1, description = "Exposed port for clients to connect to this proxy.")
+        @Parameter(required = true,
+            names = { "--listenPort" },
+            arity = 1,
+            description = "Exposed port for clients to connect to this proxy.")
         public int frontsidePort = 0;
-        @Parameter(required = false, names = {
-            "--numThreads" }, arity = 1, description = "How many threads netty should create in its event loop group")
+        @Parameter(required = false,
+            names = { "--numThreads" },
+            arity = 1,
+            description = "How many threads netty should create in its event loop group")
         public int numThreads = 1;
-        @Parameter(required = false, names = {
-            "--destinationConnectionPoolSize" }, arity = 1, description = "Number of socket connections that should be maintained to the destination server "
+        @Parameter(required = false,
+            names = { "--destinationConnectionPoolSize" },
+            arity = 1,
+            description = "Number of socket connections that should be maintained to the destination server "
                 + "to reduce the perceived latency to clients.  Each thread will have its own cache, so the "
                 + "total number of outstanding warm connections will be multiplied by numThreads.")
         public int destinationConnectionPoolSize = 0;
-        @Parameter(required = false, names = {
-            "--destinationConnectionPoolTimeout" }, arity = 1, description = "Of the socket connections maintained by the destination connection pool, "
+        @Parameter(required = false,
+            names = { "--destinationConnectionPoolTimeout" },
+            arity = 1,
+            description = "Of the socket connections maintained by the destination connection pool, "
                 + "how long after connection should the be recycled "
                 + "(closed with a new connection taking its place)")
         public String destinationConnectionPoolTimeout = "PT30S";
-        @Parameter(required = false, names = {
-            "--otelCollectorEndpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be forwarded."
+        @Parameter(required = false,
+            names = { "--otelCollectorEndpoint" },
+            arity = 1,
+            description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be forwarded."
                 + "If this is not provided, metrics will not be sent to a collector.")
         public String otelCollectorEndpoint;
-        @Parameter(required = false, names = "--suppressCaptureForHeaderMatch", arity = 2, description = "The header name (which will be interpreted in a case-insensitive manner) and a regex "
-            + "pattern.  When the incoming request has a header that matches the regex, it will be passed "
-            + "through to the service but will NOT be captured.  E.g. user-agent 'healthcheck'.")
+        @Parameter(required = false,
+            names = "--suppressCaptureForHeaderMatch",
+            arity = 2,
+            description = "The header name (which will be interpreted in a case-insensitive manner) and a regex "
+                + "pattern.  When the incoming request has a header that matches the regex, it will be passed "
+                + "through to the service but will NOT be captured.  E.g. user-agent 'healthcheck'.")
         public List<String> suppressCaptureHeaderPairs = new ArrayList<>();
     }
 
