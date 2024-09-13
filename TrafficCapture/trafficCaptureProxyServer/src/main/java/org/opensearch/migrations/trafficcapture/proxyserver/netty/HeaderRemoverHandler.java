@@ -1,5 +1,6 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import io.netty.buffer.ByteBuf;
@@ -7,8 +8,11 @@ import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.util.ReferenceCountUtil;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
     final String headerToRemove;
     CompositeByteBuf previousRemaining;
@@ -34,13 +38,11 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
      * need to be buffered by the caller
      */
     boolean matchNextBytes(ChannelHandlerContext ctx, ByteBuf buf) {
-        if (!buf.isReadable()) {
-            return false;
-        }
-        buf.markReaderIndex();
-        for (int i=previousRemaining.readerIndex(); ; ++i) {
+        final var sourceReaderIdx = buf.readerIndex();
+        for (int i=previousRemaining.writerIndex(); ; ++i) {
             if (!buf.isReadable()) { // partial match
-                previousRemaining.addComponent(true, buf);
+                previousRemaining.addComponent(true,
+                    buf.retainedSlice(sourceReaderIdx, i-previousRemaining.writerIndex()));
                 return true;
             }
             if (i == headerToRemove.length()) { // match!
@@ -49,19 +51,22 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
                 dropUntilNewline = true; // ... plus other bytes until we reset
                 return true;
             }
+            buf.markReaderIndex();
             if (Character.toLowerCase(headerToRemove.charAt(i)) != Character.toLowerCase(buf.readByte())) { // no match
                 previousRemaining.forEach(bb -> lambdaSafeSuperChannelRead(ctx, bb));
+                previousRemaining.removeComponents(0, previousRemaining.numComponents());
+                previousRemaining.release();
                 previousRemaining = null;
+                buf.resetReaderIndex();
                 dropUntilNewline = false;
                 return false;
             }
         }
-
     }
 
     boolean advanceByteBufUntilNewline(ByteBuf bb) {
         while (bb.isReadable()) { // sonar lint doesn't like if the while statement has an empty body
-            if (bb.readByte() != '\n') { return true; }
+            if (bb.readByte() == '\n') { return true; }
         }
         return false;
     }
@@ -74,38 +79,41 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
         }
 
         var sourceBuf = (ByteBuf) msg;
-        var startForNextSourceSegment = sourceBuf.readerIndex();
+        var currentSourceSegmentStart = (previousRemaining != null || dropUntilNewline) ? -1 : sourceBuf.readerIndex();
         var cleanedIncomingBuf = ctx.alloc().compositeBuffer(4);
 
-        while (true) {
+        while (sourceBuf.isReadable()) {
             if (previousRemaining != null) {
                 final var sourceReaderIdx = sourceBuf.readerIndex();
-                if (matchNextBytes(ctx, sourceBuf.slice(sourceReaderIdx, sourceBuf.readableBytes())) &&
-                    sourceReaderIdx != startForNextSourceSegment)  // would be 0-length
-                {
-                    cleanedIncomingBuf.addComponent(true,
-                        sourceBuf.retainedSlice(startForNextSourceSegment, sourceReaderIdx));
-                    startForNextSourceSegment = -1;
+                if (matchNextBytes(ctx, sourceBuf)) {
+                    if (currentSourceSegmentStart >= 0 &&
+                        sourceReaderIdx != currentSourceSegmentStart)  // would be 0-length
+                    {
+                        cleanedIncomingBuf.addComponent(true,
+                        sourceBuf.retainedSlice(currentSourceSegmentStart, sourceReaderIdx-currentSourceSegmentStart));
+                        currentSourceSegmentStart = -1;
+                    }
+                } else if (currentSourceSegmentStart == -1) {
+                    currentSourceSegmentStart = sourceReaderIdx;
                 }
             } else {
-                var foundNewline = advanceByteBufUntilNewline(sourceBuf);
-                if (dropUntilNewline) {
-                    if (foundNewline) {
-                        // took care of previous bytes in the source buffer in the previousRemaining != null branch
-                        startForNextSourceSegment = sourceBuf.readerIndex();
-                    }
-                }
-                if (foundNewline) {
+                if (advanceByteBufUntilNewline(sourceBuf)) {
                     previousRemaining = ctx.alloc().compositeBuffer(16);
                 } else {
                     break;
                 }
             }
         }
-        if (startForNextSourceSegment >= 0) {
+        if (currentSourceSegmentStart >= 0) {
             cleanedIncomingBuf.addComponent(true,
-                sourceBuf.retainedSlice(startForNextSourceSegment, sourceBuf.readerIndex()-startForNextSourceSegment));
+                sourceBuf.retainedSlice(currentSourceSegmentStart, sourceBuf.readerIndex()-currentSourceSegmentStart));
         }
         super.channelRead(ctx, cleanedIncomingBuf);
+    }
+
+    @Override
+    public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
+        ReferenceCountUtil.release(previousRemaining);
+        super.channelUnregistered(ctx);
     }
 }
