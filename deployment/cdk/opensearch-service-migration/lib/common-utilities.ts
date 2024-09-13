@@ -326,6 +326,13 @@ export class ClusterSigV4Auth {
         this.region = region;
         this.serviceSigningName = service;
     }
+
+    toDict() {
+        return {
+            region: this.region,
+            service: this.serviceSigningName
+        }
+    }
 }
 
 export class ClusterBasicAuth {
@@ -379,7 +386,7 @@ export class ClusterAuth {
             return {no_auth: ""};
         }
         if (this.sigv4) {
-            return {sigv4: this.sigv4};
+            return {sigv4: this.sigv4.toDict()};
         }
         return {};
     }
