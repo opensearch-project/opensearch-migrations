@@ -1,11 +1,7 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
-import java.nio.charset.StandardCharsets;
-import java.util.List;
-
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.CompositeByteBuf;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.util.ReferenceCountUtil;
@@ -53,7 +49,7 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
             }
             buf.markReaderIndex();
             if (Character.toLowerCase(headerToRemove.charAt(i)) != Character.toLowerCase(buf.readByte())) { // no match
-                previousRemaining.forEach(bb -> lambdaSafeSuperChannelRead(ctx, bb));
+                previousRemaining.forEach(bb -> lambdaSafeSuperChannelRead(ctx, bb.retain()));
                 previousRemaining.removeComponents(0, previousRemaining.numComponents());
                 previousRemaining.release();
                 previousRemaining = null;
@@ -71,6 +67,18 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
         return false;
     }
 
+    CompositeByteBuf addSliceToComposite(ChannelHandlerContext ctx, CompositeByteBuf priorBuf, ByteBuf sourceBuf,
+                                         int start, int len) {
+        if (len == 0) {
+            return priorBuf;
+        }
+        if (priorBuf == null) {
+            priorBuf = ctx.alloc().compositeBuffer(4);
+        }
+        priorBuf.addComponent(true, sourceBuf.retainedSlice(start, len));
+        return priorBuf;
+    }
+
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
         if (!(msg instanceof ByteBuf)) {
@@ -80,7 +88,7 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
 
         var sourceBuf = (ByteBuf) msg;
         var currentSourceSegmentStart = (previousRemaining != null || dropUntilNewline) ? -1 : sourceBuf.readerIndex();
-        var cleanedIncomingBuf = ctx.alloc().compositeBuffer(4);
+        CompositeByteBuf cleanedIncomingBuf = null;
 
         while (sourceBuf.isReadable()) {
             if (previousRemaining != null) {
@@ -89,8 +97,8 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
                     if (currentSourceSegmentStart >= 0 &&
                         sourceReaderIdx != currentSourceSegmentStart)  // would be 0-length
                     {
-                        cleanedIncomingBuf.addComponent(true,
-                        sourceBuf.retainedSlice(currentSourceSegmentStart, sourceReaderIdx-currentSourceSegmentStart));
+                        cleanedIncomingBuf = addSliceToComposite(ctx, cleanedIncomingBuf, sourceBuf,
+                            currentSourceSegmentStart, sourceReaderIdx-currentSourceSegmentStart);
                         currentSourceSegmentStart = -1;
                     }
                 } else if (currentSourceSegmentStart == -1) {
@@ -104,11 +112,15 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
                 }
             }
         }
+
         if (currentSourceSegmentStart >= 0) {
-            cleanedIncomingBuf.addComponent(true,
-                sourceBuf.retainedSlice(currentSourceSegmentStart, sourceBuf.readerIndex()-currentSourceSegmentStart));
+            cleanedIncomingBuf = addSliceToComposite(ctx, cleanedIncomingBuf, sourceBuf,
+                currentSourceSegmentStart, sourceBuf.readerIndex()-currentSourceSegmentStart);
         }
-        super.channelRead(ctx, cleanedIncomingBuf);
+        sourceBuf.release();
+        if (cleanedIncomingBuf != null) {
+            super.channelRead(ctx, cleanedIncomingBuf);
+        }
     }
 
     @Override

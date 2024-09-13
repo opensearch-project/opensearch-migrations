@@ -54,10 +54,11 @@ class HeaderAdderHandlerTest {
         var channel = new EmbeddedChannel(new HeaderAdderHandler(newHeader));
         sliceMessageIntoChannelWrites(channel, msg, sizes);
         var output = Unpooled.compositeBuffer();
-        channel.inboundMessages().forEach(v -> output.addComponent(true, (ByteBuf) v));
-        channel.close();
+        channel.inboundMessages().forEach(v -> output.addComponent(true, ((ByteBuf) v).retain()));
+        channel.finishAndReleaseAll();
 
         Assertions.assertEquals(makeMessage(lineEnding, extraHeader), output.toString(StandardCharsets.UTF_8));
+        output.release();
     }
 
     public static void sliceMessageIntoChannelWrites(EmbeddedChannel channel, String msg, IntStream sizes) {
@@ -73,7 +74,11 @@ class HeaderAdderHandlerTest {
                 return substr;
             })
             .takeWhile(Objects::nonNull)
-            .forEach(substr -> channel.writeInbound(Unpooled.wrappedBuffer(substr.getBytes(StandardCharsets.UTF_8))));
+            .forEach(substr -> {
+                var bytes = substr.getBytes(StandardCharsets.UTF_8);
+                var buf = channel.alloc().buffer(bytes.length);
+                channel.writeInbound(buf.writeBytes(bytes));
+            });
     }
 
     String makeMessage(String lineEnding, String extraHeader) {

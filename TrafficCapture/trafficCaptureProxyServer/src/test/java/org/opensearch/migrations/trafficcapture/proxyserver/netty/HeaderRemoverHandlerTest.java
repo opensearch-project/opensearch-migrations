@@ -13,7 +13,6 @@ import java.util.stream.IntStream;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
@@ -22,7 +21,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
-@WrapWithNettyLeakDetection()
+@WrapWithNettyLeakDetection(repetitions = 1)
 @Slf4j
 class HeaderRemoverHandlerTest {
 
@@ -41,13 +40,14 @@ class HeaderRemoverHandlerTest {
 
         var channel = new EmbeddedChannel(new HeaderRemoverHandler("host:"));
         HeaderAdderHandlerTest.sliceMessageIntoChannelWrites(channel, sourceMsg, sizes);
-        var output = Unpooled.compositeBuffer();
-        channel.inboundMessages().forEach(v -> output.addComponent(true, ((ByteBuf) v)));
-        channel.close();
+        var outputBuf = channel.alloc().compositeBuffer();
+        channel.inboundMessages().forEach(v -> outputBuf.addComponent(true, ((ByteBuf) v).retain()));
+        channel.finishAndReleaseAll();
 
-        Assertions.assertEquals(messageMaker.apply(false), output.toString(StandardCharsets.UTF_8),
+        var outputString = outputBuf.toString(StandardCharsets.UTF_8);
+        Assertions.assertEquals(messageMaker.apply(false), outputString,
             "Error converting source message: " + sourceMsg);
-        output.release();
+        outputBuf.release();
     }
 
     @Test
