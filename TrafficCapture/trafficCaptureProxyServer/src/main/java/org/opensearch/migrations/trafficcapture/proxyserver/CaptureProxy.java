@@ -4,6 +4,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Duration;
@@ -21,6 +22,8 @@ import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLException;
 
 import com.google.protobuf.CodedOutputStream;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.socket.SocketChannel;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -38,8 +41,12 @@ import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSe
 import org.opensearch.migrations.trafficcapture.StreamLifecycleManager;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.HeaderValueFilteringCapturePredicate;
+import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.BacksideConnectionPool;
+import org.opensearch.migrations.trafficcapture.proxyserver.netty.HeaderAdderHandler;
+import org.opensearch.migrations.trafficcapture.proxyserver.netty.HeaderRemoverHandler;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
+import org.opensearch.migrations.trafficcapture.proxyserver.netty.ProxyChannelInitializer;
 import org.opensearch.migrations.utils.ProcessHelpers;
 import org.opensearch.security.ssl.DefaultSecurityKeyStore;
 import org.opensearch.security.ssl.util.SSLConfigConstants;
@@ -142,6 +149,12 @@ public class CaptureProxy {
             description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be forwarded."
                 + "If this is not provided, metrics will not be sent to a collector.")
         public String otelCollectorEndpoint;
+        @Parameter(required = false,
+            names = "--setHeader",
+            arity = 2,
+            description = "[header-name header-value] Set an HTTP header (first argument) with to the specified value" +
+                " (second argument).  Any existing headers with that name will be removed.")
+        public List<String> headerOverrides = new ArrayList<>();
         @Parameter(required = false,
             names = "--suppressCaptureForHeaderMatch",
             arity = 2,
@@ -346,7 +359,7 @@ public class CaptureProxy {
         var params = parseArgs(args);
         var backsideUri = convertStringToUri(params.backsideUriString);
 
-        var rootContext = new RootCaptureContext(
+        var ctx = new RootCaptureContext(
             RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "capture",
                 ProcessHelpers.getNodeInstanceName()),
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
@@ -382,14 +395,10 @@ public class CaptureProxy {
             var headerCapturePredicate = new HeaderValueFilteringCapturePredicate(
                 convertPairListToMap(params.suppressCaptureHeaderPairs)
             );
-            proxy.start(
-                rootContext,
-                backsideConnectionPool,
-                params.numThreads,
-                sslEngineSupplier,
-                getConnectionCaptureFactory(params, rootContext),
-                headerCapturePredicate
-            );
+            var proxyChannelInitializer =
+                buildProxyChannelInitializer(ctx, backsideConnectionPool, sslEngineSupplier, headerCapturePredicate,
+                    params.headerOverrides, getConnectionCaptureFactory(params, ctx));
+            proxy.start(proxyChannelInitializer, params.numThreads);
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Caught exception while setting up the server and rethrowing").log();
             throw e;
@@ -407,5 +416,36 @@ public class CaptureProxy {
         // This loop just gives the main() function something to do while the netty event loops
         // work in the background.
         proxy.waitForClose();
+    }
+
+    static ProxyChannelInitializer buildProxyChannelInitializer(RootCaptureContext rootContext,
+                                                                BacksideConnectionPool backsideConnectionPool,
+                                                                Supplier<SSLEngine> sslEngineSupplier,
+                                                                @NonNull RequestCapturePredicate headerCapturePredicate,
+                                                                List<String> headerOverrides,
+                                                                IConnectionCaptureFactory connectionFactory)
+    {
+        var headers = convertPairListToMap(headerOverrides);
+        return new ProxyChannelInitializer(
+            rootContext,
+            backsideConnectionPool,
+            sslEngineSupplier,
+            connectionFactory,
+            headerCapturePredicate
+        ) {
+            @Override
+            protected void initChannel(@NonNull SocketChannel ch) throws IOException {
+                super.initChannel(ch);
+                for (var k : headers.keySet()) {
+                    ch.pipeline().addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "RemoveHeader-" + k,
+                        new HeaderRemoverHandler(k + ":"));
+                }
+                for (var kvp : headers.entrySet()) {
+                    var lineBytes = (kvp.getKey() + ":" + kvp.getValue()).getBytes(StandardCharsets.UTF_8);
+                    ch.pipeline().addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "AddHeader-" + kvp.getKey(),
+                        new HeaderAdderHandler(Unpooled.unreleasableBuffer(Unpooled.wrappedBuffer(lineBytes))));
+                }
+            }
+        };
     }
 }

@@ -47,7 +47,7 @@ class HeaderAdderHandlerTest {
     }
 
     private void runTestWithSize(String lineEnding, IntStream sizes) {
-        var extraHeader = "host: my.host\n";
+        var extraHeader = "host: my.host";
         var newHeader = Unpooled.wrappedBuffer(extraHeader.getBytes(StandardCharsets.UTF_8));
         final var msg = makeMessage(lineEnding, "");
 
@@ -57,7 +57,7 @@ class HeaderAdderHandlerTest {
         channel.inboundMessages().forEach(v -> output.addComponent(true, ((ByteBuf) v).retain()));
         channel.finishAndReleaseAll();
 
-        Assertions.assertEquals(makeMessage(lineEnding, extraHeader), output.toString(StandardCharsets.UTF_8));
+        Assertions.assertEquals(makeMessage(lineEnding, extraHeader + lineEnding), output.toString(StandardCharsets.UTF_8));
         output.release();
     }
 

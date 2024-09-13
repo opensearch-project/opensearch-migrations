@@ -207,7 +207,8 @@ class NettyScanningHttpProxyTest {
                 var connectionPool = new BacksideConnectionPool(testServerUri, null, 10, Duration.ofSeconds(10));
 
                 nshp.get()
-                    .start(rootCtx, connectionPool, 1, null, connectionCaptureFactory, new RequestCapturePredicate());
+                    .start(new ProxyChannelInitializer(rootCtx, connectionPool, null,
+                        connectionCaptureFactory, new RequestCapturePredicate()), 1);
                 System.out.println("proxy port = " + port);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
