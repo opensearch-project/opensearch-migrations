@@ -3,6 +3,7 @@ package org.opensearch.migrations.testutils;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -56,7 +57,7 @@ public class SimpleNettyHttpServer implements AutoCloseable {
 
     public static SimpleNettyHttpServer makeServer(
         boolean useTls,
-        Function<HttpRequestFirstLine, SimpleHttpResponse> makeContext
+        Function<HttpRequest, SimpleHttpResponse> makeContext
     ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         return makeServer(useTls, null, makeContext);
     }
@@ -64,7 +65,7 @@ public class SimpleNettyHttpServer implements AutoCloseable {
     public static SimpleNettyHttpServer makeServer(
         boolean useTls,
         Duration readTimeout,
-        Function<HttpRequestFirstLine, SimpleHttpResponse> makeContext
+        Function<HttpRequest, SimpleHttpResponse> makeContext
     ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         var testServerRef = new AtomicReference<SimpleNettyHttpServer>();
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
@@ -77,28 +78,31 @@ public class SimpleNettyHttpServer implements AutoCloseable {
         return testServerRef.get();
     }
 
-    private static class RequestToFirstLineAdapter implements HttpRequestFirstLine {
+    public static class RequestToAdapter implements HttpRequest {
         private final FullHttpRequest request;
 
-        public RequestToFirstLineAdapter(FullHttpRequest request) {
+        public RequestToAdapter(FullHttpRequest request) {
             this.request = request;
         }
 
         @Override
-        public String verb() {
+        public String getVerb() {
             return request.method().toString();
         }
 
         @SneakyThrows
         @Override
-        public URI path() {
+        public URI getPath() {
             return new URI(request.uri());
         }
 
         @Override
-        public String version() {
+        public String getVersion() {
             return request.protocolVersion().text();
         }
+
+        @Override
+        public List<Map.Entry<String, String>> getHeaders() { return request.headers().entries(); }
     }
 
     HttpHeaders convertHeaders(Map<String, String> headers) {
@@ -108,7 +112,7 @@ public class SimpleNettyHttpServer implements AutoCloseable {
     }
 
     private SimpleChannelInboundHandler<FullHttpRequest> makeHandlerFromResponseContext(
-        Function<HttpRequestFirstLine, SimpleHttpResponse> responseBuilder
+        Function<HttpRequest, SimpleHttpResponse> responseBuilder
     ) {
         return new SimpleChannelInboundHandler<>() {
             @Override
@@ -118,7 +122,7 @@ public class SimpleNettyHttpServer implements AutoCloseable {
                         ctx.close();
                         return;
                     }
-                    var specifiedResponse = responseBuilder.apply(new RequestToFirstLineAdapter(req));
+                    var specifiedResponse = responseBuilder.apply(new RequestToAdapter(req));
                     var fullResponse = new DefaultFullHttpResponse(
                         HttpVersion.HTTP_1_1,
                         HttpResponseStatus.valueOf(specifiedResponse.statusCode, specifiedResponse.statusText),
@@ -146,7 +150,7 @@ public class SimpleNettyHttpServer implements AutoCloseable {
         boolean useTLS,
         int port,
         Duration timeout,
-        Function<HttpRequestFirstLine, SimpleHttpResponse> responseBuilder
+        Function<HttpRequest, SimpleHttpResponse> responseBuilder
     ) throws Exception {
         this.useTls = useTLS;
         this.port = port;

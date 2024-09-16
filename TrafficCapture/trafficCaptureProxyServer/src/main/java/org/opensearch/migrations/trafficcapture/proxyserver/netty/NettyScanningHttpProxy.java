@@ -1,22 +1,15 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
-import java.util.function.Supplier;
-import javax.net.ssl.SSLEngine;
 
-import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
-import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
-import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
 import io.netty.channel.ChannelOption;
 import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
-import io.netty.channel.socket.SocketChannel;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.Getter;
-import lombok.NonNull;
 
 public class NettyScanningHttpProxy {
     @Getter

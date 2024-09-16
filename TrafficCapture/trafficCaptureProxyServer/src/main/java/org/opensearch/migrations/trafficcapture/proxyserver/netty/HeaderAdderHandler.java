@@ -34,7 +34,7 @@ public class HeaderAdderHandler extends ChannelInboundHandlerAdapter {
                 useCarriageReturn = true;
             } else if (nextByte == '\n') {
                 final var upToIndex = buf.readerIndex();
-                var composite = Unpooled.compositeBuffer(3);
+                var composite = Unpooled.compositeBuffer(4);
                 buf.resetReaderIndex();
                 composite.addComponent(true, buf.retainedSlice(0, upToIndex));
                 composite.addComponent(true, headerLineToAdd.duplicate());

@@ -13,7 +13,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import org.opensearch.migrations.testutils.HttpRequestFirstLine;
+import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
@@ -108,7 +108,7 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
     @MethodSource(value = "makeArgs")
     public void testSecondPhaseLeaseAcquisitionFailureKeepsRetrying(
         Class exceptionClassToTest,
-        Function<PathCounts, Function<HttpRequestFirstLine, SimpleHttpResponse>> responseFactory)
+        Function<PathCounts, Function<HttpRequest, SimpleHttpResponse>> responseFactory)
         throws Exception
     {
         var pathToCounts = new PathCounts();
@@ -183,23 +183,23 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
     }
 
     @NonNull
-    private static Function<PathCounts, Function<HttpRequestFirstLine, SimpleHttpResponse>>
+    private static Function<PathCounts, Function<HttpRequest, SimpleHttpResponse>>
     getCountingResponseMakerWithSearchBody(String searchResponse) {
         var payloadBytes = searchResponse.getBytes(StandardCharsets.UTF_8);
         return pathCounts -> getCountingResponseMaker(pathCounts, makeResponse(200, "OK", payloadBytes));
     }
 
     @NonNull
-    private static Function<PathCounts, Function<HttpRequestFirstLine, SimpleHttpResponse>>
+    private static Function<PathCounts, Function<HttpRequest, SimpleHttpResponse>>
     getCountingResponseMaker(SimpleHttpResponse searchResponse) {
         return pathCounts -> getCountingResponseMaker(pathCounts, searchResponse);
     }
 
     @NonNull
-    private static Function<HttpRequestFirstLine, SimpleHttpResponse>
+    private static Function<HttpRequest, SimpleHttpResponse>
     getCountingResponseMaker(PathCounts pathToCountMap, SimpleHttpResponse searchResponse) {
         return httpRequestFirstLine -> {
-            final var uriPath = httpRequestFirstLine.path().getPath();
+            final var uriPath = httpRequestFirstLine.getPath().getPath();
             if (uriPath.startsWith("/" + OpenSearchWorkCoordinator.INDEX_NAME + "/_refresh")) {
                 ++pathToCountMap.refreshes;
                 return makeResponse(200, "OK",

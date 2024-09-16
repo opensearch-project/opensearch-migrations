@@ -22,8 +22,6 @@ import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLException;
 
 import com.google.protobuf.CodedOutputStream;
-import io.netty.buffer.Unpooled;
-import io.netty.channel.socket.SocketChannel;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -54,6 +52,8 @@ import org.opensearch.security.ssl.util.SSLConfigConstants;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
@@ -345,6 +345,9 @@ public class CaptureProxy {
     }
 
     protected static Map<String, String> convertPairListToMap(List<String> list) {
+        if (list == null) {
+            return Map.of();
+        }
         var map = new TreeMap<String, String>();
         for (int i = 0; i < list.size(); i += 2) {
             map.put(list.get(i), list.get(i + 1));
@@ -436,14 +439,14 @@ public class CaptureProxy {
             @Override
             protected void initChannel(@NonNull SocketChannel ch) throws IOException {
                 super.initChannel(ch);
+                for (var kvp : headers.entrySet()) {
+                    var lineBytes = (kvp.getKey() + ": " + kvp.getValue()).getBytes(StandardCharsets.UTF_8);
+                    ch.pipeline().addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "AddHeader-" + kvp.getKey(),
+                        new HeaderAdderHandler(Unpooled.unreleasableBuffer(Unpooled.wrappedBuffer(lineBytes))));
+                }
                 for (var k : headers.keySet()) {
                     ch.pipeline().addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "RemoveHeader-" + k,
                         new HeaderRemoverHandler(k + ":"));
-                }
-                for (var kvp : headers.entrySet()) {
-                    var lineBytes = (kvp.getKey() + ":" + kvp.getValue()).getBytes(StandardCharsets.UTF_8);
-                    ch.pipeline().addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "AddHeader-" + kvp.getKey(),
-                        new HeaderAdderHandler(Unpooled.unreleasableBuffer(Unpooled.wrappedBuffer(lineBytes))));
                 }
             }
         };

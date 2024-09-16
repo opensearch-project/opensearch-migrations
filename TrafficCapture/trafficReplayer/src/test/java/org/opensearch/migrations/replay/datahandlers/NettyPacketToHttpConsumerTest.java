@@ -35,7 +35,7 @@ import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.http.retries.NoRetryEvaluatorFactory;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.replay.util.TextTrackedFuture;
-import org.opensearch.migrations.testutils.HttpRequestFirstLine;
+import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
@@ -85,7 +85,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         return TestContext.withTracking(false, true);
     }
 
-    private static SimpleHttpResponse makeResponseContext(HttpRequestFirstLine request) {
+    private static SimpleHttpResponse makeResponseContext(HttpRequest request) {
         var headers = new TreeMap(
             Map.of(
                 "Content-Type",
@@ -100,7 +100,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
     }
 
-    private static SimpleHttpResponse makeResponseContextLarge(HttpRequestFirstLine request) {
+    private static SimpleHttpResponse makeResponseContextLarge(HttpRequest request) {
         var headers = new TreeMap(
             Map.of(
                 "Content-Type",

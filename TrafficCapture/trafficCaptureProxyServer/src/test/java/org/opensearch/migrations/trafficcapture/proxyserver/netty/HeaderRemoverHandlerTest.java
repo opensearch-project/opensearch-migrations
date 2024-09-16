@@ -2,7 +2,6 @@ package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
 import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
-import java.util.Comparator;
 import java.util.Random;
 import java.util.function.BiFunction;
 import java.util.function.Function;
@@ -10,16 +9,16 @@ import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-
-import io.netty.buffer.ByteBuf;
-import io.netty.channel.embedded.EmbeddedChannel;
-import io.netty.util.ReferenceCountUtil;
-import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
+
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+
+import io.netty.buffer.ByteBuf;
+import io.netty.channel.embedded.EmbeddedChannel;
+import lombok.extern.slf4j.Slf4j;
 
 @WrapWithNettyLeakDetection(repetitions = 1)
 @Slf4j
