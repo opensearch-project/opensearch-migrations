@@ -160,7 +160,6 @@ public class LuceneDocumentsReader {
             BytesRef sourceBytes = null;
             try {
                 for (var field : document.getFields()) {
-                    log.atDebug().setMessage("Field: {}").addArgument(field.name()).log();
                     String fieldName = field.name();
                     switch (fieldName) {
                         case "_id": {
