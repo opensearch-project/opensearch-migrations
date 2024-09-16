@@ -265,25 +265,6 @@ def test_metadata_with_allowlists_makes_correct_subprocess_call(mocker):
     )
 
 
-def test_metadata_migrate_detached_makes_correct_subprocess_call(mocker):
-    config = {
-        "from_snapshot": {
-            "snapshot_name": "reindex_from_snapshot",
-            "fs": {
-                "repo_path": "path/to/repo"
-            },
-        },
-        "min_replicas": 2,
-    }
-    target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
-    metadata = Metadata(config, target, None)
-
-    mock = mocker.patch("subprocess.Popen")
-    metadata.migrate(detached_log="/tmp/log_file.log")
-
-    mock.assert_called_once()
-
-
 def test_metadata_with_target_config_auth_makes_correct_subprocess_call(mocker):
     config = {
         "from_snapshot": {

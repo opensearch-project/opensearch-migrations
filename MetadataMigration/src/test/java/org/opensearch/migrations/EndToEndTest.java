@@ -127,7 +127,7 @@ class EndToEndTest {
         if (sourceIsES7_X) {
             sourceClusterOperations.createES7Templates(testData.compoTemplateName, testData.indexTemplateName, "author", "blog*");
         } else if (sourceIsES6_8) {
-            sourceClusterOperations.createES6LegacyTemplate(testData.indexTemplateName, "movies*");
+            sourceClusterOperations.createES6LegacyTemplate(testData.indexTemplateName, "blog*");
         }
 
         // Creates a document that uses the template
@@ -244,17 +244,17 @@ class EndToEndTest {
         res = targetClusterOperations.get("/_aliases");
         assertThat(res.getValue(), res.getKey(), equalTo(200));
         var verifyAliasWasListed = allOf(containsString(testData.aliasInTemplate), containsString(testData.aliasName));
-        assertThat(res.getValue(), expectUpdatesOnTarget ? verifyAliasWasListed : not(expectUpdatesOnTarget));
+        assertThat(res.getValue(), expectUpdatesOnTarget ? verifyAliasWasListed : not(verifyAliasWasListed));
 
         // Check that the templates were migrated
         if (sourceIsES6_8) {
             res = targetClusterOperations.get("/_template/" + testData.indexTemplateName);
             assertThat(res.getValue(), res.getKey(), verifyResponseCode);
-            var verifyBodyHasComponentTemplate = containsString("composed_of\":[\"" + testData.compoTemplateName + "\"]");
-            assertThat(res.getValue(), expectUpdatesOnTarget ? verifyBodyHasComponentTemplate : not(verifyBodyHasComponentTemplate));
         } else {
             res = targetClusterOperations.get("/_index_template/" + testData.indexTemplateName);
             assertThat(res.getValue(), res.getKey(), verifyResponseCode);
+            var verifyBodyHasComponentTemplate = containsString("composed_of\":[\"" + testData.compoTemplateName + "\"]");
+            assertThat(res.getValue(), expectUpdatesOnTarget ? verifyBodyHasComponentTemplate : not(verifyBodyHasComponentTemplate));
         }
     }
 }

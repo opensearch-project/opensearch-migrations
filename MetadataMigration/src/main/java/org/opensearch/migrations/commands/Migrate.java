@@ -16,32 +16,32 @@ public class Migrate extends MigratorEvaluatorBase {
 
     public MigrateResult execute(RootMetadataMigrationContext context) {
         var migrationMode = MigrationMode.PERFORM;
-        var evaluateResult = MigrateResult.builder();
+        var migrateResult = MigrateResult.builder();
 
         try {
-            log.info("Running Metadata Evaluation");
+            log.info("Running Metadata Migration");
 
             var clusters = createClusters();
-            evaluateResult.clusters(clusters);
+            migrateResult.clusters(clusters);
 
             var transformer = selectTransformer(clusters);
 
             var items = migrateAllItems(migrationMode, clusters, transformer, context);
-            evaluateResult.items(items);
+            migrateResult.items(items);
         } catch (ParameterException pe) {
             log.atError().setMessage("Invalid parameter").setCause(pe).log();
-            evaluateResult
+            migrateResult
                 .exitCode(INVALID_PARAMETER_CODE)
                 .errorMessage("Invalid parameter: " + pe.getMessage())
                 .build();
         } catch (Throwable e) {
             log.atError().setMessage("Unexpected failure").setCause(e).log();
-            evaluateResult
+            migrateResult
                 .exitCode(UNEXPECTED_FAILURE_CODE)
                 .errorMessage("Unexpected failure: " + e.getMessage())
                 .build();
         }
 
-        return evaluateResult.build();
+        return migrateResult.build();
     }
 }

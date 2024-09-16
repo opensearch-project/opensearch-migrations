@@ -349,6 +349,14 @@ def test_cli_metadata_migrate(runner, mocker):
     assert result.exit_code == 0
 
 
+def test_cli_metadata_evaluate(runner, mocker):
+    mock = mocker.patch("subprocess.run")
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'metadata', 'evaluate'],
+                           catch_exceptions=True)
+    mock.assert_called_once()
+    assert result.exit_code == 0
+
+
 def test_cli_with_metrics_get_data(runner, mocker):
     mock = mocker.patch('console_link.models.metrics_source.PrometheusMetricsSource.get_metrics')
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'metrics', 'list'],

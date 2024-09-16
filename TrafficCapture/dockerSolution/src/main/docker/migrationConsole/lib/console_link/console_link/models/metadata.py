@@ -163,15 +163,15 @@ class Metadata:
                 logger.warning(f"Ignoring extra value {arg}, there was no command name before it")
                 i += 1
 
-    def evaluate(self, detached_log=None, extra_args=None) -> CommandResult:
+    def evaluate(self, extra_args=None) -> CommandResult:
         logger.info("Starting metadata migration")
-        return self.migrateOrEvaluate("evaluate", detached_log, extra_args)
+        return self.migrateOrEvaluate("evaluate", extra_args)
 
-    def migrate(self, detached_log=None, extra_args=None) -> CommandResult:
+    def migrate(self, extra_args=None) -> CommandResult:
         logger.info("Starting metadata migration")
-        return self.migrateOrEvaluate("migrate", detached_log, extra_args)
+        return self.migrateOrEvaluate("migrate", extra_args)
 
-    def migrateOrEvaluate(self, command: str, detached_log=None, extra_args=None) -> CommandResult:
+    def migrateOrEvaluate(self, command: str, extra_args=None) -> CommandResult:
         command_base = "/root/metadataMigration/bin/MetadataMigration"
         command_args = {}
 
@@ -230,9 +230,7 @@ class Metadata:
         self._appendArgs(command_args, extra_args)
 
         command_runner = CommandRunner(command_base, command_args,
-                                       sensitive_fields=["--target-password"],
-                                       run_as_detatched=detached_log is not None,
-                                       log_file=detached_log)
+                                       sensitive_fields=["--target-password"])
         logger.info(f"Migrating metadata with command: {' '.join(command_runner.sanitized_command())}")
         try:
             return command_runner.run()
