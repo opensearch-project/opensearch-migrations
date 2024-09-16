@@ -21,6 +21,7 @@ import com.rfs.common.DocumentReindexer;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.OpenSearchClient.BulkResponse;
+import com.rfs.common.RfsLuceneDocument;
 import com.rfs.tracing.IRfsContexts;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
@@ -68,7 +69,7 @@ public class PerformanceVerificationTest {
             }
 
             @Override
-            protected Document getDocument(IndexReader reader, int docId, boolean isLive) {
+            protected RfsLuceneDocument getDocument(IndexReader reader, int docId, boolean isLive) {
                 ingestedDocuments.incrementAndGet();
                 return super.getDocument(reader, docId, isLive);
             }

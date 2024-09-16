@@ -15,7 +15,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
 
-import org.apache.lucene.document.Document;
 import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Assertions;
@@ -34,6 +33,7 @@ import com.rfs.common.FileSystemRepo;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.RestClient;
+import com.rfs.common.RfsLuceneDocument;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
 import com.rfs.common.http.ConnectionContextTestParams;
@@ -181,15 +181,15 @@ public class SourceTestBase {
     }
 
     public static class FilteredLuceneDocumentsReader extends LuceneDocumentsReader {
-        private final UnaryOperator<Document> docTransformer;
+        private final UnaryOperator<RfsLuceneDocument> docTransformer;
 
-        public FilteredLuceneDocumentsReader(Path luceneFilesBasePath, boolean softDeletesPossible, String softDeletesField, UnaryOperator<Document> docTransformer) {
+        public FilteredLuceneDocumentsReader(Path luceneFilesBasePath, boolean softDeletesPossible, String softDeletesField, UnaryOperator<RfsLuceneDocument> docTransformer) {
             super(luceneFilesBasePath, softDeletesPossible, softDeletesField);
             this.docTransformer = docTransformer;
         }
 
         @Override
-        public Flux<Document> readDocuments() {
+        public Flux<RfsLuceneDocument> readDocuments() {
             return super.readDocuments().map(docTransformer::apply);
         }
     }
@@ -213,7 +213,7 @@ public class SourceTestBase {
             log.atDebug().setMessage("Lease expired for " + workItemId + " making next document get throw").log();
             shouldThrow.set(true);
         })) {
-            UnaryOperator<Document> terminatingDocumentFilter = d -> {
+            UnaryOperator<RfsLuceneDocument> terminatingDocumentFilter = d -> {
                 if (shouldThrow.get()) {
                     throw new LeasePastError();
                 }
