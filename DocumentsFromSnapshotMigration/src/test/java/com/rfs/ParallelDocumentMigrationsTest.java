@@ -20,7 +20,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
@@ -80,7 +79,6 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
     ) throws Exception {
         var executorService = Executors.newFixedThreadPool(numWorkers);
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
-        final var testMetadataMigrationContext = MetadataMigrationTestContext.factory().noOtelTracking();
         final var testDocMigrationContext = DocumentMigrationTestContext.factory()
             .withAllTracking();
 
@@ -119,14 +117,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
             var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
             try {
                 esSourceContainer.copySnapshotData(tempDir.toString());
-
-                var targetClient = new OpenSearchClient(ConnectionContextTestParams.builder()
-                    .host(esSourceContainer.getUrl())
-                    .build()
-                    .toConnectionContext());
                 var sourceRepo = new FileSystemRepo(tempDir);
-                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, List.of(), List.of(), List.of(), INDEX_ALLOWLIST, testMetadataMigrationContext, baseSourceImageVersion.getVersion());
-
                 var workerFutures = new ArrayList<CompletableFuture<Integer>>();
                 var runCounter = new AtomicInteger();
                 final var clockJitter = new Random(1);

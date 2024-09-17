@@ -5,10 +5,6 @@ import java.time.Duration;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
 
-import org.apache.lucene.document.Document;
-import org.apache.lucene.document.Field;
-import org.apache.lucene.document.StringField;
-import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -56,7 +52,7 @@ class DocumentReindexerTest {
 
     @Test
     void reindex_shouldBufferByDocumentCount() {
-        Flux<Document> documentStream = Flux.range(1, 10)
+        Flux<RfsLuceneDocument> documentStream = Flux.range(1, 10)
             .map(i -> createTestDocument(String.valueOf(i)));
 
         when(mockClient.sendBulkRequest(eq("test-index"), any(), any()))
@@ -92,7 +88,7 @@ class DocumentReindexerTest {
     @Test
     void reindex_shouldBufferBySize() {
         int numDocs = 5;
-        Flux<Document> documentStream = Flux.range(1, numDocs)
+        Flux<RfsLuceneDocument> documentStream = Flux.range(1, numDocs)
             .map(i -> createLargeTestDocument(String.valueOf(i), MAX_BULK_SIZE / 2 + 1));
 
         when(mockClient.sendBulkRequest(eq("test-index"), any(), any()))
@@ -122,7 +118,7 @@ class DocumentReindexerTest {
 
     @Test
     void reindex_shouldSendDocumentsLargerThanMaxBulkSize() {
-        Flux<Document> documentStream = Flux.just(createLargeTestDocument("1", MAX_BULK_SIZE * 3 / 2));
+        Flux<RfsLuceneDocument> documentStream = Flux.just(createLargeTestDocument("1", MAX_BULK_SIZE * 3 / 2));
 
         when(mockClient.sendBulkRequest(eq("test-index"), any(), any()))
             .thenAnswer(invocation -> {
@@ -148,7 +144,7 @@ class DocumentReindexerTest {
 
     @Test
     void reindex_shouldTrimAndRemoveNewlineFromSource() {
-        Flux<Document> documentStream = Flux.just(createTestDocumenWithWhitespace("1"));
+        Flux<RfsLuceneDocument> documentStream = Flux.just(createTestDocumenWithWhitespace("MQAA"));
 
         when(mockClient.sendBulkRequest(eq("test-index"), any(), any()))
             .thenAnswer(invocation -> {
@@ -172,26 +168,17 @@ class DocumentReindexerTest {
         assertEquals("{\"index\":{\"_id\":\"MQAA\"}}\n{\"field\":\"value\"}", capturedBulkRequests.get(0).asBulkIndex());
     }
 
-    private Document createTestDocument(String id) {
-        Document doc = new Document();
-        doc.add(new StringField("_id", new BytesRef(id), Field.Store.YES));
-        doc.add(new StringField("_source", new BytesRef("{\"field\":\"value\"}"), Field.Store.YES));
-        return doc;
+    private RfsLuceneDocument createTestDocument(String id) {
+        return new RfsLuceneDocument(id, "{\"field\":\"value\"}");
     }
 
-    private Document createTestDocumenWithWhitespace(String id) {
-        Document doc = new Document();
-        doc.add(new StringField("_id", new BytesRef(id), Field.Store.YES));
-        doc.add(new StringField("_source", new BytesRef(" \r\n\t{\"field\"\n:\"value\"}\r\n\t "), Field.Store.YES));
-        return doc;
+    private RfsLuceneDocument createTestDocumenWithWhitespace(String id) {
+        return new RfsLuceneDocument(id, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ");
     }
 
-    private Document createLargeTestDocument(String id, int size) {
-        Document doc = new Document();
-        doc.add(new StringField("_id", new BytesRef(id), Field.Store.YES));
+    private RfsLuceneDocument createLargeTestDocument(String id, int size) {
         String largeField = "x".repeat(size);
-        doc.add(new StringField("_source", new BytesRef("{\"field\":\"" + largeField + "\"}"), Field.Store.YES));
-        return doc;
+        return new RfsLuceneDocument(id, "{\"field\":\"" + largeField + "\"}");
     }
 
     @Test
@@ -200,7 +187,7 @@ class DocumentReindexerTest {
         int maxConcurrentRequests = 5;
         DocumentReindexer concurrentReindexer = new DocumentReindexer(mockClient, 1, MAX_BULK_SIZE, maxConcurrentRequests);
 
-        Flux<Document> documentStream = Flux.range(1, numDocs).map(i -> createTestDocument(String.valueOf(i)));
+        Flux<RfsLuceneDocument> documentStream = Flux.range(1, numDocs).map(i -> createTestDocument(String.valueOf(i)));
 
         AtomicInteger concurrentRequests = new AtomicInteger(0);
         AtomicInteger maxObservedConcurrency = new AtomicInteger(0);

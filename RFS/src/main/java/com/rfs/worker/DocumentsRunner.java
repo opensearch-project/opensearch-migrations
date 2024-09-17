@@ -7,8 +7,6 @@ import java.util.function.BiFunction;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import org.apache.lucene.document.Document;
-
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
 import com.rfs.cms.IWorkCoordinator;
@@ -16,6 +14,7 @@ import com.rfs.cms.ScopedWorkCoordinator;
 import com.rfs.common.DocumentReindexer;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.RfsException;
+import com.rfs.common.RfsLuceneDocument;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.models.ShardMetadata;
 import lombok.AllArgsConstructor;
@@ -94,7 +93,7 @@ public class DocumentsRunner {
 
         var unpacker = unpackerFactory.create(shardMetadata);
         var reader = readerFactory.apply(unpacker.unpack());
-        Flux<Document> documents = reader.readDocuments();
+        Flux<RfsLuceneDocument> documents = reader.readDocuments();
 
         reindexer.reindex(shardMetadata.getIndexName(), documents, context)
             .doOnError(error -> log.error("Error during reindexing: " + error))

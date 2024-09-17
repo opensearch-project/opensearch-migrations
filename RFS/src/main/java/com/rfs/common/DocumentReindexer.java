@@ -5,8 +5,6 @@ import java.util.List;
 import java.util.UUID;
 import java.util.function.Predicate;
 
-import org.apache.lucene.document.Document;
-
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts.IDocumentReindexContext;
 
 import lombok.EqualsAndHashCode;
@@ -28,7 +26,7 @@ public class DocumentReindexer {
     private final long maxBytesPerBulkRequest;
     private final int maxConcurrentWorkItems;
 
-    public Mono<Void> reindex(String indexName, Flux<Document> documentStream, IDocumentReindexContext context) {
+    public Mono<Void> reindex(String indexName, Flux<RfsLuceneDocument> documentStream, IDocumentReindexContext context) {
         var scheduler = Schedulers.newParallel("DocumentBulkAggregator");
         var bulkDocs = documentStream
             .publishOn(scheduler, 1)
@@ -98,15 +96,15 @@ public class DocumentReindexer {
         private final String docId;
         private final String bulkIndex;
 
-        public BulkDocSection(Document doc) {
-            this.docId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
+        public BulkDocSection(RfsLuceneDocument doc) {
+            this.docId = doc.id;
             this.bulkIndex = createBulkIndex(docId, doc);
         }
 
         @SneakyThrows
-        private static String createBulkIndex(final String docId, final Document doc) {
+        private static String createBulkIndex(final String docId, final RfsLuceneDocument doc) {
             // For a successful bulk ingestion, we cannot have any leading or trailing whitespace, and  must be on a single line.
-            String trimmedSource = doc.getBinaryValue("_source").utf8ToString().trim().replace("\n", "");
+            String trimmedSource = doc.source.trim().replace("\n", "");
             return "{\"index\":{\"_id\":\"" + docId + "\"}}" + "\n" + trimmedSource;
         }
 

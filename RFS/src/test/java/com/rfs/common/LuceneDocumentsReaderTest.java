@@ -98,36 +98,87 @@ public class LuceneDocumentsReaderTest {
         Path luceneDir = unpacker.unpack();
 
         // Use the LuceneDocumentsReader to get the documents
-        Flux<Document> documents = new LuceneDocumentsReader(
-            luceneDir,
-            sourceResourceProvider.getSoftDeletesPossible(),
-            sourceResourceProvider.getSoftDeletesFieldData()
-        ).readDocuments()
-            .sort(Comparator.comparing(doc -> Uid.decodeId(doc.getBinaryValue("_id").bytes))); // Sort for consistent order given LuceneDocumentsReader may interleave
+        var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
+
+        Flux<RfsLuceneDocument> documents = reader.readDocuments()
+            .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
 
         // Verify that the results are as expected
         StepVerifier.create(documents).expectNextMatches(doc -> {
             String expectedId = "complexdoc";
-            String actualId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
+            String actualId = doc.id;
 
             String expectedSource = "{\"title\":\"This is a doc with complex history\",\"content\":\"Updated!\"}";
-            String actualSource = doc.getBinaryValue("_source").utf8ToString();
+            String actualSource = doc.source;
             assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
             return true;
         }).expectNextMatches(doc -> {
             String expectedId = "unchangeddoc";
-            String actualId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
+            String actualId = doc.id;
 
             String expectedSource = "{\"title\":\"This doc will not be changed\\nIt has multiple lines of text\\nIts source doc has extra newlines.\",\"content\":\"bluh bluh\"}";
-            String actualSource = doc.getBinaryValue("_source").utf8ToString();
+            String actualSource = doc.source;
             assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
             return true;
         }).expectNextMatches(doc -> {
             String expectedId = "updateddoc";
-            String actualId = Uid.decodeId(doc.getBinaryValue("_id").bytes);
+            String actualId = doc.id;
 
             String expectedSource = "{\"title\":\"This is doc that will be updated\",\"content\":\"Updated!\"}";
-            String actualSource = doc.getBinaryValue("_source").utf8ToString();
+            String actualSource = doc.source;
+            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            return true;
+        }).expectComplete().verify();
+    }
+
+    @Test
+    public void ReadDocuments_ES5_Origin_AsExpected() throws Exception {
+        Snapshot snapshot = TestResources.SNAPSHOT_ES_6_8_MERGED;
+        Version version = Version.fromString("ES 6.8");
+
+        final var repo = new FileSystemRepo(snapshot.dir);
+        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo);
+        DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
+
+        final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
+
+        SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(
+                    repoAccessor,
+                    tempDirectory,
+                    shardMetadata,
+                    Integer.MAX_VALUE
+                );
+        Path luceneDir = unpacker.unpack();
+
+        // Use the LuceneDocumentsReader to get the documents
+        var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
+
+        Flux<RfsLuceneDocument> documents = reader.readDocuments()
+            .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
+
+        // Verify that the results are as expected
+        StepVerifier.create(documents).expectNextMatches(doc -> {
+            String expectedId = "type1#complexdoc";
+            String actualId = doc.id;
+
+            String expectedSource = "{\"title\":\"This is a doc with complex history. Updated!\"}";
+            String actualSource = doc.source;
+            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            return true;
+        }).expectNextMatches(doc -> {
+            String expectedId = "type2#unchangeddoc";
+            String actualId = doc.id;
+
+            String expectedSource = "{\"content\":\"This doc will not be changed\nIt has multiple lines of text\nIts source doc has extra newlines.\"}";
+            String actualSource = doc.source;
+            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            return true;
+        }).expectNextMatches(doc -> {
+            String expectedId = "type2#updateddoc";
+            String actualId = doc.id;
+
+            String expectedSource = "{\"content\":\"Updated!\"}";
+            String actualSource = doc.source;
             assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
             return true;
         }).expectComplete().verify();
@@ -190,7 +241,7 @@ public class LuceneDocumentsReaderTest {
         }, 500, TimeUnit.MILLISECONDS);
 
         // Read documents
-        List<Document> actualDocuments = reader.readDocuments()
+        List<RfsLuceneDocument> actualDocuments = reader.readDocuments()
             .subscribeOn(Schedulers.parallel())
             .collectList()
             .block(Duration.ofSeconds(2));
@@ -208,8 +259,12 @@ public class LuceneDocumentsReaderTest {
 
     protected void assertDocsEqual(String expectedId, String actualId, String expectedSource, String actualSource) {
         try {
-            JsonNode expectedNode = objectMapper.readTree(expectedSource);
-            JsonNode actualNode = objectMapper.readTree(actualSource);
+            String sanitizedExpected = expectedSource.trim().replace("\n", "").replace("\\n", "");
+            String sanitizedActual = actualSource.trim().replace("\n", "").replace("\\n", "");
+
+
+            JsonNode expectedNode = objectMapper.readTree(sanitizedExpected);
+            JsonNode actualNode = objectMapper.readTree(sanitizedActual);
             assertEquals(expectedId, actualId);
             assertEquals(expectedNode, actualNode);
         } catch (JsonProcessingException e) {

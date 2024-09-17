@@ -2,16 +2,20 @@ package com.rfs.common;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
 
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
+import org.apache.lucene.index.IndexCommit;
 import org.apache.lucene.index.IndexReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.SoftDeletesDirectoryReaderWrapper;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
+
+import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
 import lombok.Lombok;
 import lombok.RequiredArgsConstructor;
@@ -24,8 +28,13 @@ import reactor.core.scheduler.Schedulers;
 @RequiredArgsConstructor
 @Slf4j
 public class LuceneDocumentsReader {
-    public static Function<Path, LuceneDocumentsReader> getFactory(boolean softDeletesPossible, String softDeletesField) {
-        return path -> new LuceneDocumentsReader(path, softDeletesPossible, softDeletesField);
+
+    public static Function<Path, LuceneDocumentsReader> getFactory(ClusterSnapshotReader snapshotReader) {
+        return path -> new LuceneDocumentsReader(
+            path,
+            snapshotReader.getSoftDeletesPossible(),
+            snapshotReader.getSoftDeletesFieldData()
+        );
     }
 
     protected final Path indexDirectoryPath;
@@ -79,7 +88,7 @@ public class LuceneDocumentsReader {
      *    Lucene Index.
 
      */
-    public Flux<Document> readDocuments() {
+    public Flux<RfsLuceneDocument> readDocuments() {
         return Flux.using(
             () -> wrapReader(getReader(), softDeletesPossible, softDeletesField),
             this::readDocsByLeavesInParallel,
@@ -93,11 +102,20 @@ public class LuceneDocumentsReader {
         });
     }
 
-    protected DirectoryReader getReader() throws IOException {
-        return DirectoryReader.open(FSDirectory.open(indexDirectoryPath));
+    protected DirectoryReader getReader() throws IOException {// Get the list of commits and pick the latest one
+        try (FSDirectory directory = FSDirectory.open(indexDirectoryPath)) {
+            List  <IndexCommit> commits = DirectoryReader.listCommits(directory);
+            IndexCommit latestCommit = commits.get(commits.size() - 1);
+
+            return DirectoryReader.open(
+                latestCommit,
+                6, // Minimum supported major version - Elastic 5/Lucene 6
+                null // No specific sorting required
+            );
+        }
     }
 
-    Publisher<Document> readDocsByLeavesInParallel(DirectoryReader reader) {
+    Publisher<RfsLuceneDocument> readDocsByLeavesInParallel(DirectoryReader reader) {
         var segmentsToReadAtOnce = 5; // Arbitrary value
         var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
@@ -116,7 +134,7 @@ public class LuceneDocumentsReader {
             .doOnTerminate(sharedSegmentReaderScheduler::dispose);
     }
 
-    Publisher<Callable<Document>> getReadDocCallablesFromSegments(LeafReaderContext leafReaderContext) {
+    Publisher<Callable<RfsLuceneDocument>> getReadDocCallablesFromSegments(LeafReaderContext leafReaderContext) {
         @SuppressWarnings("resource") // segmentReader will be closed by parent DirectoryReader
         var segmentReader = leafReaderContext.reader();
         var liveDocs = segmentReader.getLiveDocs();
@@ -135,18 +153,43 @@ public class LuceneDocumentsReader {
         return reader;
     }
 
-    protected Document getDocument(IndexReader reader, int docId, boolean isLive) {
+    protected RfsLuceneDocument getDocument(IndexReader reader, int docId, boolean isLive) {
         try {
             Document document = reader.document(docId);
-            BytesRef sourceBytes = document.getBinaryValue("_source");
-            String id;
+            String id = null;
+            BytesRef sourceBytes = null;
             try {
-                var idValue = document.getBinaryValue("_id");
-                if (idValue == null) {
+                for (var field : document.getFields()) {
+                    String fieldName = field.name();
+                    switch (fieldName) {
+                        case "_id": {
+                            // ES 6+
+                            var idBytes = field.binaryValue();
+                            id = Uid.decodeId(idBytes.bytes);
+                            break;
+                        }
+                        case "_uid": {
+                            // ES 5
+                            id = field.stringValue();
+                            break;
+                        }
+                        case "_source": {
+                            // All versions (?)
+                            sourceBytes = field.binaryValue();
+                            break;
+                        }
+                    }
+                }
+                if (id == null) {
                     log.atError().setMessage("Document with index" + docId + " does not have an id. Skipping").log();
                     return null;  // Skip documents with missing id
                 }
-                id = Uid.decodeId(idValue.bytes);
+
+                if (sourceBytes == null || sourceBytes.bytes.length == 0) {
+                    log.atWarn().setMessage("Document {} doesn't have the _source field enabled").addArgument(id).log();
+                    return null;  // Skip these
+                }
+
                 log.atDebug().setMessage("Reading document {}").addArgument(id).log();
             } catch (Exception e) {
                 StringBuilder errorMessage = new StringBuilder();
@@ -161,13 +204,8 @@ public class LuceneDocumentsReader {
                 return null; // Skip these
             }
 
-            if (sourceBytes == null || sourceBytes.bytes.length == 0) {
-                log.atWarn().setMessage("Document {} doesn't have the _source field enabled").addArgument(id).log();
-                return null;  // Skip these
-            }
-
             log.atDebug().setMessage("Document {} read successfully").addArgument(id).log();
-            return document;
+            return new RfsLuceneDocument(id, sourceBytes.utf8ToString());
         } catch (Exception e) {
             log.atError().setMessage("Failed to read document at Lucene index location {}").addArgument(docId).setCause(e).log();
             return null;
