@@ -1,6 +1,6 @@
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import {IVpc, Port, SecurityGroup, SubnetFilter, SubnetType} from "aws-cdk-lib/aws-ec2";
-import {FileSystem} from 'aws-cdk-lib/aws-efs';
+import {FileSystem, LifecyclePolicy, ThroughputMode} from 'aws-cdk-lib/aws-efs';
 import {Construct} from "constructs";
 import {CfnConfiguration} from "aws-cdk-lib/aws-msk";
 import {Cluster} from "aws-cdk-lib/aws-ecs";
@@ -8,7 +8,11 @@ import {StackPropsExt} from "./stack-composer";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {StreamingSourceType} from "./streaming-source-type";
 import {Bucket, BucketEncryption} from "aws-cdk-lib/aws-s3";
-import {createMigrationStringParameter, MigrationSSMParameter, parseRemovalPolicy} from "./common-utilities";
+import {
+    createMigrationStringParameter,
+    MigrationSSMParameter,
+    parseRemovalPolicy
+} from "./common-utilities";
 import {
     ClientAuthentication,
     ClientBrokerEncryption,
@@ -188,7 +192,9 @@ export class MigrationAssistanceStack extends Stack {
         const sharedLogsEFS = new FileSystem(this, 'sharedLogsEFS', {
             vpc: props.vpc,
             securityGroup: sharedLogsSG,
-            removalPolicy: replayerEFSRemovalPolicy
+            removalPolicy: replayerEFSRemovalPolicy,
+            lifecyclePolicy: LifecyclePolicy.AFTER_1_DAY, // Cost break even is at 26 downloads / month
+            throughputMode: ThroughputMode.BURSTING, // Best cost characteristics for write heavy, short-lived data
         });
         createMigrationStringParameter(this, sharedLogsEFS.fileSystemId, {
             ...props,
