@@ -51,7 +51,7 @@ In all other cases, the required components of each cluster object are:
 
 The optional component is:
 
-- `version` -- the Elasticsearch or OpenSearch version of the cluster, in the format of `OS_x.y` or `ES_x.y`
+- `version` -- the Elasticsearch or OpenSearch version of the cluster, in the format of `OS_x.y` or `ES_x.y` This will be passed to the ReindexFromSnapshot service, if enabled, and provided for the metadata migration on the Migration Console. It defaults to `ES_7.10.2` which works with related versions (always ES 7 & OS 1, ususally OS 2)
 
 ### Reindex from Snapshot (RFS) Service Options
 

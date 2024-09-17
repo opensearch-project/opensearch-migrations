@@ -229,7 +229,7 @@ class Metadata:
             command_args.update({"--component-template-allowlist": ",".join(self._component_template_allowlist)})
 
         if self._source_cluster_version:
-            command_args.update("--source-version", self._source_version)
+            command_args.update({"--source-version": self._source_cluster_version})
 
         # Extra args might not be represented with dictionary, so convert args to list and append commands
         self._appendArgs(command_args, extra_args)
