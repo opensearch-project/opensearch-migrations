@@ -225,8 +225,7 @@ public class RfsMigrateDocuments {
                 );
 
                 run(
-                    LuceneDocumentsReader.getFactory(sourceResourceProvider.getSoftDeletesPossible(),
-                        sourceResourceProvider.getSoftDeletesFieldData()),
+                    LuceneDocumentsReader.getFactory(sourceResourceProvider),
                     reindexer,
                     workCoordinator,
                     arguments.initialLeaseDuration,
