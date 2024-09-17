@@ -3,6 +3,7 @@ package com.rfs.worker;
 import java.util.List;
 import java.util.function.BiConsumer;
 
+import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.metadata.IndexCreator;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 
@@ -23,7 +24,7 @@ public class IndexRunner {
     private final Transformer transformer;
     private final List<String> indexAllowlist;
 
-    public IndexMetadataResults migrateIndices(ICreateIndexContext context) {
+    public IndexMetadataResults migrateIndices(MigrationMode mode, ICreateIndexContext context) {
         SnapshotRepo.Provider repoDataProvider = metadataFactory.getRepoDataProvider();
         // TODO - parallelize this, maybe ~400-1K requests per thread and do it asynchronously
 
@@ -41,13 +42,14 @@ public class IndexRunner {
                 var indexName = index.getName();
                 var indexMetadata = metadataFactory.fromRepo(snapshotName, indexName);
                 var transformedRoot = transformer.transformIndexMetadata(indexMetadata);
-                var resultOp = indexCreator.create(transformedRoot, context);
-                resultOp.ifPresentOrElse(
-                    value -> log.info("Index " + indexName + " created successfully"),
-                    () -> log.info("Index " + indexName + " already existed; no work required")
-                );
-                results.indexName(indexName);
-                transformedRoot.getAliases().fieldNames().forEachRemaining(results::alias);
+                var created = indexCreator.create(transformedRoot, mode, context);
+                if (created) {
+                    log.debug("Index " + indexName + " created successfully");
+                    results.indexName(indexName);
+                    transformedRoot.getAliases().fieldNames().forEachRemaining(results::alias);
+                } else {
+                    log.warn("Index " + indexName + " already existed; no work required");
+                }
             });
         return results.build();
     }

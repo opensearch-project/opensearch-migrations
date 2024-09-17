@@ -1,12 +1,47 @@
 package org.opensearch.migrations.commands;
 
+import org.opensearch.migrations.MigrateOrEvaluateArgs;
+import org.opensearch.migrations.MigrationMode;
+import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
+
+import com.beust.jcommander.ParameterException;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class Evaluate {
+public class Evaluate extends MigratorEvaluatorBase {
 
-    public EvaluateResult execute() {
-        log.atError().setMessage("evaluate is not supported").log();
-        return new EvaluateResult(9999);
+    public Evaluate(MigrateOrEvaluateArgs arguments) {
+        super(arguments);
+    }
+
+    public EvaluateResult execute(RootMetadataMigrationContext context) {
+        var migrationMode = MigrationMode.SIMULATE;
+        var evaluateResult = EvaluateResult.builder();
+
+        try {
+            log.info("Running Metadata Evaluation");
+
+            var clusters = createClusters();
+            evaluateResult.clusters(clusters);
+
+            var transformer = selectTransformer(clusters);
+
+            var items = migrateAllItems(migrationMode, clusters, transformer, context);
+            evaluateResult.items(items);
+        } catch (ParameterException pe) {
+            log.atError().setMessage("Invalid parameter").setCause(pe).log();
+            evaluateResult
+                .exitCode(INVALID_PARAMETER_CODE)
+                .errorMessage("Invalid parameter: " + pe.getMessage())
+                .build();
+        } catch (Throwable e) {
+            log.atError().setMessage("Unexpected failure").setCause(e).log();
+            evaluateResult
+                .exitCode(UNEXPECTED_FAILURE_CODE)
+                .errorMessage("Unexpected failure: " + e.getMessage())
+                .build();
+        }
+
+        return evaluateResult.build();
     }
 }

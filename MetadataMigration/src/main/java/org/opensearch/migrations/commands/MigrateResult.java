@@ -10,7 +10,7 @@ import lombok.Getter;
 
 @Builder
 @Getter
-public class MigrateResult implements Result {
+public class MigrateResult implements MigrationItemResult {
     private final Clusters clusters;
     private final Items items;
     private final String errorMessage;
