@@ -234,7 +234,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
 
     @Test
     @ResourceLock("TrafficReplayerRunner")
-    @Tag("slowTest")
+    @Tag("longTest")
     public void fullTestWithThrottledStart() throws Throwable {
         var random = new Random(1);
         try (
@@ -357,7 +357,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
 
     @ParameterizedTest
     @CsvSource(value = { "3,false", "-1,false", "3,true", "-1,true", })
-    @Tag("slowTest")
+    @Tag("longTest")
     @ResourceLock("TrafficReplayerRunner")
     public void fullTestWithRestarts(int testSize, boolean randomize) throws Throwable {
 
