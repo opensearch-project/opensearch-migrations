@@ -89,12 +89,14 @@ subprojects {
 
     // Mutually exclusive tests to avoid duplication
     tasks.named('test') {
+        systemProperty 'migrationLogLevel', 'TRACE'
         useJUnitPlatform {
             excludeTags('longTest', 'isolatedTest')
         }
     }
 
     tasks.register('slowTest', Test) {
+        systemProperty 'migrationLogLevel', 'DEBUG'
         useJUnitPlatform {
             includeTags 'longTest'
             excludeTags 'isolatedTest'
