@@ -76,16 +76,24 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
         return false;
     }
 
-    CompositeByteBuf addSliceToComposite(ChannelHandlerContext ctx, CompositeByteBuf priorBuf, ByteBuf sourceBuf,
-                                         int start, int len) {
+    ByteBuf addSliceToRunningBuf(ChannelHandlerContext ctx, ByteBuf priorBuf, ByteBuf sourceBuf,
+                                 int start, int len) {
         if (len == 0) {
             return priorBuf;
         }
+        var slicedSourceBuf = sourceBuf.retainedSlice(start, len);
         if (priorBuf == null) {
-            priorBuf = ctx.alloc().compositeBuffer(4);
+            return slicedSourceBuf;
         }
-        priorBuf.addComponent(true, sourceBuf.retainedSlice(start, len));
-        return priorBuf;
+        CompositeByteBuf cbb;
+        if (!(priorBuf instanceof CompositeByteBuf)) {
+            cbb = ctx.alloc().compositeBuffer(4);
+            cbb.addComponent(true, priorBuf);
+        } else {
+            cbb = (CompositeByteBuf) priorBuf;
+        }
+        cbb.addComponent(true, slicedSourceBuf);
+        return cbb;
     }
 
     @Override
@@ -99,7 +107,7 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
         var currentSourceSegmentStart =
             (previousRemaining != null || dropUntilNewline || requestPosition == MessagePosition.ONE_NEW_LINE)
                 ? -1 : sourceBuf.readerIndex();
-        CompositeByteBuf cleanedIncomingBuf = null;
+        ByteBuf cleanedIncomingBuf = null;
         sourceBuf.markReaderIndex();
 
         while (sourceBuf.isReadable()) {
@@ -126,7 +134,7 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
                     if (currentSourceSegmentStart >= 0 &&
                         sourceReaderIdx != currentSourceSegmentStart)  // would be 0-length
                     {
-                        cleanedIncomingBuf = addSliceToComposite(ctx, cleanedIncomingBuf, sourceBuf,
+                        cleanedIncomingBuf = addSliceToRunningBuf(ctx, cleanedIncomingBuf, sourceBuf,
                             currentSourceSegmentStart, sourceReaderIdx-currentSourceSegmentStart);
                         currentSourceSegmentStart = -1;
                     }
@@ -144,7 +152,7 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
         }
 
         if (currentSourceSegmentStart >= 0) {
-            cleanedIncomingBuf = addSliceToComposite(ctx, cleanedIncomingBuf, sourceBuf,
+            cleanedIncomingBuf = addSliceToRunningBuf(ctx, cleanedIncomingBuf, sourceBuf,
                 currentSourceSegmentStart, sourceBuf.readerIndex()-currentSourceSegmentStart);
         }
         sourceBuf.release();
