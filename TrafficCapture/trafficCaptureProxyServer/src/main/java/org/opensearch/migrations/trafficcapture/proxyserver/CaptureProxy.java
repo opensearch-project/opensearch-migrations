@@ -9,11 +9,12 @@ import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
-import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
@@ -52,6 +53,7 @@ import org.opensearch.security.ssl.util.SSLConfigConstants;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.ssl.SslContext;
@@ -348,7 +350,7 @@ public class CaptureProxy {
         if (list == null) {
             return Map.of();
         }
-        var map = new TreeMap<String, String>();
+        var map = new LinkedHashMap<String, String>();
         for (int i = 0; i < list.size(); i += 2) {
             map.put(list.get(i), list.get(i + 1));
         }
@@ -425,10 +427,22 @@ public class CaptureProxy {
                                                                 BacksideConnectionPool backsideConnectionPool,
                                                                 Supplier<SSLEngine> sslEngineSupplier,
                                                                 @NonNull RequestCapturePredicate headerCapturePredicate,
-                                                                List<String> headerOverrides,
+                                                                List<String> headerOverridesArgs,
                                                                 IConnectionCaptureFactory connectionFactory)
     {
-        var headers = convertPairListToMap(headerOverrides);
+        var headers = new ArrayList<>(convertPairListToMap(headerOverridesArgs).entrySet());
+        Collections.reverse(headers);
+        final var removeStrings = new ArrayList<String>(headers.size());
+        final var addBufs = new ArrayList<ByteBuf>(headers.size());
+
+        for (var kvp : headers) {
+            addBufs.add(
+                Unpooled.unreleasableBuffer(
+                    Unpooled.wrappedBuffer(
+                        (kvp.getKey() + ": " + kvp.getValue()).getBytes(StandardCharsets.UTF_8))));
+            removeStrings.add(kvp.getKey() + ":");
+        }
+
         return new ProxyChannelInitializer(
             rootContext,
             backsideConnectionPool,
@@ -439,14 +453,20 @@ public class CaptureProxy {
             @Override
             protected void initChannel(@NonNull SocketChannel ch) throws IOException {
                 super.initChannel(ch);
-                for (var kvp : headers.entrySet()) {
-                    var lineBytes = (kvp.getKey() + ": " + kvp.getValue()).getBytes(StandardCharsets.UTF_8);
-                    ch.pipeline().addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "AddHeader-" + kvp.getKey(),
-                        new HeaderAdderHandler(Unpooled.unreleasableBuffer(Unpooled.wrappedBuffer(lineBytes))));
+                final var pipeline = ch.pipeline();
+                {
+                    int i = 0;
+                    for (var kvp : headers) {
+                        pipeline.addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "AddHeader-" + kvp.getKey(),
+                            new HeaderAdderHandler(addBufs.get(i++)));
+                    }
                 }
-                for (var k : headers.keySet()) {
-                    ch.pipeline().addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "RemoveHeader-" + k,
-                        new HeaderRemoverHandler(k + ":"));
+                {
+                    int i = 0;
+                    for (var kvp : headers) {
+                        pipeline.addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "RemoveHeader-" + kvp.getKey(),
+                            new HeaderRemoverHandler(removeStrings.get(i++)));
+                    }
                 }
             }
         };

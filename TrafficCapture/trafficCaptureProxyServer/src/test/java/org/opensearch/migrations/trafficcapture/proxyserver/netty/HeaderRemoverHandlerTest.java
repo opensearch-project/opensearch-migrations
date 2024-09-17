@@ -50,6 +50,12 @@ class HeaderRemoverHandlerTest {
     }
 
     @Test
+    public void newlinesArePreserved() {
+        runTestsWithSize((b,s) -> "GET / HTTP/1.1\r\n" + (b ? "host: localhost\r\n" : "") + "\r\n",
+            () -> IntStream.of(Integer.MAX_VALUE));
+    }
+
+    @Test
     public void throwsOnHostFormatError() {
         Assertions.assertThrows(IllegalArgumentException.class, () -> new HeaderRemoverHandler("host"));
         Assertions.assertThrows(IllegalArgumentException.class, () -> new HeaderRemoverHandler("h: "));
@@ -87,6 +93,7 @@ class HeaderRemoverHandlerTest {
         final var bound = getBound(HeaderRemoverHandlerTest::makeInterlacedMessage);
         for (int i=0; i<NUM_RANDOM_RUNS; ++i) {
             Random r = new Random(i);
+            log.atDebug().setMessage(() -> "random run={}").addArgument(i).log();
             runTestsWithSize(HeaderRemoverHandlerTest::makeInterlacedMessage,
                 () -> IntStream.generate(() -> r.nextInt(bound)));
         }
@@ -107,6 +114,7 @@ class HeaderRemoverHandlerTest {
         final var bound = getBound(HeaderRemoverHandlerTest::makeConsecutiveMessage);
         for (int i=0; i<NUM_RANDOM_RUNS; ++i) {
             Random r = new Random(i);
+            log.atDebug().setMessage(() -> "random run={}").addArgument(i).log();
             runTestsWithSize(HeaderRemoverHandlerTest::makeConsecutiveMessage,
                 () -> IntStream.generate(() -> r.nextInt(bound)));
         }

@@ -16,6 +16,11 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
     // when dropUntilNewline == true, we're dropping, otherwise, we're copying (when previousRemaining==null)
     // The starting state is previousRemaining == null and dropUntilNewline = false
     boolean dropUntilNewline;
+    MessagePosition requestPosition = MessagePosition.IN_HEADER;
+
+    private enum MessagePosition {
+        IN_HEADER, ONE_NEW_LINE, AFTER_HEADERS,
+    }
 
     public HeaderRemoverHandler(String headerToRemove) {
         if (!headerToRemove.endsWith(":")) {
@@ -49,15 +54,19 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
             }
             buf.markReaderIndex();
             if (Character.toLowerCase(headerToRemove.charAt(i)) != Character.toLowerCase(buf.readByte())) { // no match
-                previousRemaining.forEach(bb -> lambdaSafeSuperChannelRead(ctx, bb.retain()));
-                previousRemaining.removeComponents(0, previousRemaining.numComponents());
-                previousRemaining.release();
-                previousRemaining = null;
+                flushAndClearPreviousRemaining(ctx);
                 buf.resetReaderIndex();
                 dropUntilNewline = false;
                 return false;
             }
         }
+    }
+
+    void flushAndClearPreviousRemaining(ChannelHandlerContext ctx) {
+        previousRemaining.forEach(bb -> lambdaSafeSuperChannelRead(ctx, bb.retain()));
+        previousRemaining.removeComponents(0, previousRemaining.numComponents());
+        previousRemaining.release();
+        previousRemaining = null;
     }
 
     boolean advanceByteBufUntilNewline(ByteBuf bb) {
@@ -81,16 +90,36 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        if (!(msg instanceof ByteBuf)) {
+        if (!(msg instanceof ByteBuf) || requestPosition == MessagePosition.AFTER_HEADERS) {
             super.channelRead(ctx, msg);
             return;
         }
 
         var sourceBuf = (ByteBuf) msg;
-        var currentSourceSegmentStart = (previousRemaining != null || dropUntilNewline) ? -1 : sourceBuf.readerIndex();
+        var currentSourceSegmentStart =
+            (previousRemaining != null || dropUntilNewline || requestPosition == MessagePosition.ONE_NEW_LINE)
+                ? -1 : sourceBuf.readerIndex();
         CompositeByteBuf cleanedIncomingBuf = null;
+        sourceBuf.markReaderIndex();
 
         while (sourceBuf.isReadable()) {
+            if (requestPosition == MessagePosition.ONE_NEW_LINE) {
+                final var nextByte = sourceBuf.readByte();
+                if (nextByte == '\n' || nextByte == '\r') {
+                    requestPosition = MessagePosition.AFTER_HEADERS;
+                    if (currentSourceSegmentStart == -1) {
+                        currentSourceSegmentStart = sourceBuf.readerIndex() - 1;
+                    }
+                    sourceBuf.readerIndex(sourceBuf.writerIndex());
+                    break;
+                } else {
+                    previousRemaining = ctx.alloc().compositeBuffer(16);
+                    requestPosition = MessagePosition.IN_HEADER;
+                    sourceBuf.resetReaderIndex();
+                    continue;
+                }
+            }
+
             if (previousRemaining != null) {
                 final var sourceReaderIdx = sourceBuf.readerIndex();
                 if (matchNextBytes(ctx, sourceBuf)) {
@@ -106,7 +135,8 @@ public class HeaderRemoverHandler extends ChannelInboundHandlerAdapter {
                 }
             } else {
                 if (advanceByteBufUntilNewline(sourceBuf)) {
-                    previousRemaining = ctx.alloc().compositeBuffer(16);
+                    sourceBuf.markReaderIndex();
+                    requestPosition = MessagePosition.ONE_NEW_LINE;
                 } else {
                     break;
                 }

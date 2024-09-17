@@ -6,6 +6,7 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
+import io.netty.util.ReferenceCountUtil;
 
 public class HeaderAdderHandler extends ChannelInboundHandlerAdapter {
     private static final ByteBuf CRLF_BYTE_BUF =
@@ -37,7 +38,7 @@ public class HeaderAdderHandler extends ChannelInboundHandlerAdapter {
                 var composite = Unpooled.compositeBuffer(4);
                 buf.resetReaderIndex();
                 composite.addComponent(true, buf.retainedSlice(0, upToIndex));
-                composite.addComponent(true, headerLineToAdd.duplicate());
+                composite.addComponent(true, headerLineToAdd.retainedDuplicate());
                 composite.addComponent(true, (useCarriageReturn ? CRLF_BYTE_BUF : LF_BYTE_BUF).duplicate());
                 composite.addComponent(true, buf.retainedSlice(upToIndex, buf.readableBytes()-upToIndex));
                 buf.release();
@@ -48,5 +49,11 @@ public class HeaderAdderHandler extends ChannelInboundHandlerAdapter {
         }
         buf.resetReaderIndex();
         super.channelRead(ctx, msg);
+    }
+
+    @Override
+    public void channelUnregistered(ChannelHandlerContext ctx) throws Exception {
+        ReferenceCountUtil.release(headerLineToAdd);
+        super.channelUnregistered(ctx);
     }
 }
