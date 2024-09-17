@@ -44,6 +44,15 @@ gantt
     Teardown   : teardown, after validation, 2d
 ```
 
+#### Explanation of Scaling Operations
+
+1. **Scale Up Target Cluster**: Occurs after metadata migration and before reindexing. The target cluster is scaled up to handle the resource-intensive reindexing process faster.
+
+
+2. **Scale Down Target Cluster for Replay**: Once the reindexing is complete, the target cluster is scaled down to a more appropriate size for the traffic replay phase. While still provisioned higher than normal production workloads, given replayer has a >1 speedup factor.
+
+3. **Scale Down Target Cluster**: After the validation phase, the target cluster is scaled down to its final operational size. This step ensures that the cluster is rightsized for normal production workloads, balancing performance needs with cost-efficiency.
+
 ### Component Durations
 
 This component duration breakdown is useful for identifying the cost of resources deployed during the migration process. It provides a clear overview of how long each component is active or retained, which directly impacts resource utilization and associated costs.
