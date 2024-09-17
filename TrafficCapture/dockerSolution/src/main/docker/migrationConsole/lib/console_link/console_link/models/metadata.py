@@ -52,7 +52,8 @@ SCHEMA = {
     "min_replicas": {"type": "integer", "min": 0, "required": False},
     "index_allowlist": list_schema(required=False),
     "index_template_allowlist": list_schema(required=False),
-    "component_template_allowlist": list_schema(required=False)
+    "component_template_allowlist": list_schema(required=False),
+    "source_cluster_version": {"type": "string", "required": False}
 }
 
 
@@ -80,6 +81,7 @@ class Metadata:
         self._index_template_allowlist = config.get("index_template_allowlist", None)
         self._component_template_allowlist = config.get("component_template_allowlist", None)
         self._otel_endpoint = config.get("otel_endpoint", None)
+        self._source_cluster_version = config.get("source_cluster_version", None)
 
         logger.debug(f"Min replicas: {self._min_replicas}")
         logger.debug(f"Index allowlist: {self._index_allowlist}")
@@ -225,6 +227,9 @@ class Metadata:
 
         if self._component_template_allowlist:
             command_args.update({"--component-template-allowlist": ",".join(self._component_template_allowlist)})
+
+        if self._source_cluster_version:
+            command_args.update("--source-version", self._source_version)
 
         # Extra args might not be represented with dictionary, so convert args to list and append commands
         self._appendArgs(command_args, extra_args)
