@@ -10,6 +10,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.IntStream;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
@@ -23,6 +24,7 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
+@Tag("longTest")
 public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest extends InstrumentationTest {
 
     public static Arguments[] generateAllTestsAndConfirmComplete(IntStream seedStream) {
