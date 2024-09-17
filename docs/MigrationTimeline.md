@@ -2,20 +2,17 @@
 
 ## 15 day
 
+This 15-day migration timeline demonstrates an example of a migration process that can be adapted to 3 working weeks when including weekends. Key phases:
+
+1. Deployment and setup (Days 1-5)
+1. Historical backfill and catchup (Days 5-10)
+1. Validation and teardown (Days 11-15)
 
 ### Timeline
 
 ```mermaid
 %%{
   init: {
-    'theme': 'base',
-    'themeVariables': {
-      'primaryColor': '#2070D0',
-      'primaryTextColor': '#000000',      
-      'primaryBorderColor': '#002060',
-      'tertiaryColor': '#FFFFFF',
-      'taskTextColor': '#00000'
-    },
     "gantt": {
         "fontSize": 20,
         "barHeight": 40,
@@ -40,7 +37,7 @@ gantt
     Scale Up Target Cluster : milestone, after metadata, 0d
     Reindex from Snapshot : rfs, after metadata, 71h
     Scale Down Target Cluster for Replay : milestone, after rfs, 0d
-    Traffic Replay (5x): replay, after rfs, 1d
+    Traffic Replay: replay, after rfs, 1d
     Traffic Switchover : milestone, switchover, after replay, 0d
     Validation : validation, after switchover, 3d
     Scale Down Target Cluster : milestone, 12 00, 0d
@@ -49,17 +46,12 @@ gantt
 
 ### Component Durations
 
+This component duration breakdown is useful for identifying the cost of resources deployed during the migration process. It provides a clear overview of how long each component is active or retained, which directly impacts resource utilization and associated costs.
+
+Note: Duration excludes weekends. If actual timeline extends over weekends, duration (and potentially costs) will increase.
+
 ```mermaid
 %%{
-  init: {
-    'theme': 'base',
-    'themeVariables': {
-      'primaryColor': '#2070D0',
-      'primaryTextColor': '#000000',      
-      'primaryBorderColor': '#002060',
-      'tertiaryColor': '#FFFFFF',
-      'taskTextColor': '#00000'
-    },
     "gantt": {
         "fontSize": 20,
         "barHeight": 40,
@@ -75,7 +67,6 @@ gantt
     tickInterval 1day
 
     section Services
-    %% Duration used excludes weekend time which adds costs
     Core Services Runtime (15d) : active, 1 00, 15d
     Capture Proxy Runtime (5d) : active, capture_active, 6 00, 5d
     Capture Data Retention (5d) : after capture_active, 5d
