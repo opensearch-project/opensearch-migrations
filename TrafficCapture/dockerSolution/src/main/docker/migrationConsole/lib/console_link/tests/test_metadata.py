@@ -141,6 +141,30 @@ def test_full_config_and_snapshot_gives_priority_to_config(s3_snapshot):
     assert metadata._local_dir == config["from_snapshot"]["local_dir"]
 
 
+def test_full_config_with_version_includes_version_string_in_subprocess(s3_snapshot, mocker):
+    config = {
+        "from_snapshot": {
+            "local_dir": "/tmp/s3",
+            "snapshot_name": "reindex_from_snapshot",
+            "s3": {
+                "repo_uri": "s3://my-bucket",
+                "aws_region": "us-east-1"
+            },
+        },
+        "source_cluster_version": "ES_6.8"
+
+    }
+    metadata = Metadata(config, create_valid_cluster(), s3_snapshot)
+
+    mock = mocker.patch("subprocess.run")
+    metadata.migrate()
+
+    mock.assert_called_once()
+    actual_call_args = mock.call_args.args[0]
+    assert '--source-version' in actual_call_args
+    assert config['source_cluster_version'] in actual_call_args
+
+
 def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
     config = {
         "from_snapshot": {
