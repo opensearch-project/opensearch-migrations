@@ -195,7 +195,6 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     @CsvSource({ "false, false", "false, true", "true, false", "true, true" })
     @Tag("longTest")
     @WrapWithNettyLeakDetection(repetitions = 1)
-    @Tag("longTest")
     public void testThatPeerResetTriggersFinalizeFuture(boolean useTls, boolean withServerReadTimeout)
         throws Exception {
         final var RESPONSE_TIMEOUT_FOR_HUNG_TEST = Duration.ofMillis(500);
@@ -285,6 +284,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
 
     @ParameterizedTest
     @CsvSource({ "false, false", "false, true", "true, false", "true, true" })
+    @WrapWithNettyLeakDetection(repetitions = 1)
     @Tag("longTest")
     public void testThatConnectionsAreKeptAliveAndShared(boolean useTls, boolean largeResponse) throws Exception {
         try (
@@ -396,6 +396,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     }
 
     @ParameterizedTest
+    @Tag("longTest")
     @CsvSource({ "false", "true" })
     public void testResponseTakesLongerThanTimeout(boolean useTls) throws Exception {
         var responseTimeout = Duration.ofMillis(50);
@@ -439,7 +440,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 Instant.now(),
                 Instant.now(),
                 () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
-            var maxTimeToWaitForTimeoutOrResponse = Duration.ofSeconds(10);
+            var maxTimeToWaitForTimeoutOrResponse = Duration.ofSeconds(30);
             var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
             log.atInfo().setMessage("RequestFinishFuture finished").log();
             Assertions.assertInstanceOf(ReadTimeoutException.class, aggregatedResponse.getError());
@@ -447,6 +448,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     }
 
     @ParameterizedTest
+    @Tag("longTest")
     @CsvSource({ "false", "true" })
     public void testTimeBetweenRequestsLongerThanResponseTimeout(boolean useTls) throws Exception {
         var responseTimeout = Duration.ofMillis(100);

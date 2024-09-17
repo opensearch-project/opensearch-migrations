@@ -2,7 +2,7 @@ package org.opensearch.migrations.cli;
 
 import java.nio.file.Path;
 
-import org.opensearch.migrations.MetadataArgs;
+import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.cluster.ClusterReader;
 
@@ -15,7 +15,7 @@ import lombok.AllArgsConstructor;
 
 @AllArgsConstructor
 public class ClusterReaderExtractor {
-    final MetadataArgs arguments;
+    final MigrateOrEvaluateArgs arguments;
 
     public ClusterReader extractClusterReader() { 
         if (arguments.fileSystemRepoPath != null && arguments.s3RepoUri != null && arguments.sourceArgs.host != null) {

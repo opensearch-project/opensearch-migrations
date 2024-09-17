@@ -14,7 +14,7 @@ dependencies {
     implementation project(":RFS")
     implementation project(':transformation')
 
-    implementation group: 'com.beust', name: 'jcommander'
+    implementation group: 'org.jcommander', name: 'jcommander'
     implementation group: 'org.slf4j', name: 'slf4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
 

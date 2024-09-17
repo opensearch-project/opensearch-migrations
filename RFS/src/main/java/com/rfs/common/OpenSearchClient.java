@@ -148,6 +148,29 @@ public class OpenSearchClient {
         return createObjectIdempotent(targetPath, settings, context);
     }
 
+    /** Returns true if this template already exists */
+    public boolean hasLegacyTemplate(String templateName) {
+        var targetPath = "_template/" + templateName;
+        return hasObjectCheck(targetPath, null);
+    }
+
+    /** Returns true if this template already exists */
+    public boolean hasComponentTemplate(String templateName) {
+        var targetPath = "_component_template/" + templateName;
+        return hasObjectCheck(targetPath, null);
+    }
+
+    /** Returns true if this template already exists */
+    public boolean hasIndexTemplate(String templateName) {
+        var targetPath = "_index_template/" + templateName;
+        return hasObjectCheck(targetPath, null);
+    }
+
+    /** Returns true if this index already exists */
+    public boolean hasIndex(String indexName) {
+        return hasObjectCheck(indexName, null);
+    }
+
     /*
      * Create an index if it does not already exist.  Returns an Optional; if the index was created, it
      * will be the created object and empty otherwise.
@@ -166,29 +189,7 @@ public class OpenSearchClient {
         ObjectNode settings,
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
-        HttpResponse getResponse = client.getAsync(objectPath, context.createCheckRequestContext())
-            .flatMap(resp -> {
-                if (resp.statusCode == HttpURLConnection.HTTP_NOT_FOUND || resp.statusCode == HttpURLConnection.HTTP_OK) {
-                    return Mono.just(resp);
-                } else {
-                    String errorMessage = ("Could not create object: "
-                        + objectPath
-                        + ". Response Code: "
-                        + resp.statusCode
-                        + ", Response Message: "
-                        + resp.statusText
-                        + ", Response Body: "
-                        + resp.body);
-                    return Mono.error(new OperationFailed(errorMessage, resp));
-                }
-            })
-            .doOnError(e -> log.error(e.getMessage()))
-            .retryWhen(checkIfItemExistsRetryStrategy)
-            .block();
-
-        assert getResponse != null : ("getResponse should not be null; it should either be a valid response or an exception"
-            + " should have been thrown.");
-        boolean objectDoesNotExist = getResponse.statusCode == HttpURLConnection.HTTP_NOT_FOUND;
+        var objectDoesNotExist = !hasObjectCheck(objectPath, context);
         if (objectDoesNotExist) {
             client.putAsync(objectPath, settings.toString(), context.createCheckRequestContext()).flatMap(resp -> {
                 if (resp.statusCode == HttpURLConnection.HTTP_OK) {
@@ -214,9 +215,43 @@ public class OpenSearchClient {
                 .block();
 
             return Optional.of(settings);
+        } else {
+            log.debug("Object at path {} already exists, not attempting to create.", objectPath);
         }
         // The only response code that can end up here is HTTP_OK, which means the object already existed
         return Optional.empty();
+    }
+
+    private boolean hasObjectCheck(
+        String objectPath,
+        IRfsContexts.ICheckedIdempotentPutRequestContext context
+    ) {
+        var requestContext = Optional.ofNullable(context)
+            .map(c -> c.createCheckRequestContext())
+            .orElse(null);
+        var getResponse = client.getAsync(objectPath, requestContext)
+            .flatMap(resp -> {
+                if (resp.statusCode == HttpURLConnection.HTTP_NOT_FOUND || resp.statusCode == HttpURLConnection.HTTP_OK) {
+                    return Mono.just(resp);
+                } else {
+                    String errorMessage = ("Could not create object: "
+                        + objectPath
+                        + ". Response Code: "
+                        + resp.statusCode
+                        + ", Response Message: "
+                        + resp.statusText
+                        + ", Response Body: "
+                        + resp.body);
+                    return Mono.error(new OperationFailed(errorMessage, resp));
+                }
+            })
+            .doOnError(e -> log.error(e.getMessage()))
+            .retryWhen(checkIfItemExistsRetryStrategy)
+            .block();
+
+        assert getResponse != null : ("getResponse should not be null; it should either be a valid response or an exception"
+            + " should have been thrown.");
+        return getResponse.statusCode == HttpURLConnection.HTTP_OK;
     }
 
     /*

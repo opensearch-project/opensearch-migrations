@@ -311,11 +311,23 @@ def metadata_group(ctx):
     ignore_unknown_options=True,
     help_option_names=[]
 ))
-@click.option("--detach", is_flag=True, help="Run metadata migration in detached mode")
 @click.argument('extra_args', nargs=-1, type=click.UNPROCESSED)
 @click.pass_obj
-def migrate_metadata_cmd(ctx, detach, extra_args):
-    exitcode, message = metadata_.migrate(ctx.env.metadata, detach, extra_args)
+def migrate_metadata_cmd(ctx, extra_args):
+    exitcode, message = metadata_.migrate(ctx.env.metadata, extra_args)
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(message)
+
+
+@metadata_group.command(name="evaluate", context_settings=dict(
+    ignore_unknown_options=True,
+    help_option_names=[]
+))
+@click.argument('extra_args', nargs=-1, type=click.UNPROCESSED)
+@click.pass_obj
+def evaluate_metadata_cmd(ctx, extra_args):
+    exitcode, message = metadata_.evaluate(ctx.env.metadata, extra_args)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)

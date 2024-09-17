@@ -1,34 +1,26 @@
+import { EngineVersion } from 'aws-cdk-lib/aws-opensearchservice';
+import { ClusterAuth } from './common-utilities';
 import * as yaml from 'yaml';
-
-export class ClusterBasicAuth {
-    username: string;
-    password?: string;
-    password_from_secret_arn?: string;
-
-    constructor({
-        username,
-        password,
-        password_from_secret_arn,
-    }: {
-        username: string;
-        password?: string;
-        password_from_secret_arn?: string;
-    }) {
-        this.username = username;
-        this.password = password;
-        this.password_from_secret_arn = password_from_secret_arn;
-
-        // Validation: Exactly one of password or password_from_secret_arn must be provided
-        if ((password && password_from_secret_arn) || (!password && !password_from_secret_arn)) {
-            throw new Error('Exactly one of password or password_from_secret_arn must be provided');
-        }
-    }
-}
 
 export class ClusterYaml {
     endpoint: string = '';
-    no_auth?: string | null;
-    basic_auth?: ClusterBasicAuth | null;
+    version?: EngineVersion;
+    auth: ClusterAuth;
+
+    constructor({endpoint, auth, version} : {endpoint: string, auth: ClusterAuth, version?: EngineVersion}) {
+        this.endpoint = endpoint;
+        this.auth = auth;
+        this.version = version;
+    }
+    toDict() {
+        return {
+            endpoint: this.endpoint,
+            ...this.auth.toDict(),
+            // TODO: figure out how version should be incorporated
+            // https://opensearch.atlassian.net/browse/MIGRATIONS-1951
+            // version: this.version?.version
+        };
+    }
 }
 
 export class MetricsSourceYaml {
@@ -142,8 +134,8 @@ export class ServicesYaml {
 
     stringify(): string {
         return yaml.stringify({
-            source_cluster: this.source_cluster,
-            target_cluster: this.target_cluster,
+            source_cluster: this.source_cluster?.toDict(),
+            target_cluster: this.target_cluster?.toDict(),
             metrics_source: this.metrics_source,
             backfill: this.backfill?.toDict(),
             snapshot: this.snapshot?.toDict(),

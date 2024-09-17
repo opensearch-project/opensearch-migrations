@@ -9,6 +9,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 
 import com.rfs.common.InvalidResponse;
@@ -31,8 +32,7 @@ class IndexCreator_OS_2_11Test {
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder()
         .enable(StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION)
         .build();
-    @SuppressWarnings("unchecked")
-    private static final Optional<ObjectNode> INDEX_CREATE_SUCCESS = mock(Optional.class);
+    private static final Optional<ObjectNode> INDEX_CREATE_SUCCESS = Optional.of(mock(ObjectNode.class));
     private static final String MIN_INDEX_JSON = "{ \"settings\": { } }";
 
     @Test
@@ -45,7 +45,7 @@ class IndexCreator_OS_2_11Test {
         var result = create(client, MIN_INDEX_JSON, "indexName");
 
         // Assertions
-        assertThat(result, equalTo(INDEX_CREATE_SUCCESS));
+        assertThat(result, equalTo(true));
         verify(client).createIndex(any(), any(), any());
     }
 
@@ -113,7 +113,7 @@ class IndexCreator_OS_2_11Test {
         var result = create(client, rawJson, "indexName");
 
         // Assertions
-        assertThat(result, equalTo(INDEX_CREATE_SUCCESS));
+        assertThat(result, equalTo(true));
 
         var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
         verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any());
@@ -127,11 +127,11 @@ class IndexCreator_OS_2_11Test {
     }
 
     @SneakyThrows
-    private Optional<ObjectNode> create(OpenSearchClient client, String rawJson, String indexName) {
+    private boolean create(OpenSearchClient client, String rawJson, String indexName) {
         var node = (ObjectNode) OBJECT_MAPPER.readTree(rawJson);
         var indexId = "indexId";
-        var indexData = new IndexMetadataData_OS_2_11(node, indexName, indexId);
+        var indexData = new IndexMetadataData_OS_2_11(node, indexId, indexName);
         var indexCreator = new IndexCreator_OS_2_11(client);
-        return indexCreator.create(indexData, mock(ICreateIndexContext.class));
+        return indexCreator.create(indexData, MigrationMode.PERFORM, mock(ICreateIndexContext.class));
     }
 }

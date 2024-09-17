@@ -163,14 +163,29 @@ class Metadata:
                 logger.warning(f"Ignoring extra value {arg}, there was no command name before it")
                 i += 1
 
-    def migrate(self, detached_log=None, extra_args=None) -> CommandResult:
+    def evaluate(self, extra_args=None) -> CommandResult:
         logger.info("Starting metadata migration")
+        return self.migrateOrEvaluate("evaluate", extra_args)
+
+    def migrate(self, extra_args=None) -> CommandResult:
+        logger.info("Starting metadata migration")
+        return self.migrateOrEvaluate("migrate", extra_args)
+
+    def migrateOrEvaluate(self, command: str, extra_args=None) -> CommandResult:
         command_base = "/root/metadataMigration/bin/MetadataMigration"
-        command_args = {
+        command_args = {}
+
+        # Add any common metadata parameter before the command
+        if self._otel_endpoint:
+            command_args.update({"--otel-collector-endpoint": self._otel_endpoint})
+
+        command_args.update({
+            command: None,
             "--snapshot-name": self._snapshot_name,
             "--target-host": self._target_cluster.endpoint,
             "--min-replicas": self._min_replicas
-        }
+        })
+
         if self._snapshot_location == 's3':
             command_args.update({
                 "--s3-local-dir": self._local_dir,
@@ -211,16 +226,11 @@ class Metadata:
         if self._component_template_allowlist:
             command_args.update({"--component-template-allowlist": ",".join(self._component_template_allowlist)})
 
-        if self._otel_endpoint:
-            command_args.update({"--otel-collector-endpoint": self._otel_endpoint})
-
         # Extra args might not be represented with dictionary, so convert args to list and append commands
         self._appendArgs(command_args, extra_args)
 
         command_runner = CommandRunner(command_base, command_args,
-                                       sensitive_fields=["--target-password"],
-                                       run_as_detatched=detached_log is not None,
-                                       log_file=detached_log)
+                                       sensitive_fields=["--target-password"])
         logger.info(f"Migrating metadata with command: {' '.join(command_runner.sanitized_command())}")
         try:
             return command_runner.run()
