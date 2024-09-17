@@ -61,6 +61,7 @@ Note: Duration excludes weekends. If actual timeline extends over weekends, dura
 
 ```mermaid
 %%{
+  init: {
     "gantt": {
         "fontSize": 20,
         "barHeight": 40,
