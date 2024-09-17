@@ -11,6 +11,7 @@ import java.util.Random;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -61,11 +62,20 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
             );
     }
 
+    @Test
+    @WrapWithNettyLeakDetection(repetitions = 2)
+    public void testSomeRequestProcessing() throws Exception {
+        var args = provideTestParameters().findFirst().get();
+        testRequestProcessing((Integer) args.get()[0], (Boolean) args.get()[1], (String) args.get()[2]);
+    }
+
     @ParameterizedTest
     @MethodSource("provideTestParameters")
+    @Tag("longTest")
+    @WrapWithNettyLeakDetection(repetitions = 2)
     public void testRequestProcessing(Integer attemptedChunks, Boolean hostTransformation, String requestFile)
         throws Exception {
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(
             Duration.ofMillis(Math.min(100 / attemptedChunks, 1)),
             dummyAggregatedResponse
@@ -92,8 +102,8 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
             : testBytes;
 
         var expectedTransformationStatus = (hostTransformation)
-            ? HttpRequestTransformationStatus.COMPLETED
-            : HttpRequestTransformationStatus.SKIPPED;
+            ? HttpRequestTransformationStatus.completed()
+            : HttpRequestTransformationStatus.skipped();
 
         Assertions.assertEquals(
             new String(expectedBytes, StandardCharsets.UTF_8),
@@ -111,7 +121,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
 
     @Test
     public void testRemoveAuthHeadersWorks() throws Exception {
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformingConsumer<AggregatedRawResponse>(
             new TransformationLoader().getTransformerFactoryLoader("test.domain"),
@@ -134,12 +144,12 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         var returnedResponse = transformingHandler.finalizeRequest().get();
         Assertions.assertEquals(new String(testBytes, StandardCharsets.UTF_8), testPacketCapture.getCapturedAsString());
         Assertions.assertArrayEquals(testBytes, testPacketCapture.getBytesCaptured());
-        Assertions.assertEquals(HttpRequestTransformationStatus.SKIPPED, returnedResponse.transformationStatus);
+        Assertions.assertEquals(HttpRequestTransformationStatus.skipped(), returnedResponse.transformationStatus);
     }
 
     @Test
     public void testPartialBodyIsPassedThrough() throws Exception {
-        final var dummyAggregatedResponse = new AggregatedRawResponse(17, null, null, null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var complexTransformer = new JsonCompositeTransformer(new IJsonTransformer() {
             @Override
@@ -185,13 +195,13 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
         Assertions.assertArrayEquals(expectedString.getBytes(StandardCharsets.UTF_8),
             testPacketCapture.getBytesCaptured());
-        Assertions.assertEquals(HttpRequestTransformationStatus.COMPLETED, returnedResponse.transformationStatus);
-        Assertions.assertNull(returnedResponse.error);
+        Assertions.assertEquals(HttpRequestTransformationStatus.completed(), returnedResponse.transformationStatus);
+        Assertions.assertNull(returnedResponse.transformationStatus.getException());
     }
 
     @Test
     public void testNewlineDelimitedJsonBodyIsHandled() throws Exception {
-        final var dummyAggregatedResponse = new AggregatedRawResponse(19, null, null, null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 19, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var sizeCalculatingTransformer = new JsonCompositeTransformer(incomingJson -> {
             var payload = (Map) incomingJson.get("payload");
@@ -213,13 +223,13 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         var returnedResponse = transformingHandler.finalizeRequest().get();
         var expectedString = NDJSON_TEST_REQUEST.replace("\r\n\r\n","\r\nlistSize: 3\r\n\r\n");
         Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
-        Assertions.assertEquals(HttpRequestTransformationStatus.COMPLETED, returnedResponse.transformationStatus);
-        Assertions.assertNull(returnedResponse.error);
+        Assertions.assertEquals(HttpRequestTransformationStatus.completed(), returnedResponse.transformationStatus);
+        Assertions.assertNull(returnedResponse.transformationStatus.getException());
     }
 
     @Test
     public void testPartialNewlineDelimitedJsonBodyIsHandled() throws Exception {
-        final var dummyAggregatedResponse = new AggregatedRawResponse(19, null, null, null);
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 19, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var sizeCalculatingTransformer = new JsonCompositeTransformer(incomingJson -> {
             var payload = (Map) incomingJson.get("payload");
@@ -248,8 +258,8 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         var expectedString = new String(testBytes, StandardCharsets.UTF_8)
             .replace("\r\n\r\n","\r\nlistSize: 2\r\nleftover: 30\r\n\r\n");
         Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
-        Assertions.assertEquals(HttpRequestTransformationStatus.COMPLETED, returnedResponse.transformationStatus);
-        Assertions.assertNull(returnedResponse.error);
+        Assertions.assertEquals(HttpRequestTransformationStatus.completed(), returnedResponse.transformationStatus);
+        Assertions.assertNull(returnedResponse.transformationStatus.getException());
     }
 
     public static List<byte[]> sliceRandomChunks(byte[] bytes, int numChunks) {

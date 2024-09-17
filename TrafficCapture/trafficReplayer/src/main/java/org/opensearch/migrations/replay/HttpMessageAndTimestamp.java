@@ -9,6 +9,8 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.replay.datatypes.RawPackets;
 import org.opensearch.migrations.replay.util.NettyUtils;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.Lombok;
@@ -53,6 +55,16 @@ public class HttpMessageAndTimestamp {
     public HttpMessageAndTimestamp(Instant firstPacketTimestamp) {
         this.firstPacketTimestamp = firstPacketTimestamp;
         this.packetBytes = new RawPackets();
+    }
+
+    public ByteBuf asByteBuf() {
+        var compositeBuf = Unpooled.compositeBuffer();
+        packetBytes.stream()
+            .map(Unpooled::wrappedBuffer)
+            .forEach(buffer -> {
+                compositeBuf.addComponent(true, buffer);
+            });
+        return compositeBuf.asReadOnly();
     }
 
     public boolean hasInProgressSegment() {

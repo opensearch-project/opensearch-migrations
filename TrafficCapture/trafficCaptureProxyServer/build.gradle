@@ -39,7 +39,7 @@ dependencies {
     implementation group: 'org.slf4j', name: 'slf4j-api'
     implementation group: 'com.lmax', name: 'disruptor'
 
-    implementation group: 'com.beust', name: 'jcommander'
+    implementation group: 'org.jcommander', name: 'jcommander'
     implementation group: "com.google.protobuf", name: "protobuf-java"
 
     testImplementation project(':TrafficCapture:captureProtobufs')

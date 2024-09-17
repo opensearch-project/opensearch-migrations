@@ -43,6 +43,7 @@ public class TracingTest extends InstrumentationTest {
                     try (var ctx = httpCtx.createTransformationContext()) {}
                     try (var ctx = httpCtx.createScheduledContext(Instant.now())) {}
                     try (var targetRequestCtx = httpCtx.createTargetRequestContext()) {
+                        try (var ctx = targetRequestCtx.createHttpConnectingContext()) {}
                         try (var ctx = targetRequestCtx.createHttpSendingContext()) {}
                         try (var ctx = targetRequestCtx.createWaitingForResponseContext()) {}
                         try (var ctx = targetRequestCtx.createHttpReceivingContext()) {}
@@ -74,7 +75,7 @@ public class TracingTest extends InstrumentationTest {
             }
         }).toArray(String[]::new);
         Stream.of(keys).forEach(spanName -> {
-            Assertions.assertNotNull(byName.get(spanName));
+            Assertions.assertNotNull(byName.get(spanName), "\"" + spanName + "\" not present");
             Assertions.assertEquals(1, byName.get(spanName).size());
             byName.remove(spanName);
         });

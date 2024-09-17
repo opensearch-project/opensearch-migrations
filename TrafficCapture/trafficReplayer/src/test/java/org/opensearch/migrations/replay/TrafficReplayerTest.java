@@ -183,6 +183,7 @@ class TrafficReplayerTest extends InstrumentationTest {
     }
 
     @Test
+    @WrapWithNettyLeakDetection(repetitions = 1)
     public void testReader() throws Exception {
         var uri = new URI("http://localhost:9200");
         try (
@@ -191,7 +192,7 @@ class TrafficReplayerTest extends InstrumentationTest {
                 uri,
                 null,
                 null,
-                RootReplayerConstructorExtensions.makeClientConnectionPool(uri)
+                RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(uri)
             )
         ) {
             List<List<byte[]>> byteArrays = new ArrayList<>();
@@ -256,6 +257,7 @@ class TrafficReplayerTest extends InstrumentationTest {
 
     @Test
     @Tag("longTest")
+    @WrapWithNettyLeakDetection(repetitions = 2)
     public void testCapturedReadsAfterCloseAreHandledAsNew() throws Exception {
         var uri = new URI("http://localhost:9200");
         try (
@@ -264,7 +266,7 @@ class TrafficReplayerTest extends InstrumentationTest {
                 uri,
                 null,
                 new TransformationLoader().getTransformerFactoryLoader("localhost"),
-                RootReplayerConstructorExtensions.makeClientConnectionPool(uri)
+                RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(uri)
             )
         ) {
             List<List<byte[]>> byteArrays = new ArrayList<>();

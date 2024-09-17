@@ -15,10 +15,11 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import javax.net.ssl.SSLException;
 
 import org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpConsumer;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.replay.http.retries.OpenSearchDefaultRetry;
+import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFactory;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
@@ -76,6 +77,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     }
 
     private final AtomicReference<TextTrackedFuture<Void>> allRemainingWorkFutureOrShutdownSignalRef;
+    protected final ClientConnectionPool clientConnectionPool;
     private final AtomicReference<Error> shutdownReasonRef;
     private final AtomicReference<CompletableFuture<Void>> shutdownFutureRef;
 
@@ -93,32 +95,31 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             serverUri,
             authTransformerFactory,
             jsonTransformer,
-            clientConnectionPool,
             trafficStreamLimiter,
-            workTracker
+            workTracker,
+            new RetryCollectingVisitorFactory(new OpenSearchDefaultRetry())
         );
+        this.clientConnectionPool = clientConnectionPool;
         allRemainingWorkFutureOrShutdownSignalRef = new AtomicReference<>();
         shutdownReasonRef = new AtomicReference<>();
         shutdownFutureRef = new AtomicReference<>();
     }
 
-    public static ClientConnectionPool makeClientConnectionPool(
-        URI serverUri,
-        boolean allowInsecureConnections,
-        int numSendingThreads
-    ) throws SSLException {
-        return makeClientConnectionPool(serverUri, allowInsecureConnections, numSendingThreads, null);
+
+    public static ClientConnectionPool
+    makeNettyPacketConsumerConnectionPool(URI serverUri, boolean allowInsecureConnections, int numSendingThreads) {
+        return makeNettyPacketConsumerConnectionPool(serverUri, allowInsecureConnections, numSendingThreads, null);
     }
 
-    public static ClientConnectionPool makeClientConnectionPool(
+    public static ClientConnectionPool makeNettyPacketConsumerConnectionPool(
         URI serverUri,
         boolean allowInsecureConnections,
         int numSendingThreads,
         String connectionPoolName
-    ) throws SSLException {
+    ) {
         return new ClientConnectionPool(
-            serverUri,
-            loadSslContext(serverUri, allowInsecureConnections),
+            NettyPacketToHttpConsumer.createClientConnectionFactory(
+                loadSslContext(serverUri, allowInsecureConnections), serverUri),
             connectionPoolName != null
                 ? connectionPoolName
                 : getTargetConnectionPoolName(targetConnectionPoolUniqueCounter.getAndIncrement()),
@@ -130,7 +131,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         return TARGET_CONNECTION_POOL_NAME + (i == 0 ? "" : Integer.toString(i));
     }
 
-    public static SslContext loadSslContext(URI serverUri, boolean allowInsecureConnections) throws SSLException {
+    @SneakyThrows
+    public static SslContext loadSslContext(URI serverUri, boolean allowInsecureConnections) {
         if (serverUri.getScheme().equalsIgnoreCase("https")) {
             var sslContextBuilder = SslContextBuilder.forClient();
             if (allowInsecureConnections) {
@@ -149,13 +151,11 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         TimeShifter timeShifter,
         Consumer<SourceTargetCaptureTuple> resultTupleConsumer
     ) throws InterruptedException, ExecutionException {
-
         var senderOrchestrator = new RequestSenderOrchestrator(
             clientConnectionPool,
             (replaySession, ctx) -> new NettyPacketToHttpConsumer(replaySession, ctx, targetServerResponseTimeout)
         );
         var replayEngine = new ReplayEngine(senderOrchestrator, trafficSource, timeShifter);
-
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator =
             new CapturedTrafficToHttpTransactionAccumulator(
                 observedPacketConnectionTimeout,
@@ -177,9 +177,6 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         }
     }
 
-    /**
-     * @param replayEngine is not used here but might be of use to extensions of this class
-     */
     protected void wrapUpWorkAndEmitSummary(
         ReplayEngine replayEngine,
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator
@@ -269,14 +266,14 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         var workTracker = (IStreamableWorkTracker<Void>) requestWorkTracker;
         Map.Entry<
             UniqueReplayerRequestKey,
-            TrackedFuture<String, TransformedTargetRequestAndResponse>>[] allRemainingWorkArray = workTracker
+            TrackedFuture<String, TransformedTargetRequestAndResponseList>>[] allRemainingWorkArray = workTracker
                 .getRemainingItems()
                 .toArray(Map.Entry[]::new);
         writeStatusLogsForRemainingWork(logLevel, allRemainingWorkArray);
 
         // remember, this block is ONLY for the leftover items. Lots of other items have been processed
         // and were removed from the live map (hopefully)
-        TrackedFuture<String, TransformedTargetRequestAndResponse>[] allCompletableFuturesArray = Arrays.stream(
+        TrackedFuture<String, TransformedTargetRequestAndResponseList>[] allCompletableFuturesArray = Arrays.stream(
             allRemainingWorkArray
         ).map(Map.Entry::getValue).toArray(TrackedFuture[]::new);
         var allWorkFuture = TextTrackedFuture.allOf(
@@ -330,7 +327,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         Level logLevel,
         Map.Entry<
             UniqueReplayerRequestKey,
-            TrackedFuture<String, TransformedTargetRequestAndResponse>>[] allRemainingWorkArray
+            TrackedFuture<String, TransformedTargetRequestAndResponseList>>[] allRemainingWorkArray
     ) {
         log.atLevel(logLevel).log("All remaining work to wait on " + allRemainingWorkArray.length);
         if (log.isInfoEnabled()) {
@@ -353,8 +350,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     static String formatWorkItem(TrackedFuture<String, ?> cf) {
         try {
             var resultValue = cf.get();
-            if (resultValue instanceof TransformedTargetRequestAndResponse) {
-                return "" + ((TransformedTargetRequestAndResponse) resultValue).getTransformationStatus();
+            if (resultValue instanceof TransformedTargetRequestAndResponseList) {
+                return "" + ((TransformedTargetRequestAndResponseList) resultValue).getTransformationStatus();
             }
             return null;
         } catch (InterruptedException e) {
@@ -363,6 +360,11 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         } catch (ExecutionException e) {
             return e.getMessage();
         }
+    }
+
+    @Override
+    protected boolean shouldRetry() {
+        return !stopReadingRef.get();
     }
 
     @SneakyThrows
@@ -382,6 +384,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         }
         stopReadingRef.set(true);
         liveTrafficStreamLimiter.close();
+
 
         var nettyShutdownFuture = clientConnectionPool.shutdownNow();
         nettyShutdownFuture.whenComplete((v, t) -> {

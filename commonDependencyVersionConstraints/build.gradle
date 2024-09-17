@@ -45,13 +45,9 @@ dependencies {
     api group: 'org.apache.jmeter', name: 'ApacheJMeter_http', version: jmeter
     api group: 'org.apache.jmeter', name: 'ApacheJMeter_config', version: jmeter
 
-    api group: 'com.beust', name: 'jcommander', version: '1.82'
+    api group: 'org.jcommander', name: 'jcommander', version: '1.85'
 
     api group: 'org.projectlombok', name: 'lombok', version: '1.18.28'
-
-    def resilience4j = '1.7.0'
-    api group: 'io.github.resilience4j', name: 'resilience4j-ratelimiter', version: resilience4j
-    api group: 'io.github.resilience4j', name: 'resilience4j-retry', version: resilience4j
 
     def jackson = '2.16.2'
     api group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: jackson
@@ -108,14 +104,16 @@ dependencies {
 
     api group: 'eu.rekawek.toxiproxy', name: 'toxiproxy-java', version: '2.1.7'
 
-    def lucene = '8.11.3';
+    def lucene = '9.11.1';
     api group: 'org.apache.lucene', name: 'lucene-core', version: lucene
-    api group: 'org.apache.lucene', name: 'lucene-analyzers-common', version: lucene
+    api group: 'org.apache.lucene', name: 'lucene-analysis-common', version: lucene
     api group: 'org.apache.lucene', name: 'lucene-backward-codecs', version: lucene
 
     api group: 'org.hamcrest', name: 'hamcrest', version: '2.2'
 
     api group: 'org.openjdk.jmh', name: 'jmh-core', version: '1.36'
+
+    api group: 'org.semver4j', name: 'semver4j', version: '5.3.0'
 
     // ************************************************************
     // The following constraints are for mitigating transitive CVEs

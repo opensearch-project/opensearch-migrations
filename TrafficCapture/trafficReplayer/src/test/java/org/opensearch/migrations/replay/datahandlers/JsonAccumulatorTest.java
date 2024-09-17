@@ -7,6 +7,7 @@ import java.util.Random;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
@@ -69,13 +70,24 @@ public class JsonAccumulatorTest {
     @ParameterizedTest
     @CsvSource({
         "tiny,2",
-        "tiny,20000",
+        "tiny,20000"})
+    public void testAccumulationShort(String dataName, int chunkBound) throws IOException {
+        testAccumulation(dataName, chunkBound);
+    }
+
+    @ParameterizedTest
+    @Tag("longTest")
+    @CsvSource({
         "medium,2",
         "medium,20000",
         "large,2",
         "large,20000",
         "largeAndPacked,2",
         "largeAndPacked,20000" })
+    public void testAccumulationLong(String dataName, int chunkBound) throws IOException {
+        testAccumulation(dataName, chunkBound);
+    }
+
     public void testAccumulation(String dataName, int chunkBound) throws IOException {
         var testFileBytes = getData(dataName);
         var outputJson = readJson(testFileBytes, 2);
@@ -84,6 +96,5 @@ public class JsonAccumulatorTest {
         var jacksonParsedRoundTripped = mapper.writeValueAsString(mapper.readTree(testFileBytes));
         var jsonAccumParsedRoundTripped = mapper.writeValueAsString(outputJson);
         Assertions.assertEquals(jacksonParsedRoundTripped, jsonAccumParsedRoundTripped);
-
     }
 }

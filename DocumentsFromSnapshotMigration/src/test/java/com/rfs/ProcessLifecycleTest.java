@@ -16,23 +16,19 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-import org.opensearch.migrations.Version;
-import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.testcontainers.OpensearchContainer;
 
-import com.rfs.common.FileSystemRepo;
 import com.rfs.common.FileSystemSnapshotCreator;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.framework.PreloadedSearchClusterContainer;
 import com.rfs.framework.SearchClusterContainer;
-import eu.rekawek.toxiproxy.ToxiproxyClient;
 import eu.rekawek.toxiproxy.model.ToxicDirection;
 import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
 import org.testcontainers.containers.Network;
-import org.testcontainers.containers.ToxiproxyContainer;
 
 /**
  * TODO - the code in this test was lifted from FullTest.java (now named ParallelDocumentMigrationsTest.java).
@@ -42,11 +38,9 @@ import org.testcontainers.containers.ToxiproxyContainer;
 @Tag("longTest")
 public class ProcessLifecycleTest extends SourceTestBase {
 
-    public static final String TOXIPROXY_IMAGE_NAME = "ghcr.io/shopify/toxiproxy:2.9.0";
     public static final String TARGET_DOCKER_HOSTNAME = "target";
     public static final String SNAPSHOT_NAME = "test_snapshot";
     public static final List<String> INDEX_ALLOWLIST = List.of();
-    public static final int TOXIPROXY_PORT = 8666;
     public static final int OPENSEARCH_PORT = 9200;
 
     enum FailHow {
@@ -64,14 +58,13 @@ public class ProcessLifecycleTest extends SourceTestBase {
         // The Document Migration process will throw an exception immediately, which will cause an exit.
         "AT_STARTUP, 1",
         // This test is dependent upon the max lease duration that is passed to the command line. It's set
-        // to such a short value (1s), that no document migration will exit in that amount of time. For good
+        // to such a short value (1s) that no document migration will exit in that amount of time. For good
         // measure though, the toxiproxy also adds latency to the requests to make it impossible for the
         // migration to complete w/in that 1s.
         "WITH_DELAYS, 2" })
     public void testProcessExitsAsExpected(String failAfterString, int expectedExitCode) throws Exception {
         final var failHow = FailHow.valueOf(failAfterString);
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
-        final var testMetadataMigrationContext = MetadataMigrationTestContext.factory().noOtelTracking();
 
         var sourceImageArgs = makeParamsForBase(SearchClusterContainer.ES_V7_10_2);
         var baseSourceImageVersion = (SearchClusterContainer.ContainerVersion) sourceImageArgs[0];
@@ -93,7 +86,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
             var osTargetContainer = new OpensearchContainer<>(targetImageName).withExposedPorts(OPENSEARCH_PORT)
                 .withNetwork(network)
                 .withNetworkAliases(TARGET_DOCKER_HOSTNAME);
-            var proxyContainer = new ToxiproxyContainer(TOXIPROXY_IMAGE_NAME).withNetwork(network)
+            var proxyContainer = new ToxiProxyWrapper(network)
         ) {
 
             CompletableFuture.allOf(CompletableFuture.supplyAsync(() -> {
@@ -103,7 +96,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
                 osTargetContainer.start();
                 return null;
             }), CompletableFuture.supplyAsync(() -> {
-                proxyContainer.start();
+                proxyContainer.start(TARGET_DOCKER_HOSTNAME, OPENSEARCH_PORT);
                 return null;
             })).join();
 
@@ -122,8 +115,6 @@ public class ProcessLifecycleTest extends SourceTestBase {
             );
             esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
-            migrateMetadata(osTargetContainer, tempDirSnapshot, testMetadataMigrationContext, baseSourceImageVersion.getVersion());
-
             int actualExitCode = runProcessAgainstToxicTarget(tempDirSnapshot, tempDirLucene, proxyContainer, failHow);
             log.atInfo().setMessage("Process exited with code: " + actualExitCode).log();
 
@@ -139,31 +130,19 @@ public class ProcessLifecycleTest extends SourceTestBase {
         }
     }
 
-    private static void migrateMetadata(
-        OpensearchContainer targetContainer,
-        Path tempDirSnapshot,
-        MetadataMigrationTestContext testMetadataMigrationContext,
-        Version sourceVersion
-    ) {
-        String targetAddress = "http://"
-            + targetContainer.getHost()
-            + ":"
-            + targetContainer.getMappedPort(OPENSEARCH_PORT);
-        var targetClient = new OpenSearchClient(ConnectionContextTestParams.builder()
-            .host(targetAddress)
-            .build()
-            .toConnectionContext());
-        var sourceRepo = new FileSystemRepo(tempDirSnapshot);
-        migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, List.of(), List.of(), List.of(), INDEX_ALLOWLIST, testMetadataMigrationContext, sourceVersion);
-    }
-
     private static int runProcessAgainstToxicTarget(
         Path tempDirSnapshot,
         Path tempDirLucene,
-        ToxiproxyContainer proxyContainer,
+        ToxiProxyWrapper proxyContainer,
         FailHow failHow
     ) throws IOException, InterruptedException {
-        String targetAddress = setupProxyAndGetAddress(proxyContainer, failHow);
+        String targetAddress = proxyContainer.getProxyUriAsString();
+        var tp = proxyContainer.getProxy();
+        if (failHow == FailHow.AT_STARTUP) {
+            tp.disable();
+        } else if (failHow == FailHow.WITH_DELAYS) {
+            tp.toxics().latency("latency-toxic", ToxicDirection.DOWNSTREAM, 100);
+        }
 
         int timeoutSeconds = 90;
         ProcessBuilder processBuilder = setupProcess(tempDirSnapshot, tempDirLucene, targetAddress, failHow);
@@ -183,26 +162,6 @@ public class ProcessLifecycleTest extends SourceTestBase {
         return process.exitValue();
     }
 
-    @NotNull
-    private static String setupProxyAndGetAddress(ToxiproxyContainer proxyContainer, FailHow failHow)
-        throws IOException {
-        var toxiproxyClient = new ToxiproxyClient(proxyContainer.getHost(), proxyContainer.getControlPort());
-        var proxy = toxiproxyClient.createProxy(
-            "proxy",
-            "0.0.0.0:" + TOXIPROXY_PORT,
-            TARGET_DOCKER_HOSTNAME + ":" + OPENSEARCH_PORT
-        );
-        String targetAddress = "http://"
-            + proxyContainer.getHost()
-            + ":"
-            + proxyContainer.getMappedPort(TOXIPROXY_PORT);
-        if (failHow == FailHow.AT_STARTUP) {
-            proxy.disable();
-        } else if (failHow == FailHow.WITH_DELAYS) {
-            proxy.toxics().latency("latency-toxic", ToxicDirection.DOWNSTREAM, 100);
-        }
-        return targetAddress;
-    }
 
     @NotNull
     private static ProcessBuilder setupProcess(

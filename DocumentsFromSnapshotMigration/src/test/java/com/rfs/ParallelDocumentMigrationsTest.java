@@ -20,10 +20,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
-import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 
 import com.rfs.common.FileSystemRepo;
 import com.rfs.common.FileSystemSnapshotCreator;
@@ -34,7 +32,7 @@ import com.rfs.framework.SearchClusterContainer;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 
-@Tag("longTest")
+@Tag("isolatedTest")
 @Slf4j
 public class ParallelDocumentMigrationsTest extends SourceTestBase {
 
@@ -45,7 +43,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
 
     public static Stream<Arguments> makeDocumentMigrationArgs() {
         List<Object[]> sourceImageArgs = SOURCE_IMAGES.stream()
-            .map(name -> makeParamsForBase(name))
+            .map(SourceTestBase::makeParamsForBase)
             .collect(Collectors.toList());
         var targetImageNames = TARGET_IMAGES.stream()
             .collect(Collectors.toList());
@@ -81,9 +79,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
     ) throws Exception {
         var executorService = Executors.newFixedThreadPool(numWorkers);
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
-        final var testMetadataMigrationContext = MetadataMigrationTestContext.factory().noOtelTracking();
-        final var workCoordinationContext = WorkCoordinationTestContext.factory().withAllTracking();
-        final var testDocMigrationContext = DocumentMigrationTestContext.factory(workCoordinationContext)
+        final var testDocMigrationContext = DocumentMigrationTestContext.factory()
             .withAllTracking();
 
         try (
@@ -121,14 +117,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
             var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
             try {
                 esSourceContainer.copySnapshotData(tempDir.toString());
-
-                var targetClient = new OpenSearchClient(ConnectionContextTestParams.builder()
-                    .host(esSourceContainer.getUrl())
-                    .build()
-                    .toConnectionContext());
                 var sourceRepo = new FileSystemRepo(tempDir);
-                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, List.of(), List.of(), List.of(), INDEX_ALLOWLIST, testMetadataMigrationContext, baseSourceImageVersion.getVersion());
-
                 var workerFutures = new ArrayList<CompletableFuture<Integer>>();
                 var runCounter = new AtomicInteger();
                 final var clockJitter = new Random(1);
@@ -197,7 +186,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
     }
 
     private void verifyWorkMetrics(DocumentMigrationTestContext rootContext, int numWorkers, int numRuns) {
-        var workMetrics = rootContext.getWorkCoordinationContext().inMemoryInstrumentationBundle.getFinishedMetrics();
+        var workMetrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         var migrationMetrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();
 
         verifyCoordinatorBehavior(workMetrics, numRuns);

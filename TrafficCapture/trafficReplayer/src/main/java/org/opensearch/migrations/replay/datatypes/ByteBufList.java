@@ -5,11 +5,20 @@ import java.util.StringJoiner;
 import java.util.stream.Stream;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.CompositeByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.util.AbstractReferenceCounted;
 import io.netty.util.ReferenceCounted;
 
-public class TransformedPackets implements AutoCloseable {
+public class ByteBufList extends AbstractReferenceCounted {
 
     ArrayList<ByteBuf> data = new ArrayList<>();
+
+    public ByteBufList(ByteBuf ...items) {
+        for (var i : items) {
+            add(i);
+        }
+    }
 
     public boolean add(ByteBuf nextRequestPacket) {
         return data.add(nextRequestPacket.retainedDuplicate());
@@ -31,10 +40,6 @@ public class TransformedPackets implements AutoCloseable {
         return data.stream().map(ByteBuf::duplicate);
     }
 
-    public Stream<ByteBuf> streamRetained() {
-        return data.stream().map(ByteBuf::retainedDuplicate);
-    }
-
     public Stream<byte[]> asByteArrayStream() {
         return streamUnretained().map(bb -> {
             byte[] bArr = new byte[bb.readableBytes()];
@@ -43,8 +48,18 @@ public class TransformedPackets implements AutoCloseable {
         });
     }
 
+    public CompositeByteBuf asCompositeByteBufRetained() {
+        return asCompositeByteBufRetained(data.stream().map(ByteBuf::retainedDuplicate));
+    }
+
+    public static CompositeByteBuf asCompositeByteBufRetained(Stream<ByteBuf> byteBufs) {
+        var compositeByteBuf = Unpooled.compositeBuffer();
+        byteBufs.forEach(byteBuf -> compositeByteBuf.addComponent(true, byteBuf));
+        return compositeByteBuf;
+    }
+
     @Override
-    public void close() {
+    public void deallocate() {
         data.forEach(ReferenceCounted::release);
         // Once we're closed, I'd rather see an NPE rather than refCnt errors from netty, which
         // could cause us to look in many places before finding out that it was just localize
@@ -54,11 +69,16 @@ public class TransformedPackets implements AutoCloseable {
     }
 
     @Override
+    public ReferenceCounted touch(Object o) {
+        return this;
+    }
+
+    @Override
     public String toString() {
         if (isClosed()) {
             return "CLOSED";
         }
-        return new StringJoiner(", ", TransformedPackets.class.getSimpleName() + "[", "]").add("data=" + data)
+        return new StringJoiner(", ", ByteBufList.class.getSimpleName() + "[", "]").add("data=" + data)
             .toString();
     }
 }

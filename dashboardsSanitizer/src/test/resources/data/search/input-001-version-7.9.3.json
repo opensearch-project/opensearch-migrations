@@ -1,0 +1,31 @@
+{
+    "attributes": {
+        "columns": [
+            "a"
+        ],
+        "description": "",
+        "hits": 0,
+        "kibanaSavedObjectMeta": {
+            "searchSourceJSON": "{\"query\":{\"query\":\"\",\"language\":\"kuery\"},\"filter\":[],\"indexRefName\":\"kibanaSavedObjectMeta.searchSourceJSON.index\"}"
+        },
+        "sort": [["@timestamp", "desc"]],
+        "title": "TEST Query",
+        "version": 1
+    },
+    "coreMigrationVersion": "7.9.3",
+    "id": "99aa82c8-cc36-507f-ba79-689a2feb0f89",
+    "managed": false,
+    "originId": "7fe0cd60-2059-11ec-87c9-7fa4dd077e56",
+    "references": [
+        {
+            "id": "486642f6-1c32-5e74-83f5-7bbc13b3a36e",
+            "name": "kibanaSavedObjectMeta.searchSourceJSON.index",
+            "type": "index-pattern"
+        }
+    ],
+    "type": "search",
+    "migrationVersion": {"search": "7.9.3"},
+    "typeMigrationVersion": "10.2.0",
+    "updated_at": "2021-09-28T12:43:14.915Z",
+    "version": "WzI1MTkyNDAsMTld"
+}

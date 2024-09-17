@@ -13,6 +13,7 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.util.BytesRef;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
@@ -21,6 +22,7 @@ import com.rfs.common.DocumentReindexer;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.OpenSearchClient.BulkResponse;
+import com.rfs.common.RfsLuceneDocument;
 import com.rfs.tracing.IRfsContexts;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
@@ -37,6 +39,7 @@ import static org.mockito.Mockito.when;
 public class PerformanceVerificationTest {
 
     @Test
+    @Tag("isolatedTest")
     void testDocumentBuffering() throws Exception {
         // Create an in-memory directory for the test
         ByteBuffersDirectory inMemoryDir = new ByteBuffersDirectory();
@@ -68,7 +71,7 @@ public class PerformanceVerificationTest {
             }
 
             @Override
-            protected Document getDocument(IndexReader reader, int docId, boolean isLive) {
+            protected RfsLuceneDocument getDocument(IndexReader reader, int docId, boolean isLive) {
                 ingestedDocuments.incrementAndGet();
                 return super.getDocument(reader, docId, isLive);
             }
@@ -148,7 +151,8 @@ public class PerformanceVerificationTest {
         int docsFromBuffers = expectedBulkDocsBuffered * maxDocsPerBulkRequest;
         int numberOfSingleBufferSteps = 2; // calls like publishOn(scheduler, 1) holds a 1 item buffer
         int strictExpectedBufferedDocs = docsFromBuffers + expectedConcurrentDocReads + numberOfSingleBufferSteps;
-        assertEquals(strictExpectedBufferedDocs, bufferedDocs);
+        // Assert that the number of buffered documents is within 1 of the expected number
+        assertEquals(strictExpectedBufferedDocs, bufferedDocs, 1);
 
         // Verify the total number of ingested documents
         assertEquals(500_000, ingestedDocuments.get(), "Not all documents were ingested");

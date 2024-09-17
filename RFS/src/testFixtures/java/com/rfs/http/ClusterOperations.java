@@ -6,6 +6,7 @@ import java.util.Map;
 
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
+import org.apache.hc.client5.http.classic.methods.HttpPost;
 import org.apache.hc.client5.http.classic.methods.HttpPut;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
@@ -170,6 +171,9 @@ public class ClusterOperations {
             + "                \"type\": \"text\""
             + "            }"
             + "        }"
+            + "    },"
+            + "    \"aliases\": {"
+            + "        \"alias1\": {}"
             + "    }"
             + "},"
             + "\"version\": 1"
@@ -205,6 +209,32 @@ public class ClusterOperations {
         createIndexTempRequest.setHeader("Content-Type", "application/json");
 
         try (var response = httpClient.execute(createIndexTempRequest)) {
+            assertThat(
+                EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8),
+                response.getCode(),
+                equalTo(200)
+            );
+        }
+    }
+
+    @SneakyThrows
+    public void createAlias(String aliasName, String indexPattern) {
+        final var requestBodyJson = "{\r\n" + //
+            "  \"actions\": [\r\n" + //
+            "    {\r\n" + //
+            "      \"add\": {\r\n" + //
+            "        \"index\": \"" + indexPattern + "\",\r\n" + //
+            "        \"alias\": \"" + aliasName + "\"\r\n" + //
+            "      }\r\n" + //
+            "    }\r\n" + //
+            "  ]\r\n" + //
+            "}";
+
+        final var aliasRequest = new HttpPost(this.clusterUrl + "/_aliases");
+        aliasRequest.setEntity(new StringEntity(requestBodyJson));
+        aliasRequest.setHeader("Content-Type", "application/json");
+
+        try (var response = httpClient.execute(aliasRequest)) {
             assertThat(
                 EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8),
                 response.getCode(),

@@ -15,11 +15,12 @@ import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 
+import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class RequestResponsePacketPair {
+public class RequestResponsePacketPair implements IRequestResponsePacketPair {
 
     public enum ReconstructionStatus {
         COMPLETE,
@@ -27,7 +28,9 @@ public class RequestResponsePacketPair {
         CLOSED_PREMATURELY
     }
 
+    @Getter
     HttpMessageAndTimestamp requestData;
+    @Getter
     HttpMessageAndTimestamp responseData;
     @NonNull
     final ISourceTrafficChannelKey firstTrafficStreamKeyForRequest;

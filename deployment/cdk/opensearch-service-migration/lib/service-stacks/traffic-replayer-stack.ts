@@ -1,11 +1,12 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {CpuArchitecture, MountPoint, Volume} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {
+    ClusterAuth,
     MigrationSSMParameter,
     createMSKConsumerIAMPolicies,
     createOpenSearchIAMAccessPolicy,
@@ -21,7 +22,7 @@ import { SharedLogFileSystem } from "../components/shared-log-file-system";
 
 export interface TrafficReplayerProps extends StackPropsExt {
     readonly vpc: IVpc,
-    readonly enableClusterFGACAuth: boolean,
+    readonly clusterAuthDetails: ClusterAuth,
     readonly streamingSourceType: StreamingSourceType,
     readonly fargateCpuArch: CpuArchitecture,
     readonly addOnMigrationId?: string,
@@ -80,15 +81,12 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         const groupId = props.customKafkaGroupId ? props.customKafkaGroupId : `logging-group-${deployId}`
 
         let replayerCommand = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint} --insecure --kafka-traffic-brokers ${brokerEndpoints} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id ${groupId}`
-        if (props.enableClusterFGACAuth) {
-            const osUserAndSecret = getMigrationStringParameterValue(this, {
-                ...props,
-                parameter: MigrationSSMParameter.OS_USER_AND_SECRET_ARN,
-            });
-            replayerCommand = replayerCommand.concat(` --auth-header-user-and-secret ${osUserAndSecret}`)
+        if (props.clusterAuthDetails.basicAuth) {
+            replayerCommand = replayerCommand.concat(` --auth-header-user-and-secret "${props.clusterAuthDetails.basicAuth.username} ${props.clusterAuthDetails.basicAuth.password_from_secret_arn}"`)
         }
         replayerCommand = props.streamingSourceType === StreamingSourceType.AWS_MSK ? replayerCommand.concat(" --kafka-traffic-enable-msk-auth") : replayerCommand
         replayerCommand = props.userAgentSuffix ? replayerCommand.concat(` --user-agent ${props.userAgentSuffix}`) : replayerCommand
+        replayerCommand = props.clusterAuthDetails.sigv4 ? replayerCommand.concat(` --sigv4-auth-header-service-region ${props.clusterAuthDetails.sigv4.serviceSigningName},${props.clusterAuthDetails.sigv4.region}`) : replayerCommand
         replayerCommand = props.otelCollectorEnabled ? replayerCommand.concat(` --otelCollectorEndpoint ${OtelCollectorSidecar.getOtelLocalhostEndpoint()}`) : replayerCommand
         replayerCommand = parseAndMergeArgs(replayerCommand, props.extraArgs);
 

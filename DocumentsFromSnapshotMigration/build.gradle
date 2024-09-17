@@ -33,7 +33,7 @@ dependencies {
 
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
-    implementation group: 'com.beust', name: 'jcommander'
+    implementation group: 'org.jcommander', name: 'jcommander'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
@@ -46,6 +46,7 @@ dependencies {
 
     testImplementation testFixtures(project(":RFS"))
     testImplementation testFixtures(project(":coreUtilities"))
+    testImplementation testFixtures(project(":testHelperFixtures"))
     testImplementation project(":CreateSnapshot")
     testImplementation project(":MetadataMigration")
     testImplementation group: 'org.apache.lucene', name: 'lucene-core'
