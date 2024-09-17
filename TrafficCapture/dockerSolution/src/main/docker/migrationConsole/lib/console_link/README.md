@@ -92,6 +92,7 @@ Source and target clusters have the following options:
 
 - `endpoint`: required, the endpoint to reach the cluster.
 - `allow_insecure`: optional, default is false, equivalent to the curl `--insecure` flag, will not verify unsigned or invalid certificates
+- `version`: optional, default is to assume a version compatible with ES 7 or OS 1. Format should be `ES_7.10.2` or `OS_2.15`, for instance.
 
 Exactly one of the following blocks must be present:
 
@@ -198,6 +199,7 @@ The metadata migration moves indices, components, and templates from a snapshot 
 - `index_allowlist`: optional, a list of index names. If this key is provided, only the named indices will be migrated. If the field is not provided, all non-system indices will be migrated.
 - `index_template_allowlist`: optional, a list of index template names. If this key is provided, only the named templates will be migrated. If the field is not provided, all templates will be migrated.
 - `component_template_allowlist`: optional, a list of component template names. If this key is provided, only the named component templates will be migrated. If the field is not provided, all component templates will be migrated.
+- `source_cluster_version`: optional, defaults to `ES_7.10.2`, which should work for closely related versions. Version of the source cluster from which the snapshot was taken and used for handling incompatible settings between versions.
 - `from_snapshot`: required. As mentioned above, `from_snapshot` is the only allowable source for a metadata migration at this point. This key must be present, but if it's value is null/empty, the snapshot details will be pulled from the top-level `snapshot` object. If a `snapshot` object does not exist, this block must be populated.
     - `snapshot_name`: required, as described in the Snapshot section
     - `s3` or `fs` block: exactly one must be present, as described in the Snapshot section

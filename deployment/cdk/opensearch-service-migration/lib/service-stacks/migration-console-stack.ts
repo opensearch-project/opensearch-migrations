@@ -242,6 +242,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         let servicesYaml = props.servicesYaml
         servicesYaml.source_cluster = props.sourceCluster
         servicesYaml.metadata_migration = new MetadataMigrationYaml();
+        servicesYaml.metadata_migration.source_cluster_version = props.sourceCluster?.version
         if (props.otelCollectorEnabled) {
             const otelSidecarEndpoint = OtelCollectorSidecar.getOtelLocalhostEndpoint();
             if (servicesYaml.metadata_migration) {
