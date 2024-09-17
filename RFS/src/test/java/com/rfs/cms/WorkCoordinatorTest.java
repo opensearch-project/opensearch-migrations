@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
@@ -117,6 +118,7 @@ public class WorkCoordinatorTest {
     }
 
     @Test
+    @Tag("isolatedTest")
     public void testAcquireLeaseForQuery() throws Exception {
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         final var NUM_DOCS = 40;

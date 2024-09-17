@@ -25,6 +25,7 @@ import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -184,6 +185,7 @@ public class LuceneDocumentsReaderTest {
     }
 
     @Test
+    @Tag("isolatedTest")
     void testParallelReading() throws Exception {
         // Create a mock IndexReader with multiple leaves (segments)
         int numSegments = 10;

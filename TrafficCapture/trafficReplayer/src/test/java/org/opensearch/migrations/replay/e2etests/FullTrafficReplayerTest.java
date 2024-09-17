@@ -316,8 +316,8 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
     }
 
     @Test
+    @Tag("longTest")
     public void makeSureThatCollateralDamageDoesntFreezeTests() throws Throwable {
-
         var imposterThread = new Thread(() -> {
             while (true) {
                 try {
