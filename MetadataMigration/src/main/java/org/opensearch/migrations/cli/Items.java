@@ -13,6 +13,7 @@ import lombok.NonNull;
 @Builder
 @Data
 public class Items {
+    static final String NONE_FOUND_MARKER = "<NONE FOUND>";
     private final boolean dryRun;
     @NonNull
     private final List<String> indexTemplates;
@@ -36,7 +37,7 @@ public class Items {
         sb.append(Format.indentToLevel(1) + "Component Templates:" + System.lineSeparator());
         sb.append(Format.indentToLevel(2) +getPrintableList(getComponentTemplates()) + System.lineSeparator());
         sb.append(System.lineSeparator());
-        sb.append(Format.indentToLevel(1) + System.lineSeparator());
+        sb.append(Format.indentToLevel(1) + "Indexes:" + System.lineSeparator());
         sb.append(Format.indentToLevel(2) + getPrintableList(getIndexes()) + System.lineSeparator());
         sb.append(System.lineSeparator());
         sb.append(Format.indentToLevel(1) + "Aliases:" + System.lineSeparator());
@@ -47,7 +48,7 @@ public class Items {
 
     private String getPrintableList(List<String> list) {
         if (list == null || list.isEmpty()) {
-            return "<NONE FOUND>";
+            return NONE_FOUND_MARKER;
         }
         return list.stream().sorted().collect(Collectors.joining(", "));
     }

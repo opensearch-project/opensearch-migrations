@@ -94,18 +94,20 @@ public class MetadataMigration {
     }
 
     private static void printTopLevelHelp(JCommander commander) {
-        log.info("Usage: [options] [command] [commandOptions]");
-        log.info("Options:");
+        var sb = new StringBuilder();
+        sb.append("Usage: [options] [command] [commandOptions]");
+        sb.append("Options:");
         for (var parameter : commander.getParameters()) {
-            log.info("  " + parameter.getNames());
-            log.info("    " + parameter.getDescription());
+            sb.append("  " + parameter.getNames());
+            sb.append("    " + parameter.getDescription());
         }
 
-        log.info("Commands:");
+        sb.append("Commands:");
         for (var command : commander.getCommands().entrySet()) {
-            log.info("  " + command.getKey());
+            sb.append("  " + command.getKey());
         }
-        log.info("\nUse --help with a specific command for more information.");
+        sb.append("\nUse --help with a specific command for more information.");
+        log.info(sb.toString());
     }
 
     private static void printCommandUsage(JCommander jCommander) {
