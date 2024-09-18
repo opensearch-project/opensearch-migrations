@@ -3,6 +3,7 @@ package org.opensearch.migrations.testutils;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Duration;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
@@ -29,6 +30,7 @@ import io.netty.handler.codec.http.HttpRequestDecoder;
 import io.netty.handler.codec.http.HttpResponseEncoder;
 import io.netty.handler.codec.http.HttpResponseStatus;
 import io.netty.handler.codec.http.HttpVersion;
+import io.netty.handler.logging.LoggingHandler;
 import io.netty.handler.ssl.SslHandler;
 import io.netty.handler.timeout.ReadTimeoutHandler;
 import io.netty.util.concurrent.DefaultThreadFactory;
@@ -56,15 +58,30 @@ public class SimpleNettyHttpServer implements AutoCloseable {
 
     public static SimpleNettyHttpServer makeServer(
         boolean useTls,
-        Function<HttpRequestFirstLine, SimpleHttpResponse> makeContext
+        Function<HttpRequest, SimpleHttpResponse> makeContext
     ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
-        return makeServer(useTls, null, makeContext);
+        return makeNettyServer(useTls, null, r -> makeContext.apply(new RequestToAdapter(r)));
+    }
+
+    public static SimpleNettyHttpServer makeNettyServer(
+        boolean useTls,
+        Function<FullHttpRequest, SimpleHttpResponse> makeContext
+    ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
+        return makeNettyServer(useTls, null, makeContext);
     }
 
     public static SimpleNettyHttpServer makeServer(
         boolean useTls,
         Duration readTimeout,
-        Function<HttpRequestFirstLine, SimpleHttpResponse> makeContext
+        Function<HttpRequest, SimpleHttpResponse> makeContext
+    ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
+        return makeNettyServer(useTls, readTimeout, r -> makeContext.apply(new RequestToAdapter(r)));
+    }
+
+    public static SimpleNettyHttpServer makeNettyServer(
+        boolean useTls,
+        Duration readTimeout,
+        Function<FullHttpRequest, SimpleHttpResponse> makeContext
     ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         var testServerRef = new AtomicReference<SimpleNettyHttpServer>();
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
@@ -77,28 +94,31 @@ public class SimpleNettyHttpServer implements AutoCloseable {
         return testServerRef.get();
     }
 
-    private static class RequestToFirstLineAdapter implements HttpRequestFirstLine {
+    public static class RequestToAdapter implements HttpRequest {
         private final FullHttpRequest request;
 
-        public RequestToFirstLineAdapter(FullHttpRequest request) {
+        public RequestToAdapter(FullHttpRequest request) {
             this.request = request;
         }
 
         @Override
-        public String verb() {
+        public String getVerb() {
             return request.method().toString();
         }
 
         @SneakyThrows
         @Override
-        public URI path() {
+        public URI getPath() {
             return new URI(request.uri());
         }
 
         @Override
-        public String version() {
+        public String getVersion() {
             return request.protocolVersion().text();
         }
+
+        @Override
+        public List<Map.Entry<String, String>> getHeaders() { return request.headers().entries(); }
     }
 
     HttpHeaders convertHeaders(Map<String, String> headers) {
@@ -108,8 +128,13 @@ public class SimpleNettyHttpServer implements AutoCloseable {
     }
 
     private SimpleChannelInboundHandler<FullHttpRequest> makeHandlerFromResponseContext(
-        Function<HttpRequestFirstLine, SimpleHttpResponse> responseBuilder
-    ) {
+        Function<HttpRequest, SimpleHttpResponse> responseBuilder) {
+        return makeHandlerFromNettyResponseContext(r -> responseBuilder.apply(new RequestToAdapter(r)));
+    }
+
+    private SimpleChannelInboundHandler<FullHttpRequest> makeHandlerFromNettyResponseContext(
+        Function<FullHttpRequest, SimpleHttpResponse> responseBuilder)
+    {
         return new SimpleChannelInboundHandler<>() {
             @Override
             protected void channelRead0(ChannelHandlerContext ctx, FullHttpRequest req) {
@@ -118,7 +143,7 @@ public class SimpleNettyHttpServer implements AutoCloseable {
                         ctx.close();
                         return;
                     }
-                    var specifiedResponse = responseBuilder.apply(new RequestToFirstLineAdapter(req));
+                    var specifiedResponse = responseBuilder.apply(req);
                     var fullResponse = new DefaultFullHttpResponse(
                         HttpVersion.HTTP_1_1,
                         HttpResponseStatus.valueOf(specifiedResponse.statusCode, specifiedResponse.statusText),
@@ -146,7 +171,7 @@ public class SimpleNettyHttpServer implements AutoCloseable {
         boolean useTLS,
         int port,
         Duration timeout,
-        Function<HttpRequestFirstLine, SimpleHttpResponse> responseBuilder
+        Function<FullHttpRequest, SimpleHttpResponse> responseBuilder
     ) throws Exception {
         this.useTls = useTLS;
         this.port = port;
@@ -168,10 +193,13 @@ public class SimpleNettyHttpServer implements AutoCloseable {
                     if (timeout != null) {
                         pipeline.addLast(new ReadTimeoutHandler(timeout.toMillis(), TimeUnit.MILLISECONDS));
                     }
+                    pipeline.addLast(new LoggingHandler("A"));
                     pipeline.addLast(new HttpRequestDecoder());
+                    pipeline.addLast(new LoggingHandler("B"));
                     pipeline.addLast(new HttpObjectAggregator(16 * 1024));
+                    pipeline.addLast(new LoggingHandler("C"));
                     pipeline.addLast(new HttpResponseEncoder());
-                    pipeline.addLast(makeHandlerFromResponseContext(responseBuilder));
+                    pipeline.addLast(makeHandlerFromNettyResponseContext(responseBuilder));
                 }
             });
         serverChannel = b.bind(port).sync().channel();
