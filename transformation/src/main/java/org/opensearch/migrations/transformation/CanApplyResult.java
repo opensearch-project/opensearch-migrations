@@ -7,8 +7,9 @@ import lombok.RequiredArgsConstructor;
  * The result after checking if a transformer can be applied to an entity
  */
 public abstract class CanApplyResult {
-    public final static CanApplyResult YES = new Yes();
-    public final static CanApplyResult NO = new No();
+    private CanApplyResult() {}
+    public static final CanApplyResult YES = new Yes();
+    public static final CanApplyResult NO = new No();
 
     /** Yes, the transformation can be applied */
     public static final class Yes extends CanApplyResult {}
