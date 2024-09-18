@@ -1,10 +1,10 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
+import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
-import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -16,11 +16,15 @@ import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLException;
 
 import com.google.protobuf.CodedOutputStream;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -143,19 +147,20 @@ public class CaptureProxy {
 
     @SneakyThrows
     protected static Settings getSettings(@NonNull String configFile) {
-        var builder = Settings.builder();
-        try (var lines = Files.lines(Paths.get(configFile))) {
-            lines.map(
-                line -> Optional.of(line.indexOf('#')).filter(i -> i >= 0).map(i -> line.substring(0, i)).orElse(line)
-            ).filter(line -> line.startsWith(HTTPS_CONFIG_PREFIX) && line.contains(":")).forEach(line -> {
-                var parts = line.split(": *", 2);
-                builder.put(parts[0], parts[1]);
-            });
-        }
-        builder.put(SSLConfigConstants.SECURITY_SSL_TRANSPORT_ENABLED, false);
+        var objectMapper = new ObjectMapper(new YAMLFactory());
+        var configMap = objectMapper.readValue(new File(configFile), Map.class);
+
         var configParentDirStr = Paths.get(configFile).toAbsolutePath().getParent();
-        builder.put("path.home", configParentDirStr);
-        return builder.build();
+        var httpsSettings =
+            objectMapper.convertValue(configMap, new TypeReference<Map<String, Object>>(){})
+                .entrySet().stream()
+                .filter(kvp -> kvp.getKey().startsWith(HTTPS_CONFIG_PREFIX))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+
+        return Settings.builder().loadFromMap(httpsSettings)
+            .put(SSLConfigConstants.SECURITY_SSL_TRANSPORT_ENABLED, false)
+            .put("path.home", configParentDirStr)
+            .build();
     }
 
     protected static IConnectionCaptureFactory<Object> getNullConnectionCaptureFactory() {
