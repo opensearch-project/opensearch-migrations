@@ -24,9 +24,6 @@ import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import com.rfs.common.FileSystemRepo;
-import com.rfs.common.FileSystemSnapshotCreator;
-import com.rfs.common.OpenSearchClient;
-import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.framework.PreloadedSearchClusterContainer;
 import com.rfs.framework.SearchClusterContainer;
 import lombok.Lombok;
@@ -99,21 +96,16 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                 return null;
             }, executorService)).join();
 
-            final var SNAPSHOT_NAME = "test_snapshot";
+            var args = new CreateSnapshot.Args();
+            args.snapshotName = "test_snapshot";
+            args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
+            args.sourceArgs.host = esSourceContainer.getUrl();
+
+            var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
+            snapshotCreator.run();
+
+
             final List<String> INDEX_ALLOWLIST = List.of();
-            CreateSnapshot.run(
-                c -> new FileSystemSnapshotCreator(
-                    SNAPSHOT_NAME,
-                    c,
-                    SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
-                    testSnapshotContext.createSnapshotCreateContext()
-                ),
-                new OpenSearchClient(ConnectionContextTestParams.builder()
-                    .host(esSourceContainer.getUrl())
-                    .build()
-                    .toConnectionContext()),
-                false
-            );
             var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
             try {
                 esSourceContainer.copySnapshotData(tempDir.toString());
@@ -127,7 +119,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                         CompletableFuture.supplyAsync(
                             () -> migrateDocumentsSequentially(
                                 sourceRepo,
-                                SNAPSHOT_NAME,
+                                args.snapshotName,
                                 INDEX_ALLOWLIST,
                                 osTargetContainer.getUrl(),
                                 runCounter,

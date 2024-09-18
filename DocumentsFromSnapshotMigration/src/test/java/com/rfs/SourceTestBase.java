@@ -23,6 +23,7 @@ import org.opensearch.migrations.Version;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
+import com.rfs.RfsMigrateDocuments.RunParameters;
 import com.rfs.cms.CoordinateWorkHttpClient;
 import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.cms.OpenSearchWorkCoordinator;
@@ -189,36 +190,37 @@ public class SourceTestBase {
             final var nextClockShift = (int) (clockJitter.nextDouble() * ms_window) - (ms_window / 2);
             log.info("nextClockShift=" + nextClockShift);
 
-
             Function<Path, LuceneDocumentsReader> readerFactory = path -> new FilteredLuceneDocumentsReader(path, sourceResourceProvider.getSoftDeletesPossible(),
                 sourceResourceProvider.getSoftDeletesFieldData(), terminatingDocumentFilter);
 
-            return RfsMigrateDocuments.run(
-                readerFactory,
-                new DocumentReindexer(new OpenSearchClient(ConnectionContextTestParams.builder()
+            try (var workCoordinator = new OpenSearchWorkCoordinator(
+                new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                     .host(targetAddress)
-                    .compressionEnabled(compressionEnabled)
                     .build()
-                    .toConnectionContext()), 1000, Long.MAX_VALUE, 1),
-                new OpenSearchWorkCoordinator(
-                    new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
+                    .toConnectionContext()),
+                TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                UUID.randomUUID().toString(),
+                Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))
+            )) {
+                return RfsMigrateDocuments.run(RunParameters.builder()
+                    .leaseExpireTrigger(processManager)
+                    .workCoordinator(workCoordinator)
+                    .snapshotName(snapshotName)
+                    .snapshotReader(sourceResourceProvider)
+                    .snapshotUnpacker(unpackerFactory)
+                    .documentReader(readerFactory)
+                    .reindexer(new DocumentReindexer(new OpenSearchClient(ConnectionContextTestParams.builder()
                         .host(targetAddress)
+                        .compressionEnabled(compressionEnabled)
                         .build()
-                        .toConnectionContext()),
-                    TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                    UUID.randomUUID().toString(),
-                    Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))
-                ),
-                Duration.ofMinutes(10),
-                processManager,
-                sourceResourceProvider.getIndexMetadata(),
-                snapshotName,
-                indexAllowlist,
-                sourceResourceProvider.getShardMetadata(),
-                unpackerFactory,
-                MAX_SHARD_SIZE_BYTES,
-                context
-            );
+                        .toConnectionContext()), 1000, Long.MAX_VALUE, 1))
+                    .maxInitialLeaseDuration(Duration.ofMinutes(10))
+                    .indexAllowlist(indexAllowlist)
+                    .maxShardSizeBytes(MAX_SHARD_SIZE_BYTES)
+                    .tracingContext(context)
+                    .build()
+                );
+            }
         } finally {
             deleteTree(tempDir);
         }
