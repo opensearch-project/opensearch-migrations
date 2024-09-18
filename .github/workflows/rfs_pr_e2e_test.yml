@@ -17,31 +17,10 @@ permissions:
 jobs:
   rfs-e2e-aws-test:
     runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./jenkins/webhookTriggers
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: lewijacn/trigger-jenkins@v1.0.0
         with:
-          python-version: ${{ env.python-version }}
-      - name: Install dependencies for python webhook
-        run: |
-          python3 -m pip install --upgrade pipenv
-          pipenv install --deploy
-      - name: Trigger jenkins job and wait for completion
-        run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request" ]]; then
-            branch_name="${{ github.event.pull_request.head.ref }}"
-            pr_repo_url="https://github.com/${{ github.event.pull_request.head.repo.full_name }}.git"
-          else
-            branch_name="${{ github.ref_name }}"
-            pr_repo_url="https://github.com/${{ github.repository }}.git"
-          fi
-          echo "Running jenkins test on repo: $pr_repo_url and branch: $branch_name"
-          pipenv run python3 default_webhook_trigger.py \
-            --jenkins_url="https://migrations.ci.opensearch.org" \
-            --pipeline_token="${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}" \
-            --job_name=rfs-default-e2e-test \
-            --job_param="GIT_REPO_URL=$pr_repo_url" \
-            --job_param="GIT_BRANCH=$branch_name"
+          jenkins_url: "https://migrations.ci.opensearch.org"
+          job_name: "rfs-default-e2e-test"
+          api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
+          job_params: "GIT_REPO_URL=$pr_repo_url,GIT_BRANCH=$branch_name"
