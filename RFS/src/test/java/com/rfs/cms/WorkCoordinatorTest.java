@@ -13,6 +13,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
@@ -83,7 +84,6 @@ public class WorkCoordinatorTest {
 
     @Test
     public void testAcquireLeaseHasNoUnnecessaryConflicts() throws Exception {
-        log.error("Hello");
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         final var NUM_DOCS = 100;
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
@@ -117,6 +117,7 @@ public class WorkCoordinatorTest {
     }
 
     @Test
+    @Tag("isolatedTest")
     public void testAcquireLeaseForQuery() throws Exception {
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         final var NUM_DOCS = 40;

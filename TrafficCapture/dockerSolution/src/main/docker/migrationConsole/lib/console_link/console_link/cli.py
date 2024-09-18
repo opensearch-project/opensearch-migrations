@@ -7,6 +7,7 @@ import console_link.middleware.backfill as backfill_
 import console_link.middleware.snapshot as snapshot_
 import console_link.middleware.metadata as metadata_
 import console_link.middleware.replay as replay_
+import console_link.middleware.kafka as kafka_
 
 from console_link.models.utils import ExitCode
 from console_link.environment import Environment
@@ -311,11 +312,23 @@ def metadata_group(ctx):
     ignore_unknown_options=True,
     help_option_names=[]
 ))
-@click.option("--detach", is_flag=True, help="Run metadata migration in detached mode")
 @click.argument('extra_args', nargs=-1, type=click.UNPROCESSED)
 @click.pass_obj
-def migrate_metadata_cmd(ctx, detach, extra_args):
-    exitcode, message = metadata_.migrate(ctx.env.metadata, detach, extra_args)
+def migrate_metadata_cmd(ctx, extra_args):
+    exitcode, message = metadata_.migrate(ctx.env.metadata, extra_args)
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(message)
+
+
+@metadata_group.command(name="evaluate", context_settings=dict(
+    ignore_unknown_options=True,
+    help_option_names=[]
+))
+@click.argument('extra_args', nargs=-1, type=click.UNPROCESSED)
+@click.pass_obj
+def evaluate_metadata_cmd(ctx, extra_args):
+    exitcode, message = metadata_.evaluate(ctx.env.metadata, extra_args)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -385,7 +398,7 @@ def kafka_group(ctx):
 @click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to create')
 @click.pass_obj
 def create_topic_cmd(ctx, topic_name):
-    result = ctx.env.kafka.create_topic(topic_name=topic_name)
+    result = kafka_.create_topic(ctx.env.kafka, topic_name=topic_name)
     click.echo(result.value)
 
 
@@ -396,13 +409,13 @@ def create_topic_cmd(ctx, topic_name):
 @click.pass_obj
 def delete_topic_cmd(ctx, acknowledge_risk, topic_name):
     if acknowledge_risk:
-        result = ctx.env.kafka.delete_topic(topic_name=topic_name)
+        result = kafka_.delete_topic(ctx.env.kafka, topic_name=topic_name)
         click.echo(result.value)
     else:
         if click.confirm('Deleting a topic will irreversibly delete all captured traffic records stored in that '
                          'topic. Are you sure you want to continue?'):
             click.echo(f"Performing delete topic operation on {topic_name} topic...")
-            result = ctx.env.kafka.delete_topic(topic_name=topic_name)
+            result = kafka_.delete_topic(ctx.env.kafka, topic_name=topic_name)
             click.echo(result.value)
         else:
             click.echo("Aborting command.")
@@ -412,7 +425,7 @@ def delete_topic_cmd(ctx, acknowledge_risk, topic_name):
 @click.option('--group-name', default="logging-group-default", help='Specify a group name to describe')
 @click.pass_obj
 def describe_group_command(ctx, group_name):
-    result = ctx.env.kafka.describe_consumer_group(group_name=group_name)
+    result = kafka_.describe_consumer_group(ctx.env.kafka, group_name=group_name)
     click.echo(result.value)
 
 
@@ -420,7 +433,7 @@ def describe_group_command(ctx, group_name):
 @click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to describe')
 @click.pass_obj
 def describe_topic_records_cmd(ctx, topic_name):
-    result = ctx.env.kafka.describe_topic_records(topic_name=topic_name)
+    result = kafka_.describe_topic_records(ctx.env.kafka, topic_name=topic_name)
     click.echo(result.value)
 
 # ##################### UTILITIES ###################

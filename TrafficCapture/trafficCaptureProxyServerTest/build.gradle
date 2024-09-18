@@ -31,7 +31,7 @@ dependencies {
     implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_core', withoutBom
     implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_http', withoutBom
     implementation group: 'org.apache.jmeter', name: 'ApacheJMeter_config', withoutBom
-    implementation group: 'com.beust', name: 'jcommander'
+    implementation group: 'org.jcommander', name: 'jcommander'
 }
 
 CommonConfigurations.applyCommonConfigurations(project)

@@ -20,20 +20,16 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import com.rfs.common.FileSystemRepo;
-import com.rfs.common.FileSystemSnapshotCreator;
-import com.rfs.common.OpenSearchClient;
-import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.framework.PreloadedSearchClusterContainer;
 import com.rfs.framework.SearchClusterContainer;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 
-@Tag("longTest")
+@Tag("isolatedTest")
 @Slf4j
 public class ParallelDocumentMigrationsTest extends SourceTestBase {
 
@@ -80,7 +76,6 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
     ) throws Exception {
         var executorService = Executors.newFixedThreadPool(numWorkers);
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
-        final var testMetadataMigrationContext = MetadataMigrationTestContext.factory().noOtelTracking();
         final var testDocMigrationContext = DocumentMigrationTestContext.factory()
             .withAllTracking();
 
@@ -101,32 +96,20 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                 return null;
             }, executorService)).join();
 
-            final var SNAPSHOT_NAME = "test_snapshot";
+            var args = new CreateSnapshot.Args();
+            args.snapshotName = "test_snapshot";
+            args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
+            args.sourceArgs.host = esSourceContainer.getUrl();
+
+            var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
+            snapshotCreator.run();
+
+
             final List<String> INDEX_ALLOWLIST = List.of();
-            CreateSnapshot.run(
-                c -> new FileSystemSnapshotCreator(
-                    SNAPSHOT_NAME,
-                    c,
-                    SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
-                    testSnapshotContext.createSnapshotCreateContext()
-                ),
-                new OpenSearchClient(ConnectionContextTestParams.builder()
-                    .host(esSourceContainer.getUrl())
-                    .build()
-                    .toConnectionContext()),
-                false
-            );
             var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
             try {
                 esSourceContainer.copySnapshotData(tempDir.toString());
-
-                var targetClient = new OpenSearchClient(ConnectionContextTestParams.builder()
-                    .host(esSourceContainer.getUrl())
-                    .build()
-                    .toConnectionContext());
                 var sourceRepo = new FileSystemRepo(tempDir);
-                migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, List.of(), List.of(), List.of(), INDEX_ALLOWLIST, testMetadataMigrationContext, baseSourceImageVersion.getVersion());
-
                 var workerFutures = new ArrayList<CompletableFuture<Integer>>();
                 var runCounter = new AtomicInteger();
                 final var clockJitter = new Random(1);
@@ -136,7 +119,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                         CompletableFuture.supplyAsync(
                             () -> migrateDocumentsSequentially(
                                 sourceRepo,
-                                SNAPSHOT_NAME,
+                                args.snapshotName,
                                 INDEX_ALLOWLIST,
                                 osTargetContainer.getUrl(),
                                 runCounter,
