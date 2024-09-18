@@ -7,7 +7,9 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class ProcessHelpers {
-    private static final String DEFAULT_NODE_ID = "generated_" + UUID.randomUUID().toString();
+    private static final String DEFAULT_NODE_ID = "generated_" + UUID.randomUUID();
+
+    private ProcessHelpers() {}
 
     public static String getNodeInstanceName() {
         var nodeId = Optional.of("ECS_TASK_ID").map(System::getenv)
