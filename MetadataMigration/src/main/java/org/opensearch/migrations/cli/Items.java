@@ -5,6 +5,7 @@ import java.util.stream.Collectors;
 
 import lombok.Builder;
 import lombok.Data;
+import lombok.NonNull;
 
 /**
  * Either items that are candidates for migration or have been migrated;
@@ -12,37 +13,42 @@ import lombok.Data;
 @Builder
 @Data
 public class Items {
-    public boolean dryRun;
-    public List<String> indexTemplates;
-    public List<String> componentTemplates;
-    public List<String> indexes;
-    public List<String> aliases;
+    static final String NONE_FOUND_MARKER = "<NONE FOUND>";
+    private final boolean dryRun;
+    @NonNull
+    private final List<String> indexTemplates;
+    @NonNull
+    private final List<String> componentTemplates;
+    @NonNull
+    private final List<String> indexes;
+    @NonNull
+    private final List<String> aliases;
 
-    public String toString() {
+    public String asCliOutput() {
         var sb = new StringBuilder();
         if (isDryRun()) {
             sb.append("Migration Candidates:" + System.lineSeparator());
         } else {
             sb.append("Migrated Items:" + System.lineSeparator());
         }
-        sb.append("   Index Templates:" + System.lineSeparator());
-        sb.append("      " + getPrintableList(getIndexTemplates()) + System.lineSeparator());
+        sb.append(Format.indentToLevel(1) + "Index Templates:" + System.lineSeparator());
+        sb.append(Format.indentToLevel(2) + getPrintableList(getIndexTemplates()) + System.lineSeparator());
         sb.append(System.lineSeparator());
-        sb.append("   Component Templates:" + System.lineSeparator());
-        sb.append("      " + getPrintableList(getComponentTemplates()) + System.lineSeparator());
+        sb.append(Format.indentToLevel(1) + "Component Templates:" + System.lineSeparator());
+        sb.append(Format.indentToLevel(2) +getPrintableList(getComponentTemplates()) + System.lineSeparator());
         sb.append(System.lineSeparator());
-        sb.append("   Indexes:" + System.lineSeparator());
-        sb.append("      " + getPrintableList(getIndexes()) + System.lineSeparator());
+        sb.append(Format.indentToLevel(1) + "Indexes:" + System.lineSeparator());
+        sb.append(Format.indentToLevel(2) + getPrintableList(getIndexes()) + System.lineSeparator());
         sb.append(System.lineSeparator());
-        sb.append("   Aliases:" + System.lineSeparator());
-        sb.append("      " + getPrintableList(getAliases()) + System.lineSeparator());
+        sb.append(Format.indentToLevel(1) + "Aliases:" + System.lineSeparator());
+        sb.append(Format.indentToLevel(2) +getPrintableList(getAliases()) + System.lineSeparator());
         sb.append(System.lineSeparator());
         return sb.toString();
     }
 
     private String getPrintableList(List<String> list) {
         if (list == null || list.isEmpty()) {
-            return "<NONE FOUND>";
+            return NONE_FOUND_MARKER;
         }
         return list.stream().sorted().collect(Collectors.joining(", "));
     }
