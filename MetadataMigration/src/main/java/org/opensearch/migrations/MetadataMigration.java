@@ -77,7 +77,7 @@ public class MetadataMigration {
                 result = meta.evaluate(evaluateArgs).execute(context);
                 break;
         }
-        log.info(result.toString());
+        log.atInfo().setMessage("{}").addArgument(result::asCliOutput).log();
         System.exit(result.getExitCode());
     }
 
