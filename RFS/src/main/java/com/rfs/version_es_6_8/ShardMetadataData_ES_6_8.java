@@ -7,7 +7,6 @@ import java.util.List;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonParser;
-import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.DeserializationContext;
 import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonNode;
@@ -108,8 +107,7 @@ public class ShardMetadataData_ES_6_8 implements ShardMetadata {
 
     @Override
     public List<ShardFileInfo> getFiles() {
-        List<ShardFileInfo> convertedFiles = new ArrayList<>(files);
-        return convertedFiles;
+        return new ArrayList<>(files);
     }
 
     @Override
@@ -198,14 +196,14 @@ public class ShardMetadataData_ES_6_8 implements ShardMetadata {
             }
 
             long totalLength = length;
-            long numberOfParts = totalLength / partBytes;
+            long numberOfPartsTemp = totalLength / partBytes;
             if (totalLength % partBytes > 0) {
-                numberOfParts++;
+                numberOfPartsTemp++;
             }
-            if (numberOfParts == 0) {
-                numberOfParts++;
+            if (numberOfPartsTemp == 0) {
+                numberOfPartsTemp++;
             }
-            this.numberOfParts = numberOfParts;
+            this.numberOfParts = numberOfPartsTemp;
         }
 
         @Override
@@ -298,8 +296,7 @@ public class ShardMetadataData_ES_6_8 implements ShardMetadata {
 
     public static class FileInfoRawDeserializer extends JsonDeserializer<FileInfoRaw> {
         @Override
-        public FileInfoRaw deserialize(JsonParser jp, DeserializationContext ctxt) throws IOException,
-            JsonProcessingException {
+        public FileInfoRaw deserialize(JsonParser jp, DeserializationContext ctxt) throws IOException {
 
             JsonNode rootNode = jp.getCodec().readTree(jp);
 

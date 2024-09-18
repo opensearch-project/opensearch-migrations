@@ -49,8 +49,7 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
 
     @Override
     public List<SnapshotRepo.Snapshot> getSnapshots() {
-        List<SnapshotRepo.Snapshot> convertedList = new ArrayList<>(getRepoData().snapshots);
-        return convertedList;
+        return new ArrayList<>(getRepoData().snapshots);
     }
 
     @Override
