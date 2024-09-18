@@ -18,7 +18,8 @@ jobs:
   rfs-e2e-aws-test:
     runs-on: ubuntu-latest
     steps:
-      - uses: lewijacn/trigger-jenkins@v1.0.0
+      - name: Jenkins Job Trigger and Monitor
+        uses: lewijacn/jenkins-trigger@1.0.0
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
           job_name: "rfs-default-e2e-test"
