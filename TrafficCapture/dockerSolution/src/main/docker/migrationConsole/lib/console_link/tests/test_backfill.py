@@ -133,6 +133,17 @@ def test_get_backfill_unsupported_type():
     assert "fetch" in str(excinfo.value.args[1])
 
 
+def test_get_backfill_multiple_types():
+    unknown_config = {
+        "fetch": {"data": "xyz"},
+        "new_backfill": {"data": "abc"}
+    }
+    with pytest.raises(UnsupportedBackfillTypeError) as excinfo:
+        get_backfill(unknown_config, None, None)
+    assert "fetch" in excinfo.value.args[1]
+    assert "new_backfill" in excinfo.value.args[1]
+
+
 def test_cant_instantiate_with_multiple_types():
     config = {
         "opensearch_ingestion": {
