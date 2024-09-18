@@ -5,29 +5,29 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.rfs.models.IndexMetadata;
 import com.rfs.transformers.TransformFunctions;
 
+import lombok.Getter;
+
 public class IndexMetadataData_ES_7_10 implements IndexMetadata {
-    private ObjectNode root;
+    @Getter
+    private final ObjectNode rawJson;
     private ObjectNode mappings;
     private ObjectNode settings;
-    private String indexId;
-    private String indexName;
+    @Getter
+    private final String id;
+    @Getter
+    private final String name;
 
     public IndexMetadataData_ES_7_10(ObjectNode root, String indexId, String indexName) {
-        this.root = root;
+        this.rawJson = root;
         this.mappings = null;
         this.settings = null;
-        this.indexId = indexId;
-        this.indexName = indexName;
+        this.id = indexId;
+        this.name = indexName;
     }
 
     @Override
     public ObjectNode getAliases() {
-        return (ObjectNode) root.get("aliases");
-    }
-
-    @Override
-    public String getId() {
-        return indexId;
+        return (ObjectNode) rawJson.get("aliases");
     }
 
     @Override
@@ -36,15 +36,10 @@ public class IndexMetadataData_ES_7_10 implements IndexMetadata {
             return mappings;
         }
 
-        ObjectNode mappingsNode = (ObjectNode) root.get("mappings");
+        ObjectNode mappingsNode = (ObjectNode) rawJson.get("mappings");
         mappings = mappingsNode;
 
         return mappings;
-    }
-
-    @Override
-    public String getName() {
-        return indexName;
     }
 
     @Override
@@ -58,7 +53,7 @@ public class IndexMetadataData_ES_7_10 implements IndexMetadata {
             return settings;
         }
 
-        ObjectNode treeSettings = TransformFunctions.convertFlatSettingsToTree((ObjectNode) root.get("settings"));
+        ObjectNode treeSettings = TransformFunctions.convertFlatSettingsToTree((ObjectNode) rawJson.get("settings"));
 
         settings = treeSettings;
 
@@ -66,12 +61,7 @@ public class IndexMetadataData_ES_7_10 implements IndexMetadata {
     }
 
     @Override
-    public ObjectNode rawJson() {
-        return root;
-    }
-
-    @Override
     public IndexMetadata deepCopy() {
-        return new IndexMetadataData_ES_7_10(root.deepCopy(), indexId, indexName);
+        return new IndexMetadataData_ES_7_10(rawJson.deepCopy(), id, name);
     }
 }

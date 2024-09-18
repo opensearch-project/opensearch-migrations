@@ -6,10 +6,9 @@ import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 import com.fasterxml.jackson.dataformat.smile.SmileGenerator;
 
+
 public class ElasticsearchConstants_ES_6_8 {
-    private ElasticsearchConstants_ES_6_8() {
-        throw new UnsupportedOperationException("This class is not meant to be instantiated");
-    }
+    private ElasticsearchConstants_ES_6_8() {}
 
     public static final int BUFFER_SIZE_IN_BYTES;
     public static final SmileFactory SMILE_FACTORY;

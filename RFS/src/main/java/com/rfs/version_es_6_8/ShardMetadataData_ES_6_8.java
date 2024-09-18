@@ -1,7 +1,7 @@
 package com.rfs.version_es_6_8;
 
 import java.io.IOException;
-import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
@@ -16,19 +16,22 @@ import org.apache.lucene.util.BytesRef;
 import com.rfs.models.ShardFileInfo;
 import com.rfs.models.ShardMetadata;
 
+import lombok.Getter;
+
+@Getter
 public class ShardMetadataData_ES_6_8 implements ShardMetadata {
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
-    private String snapshotName;
-    private String indexName;
-    private String indexId;
-    private int shardId;
-    private int indexVersion;
-    private long startTime;
-    private long time;
-    private int numberOfFiles;
-    private long totalSize;
-    private List<FileInfo> files;
+    private final String snapshotName;
+    private final String indexName;
+    private final String indexId;
+    private final int shardId;
+    private final int indexVersion;
+    private final long startTime;
+    private final long time;
+    private final int numberOfFiles;
+    private final long totalSizeBytes;
+    private final List<ShardFileInfo> files;
 
     public ShardMetadataData_ES_6_8(
         String snapshotName,
@@ -50,64 +53,14 @@ public class ShardMetadataData_ES_6_8 implements ShardMetadata {
         this.startTime = startTime;
         this.time = time;
         this.numberOfFiles = numberOfFiles;
-        this.totalSize = totalSize;
+        this.totalSizeBytes = totalSize;
 
         // Convert the raw file metadata to the FileMetadata class
         List<FileInfo> convertedFiles = new java.util.ArrayList<>();
         for (FileInfoRaw fileMetadataRaw : files) {
             convertedFiles.add(FileInfo.fromFileMetadataRaw(fileMetadataRaw));
         }
-        this.files = convertedFiles;
-    }
-
-    @Override
-    public String getSnapshotName() {
-        return snapshotName;
-    }
-
-    @Override
-    public String getIndexName() {
-        return indexName;
-    }
-
-    @Override
-    public String getIndexId() {
-        return indexId;
-    }
-
-    @Override
-    public int getShardId() {
-        return shardId;
-    }
-
-    @Override
-    public int getIndexVersion() {
-        return indexVersion;
-    }
-
-    @Override
-    public long getStartTime() {
-        return startTime;
-    }
-
-    @Override
-    public long getTime() {
-        return time;
-    }
-
-    @Override
-    public int getNumberOfFiles() {
-        return numberOfFiles;
-    }
-
-    @Override
-    public long getTotalSizeBytes() {
-        return totalSize;
-    }
-
-    @Override
-    public List<ShardFileInfo> getFiles() {
-        return new ArrayList<>(files);
+        this.files = Collections.unmodifiableList(convertedFiles);
     }
 
     @Override
@@ -148,15 +101,16 @@ public class ShardMetadataData_ES_6_8 implements ShardMetadata {
         }
     }
 
+    @Getter
     public static class FileInfo implements ShardFileInfo {
-        private String name;
-        private String physicalName;
-        private long length;
-        private String checksum;
-        private long partSize;
-        private long numberOfParts;
-        private String writtenBy;
-        private BytesRef metaHash;
+        private final String name;
+        private final String physicalName;
+        private final long length;
+        private final String checksum;
+        private final long partSize;
+        private final long numberOfParts;
+        private final String writtenBy;
+        private final BytesRef metaHash;
 
         public static FileInfo fromFileMetadataRaw(FileInfoRaw fileMetadataRaw) {
             return new FileInfo(
@@ -187,7 +141,9 @@ public class ShardMetadataData_ES_6_8 implements ShardMetadata {
             this.writtenBy = writtenBy;
             this.metaHash = metaHash;
 
-            // Calculate the number of parts the file is chopped into; taken from Elasticsearch code
+            // Calculate the number of parts the file is chopped into; taken from Elasticsearch code.  When Elasticsearch makes
+            // a snapshot and finds Lucene files over a specified size, it will split those files into multiple parts based on the
+            // maximum part size.
             // See:
             // https://github.com/elastic/elasticsearch/blob/6.8/server/src/main/java/org/elasticsearch/index/snapshots/blobstore/BlobStoreIndexShardSnapshot.java#L68
             long partBytes = Long.MAX_VALUE;
@@ -204,46 +160,6 @@ public class ShardMetadataData_ES_6_8 implements ShardMetadata {
                 numberOfPartsTemp++;
             }
             this.numberOfParts = numberOfPartsTemp;
-        }
-
-        @Override
-        public String getName() {
-            return name;
-        }
-
-        @Override
-        public String getPhysicalName() {
-            return physicalName;
-        }
-
-        @Override
-        public long getLength() {
-            return length;
-        }
-
-        @Override
-        public String getChecksum() {
-            return checksum;
-        }
-
-        @Override
-        public long getPartSize() {
-            return partSize;
-        }
-
-        @Override
-        public String getWrittenBy() {
-            return writtenBy;
-        }
-
-        @Override
-        public BytesRef getMetaHash() {
-            return metaHash;
-        }
-
-        @Override
-        public long getNumberOfParts() {
-            return numberOfParts;
         }
 
         // The Snapshot file may be split into multiple blobs; use this to find the correct file name

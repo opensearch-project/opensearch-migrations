@@ -23,7 +23,7 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
     }
 
     public List<SnapshotRepo.Index> getIndices() {
-        return getRepoData().indices.entrySet()
+        return getRepoData().getIndices().entrySet()
             .stream()
             .map(entry -> SnapshotRepoData_ES_7_10.Index.fromRawIndex(entry.getKey(), entry.getValue()))
             .collect(Collectors.toList());
@@ -32,15 +32,15 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
         List<SnapshotRepo.Index> matchedIndices = new ArrayList<>();
-        SnapshotRepoData_ES_7_10.Snapshot targetSnapshot = getRepoData().snapshots.stream()
-            .filter(snapshot -> snapshotName.equals(snapshot.name))
+        SnapshotRepoData_ES_7_10.Snapshot targetSnapshot = getRepoData().getSnapshots().stream()
+            .filter(snapshot -> snapshotName.equals(snapshot.getName()))
             .findFirst()
             .orElse(null);
 
         if (targetSnapshot != null) {
-            targetSnapshot.indexMetadataLookup.keySet().forEach(indexId -> {
-                getRepoData().indices.forEach((indexName, rawIndex) -> {
-                    if (indexId.equals(rawIndex.id)) {
+            targetSnapshot.getIndexMetadataLookup().keySet().forEach(indexId -> {
+                getRepoData().getIndices().forEach((indexName, rawIndex) -> {
+                    if (indexId.equals(rawIndex.getId())) {
                         matchedIndices.add(SnapshotRepoData_ES_7_10.Index.fromRawIndex(indexName, rawIndex));
                     }
                 });
@@ -51,13 +51,13 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
 
     @Override
     public List<SnapshotRepo.Snapshot> getSnapshots() {
-        return new ArrayList<>(getRepoData().snapshots);
+        return new ArrayList<>(getRepoData().getSnapshots());
     }
 
     public String getSnapshotId(String snapshotName) {
-        for (SnapshotRepoData_ES_7_10.Snapshot snapshot : getRepoData().snapshots) {
-            if (snapshot.name.equals(snapshotName)) {
-                return snapshot.uuid;
+        for (SnapshotRepoData_ES_7_10.Snapshot snapshot : getRepoData().getSnapshots()) {
+            if (snapshot.getName().equals(snapshotName)) {
+                return snapshot.getId();
             }
         }
         return null;
@@ -65,7 +65,7 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
 
     @Override
     public String getIndexId(String indexName) {
-        return getRepoData().indices.get(indexName).id;
+        return getRepoData().getIndices().get(indexName).getId();
     }
 
     @Override
@@ -79,15 +79,15 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
             return null;
         }
 
-        String metadataLookupKey = getRepoData().snapshots.stream()
-            .filter(snapshot -> snapshot.name.equals(snapshotName))
-            .map(snapshot -> snapshot.indexMetadataLookup.get(indexId))
+        String metadataLookupKey = getRepoData().getSnapshots().stream()
+            .filter(snapshot -> snapshot.getName().equals(snapshotName))
+            .map(snapshot -> snapshot.getIndexMetadataLookup().get(indexId))
             .findFirst()
             .orElse(null);
         if (metadataLookupKey == null) {
             return null;
         }
 
-        return getRepoData().indexMetadataIdentifiers.get(metadataLookupKey);
+        return getRepoData().getIndexMetadataIdentifiers().get(metadataLookupKey);
     }
 }

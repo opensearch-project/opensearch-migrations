@@ -10,6 +10,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotRepo.CantParseRepoFile;
+
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.RequiredArgsConstructor;
+
 import com.rfs.common.SourceRepo;
 
 public class SnapshotRepoData_ES_6_8 {
@@ -36,19 +42,20 @@ public class SnapshotRepoData_ES_6_8 {
         return fromRepoFile(file);
     }
 
-    public Path filePath;
-    public List<Snapshot> snapshots;
-    public Map<String, RawIndex> indices;
+    @Getter
+    private Path filePath;
+    @Getter
+    private List<Snapshot> snapshots;
+    @Getter
+    private Map<String, RawIndex> indices;
 
+    @Getter
+    @AllArgsConstructor
+    @NoArgsConstructor
     public static class Snapshot implements SnapshotRepo.Snapshot {
-        public String name;
-        public String uuid;
-        public int state;
-
-        @Override
-        public String getName() {
-            return name;
-        }
+        private String name;
+        private String uuid;
+        private int state;
 
         @Override
         public String getId() {
@@ -56,37 +63,23 @@ public class SnapshotRepoData_ES_6_8 {
         }
     }
 
+    @Getter
+    @AllArgsConstructor
+    @NoArgsConstructor
     public static class RawIndex {
-        public String id;
-        public List<String> snapshots;
+        private String id;
+        private List<String> snapshots;
     }
 
+    @Getter
+    @RequiredArgsConstructor
     public static class Index implements SnapshotRepo.Index {
         public static Index fromRawIndex(String name, RawIndex rawIndex) {
-            Index index = new Index();
-            index.name = name;
-            index.id = rawIndex.id;
-            index.snapshots = rawIndex.snapshots;
-            return index;
+            return new Index(name, rawIndex.id, rawIndex.snapshots);
         }
 
-        public String name;
-        public String id;
-        public List<String> snapshots;
-
-        @Override
-        public String getName() {
-            return name;
-        }
-
-        @Override
-        public String getId() {
-            return id;
-        }
-
-        @Override
-        public List<String> getSnapshots() {
-            return snapshots;
-        }
+        private final String name;
+        private final String id;
+        private final List<String> snapshots;
     }
 }
