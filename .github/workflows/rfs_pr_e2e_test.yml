@@ -19,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Jenkins Job Trigger and Monitor
-        uses: lewijacn/jenkins-trigger@1.0.3
+        uses: lewijacn/jenkins-trigger@main
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
           job_name: "rfs-default-e2e-test"
