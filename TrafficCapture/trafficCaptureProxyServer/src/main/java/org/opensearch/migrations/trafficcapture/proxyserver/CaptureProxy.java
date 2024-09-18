@@ -73,6 +73,7 @@ public class CaptureProxy {
 
     private static final String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
     public static final String DEFAULT_KAFKA_CLIENT_ID = "HttpCaptureProxyProducer";
+    public static final String SUPPORTED_TLS_PROTOCOLS_LIST_KEY = "plugins.security.ssl.http.enabled_protocols";
 
     public static class Parameters {
         @Parameter(required = false,
@@ -204,8 +205,14 @@ public class CaptureProxy {
                 .entrySet().stream()
                 .filter(kvp -> kvp.getKey().startsWith(HTTPS_CONFIG_PREFIX))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        if (!httpsSettings.containsKey(SUPPORTED_TLS_PROTOCOLS_LIST_KEY)) {
+            httpsSettings.put(SUPPORTED_TLS_PROTOCOLS_LIST_KEY, List.of("TLSv1.2", "TLSv1.3"));
+        }
 
         return Settings.builder().loadFromMap(httpsSettings)
+            // Don't bother with configurations the 'transport' (port 9300), which the plugin that we're using
+            // will also configure (& fail) otherwise.  We only use the plugin to setup security for the 'http'
+            // port and then move the SSLEngine into our implementation.
             .put(SSLConfigConstants.SECURITY_SSL_TRANSPORT_ENABLED, false)
             .put("path.home", configParentDirStr)
             .build();
@@ -376,12 +383,10 @@ public class CaptureProxy {
         );
 
         var sksOp = Optional.ofNullable(params.sslConfigFilePath)
-            .map(
-                sslConfigFile -> new DefaultSecurityKeyStore(
-                    getSettings(sslConfigFile),
-                    Paths.get(sslConfigFile).toAbsolutePath().getParent()
-                )
-            );
+            .map(sslConfigFile -> new DefaultSecurityKeyStore(
+                getSettings(sslConfigFile),
+                Paths.get(sslConfigFile).toAbsolutePath().getParent()))
+            .filter(sks -> sks.sslHTTPProvider != null);
 
         sksOp.ifPresent(DefaultSecurityKeyStore::initHttpSSLConfig);
         var proxy = new NettyScanningHttpProxy(params.frontsidePort);
