@@ -74,9 +74,9 @@ class MetricsSource:
         component: Component,
         metric: str,
         statistic: MetricStatistic,
-        startTime: datetime,
+        start_time: datetime,
         period_in_seconds: int = 60,
-        endTime: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
         dimensions: Optional[Dict] = None,
     ) -> List[Tuple[str, float]]:
         raise NotImplementedError
@@ -147,21 +147,21 @@ class CloudwatchMetricsSource(MetricsSource):
         component: Component,
         metric: str,
         statistic: MetricStatistic,
-        startTime: datetime,
+        start_time: datetime,
         period_in_seconds: int = 60,
-        endTime: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
         dimensions: Optional[Dict[str, str]] = None,
     ) -> List[Tuple[str, float]]:
         logger.info(f"{self.__class__.__name__}.get_metric_data called with {component=}, {metric=}, {statistic=},"
-                    f"{startTime=}, {period_in_seconds=}, {endTime=}, {dimensions=}")
+                    f"{start_time=}, {period_in_seconds=}, {end_time=}, {dimensions=}")
 
         aws_dimensions = [{"Name": "OTelLib", "Value": component.value}]
         if dimensions:
             aws_dimensions += [{"Name": k, "Value": v} for k, v in dimensions.items()]
         logger.debug(f"AWS Dimensions set to: {aws_dimensions}")
-        if not endTime:
-            endTime = datetime.now()
-            logger.debug(f"No endTime provided, using current time: {endTime}")
+        if not end_time:
+            end_time = datetime.now()
+            logger.debug(f"No endTime provided, using current time: {end_time}")
         response = self.client.get_metric_data(
             MetricDataQueries=[
                 {
@@ -177,8 +177,8 @@ class CloudwatchMetricsSource(MetricsSource):
                     },
                 },
             ],
-            StartTime=startTime,
-            EndTime=endTime,
+            StartTime=start_time,
+            EndTime=end_time,
             ScanBy="TimestampAscending",
         )
         raise_for_aws_api_error(response)
@@ -199,8 +199,7 @@ def prometheus_component_names(c: Component) -> str:
         return "capture"
     elif c == Component.REPLAYER:
         return "replay"
-    else:
-        raise ValueError(f"Unsupported component: {c}")
+    raise ValueError(f"Unsupported component: {c}")
 
 
 class PrometheusMetricsSource(MetricsSource):
@@ -235,21 +234,21 @@ class PrometheusMetricsSource(MetricsSource):
         component: Component,
         metric: str,
         statistic: MetricStatistic,
-        startTime: datetime,
+        start_time: datetime,
         period_in_seconds: int = 60,
-        endTime: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
         dimensions: Optional[Dict] = None,
     ) -> List[Tuple[str, float]]:
         logger.info(f"{self.__class__.__name__} get_metric_data called with {component=}, {metric=}, {statistic=},"
-                    f"{startTime=}, {period_in_seconds=}, {endTime=}, {dimensions=}")
-        if not endTime:
-            endTime = datetime.now()
+                    f"{start_time=}, {period_in_seconds=}, {end_time=}, {dimensions=}")
+        if not end_time:
+            end_time = datetime.now()
         r = requests.get(
             f"{self.endpoint}/api/v1/query_range",
             params={  # type: ignore
                 "query": f'{metric}{{exported_job="{prometheus_component_names(component)}"}}',
-                "start": startTime.timestamp(),
-                "end": endTime.timestamp(),
+                "start": start_time.timestamp(),
+                "end": end_time.timestamp(),
                 "step": period_in_seconds,
             },
         )
