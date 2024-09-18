@@ -561,42 +561,47 @@ def test_cli_kafka_when_not_defined(runner, source_cluster_only_yaml_path):
 
 
 def test_cli_kafka_create_topic(runner, mocker):
-    # These commands _should_ go through the middleware layer but currently don't
-    # middleware_mock = mocker.spy(middleware.kafka, 'create_topic')
-    # middleware_mock.assert_called_once_with(env.kafka, 'test')
-
+    middleware_mock = mocker.spy(middleware.kafka, 'create_topic')
     model_mock = mocker.patch.object(StandardKafka, 'create_topic')
     result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'create-topic',
                                  '--topic-name', 'test'],
                            catch_exceptions=True)
+
     model_mock.assert_called_once_with(topic_name='test')
+    middleware_mock.assert_called_once()
     assert result.exit_code == 0
 
 
 def test_cli_kafka_delete_topic(runner, mocker):
     model_mock = mocker.patch.object(StandardKafka, 'delete_topic')
+    middleware_mock = mocker.spy(middleware.kafka, 'delete_topic')
     result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'delete-topic',
                                  '--topic-name', 'test', '--acknowledge-risk'],
                            catch_exceptions=True)
     model_mock.assert_called_once_with(topic_name='test')
+    middleware_mock.assert_called_once()
     assert result.exit_code == 0
 
 
 def test_cli_kafka_describe_consumer_group(runner, mocker):
     model_mock = mocker.patch.object(StandardKafka, 'describe_consumer_group')
+    middleware_mock = mocker.spy(middleware.kafka, 'describe_consumer_group')
     result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'describe-consumer-group',
                                  '--group-name', 'test-group'],
                            catch_exceptions=True)
     model_mock.assert_called_once_with(group_name='test-group')
+    middleware_mock.assert_called_once()
     assert result.exit_code == 0
 
 
 def test_cli_kafka_describe_topic(runner, mocker):
     model_mock = mocker.patch.object(StandardKafka, 'describe_topic_records')
+    middleware_mock = mocker.spy(middleware.kafka, 'describe_topic_records')
     result = runner.invoke(cli, ['-vv', '--config-file', str(VALID_SERVICES_YAML), 'kafka', 'describe-topic-records',
                                  '--topic-name', 'test'],
                            catch_exceptions=True)
     model_mock.assert_called_once_with(topic_name='test')
+    middleware_mock.assert_called_once()
     assert result.exit_code == 0
 
 
