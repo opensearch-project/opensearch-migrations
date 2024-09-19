@@ -93,7 +93,7 @@ See the [wiki - Configuration Options](https://github.com/opensearch-project/ope
 ## How to use the deployed Migration tools?
 See the [wiki](https://github.com/opensearch-project/opensearch-migrations/wiki) for steps on how to use this tooling to perform different migrations.
 
-## Accessing the Migration Console Hub
+## Accessing the Migration Console
 
 The Migration Console is a deployed ECS service container in this solution that should be accessed for managing/executing different phases of a migration
 
