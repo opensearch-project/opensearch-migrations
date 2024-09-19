@@ -16,4 +16,13 @@ public class JsonKeysForHttpMessage {
      * the payload object will be an empty map.
      */
     public static final String INLINED_JSON_BODY_DOCUMENT_KEY = "inlinedJsonBody";
+    /**
+     * for the type application
+     */
+    public static final String INLINED_NDJSON_BODIES_DOCUMENT_KEY = "inlinedJsonSequenceBodies";
+    /**
+     * This maps to a ByteBuf that is owned by the caller.
+     * Any consumers should retain if they need to access it later.  This may be UTF8, UTF16 encoded, or something else.
+     */
+    public static final String INLINED_BINARY_BODY_DOCUMENT_KEY = "inlinedBinaryBody";
 }
