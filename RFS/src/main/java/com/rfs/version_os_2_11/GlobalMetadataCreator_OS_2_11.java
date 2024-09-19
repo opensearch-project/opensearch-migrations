@@ -44,7 +44,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         return createTemplates(
             metadata.getTemplates(),
             legacyTemplateAllowlist,
-            TemplateTypes.LegacyIndexTemplate,
+            TemplateTypes.LEGACY_INDEX_TEMPLATE,
             mode,
             context
         );
@@ -54,7 +54,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         return createTemplates(
             metadata.getComponentTemplates(),
             componentTemplateAllowlist,
-            TemplateTypes.ComponentTemplates,
+            TemplateTypes.COMPONENT_TEMPLATE,
             mode,
             context
         );
@@ -64,7 +64,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         return createTemplates(
             metadata.getIndexTemplates(),
             indexTemplateAllowlist,
-            TemplateTypes.IndexTemplate,
+            TemplateTypes.INDEX_TEMPLATE,
             mode,
             context
         );
@@ -72,19 +72,19 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
 
     @AllArgsConstructor
     private enum TemplateTypes {
-        IndexTemplate(
-            (client, name, body, context) -> client.createIndexTemplate(name, body, context.createMigrateTemplateContext()),
-            (client, name) -> client.hasIndexTemplate(name)
+        INDEX_TEMPLATE(
+            (targetClient, name, body, context) -> targetClient.createIndexTemplate(name, body, context.createMigrateTemplateContext()),
+            (targetClient, name) -> targetClient.hasIndexTemplate(name)
         ),
 
-        LegacyIndexTemplate(
-            (client, name, body, context) -> client.createLegacyTemplate(name, body, context.createMigrateLegacyTemplateContext()),
-            (client, name) -> client.hasLegacyTemplate(name)
+        LEGACY_INDEX_TEMPLATE(
+            (targetClient, name, body, context) -> targetClient.createLegacyTemplate(name, body, context.createMigrateLegacyTemplateContext()),
+            (targetClient, name) -> targetClient.hasLegacyTemplate(name)
         ),
 
-        ComponentTemplates(
-            (client, name, body, context) -> client.createComponentTemplate(name, body, context.createComponentTemplateContext()),
-            (client, name) -> client.hasComponentTemplate(name)
+        COMPONENT_TEMPLATE(
+            (targetClient, name, body, context) -> targetClient.createComponentTemplate(name, body, context.createComponentTemplateContext()),
+            (targetClient, name) -> targetClient.hasComponentTemplate(name)
         );
         final TemplateCreator creator;
         final TemplateExistsCheck alreadyExistsCheck;
@@ -118,7 +118,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
             return List.of();
         }
 
-        if (templateAllowlist != null && templateAllowlist.size() == 0) {
+        if (templateAllowlist != null && templateAllowlist.isEmpty()) {
             log.info("No {} in specified allowlist", templateType);
             return List.of();
         } else if (templateAllowlist != null) {
@@ -144,24 +144,21 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
 
         templatesToCreate.forEach((templateName, templateBody) -> {
             log.info("Creating {}: {}", templateType, templateName);
-            switch (mode) {
-                case SIMULATE:
-                    var alreadyExists = templateType.alreadyExistsCheck.templateAlreadyExists(client, templateName);
-                    if (!alreadyExists) {
-                        templateList.add(templateName);
-                    } else {
-                        log.warn("Template {} already exists on the target, it will not be created during a migration", templateName);
-                    }
-                    break;                    
 
-                case PERFORM:
-                    var createdTemplate = templateType.creator.createTemplate(client, templateName, templateBody, context);
-                    if (createdTemplate.isPresent()) {
-                        templateList.add(templateName);
-                    } else {
-                        log.warn("Template {} already exists on the target, unable to create", templateName);
-                    }
-                    break;
+            if (mode == MigrationMode.SIMULATE) {
+                var alreadyExists = templateType.alreadyExistsCheck.templateAlreadyExists(client, templateName);
+                if (!alreadyExists) {
+                    templateList.add(templateName);
+                } else {
+                    log.warn("Template {} already exists on the target, it will not be created during a migration", templateName);
+                }
+            } else if (mode == MigrationMode.PERFORM) {
+                var createdTemplate = templateType.creator.createTemplate(client, templateName, templateBody, context);
+                if (createdTemplate.isPresent()) {
+                    templateList.add(templateName);
+                } else {
+                    log.warn("Template {} already exists on the target, unable to create", templateName);
+                }
             }
         });
 
