@@ -611,12 +611,30 @@ def test_completion_script(runner):
 
 
 def test_tuple_converter(runner, tmp_path):
-    output_file = f"{tmp_path}/converted_tuples.json"
+    # The `multiple_tuples` and `multiple_tuples_parsed` files are formatted as "real" json objects so that
+    # they can be pretty-printed and examined, but they need to be converted to ndjson files to be used by the
+    # CLI command.
+
+    # Make the input file
+    expected_output = f"{TEST_DATA_DIRECTORY}/multiple_tuples.json"
+    with open(expected_output, 'r') as f:
+        output_tuples = json.load(f)
+    ndjson_input_file = f"{tmp_path}/tuples.ndjson"
+    with open(ndjson_input_file, 'w') as f:
+        f.write('\n'.join([json.dumps(record) for record in output_tuples]))
+
+    ndjson_output_file = f"{tmp_path}/converted_tuples.ndjson"
     result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'tuples', 'show',
-                                 '--in', f"{TEST_DATA_DIRECTORY}/multiple_tuples.json",
-                                 '--out', output_file],
+                                 '--in', ndjson_input_file,
+                                 '--out', ndjson_output_file],
                            catch_exceptions=True)
-    assert output_file in result.output
+    assert ndjson_output_file in result.output
     assert result.exit_code == 0
 
-    assert open(output_file).readlines() == open(TEST_DATA_DIRECTORY / "multiple_tuples_parsed.json").readlines()
+    # Open the ndjson output file and compare it to the "real" output file
+    expected_output = f"{TEST_DATA_DIRECTORY}/multiple_tuples_parsed.json"
+    with open(expected_output, 'r') as f:
+        output_tuples = json.load(f)
+    expected_output_as_ndjson = [json.dumps(record) + "\n" for record in output_tuples]
+
+    assert open(ndjson_output_file).readlines() == expected_output_as_ndjson

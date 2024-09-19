@@ -110,7 +110,7 @@ The body of the messages is sometimes gzipped which makes it difficult to repres
 and responses is base64 encoded before it is logged. This makes the files stable, but not human-readable.
 
 We have provided a utility script that can parse these files and output them to a human-readable format: the bodies are
-base64 decoded and parsed as JSON if applicable. They're then saved back to JSON format to stdout or disk.
+base64 decoded and parsed as JSON if applicable. They're then saved back to JSON format to stdout or file.
 
 To use this utility from the Migration Console,
 ```sh
