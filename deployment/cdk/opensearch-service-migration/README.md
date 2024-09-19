@@ -54,10 +54,21 @@ cdk bootstrap --c contextId=demo-deploy
 Further CDK documentation [here](https://docs.aws.amazon.com/cdk/v2/guide/cli.html)
 
 ## Deploying the CDK
+
+### Which configuration options should I use?
+Update the file named `cdk.context.json` in this directory to select migration options for metadata, historical backfill or traffic capture and replay, see details [here](https://github.com/opensearch-project/opensearch-migrations/wiki/Configuration-Options).
+
+### How is the CDK context used in this solution?
 This project uses CDK context parameters to configure deployments. These context values will dictate the composition of your stacks as well as which stacks get deployed.
 
 The full list of available configuration options for this project are listed [here](./options.md). Each option can be provided as an empty string `""` or simply not included, and in each of these 'empty' cases the option will use the project default value (if it exists) or CloudFormation's default value.
 
+Depending on your use-case, you may choose to provide options from both the `cdk.context.json` and the CDK CLI, in which case it is important to know the precedence level for context values. The below order shows these levels with values being passed by the CDK CLI having the most importance
+1. CDK CLI passed context values, e.g. --c stage=dev2 (highest precedence)
+2. Created `cdk.context.json` in the same directory as this README
+3. Existing `default-values.json` in the same directory as this README
+
+### Deploying the demo solution
 A set of demo context values (using the `demo-deploy` label) has been set in the `cdk.context.json` located in this directory, which can be customized or used as is for a quickstart demo solution.
 
 This demo solution can be deployed with the following command:
@@ -80,15 +91,6 @@ To get a list of all the available stack ids that can be deployed/redeployed for
 ```shell
 cdk ls --c contextId=demo-deploy
 ```
-
-
-Depending on your use-case, you may choose to provide options from both the `cdk.context.json` and the CDK CLI, in which case it is important to know the precedence level for context values. The below order shows these levels with values being passed by the CDK CLI having the most importance
-1. CDK CLI passed context values, e.g. --c stage=dev2 (highest precedence)
-2. Created `cdk.context.json` in the same directory as this README
-3. Existing `default-values.json` in the same directory as this README
-
-## Which CDK context options should I use?
-See the [wiki - Configuration Options](https://github.com/opensearch-project/opensearch-migrations/wiki/Configuration-Options) for guidance on which context options should be used for different migrations.
 
 ## How to use the deployed Migration tools?
 See the [wiki](https://github.com/opensearch-project/opensearch-migrations/wiki) for steps on how to use this tooling to perform different migrations.
@@ -162,28 +164,12 @@ Finally, the additional infrastructure can be removed with:
 cdk destroy "*" --c contextId=demo-addon1
 ```
 
-### Configuring SigV4 Replayer Requests (To be removed when CDK autoconfigures this)
-A user can then use the `trafficReplayerExtraArgs` option to specify the Traffic Replayer service argument for enabling SigV4 authentication, which the below sections show. **Note**: As only one authorization header can be specified, the `trafficReplayerEnableClusterFGACAuth` option should not be used if enabling SigV4 authentication for the Traffic Replayer. See [here](#how-is-an-authorization-header-set-for-requests-from-the-replayer-to-the-target-cluster) for more details on how the Traffic Replayer sets its authorization header.
-#### OpenSearch Service
-```shell
-# e.g. --sigv4-auth-header-service-region es,us-east-1
-"trafficReplayerExtraArgs": "--sigv4-auth-header-service-region es,<REGION>"
-```
-
-#### OpenSearch Serverless
-```shell
-# e.g. --sigv4-auth-header-service-region aoss,us-east-1
-"trafficReplayerExtraArgs": "--sigv4-auth-header-service-region aoss,<REGION>"
-```
-
 
 ### How is an Authorization header set for requests from the Replayer to the target cluster?
 
 The Replayer documentation [here](../../../TrafficCapture/trafficReplayer/README.md#authorization-header-for-replayed-requests) explains the reasoning the Replayer uses to determine what auth header it should use when replaying requests to the target cluster.
 
-As it relates to this CDK, the two main avenues for setting an explicit auth header for the Replayer are through the `trafficReplayerEnableClusterFGACAuth` and `trafficReplayerExtraArgs` options
-1. The `trafficReplayerEnableClusterFGACAuth` option will utilize the `--auth-header-user-and-secret` parameter of the Replayer service to create a basic auth header with a username and AWS Secrets Manager secret value. This option requires that a Fine Grained Access Control (FGAC) user be configured (see `fineGrainedManagerUserName` and `fineGrainedManagerUserSecretManagerKeyARN` CDK context options [here](./options.md)) or is running in demo mode (see `enableDemoAdmin` CDK context option).
-2. The `trafficReplayerExtraArgs` option allows a user to directly specify the Replayer parameter they want to use for setting the auth header. For example to enable SigV4 as the auth header for an OpenSearch service in us-east-1, a user could set this option to `--sigv4-auth-header-service-region es,us-east-1`
+As it relates to this CDK, the `targetCluster` configuration option (specifically the `auth` element) that a user provides will dictate which auth the Migration tools will use for communicating with the target cluster
 
 ### Common Deployment Errors
 
