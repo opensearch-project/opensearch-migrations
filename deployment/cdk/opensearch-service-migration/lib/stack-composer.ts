@@ -214,7 +214,7 @@ export class StackComposer {
         const sourceClusterDisabledField = this.getContextForType('sourceClusterDisabled', 'boolean', defaultValues, contextJSON)
         const sourceClusterEndpointField = this.getContextForType('sourceClusterEndpoint', 'string', defaultValues, contextJSON)
         let sourceClusterDefinition = this.getContextForType('sourceCluster', 'object', defaultValues, contextJSON)
-        
+
         if (!sourceClusterDefinition && (sourceClusterEndpointField || sourceClusterDisabledField)) {
             console.warn("`sourceClusterDisabled` and `sourceClusterEndpoint` are being deprecated in favor of a `sourceCluster` object.")
             console.warn("Please update your CDK context block to use the `sourceCluster` object.")
@@ -261,11 +261,11 @@ export class StackComposer {
                 "and in this case, `targetCluster` was provided to define an existing target cluster."
             )
         }
-        
+
         const targetClusterAuth = targetCluster?.auth
         const targetVersion = this.getEngineVersion(targetCluster?.version || engineVersion)
 
-        const requiredFields: { [key: string]: any; } = {"stage":stage, "domainName":domainName}
+        const requiredFields: { [key: string]: any; } = {"stage":stage}
         for (let key in requiredFields) {
             if (!requiredFields[key]) {
                 throw new Error(`Required CDK context field ${key} is not present`)
@@ -274,6 +274,10 @@ export class StackComposer {
         if (addOnMigrationDeployId && vpcId) {
             console.warn("Addon deployments will use the original deployment 'vpcId' regardless of passed 'vpcId' values")
         }
+        if (stage.length > 15) {
+            throw new Error(`Maximum allowed stage name length is 15 characters but received ${stage}`)
+        }
+        const clusterDomainName = domainName ? domainName : `os-cluster-${stage}`
         let preexistingOrContainerTargetEndpoint
         if (targetCluster && osContainerServiceEnabled) {
             throw new Error("The following options are mutually exclusive as only one target cluster can be specified for a given deployment: [targetCluster, osContainerServiceEnabled]")
@@ -348,7 +352,7 @@ export class StackComposer {
         if (!preexistingOrContainerTargetEndpoint) {
             openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
                 version: targetVersion,
-                domainName: domainName,
+                domainName: clusterDomainName,
                 dataNodeInstanceType: dataNodeType,
                 dataNodes: dataNodeCount,
                 dedicatedManagerNodeType: dedicatedManagerNodeType,
