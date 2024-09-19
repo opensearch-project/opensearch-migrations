@@ -6,9 +6,10 @@ import yaml
 
 import console_link.middleware.replay as replay_
 from console_link.models.ecs_service import ECSService
-from console_link.models.factories import get_replayer
+from console_link.models.factories import UnsupportedReplayerError, get_replayer
 from console_link.models.replayer_base import Replayer
 from console_link.models.replayer_ecs import ECSReplayer
+from console_link.models.replayer_docker import DockerReplayer
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 AWS_REGION = "us-east-1"
@@ -116,3 +117,22 @@ def test_replayer_describe_as_json():
     success, output = replay_.describe(replayer, as_json=True)
     assert success
     assert json.loads(output) == config
+
+
+def test_get_docker_replayer():
+    config = {
+        "docker": None
+    }
+    replayer = get_replayer(config)
+    assert isinstance(replayer, DockerReplayer)
+
+
+def test_nonexistent_replayer_type():
+    config = {
+        "new_replayer_type": {
+            "setting": "value"
+        }
+    }
+    with pytest.raises(UnsupportedReplayerError) as exc_info:
+        get_replayer(config)
+    assert 'new_replayer_type' in exc_info.value.args

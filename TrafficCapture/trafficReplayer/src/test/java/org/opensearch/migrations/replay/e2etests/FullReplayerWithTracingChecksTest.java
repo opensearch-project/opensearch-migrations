@@ -52,6 +52,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
     @ParameterizedTest
     @ValueSource(ints = { 1, 2 })
     @ResourceLock("TrafficReplayerRunner")
+    // run in isolation to reduce the chance that there's a broken connection, upsetting the tcpConnection count check
     @Tag("longTest")
     public void testStreamWithRequestsWithCloseIsCommittedOnce(int numRequests) throws Throwable {
         var random = new Random(1);

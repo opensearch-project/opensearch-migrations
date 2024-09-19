@@ -23,7 +23,7 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
     }
 
     public List<SnapshotRepoData_ES_6_8.Index> getIndices() {
-        return getRepoData().indices.entrySet()
+        return getRepoData().getIndices().entrySet()
             .stream()
             .map(entry -> SnapshotRepoData_ES_6_8.Index.fromRawIndex(entry.getKey(), entry.getValue()))
             .collect(Collectors.toList());
@@ -32,14 +32,14 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
     @Override
     public List<SnapshotRepo.Index> getIndicesInSnapshot(String snapshotName) {
         List<SnapshotRepo.Index> matchedIndices = new ArrayList<>();
-        SnapshotRepoData_ES_6_8.Snapshot targetSnapshot = getRepoData().snapshots.stream()
-            .filter(snapshot -> snapshotName.equals(snapshot.name))
+        SnapshotRepoData_ES_6_8.Snapshot targetSnapshot = getRepoData().getSnapshots().stream()
+            .filter(snapshot -> snapshotName.equals(snapshot.getName()))
             .findFirst()
             .orElse(null);
 
         if (targetSnapshot != null) {
-            getRepoData().indices.forEach((indexName, rawIndex) -> {
-                if (rawIndex.snapshots.contains(targetSnapshot.uuid)) {
+            getRepoData().getIndices().forEach((indexName, rawIndex) -> {
+                if (rawIndex.getSnapshots().contains(targetSnapshot.getId())) {
                     matchedIndices.add(SnapshotRepoData_ES_6_8.Index.fromRawIndex(indexName, rawIndex));
                 }
             });
@@ -49,15 +49,14 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
 
     @Override
     public List<SnapshotRepo.Snapshot> getSnapshots() {
-        List<SnapshotRepo.Snapshot> convertedList = new ArrayList<>(getRepoData().snapshots);
-        return convertedList;
+        return new ArrayList<>(getRepoData().getSnapshots());
     }
 
     @Override
     public String getSnapshotId(String snapshotName) {
-        for (SnapshotRepoData_ES_6_8.Snapshot snapshot : getRepoData().snapshots) {
-            if (snapshot.name.equals(snapshotName)) {
-                return snapshot.uuid;
+        for (SnapshotRepoData_ES_6_8.Snapshot snapshot : getRepoData().getSnapshots()) {
+            if (snapshot.getName().equals(snapshotName)) {
+                return snapshot.getId();
             }
         }
         return null;
@@ -65,7 +64,7 @@ public class SnapshotRepoProvider_ES_6_8 implements SnapshotRepo.Provider {
 
     @Override
     public String getIndexId(String indexName) {
-        return getRepoData().indices.get(indexName).id;
+        return getRepoData().getIndices().get(indexName).getId();
     }
 
     @Override

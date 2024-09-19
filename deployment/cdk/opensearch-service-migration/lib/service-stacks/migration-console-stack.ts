@@ -235,13 +235,14 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         const getTargetSecretsPolicy = props.servicesYaml.target_cluster.auth.basicAuth?.password_from_secret_arn ?
             getTargetPasswordAccessPolicy(props.servicesYaml.target_cluster.auth.basicAuth?.password_from_secret_arn) : null;
 
-        const getSourceSecretsPolicy = props.servicesYaml.source_cluster?.auth.basicAuth?.password_from_secret_arn ?
-            getTargetPasswordAccessPolicy(props.servicesYaml.source_cluster?.auth.basicAuth?.password_from_secret_arn) : null;
+        const getSourceSecretsPolicy = props.sourceCluster?.auth.basicAuth?.password_from_secret_arn ?
+            getTargetPasswordAccessPolicy(props.sourceCluster?.auth.basicAuth?.password_from_secret_arn) : null;
 
         // Upload the services.yaml file to Parameter Store
         let servicesYaml = props.servicesYaml
         servicesYaml.source_cluster = props.sourceCluster
         servicesYaml.metadata_migration = new MetadataMigrationYaml();
+        servicesYaml.metadata_migration.source_cluster_version = props.sourceCluster?.version
         if (props.otelCollectorEnabled) {
             const otelSidecarEndpoint = OtelCollectorSidecar.getOtelLocalhostEndpoint();
             if (servicesYaml.metadata_migration) {

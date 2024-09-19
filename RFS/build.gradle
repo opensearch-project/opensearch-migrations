@@ -20,7 +20,7 @@ dependencies {
     implementation project(':coreUtilities')
     implementation project(':transformation')
 
-    implementation group: 'com.beust', name: 'jcommander'
+    implementation group: 'org.jcommander', name: 'jcommander'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
@@ -31,7 +31,7 @@ dependencies {
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
     implementation group: 'org.apache.lucene', name: 'lucene-core'
-    implementation group: 'org.apache.lucene', name: 'lucene-analyzers-common'
+    implementation group: 'org.apache.lucene', name: 'lucene-analysis-common'
     implementation group: 'org.apache.lucene', name: 'lucene-backward-codecs'
     implementation group: 'software.amazon.awssdk', name: 's3'
     implementation group: 'software.amazon.awssdk', name: 's3-transfer-manager'
@@ -49,6 +49,7 @@ dependencies {
     testImplementation 'com.github.docker-java:docker-java-transport-httpclient5:3.3.6'
 
     testImplementation testFixtures(project(path: ':RFS'))
+    testImplementation group: 'org.apache.lucene', name: 'lucene-backward-codecs'
     testImplementation group: 'io.projectreactor', name: 'reactor-test'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'

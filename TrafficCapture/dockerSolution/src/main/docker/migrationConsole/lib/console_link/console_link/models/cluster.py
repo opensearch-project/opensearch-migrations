@@ -60,6 +60,7 @@ SCHEMA = {
         "schema": {
             "endpoint": {"type": "string", "required": True},
             "allow_insecure": {"type": "boolean", "required": False},
+            "version": {"type": "string", "required": False},
             "no_auth": NO_AUTH_SCHEMA,
             "basic_auth": BASIC_AUTH_SCHEMA,
             "sigv4": SIGV4_SCHEMA
@@ -75,6 +76,8 @@ class Cluster:
     """
 
     endpoint: str = ""
+    version: Optional[str] = None
+    aws_secret_arn: Optional[str] = None
     auth_type: Optional[AuthMethod] = None
     auth_details: Optional[Dict[str, Any]] = None
     allow_insecure: bool = False

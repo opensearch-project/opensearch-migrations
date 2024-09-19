@@ -63,7 +63,7 @@ which has comments throughout it to indicate how data percolates and is converte
 
 ## Handlers
 
-With the exception of the preparation around JSON model and its transformation, all the other handlers (compression,
+Except for the conversions around JSON payloads, all the other handlers (compression,
 chunked, and JSON parsing/serialization), use streaming data models via mostly custom handlers. This should minimize the
 memory load (working set size, cache misses, etc). However, attempts have not yet been made to reduce the number of
 allocations. Those optimization may not have extremely high value, especially when JSON parsing will need to create

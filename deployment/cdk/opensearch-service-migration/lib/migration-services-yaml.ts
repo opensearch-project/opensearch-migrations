@@ -1,13 +1,12 @@
-import { EngineVersion } from 'aws-cdk-lib/aws-opensearchservice';
 import { ClusterAuth } from './common-utilities';
 import * as yaml from 'yaml';
 
 export class ClusterYaml {
     endpoint: string = '';
-    version?: EngineVersion;
+    version?: string;
     auth: ClusterAuth;
 
-    constructor({endpoint, auth, version} : {endpoint: string, auth: ClusterAuth, version?: EngineVersion}) {
+    constructor({endpoint, auth, version} : {endpoint: string, auth: ClusterAuth, version?: string}) {
         this.endpoint = endpoint;
         this.auth = auth;
         this.version = version;
@@ -15,6 +14,7 @@ export class ClusterYaml {
     toDict() {
         return {
             endpoint: this.endpoint,
+            version: this.version,
             ...this.auth.toDict(),
             // TODO: figure out how version should be incorporated
             // https://opensearch.atlassian.net/browse/MIGRATIONS-1951
@@ -108,6 +108,7 @@ export class MetadataMigrationYaml {
     from_snapshot: null = null;
     min_replicas: number = 1;
     otel_endpoint: string = '';
+    source_cluster_version?: string;
 }
 
 export class MSKYaml {

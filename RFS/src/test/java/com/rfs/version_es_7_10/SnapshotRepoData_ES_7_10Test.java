@@ -44,8 +44,8 @@ public class SnapshotRepoData_ES_7_10Test {
         final var result = SnapshotRepoData_ES_7_10.fromRepoFile(jsonInFile);
 
         // Verify
-        assertThat(result.minVersion, equalTo("7.9.0"));
-        assertThat(result.indices.size(), equalTo(1));
+        assertThat(result.getMinVersion(), equalTo("7.9.0"));
+        assertThat(result.getIndices().size(), equalTo(1));
     }
 
     @Test
@@ -58,8 +58,8 @@ public class SnapshotRepoData_ES_7_10Test {
         final var result = SnapshotRepoData_ES_7_10.fromRepoFile(jsonInFile);
 
         // Verify
-        assertThat(result.minVersion, equalTo("7.9.0"));
-        assertThat(result.indices.size(), equalTo(1));
+        assertThat(result.getMinVersion(), equalTo("7.9.0"));
+        assertThat(result.getIndices().size(), equalTo(1));
     }
 
     private String insertAtLine(final String source, final String toAdd, final int lineNumber) {

@@ -19,7 +19,8 @@ RUN sed 's/searchguard/plugins.security/g' $ELASTIC_SEARCH_CONFIG_FILE |  \
 # but maybe not for a demo to show individual steps
 RUN /root/enableTlsConfig.sh $ELASTIC_SEARCH_CONFIG_FILE
 # Alter this config line to either enable(searchguard.disabled: false) or disable(searchguard.disabled: true) HTTP auth
-RUN echo "searchguard.disabled: false" >> $ELASTIC_SEARCH_CONFIG_FILE
+RUN echo -n "searchguard.disabled: false" >> $ELASTIC_SEARCH_CONFIG_FILE  && \
+    echo -n "plugins.security.ssl.http.enabled_protocols: ['TLSv1.2', 'TLSv1.3']" >> $PROXY_TLS_CONFIG_FILE
 
 RUN sed -i '/^-Xms/i # Increase default heap to 80% RAM, Requires JDK >= 10' $ELASTIC_SEARCH_JVM_CONFIG_FILE && \
     sed -i 's/^-Xms/#&/' $ELASTIC_SEARCH_JVM_CONFIG_FILE && \
