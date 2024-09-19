@@ -72,7 +72,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         super(DockerImageName.parse(version.imageName));
         this.withExposedPorts(9200, 9300)
             .withEnv(version.getInitializationType().getEnvVariables())
-            .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(1)));
+            .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(5)));
 
         this.containerVersion = version;
     }
@@ -130,7 +130,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
 
         public ContainerVersion(final String imageName, final Version version, INITIALIZATION_FLAVOR initializationType) {
             this.imageName = imageName;
-            this.version = version; 
+            this.version = version;
             this.initializationType = initializationType;
         }
 

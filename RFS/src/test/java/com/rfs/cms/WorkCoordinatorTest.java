@@ -84,7 +84,6 @@ public class WorkCoordinatorTest {
 
     @Test
     public void testAcquireLeaseHasNoUnnecessaryConflicts() throws Exception {
-        log.error("Hello");
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         final var NUM_DOCS = 100;
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "docCreatorWorker")) {

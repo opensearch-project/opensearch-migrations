@@ -305,3 +305,65 @@ def test_valid_cluster_api_call_with_sigv4_auth(requests_mock, aws_credentials):
         assert "Signature=" in auth_header
         assert "es" in auth_header
         assert "us-east-2" in auth_header
+
+
+def test_call_api_via_middleware(requests_mock):
+    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    requests_mock.get(f"{cluster.endpoint}/test_api", json={'test': True})
+
+    response = clusters_.call_api(cluster, '/test_api')
+    assert response.status_code == 200
+    assert response.json() == {'test': True}
+
+
+def test_cat_indices_with_refresh(requests_mock):
+    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    refresh_mock = requests_mock.get(f"{cluster.endpoint}/_refresh")
+    indices_mock = requests_mock.get(f"{cluster.endpoint}/_cat/indices/_all")
+
+    clusters_.cat_indices(cluster, refresh=True)
+    assert refresh_mock.call_count == 1
+    assert indices_mock.call_count == 1
+
+
+def test_clear_indices(requests_mock):
+    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    mock = requests_mock.delete(f"{cluster.endpoint}/*,-.*,-searchguard*,-sg7*,.migrations_working_state")
+    clusters_.clear_indices(cluster)
+    assert mock.call_count == 1
+
+
+def test_run_benchmark_executes_correctly_no_auth(mocker):
+    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    mock = mocker.patch("subprocess.run", autospec=True)
+    workload = "nyctaxis"
+    cluster.execute_benchmark_workload(workload=workload)
+    mock.assert_called_once_with("opensearch-benchmark execute-test --distribution-version=1.0.0 "
+                                 f"--target-host={cluster.endpoint} --workload={workload} --pipeline=benchmark-only"
+                                 " --test-mode --kill-running-processes --workload-params=target_throughput:0.5,"
+                                 "bulk_size:10,bulk_indexing_clients:1,search_clients:1 "
+                                 "--client-options=verify_certs:false", shell=True)
+
+
+def test_run_benchmark_raises_error_sigv4_auth():
+    cluster = create_valid_cluster(auth_type=AuthMethod.SIGV4, details={"region": "eu-west-1", "service": "aoss"})
+    workload = "nyctaxis"
+    with pytest.raises(NotImplementedError):
+        cluster.execute_benchmark_workload(workload=workload)
+
+
+def test_run_benchmark_executes_correctly_basic_auth_and_https(mocker):
+    auth_details = {"username": "admin", "password": "Admin1"}
+    cluster = create_valid_cluster(auth_type=AuthMethod.BASIC_AUTH, details=auth_details)
+    cluster.allow_insecure = False
+
+    mock = mocker.patch("subprocess.run", autospec=True)
+    workload = "nyctaxis"
+    cluster.execute_benchmark_workload(workload=workload)
+    mock.assert_called_once_with("opensearch-benchmark execute-test --distribution-version=1.0.0 "
+                                 f"--target-host={cluster.endpoint} --workload={workload} --pipeline=benchmark-only"
+                                 " --test-mode --kill-running-processes --workload-params=target_throughput:0.5,"
+                                 "bulk_size:10,bulk_indexing_clients:1,search_clients:1 "
+                                 "--client-options=verify_certs:false,use_ssl:true,"
+                                 f"basic_auth_user:{auth_details['username']},"
+                                 f"basic_auth_password:{auth_details['password']}", shell=True)

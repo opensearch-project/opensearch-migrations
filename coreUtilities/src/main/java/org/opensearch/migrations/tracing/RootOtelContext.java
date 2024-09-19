@@ -177,7 +177,6 @@ public class RootOtelContext implements IRootOtelContext {
         String spanName,
         Stream<Span> linkedSpans
     ) {
-        assert forScope.getCurrentSpan() == null;
         var forEnclosingScope = forScope.getEnclosingScope();
         var parentSpan = forEnclosingScope == null ? null : forEnclosingScope.getCurrentSpan();
         var spanBuilder = getOpenTelemetry().getTracer(scopeName).spanBuilder(spanName);

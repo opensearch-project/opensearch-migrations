@@ -1,26 +1,32 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
+import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
-import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
-import java.util.TreeMap;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLException;
 
 import com.google.protobuf.CodedOutputStream;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -38,8 +44,12 @@ import org.opensearch.migrations.trafficcapture.StreamChannelConnectionCaptureSe
 import org.opensearch.migrations.trafficcapture.StreamLifecycleManager;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.KafkaCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.HeaderValueFilteringCapturePredicate;
+import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.BacksideConnectionPool;
+import org.opensearch.migrations.trafficcapture.proxyserver.netty.HeaderAdderHandler;
+import org.opensearch.migrations.trafficcapture.proxyserver.netty.HeaderRemoverHandler;
 import org.opensearch.migrations.trafficcapture.proxyserver.netty.NettyScanningHttpProxy;
+import org.opensearch.migrations.trafficcapture.proxyserver.netty.ProxyChannelInitializer;
 import org.opensearch.migrations.utils.ProcessHelpers;
 import org.opensearch.security.ssl.DefaultSecurityKeyStore;
 import org.opensearch.security.ssl.util.SSLConfigConstants;
@@ -47,6 +57,9 @@ import org.opensearch.security.ssl.util.SSLConfigConstants;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.socket.SocketChannel;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
@@ -60,61 +73,101 @@ public class CaptureProxy {
 
     private static final String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
     public static final String DEFAULT_KAFKA_CLIENT_ID = "HttpCaptureProxyProducer";
+    public static final String SUPPORTED_TLS_PROTOCOLS_LIST_KEY = "plugins.security.ssl.http.enabled_protocols";
 
     public static class Parameters {
-        @Parameter(required = false, names = {
-            "--traceDirectory" }, arity = 1, description = "Directory to store trace files in.")
+        @Parameter(required = false,
+            names = { "--traceDirectory" },
+            arity = 1,
+            description = "Directory to store trace files in.")
         public String traceDirectory;
-        @Parameter(required = false, names = {
-            "--noCapture" }, arity = 0, description = "If enabled, Does NOT capture traffic to ANY sink.")
+        @Parameter(required = false,
+            names = { "--noCapture" },
+            arity = 0,
+            description = "If enabled, Does NOT capture traffic to ANY sink.")
         public boolean noCapture;
-        @Parameter(required = false, names = {
-            "--kafkaConfigFile" }, arity = 1, description = "Kafka properties file for additional client customization.")
+        @Parameter(required = false,
+            names = { "--kafkaConfigFile" },
+            arity = 1,
+            description = "Kafka properties file for additional client customization.")
         public String kafkaPropertiesFile;
-        @Parameter(required = false, names = {
-            "--kafkaClientId" }, arity = 1, description = "clientId to use for interfacing with Kafka.")
+        @Parameter(required = false,
+            names = { "--kafkaClientId" },
+            arity = 1,
+            description = "clientId to use for interfacing with Kafka.")
         public String kafkaClientId = DEFAULT_KAFKA_CLIENT_ID;
-        @Parameter(required = false, names = {
-            "--kafkaConnection" }, arity = 1, description = "Sequence of <HOSTNAME:PORT> values delimited by ','.")
+        @Parameter(required = false,
+            names = { "--kafkaConnection" },
+            arity = 1,
+            description = "Sequence of <HOSTNAME:PORT> values delimited by ','.")
         public String kafkaConnection;
-        @Parameter(required = false, names = {
-            "--enableMSKAuth" }, arity = 0, description = "Enables SASL Kafka properties required for connecting to MSK with IAM auth.")
+        @Parameter(required = false,
+            names = { "--enableMSKAuth" },
+            arity = 0,
+            description = "Enables SASL Kafka properties required for connecting to MSK with IAM auth.")
         public boolean mskAuthEnabled = false;
-        @Parameter(required = false, names = {
-            "--sslConfigFile" }, arity = 1, description = "YAML configuration of the HTTPS settings.  When this is not set, the proxy will not use TLS.")
+        @Parameter(required = false,
+            names = { "--sslConfigFile" },
+            arity = 1,
+            description = "YAML configuration of the HTTPS settings.  When this is not set, the proxy will not use TLS.")
         public String sslConfigFilePath;
-        @Parameter(required = false, names = {
-            "--maxTrafficBufferSize" }, arity = 1, description = "The maximum number of bytes that will be written to a single TrafficStream object.")
+        @Parameter(required = false,
+            names = { "--maxTrafficBufferSize" },
+            arity = 1,
+            description = "The maximum number of bytes that will be written to a single TrafficStream object.")
         public int maximumTrafficStreamSize = 1024 * 1024;
-        @Parameter(required = false, names = {
-            "--insecureDestination" }, arity = 0, description = "Do not check the destination server's certificate")
+        @Parameter(required = false,
+            names = { "--insecureDestination" },
+            arity = 0,
+            description = "Do not check the destination server's certificate")
         public boolean allowInsecureConnectionsToBackside;
-        @Parameter(required = true, names = {
-            "--destinationUri" }, arity = 1, description = "URI of the server that the proxy is capturing traffic for.")
+        @Parameter(required = true,
+            names = { "--destinationUri" },
+            arity = 1,
+            description = "URI of the server that the proxy is capturing traffic for.")
         public String backsideUriString;
-        @Parameter(required = true, names = {
-            "--listenPort" }, arity = 1, description = "Exposed port for clients to connect to this proxy.")
+        @Parameter(required = true,
+            names = { "--listenPort" },
+            arity = 1,
+            description = "Exposed port for clients to connect to this proxy.")
         public int frontsidePort = 0;
-        @Parameter(required = false, names = {
-            "--numThreads" }, arity = 1, description = "How many threads netty should create in its event loop group")
+        @Parameter(required = false,
+            names = { "--numThreads" },
+            arity = 1,
+            description = "How many threads netty should create in its event loop group")
         public int numThreads = 1;
-        @Parameter(required = false, names = {
-            "--destinationConnectionPoolSize" }, arity = 1, description = "Number of socket connections that should be maintained to the destination server "
+        @Parameter(required = false,
+            names = { "--destinationConnectionPoolSize" },
+            arity = 1,
+            description = "Number of socket connections that should be maintained to the destination server "
                 + "to reduce the perceived latency to clients.  Each thread will have its own cache, so the "
                 + "total number of outstanding warm connections will be multiplied by numThreads.")
         public int destinationConnectionPoolSize = 0;
-        @Parameter(required = false, names = {
-            "--destinationConnectionPoolTimeout" }, arity = 1, description = "Of the socket connections maintained by the destination connection pool, "
+        @Parameter(required = false,
+            names = { "--destinationConnectionPoolTimeout" },
+            arity = 1,
+            description = "Of the socket connections maintained by the destination connection pool, "
                 + "how long after connection should the be recycled "
                 + "(closed with a new connection taking its place)")
         public String destinationConnectionPoolTimeout = "PT30S";
-        @Parameter(required = false, names = {
-            "--otelCollectorEndpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be forwarded."
+        @Parameter(required = false,
+            names = { "--otelCollectorEndpoint" },
+            arity = 1,
+            description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be forwarded."
                 + "If this is not provided, metrics will not be sent to a collector.")
         public String otelCollectorEndpoint;
-        @Parameter(required = false, names = "--suppressCaptureForHeaderMatch", arity = 2, description = "The header name (which will be interpreted in a case-insensitive manner) and a regex "
-            + "pattern.  When the incoming request has a header that matches the regex, it will be passed "
-            + "through to the service but will NOT be captured.  E.g. user-agent 'healthcheck'.")
+        @Parameter(required = false,
+            names = "--setHeader",
+            arity = 2,
+            description = "[header-name header-value] Set an HTTP header (first argument) with to the specified value" +
+                " (second argument).  Any existing headers with that name will be removed.")
+        public List<String> headerOverrides = new ArrayList<>();
+        @Parameter(required = false,
+            names = "--suppressCaptureForHeaderMatch",
+            arity = 2,
+            description = "The header name (which will be interpreted in a case-insensitive manner) and a regex "
+                + "pattern.  When the incoming request has a header that matches the regex, it will be passed "
+                + "through to the service but will NOT be captured.  E.g. user-agent 'healthcheck'.")
         public List<String> suppressCaptureHeaderPairs = new ArrayList<>();
     }
 
@@ -143,19 +196,26 @@ public class CaptureProxy {
 
     @SneakyThrows
     protected static Settings getSettings(@NonNull String configFile) {
-        var builder = Settings.builder();
-        try (var lines = Files.lines(Paths.get(configFile))) {
-            lines.map(
-                line -> Optional.of(line.indexOf('#')).filter(i -> i >= 0).map(i -> line.substring(0, i)).orElse(line)
-            ).filter(line -> line.startsWith(HTTPS_CONFIG_PREFIX) && line.contains(":")).forEach(line -> {
-                var parts = line.split(": *", 2);
-                builder.put(parts[0], parts[1]);
-            });
-        }
-        builder.put(SSLConfigConstants.SECURITY_SSL_TRANSPORT_ENABLED, false);
+        var objectMapper = new ObjectMapper(new YAMLFactory());
+        var configMap = objectMapper.readValue(new File(configFile), Map.class);
+
         var configParentDirStr = Paths.get(configFile).toAbsolutePath().getParent();
-        builder.put("path.home", configParentDirStr);
-        return builder.build();
+        var httpsSettings =
+            objectMapper.convertValue(configMap, new TypeReference<Map<String, Object>>(){})
+                .entrySet().stream()
+                .filter(kvp -> kvp.getKey().startsWith(HTTPS_CONFIG_PREFIX))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        if (!httpsSettings.containsKey(SUPPORTED_TLS_PROTOCOLS_LIST_KEY)) {
+            httpsSettings.put(SUPPORTED_TLS_PROTOCOLS_LIST_KEY, List.of("TLSv1.2", "TLSv1.3"));
+        }
+
+        return Settings.builder().loadFromMap(httpsSettings)
+            // Don't bother with configurations the 'transport' (port 9300), which the plugin that we're using
+            // will also configure (& fail) otherwise.  We only use the plugin to setup security for the 'http'
+            // port and then move the SSLEngine into our implementation.
+            .put(SSLConfigConstants.SECURITY_SSL_TRANSPORT_ENABLED, false)
+            .put("path.home", configParentDirStr)
+            .build();
     }
 
     protected static IConnectionCaptureFactory<Object> getNullConnectionCaptureFactory() {
@@ -299,7 +359,10 @@ public class CaptureProxy {
     }
 
     protected static Map<String, String> convertPairListToMap(List<String> list) {
-        var map = new TreeMap<String, String>();
+        if (list == null) {
+            return Map.of();
+        }
+        var map = new LinkedHashMap<String, String>();
         for (int i = 0; i < list.size(); i += 2) {
             map.put(list.get(i), list.get(i + 1));
         }
@@ -313,19 +376,17 @@ public class CaptureProxy {
         var params = parseArgs(args);
         var backsideUri = convertStringToUri(params.backsideUriString);
 
-        var rootContext = new RootCaptureContext(
+        var ctx = new RootCaptureContext(
             RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "capture",
                 ProcessHelpers.getNodeInstanceName()),
             new CompositeContextTracker(new ActiveContextTracker(), new ActiveContextTrackerByActivityType())
         );
 
         var sksOp = Optional.ofNullable(params.sslConfigFilePath)
-            .map(
-                sslConfigFile -> new DefaultSecurityKeyStore(
-                    getSettings(sslConfigFile),
-                    Paths.get(sslConfigFile).toAbsolutePath().getParent()
-                )
-            );
+            .map(sslConfigFile -> new DefaultSecurityKeyStore(
+                getSettings(sslConfigFile),
+                Paths.get(sslConfigFile).toAbsolutePath().getParent()))
+            .filter(sks -> sks.sslHTTPProvider != null);
 
         sksOp.ifPresent(DefaultSecurityKeyStore::initHttpSSLConfig);
         var proxy = new NettyScanningHttpProxy(params.frontsidePort);
@@ -349,14 +410,10 @@ public class CaptureProxy {
             var headerCapturePredicate = new HeaderValueFilteringCapturePredicate(
                 convertPairListToMap(params.suppressCaptureHeaderPairs)
             );
-            proxy.start(
-                rootContext,
-                backsideConnectionPool,
-                params.numThreads,
-                sslEngineSupplier,
-                getConnectionCaptureFactory(params, rootContext),
-                headerCapturePredicate
-            );
+            var proxyChannelInitializer =
+                buildProxyChannelInitializer(ctx, backsideConnectionPool, sslEngineSupplier, headerCapturePredicate,
+                    params.headerOverrides, getConnectionCaptureFactory(params, ctx));
+            proxy.start(proxyChannelInitializer, params.numThreads);
         } catch (Exception e) {
             log.atError().setCause(e).setMessage("Caught exception while setting up the server and rethrowing").log();
             throw e;
@@ -374,5 +431,54 @@ public class CaptureProxy {
         // This loop just gives the main() function something to do while the netty event loops
         // work in the background.
         proxy.waitForClose();
+    }
+
+    static ProxyChannelInitializer buildProxyChannelInitializer(RootCaptureContext rootContext,
+                                                                BacksideConnectionPool backsideConnectionPool,
+                                                                Supplier<SSLEngine> sslEngineSupplier,
+                                                                @NonNull RequestCapturePredicate headerCapturePredicate,
+                                                                List<String> headerOverridesArgs,
+                                                                IConnectionCaptureFactory connectionFactory)
+    {
+        var headers = new ArrayList<>(convertPairListToMap(headerOverridesArgs).entrySet());
+        Collections.reverse(headers);
+        final var removeStrings = new ArrayList<String>(headers.size());
+        final var addBufs = new ArrayList<ByteBuf>(headers.size());
+
+        for (var kvp : headers) {
+            addBufs.add(
+                Unpooled.unreleasableBuffer(
+                    Unpooled.wrappedBuffer(
+                        (kvp.getKey() + ": " + kvp.getValue()).getBytes(StandardCharsets.UTF_8))));
+            removeStrings.add(kvp.getKey() + ":");
+        }
+
+        return new ProxyChannelInitializer(
+            rootContext,
+            backsideConnectionPool,
+            sslEngineSupplier,
+            connectionFactory,
+            headerCapturePredicate
+        ) {
+            @Override
+            protected void initChannel(@NonNull SocketChannel ch) throws IOException {
+                super.initChannel(ch);
+                final var pipeline = ch.pipeline();
+                {
+                    int i = 0;
+                    for (var kvp : headers) {
+                        pipeline.addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "AddHeader-" + kvp.getKey(),
+                            new HeaderAdderHandler(addBufs.get(i++)));
+                    }
+                }
+                {
+                    int i = 0;
+                    for (var kvp : headers) {
+                        pipeline.addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "RemoveHeader-" + kvp.getKey(),
+                            new HeaderRemoverHandler(removeStrings.get(i++)));
+                    }
+                }
+            }
+        };
     }
 }

@@ -17,6 +17,8 @@ import io.netty.handler.ssl.SslHandler;
 import lombok.NonNull;
 
 public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel> {
+    protected static final String CAPTURE_HANDLER_NAME = "CaptureHandler";
+
     protected final IConnectionCaptureFactory<T> connectionCaptureFactory;
     protected final Supplier<SSLEngine> sslEngineProvider;
     protected final IRootWireLoggingContext rootContext;
@@ -46,7 +48,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
     }
 
     @Override
-    protected void initChannel(SocketChannel ch) throws IOException {
+    protected void initChannel(@NonNull SocketChannel ch) throws IOException {
         var sslContext = sslEngineProvider != null ? sslEngineProvider.get() : null;
         if (sslContext != null) {
             ch.pipeline().addLast(new SslHandler(sslEngineProvider.get()));
@@ -54,7 +56,7 @@ public class ProxyChannelInitializer<T> extends ChannelInitializer<SocketChannel
 
         var connectionId = ch.id().asLongText();
         ch.pipeline()
-            .addLast(
+            .addLast(CAPTURE_HANDLER_NAME,
                 new ConditionallyReliableLoggingHttpHandler<>(
                     rootContext,
                     "",

@@ -1,5 +1,7 @@
 package org.opensearch.migrations;
 
+import java.util.Arrays;
+
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
@@ -23,20 +25,20 @@ public class Version {
         var builder = Version.builder();
         var remainingString = raw.toLowerCase();
 
-        for (var flavor : Flavor.values()) {
-            if (remainingString.startsWith(flavor.name().toLowerCase())) {
-                remainingString = remainingString.substring(flavor.name().length());
-                builder.flavor(flavor);
-                break;
-            } else if (remainingString.startsWith(flavor.shorthand.toLowerCase())) {
-                remainingString = remainingString.substring(flavor.shorthand.length());
-                builder.flavor(flavor);
-                break;
-            }
-        }
+        var finalRemainingString = remainingString;
+        var matchedFlavor = Arrays.stream(Flavor.values())
+            .filter(flavor -> finalRemainingString.startsWith(flavor.name().toLowerCase()) ||
+                              finalRemainingString.startsWith(flavor.shorthand.toLowerCase()))
+            .findFirst();
 
-        if (remainingString.equals(raw.toLowerCase())) {
-            throw new RuntimeException("Unable to determine build flavor from '" + raw +"'");
+        if (matchedFlavor.isPresent()) {
+            Flavor flavor = matchedFlavor.get();
+            remainingString = remainingString.startsWith(flavor.name().toLowerCase()) ?
+                remainingString.substring(flavor.name().length()) :
+                remainingString.substring(flavor.shorthand.length());
+            builder.flavor(flavor);
+        } else {
+            throw new IllegalArgumentException("Unable to determine build flavor from '" + raw +"'");
         }
 
         try {
@@ -59,7 +61,7 @@ public class Version {
             }
             return builder.build();
         } catch (Exception e) {
-            throw new RuntimeException("Unable to parse version numbers from the string '" + raw + "'\r\n", e);
+            throw new IllegalArgumentException("Unable to parse version numbers from the string '" + raw + "'\r\n", e);
         }
     }
 }

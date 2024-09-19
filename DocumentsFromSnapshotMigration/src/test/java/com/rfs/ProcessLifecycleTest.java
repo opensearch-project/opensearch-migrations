@@ -20,9 +20,6 @@ import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.testcontainers.OpensearchContainer;
 
-import com.rfs.common.FileSystemSnapshotCreator;
-import com.rfs.common.OpenSearchClient;
-import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.framework.PreloadedSearchClusterContainer;
 import com.rfs.framework.SearchClusterContainer;
 import eu.rekawek.toxiproxy.model.ToxicDirection;
@@ -100,19 +97,14 @@ public class ProcessLifecycleTest extends SourceTestBase {
                 return null;
             })).join();
 
-            CreateSnapshot.run(
-                c -> new FileSystemSnapshotCreator(
-                    SNAPSHOT_NAME,
-                    c,
-                    SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
-                    testSnapshotContext.createSnapshotCreateContext()
-                ),
-                new OpenSearchClient(ConnectionContextTestParams.builder()
-                    .host(esSourceContainer.getUrl())
-                    .build()
-                    .toConnectionContext()),
-                false
-            );
+            var args = new CreateSnapshot.Args();
+            args.snapshotName = SNAPSHOT_NAME;
+            args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
+            args.sourceArgs.host = esSourceContainer.getUrl();
+
+            var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
+            snapshotCreator.run();
+
             esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
             int actualExitCode = runProcessAgainstToxicTarget(tempDirSnapshot, tempDirLucene, proxyContainer, failHow);
