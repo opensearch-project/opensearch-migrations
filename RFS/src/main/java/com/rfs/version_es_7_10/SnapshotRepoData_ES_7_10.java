@@ -12,13 +12,11 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotRepo.CantParseRepoFile;
-
+import com.rfs.common.SourceRepo;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.RequiredArgsConstructor;
-
-import com.rfs.common.SourceRepo;
 
 @Getter
 public class SnapshotRepoData_ES_7_10 {

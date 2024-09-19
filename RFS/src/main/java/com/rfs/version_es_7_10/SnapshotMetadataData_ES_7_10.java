@@ -5,7 +5,6 @@ import java.util.List;
 import com.fasterxml.jackson.annotation.JsonProperty;
 
 import com.rfs.models.SnapshotMetadata;
-
 import lombok.Getter;
 
 @Getter

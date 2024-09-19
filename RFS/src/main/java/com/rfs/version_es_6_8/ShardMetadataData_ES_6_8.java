@@ -15,7 +15,6 @@ import org.apache.lucene.util.BytesRef;
 
 import com.rfs.models.ShardFileInfo;
 import com.rfs.models.ShardMetadata;
-
 import lombok.Getter;
 
 @Getter

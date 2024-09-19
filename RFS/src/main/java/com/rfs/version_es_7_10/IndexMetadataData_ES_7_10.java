@@ -4,7 +4,6 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import com.rfs.models.IndexMetadata;
 import com.rfs.transformers.TransformFunctions;
-
 import lombok.Getter;
 
 public class IndexMetadataData_ES_7_10 implements IndexMetadata {
