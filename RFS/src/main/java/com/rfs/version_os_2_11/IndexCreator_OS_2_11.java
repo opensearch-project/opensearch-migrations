@@ -42,11 +42,10 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
 
         // Create the index; it's fine if it already exists
         try {
-            switch (mode) {
-                case SIMULATE:
-                    return !client.hasIndex(index.getName());
-                case PERFORM:
-                    return client.createIndex(index.getName(), body, context).isPresent();
+            if (mode == MigrationMode.SIMULATE) {
+                return !client.hasIndex(index.getName());
+            } else if (mode == MigrationMode.PERFORM) {
+                return client.createIndex(index.getName(), body, context).isPresent();
             }
         } catch (InvalidResponse invalidResponse) {
             var illegalArguments = invalidResponse.getIllegalArguments();
