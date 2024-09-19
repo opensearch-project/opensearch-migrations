@@ -21,16 +21,18 @@ public class GlobalMetadataData_OS_2_11 implements GlobalMetadata {
     }
 
     public ObjectNode getIndexTemplates() {
-        if (root.get("index_template") != null) {
-            return (ObjectNode) root.get("index_template").get("index_template");
+        String indexTemplateKey = "index_template";
+        if (root.get(indexTemplateKey) != null) {
+            return (ObjectNode) root.get(indexTemplateKey).get(indexTemplateKey);
         } else {
             return null;
         }
     }
 
     public ObjectNode getComponentTemplates() {
-        if (root.get("component_template") != null) {
-            return (ObjectNode) root.get("component_template").get("component_template");
+        String componentTemplateKey = "component_template";
+        if (root.get(componentTemplateKey) != null) {
+            return (ObjectNode) root.get(componentTemplateKey).get(componentTemplateKey);
         } else {
             return null;
         }

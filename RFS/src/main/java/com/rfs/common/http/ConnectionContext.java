@@ -6,6 +6,7 @@ import java.time.Clock;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
@@ -14,6 +15,7 @@ import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
  * Stores the connection context for an Elasticsearch/OpenSearch cluster
  */
 @Getter
+@EqualsAndHashCode(exclude={"requestTransformer"})
 @ToString(exclude={"requestTransformer"})
 public class ConnectionContext {
     public enum Protocol {
@@ -140,7 +142,7 @@ public class ConnectionContext {
         public boolean compressionEnabled = false;
     }
 
-        @Getter
+    @Getter
     public static class SourceArgs implements IParams {
         @Parameter(names = {
             "--source-host" }, description = "The source host and port (e.g. http://localhost:9200)", required = false)

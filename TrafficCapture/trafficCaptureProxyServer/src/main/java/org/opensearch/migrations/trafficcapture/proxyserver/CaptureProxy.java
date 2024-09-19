@@ -1,11 +1,11 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
+import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.OutputStream;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -18,11 +18,15 @@ import java.util.Properties;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 import javax.net.ssl.SSLEngine;
 import javax.net.ssl.SSLException;
 
 import com.google.protobuf.CodedOutputStream;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import org.apache.kafka.clients.CommonClientConfigs;
 import org.apache.kafka.clients.producer.KafkaProducer;
 import org.apache.kafka.clients.producer.ProducerConfig;
@@ -69,6 +73,7 @@ public class CaptureProxy {
 
     private static final String HTTPS_CONFIG_PREFIX = "plugins.security.ssl.http.";
     public static final String DEFAULT_KAFKA_CLIENT_ID = "HttpCaptureProxyProducer";
+    public static final String SUPPORTED_TLS_PROTOCOLS_LIST_KEY = "plugins.security.ssl.http.enabled_protocols";
 
     public static class Parameters {
         @Parameter(required = false,
@@ -191,19 +196,26 @@ public class CaptureProxy {
 
     @SneakyThrows
     protected static Settings getSettings(@NonNull String configFile) {
-        var builder = Settings.builder();
-        try (var lines = Files.lines(Paths.get(configFile))) {
-            lines.map(
-                line -> Optional.of(line.indexOf('#')).filter(i -> i >= 0).map(i -> line.substring(0, i)).orElse(line)
-            ).filter(line -> line.startsWith(HTTPS_CONFIG_PREFIX) && line.contains(":")).forEach(line -> {
-                var parts = line.split(": *", 2);
-                builder.put(parts[0], parts[1]);
-            });
-        }
-        builder.put(SSLConfigConstants.SECURITY_SSL_TRANSPORT_ENABLED, false);
+        var objectMapper = new ObjectMapper(new YAMLFactory());
+        var configMap = objectMapper.readValue(new File(configFile), Map.class);
+
         var configParentDirStr = Paths.get(configFile).toAbsolutePath().getParent();
-        builder.put("path.home", configParentDirStr);
-        return builder.build();
+        var httpsSettings =
+            objectMapper.convertValue(configMap, new TypeReference<Map<String, Object>>(){})
+                .entrySet().stream()
+                .filter(kvp -> kvp.getKey().startsWith(HTTPS_CONFIG_PREFIX))
+                .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
+        if (!httpsSettings.containsKey(SUPPORTED_TLS_PROTOCOLS_LIST_KEY)) {
+            httpsSettings.put(SUPPORTED_TLS_PROTOCOLS_LIST_KEY, List.of("TLSv1.2", "TLSv1.3"));
+        }
+
+        return Settings.builder().loadFromMap(httpsSettings)
+            // Don't bother with configurations the 'transport' (port 9300), which the plugin that we're using
+            // will also configure (& fail) otherwise.  We only use the plugin to setup security for the 'http'
+            // port and then move the SSLEngine into our implementation.
+            .put(SSLConfigConstants.SECURITY_SSL_TRANSPORT_ENABLED, false)
+            .put("path.home", configParentDirStr)
+            .build();
     }
 
     protected static IConnectionCaptureFactory<Object> getNullConnectionCaptureFactory() {
@@ -371,12 +383,10 @@ public class CaptureProxy {
         );
 
         var sksOp = Optional.ofNullable(params.sslConfigFilePath)
-            .map(
-                sslConfigFile -> new DefaultSecurityKeyStore(
-                    getSettings(sslConfigFile),
-                    Paths.get(sslConfigFile).toAbsolutePath().getParent()
-                )
-            );
+            .map(sslConfigFile -> new DefaultSecurityKeyStore(
+                getSettings(sslConfigFile),
+                Paths.get(sslConfigFile).toAbsolutePath().getParent()))
+            .filter(sks -> sks.sslHTTPProvider != null);
 
         sksOp.ifPresent(DefaultSecurityKeyStore::initHttpSSLConfig);
         var proxy = new NettyScanningHttpProxy(params.frontsidePort);

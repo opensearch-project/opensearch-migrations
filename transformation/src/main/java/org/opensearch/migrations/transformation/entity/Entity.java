@@ -15,5 +15,5 @@ public interface Entity {
     /**
      * Gets the underlying entity as an ObjectNode, supports read and write operations
      */
-    ObjectNode rawJson();
+    ObjectNode getRawJson();
 }

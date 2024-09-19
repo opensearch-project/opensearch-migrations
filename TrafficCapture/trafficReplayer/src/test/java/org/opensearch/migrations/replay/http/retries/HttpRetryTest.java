@@ -25,6 +25,7 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.util.TextTrackedFuture;
 import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleHttpServer;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
@@ -45,9 +46,6 @@ import static org.opensearch.migrations.replay.datahandlers.NettyPacketToHttpCon
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 1)
 public class HttpRetryTest {
-
-    public static final String HTTPD_IMAGE = "httpd:alpine";
-
     private ByteBufList makeRequest() {
         return new ByteBufList(Unpooled.wrappedBuffer(TestHttpServerContext.getRequestStringForSimpleGet("/")
             .getBytes(StandardCharsets.UTF_8)));
@@ -215,7 +213,7 @@ public class HttpRetryTest {
         var executor = Executors.newSingleThreadScheduledExecutor(new DefaultThreadFactory("HttpRetryTest"));
         try (var rootContext = TestContext.withAllTracking();
             var network = Network.newNetwork();
-             var server = new GenericContainer<>(HTTPD_IMAGE)
+             var server = new GenericContainer<>(SharedDockerImageNames.HTTPD)
                  .withNetwork(network)
                  .withNetworkAliases(SERVERNAME_ALIAS)
                  .waitingFor(Wait.forHttp("/").forStatusCode(200)).withStartupTimeout(Duration.ofMinutes(5));

@@ -18,7 +18,8 @@ dependencies {
     implementation group: 'org.slf4j', name: 'slf4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
 
-    testImplementation testFixtures(project(path: ':RFS'))
+    testImplementation testFixtures(project(':RFS'))
+    testImplementation testFixtures(project(':testHelperFixtures'))
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
     testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'

@@ -24,7 +24,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         MigrationMode mode,
         ICreateIndexContext context
     ) {
-        IndexMetadataData_OS_2_11 indexMetadata = new IndexMetadataData_OS_2_11(index.rawJson(), index.getId(), index.getName());
+        IndexMetadataData_OS_2_11 indexMetadata = new IndexMetadataData_OS_2_11(index.getRawJson(), index.getId(), index.getName());
 
         // Remove some settings which will cause errors if you try to pass them to the API
         ObjectNode settings = indexMetadata.getSettings();
@@ -42,11 +42,10 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
 
         // Create the index; it's fine if it already exists
         try {
-            switch (mode) {
-                case SIMULATE:
-                    return !client.hasIndex(index.getName());
-                case PERFORM:
-                    return client.createIndex(index.getName(), body, context).isPresent();
+            if (mode == MigrationMode.SIMULATE) {
+                return !client.hasIndex(index.getName());
+            } else if (mode == MigrationMode.PERFORM) {
+                return client.createIndex(index.getName(), body, context).isPresent();
             }
         } catch (InvalidResponse invalidResponse) {
             var illegalArguments = invalidResponse.getIllegalArguments();

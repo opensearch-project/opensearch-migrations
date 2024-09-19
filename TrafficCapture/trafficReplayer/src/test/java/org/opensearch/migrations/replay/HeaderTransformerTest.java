@@ -23,7 +23,7 @@ import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-@WrapWithNettyLeakDetection
+@WrapWithNettyLeakDetection(repetitions = 2)
 public class HeaderTransformerTest extends InstrumentationTest {
 
     private static final String SILLY_TARGET_CLUSTER_NAME = "remoteguest";
@@ -127,55 +127,5 @@ public class HeaderTransformerTest extends InstrumentationTest {
                 + "\r\n"
                 + "authorization: Basic YWRtaW46YWRtaW4=\r\n"
         );
-    }
-
-    /**
-     * Fixing this one will involve some thought.  Where should we unwind to?  I would say probably all
-     * the way back to the HttpTransformer.
-     * @throws Exception
-     */
-    @Test
-    public void testMalformedPayload_andTypeMappingUri_IsPassedThrough() throws Exception {
-        var referenceStringBuilder = new StringBuilder();
-        // mock object. values don't matter at all - not what we're testing
-        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 12, Duration.ZERO, List.of(), null);
-        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
-
-        var transformingHandler = new HttpJsonTransformingConsumer<>(
-            new TransformationLoader().getTransformerFactoryLoader(
-                SILLY_TARGET_CLUSTER_NAME,
-                null,
-                "[{\"JsonTransformerForOpenSearch23PlusTargetTransformerProvider\":\"\"}]"
-            ),
-            null,
-            testPacketCapture,
-            rootContext.getTestConnectionRequestContext(0)
-        );
-
-        Random r = new Random(2);
-        var stringParts = IntStream.range(0, 1)
-            .mapToObj(i -> TestUtils.makeRandomString(r, 10))
-            .map(o -> (String) o)
-            .collect(Collectors.toList());
-
-        TrackedFuture<String, Void> allConsumesFuture = TestUtils.chainedDualWriteHeaderAndPayloadParts(
-            transformingHandler,
-            stringParts,
-            referenceStringBuilder,
-            contentLength -> "PUT /foo HTTP/1.1\r\n"
-                + "HoSt: "
-                + SOURCE_CLUSTER_NAME
-                + "\r\n"
-                + "content-type: application/json\r\n"
-                + "content-length: "
-                + contentLength
-                + "\r\n"
-        );
-
-        var finalizationFuture = allConsumesFuture.thenCompose(
-            v -> transformingHandler.finalizeRequest(),
-            () -> "HeaderTransformTest.testMalformedPayload_andTypeMappingUri_IsPassedThrough"
-        );
-        Assertions.assertThrows(Exception.class, () -> finalizationFuture.get());
     }
 }

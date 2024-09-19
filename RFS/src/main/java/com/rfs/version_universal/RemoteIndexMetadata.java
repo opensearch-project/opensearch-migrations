@@ -13,7 +13,7 @@ public class RemoteIndexMetadata implements IndexMetadata {
     private ObjectNode sourceData;
 
     @Override
-    public ObjectNode rawJson() {
+    public ObjectNode getRawJson() {
         return sourceData;
     }
 
@@ -24,7 +24,8 @@ public class RemoteIndexMetadata implements IndexMetadata {
 
     @Override
     public String getId() {
-        return indexName;
+        // The ID is the name in this case
+        return getName();
     }
 
     @Override
