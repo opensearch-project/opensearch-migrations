@@ -71,7 +71,7 @@ public class DefaultRetry implements RequestRetryEvaluator {
                                     Optional.ofNullable(HttpByteBufFormatter.processHttpMessageFromBufs(
                                         HttpByteBufFormatter.HttpMessageType.RESPONSE,
                                         Stream.of(sourceResponse.asByteBuf()))))
-                                .filter(o -> o instanceof HttpResponse)
+                                .filter(HttpResponse.class::isInstance)
                                 .map(responseMsg -> shouldRetry(((HttpResponse)responseMsg).status().code(),
                                     rr.status().code()))
                                 .orElse(RequestSenderOrchestrator.RetryDirective.RETRY),

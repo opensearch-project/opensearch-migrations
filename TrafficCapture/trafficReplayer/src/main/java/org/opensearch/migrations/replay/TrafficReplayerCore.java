@@ -279,7 +279,6 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
         ) {
             log.trace("done sending and finalizing data to the packet handler");
 
-            SourceTargetCaptureTuple requestResponseTuple1;
             if (t != null) {
                 log.error("Got exception in CompletableFuture callback: ", t);
             }
@@ -316,6 +315,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             request.packetBytes::stream);
     }
 
+    @Override
     protected void perResponseConsumer(AggregatedRawResponse summary,
                                        HttpRequestTransformationStatus transformationStatus,
                                        IReplayContexts.IReplayerHttpTransactionContext context) {
@@ -328,7 +328,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             exceptionRequestCount.incrementAndGet();
         } else if (transformationStatus.isError()) {
             log.atInfo()
-                .setCause(summary.getError())
+                .setCause(Optional.ofNullable(summary).map(AggregatedRawResponse::getError).orElse(null))
                 .setMessage("Unknown error transforming {}: ")
                 .addArgument(context)
                 .log();

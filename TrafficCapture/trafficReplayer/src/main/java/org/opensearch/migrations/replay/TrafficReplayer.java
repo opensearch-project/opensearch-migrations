@@ -51,7 +51,7 @@ public class TrafficReplayer {
     public static final String PACKET_TIMEOUT_SECONDS_PARAMETER_NAME = "--packet-timeout-seconds";
 
     public static final String LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME = "--lookahead-time-window";
-    private static final long ACTIVE_WORK_MONITOR_CADENCE_MS = 30 * 1000;
+    private static final long ACTIVE_WORK_MONITOR_CADENCE_MS = 30 * 1000L;
 
     public static class DualException extends Exception {
         public final Throwable originalCause;
@@ -274,7 +274,8 @@ public class TrafficReplayer {
                 params,
                 Duration.ofSeconds(params.lookaheadTimeSeconds)
             );
-            var authTransformer = buildAuthTransformerFactory(params)
+            var authTransformer = buildAuthTransformerFactory(params);
+            var trafficStreamLimiter = new TrafficStreamLimiter(params.maxConcurrentRequests)
         ) {
             var timeShifter = new TimeShifter(params.speedupFactor);
             var serverTimeout = Duration.ofSeconds(params.targetServerResponseTimeoutSeconds);
@@ -296,7 +297,7 @@ public class TrafficReplayer {
                     params.allowInsecureConnections,
                     params.numClientThreads
                 ),
-                new TrafficStreamLimiter(params.maxConcurrentRequests),
+                trafficStreamLimiter,
                 orderedRequestTracker
             );
             activeContextMonitor = new ActiveContextMonitor(
@@ -346,20 +347,20 @@ public class TrafficReplayer {
             // both Log4J and the java builtin loggers add shutdown hooks.
             // The API for addShutdownHook says that those hooks registered will run in an undetermined order.
             // Hence, the reason that this code logs via slf4j logging AND stderr.
-            {
-                var beforeMsg = "Running TrafficReplayer Shutdown.  "
+            Optional.of("Running TrafficReplayer Shutdown.  "
                     + "The logging facilities may also be shutting down concurrently, "
-                    + "resulting in missing logs messages.";
-                log.atWarn().setMessage(beforeMsg).log();
-                System.err.println(beforeMsg);
-            }
+                    + "resulting in missing logs messages.")
+                .ifPresent(beforeMsg -> {
+                    log.atWarn().setMessage(beforeMsg).log();
+                    System.err.println(beforeMsg);
+                });
             Optional.ofNullable(weakTrafficReplayer.get()).ifPresent(o -> o.shutdown(null));
-            {
-                var afterMsg = "Done shutting down TrafficReplayer (due to Runtime shutdown).  "
-                    + "Logs may be missing for events that have happened after the Shutdown event was received.";
-                log.atWarn().setMessage(afterMsg).log();
-                System.err.println(afterMsg);
-            }
+            Optional.of("Done shutting down TrafficReplayer (due to Runtime shutdown).  "
+                    + "Logs may be missing for events that have happened after the Shutdown event was received.")
+                .ifPresent(afterMsg -> {
+                    log.atWarn().setMessage(afterMsg).log();
+                    System.err.println(afterMsg);
+                });
         }));
     }
 

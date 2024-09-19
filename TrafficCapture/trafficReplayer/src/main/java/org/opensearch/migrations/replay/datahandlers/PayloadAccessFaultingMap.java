@@ -11,6 +11,7 @@ import org.opensearch.migrations.replay.datahandlers.http.StrictCaseInsensitiveH
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 import lombok.EqualsAndHashCode;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 /**
@@ -46,38 +47,24 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
     }
 
     @Override
-    public Set<Entry<String, Object>> entrySet() {
+    public Object put(String key, Object value) {
+        if (!JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY.equals(key)) {
+            return null;
+        }
+        Object old = onlyValue;
+        onlyValue = value;
+        return old;
+    }
+
+    @Override
+    public @NonNull Set<Entry<String, Object>> entrySet() {
         if (onlyValue != null) {
             return Set.of(new SimpleEntry<>(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, onlyValue));
         } else {
             return new AbstractSet<Entry<String, Object>>() {
                 @Override
-                public Iterator<Entry<String, Object>> iterator() {
-                    return new Iterator<>() {
-                        private int count;
-
-                        @Override
-                        public boolean hasNext() {
-                            return count == 0 && isJson;
-                        }
-
-                        @Override
-                        public Entry<String, Object> next() {
-                            if (isJson && count == 0) {
-                                ++count;
-                                if (onlyValue != null) {
-                                    return new SimpleEntry<>(
-                                        JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY,
-                                        onlyValue
-                                    );
-                                } else {
-                                    throw PayloadNotLoadedException.getInstance();
-                                }
-                            } else {
-                                throw new NoSuchElementException();
-                            }
-                        }
-                    };
+                public @NonNull Iterator<Entry<String, Object>> iterator() {
+                    return makeInternalIterator();
                 }
 
                 @Override
@@ -88,14 +75,32 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
         }
     }
 
-    @Override
-    public Object put(String key, Object value) {
-        if (!JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY.equals(key)) {
-            return null;
-        }
-        Object old = onlyValue;
-        onlyValue = value;
-        return old;
+    private Iterator<Entry<String, Object>> makeInternalIterator() {
+        return new Iterator<>() {
+            private int count;
+
+            @Override
+            public boolean hasNext() {
+                return count == 0 && isJson;
+            }
+
+            @Override
+            public Entry<String, Object> next() {
+                if (isJson && count == 0) {
+                    ++count;
+                    if (onlyValue != null) {
+                        return new SimpleEntry<>(
+                            JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY,
+                            onlyValue
+                        );
+                    } else {
+                        throw PayloadNotLoadedException.getInstance();
+                    }
+                } else {
+                    throw new NoSuchElementException();
+                }
+            }
+        };
     }
 
     @Override
