@@ -27,6 +27,7 @@ import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
+import org.opensearch.migrations.utils.ProcessHelpers;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
@@ -221,11 +222,13 @@ public class TrafficReplayer {
     }
 
     public static void main(String[] args) throws Exception {
+        System.err.println("Got args: " + String.join("; ", args));
+        final var workerId = ProcessHelpers.getNodeInstanceName();
+        log.info("Starting Traffic Replayer with id=" + workerId);
+
         var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
         var params = parseArgs(args);
         URI uri;
-        System.err.println("Starting Traffic Replayer");
-        System.err.println("Got args: " + String.join("; ", args));
         try {
             uri = new URI(params.targetUriString);
         } catch (Exception e) {
@@ -258,7 +261,9 @@ public class TrafficReplayer {
         );
         var contextTrackers = new CompositeContextTracker(globalContextTracker, perContextTracker);
         var topContext = new RootReplayerContext(
-            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "replay"),
+            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint,
+                "replay",
+                ProcessHelpers.getNodeInstanceName()),
             contextTrackers
         );
 

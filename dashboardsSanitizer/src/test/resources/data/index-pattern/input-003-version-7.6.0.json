@@ -1,0 +1,26 @@
+{
+    "attributes": {
+        "allowHidden": false,
+        "fieldAttrs": "{\"testField_1\":{\"count\":1},\"testField_2\":{\"count\":1},\"testField_3\":{\"count\":1},\"testField_4\":{\"count\":2},\"testField_5\":{\"count\":1},\"testField_6\":{\"count\":4},\"testField_7\":{\"count\":3},\"testField_8\":{\"count\":1},\"testField_9\":{\"count\":6},\"testField_10\":{\"count\":6},\"testField_11\":{\"count\":1},\"testField_12\":{\"count\":1},\"testField_13\":{\"count\":3},\"testField_14\":{\"count\":1},\"testField_15\":{\"count\":1},\"testField_16\":{\"count\":3},\"testField_17\":{\"count\":1},\"testField_18\":{\"count\":1},\"testField_19\":{\"count\":2},\"testField_20\":{\"count\":1},\"testField_21\":{\"count\":2},\"testField_22\":{\"count\":13},\"testField_23\":{\"count\":2},\"testField_24\":{\"count\":1},\"testField_25\":{\"count\":1},\"testField_26\":{\"count\":6},\"testField_27\":{\"count\":2},\"testField_28\":{\"count\":2,\"customLabel\":\"\"},\"testField_29\":{\"count\":2},\"testField_30\":{\"count\":5},\"testField_31\":{\"count\":2},\"testField_32\":{\"count\":1},\"testField_33\":{\"count\":1}}",
+        "fieldFormatMap": "{\"testField_28\":{\"id\":\"url\",\"params\":{\"parsedUrl\":{\"pathname\":\"/s/bo/app/home\",\"basePath\":\"/s/bo\"},\"labelTemplate\":\"{{value}}\",\"type\":\"a\",\"width\":null,\"height\":null}}}",
+        "fields": "[{\"name\":\"testField_28\",\"script\":\"if (doc['testField_7'].size() != 0) {\\r\\n    return doc['testField_7'].value;\\r\\n}\\r\\nreturn \\\"\\\";\\r\\n\",\"lang\":\"painless\",\"type\":\"number\",\"scripted\":true,\"customLabel\":\"\",\"count\":2}]",
+        "name": "test-pattern",
+        "runtimeFieldMap": "{}",
+        "sourceFilters": "[]",
+        "timeFieldName": "@timestamp",
+        "title": "test-pattern",
+        "typeMeta": "{}"
+    },
+    "coreMigrationVersion": "7.6.0",
+    "id": "test-id-001",
+    "managed": false,
+    "originId": "test-origin-id-001",
+    "references": [],
+    "type": "index-pattern",
+    "migrationVersion": {
+        "index-pattern": "7.6.0"
+    },
+    "typeMigrationVersion": "7.6.0",
+    "updated_at": "2024-07-01T08:01:56.451Z",
+    "version": "test-version-001"
+}

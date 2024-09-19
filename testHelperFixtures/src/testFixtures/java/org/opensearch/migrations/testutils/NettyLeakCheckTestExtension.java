@@ -12,6 +12,7 @@ import org.junit.jupiter.api.extension.ReflectiveInvocationContext;
 import lombok.Lombok;
 
 public class NettyLeakCheckTestExtension implements InvocationInterceptor {
+    public static final int DEFAULT_NUM_REPETITIONS = 16;
     private final boolean allLeakChecksAreDisabled;
 
     public NettyLeakCheckTestExtension() {
@@ -23,19 +24,49 @@ public class NettyLeakCheckTestExtension implements InvocationInterceptor {
         Callable<T> repeatCall,
         Callable<T> finalCall
     ) throws Throwable {
-        if (allLeakChecksAreDisabled || getAnnotation(extensionContext).map(a -> a.disableLeakChecks()).orElse(false)) {
+        if (allLeakChecksAreDisabled || getAnnotation(extensionContext).map(WrapWithNettyLeakDetection::disableLeakChecks).orElse(false)) {
             CountingNettyResourceLeakDetector.deactivate();
             finalCall.call();
             return;
         } else {
             CountingNettyResourceLeakDetector.activate();
-            int repetitions = getAnnotation(extensionContext).map(a -> a.repetitions())
+            var repetitions = getAnnotation(extensionContext).map(WrapWithNettyLeakDetection::repetitions)
                 .orElseThrow(() -> new IllegalStateException("No test method present"));
+            var minRuntimeMs = getAnnotation(extensionContext).map(WrapWithNettyLeakDetection::minRuntimeMillis)
+                .orElseThrow(() -> new IllegalStateException("No test method present"));
+            var maxRuntimeMs = getAnnotation(extensionContext).map(WrapWithNettyLeakDetection::maxRuntimeMillis)
+                .orElseThrow(() -> new IllegalStateException("No test method present"));
+            if (repetitions == -1 &&
+                minRuntimeMs == -1 &&
+                maxRuntimeMs == -1) {
+                repetitions = DEFAULT_NUM_REPETITIONS;
+            }
+            assert minRuntimeMs <= 0 || maxRuntimeMs <= 0 || minRuntimeMs <= maxRuntimeMs :
+                "expected maxRuntime to be >= minRuntime";
 
-            for (int i = 0; i < repetitions; i++) {
-                ((i == repetitions - 1) ? finalCall : repeatCall).call();
+            long nanosSpent = 0;
+            for (int runNumber = 1; ; runNumber++) {
+                var startTimeNanos = System.nanoTime();
+                boolean lastRun = false;
+                {
+                    var timeSpentMs = nanosSpent / (1000 * 1000);
+                    if (repetitions >= 0) {
+                        lastRun = runNumber >= repetitions;
+                    }
+                    if (minRuntimeMs > 0) {
+                        lastRun = timeSpentMs >= minRuntimeMs;
+                    }
+                    if (maxRuntimeMs > 0 && !lastRun) {
+                        lastRun = timeSpentMs >= maxRuntimeMs;
+                    }
+                }
+                (lastRun ? finalCall : repeatCall).call();
+                nanosSpent += (System.nanoTime() - startTimeNanos);
                 System.gc();
                 System.runFinalization();
+                if (lastRun) {
+                    break;
+                }
             }
 
             Assertions.assertEquals(0, CountingNettyResourceLeakDetector.getNumLeaks());
@@ -76,11 +107,9 @@ public class NettyLeakCheckTestExtension implements InvocationInterceptor {
         var selfInstance = invocationContext.getTarget()
             .orElseThrow(() -> new IllegalStateException("Target instance not found"));
         wrapWithLeakChecks(extensionContext, () -> {
-            {
-                Method m = invocationContext.getExecutable();
-                m.setAccessible(true);
-                return m.invoke(selfInstance, invocationContext.getArguments().toArray());
-            }
+            Method m = invocationContext.getExecutable();
+            m.setAccessible(true);
+            return m.invoke(selfInstance, invocationContext.getArguments().toArray());
         }, () -> wrapProceed(invocation));
     }
 

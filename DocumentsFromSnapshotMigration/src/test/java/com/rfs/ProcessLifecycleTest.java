@@ -16,16 +16,10 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-import org.opensearch.migrations.Version;
-import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.testcontainers.OpensearchContainer;
 
-import com.rfs.common.FileSystemRepo;
-import com.rfs.common.FileSystemSnapshotCreator;
-import com.rfs.common.OpenSearchClient;
-import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.framework.PreloadedSearchClusterContainer;
 import com.rfs.framework.SearchClusterContainer;
 import eu.rekawek.toxiproxy.model.ToxicDirection;
@@ -61,14 +55,13 @@ public class ProcessLifecycleTest extends SourceTestBase {
         // The Document Migration process will throw an exception immediately, which will cause an exit.
         "AT_STARTUP, 1",
         // This test is dependent upon the max lease duration that is passed to the command line. It's set
-        // to such a short value (1s), that no document migration will exit in that amount of time. For good
+        // to such a short value (1s) that no document migration will exit in that amount of time. For good
         // measure though, the toxiproxy also adds latency to the requests to make it impossible for the
         // migration to complete w/in that 1s.
         "WITH_DELAYS, 2" })
     public void testProcessExitsAsExpected(String failAfterString, int expectedExitCode) throws Exception {
         final var failHow = FailHow.valueOf(failAfterString);
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
-        final var testMetadataMigrationContext = MetadataMigrationTestContext.factory().noOtelTracking();
 
         var sourceImageArgs = makeParamsForBase(SearchClusterContainer.ES_V7_10_2);
         var baseSourceImageVersion = (SearchClusterContainer.ContainerVersion) sourceImageArgs[0];
@@ -104,22 +97,15 @@ public class ProcessLifecycleTest extends SourceTestBase {
                 return null;
             })).join();
 
-            CreateSnapshot.run(
-                c -> new FileSystemSnapshotCreator(
-                    SNAPSHOT_NAME,
-                    c,
-                    SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
-                    testSnapshotContext.createSnapshotCreateContext()
-                ),
-                new OpenSearchClient(ConnectionContextTestParams.builder()
-                    .host(esSourceContainer.getUrl())
-                    .build()
-                    .toConnectionContext()),
-                false
-            );
-            esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
+            var args = new CreateSnapshot.Args();
+            args.snapshotName = SNAPSHOT_NAME;
+            args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
+            args.sourceArgs.host = esSourceContainer.getUrl();
 
-            migrateMetadata(osTargetContainer, tempDirSnapshot, testMetadataMigrationContext, baseSourceImageVersion.getVersion());
+            var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
+            snapshotCreator.run();
+
+            esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
             int actualExitCode = runProcessAgainstToxicTarget(tempDirSnapshot, tempDirLucene, proxyContainer, failHow);
             log.atInfo().setMessage("Process exited with code: " + actualExitCode).log();
@@ -134,24 +120,6 @@ public class ProcessLifecycleTest extends SourceTestBase {
             deleteTree(tempDirSnapshot);
             deleteTree(tempDirLucene);
         }
-    }
-
-    private static void migrateMetadata(
-        OpensearchContainer targetContainer,
-        Path tempDirSnapshot,
-        MetadataMigrationTestContext testMetadataMigrationContext,
-        Version sourceVersion
-    ) {
-        String targetAddress = "http://"
-            + targetContainer.getHost()
-            + ":"
-            + targetContainer.getMappedPort(OPENSEARCH_PORT);
-        var targetClient = new OpenSearchClient(ConnectionContextTestParams.builder()
-            .host(targetAddress)
-            .build()
-            .toConnectionContext());
-        var sourceRepo = new FileSystemRepo(tempDirSnapshot);
-        migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, List.of(), List.of(), List.of(), INDEX_ALLOWLIST, testMetadataMigrationContext, sourceVersion);
     }
 
     private static int runProcessAgainstToxicTarget(

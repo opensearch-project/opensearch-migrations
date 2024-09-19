@@ -27,7 +27,7 @@ dependencies {
     runtimeOnly project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     runtimeOnly project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
 
-    implementation group: 'com.beust', name: 'jcommander'
+    implementation group: 'org.jcommander', name: 'jcommander'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     implementation group: 'com.google.guava', name: 'guava'
     implementation group: 'com.google.protobuf', name: 'protobuf-java'

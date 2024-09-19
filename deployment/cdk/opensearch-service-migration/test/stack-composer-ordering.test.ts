@@ -116,7 +116,10 @@ describe('Stack Composer Ordering Tests', () => {
             "otelCollectorEnabled": false,
             "osContainerServiceEnabled": false,
             "reindexFromSnapshotServiceEnabled": false,
-            "sourceClusterEndpoint": "https://test-cluster",
+            "sourceCluster": {
+                "endpoint": "https://test-cluster",
+                "auth": {"type": "none"}
+            }
         }
 
         const stacks = createStackComposer(contextOptions)

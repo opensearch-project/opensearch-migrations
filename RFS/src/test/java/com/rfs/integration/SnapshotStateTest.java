@@ -10,7 +10,6 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
-import org.opensearch.migrations.workcoordination.tracing.WorkCoordinationTestContext;
 
 import com.rfs.common.DocumentReindexer.BulkDocSection;
 import com.rfs.common.OpenSearchClient;
@@ -67,8 +66,7 @@ public class SnapshotStateTest {
     @Test
     public void SingleSnapshot_SingleDocument() throws Exception {
         // Setup
-        final var workCoordinationContext = WorkCoordinationTestContext.factory().noOtelTracking();
-        final var testContext = DocumentMigrationTestContext.factory(workCoordinationContext).noOtelTracking();
+        final var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
         final var indexName = "my-index";
         final var document1Id = "doc1";
         final var document1Body = "   \n {\n\"fo$o\":\"bar\"\n}\t \n"; // Verify that we trim and remove newlines
@@ -106,8 +104,7 @@ public class SnapshotStateTest {
     @Test
     public void SingleSnapshot_SingleDocument_Then_DeletedDocument() throws Exception {
         // Setup
-        final var workCoordinationContext = WorkCoordinationTestContext.factory().noOtelTracking();
-        final var testContext = DocumentMigrationTestContext.factory(workCoordinationContext).noOtelTracking();
+        final var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
         final var indexName = "my-index-with-deleted-item";
         final var document1Id = "doc1-going-to-be-deleted";
         final var document1Body = "{\"foo\":\"bar\"}";
@@ -140,8 +137,7 @@ public class SnapshotStateTest {
     @Test
     public void SingleSnapshot_SingleDocument_Then_UpdateDocument() throws Exception {
         // Setup
-        final var workCoordinationContext = WorkCoordinationTestContext.factory().noOtelTracking();
-        final var testContext = DocumentMigrationTestContext.factory(workCoordinationContext).noOtelTracking();
+        final var testContext = DocumentMigrationTestContext.factory().noOtelTracking();
         final var indexName = "my-index-with-updated-item";
         final var document1Id = "doc1-going-to-be-updated";
         final var document1BodyOriginal = "{\"foo\":\"bar\"}";

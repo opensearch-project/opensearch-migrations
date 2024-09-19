@@ -57,7 +57,10 @@ describe('OpenSearch Domain Stack Tests', () => {
       vpcSecurityGroupIds: ["sg-123456789abcdefgh", "sg-223456789abcdefgh"],
       domainAZCount: 3,
       domainRemovalPolicy: "DESTROY",
-      sourceClusterEndpoint: "https://test-cluster",
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"}
+      }
     }
 
     const openSearchStacks = createStackComposer(contextOptions)
@@ -110,7 +113,10 @@ describe('OpenSearch Domain Stack Tests', () => {
       vpcSecurityGroupIds: "[\"sg-123456789abcdefgh\", \"sg-223456789abcdefgh\"]",
       domainAZCount: "3",
       domainRemovalPolicy: "DESTROY",
-      sourceClusterEndpoint: "https://test-cluster",
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"}
+      }
     }
 
     const openSearchStacks = createStackComposer(contextOptions)
@@ -143,7 +149,10 @@ describe('OpenSearch Domain Stack Tests', () => {
       enforceHTTPS: true,
       encryptionAtRestEnabled: true,
       nodeToNodeEncryptionEnabled: true,
-      sourceClusterEndpoint: "https://test-cluster",
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"}
+      }
     }
 
     const openSearchStacks = createStackComposer(contextOptions)
@@ -163,7 +172,10 @@ describe('OpenSearch Domain Stack Tests', () => {
       enforceHTTPS: "true",
       encryptionAtRestEnabled: "true",
       nodeToNodeEncryptionEnabled: "true",
-      sourceClusterEndpoint: "https://test-cluster",
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"}
+      }
     }
 
     const openSearchStacks = createStackComposer(contextOptions)

@@ -69,8 +69,8 @@ subprojects {
             showExceptions true
             showCauses true
             showStackTraces true
-            showStandardStreams = true
         }
+        maxParallelForks = gradle.startParameter.maxWorkerCount
 
         // Provide way to exclude particular tests from CLI
         // e.g. ../gradlew test -PexcludeTests=**/KafkaProtobufConsumerLongTermTest*
@@ -84,21 +84,36 @@ subprojects {
         systemProperty 'log4j2.contextSelector', 'org.apache.logging.log4j.core.selector.BasicContextSelector'
         // Verify assertions in tests
         jvmArgs '-ea'
+        jacoco.enabled = true
     }
 
     // Mutually exclusive tests to avoid duplication
     tasks.named('test') {
+        systemProperty 'migrationLogLevel', 'TRACE'
         useJUnitPlatform {
-            excludeTags 'longTest'
+            excludeTags('longTest', 'isolatedTest')
         }
-        jacoco.enabled = true
     }
 
     tasks.register('slowTest', Test) {
+        systemProperty 'migrationLogLevel', 'DEBUG'
         useJUnitPlatform {
             includeTags 'longTest'
+            excludeTags 'isolatedTest'
         }
-        jacoco.enabled = true
+    }
+
+    tasks.register('isolatedTest', Test) {
+        maxParallelForks = 1
+        useJUnitPlatform {
+            includeTags 'isolatedTest'
+        }
+    }
+
+    tasks.register('fullTest') {
+        dependsOn test
+        dependsOn slowTest
+        dependsOn isolatedTest
     }
 
     task javadocJar(type: Jar, dependsOn: javadoc) {
@@ -197,6 +212,36 @@ subprojects {
             html.required = true
             html.destination file("${buildDir}/reports/jacoco/test/html")
         }
+    }
+}
+
+gradle.projectsEvaluated {
+    List<Task> isolatedTestsTasks = []
+    List<Task> sharedProcessTestsTasks = []
+    subprojects { subproject ->
+        subproject.tasks.withType(Test).all { task ->
+            if (task.name == "isolatedTest") {
+                isolatedTestsTasks.add(task)
+            } else {
+                sharedProcessTestsTasks.add(task)
+            }
+        }
+    }
+    isolatedTestsTasks.sort { task -> task.project.name }
+
+    // Create a sequential dependency chain
+    Task previousTask = null
+    isolatedTestsTasks.each { task ->
+        sharedProcessTestsTasks.forEach {task.mustRunAfter(it) }
+        if (previousTask != null) {
+            task.mustRunAfter(previousTask)
+        }
+        previousTask = task
+    }
+
+    tasks.register("allTests") {
+        dependsOn sharedProcessTestsTasks
+        dependsOn isolatedTestsTasks
     }
 }
 

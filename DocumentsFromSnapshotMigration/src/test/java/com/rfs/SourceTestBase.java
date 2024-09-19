@@ -15,16 +15,15 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
 
-import org.apache.lucene.document.Document;
 import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Assertions;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
-import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
+import com.rfs.RfsMigrateDocuments.RunParameters;
 import com.rfs.cms.CoordinateWorkHttpClient;
 import com.rfs.cms.LeaseExpireTrigger;
 import com.rfs.cms.OpenSearchWorkCoordinator;
@@ -34,18 +33,13 @@ import com.rfs.common.FileSystemRepo;
 import com.rfs.common.LuceneDocumentsReader;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.RestClient;
+import com.rfs.common.RfsLuceneDocument;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
 import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.framework.SearchClusterContainer;
 import com.rfs.http.SearchClusterRequests;
-import com.rfs.transformers.TransformFunctions;
-import com.rfs.transformers.Transformer;
-import com.rfs.version_os_2_11.GlobalMetadataCreator_OS_2_11;
-import com.rfs.version_os_2_11.IndexCreator_OS_2_11;
 import com.rfs.worker.DocumentsRunner;
-import com.rfs.worker.IndexRunner;
-import com.rfs.worker.MetadataRunner;
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.SneakyThrows;
@@ -64,43 +58,6 @@ public class SourceTestBase {
             baseSourceImage,
             GENERATOR_BASE_IMAGE,
             new String[] { "/root/runTestBenchmarks.sh", "--endpoint", "http://" + SOURCE_SERVER_ALIAS + ":9200/" } };
-    }
-
-    protected static void migrateMetadata(
-        SourceRepo sourceRepo,
-        OpenSearchClient targetClient,
-        String snapshotName,
-        List<String> legacyTemplateAllowlist,
-        List<String> componentTemplateAllowlist,
-        List<String> indexTemplateAllowlist,
-        List<String> indexAllowlist,
-        MetadataMigrationTestContext context,
-        Version sourceVersion
-    ) {
-        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(sourceVersion, sourceRepo);
-        var targetVersion = Version.fromString("OS 2.11");
-        GlobalMetadataCreator_OS_2_11 metadataCreator = new GlobalMetadataCreator_OS_2_11(
-            targetClient,
-            legacyTemplateAllowlist,
-            componentTemplateAllowlist,
-            indexTemplateAllowlist
-        );
-        Transformer transformer = TransformFunctions.getTransformer(sourceVersion, targetVersion, 1);
-        new MetadataRunner(
-            snapshotName,
-            sourceResourceProvider.getGlobalMetadata(),
-            metadataCreator,
-            transformer
-        ).migrateMetadata(context.createMetadataMigrationContext());
-
-        IndexCreator_OS_2_11 indexCreator = new IndexCreator_OS_2_11(targetClient);
-        new IndexRunner(
-            snapshotName,
-            sourceResourceProvider.getIndexMetadata(),
-            indexCreator,
-            transformer,
-            indexAllowlist
-        ).migrateIndices(context.createIndexContext());
     }
 
     @AllArgsConstructor
@@ -181,15 +138,15 @@ public class SourceTestBase {
     }
 
     public static class FilteredLuceneDocumentsReader extends LuceneDocumentsReader {
-        private final UnaryOperator<Document> docTransformer;
+        private final UnaryOperator<RfsLuceneDocument> docTransformer;
 
-        public FilteredLuceneDocumentsReader(Path luceneFilesBasePath, boolean softDeletesPossible, String softDeletesField, UnaryOperator<Document> docTransformer) {
+        public FilteredLuceneDocumentsReader(Path luceneFilesBasePath, boolean softDeletesPossible, String softDeletesField, UnaryOperator<RfsLuceneDocument> docTransformer) {
             super(luceneFilesBasePath, softDeletesPossible, softDeletesField);
             this.docTransformer = docTransformer;
         }
 
         @Override
-        public Flux<Document> readDocuments() {
+        public Flux<RfsLuceneDocument> readDocuments() {
             return super.readDocuments().map(docTransformer::apply);
         }
     }
@@ -213,7 +170,7 @@ public class SourceTestBase {
             log.atDebug().setMessage("Lease expired for " + workItemId + " making next document get throw").log();
             shouldThrow.set(true);
         })) {
-            UnaryOperator<Document> terminatingDocumentFilter = d -> {
+            UnaryOperator<RfsLuceneDocument> terminatingDocumentFilter = d -> {
                 if (shouldThrow.get()) {
                     throw new LeasePastError();
                 }
@@ -233,36 +190,37 @@ public class SourceTestBase {
             final var nextClockShift = (int) (clockJitter.nextDouble() * ms_window) - (ms_window / 2);
             log.info("nextClockShift=" + nextClockShift);
 
-
             Function<Path, LuceneDocumentsReader> readerFactory = path -> new FilteredLuceneDocumentsReader(path, sourceResourceProvider.getSoftDeletesPossible(),
                 sourceResourceProvider.getSoftDeletesFieldData(), terminatingDocumentFilter);
 
-            return RfsMigrateDocuments.run(
-                readerFactory,
-                new DocumentReindexer(new OpenSearchClient(ConnectionContextTestParams.builder()
+            try (var workCoordinator = new OpenSearchWorkCoordinator(
+                new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                     .host(targetAddress)
-                    .compressionEnabled(compressionEnabled)
                     .build()
-                    .toConnectionContext()), 1000, Long.MAX_VALUE, 1),
-                new OpenSearchWorkCoordinator(
-                    new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
+                    .toConnectionContext()),
+                TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                UUID.randomUUID().toString(),
+                Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))
+            )) {
+                return RfsMigrateDocuments.run(RunParameters.builder()
+                    .leaseExpireTrigger(processManager)
+                    .workCoordinator(workCoordinator)
+                    .snapshotName(snapshotName)
+                    .snapshotReader(sourceResourceProvider)
+                    .snapshotUnpacker(unpackerFactory)
+                    .documentReader(readerFactory)
+                    .reindexer(new DocumentReindexer(new OpenSearchClient(ConnectionContextTestParams.builder()
                         .host(targetAddress)
+                        .compressionEnabled(compressionEnabled)
                         .build()
-                        .toConnectionContext()),
-                    TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                    UUID.randomUUID().toString(),
-                    Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))
-                ),
-                Duration.ofMinutes(10),
-                processManager,
-                sourceResourceProvider.getIndexMetadata(),
-                snapshotName,
-                indexAllowlist,
-                sourceResourceProvider.getShardMetadata(),
-                unpackerFactory,
-                MAX_SHARD_SIZE_BYTES,
-                context
-            );
+                        .toConnectionContext()), 1000, Long.MAX_VALUE, 1))
+                    .maxInitialLeaseDuration(Duration.ofMinutes(10))
+                    .indexAllowlist(indexAllowlist)
+                    .maxShardSizeBytes(MAX_SHARD_SIZE_BYTES)
+                    .tracingContext(context)
+                    .build()
+                );
+            }
         } finally {
             deleteTree(tempDir);
         }

@@ -18,11 +18,10 @@ public class SnapshotMetadataFactory_ES_6_8 implements SnapshotMetadata.Factory 
     public SnapshotMetadata fromJsonNode(JsonNode root) throws Exception {
         ObjectMapper mapper = new ObjectMapper();
         ObjectNode objectNodeRoot = (ObjectNode) root;
-        SnapshotMetadataData_ES_6_8 snapshotMetadata = mapper.treeToValue(
+        return mapper.treeToValue(
             objectNodeRoot.get("snapshot"),
             SnapshotMetadataData_ES_6_8.class
         );
-        return snapshotMetadata;
     }
 
     @Override

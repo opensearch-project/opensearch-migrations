@@ -3,13 +3,19 @@ package org.opensearch.migrations.testutils;
 import java.net.InetSocketAddress;
 import java.net.URI;
 import java.net.URISyntaxException;
+import java.util.AbstractMap;
+import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import com.sun.net.httpserver.HttpServer;
 import com.sun.net.httpserver.HttpsConfigurator;
 import com.sun.net.httpserver.HttpsParameters;
 import com.sun.net.httpserver.HttpsServer;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
 import lombok.Lombok;
 
 /**
@@ -26,7 +32,7 @@ public class SimpleHttpServer implements AutoCloseable {
 
     public static SimpleHttpServer makeServer(
         boolean useTls,
-        Function<HttpRequestFirstLine, SimpleHttpResponse> makeContext
+        Function<HttpRequest, SimpleHttpResponse> makeContext
     ) throws PortFinder.ExceededMaxPortAssigmentAttemptException {
         var testServerRef = new AtomicReference<SimpleHttpServer>();
         PortFinder.retryWithNewPortUntilNoThrow(port -> {
@@ -39,31 +45,13 @@ public class SimpleHttpServer implements AutoCloseable {
         return testServerRef.get();
     }
 
-    public static class PojoHttpRequestFirstLine implements HttpRequestFirstLine {
+    @Getter
+    @AllArgsConstructor
+    public static class PojoHttpRequest implements HttpRequest {
         private final String verb;
         private final URI path;
         private final String version;
-
-        public PojoHttpRequestFirstLine(String verb, URI path, String version) {
-            this.verb = verb;
-            this.path = path;
-            this.version = version;
-        }
-
-        @Override
-        public String verb() {
-            return verb;
-        }
-
-        @Override
-        public URI path() {
-            return path;
-        }
-
-        @Override
-        public String version() {
-            return version;
-        }
+        private final List<? extends Map.Entry<String, String>> headers;
     }
 
     private static HttpsServer createSecureServer(InetSocketAddress address) throws Exception {
@@ -93,18 +81,21 @@ public class SimpleHttpServer implements AutoCloseable {
      * @param port
      * @return the port upon successfully binding the server
      */
-    public SimpleHttpServer(boolean useTls, int port, Function<HttpRequestFirstLine, SimpleHttpResponse> contentMapper)
+    public SimpleHttpServer(boolean useTls, int port, Function<HttpRequest, SimpleHttpResponse> contentMapper)
         throws Exception
     {
         var addr = new InetSocketAddress(LOCALHOST, port);
         this.useTls = useTls;
         httpServer = useTls ? createSecureServer(addr) : HttpServer.create(addr, 0);
         httpServer.createContext("/", httpExchange -> {
-            var requestToMatch = new PojoHttpRequestFirstLine(
+            var requestToMatch = new PojoHttpRequest(
                 httpExchange.getRequestMethod(),
                 httpExchange.getRequestURI(),
-                httpExchange.getProtocol()
-            );
+                httpExchange.getProtocol(),
+                httpExchange.getRequestHeaders().entrySet().stream()
+                    .flatMap(keyValueList -> keyValueList.getValue().stream()
+                        .map(v -> new AbstractMap.SimpleEntry<>(keyValueList.getKey(), v)))
+                    .collect(Collectors.toList()));
             var headersAndPayload = contentMapper.apply(requestToMatch);
             var responseHeaders = httpExchange.getResponseHeaders();
             for (var kvp : headersAndPayload.headers.entrySet()) {

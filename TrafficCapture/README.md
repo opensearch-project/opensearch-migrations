@@ -154,14 +154,14 @@ This command compiles the source code and runs the quick unit tests, ensuring th
 For a comprehensive test run, including both quick unit tests and more extensive slow tests, execute:
 
 ```sh
-../gradlew test slowTest --rerun
+../gradlew allTests --rerun
 ```
 
 This command initiates all tests, ensuring thorough validation of the project. The `--rerun` option is used to ignore existing task output cache for the specified tasks.
 
 ### Gradle Scans
 
-Gradle Scans offer a more intuitive understanding of build outputs. To enable Gradle Scans for enhanced output analysis, append `--scan` to your Gradle command.
+Gradle Scans offer a more intuitive understanding of build outputs.
 This action requires acceptance of the Gradle Scan terms of service.
 To automate this acceptance and enable scans by default, set the `OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED` environment variable:
 

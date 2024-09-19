@@ -10,7 +10,7 @@ public class VersionTest {
 
     @Test
     void fromString() throws ParseException {
-        var expected = Version.builder().flavor(Flavor.OpenSearch).major(1).minor(3).patch(18).build();
+        var expected = Version.builder().flavor(Flavor.OPENSEARCH).major(1).minor(3).patch(18).build();
         assertThat(Version.fromString("OpenSearch 1.3.18"), equalTo(expected));
         assertThat(Version.fromString("Opensearch 1.3.18"), equalTo(expected));
         assertThat(Version.fromString("Opensearch  1.3.18"), equalTo(expected));
@@ -23,7 +23,7 @@ public class VersionTest {
 
     @Test
     void fromString_defaultPatch() throws ParseException {
-        var expected = Version.builder().flavor(Flavor.OpenSearch).major(1).minor(3).patch(0).build();
+        var expected = Version.builder().flavor(Flavor.OPENSEARCH).major(1).minor(3).patch(0).build();
         assertThat(Version.fromString("OpenSearch 1.3.0"), equalTo(expected));
         assertThat(Version.fromString("OpenSearch 1.3.x"), equalTo(expected));
         assertThat(Version.fromString("OpenSearch  1.3"), equalTo(expected));
@@ -31,7 +31,7 @@ public class VersionTest {
 
     @Test
     void fromString_defaultMinor() throws ParseException {
-        var expected = Version.builder().flavor(Flavor.OpenSearch).major(1).minor(0).patch(0).build();
+        var expected = Version.builder().flavor(Flavor.OPENSEARCH).major(1).minor(0).patch(0).build();
         assertThat(Version.fromString("OpenSearch 1.0.0"), equalTo(expected));
         assertThat(Version.fromString("OpenSearch 1.0"), equalTo(expected));
         assertThat(Version.fromString("OpenSearch 1.x.x"), equalTo(expected));

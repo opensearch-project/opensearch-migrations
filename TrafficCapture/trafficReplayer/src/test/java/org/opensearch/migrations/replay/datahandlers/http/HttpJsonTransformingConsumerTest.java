@@ -11,6 +11,7 @@ import java.util.Random;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -48,8 +49,17 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
             );
     }
 
+    @Test
+    @WrapWithNettyLeakDetection(repetitions = 2)
+    public void testSomeRequestProcessing() throws Exception {
+        var args = provideTestParameters().findFirst().get();
+        testRequestProcessing((Integer) args.get()[0], (Boolean) args.get()[1], (String) args.get()[2]);
+    }
+
     @ParameterizedTest
     @MethodSource("provideTestParameters")
+    @Tag("longTest")
+    @WrapWithNettyLeakDetection(repetitions = 2)
     public void testRequestProcessing(Integer attemptedChunks, Boolean hostTransformation, String requestFile)
         throws Exception {
         final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);

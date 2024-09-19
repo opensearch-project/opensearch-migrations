@@ -21,5 +21,5 @@ def describe_consumer_group(kafka: Kafka, group_name: str) -> CommandResult:
 
 
 def describe_topic_records(kafka: Kafka, topic_name: str) -> CommandResult:
-    result = kafka.delete_topic(topic_name=topic_name)
+    result = kafka.describe_topic_records(topic_name=topic_name)
     return result

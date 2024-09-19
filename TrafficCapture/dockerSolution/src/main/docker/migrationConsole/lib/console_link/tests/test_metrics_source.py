@@ -151,7 +151,7 @@ def test_cloudwatch_metrics_get_metric_data(cw_ms, cw_stubber):
 
     cw_ms.client = cw_stubber.client
     metrics = cw_ms.get_metric_data(Component.CAPTUREPROXY, "kafkaCommitCount",
-                                    MetricStatistic.Average, startTime=datetime.datetime.now())
+                                    MetricStatistic.Average, start_time=datetime.datetime.now())
     assert metrics == mock_metric_data
 
 
@@ -184,5 +184,5 @@ def test_prometheus_get_metric_for_nonexistent_component(prometheus_ms):
     with pytest.raises(ValueError):
         prometheus_ms.get_metric_data(
             Component(3), "kafkaCommitCount",
-            MetricStatistic.Average, startTime=datetime.datetime.now()
+            MetricStatistic.Average, start_time=datetime.datetime.now()
         )

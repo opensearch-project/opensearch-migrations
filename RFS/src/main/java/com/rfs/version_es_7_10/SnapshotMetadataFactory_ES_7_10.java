@@ -20,11 +20,10 @@ public class SnapshotMetadataFactory_ES_7_10 implements SnapshotMetadata.Factory
         ObjectMapper mapper = new ObjectMapper();
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
         ObjectNode objectNodeRoot = (ObjectNode) root;
-        SnapshotMetadataData_ES_7_10 snapshotMetadata = mapper.treeToValue(
+        return mapper.treeToValue(
             objectNodeRoot.get("snapshot"),
             SnapshotMetadataData_ES_7_10.class
         );
-        return snapshotMetadata;
     }
 
     @Override

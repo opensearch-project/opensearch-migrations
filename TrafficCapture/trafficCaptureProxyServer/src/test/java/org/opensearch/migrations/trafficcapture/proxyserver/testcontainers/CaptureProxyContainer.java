@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy;
@@ -26,20 +27,24 @@ public class CaptureProxyContainer extends GenericContainer implements AutoClose
     private static final Duration TIMEOUT_DURATION = Duration.ofSeconds(30);
     private final Supplier<String> destinationUriSupplier;
     private final Supplier<String> kafkaUriSupplier;
+    private final List<String> extraArgs;
     private Integer listeningPort;
     private Thread serverThread;
 
-    public CaptureProxyContainer(
-        final Supplier<String> destinationUriSupplier,
-        final Supplier<String> kafkaUriSupplier
-    ) {
+    public CaptureProxyContainer(final Supplier<String> destinationUriSupplier,
+                                 final Supplier<String> kafkaUriSupplier,
+                                 Stream<String> extraArgs) {
         this.destinationUriSupplier = destinationUriSupplier;
         this.kafkaUriSupplier = kafkaUriSupplier;
+        this.extraArgs = extraArgs.collect(Collectors.toList());
+    }
+
+    public CaptureProxyContainer(Supplier<String> destinationUriSupplier, Supplier<String> kafkaUriSupplier) {
+        this(destinationUriSupplier, kafkaUriSupplier, Stream.of());
     }
 
     public CaptureProxyContainer(final String destinationUri, final String kafkaUri) {
-        this.destinationUriSupplier = () -> destinationUri;
-        this.kafkaUriSupplier = () -> kafkaUri;
+        this(() -> destinationUri, () -> kafkaUri);
     }
 
     public CaptureProxyContainer(final Container<?> destination, final KafkaContainer kafka) {
@@ -73,6 +78,8 @@ public class CaptureProxyContainer extends GenericContainer implements AutoClose
                 argsList.add("--listenPort");
                 argsList.add(String.valueOf(listeningPort));
                 argsList.add("--insecureDestination");
+
+                argsList.addAll(extraArgs);
 
                 CaptureProxy.main(argsList.toArray(new String[0]));
             } catch (Exception e) {
