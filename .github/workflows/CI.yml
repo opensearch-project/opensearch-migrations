@@ -48,7 +48,6 @@ jobs:
       fail-fast: false
       matrix:
         py-project:
-          - ./FetchMigration/python
           - ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link
     defaults:
       run:
@@ -225,16 +224,6 @@ jobs:
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
 
-  fetch-migration-docker-build:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./FetchMigration
-    steps:
-      - uses: actions/checkout@v4
-      - name: Build Docker Image
-        run: docker build -t migrations/fetch-migration -f Dockerfile .
-
   all-ci-checks-pass:
     needs:
       - style-check
@@ -244,7 +233,6 @@ jobs:
       - python-e2e-tests
       - python-lint
       - python-tests
-      - fetch-migration-docker-build
     if: always()
     runs-on: ubuntu-latest
     steps:

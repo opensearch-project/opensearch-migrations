@@ -27,9 +27,6 @@ COPY osiPipelineTemplate.yaml /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
 
-COPY showFetchMigrationCommand.sh /root/
-RUN chmod ug+x /root/showFetchMigrationCommand.sh
-
 COPY kafkaExport.sh /root/kafka-tools
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
