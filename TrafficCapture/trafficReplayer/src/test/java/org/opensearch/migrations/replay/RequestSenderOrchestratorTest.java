@@ -258,8 +258,8 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                 var cf = scheduledItems.get(i);
                 var arr = cf.get();
                 Assertions.assertNull(arr.error);
-                Assertions.assertTrue(arr.responseSizeInBytes > 0);
-                var packetBytesArr = arr.responsePackets.stream()
+                Assertions.assertTrue(arr.sizeInBytes > 0);
+                var packetBytesArr = arr.packets.stream()
                     .map(SimpleEntry::getValue)
                     .collect(Collectors.toList());
                 try (

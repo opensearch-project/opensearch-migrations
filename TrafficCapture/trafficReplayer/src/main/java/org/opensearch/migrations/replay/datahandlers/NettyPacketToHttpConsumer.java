@@ -336,28 +336,35 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     }
 
     private void deactivateChannel() {
-        var pipeline = channel.pipeline();
-        log.atDebug()
-            .setMessage(() -> "Resetting the pipeline for channel " + channel + "currently at: " + pipeline)
-            .log();
-        for (var handlerName : new String[] { WRITE_COUNT_WATCHER_HANDLER_NAME, READ_COUNT_WATCHER_HANDLER_NAME }) {
-            try {
-                pipeline.remove(handlerName);
-            } catch (NoSuchElementException e) {
-                log.atWarn()
-                    .setMessage(() -> "Ignoring an exception that the " + handlerName + " wasn't present")
-                    .log();
+        try {
+            var pipeline = channel.pipeline();
+            log.atDebug()
+                .setMessage(() -> "Resetting the pipeline for channel {} currently at: {}")
+                .addArgument(channel)
+                .addArgument(pipeline)
+                .log();
+            for (var handlerName : new String[] { WRITE_COUNT_WATCHER_HANDLER_NAME, READ_COUNT_WATCHER_HANDLER_NAME }) {
+                try {
+                    pipeline.remove(handlerName);
+                } catch (NoSuchElementException e) {
+                    log.atWarn()
+                        .setMessage(() -> "Ignoring an exception that the " + handlerName + " wasn't present")
+                        .log();
+                }
             }
-        }
-        while (true) {
-            var lastHandler = pipeline.last();
-            if (lastHandler instanceof SslHandler || lastHandler instanceof ConnectionClosedListenerHandler) {
-                break;
+            while (true) {
+                var lastHandler = pipeline.last();
+                if (lastHandler instanceof SslHandler || lastHandler instanceof ConnectionClosedListenerHandler) {
+                    break;
+                }
+                pipeline.removeLast();
             }
-            pipeline.removeLast();
+            channel.config().setAutoRead(false);
+            log.atDebug().setMessage(() -> "Reset the pipeline for channel " + channel + " back to: " + pipeline).log();
+        } finally {
+            getCurrentRequestSpan().close();
+            getParentContext().close();
         }
-        channel.config().setAutoRead(false);
-        log.atDebug().setMessage(() -> "Reset the pipeline for channel " + channel + " back to: " + pipeline).log();
     }
 
     @Override
