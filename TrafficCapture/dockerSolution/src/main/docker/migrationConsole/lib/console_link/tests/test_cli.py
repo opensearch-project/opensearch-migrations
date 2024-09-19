@@ -608,3 +608,15 @@ def test_cli_kafka_describe_topic(runner, mocker):
 def test_completion_script(runner):
     result = runner.invoke(cli, [str(VALID_SERVICES_YAML), 'completion', 'bash'], catch_exceptions=True)
     assert result.exit_code == 0
+
+
+def test_tuple_converter(runner, tmp_path):
+    output_file = f"{tmp_path}/converted_tuples.json"
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'tuples', 'convert',
+                                 '--in', f"{TEST_DATA_DIRECTORY}/multiple_tuples.json",
+                                 '--out', output_file],
+                           catch_exceptions=True)
+    assert output_file in result.output
+    assert result.exit_code == 0
+
+    assert open(output_file).readlines() == open(TEST_DATA_DIRECTORY / "multiple_tuples_parsed.json").readlines()

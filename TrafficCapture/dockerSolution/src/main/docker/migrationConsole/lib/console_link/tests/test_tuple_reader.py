@@ -5,7 +5,7 @@ import re
 import pytest
 
 from console_link.models.tuple_reader import (DictionaryPathException, get_element_with_regex, get_element,
-                                              set_element, decode_chunked, Flag, get_flags_for_component,
+                                              set_element, Flag, get_flags_for_component,
                                               parse_tuple)
 
 
@@ -104,13 +104,6 @@ def test_set_element_fails_and_raises():
         set_element('B.A', d, 'new value')
 
 
-def test_decode_chunked():
-    b = bytes('7\r\nMozilla\r\n11\r\nDeveloper Network\r\n0\r\n\r\n', 'utf-8')
-    decoded = decode_chunked(b)
-    print(decoded)
-    assert decoded == b'MozillaDeveloper Network'
-
-
 def test_get_flags_none():
     request = {
         'Content-Encoding': 'not-gzip',
@@ -124,9 +117,7 @@ def test_get_flags_none():
 
 def test_get_flags_for_component_only_bulk():
     request = {
-        'Content-Encoding': 'not-gzip',
         'Content-Type': 'not-json',
-        'Transfer-Encoding': 'not-chunked',
         'body': 'abcdefg'
     }
     flags = get_flags_for_component(request, True)
@@ -135,24 +126,20 @@ def test_get_flags_for_component_only_bulk():
 
 def test_get_flags_for_component_all_present():
     request = {
-        'Content-Encoding': 'gzip',
         'Content-Type': 'application/json',
-        'Transfer-Encoding': 'chunked',
         'body': 'abcdefg'
     }
     flags = get_flags_for_component(request, True)
-    assert flags == {Flag.Bulk_Request, Flag.Chunked_Transfer, Flag.Gzipped, Flag.Json}
+    assert flags == {Flag.Bulk_Request, Flag.Json}
 
 
 def test_get_flags_all_present_alternate_capitalization():
     request = {
-        'content-encoding': 'gzip',
         'CONTENT-TYPE': 'application/json',
-        'tRANSFER-eNCODING': 'chunked',
         'body': 'abcdefg'
     }
     flags = get_flags_for_component(request, True)
-    assert flags == {Flag.Bulk_Request, Flag.Chunked_Transfer, Flag.Gzipped, Flag.Json}
+    assert flags == {Flag.Bulk_Request, Flag.Json}
 
 
 def test_parse_tuple_full_example():
@@ -163,18 +150,6 @@ def test_parse_tuple_full_example():
     with open(VALID_TUPLE_PARSED, 'r') as f:
         expected = json.load(f)
 
-    assert parsed == expected
-
-
-@pytest.mark.skip("Need to actually generate these files")
-def test_parse_tuple_with_gzipped_and_chunked():
-    with open(VALID_TUPLE_GZIPPED_CHUNKED, 'r') as f:
-        tuple_ = f.read()
-    parsed = parse_tuple(tuple_, 0)
-
-    with open(VALID_TUPLE_GZIPPED_CHUNKED_PARSED, 'r') as f:
-        expected = json.load(f)
-    
     assert parsed == expected
 
 
