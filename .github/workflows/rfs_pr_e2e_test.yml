@@ -32,7 +32,7 @@ jobs:
           echo "branch_name=$branch_name" >> $GITHUB_OUTPUT
           echo "pr_repo_url=$pr_repo_url" >> $GITHUB_OUTPUT
       - name: Jenkins Job Trigger and Monitor
-        uses: lewijacn/jenkins-trigger@main
+        uses: lewijacn/jenkins-trigger@1.0.4
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
           job_name: "rfs-default-e2e-test"
