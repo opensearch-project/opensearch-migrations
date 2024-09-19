@@ -62,7 +62,7 @@ class Environment:
             self.target_cluster: Cluster = Cluster(self.config["target_cluster"])
             logger.info(f"Target cluster initialized: {self.target_cluster.endpoint}")
         else:
-            logger.warn("No target cluster provided. This may prevent other actions from proceeding.")
+            logger.warning("No target cluster provided. This may prevent other actions from proceeding.")
 
         if 'metrics_source' in self.config:
             self.metrics_source: MetricsSource = get_metrics_source(

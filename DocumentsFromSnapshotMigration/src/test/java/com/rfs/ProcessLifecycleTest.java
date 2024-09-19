@@ -16,16 +16,10 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-import org.opensearch.migrations.Version;
-import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.testcontainers.OpensearchContainer;
 
-import com.rfs.common.FileSystemRepo;
-import com.rfs.common.FileSystemSnapshotCreator;
-import com.rfs.common.OpenSearchClient;
-import com.rfs.common.http.ConnectionContextTestParams;
 import com.rfs.framework.PreloadedSearchClusterContainer;
 import com.rfs.framework.SearchClusterContainer;
 import eu.rekawek.toxiproxy.model.ToxicDirection;
@@ -68,7 +62,6 @@ public class ProcessLifecycleTest extends SourceTestBase {
     public void testProcessExitsAsExpected(String failAfterString, int expectedExitCode) throws Exception {
         final var failHow = FailHow.valueOf(failAfterString);
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
-        final var testMetadataMigrationContext = MetadataMigrationTestContext.factory().noOtelTracking();
 
         var sourceImageArgs = makeParamsForBase(SearchClusterContainer.ES_V7_10_2);
         var baseSourceImageVersion = (SearchClusterContainer.ContainerVersion) sourceImageArgs[0];
@@ -104,22 +97,15 @@ public class ProcessLifecycleTest extends SourceTestBase {
                 return null;
             })).join();
 
-            CreateSnapshot.run(
-                c -> new FileSystemSnapshotCreator(
-                    SNAPSHOT_NAME,
-                    c,
-                    SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
-                    testSnapshotContext.createSnapshotCreateContext()
-                ),
-                new OpenSearchClient(ConnectionContextTestParams.builder()
-                    .host(esSourceContainer.getUrl())
-                    .build()
-                    .toConnectionContext()),
-                false
-            );
-            esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
+            var args = new CreateSnapshot.Args();
+            args.snapshotName = SNAPSHOT_NAME;
+            args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
+            args.sourceArgs.host = esSourceContainer.getUrl();
 
-            migrateMetadata(osTargetContainer, tempDirSnapshot, testMetadataMigrationContext, baseSourceImageVersion.getVersion());
+            var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
+            snapshotCreator.run();
+
+            esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
             int actualExitCode = runProcessAgainstToxicTarget(tempDirSnapshot, tempDirLucene, proxyContainer, failHow);
             log.atInfo().setMessage("Process exited with code: " + actualExitCode).log();
@@ -134,24 +120,6 @@ public class ProcessLifecycleTest extends SourceTestBase {
             deleteTree(tempDirSnapshot);
             deleteTree(tempDirLucene);
         }
-    }
-
-    private static void migrateMetadata(
-        OpensearchContainer targetContainer,
-        Path tempDirSnapshot,
-        MetadataMigrationTestContext testMetadataMigrationContext,
-        Version sourceVersion
-    ) {
-        String targetAddress = "http://"
-            + targetContainer.getHost()
-            + ":"
-            + targetContainer.getMappedPort(OPENSEARCH_PORT);
-        var targetClient = new OpenSearchClient(ConnectionContextTestParams.builder()
-            .host(targetAddress)
-            .build()
-            .toConnectionContext());
-        var sourceRepo = new FileSystemRepo(tempDirSnapshot);
-        migrateMetadata(sourceRepo, targetClient, SNAPSHOT_NAME, List.of(), List.of(), List.of(), INDEX_ALLOWLIST, testMetadataMigrationContext, sourceVersion);
     }
 
     private static int runProcessAgainstToxicTarget(

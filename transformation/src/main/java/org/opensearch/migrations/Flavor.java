@@ -6,8 +6,8 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 @Getter
 public enum Flavor {
-    Elasticsearch("ES"),
-    OpenSearch("OS");
+    ELASTICSEARCH("ES"),
+    OPENSEARCH("OS");
 
     final String shorthand;
 }

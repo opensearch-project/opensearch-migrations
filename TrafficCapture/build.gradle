@@ -33,15 +33,17 @@ allprojects {
     }
 }
 
-tasks.named('test', Test) {
-    // Memory leak tests are adding too much execution time on `test` in TrafficCapture
-    // Disabling and will test in `slowTest`
-    systemProperty 'disableMemoryLeakTests', 'true'
-}
+subprojects {
+    tasks.named('test', Test) {
+        // Memory leak tests are adding too much execution time on `test` in TrafficCapture
+        // Disabling and will test in `slowTest`
+        it.systemProperty 'disableMemoryLeakTests', 'true'
+    }
 
-tasks.named('slowTest', Test) {
-    useJUnitPlatform {
-        // Ensure rerunning all tests to run with leak detection
-        includeTags = []
+    tasks.named('slowTest', Test) {
+        useJUnitPlatform {
+            includeTags = []
+            excludeTags = ['isolatedTest']
+        }
     }
 }

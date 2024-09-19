@@ -2,8 +2,10 @@ import json
 import pathlib
 
 import pytest
+import requests
 import requests_mock
 
+from console_link.models.cluster import Cluster
 from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
 from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill
@@ -131,6 +133,17 @@ def test_get_backfill_unsupported_type():
     assert "fetch" in str(excinfo.value.args[1])
 
 
+def test_get_backfill_multiple_types():
+    unknown_config = {
+        "fetch": {"data": "xyz"},
+        "new_backfill": {"data": "abc"}
+    }
+    with pytest.raises(UnsupportedBackfillTypeError) as excinfo:
+        get_backfill(unknown_config, None, None)
+    assert "fetch" in excinfo.value.args[1]
+    assert "new_backfill" in excinfo.value.args[1]
+
+
 def test_cant_instantiate_with_multiple_types():
     config = {
         "opensearch_ingestion": {
@@ -245,7 +258,6 @@ def test_ecs_rfs_calculates_backfill_status_from_ecs_instance_statuses_running(e
     assert str(mocked_running_status) == value.value[1]
 
 
-@pytest.mark.skip(reason="Need to implement mocking for multiple calls to endpoint")
 def test_ecs_rfs_get_status_deep_check(ecs_rfs_backfill, mocker):
     target = create_valid_cluster()
     mocked_instance_status = InstanceStatuses(
@@ -269,3 +281,39 @@ def test_ecs_rfs_get_status_deep_check(ecs_rfs_backfill, mocker):
     assert BackfillStatus.RUNNING == value.value[0]
     assert str(mocked_instance_status) in value.value[1]
     assert str(total_shards) in value.value[1]
+
+
+def test_ecs_rfs_deep_status_check_failure(ecs_rfs_backfill, mocker, caplog):
+    mocked_instance_status = InstanceStatuses(
+        desired=1,
+        running=1,
+        pending=0
+    )
+    mock_ecs = mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True,
+                                   return_value=mocked_instance_status)
+    mock_api = mocker.patch.object(Cluster, 'call_api', side_effect=requests.exceptions.RequestException())
+    result = ecs_rfs_backfill.get_status(deep_check=True)
+    assert "Working state index does not yet exist" in caplog.text
+    mock_ecs.assert_called_once()
+    mock_api.assert_called_once()
+    assert result.success
+    assert result.value[0] == BackfillStatus.RUNNING
+
+
+def test_docker_backfill_not_implemented_commands():
+    docker_rfs_config = {
+        "reindex_from_snapshot": {
+            "docker": None
+        }
+    }
+    docker_rfs_backfill = get_backfill(docker_rfs_config, None, target_cluster=create_valid_cluster())
+    assert isinstance(docker_rfs_backfill, DockerRFSBackfill)
+
+    with pytest.raises(NotImplementedError):
+        docker_rfs_backfill.start()
+
+    with pytest.raises(NotImplementedError):
+        docker_rfs_backfill.stop()
+
+    with pytest.raises(NotImplementedError):
+        docker_rfs_backfill.scale(units=3)

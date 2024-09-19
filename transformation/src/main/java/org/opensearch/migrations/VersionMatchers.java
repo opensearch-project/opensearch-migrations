@@ -26,18 +26,14 @@ public class VersionMatchers {
     }
 
     private static Predicate<Version> matchesMinorVersion(final Version version) {
-        return other -> {
-            return matchesMajorVersion(version)
-                .and(other2 -> version.getMinor() == other2.getMinor())
-                .test(other);
-        };
+        return other -> matchesMajorVersion(version)
+            .and(other2 -> version.getMinor() == other2.getMinor())
+            .test(other);
     }
 
     private static Predicate<Version> equalOrGreaterThanMinorVersion(final Version version) {
-        return other -> {
-            return matchesMajorVersion(version)
-                .and(other2 -> version.getMinor() <= other2.getMinor())
-                .test(other);
-        };
+        return other -> matchesMajorVersion(version)
+            .and(other2 -> version.getMinor() <= other2.getMinor())
+            .test(other);
     }
 }

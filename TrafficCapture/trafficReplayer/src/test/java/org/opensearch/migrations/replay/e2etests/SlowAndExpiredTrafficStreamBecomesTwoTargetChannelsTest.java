@@ -27,7 +27,7 @@ import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ArrayCursorTrafficSourceContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
-import org.opensearch.migrations.testutils.HttpRequestFirstLine;
+import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
@@ -172,7 +172,7 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
         return "/" + connection + "/" + Integer.toString(i);
     }
 
-    private static class TrackingResponseBuilder implements Function<HttpRequestFirstLine, SimpleHttpResponse> {
+    private static class TrackingResponseBuilder implements Function<HttpRequest, SimpleHttpResponse> {
         List<String> pathsReceivedList;
         CountDownLatch targetRequestsPending;
 
@@ -182,8 +182,8 @@ public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
         }
 
         @Override
-        public SimpleHttpResponse apply(HttpRequestFirstLine firstLine) {
-            var pathReceived = firstLine.path().getPath();
+        public SimpleHttpResponse apply(HttpRequest firstLine) {
+            var pathReceived = firstLine.getPath().getPath();
             pathsReceivedList.add(pathReceived);
             var payloadBytes = pathReceived.getBytes(StandardCharsets.UTF_8);
             targetRequestsPending.countDown();

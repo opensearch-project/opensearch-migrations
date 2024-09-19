@@ -36,7 +36,7 @@ public class KafkaTrafficCaptureSourceLongTermTest extends InstrumentationTest {
     );
 
     @Test
-    @Tag("longTest")
+    @Tag("isolatedTest")
     public void testTrafficCaptureSource() throws Exception {
         String testTopicName = "TEST_TOPIC";
 

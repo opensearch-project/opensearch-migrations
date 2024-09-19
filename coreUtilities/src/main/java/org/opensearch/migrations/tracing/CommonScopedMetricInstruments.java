@@ -70,7 +70,7 @@ public class CommonScopedMetricInstruments extends CommonMetricInstruments {
     }
 
     private static List<Double> getBuckets(double firstBucketSize, double lastBucketCeiling) {
-        var buckets = getExponentialBucketsBetween(firstBucketSize, lastBucketCeiling, 2.0);
+        var buckets = getExponentialBucketsBetween(firstBucketSize, lastBucketCeiling);
         log.atTrace()
             .setMessage(
                 () -> "Setting buckets to "
