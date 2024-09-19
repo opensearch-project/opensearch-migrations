@@ -18,6 +18,7 @@
     "response_time_ms": 59,
     "content-type": "text/plain; charset=UTF-8",
     "content-length": "214",
+    "comment": "This body has a few characters modified to make it un-decodeable as utf-8",
     "body": "aGVhbHRoIHN0YXR1cyBpbmRleCAgICACB1dWlkICAgICAgICAgICAgICAgICAgIHByaSByZXAgZG9jcy5jb3VudCBkb2NzLmRlbGV0ZWQgc3RvcmUuc2l6ZSBwcmkuc3RvcmUuc2l6ZQpncmVlbiAgb3BlbiAgIHNlYXJjaGd1YXJkIHlKS1hQTUh0VFJPTklYU1pYQ193bVEgICAxICAgMCAgICAgICAgICA4ICAgICAgICAgICAgMCAgICAgNDQuN2tiICAgICAgICAgNDQuN2tiCg=="
   },
   "targetRequest": {
@@ -40,6 +41,7 @@
       "response_time_ms": 721,
       "content-type": "application/json; charset=UTF-8",
       "content-length": "484",
+      "comment": "This response is valid text, but is not valid as json, despite the `content-type` header",
       "body": "aGVhbHRoIHN0YXR1cyBpbmRleCAgICAgICAgICAgICAgICAgICAgIHV1aWQgICAgICAgICAgICAgICAgICAgcHJpIHJlcCBkb2NzLmNvdW50IGRvY3MuZGVsZXRlZCBzdG9yZS5zaXplIHByaS5zdG9yZS5zaXplCmdyZWVuICBvcGVuICAgLm9wZW5zZWFyY2gtb2JzZXJ2YWJpbGl0eSA4Vy1vWUhmYlN5U3JkeFFFX3NPbnpnICAgMSAgIDAgICAgICAgICAgMCAgICAgICAgICAgIDAgICAgICAgMjA4YiAgICAgICAgICAgMjA4YgpncmVlbiAgb3BlbiAgIC5wbHVnaW5zLW1sLWNvbmZpZyAgICAgICAgRjludnh2c2dSelNibG1mSnZ2aGptdyAgIDEgICAwICAgICAgICAgIDEgICAgICAgICAgICAwICAgICAgMy44a2IgICAgICAgICAgMy44a2IKZ3JlZW4gIG9wZW4gICAub3BlbmRpc3Ryb19zZWN1cml0eSAgICAgIDVmWHlhbkZuU2tDUUQ2bjFKUW1KTlEgICAxICAgMCAgICAgICAgIDEwICAgICAgICAgICAgMCAgICAgNzcuNWtiICAgICAgICAgNzcuNWtiCg=="
     }
   ],
