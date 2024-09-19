@@ -3,6 +3,7 @@ package org.opensearch.migrations.cli;
 import java.nio.file.Path;
 
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.cluster.ClusterReader;
 
@@ -11,14 +12,15 @@ import com.rfs.common.FileSystemRepo;
 import com.rfs.common.S3Repo;
 import com.rfs.common.S3Uri;
 import com.rfs.common.SourceRepo;
+import com.rfs.common.http.ConnectionContext;
 import lombok.AllArgsConstructor;
 
 @AllArgsConstructor
 public class ClusterReaderExtractor {
-    final MigrateOrEvaluateArgs arguments;
+    private final MigrateOrEvaluateArgs arguments;
 
-    public ClusterReader extractClusterReader() { 
-        if (arguments.fileSystemRepoPath != null && arguments.s3RepoUri != null && arguments.sourceArgs.host != null) {
+    public ClusterReader extractClusterReader() {
+        if (arguments.fileSystemRepoPath == null && arguments.s3RepoUri == null && arguments.sourceArgs.host == null) {
             throw new ParameterException("No details on the source cluster found, please supply a connection details or a snapshot");
         }
         if ((arguments.s3RepoUri != null) && (arguments.s3Region == null || arguments.s3LocalDirPath == null)) {
@@ -26,7 +28,7 @@ public class ClusterReaderExtractor {
         }
 
         if (arguments.sourceArgs != null && arguments.sourceArgs.host != null) {
-            return ClusterProviderRegistry.getRemoteReader(arguments.sourceArgs.toConnectionContext());
+            return getRemoteReader(arguments.sourceArgs.toConnectionContext());
         }
         
         SourceRepo repo = null;
@@ -38,6 +40,14 @@ public class ClusterReaderExtractor {
             throw new ParameterException("Unable to find valid resource provider");
         }
 
-        return ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, repo);
+        return getSnapshotReader(arguments.sourceVersion, repo);
+    }
+
+    ClusterReader getRemoteReader(ConnectionContext connection) {
+        return ClusterProviderRegistry.getRemoteReader(connection);
+    }
+
+    ClusterReader getSnapshotReader(Version sourceVersion, SourceRepo repo) {
+        return ClusterProviderRegistry.getSnapshotReader(sourceVersion, repo);
     }
 }

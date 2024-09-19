@@ -14,17 +14,17 @@ public class Clusters {
     private ClusterReader source;
     private ClusterWriter target;
 
-    public String toString() {
+    public String asCliOutput() {
         var sb = new StringBuilder();
         sb.append("Clusters:" + System.lineSeparator());
         if (getSource() != null) {
-            sb.append("   Source:" + System.lineSeparator());
-            sb.append("      " + getSource() + System.lineSeparator());
+            sb.append(Format.indentToLevel(1) + "Source:" + System.lineSeparator());
+            sb.append(Format.indentToLevel(2) + getSource() + System.lineSeparator());
             sb.append(System.lineSeparator());
         }
         if (getTarget() != null) {
-            sb.append("   Target:" + System.lineSeparator());
-            sb.append("      " + getTarget() + System.lineSeparator());
+            sb.append(Format.indentToLevel(1) + "Target:" + System.lineSeparator());
+            sb.append(Format.indentToLevel(2) + getTarget() + System.lineSeparator());
             sb.append(System.lineSeparator());
         }
         return sb.toString();
