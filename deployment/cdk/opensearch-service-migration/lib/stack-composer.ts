@@ -272,7 +272,7 @@ export class StackComposer {
         const targetClusterAuth = targetCluster?.auth
         const targetVersion = this.getEngineVersion(targetCluster?.version || engineVersion)
 
-        const requiredFields: { [key: string]: any; } = {"stage":stage, "domainName":domainName}
+        const requiredFields: { [key: string]: any; } = {"stage":stage}
         for (let key in requiredFields) {
             if (!requiredFields[key]) {
                 throw new Error(`Required CDK context field ${key} is not present`)
@@ -281,6 +281,10 @@ export class StackComposer {
         if (addOnMigrationDeployId && vpcId) {
             console.warn("Addon deployments will use the original deployment 'vpcId' regardless of passed 'vpcId' values")
         }
+        if (stage.length > 15) {
+            throw new Error(`Maximum allowed stage name length is 15 characters but received ${stage}`)
+        }
+        const clusterDomainName = domainName ? domainName : `os-cluster-${stage}`
         let preexistingOrContainerTargetEndpoint
         if (targetCluster && osContainerServiceEnabled) {
             throw new Error("The following options are mutually exclusive as only one target cluster can be specified for a given deployment: [targetCluster, osContainerServiceEnabled]")
@@ -360,7 +364,7 @@ export class StackComposer {
         if (!preexistingOrContainerTargetEndpoint) {
             openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
                 version: targetVersion,
-                domainName: domainName,
+                domainName: clusterDomainName,
                 dataNodeInstanceType: dataNodeType,
                 dataNodes: dataNodeCount,
                 dedicatedManagerNodeType: dedicatedManagerNodeType,

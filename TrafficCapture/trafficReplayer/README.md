@@ -80,12 +80,20 @@ Transformations are performed via a simple interface defined by
 [IJsonTransformer](../transformationPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/IJsonTransformer.java) ('transformer').  They are loaded dynamically and are designed to allow for easy extension
 of the TrafficReplayer to support a diverse set of needs.
 
-The input to the transformer will be an HTTP message represented as a json-like `Map<String,Object>` with
+The input to the transformer is an HTTP message represented as a json-like `Map<String,Object>` with
 top-level key-value pairs defined in
 [JsonKeysForHttpMessage.java](../transformationPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/JsonKeysForHttpMessage.java).
-Only bodies that are json-formatted will be accessible, and they will be accessible as a fully-parsed Map (at 
-the keypath `'payload'->'inlinedJsonBody'`).  Transformers have the option to rewrite none, or any of the keys and
-values within the original message.  The transformer can return either the original message or a completely new message.
+Bodies that are json-formatted will be accessible via the path `payload.inlinedJsonBody` and they will be accessible 
+as a fully-parsed Map.  Newline-delimited json (ndjson) sequences will be accessible via 
+`payload.inlinedJsonSequenceBodies` as a List of json Maps.  These two payload entries are mutually exclusive.
+Any additional bytes that follow a json object (or all of the bytes if there wasn't a json object at all) will
+be available as a ByteBuf in `payload.inlinedBinaryBody`.  
+
+Transformers have the option to rewrite none, or any of the keys and values within the original message.  
+The transformer can return either the original message or a completely new message.  Notice that one json payload
+could be broken into multiple ndjson entries or vice-versa by changing the payload key and supplying an appropriately
+typed object as its value (e.g. a single Map or a List of Maps respectively for `inlinedJsonBody` and
+`inlinedJsonSequenceBodies`).
 Transformers may be used simultaneously from concurrent threads over the lifetime of the replayer.  However, 
 a message will only be processed by one transformer at a time.
 
@@ -108,10 +116,10 @@ The name is defined by the `IJsonTransformerProvider::getName()`, which unless o
 (e.g. 'JsonJoltTransformerProvider').  The value corresponding to that key is then passed to instantiate an 
 IJsonTransformer object.
 
-The base [jsonJoltMessageTransformerProvider](../transformationPlugins/jsonMessageTransformers/jsonJoltMessageTransformerProvider) 
-package includes [JsonCompositeTransformer.java]
+The jsonMessageTransformerInterface package includes [JsonCompositeTransformer.java]
 (../transformationPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/JsonCompositeTransformer.java),
-which run transformers in serial.  That composite transformer is also utilized by the TrafficReplayer to combine the
+which runs configured transformers in serial.  
+That composite transformer is also utilized by the TrafficReplayer to combine the 
 list of loaded transformations with a transformer to rewrite the 'Host' header.  That host transformation changes the 
 host header of every HTTP message to use the target domain-name rather than the source's.  That will be run after
 all loaded/specified transformations.
@@ -140,8 +148,9 @@ To run only one transformer without any configuration, the `--transformer-config
 be set to the name of the transformer (e.g. 'JsonTransformerForOpenSearch23PlusTargetTransformerProvider', 
 without quotes or any json surrounding it).
 
-The user can also specify a file to read the transformations from using the `--transformer-config-file`, but can't use
-both transformer options.
+The user can also specify a file to read the transformations from using the `--transformer-config-file`.  Users can
+also pass the script as an argument via `--transformer-config-base64`.  Each of the `transformer-config` options
+is mutually exclusive.
 
 Some simple transformations are included to change headers to add compression or to force an HTTP message payload to 
 be chunked.  Another transformer, [JsonTypeMappingTransformer.java](../transformationPlugins/jsonMessageTransformers/openSearch23PlusTargetTransformerProvider/src/main/java/org/opensearch/migrations/transform/JsonTypeMappingTransformer.java),

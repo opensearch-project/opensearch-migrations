@@ -109,8 +109,7 @@ public class RemoteReaderClient extends OpenSearchClient {
             var tree = (ObjectNode) objectMapper.readTree(resp.body);
             return Mono.just(tree);
         } catch (Exception e) {
-            log.error("Unable to get json response: ", e);
-            return Mono.error(new OperationFailed("Unable to get json response: " + e.getMessage(), resp));
+            return logAndReturnJsonError(e, resp);
         }
     }
 
@@ -140,8 +139,13 @@ public class RemoteReaderClient extends OpenSearchClient {
             }
             return Mono.just(tree);
         } catch (Exception e) {
-            log.error("Unable to get json response: ", e);
-            return Mono.error(new OperationFailed("Unable to get json response: " + e.getMessage(), resp));
+            return logAndReturnJsonError(e, resp);
         }
+    }
+
+    Mono<ObjectNode> logAndReturnJsonError(Exception e, HttpResponse resp) {
+        String errorPrefix = "Unable to get json response: ";
+        log.atError().setCause(e).setMessage(errorPrefix).log();
+        return Mono.error(new OperationFailed(errorPrefix + e.getMessage(), resp));
     }
 }

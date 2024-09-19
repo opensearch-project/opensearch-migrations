@@ -32,7 +32,7 @@ public class JsonAccumulatorTest {
             var chunkSize = Math.min(r.nextInt(chunkBound), chunkByteBuffer.remaining());
             chunkByteBuffer.limit(chunkSize + i);
             i += chunkSize;
-            var completedObject = jsonParser.consumeByteBuffer(chunkByteBuffer);
+            var completedObject = jsonParser.consumeByteBufferForSingleObject(chunkByteBuffer);
             if (completedObject != null) {
                 Assertions.assertEquals(testFileBytes.length, i);
                 return completedObject;

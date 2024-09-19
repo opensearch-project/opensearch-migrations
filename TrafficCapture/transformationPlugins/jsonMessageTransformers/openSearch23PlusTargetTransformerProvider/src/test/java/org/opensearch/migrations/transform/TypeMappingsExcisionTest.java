@@ -51,7 +51,7 @@ public class TypeMappingsExcisionTest {
             var isr = new InputStreamReader(resourceStream, StandardCharsets.UTF_8)
         ) {
             var expectedBytes = CharStreams.toString(isr).getBytes(StandardCharsets.UTF_8);
-            return (Map<String, Object>) jsonAccumulator.consumeByteBuffer(ByteBuffer.wrap(expectedBytes));
+            return (Map<String, Object>) jsonAccumulator.consumeByteBufferForSingleObject(ByteBuffer.wrap(expectedBytes));
         }
     }
 

@@ -24,7 +24,8 @@ public class RemoteIndexMetadata implements IndexMetadata {
 
     @Override
     public String getId() {
-        return indexName;
+        // The ID is the name in this case
+        return getName();
     }
 
     @Override
