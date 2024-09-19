@@ -612,7 +612,7 @@ def test_completion_script(runner):
 
 def test_tuple_converter(runner, tmp_path):
     output_file = f"{tmp_path}/converted_tuples.json"
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'tuples', 'convert',
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'tuples', 'show',
                                  '--in', f"{TEST_DATA_DIRECTORY}/multiple_tuples.json",
                                  '--out', output_file],
                            catch_exceptions=True)

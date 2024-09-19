@@ -501,9 +501,10 @@ def tuples_group(ctx):
 @click.option('--out', 'outputfile',
               type=click.File('a'),
               default=sys.stdout)
-def convert(inputfile, outputfile):
+def show(inputfile, outputfile):
     tuples_.convert(inputfile, outputfile)
-    click.echo(f"Converted tuples output to {outputfile.name}")
+    if outputfile != sys.stdout:
+        click.echo(f"Converted tuples output to {outputfile.name}")
 
 
 #################################################
