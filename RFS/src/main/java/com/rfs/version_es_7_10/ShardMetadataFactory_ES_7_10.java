@@ -32,18 +32,18 @@ public class ShardMetadataFactory_ES_7_10 implements ShardMetadata.Factory {
                 objectNodeRoot,
                 ShardMetadataData_ES_7_10.DataRaw.class
             );
-            return new ShardMetadataData_ES_7_10(
-                shardMetadataRaw.name,
-                indexName,
-                indexId,
-                shardId,
-                shardMetadataRaw.indexVersion,
-                shardMetadataRaw.startTime,
-                shardMetadataRaw.time,
-                shardMetadataRaw.numberOfFiles,
-                shardMetadataRaw.totalSize,
-                shardMetadataRaw.files
-            );
+            return ShardMetadataData_ES_7_10.builder()
+                .snapshotName(shardMetadataRaw.name)
+                .indexName(indexName)
+                .indexId(indexId)
+                .shardId(shardId)
+                .indexVersion(shardMetadataRaw.indexVersion)
+                .startTime(shardMetadataRaw.startTime)
+                .time(shardMetadataRaw.time)
+                .numberOfFiles(shardMetadataRaw.numberOfFiles)
+                .totalSizeBytes(shardMetadataRaw.totalSize)
+                .rawFiles(shardMetadataRaw.files)
+                .build();
         } catch (Exception e) {
             throw new ShardMetadata.CouldNotParseShardMetadata(
                 "Could not parse shard metadata for Index " + indexId + ", Shard " + shardId,

@@ -1,8 +1,8 @@
 package com.rfs.version_es_7_10;
 
 import java.io.IOException;
-import java.util.Collections;
 import java.util.List;
+import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
@@ -16,9 +16,11 @@ import org.apache.lucene.util.BytesRef;
 
 import com.rfs.models.ShardFileInfo;
 import com.rfs.models.ShardMetadata;
+import lombok.Builder;
 import lombok.Getter;
 
 @Getter
+@Builder(builderClassName = "Builder")
 public class ShardMetadataData_ES_7_10 implements ShardMetadata {
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -37,34 +39,14 @@ public class ShardMetadataData_ES_7_10 implements ShardMetadata {
     private final long totalSizeBytes;
     private final List<ShardFileInfo> files;
 
-    public ShardMetadataData_ES_7_10(
-        String snapshotName,
-        String indexName,
-        String indexId,
-        int shardId,
-        int indexVersion,
-        long startTime,
-        long time,
-        int numberOfFiles,
-        long totalSize,
-        List<FileInfoRaw> files
-    ) {
-        this.snapshotName = snapshotName;
-        this.indexName = indexName;
-        this.indexId = indexId;
-        this.shardId = shardId;
-        this.indexVersion = indexVersion;
-        this.startTime = startTime;
-        this.time = time;
-        this.numberOfFiles = numberOfFiles;
-        this.totalSizeBytes = totalSize;
-
-        // Convert the raw file metadata to the FileMetadata class
-        List<FileInfo> convertedFiles = new java.util.ArrayList<>();
-        for (FileInfoRaw fileMetadataRaw : files) {
-            convertedFiles.add(FileInfo.fromFileMetadataRaw(fileMetadataRaw));
+    // Custom builder method to handle rawFiles
+    public static class Builder {
+        public Builder rawFiles(List<FileInfoRaw> rawFiles) {
+            this.files = rawFiles.stream()
+                .map(FileInfo::fromFileMetadataRaw)
+                .collect(Collectors.toUnmodifiableList());
+            return this;
         }
-        this.files = Collections.unmodifiableList(convertedFiles);
     }
 
     @Override
