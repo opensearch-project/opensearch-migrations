@@ -24,7 +24,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
         MigrationMode mode,
         ICreateIndexContext context
     ) {
-        IndexMetadataData_OS_2_11 indexMetadata = new IndexMetadataData_OS_2_11(index.rawJson(), index.getId(), index.getName());
+        IndexMetadataData_OS_2_11 indexMetadata = new IndexMetadataData_OS_2_11(index.getRawJson(), index.getId(), index.getName());
 
         // Remove some settings which will cause errors if you try to pass them to the API
         ObjectNode settings = indexMetadata.getSettings();

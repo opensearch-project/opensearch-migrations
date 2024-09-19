@@ -149,8 +149,8 @@ public class HttpRetryTest {
         }
     }
 
-    @Tag("longTest")
     @Test
+    @Tag("longTest")
     @WrapWithNettyLeakDetection(disableLeakChecks = true) // code is forcibly terminated so leaks are expected
     public void testConnectionFailuresNeverGiveUp() throws Exception {
         URI serverUri;
@@ -218,7 +218,7 @@ public class HttpRetryTest {
              var server = new GenericContainer<>(HTTPD_IMAGE)
                  .withNetwork(network)
                  .withNetworkAliases(SERVERNAME_ALIAS)
-                 .waitingFor(Wait.forHttp("/").forStatusCode(200));
+                 .waitingFor(Wait.forHttp("/").forStatusCode(200)).withStartupTimeout(Duration.ofMinutes(5));
              var toxiproxy = new ToxiProxyWrapper(network))
         {
             server.start();

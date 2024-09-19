@@ -5,7 +5,7 @@ import java.time.Duration;
 import java.util.Map;
 import java.util.Random;
 
-import org.opensearch.migrations.testutils.HttpRequestFirstLine;
+import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 
 import lombok.Lombok;
@@ -30,18 +30,18 @@ public class TestHttpServerContext {
         );
     }
 
-    public static SimpleHttpResponse makeResponse(Random rand, HttpRequestFirstLine firstLine) {
+    public static SimpleHttpResponse makeResponse(Random rand, HttpRequest firstLine) {
         return makeResponse(firstLine, Duration.ofMillis(rand.nextInt(MAX_RESPONSE_TIME_MS)));
     }
 
-    public static SimpleHttpResponse makeResponse(HttpRequestFirstLine r, Duration responseWaitTime) {
+    public static SimpleHttpResponse makeResponse(HttpRequest r, Duration responseWaitTime) {
         try {
             Thread.sleep(responseWaitTime.toMillis());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw Lombok.sneakyThrow(e);
         }
-        String body = SERVER_RESPONSE_BODY_PREFIX + r.path();
+        String body = SERVER_RESPONSE_BODY_PREFIX + r.getPath();
         var payloadBytes = body.getBytes(StandardCharsets.UTF_8);
         var headers = Map.of(
             "Content-Type",

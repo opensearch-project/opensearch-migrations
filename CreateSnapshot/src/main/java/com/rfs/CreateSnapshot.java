@@ -1,7 +1,5 @@
 package com.rfs;
 
-import java.util.function.Function;
-
 import org.opensearch.migrations.snapshot.creation.tracing.RootSnapshotContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -17,13 +15,14 @@ import com.rfs.common.FileSystemSnapshotCreator;
 import com.rfs.common.OpenSearchClient;
 import com.rfs.common.S3SnapshotCreator;
 import com.rfs.common.SnapshotCreator;
-import com.rfs.common.TryHandlePhaseFailure;
 import com.rfs.common.http.ConnectionContext;
+import com.rfs.tracing.IRfsContexts.ICreateSnapshotContext;
 import com.rfs.worker.SnapshotRunner;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
+@AllArgsConstructor
 @Slf4j
 public class CreateSnapshot {
     public static class Args {
@@ -100,39 +99,44 @@ public class CreateSnapshot {
         }
 
         log.info("Running CreateSnapshot with {}", String.join(" ", args));
-        run(
-            c -> ((arguments.fileSystemRepoPath != null)
-                ? new FileSystemSnapshotCreator(
-                    arguments.snapshotName,
-                    c,
-                    arguments.fileSystemRepoPath,
-                    rootContext.createSnapshotCreateContext()
-                )
-                : new S3SnapshotCreator(
-                    arguments.snapshotName,
-                    c,
-                    arguments.s3RepoUri,
-                    arguments.s3Region,
-                    arguments.maxSnapshotRateMBPerNode,
-                    arguments.s3RoleArn,
-                    rootContext.createSnapshotCreateContext()
-                )),
-            new OpenSearchClient(arguments.sourceArgs.toConnectionContext()),
-            arguments.noWait
-        );
+        var snapshotCreator = new CreateSnapshot(arguments, rootContext.createSnapshotCreateContext());
+        snapshotCreator.run();
     }
 
-    public static void run(
-        Function<OpenSearchClient, SnapshotCreator> snapshotCreatorFactory,
-        OpenSearchClient openSearchClient,
-        boolean noWait
-    ) throws Exception {
-        TryHandlePhaseFailure.executeWithTryCatch(() -> {
-            if (noWait) {
-                SnapshotRunner.run(snapshotCreatorFactory.apply(openSearchClient));
+    private Args arguments;
+    private ICreateSnapshotContext context;
+
+    public void run() {
+        var client = new OpenSearchClient(arguments.sourceArgs.toConnectionContext());
+        SnapshotCreator snapshotCreator;
+        if (arguments.fileSystemRepoPath != null) {
+            snapshotCreator = new FileSystemSnapshotCreator(
+                    arguments.snapshotName,
+                    client,
+                    arguments.fileSystemRepoPath,
+                    context
+                );
+        } else {
+            snapshotCreator = new S3SnapshotCreator(
+                arguments.snapshotName,
+                client,
+                arguments.s3RepoUri,
+                arguments.s3Region,
+                arguments.maxSnapshotRateMBPerNode,
+                arguments.s3RoleArn,
+                context
+            );
+        }
+
+        try {
+            if (arguments.noWait) {
+                SnapshotRunner.run(snapshotCreator);
             } else {
-                SnapshotRunner.runAndWaitForCompletion(snapshotCreatorFactory.apply(openSearchClient));
+                SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
             }
-        });
+        } catch (Exception e) {
+            log.atError().setMessage("Unexpected error running RfsWorker").setCause(e).log();
+            throw e;
+        }
     }
 }

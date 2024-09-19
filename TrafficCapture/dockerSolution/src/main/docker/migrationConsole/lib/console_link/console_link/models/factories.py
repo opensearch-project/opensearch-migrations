@@ -67,7 +67,11 @@ def get_replayer(config: Dict):
 def get_kafka(config: Dict):
     if 'msk' in config:
         return MSK(config)
-    return StandardKafka(config)
+    if 'standard' in config:
+        return StandardKafka(config)
+    config.pop("broker_endpoints", None)
+    logger.error(f"An unsupported kafka source type was provided: {config.keys()}")
+    raise UnsupportedKafkaError(', '.join(config.keys()))
 
 
 def get_backfill(config: Dict, source_cluster: Optional[Cluster], target_cluster: Optional[Cluster]) -> Backfill:
@@ -93,10 +97,8 @@ def get_backfill(config: Dict, source_cluster: Optional[Cluster], target_cluster
             return ECSRFSBackfill(config=config,
                                   target_cluster=target_cluster)
 
-    logger.error(f"An unsupported metrics source type was provided: {config.keys()}")
-    if len(config.keys()) > 1:
-        raise UnsupportedBackfillTypeError(', '.join(config.keys()))
-    raise UnsupportedBackfillTypeError(next(iter(config.keys())))
+    logger.error(f"An unsupported backfill source type was provided: {config.keys()}")
+    raise UnsupportedBackfillTypeError(', '.join(config.keys()))
 
 
 def get_metrics_source(config):
@@ -106,6 +108,4 @@ def get_metrics_source(config):
         return CloudwatchMetricsSource(config)
     else:
         logger.error(f"An unsupported metrics source type was provided: {config.keys()}")
-        if len(config.keys()) > 1:
-            raise UnsupportedMetricsSourceError(', '.join(config.keys()))
-        raise UnsupportedMetricsSourceError(next(iter(config.keys())))
+        raise UnsupportedMetricsSourceError(', '.join(config.keys()))

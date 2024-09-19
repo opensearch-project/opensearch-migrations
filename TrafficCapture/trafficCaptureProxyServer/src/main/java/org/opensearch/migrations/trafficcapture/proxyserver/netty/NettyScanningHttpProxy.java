@@ -1,11 +1,6 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
-import java.util.function.Supplier;
-import javax.net.ssl.SSLEngine;
 
-import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
-import org.opensearch.migrations.trafficcapture.netty.RequestCapturePredicate;
-import org.opensearch.migrations.trafficcapture.netty.tracing.IRootWireLoggingContext;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.Channel;
@@ -14,9 +9,10 @@ import io.netty.channel.EventLoopGroup;
 import io.netty.channel.nio.NioEventLoopGroup;
 import io.netty.channel.socket.nio.NioServerSocketChannel;
 import io.netty.util.concurrent.DefaultThreadFactory;
-import lombok.NonNull;
+import lombok.Getter;
 
 public class NettyScanningHttpProxy {
+    @Getter
     protected final int proxyPort;
     protected Channel mainChannel;
     protected EventLoopGroup workerGroup;
@@ -26,33 +22,16 @@ public class NettyScanningHttpProxy {
         this.proxyPort = proxyPort;
     }
 
-    public int getProxyPort() {
-        return proxyPort;
-    }
-
-    public void start(
-        IRootWireLoggingContext rootContext,
-        BacksideConnectionPool backsideConnectionPool,
-        int numThreads,
-        Supplier<SSLEngine> sslEngineSupplier,
-        IConnectionCaptureFactory<Object> connectionCaptureFactory,
-        @NonNull RequestCapturePredicate requestCapturePredicate
-    ) throws InterruptedException {
+    public void start(ProxyChannelInitializer proxyChannelInitializer, int numThreads)
+        throws InterruptedException
+    {
         bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("captureProxyPoolBoss"));
         workerGroup = new NioEventLoopGroup(numThreads, new DefaultThreadFactory("captureProxyPoolWorker"));
         ServerBootstrap serverBootstrap = new ServerBootstrap();
         try {
             mainChannel = serverBootstrap.group(bossGroup, workerGroup)
                 .channel(NioServerSocketChannel.class)
-                .childHandler(
-                    new ProxyChannelInitializer<>(
-                        rootContext,
-                        backsideConnectionPool,
-                        sslEngineSupplier,
-                        connectionCaptureFactory,
-                        requestCapturePredicate
-                    )
-                )
+                .childHandler(proxyChannelInitializer)
                 .childOption(ChannelOption.AUTO_READ, false)
                 .bind(proxyPort)
                 .sync()

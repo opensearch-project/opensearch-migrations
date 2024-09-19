@@ -13,7 +13,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.rfs.common.SnapshotRepo;
 import com.rfs.common.SnapshotRepo.CantParseRepoFile;
 import com.rfs.common.SourceRepo;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
+import lombok.RequiredArgsConstructor;
 
+@Getter
 public class SnapshotRepoData_ES_7_10 {
     public static SnapshotRepoData_ES_7_10 fromRepoFile(Path filePath) {
         ObjectMapper mapper = new ObjectMapper();
@@ -38,26 +43,24 @@ public class SnapshotRepoData_ES_7_10 {
         return fromRepoFile(file);
     }
 
-    public Path filePath;
-    public List<Snapshot> snapshots;
-    public Map<String, RawIndex> indices;
+    private Path filePath;
+    private List<Snapshot> snapshots;
+    private Map<String, RawIndex> indices;
     @JsonProperty("min_version")
-    public String minVersion;
+    private String minVersion;
     @JsonProperty("index_metadata_identifiers")
-    public Map<String, String> indexMetadataIdentifiers;
+    private Map<String, String> indexMetadataIdentifiers;
 
+    @Getter
+    @AllArgsConstructor
+    @NoArgsConstructor
     public static class Snapshot implements SnapshotRepo.Snapshot {
-        public String name;
-        public String uuid;
-        public int state;
+        private String name;
+        private String uuid;
+        private int state;
         @JsonProperty("index_metadata_lookup")
-        public Map<String, String> indexMetadataLookup;
-        public String version;
-
-        @Override
-        public String getName() {
-            return name;
-        }
+        private Map<String, String> indexMetadataLookup;
+        private String version;
 
         @Override
         public String getId() {
@@ -65,41 +68,26 @@ public class SnapshotRepoData_ES_7_10 {
         }
     }
 
+    @Getter
+    @AllArgsConstructor
+    @NoArgsConstructor
     public static class RawIndex {
-        public String id;
-        public List<String> snapshots;
+        private String id;
+        private List<String> snapshots;
         @JsonProperty("shard_generations")
-        public List<String> shardGenerations;
+        private List<String> shardGenerations;
     }
 
+    @Getter
+    @RequiredArgsConstructor
     public static class Index implements SnapshotRepo.Index {
         public static Index fromRawIndex(String name, RawIndex rawIndex) {
-            Index index = new Index();
-            index.name = name;
-            index.id = rawIndex.id;
-            index.snapshots = rawIndex.snapshots;
-            index.shardGenerations = rawIndex.shardGenerations;
-            return index;
+            return new Index(name, rawIndex.id, rawIndex.snapshots, rawIndex.shardGenerations);
         }
 
-        public String name;
-        public String id;
-        public List<String> snapshots;
-        public List<String> shardGenerations;
-
-        @Override
-        public String getName() {
-            return name;
-        }
-
-        @Override
-        public String getId() {
-            return id;
-        }
-
-        @Override
-        public List<String> getSnapshots() {
-            return snapshots;
-        }
+        private final String name;
+        private final String id;
+        private final List<String> snapshots;
+        private final List<String> shardGenerations;
     }
 }

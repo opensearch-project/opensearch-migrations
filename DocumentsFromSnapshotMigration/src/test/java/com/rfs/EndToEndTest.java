@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ArgumentsSource;
@@ -25,6 +26,7 @@ import lombok.SneakyThrows;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 
+@Tag("isolatedTest")
 public class EndToEndTest extends SourceTestBase {
     @TempDir
     private File localDirectory;
@@ -110,7 +112,7 @@ public class EndToEndTest extends SourceTestBase {
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
             sourceCluster.copySnapshotData(localDirectory.toString());
             var sourceRepo = new FileSystemRepo(localDirectory.toPath());
- 
+
             // === ACTION: Migrate the documents ===
             final var clockJitter = new Random(1);
             var result = migrateDocumentsWithOneWorker(

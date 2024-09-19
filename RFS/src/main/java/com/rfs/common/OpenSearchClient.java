@@ -95,12 +95,12 @@ public class OpenSearchClient {
                 .major(Integer.parseInt(parts[0]))
                 .minor(Integer.parseInt(parts[1]))
                 .patch(parts.length > 2 ? Integer.parseInt(parts[2]) : 0);
-            
+
             var distroNode = versionNode.get("distribution");
             if (distroNode != null && distroNode.asText().equalsIgnoreCase("opensearch")) {
-                versionBuilder.flavor(Flavor.OpenSearch);
-            } else { 
-                versionBuilder.flavor(Flavor.Elasticsearch);
+                versionBuilder.flavor(Flavor.OPENSEARCH);
+            } else {
+                versionBuilder.flavor(Flavor.ELASTICSEARCH);
             }
             return versionBuilder.build();
         } catch (Exception e) {

@@ -6,11 +6,13 @@ import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.function.BiFunction;
 import java.util.function.Function;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionConverter;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
@@ -23,6 +25,7 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
+import com.rfs.RfsMigrateDocuments.RunParameters;
 import com.rfs.cms.CoordinateWorkHttpClient;
 import com.rfs.cms.IWorkCoordinator;
 import com.rfs.cms.LeaseExpireTrigger;
@@ -37,12 +40,13 @@ import com.rfs.common.S3Repo;
 import com.rfs.common.S3Uri;
 import com.rfs.common.SnapshotShardUnpacker;
 import com.rfs.common.SourceRepo;
-import com.rfs.common.TryHandlePhaseFailure;
 import com.rfs.common.http.ConnectionContext;
 import com.rfs.models.IndexMetadata;
 import com.rfs.models.ShardMetadata;
 import com.rfs.worker.DocumentsRunner;
 import com.rfs.worker.ShardWorkPreparer;
+import lombok.Builder;
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 
@@ -167,7 +171,7 @@ public class RfsMigrateDocuments {
     }
 
     public static void main(String[] args) throws Exception {
-        System.err.println("Got args: " + String.join("; ", args));
+        log.info("Got args: " + String.join("; ", args));
         var workerId = ProcessHelpers.getNodeInstanceName();
         log.info("Starting RfsMigrateDocuments with workerId =" + workerId);
 
@@ -182,63 +186,63 @@ public class RfsMigrateDocuments {
 
         validateArgs(arguments);
 
-        var rootDocumentContext = makeRootContext(arguments, workerId);
+        var context = makeRootContext(arguments, workerId);
         var luceneDirPath = Paths.get(arguments.luceneDir);
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
+        var connectionContext = arguments.targetArgs.toConnectionContext();
         try (var processManager = new LeaseExpireTrigger(workItemId -> {
             log.error("Terminating RfsMigrateDocuments because the lease has expired for " + workItemId);
             System.exit(PROCESS_TIMED_OUT);
-        }, Clock.systemUTC())) {
-            ConnectionContext connectionContext = arguments.targetArgs.toConnectionContext();
+        }, Clock.systemUTC());
             var workCoordinator = new OpenSearchWorkCoordinator(
                 new CoordinateWorkHttpClient(connectionContext),
                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                 workerId
-            );
+            )) {
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
-            TryHandlePhaseFailure.executeWithTryCatch(() -> {
-                OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
-                DocumentReindexer reindexer = new DocumentReindexer(targetClient,
-                    arguments.numDocsPerBulkRequest,
-                    arguments.numBytesPerBulkRequest,
-                    arguments.maxConnections);
+            OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
+            DocumentReindexer reindexer = new DocumentReindexer(targetClient,
+                arguments.numDocsPerBulkRequest,
+                arguments.numBytesPerBulkRequest,
+                arguments.maxConnections);
 
-                SourceRepo sourceRepo;
-                if (snapshotLocalDirPath == null) {
-                    sourceRepo = S3Repo.create(
-                        Paths.get(arguments.s3LocalDir),
-                        new S3Uri(arguments.s3RepoUri),
-                        arguments.s3Region
-                    );
-                } else {
-                    sourceRepo = new FileSystemRepo(snapshotLocalDirPath);
-                }
-                DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
-
-                var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, sourceRepo);
-
-                SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(
-                    repoAccessor,
-                    luceneDirPath,
-                    sourceResourceProvider.getBufferSizeInBytes()
+            SourceRepo sourceRepo;
+            if (snapshotLocalDirPath == null) {
+                sourceRepo = S3Repo.create(
+                    Paths.get(arguments.s3LocalDir),
+                    new S3Uri(arguments.s3RepoUri),
+                    arguments.s3Region
                 );
+            } else {
+                sourceRepo = new FileSystemRepo(snapshotLocalDirPath);
+            }
+            var repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
 
-                run(
-                    LuceneDocumentsReader.getFactory(sourceResourceProvider),
-                    reindexer,
-                    workCoordinator,
-                    arguments.initialLeaseDuration,
-                    processManager,
-                    sourceResourceProvider.getIndexMetadata(),
-                    arguments.snapshotName,
-                    arguments.indexAllowlist,
-                    sourceResourceProvider.getShardMetadata(),
-                    unpackerFactory,
-                    arguments.maxShardSizeBytes,
-                    rootDocumentContext
-                );
-            });
+            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(arguments.sourceVersion, sourceRepo);
+
+            var unpackerFactory = new SnapshotShardUnpacker.Factory(
+                repoAccessor,
+                luceneDirPath,
+                sourceResourceProvider.getBufferSizeInBytes()
+            );
+
+            run(RunParameters.builder()
+                .leaseExpireTrigger(processManager)
+                .workCoordinator(workCoordinator)
+                .reindexer(reindexer)
+                .snapshotName(arguments.snapshotName)
+                .snapshotReader(sourceResourceProvider)
+                .snapshotUnpacker(unpackerFactory)
+                .documentReader(LuceneDocumentsReader.getFactory(sourceResourceProvider))
+                .indexAllowlist(arguments.indexAllowlist)
+                .maxInitialLeaseDuration(arguments.initialLeaseDuration)
+                .maxShardSizeBytes(arguments.maxShardSizeBytes)
+                .tracingContext(context)
+                .build());
+        } catch (Exception e) {
+            log.atError().setMessage("Unexpected error running RfsWorker").setCause(e).log();
+            throw e;
         }
     }
 
@@ -255,41 +259,38 @@ public class RfsMigrateDocuments {
         return new RootDocumentMigrationContext(otelSdk, compositeContextTracker);
     }
 
-    public static DocumentsRunner.CompletionStatus run(
-        Function<Path, LuceneDocumentsReader> readerFactory,
-        DocumentReindexer reindexer,
-        IWorkCoordinator workCoordinator,
-        Duration maxInitialLeaseDuration,
-        LeaseExpireTrigger leaseExpireTrigger,
-        IndexMetadata.Factory indexMetadataFactory,
-        String snapshotName,
-        List<String> indexAllowlist,
-        ShardMetadata.Factory shardMetadataFactory,
-        SnapshotShardUnpacker.Factory unpackerFactory,
-        long maxShardSizeBytes,
-        RootDocumentMigrationContext rootDocumentContext
-    ) throws IOException, InterruptedException, NoWorkLeftException {
-        var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
+    public static DocumentsRunner.CompletionStatus run(RunParameters params) throws Exception {
+        var scopedWorkCoordinator = new ScopedWorkCoordinator(params.workCoordinator, params.leaseExpireTrigger);
         confirmShardPrepIsComplete(
-            indexMetadataFactory,
-            snapshotName,
-            indexAllowlist,
+            params.snapshotReader.getIndexMetadata(),
+            params.snapshotName,
+            params.indexAllowlist,
             scopedWorkCoordinator,
-            rootDocumentContext
+            params.tracingContext
         );
-        if (!workCoordinator.workItemsArePending(
-            rootDocumentContext.getWorkCoordinationContext()::createItemsPendingContext
+        if (!params.workCoordinator.workItemsArePending(
+            params.tracingContext.getWorkCoordinationContext()::createItemsPendingContext
         )) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
         }
-        return new DocumentsRunner(scopedWorkCoordinator, maxInitialLeaseDuration, (name, shard) -> {
-            var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, name, shard);
+        BiFunction<String, Integer, ShardMetadata> shardFactory = (name, shard) -> {
+            var shardMetadataFactory = params.snapshotReader.getShardMetadata();
+            var shardMetadata = shardMetadataFactory.fromRepo(params.snapshotName, name, shard);
             log.info("Shard size: " + shardMetadata.getTotalSizeBytes());
-            if (shardMetadata.getTotalSizeBytes() > maxShardSizeBytes) {
-                throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), maxShardSizeBytes);
+            if (shardMetadata.getTotalSizeBytes() > params.maxShardSizeBytes) {
+                throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), params.maxShardSizeBytes);
             }
             return shardMetadata;
-        }, unpackerFactory, readerFactory, reindexer).migrateNextShard(rootDocumentContext::createReindexContext);
+        };
+        var runner = new DocumentsRunner(
+            scopedWorkCoordinator,
+            params.maxInitialLeaseDuration,
+            shardFactory,
+            params.snapshotUnpacker,
+            params.documentReader,
+            params.reindexer);
+        var migrationStatus = runner.migrateNextShard(params.tracingContext::createReindexContext);
+        return migrationStatus;
     }
 
     private static void confirmShardPrepIsComplete(
@@ -329,8 +330,32 @@ public class RfsMigrateDocuments {
                     .log();
                 Thread.sleep(lockRenegotiationMillis);
                 lockRenegotiationMillis *= 2;
-                continue;
             }
         }
+    }
+
+    @Builder
+    static class RunParameters {
+        @NonNull
+        final LeaseExpireTrigger leaseExpireTrigger;
+        @NonNull
+        final IWorkCoordinator workCoordinator;
+        @NonNull
+        final String snapshotName;
+        @NonNull
+        final ClusterSnapshotReader snapshotReader;
+        @NonNull
+        final SnapshotShardUnpacker.Factory snapshotUnpacker;
+        @NonNull
+        final Function<Path, LuceneDocumentsReader> documentReader;
+        @NonNull
+        final DocumentReindexer reindexer;
+        @NonNull
+        final List<String> indexAllowlist;
+        @NonNull
+        final Duration maxInitialLeaseDuration;
+        final long maxShardSizeBytes;
+        @NonNull
+        final RootDocumentMigrationContext tracingContext;
     }
 }

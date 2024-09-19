@@ -1,6 +1,9 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
 import java.io.IOException;
+import java.nio.file.Files;
+import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 
 import org.apache.kafka.clients.CommonClientConfigs;
@@ -12,6 +15,7 @@ import org.junit.jupiter.api.Test;
 public class CaptureProxySetupTest {
 
     public final static String kafkaBrokerString = "invalid:9092";
+    public static final String TLS_PROTOCOLS_KEY = "plugins.security.ssl.http.enabled_protocols";
 
     @Test
     public void testBuildKafkaPropertiesBaseCase() throws IOException {
@@ -110,5 +114,42 @@ public class CaptureProxySetupTest {
 
         // Settings needed for other passed arguments (i.e. --enableMSKAuth) are ignored by property file
         Assertions.assertEquals("SASL_SSL", props.get(CommonClientConfigs.SECURITY_PROTOCOL_CONFIG));
+    }
+
+    @Test
+    public void testTlsParametersAreProperlyRead() throws Exception {
+        for (var kvp : Map.of(
+            "[ TLSv1.3, TLSv1.2 ]", List.of("TLSv1.3","TLSv1.2"),
+            "[ TLSv1.2, TLSv1.3 ]", List.of("TLSv1.2","TLSv1.3"),
+            "\n - TLSv1.2\n - TLSv1.3", List.of("TLSv1.2","TLSv1.3"),
+            "\n - TLSv1.2", List.of("TLSv1.2"))
+            .entrySet())
+        {
+            testTlsParametersAreProperlyRead(TLS_PROTOCOLS_KEY + ": " + kvp.getKey(), kvp.getValue());
+        }
+    }
+
+    @Test
+    public void testNoProtocolConfigDefaultsToSecureOnesOnly() throws Exception {
+        testTlsParametersAreProperlyRead("", List.of("TLSv1.2","TLSv1.3"));
+    }
+
+    public void testTlsParametersAreProperlyRead(String protocolsBlockString, List<String> expectedList)
+        throws Exception
+    {
+        var tempFile = Files.createTempFile("captureProxy_tlsConfig", "yaml");
+        try {
+            Files.writeString(tempFile, "plugins.security.ssl.http.enabled: true\n" +
+                "plugins.security.ssl.http.pemcert_filepath: esnode.pem\n" +
+                "plugins.security.ssl.http.pemkey_filepath: esnode-key.pem\n" +
+                "plugins.security.ssl.http.pemtrustedcas_filepath: root-ca.pem\n" +
+                protocolsBlockString);
+
+            var settings = CaptureProxy.getSettings(tempFile.toAbsolutePath().toString());
+            Assertions.assertEquals(String.join(", ", expectedList),
+                String.join(", ", settings.getAsList(TLS_PROTOCOLS_KEY)));
+        } finally {
+            Files.deleteIfExists(tempFile);
+        }
     }
 }

@@ -52,7 +52,8 @@ SCHEMA = {
     "min_replicas": {"type": "integer", "min": 0, "required": False},
     "index_allowlist": list_schema(required=False),
     "index_template_allowlist": list_schema(required=False),
-    "component_template_allowlist": list_schema(required=False)
+    "component_template_allowlist": list_schema(required=False),
+    "source_cluster_version": {"type": "string", "required": False}
 }
 
 
@@ -80,6 +81,7 @@ class Metadata:
         self._index_template_allowlist = config.get("index_template_allowlist", None)
         self._component_template_allowlist = config.get("component_template_allowlist", None)
         self._otel_endpoint = config.get("otel_endpoint", None)
+        self._source_cluster_version = config.get("source_cluster_version", None)
 
         logger.debug(f"Min replicas: {self._min_replicas}")
         logger.debug(f"Index allowlist: {self._index_allowlist}")
@@ -134,29 +136,29 @@ class Metadata:
         self._snapshot_location = "fs"
         self._repo_path = snapshot.repo_path
 
-    def _appendArgs(self, commands: Dict[str, Any], args_to_add: List[str]) -> None:
+    def _append_args(self, commands: Dict[str, Any], args_to_add: List[str]) -> None:
         if args_to_add is None:
             return
 
-        def isCommand(arg: str) -> bool:
+        def is_command(arg: Optional[str]) -> bool:
             if arg is None:
                 return False
             return arg.startswith('--') or arg.startswith('-')
 
-        def isValue(arg: str) -> bool:
+        def is_value(arg: Optional[str]) -> bool:
             if arg is None:
                 return False
-            return not isCommand(arg)
+            return not is_command(arg)
 
         i = 0
         while i < len(args_to_add):
             arg = args_to_add[i]
-            nextArg = args_to_add[i + 1] if (i + 1 < len(args_to_add)) else None
+            next_arg = args_to_add[i + 1] if (i + 1 < len(args_to_add)) else None
 
-            if isCommand(arg) and isValue(nextArg):
-                commands[arg] = nextArg
+            if is_command(arg) and is_value(next_arg):
+                commands[arg] = next_arg
                 i += 2  # Move past the command and value
-            elif isCommand(arg):
+            elif is_command(arg):
                 commands[arg] = None
                 i += 1  # Move past the command, its a flag
             else:
@@ -165,13 +167,13 @@ class Metadata:
 
     def evaluate(self, extra_args=None) -> CommandResult:
         logger.info("Starting metadata migration")
-        return self.migrateOrEvaluate("evaluate", extra_args)
+        return self.migrate_or_evaluate("evaluate", extra_args)
 
     def migrate(self, extra_args=None) -> CommandResult:
         logger.info("Starting metadata migration")
-        return self.migrateOrEvaluate("migrate", extra_args)
+        return self.migrate_or_evaluate("migrate", extra_args)
 
-    def migrateOrEvaluate(self, command: str, extra_args=None) -> CommandResult:
+    def migrate_or_evaluate(self, command: str, extra_args=None) -> CommandResult:
         command_base = "/root/metadataMigration/bin/MetadataMigration"
         command_args = {}
 
@@ -226,8 +228,11 @@ class Metadata:
         if self._component_template_allowlist:
             command_args.update({"--component-template-allowlist": ",".join(self._component_template_allowlist)})
 
+        if self._source_cluster_version:
+            command_args.update({"--source-version": self._source_cluster_version})
+
         # Extra args might not be represented with dictionary, so convert args to list and append commands
-        self._appendArgs(command_args, extra_args)
+        self._append_args(command_args, extra_args)
 
         command_runner = CommandRunner(command_base, command_args,
                                        sensitive_fields=["--target-password"])
