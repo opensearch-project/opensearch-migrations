@@ -8,6 +8,8 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import org.junit.jupiter.api.Assertions;
@@ -19,8 +21,10 @@ import org.junit.jupiter.params.provider.MethodSource;
 
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.TestCapturePacketToHttpHandler;
+import org.opensearch.migrations.replay.TestUtils;
 import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.util.TrackedFuture;
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -260,6 +264,58 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
         Assertions.assertEquals(HttpRequestTransformationStatus.completed(), returnedResponse.transformationStatus);
         Assertions.assertNull(returnedResponse.transformationStatus.getException());
+    }
+
+    @Test
+    public void testMalformedPayload_andThrowingTransformation_IsPassedThrough() throws Exception {
+        final String HOST_NAME = "foo.example";
+        var referenceStringBuilder = new StringBuilder();
+        // mock object. values don't matter at all - not what we're testing
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 12, Duration.ZERO, List.of(), null);
+        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
+
+        var transformingHandler = new HttpJsonTransformingConsumer<>(
+            new TransformationLoader().getTransformerFactoryLoader(
+                HOST_NAME,
+                null,
+                "[{\"JsonTransformerForOpenSearch23PlusTargetTransformerProvider\":\"\"}]"
+            ),
+            null,
+            testPacketCapture,
+            rootContext.getTestConnectionRequestContext(0)
+        );
+
+        Random r = new Random(2);
+        var stringParts = IntStream.range(0, 1)
+            .mapToObj(i -> TestUtils.makeRandomString(r, 10))
+            .map(o -> (String) o)
+            .collect(Collectors.toList());
+
+        TrackedFuture<String, Void> allConsumesFuture = TestUtils.chainedDualWriteHeaderAndPayloadParts(
+            transformingHandler,
+            stringParts,
+            referenceStringBuilder,
+            contentLength -> "PUT /foo HTTP/1.1\r\n"
+                + "HoSt: " + HOST_NAME + "\r\n"
+                + "content-type: application/json\r\n"
+                + "content-length: "
+                + contentLength
+                + "\r\n"
+        );
+
+        var finalizationFuture = allConsumesFuture.getDeferredFutureThroughHandle(
+            (v,t) -> transformingHandler.finalizeRequest(),
+            () -> "HeaderTransformTest.testMalformedPayload_andTypeMappingUri_IsPassedThrough"
+        );
+        var outputAndResult = finalizationFuture.get();
+        Assertions.assertInstanceOf(TransformationException.class,
+            TrackedFuture.unwindPossibleCompletionException(outputAndResult.transformationStatus.getException()),
+            "It's acceptable for now that the OpenSearch upgrade transformation can't handle non-json " +
+                "content.  If that Transform wants to handle this on its own, we'll need to use another transform " +
+                "configuration so that it throws and we can do this test.");
+        var combinedOutputBuf = outputAndResult.transformedOutput.getResponseAsByteBuf();
+        Assertions.assertTrue(combinedOutputBuf.readableBytes() == 0);
+        combinedOutputBuf.release();
     }
 
     public static List<byte[]> sliceRandomChunks(byte[] bytes, int numChunks) {

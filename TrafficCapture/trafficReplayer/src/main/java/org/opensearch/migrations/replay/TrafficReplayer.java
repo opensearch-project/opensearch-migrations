@@ -270,13 +270,15 @@ public class TrafficReplayer {
         }
     }
 
+    private static int isConfigured(String s) {
+        return (s == null || s.isBlank()) ? 0 : 1;
+    }
+
     private static String getTransformerConfig(Parameters params) {
-        if (params.transformerConfigFile != null
-            && !params.transformerConfigFile.isBlank()
-            && params.transformerConfigEncoded != null
-            && !params.transformerConfigEncoded.isBlank()
-            && params.transformerConfig != null
-            && !params.transformerConfig.isBlank()) {
+        var configuredCount = isConfigured(params.transformerConfigFile) +
+                isConfigured(params.transformerConfigEncoded) +
+                isConfigured(params.transformerConfig);
+        if (configuredCount > 1) {
             System.err.println("Specify only one of --transformer-config-base64, --transformer-config or " +
                 "--transformer-config-file.");
             System.exit(4);

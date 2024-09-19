@@ -260,7 +260,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 var br = new BufferedReader(isr)
             ) {
                 Assertions.assertEquals("", Optional.ofNullable(br.readLine()).orElse(""));
-                Assertions.assertEquals(0, result.getResponseSizeInBytes());
+                Assertions.assertEquals(0, result.getSizeInBytes());
             }
             if (withServerReadTimeout) {
                 log.trace(

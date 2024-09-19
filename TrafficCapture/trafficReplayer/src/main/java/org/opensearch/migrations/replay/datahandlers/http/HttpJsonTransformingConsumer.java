@@ -47,6 +47,7 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     private final RequestPipelineOrchestrator<R> pipelineOrchestrator;
     private final EmbeddedChannel channel;
     private IReplayContexts.IRequestTransformationContext transformationContext;
+    private Exception lastConsumeException;
 
     /**
      * Roughly try to keep track of how big each data chunk was that came into the transformer.  These values
@@ -82,10 +83,8 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
 
     private NettySendByteBufsToPacketHandlerHandler<R> getOffloadingHandler() {
         return Optional.ofNullable(channel)
-            .map(
-                c -> (NettySendByteBufsToPacketHandlerHandler) c.pipeline()
-                    .get(RequestPipelineOrchestrator.OFFLOADING_HANDLER_NAME)
-            )
+            .map(c -> (NettySendByteBufsToPacketHandlerHandler)
+                    c.pipeline().get(RequestPipelineOrchestrator.OFFLOADING_HANDLER_NAME))
             .orElse(null);
     }
 
@@ -112,13 +111,19 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
             .map(
                 cf -> cf.thenAccept(x -> channel.writeInbound(nextRequestPacket)),
                 () -> "HttpJsonTransformingConsumer sending bytes to its EmbeddedChannel"
-            );
+            )
+            .whenComplete((v,t) -> {
+                if (t instanceof Exception) { this.lastConsumeException = (Exception) t; }
+            }, () -> "");
     }
 
     public TrackedFuture<String, TransformedOutputAndResult<R>> finalizeRequest() {
         var offloadingHandler = getOffloadingHandler();
         try {
             channel.checkException();
+            if (lastConsumeException != null) {
+                throw lastConsumeException;
+            }
             if (getHttpRequestDecoderHandler() == null) { // LastHttpContent won't be sent
                 channel.writeInbound(new EndOfInput());   // so send our own version of 'EOF'
             }
@@ -179,7 +184,11 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
             r -> new TransformedOutputAndResult<>(r, makeStatusForRedrive(reason)),
             () -> "redrive final packaging"
         ).whenComplete((v, t) -> {
-            transformationContext.onTransformSkip();
+            if (t != null || (v != null && v.transformationStatus.isError())) {
+                transformationContext.onTransformFailure();
+            } else {
+                transformationContext.onTransformSkip();
+            }
             transformationContext.close();
         }, () -> "HttpJsonTransformingConsumer.redriveWithoutTransformation().map()");
     }

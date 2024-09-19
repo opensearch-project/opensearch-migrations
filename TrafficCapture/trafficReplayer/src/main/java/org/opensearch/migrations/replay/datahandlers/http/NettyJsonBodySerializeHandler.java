@@ -12,6 +12,7 @@ import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.DefaultHttpContent;
 import io.netty.handler.codec.http.LastHttpContent;
+import io.netty.util.ReferenceCountUtil;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -36,6 +37,8 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
                 var rawBody = (ByteBuf) payload.get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
                 if (rawBody.readableBytes() > 0) {
                     ctx.fireChannelRead(new DefaultHttpContent(rawBody));
+                } else {
+                    ReferenceCountUtil.release(rawBody);
                 }
             }
             ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);
@@ -62,7 +65,7 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
                     pac = pac.nextSupplier.get();
                 }
                 if (addLastNewline || it.hasNext()) {
-                    ctx.fireChannelRead(new DefaultHttpContent(NEWLINE.duplicate()));
+                    ctx.fireChannelRead(new DefaultHttpContent(NEWLINE.retainedDuplicate()));
                 }
             }
         }
