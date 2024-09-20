@@ -110,27 +110,46 @@ The body of the messages is sometimes gzipped which makes it difficult to repres
 and responses is base64 encoded before it is logged. This makes the files stable, but not human-readable.
 
 We have provided a utility script that can parse these files and output them to a human-readable format: the bodies are
-base64 decoded, un-gzipped if applicable, and parsed as JSON if applicable. They're then saved back to JSON format on disk.
+base64 decoded and parsed as JSON if applicable. They're then saved back to JSON format to stdout or file.
 
 To use this utility from the Migration Console,
 ```sh
-$ ./humanReadableLogs.py --help
-usage: humanReadableLogs.py [-h] [--outfile OUTFILE] infile
+$ console tuples show --help
+Usage: console tuples convert [OPTIONS]
 
-positional arguments:
-  infile             Path to input logged tuple file.
+Options:
+  --in FILENAME
+  --out FILENAME
+  --help          Show this message and exit.
 
-options:
-  -h, --help         show this help message and exit
-  --outfile OUTFILE  Path for output human readable tuple file.
-
-# By default, the output file is the same path as the input file, but the file name is prefixed with `readable-`.
-$ ./humanReadableLogs.py /shared_replayer_output/tuples.log
-Input file: /shared_replayer_output/tuples.log; Output file: /shared_replayer_output/readable-tuples.log
-
+# By default, the input and output files are `stdin` and `stdout` respectively, so they can be piped together with other tools.
+$ console tuples show --in /shared-logs-output/traffic-replayer-default/86ca83e66197/tuples/mini_tuples.log | jq
+{
+  "sourceRequest": {
+    "Request-URI": "/",
+    "Method": "GET",
+    "HTTP-Version": "HTTP/1.1",
+    "Host": "capture-proxy:9200",
+    "User-Agent": "python-requests/2.32.3",
+    "Accept-Encoding": "gzip, deflate, zstd",
+    "Accept": "*/*",
+    "Connection": "keep-alive",
+    "Authorization": "Basic YWRtaW46YWRtaW4=",
+    "body": ""
+  },
+  "sourceResponse": {
+    "HTTP-Version": {
+      "keepAliveDefault": true
+    },
+    "Status-Code": 200,
+    "Reason-Phrase": "OK",
+    ...
+  },
+  ...
+}
 # A specific output file can also be specified.
-$ ./humanReadableLogs.py /shared_replayer_output/tuples.log --outfile local-tuples.log
-Input file: /shared_replayer_output/tuples.log; Output file: local-tuples.log
+$ console tuples show --in /shared_replayer_output/tuples.log --out local-tuples.log
+Converted tuples output to local-tuples.log
 ```
 
 ### Capture Kafka Offloader

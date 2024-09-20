@@ -608,3 +608,33 @@ def test_cli_kafka_describe_topic(runner, mocker):
 def test_completion_script(runner):
     result = runner.invoke(cli, [str(VALID_SERVICES_YAML), 'completion', 'bash'], catch_exceptions=True)
     assert result.exit_code == 0
+
+
+def test_tuple_converter(runner, tmp_path):
+    # The `multiple_tuples` and `multiple_tuples_parsed` files are formatted as "real" json objects so that
+    # they can be pretty-printed and examined, but they need to be converted to ndjson files to be used by the
+    # CLI command.
+
+    # Make the input file
+    input_tuples_file = f"{TEST_DATA_DIRECTORY}/multiple_tuples.json"
+    with open(input_tuples_file, 'r') as f:
+        input_tuples = json.load(f)
+    ndjson_input_file = f"{tmp_path}/tuples.ndjson"
+    with open(ndjson_input_file, 'w') as f:
+        f.write('\n'.join([json.dumps(record) for record in input_tuples]))
+
+    ndjson_output_file = f"{tmp_path}/converted_tuples.ndjson"
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'tuples', 'show',
+                                 '--in', ndjson_input_file,
+                                 '--out', ndjson_output_file],
+                           catch_exceptions=True)
+    assert ndjson_output_file in result.output
+    assert result.exit_code == 0
+
+    # Open the ndjson output file and compare it to the "real" output file
+    expected_output_file = f"{TEST_DATA_DIRECTORY}/multiple_tuples_parsed.json"
+    with open(expected_output_file, 'r') as f:
+        output_tuples = json.load(f)
+    expected_output_as_ndjson = [json.dumps(record) + "\n" for record in output_tuples]
+
+    assert open(ndjson_output_file).readlines() == expected_output_as_ndjson
