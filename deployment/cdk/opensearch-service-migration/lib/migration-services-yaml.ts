@@ -124,7 +124,7 @@ export class KafkaYaml {
 }
 
 export class ClientOptions {
-    user_agent_extra?: string | null;
+    user_agent_extra?: string;
 }
 
 export class ServicesYaml {
