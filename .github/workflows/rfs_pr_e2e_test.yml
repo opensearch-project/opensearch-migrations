@@ -5,7 +5,8 @@ on:
     branches-ignore:
       - 'backport/**'
       - 'dependabot/**'
-  pull_request:
+  pull_request_target:
+    types: [opened, synchronize, reopened]
 
 env:
   python-version: '3.11'
