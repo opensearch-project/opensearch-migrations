@@ -110,13 +110,6 @@ export class MetadataMigrationYaml {
     otel_endpoint: string = '';
     source_cluster_version?: string;
 }
-
-export class MSKYaml {
-}
-
-export class StandardKafkaYaml {
-}
-
 export class KafkaYaml {
     broker_endpoints: string = '';
     msk?: string | null;
