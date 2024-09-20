@@ -1,5 +1,6 @@
 import json
 from pprint import pprint
+import sys
 import click
 import console_link.middleware.clusters as clusters_
 import console_link.middleware.metrics as metrics_
@@ -8,6 +9,7 @@ import console_link.middleware.snapshot as snapshot_
 import console_link.middleware.metadata as metadata_
 import console_link.middleware.replay as replay_
 import console_link.middleware.kafka as kafka_
+import console_link.middleware.tuples as tuples_
 
 from console_link.models.utils import ExitCode
 from console_link.environment import Environment
@@ -483,6 +485,26 @@ def completion(ctx, config_file, json, shell):
     except RuntimeError as exc:
         click.echo(f"Error: {exc}", err=True)
         ctx.exit(1)
+
+
+@cli.group(name="tuples")
+@click.pass_obj
+def tuples_group(ctx):
+    """ All commands related to tuples. """
+    pass
+
+
+@tuples_group.command()
+@click.option('--in', 'inputfile',
+              type=click.File('r'),
+              default=sys.stdin)
+@click.option('--out', 'outputfile',
+              type=click.File('a'),
+              default=sys.stdout)
+def show(inputfile, outputfile):
+    tuples_.convert(inputfile, outputfile)
+    if outputfile != sys.stdout:
+        click.echo(f"Converted tuples output to {outputfile.name}")
 
 
 #################################################

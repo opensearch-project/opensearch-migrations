@@ -35,7 +35,7 @@ public class TrafficStreamUtils {
         return ts.getConnectionId() + " (#" + getTrafficStreamIndex(ts) + ")[" + listSummaryStr + "]";
     }
 
-    private static Object getOptionalContext(TrafficObservation tso) {
+    private static String getOptionalContext(TrafficObservation tso) {
         return Optional.ofNullable(getByteArrayForDataOf(tso))
             .map(b -> " " + new String(b, 0, Math.min(3, b.length), StandardCharsets.UTF_8))
             .orElse("");
