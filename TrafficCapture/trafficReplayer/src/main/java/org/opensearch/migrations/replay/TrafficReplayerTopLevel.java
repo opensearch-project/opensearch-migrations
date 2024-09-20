@@ -177,6 +177,16 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
         }
     }
 
+    /**
+     * Called after the TrafficReplayer has finished accumulating and reconstructing every transaction from
+     * the incoming stream.  This implementation will NOT wait for the ReplayEngine independently to complete,
+     * but rather call waitForRemainingWork.  If a subclass wants more details  from either of the two main
+     * non-field components of a TrafficReplayer, they have access to each of them here.
+     *
+     * @param replayEngine The ReplayEngine that may still be working to send the accumulated requests.
+     * @param trafficToHttpTransactionAccumulator The accumulator that had reconstructed the incoming records and
+     *                                            has now finished
+     */
     protected void wrapUpWorkAndEmitSummary(
         ReplayEngine replayEngine,
         CapturedTrafficToHttpTransactionAccumulator trafficToHttpTransactionAccumulator

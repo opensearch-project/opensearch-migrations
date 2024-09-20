@@ -14,7 +14,7 @@ public class RefSafeHolder<T> implements AutoCloseable {
     }
 
     @MustBeClosed
-    static public <T> RefSafeHolder<T> create(@Nullable T resource) {
+    public static <T> RefSafeHolder<T> create(@Nullable T resource) {
         return new RefSafeHolder<>(resource);
     }
 

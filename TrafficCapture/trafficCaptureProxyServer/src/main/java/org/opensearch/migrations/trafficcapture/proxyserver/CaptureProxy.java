@@ -205,9 +205,7 @@ public class CaptureProxy {
                 .entrySet().stream()
                 .filter(kvp -> kvp.getKey().startsWith(HTTPS_CONFIG_PREFIX))
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
-        if (!httpsSettings.containsKey(SUPPORTED_TLS_PROTOCOLS_LIST_KEY)) {
-            httpsSettings.put(SUPPORTED_TLS_PROTOCOLS_LIST_KEY, List.of("TLSv1.2", "TLSv1.3"));
-        }
+        httpsSettings.putIfAbsent(SUPPORTED_TLS_PROTOCOLS_LIST_KEY, List.of("TLSv1.2", "TLSv1.3"));
 
         return Settings.builder().loadFromMap(httpsSettings)
             // Don't bother with configurations the 'transport' (port 9300), which the plugin that we're using
@@ -299,7 +297,7 @@ public class CaptureProxy {
         return kafkaProps;
     }
 
-    protected static IConnectionCaptureFactory getConnectionCaptureFactory(
+    protected static IConnectionCaptureFactory<?> getConnectionCaptureFactory(
         Parameters params,
         RootCaptureContext rootContext
     ) throws IOException {
@@ -433,12 +431,12 @@ public class CaptureProxy {
         proxy.waitForClose();
     }
 
-    static ProxyChannelInitializer buildProxyChannelInitializer(RootCaptureContext rootContext,
+    static <T> ProxyChannelInitializer<T> buildProxyChannelInitializer(RootCaptureContext rootContext,
                                                                 BacksideConnectionPool backsideConnectionPool,
                                                                 Supplier<SSLEngine> sslEngineSupplier,
                                                                 @NonNull RequestCapturePredicate headerCapturePredicate,
                                                                 List<String> headerOverridesArgs,
-                                                                IConnectionCaptureFactory connectionFactory)
+                                                                IConnectionCaptureFactory<T> connectionFactory)
     {
         var headers = new ArrayList<>(convertPairListToMap(headerOverridesArgs).entrySet());
         Collections.reverse(headers);
@@ -453,7 +451,7 @@ public class CaptureProxy {
             removeStrings.add(kvp.getKey() + ":");
         }
 
-        return new ProxyChannelInitializer(
+        return new ProxyChannelInitializer<>(
             rootContext,
             backsideConnectionPool,
             sslEngineSupplier,
@@ -464,19 +462,16 @@ public class CaptureProxy {
             protected void initChannel(@NonNull SocketChannel ch) throws IOException {
                 super.initChannel(ch);
                 final var pipeline = ch.pipeline();
-                {
-                    int i = 0;
-                    for (var kvp : headers) {
-                        pipeline.addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "AddHeader-" + kvp.getKey(),
-                            new HeaderAdderHandler(addBufs.get(i++)));
-                    }
+                int i = 0;
+                for (var kvp : headers) {
+                    pipeline.addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "AddHeader-" + kvp.getKey(),
+                        new HeaderAdderHandler(addBufs.get(i++)));
                 }
-                {
-                    int i = 0;
-                    for (var kvp : headers) {
-                        pipeline.addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "RemoveHeader-" + kvp.getKey(),
-                            new HeaderRemoverHandler(removeStrings.get(i++)));
-                    }
+
+                i = 0;
+                for (var kvp : headers) {
+                    pipeline.addAfter(ProxyChannelInitializer.CAPTURE_HANDLER_NAME, "RemoveHeader-" + kvp.getKey(),
+                        new HeaderRemoverHandler(removeStrings.get(i++)));
                 }
             }
         };
