@@ -23,8 +23,8 @@ jobs:
           REPO_BASE: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
         id: sanitize-input
         run: |
-          clean_branch_name = $(echo "$BRANCH_NAME" | tr -cd '[:alnum:]_-./')
-          clean_repo_base = $(echo "$REPO_BASE" | tr -cd '[:alnum:]_-./')
+          clean_branch_name = $(echo "$BRANCH_NAME" | tr -cd '[:alnum:]_\-\./')
+          clean_repo_base = $(echo "$REPO_BASE" | tr -cd '[:alnum:]_\-\./')
           clean_repo_url = "https://github.com/$clean_repo_base.git"
           echo "Running jenkins test on repo: $clean_repo_url and branch: $clean_branch_name"
           echo "branch_name=$clean_branch_name" >> $GITHUB_OUTPUT
