@@ -10,7 +10,9 @@ import requests.auth
 from requests.auth import HTTPBasicAuth
 from requests_auth_aws_sigv4 import AWSSigV4
 
+from console_link.models.client_options import ClientOptions
 from console_link.models.schema_tools import contains_one_of
+from console_link.models.utils import create_boto3_client, append_user_agent_header_for_requests
 
 requests.packages.urllib3.disable_warnings()  # ignore: type
 
@@ -79,8 +81,9 @@ class Cluster:
     auth_type: Optional[AuthMethod] = None
     auth_details: Optional[Dict[str, Any]] = None
     allow_insecure: bool = False
+    client_options: Optional[ClientOptions] = None
 
-    def __init__(self, config: Dict) -> None:
+    def __init__(self, config: Dict, client_options: Optional[ClientOptions] = None) -> None:
         logger.info(f"Initializing cluster with config: {config}")
         v = Validator(SCHEMA)
         if not v.validate({'cluster': config}):
@@ -97,6 +100,7 @@ class Cluster:
         elif 'sigv4' in config:
             self.auth_type = AuthMethod.SIGV4
             self.auth_details = config["sigv4"] if config["sigv4"] is not None else {}
+        self.client_options = client_options
 
     def get_basic_auth_password(self) -> str:
         """This method will return the basic auth password, if basic auth is enabled.
@@ -108,11 +112,11 @@ class Cluster:
             return self.auth_details["password"]
         # Pull password from AWS Secrets Manager
         assert "password_from_secret_arn" in self.auth_details  # for mypy's sake
-        client = boto3.client('secretsmanager')
+        client = create_boto3_client(aws_service_name="secretsmanager", client_options=self.client_options)
         password = client.get_secret_value(SecretId=self.auth_details["password_from_secret_arn"])
         return password["SecretString"]
 
-    def _get_sigv4_details(self, force_region=False) -> tuple[str, str]:
+    def _get_sigv4_details(self, force_region=False) -> tuple[str, Optional[str]]:
         """Return the service signing name and region name. If force_region is true,
         it will instantiate a boto3 session to guarantee that the region is not None.
         This will fail if AWS credentials are not available.
@@ -145,8 +149,13 @@ class Cluster:
         """
         if session is None:
             session = requests.Session()
-        
+
         auth = self._generate_auth_object()
+
+        request_headers = headers
+        if self.client_options and self.client_options.user_agent_extra:
+            user_agent_extra = self.client_options.user_agent_extra
+            request_headers = append_user_agent_header_for_requests(headers=headers, user_agent_extra=user_agent_extra)
 
         # Extract query parameters from kwargs
         params = kwargs.get('params', {})
@@ -159,7 +168,7 @@ class Cluster:
             params=params,
             auth=auth,
             data=data,
-            headers=headers,
+            headers=request_headers,
             timeout=timeout
         )
         logger.info(f"Received response: {r.status_code} {method.name} {self.endpoint}{path} - {r.text[:1000]}")

@@ -39,7 +39,7 @@ describe('createApp', () => {
     process.env.CDK_DEFAULT_ACCOUNT = 'test-account';
     process.env.CDK_DEFAULT_REGION = 'test-region';
     process.env.MIGRATIONS_APP_REGISTRY_ARN = 'test-arn';
-    process.env.CUSTOM_REPLAYER_USER_AGENT = 'test-user-agent';
+    process.env.MIGRATIONS_USER_AGENT = 'test-user-agent';
 
     const consoleSpy = jest.spyOn(console, 'info').mockImplementation();
     const mockAddTag = jest.fn();
@@ -58,7 +58,7 @@ describe('createApp', () => {
       expect.any(Object),
       {
         migrationsAppRegistryARN: 'test-arn',
-        customReplayerUserAgent: 'test-user-agent',
+        migrationsUserAgent: 'test-user-agent',
         migrationsSolutionVersion: '1.0.0',
         env: { account: 'test-account', region: 'test-region' },
       }

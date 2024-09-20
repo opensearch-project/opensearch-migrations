@@ -6,6 +6,7 @@ from moto import mock_aws
 import boto3
 
 import console_link.middleware.clusters as clusters_
+from console_link.models.client_options import ClientOptions
 from console_link.models.cluster import AuthMethod, Cluster
 from tests.utils import create_valid_cluster
 
@@ -224,6 +225,21 @@ def test_valid_cluster_api_call_with_no_auth(requests_mock):
     response = cluster.call_api("/test_api")
     assert response.status_code == 200
     assert response.json() == {'test': True}
+
+
+def test_valid_cluster_api_call_with_client_options(requests_mock):
+    test_user_agent = "test-agent-v1.0"
+    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH,
+                                   client_options=ClientOptions(config={"user_agent_extra": test_user_agent}))
+    assert isinstance(cluster, Cluster)
+
+    requests_mock.get(f"{cluster.endpoint}/test_api", json={'test': True})
+    response = cluster.call_api("/test_api")
+    assert response.headers == {}
+    assert response.status_code == 200
+    assert response.json() == {'test': True}
+
+    assert test_user_agent in requests_mock.last_request.headers['User-Agent']
 
 
 def test_connection_check_with_exception(mocker):

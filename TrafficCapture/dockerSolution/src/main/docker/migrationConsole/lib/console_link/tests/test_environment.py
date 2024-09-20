@@ -9,6 +9,9 @@ from console_link.models.metrics_source import MetricsSource
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 VALID_SERVICES_YAML = TEST_DATA_DIRECTORY / "services.yaml"
+VALID_SERVICES_CLIENT_OPTIONS_YAML = TEST_DATA_DIRECTORY / "services_with_client_options.yaml"
+# Value should match value in VALID_SERVICES_CLIENT_OPTIONS_YAML
+USER_AGENT_EXTRA = "test-user-agent-v1.0"
 
 
 def create_file_in_tmp_path(tmp_path, file_name, content):
@@ -30,6 +33,18 @@ def test_valid_services_yaml_to_environment_succeeds():
     assert isinstance(env.backfill, Backfill)
     assert env.metrics_source is not None
     assert isinstance(env.metrics_source, MetricsSource)
+    assert env.client_options is None
+
+
+def test_valid_services_yaml_with_client_options_are_propagated():
+    env = Environment(VALID_SERVICES_CLIENT_OPTIONS_YAML)
+    stored_client_options_user_agent_extra = env.client_options.user_agent_extra
+    assert stored_client_options_user_agent_extra == USER_AGENT_EXTRA
+    assert env.source_cluster.client_options.user_agent_extra == stored_client_options_user_agent_extra
+    assert env.target_cluster.client_options.user_agent_extra == stored_client_options_user_agent_extra
+    assert env.replay.client_options.user_agent_extra == stored_client_options_user_agent_extra
+    assert env.backfill.client_options.user_agent_extra == stored_client_options_user_agent_extra
+    assert env.metrics_source.client_options.user_agent_extra == stored_client_options_user_agent_extra
 
 
 MINIMAL_YAML = """
@@ -46,6 +61,7 @@ def test_minimial_services_yaml_to_environment_works(tmp_path):
     assert env.source_cluster is None
     assert env.backfill is None
     assert env.metrics_source is None
+    assert env.client_options is None
 
     assert env.target_cluster is not None
     assert isinstance(env.target_cluster, Cluster)

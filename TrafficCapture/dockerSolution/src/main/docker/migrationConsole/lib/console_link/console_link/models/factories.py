@@ -1,6 +1,7 @@
 from enum import Enum
 from typing import Dict, Optional
 
+from console_link.models.client_options import ClientOptions
 from console_link.models.replayer_docker import DockerReplayer
 from console_link.models.metrics_source import CloudwatchMetricsSource, PrometheusMetricsSource
 from console_link.models.backfill_base import Backfill
@@ -55,9 +56,9 @@ def get_snapshot(config: Dict, source_cluster: Cluster):
     raise UnsupportedSnapshotError(next(iter(config.keys())))
 
 
-def get_replayer(config: Dict):
+def get_replayer(config: Dict, client_options: Optional[ClientOptions] = None):
     if 'ecs' in config:
-        return ECSReplayer(config)
+        return ECSReplayer(config=config, client_options=client_options)
     if 'docker' in config:
         return DockerReplayer(config)
     logger.error(f"An unsupported replayer type was provided: {config.keys()}")
@@ -74,7 +75,8 @@ def get_kafka(config: Dict):
     raise UnsupportedKafkaError(', '.join(config.keys()))
 
 
-def get_backfill(config: Dict, source_cluster: Optional[Cluster], target_cluster: Optional[Cluster]) -> Backfill:
+def get_backfill(config: Dict, source_cluster: Optional[Cluster], target_cluster: Optional[Cluster],
+                 client_options: Optional[ClientOptions] = None) -> Backfill:
     if BackfillType.opensearch_ingestion.name in config:
         if source_cluster is None:
             raise ValueError("source_cluster must be provided for OpenSearch Ingestion backfill")
@@ -83,7 +85,8 @@ def get_backfill(config: Dict, source_cluster: Optional[Cluster], target_cluster
         logger.debug("Creating OpenSearch Ingestion backfill instance")
         return OpenSearchIngestionBackfill(config=config,
                                            source_cluster=source_cluster,
-                                           target_cluster=target_cluster)
+                                           target_cluster=target_cluster,
+                                           client_options=client_options)
     elif BackfillType.reindex_from_snapshot.name in config:
         if target_cluster is None:
             raise ValueError("target_cluster must be provided for RFS backfill")
@@ -95,17 +98,18 @@ def get_backfill(config: Dict, source_cluster: Optional[Cluster], target_cluster
         elif 'ecs' in config[BackfillType.reindex_from_snapshot.name]:
             logger.debug("Creating ECS RFS backfill instance")
             return ECSRFSBackfill(config=config,
-                                  target_cluster=target_cluster)
+                                  target_cluster=target_cluster,
+                                  client_options=client_options)
 
     logger.error(f"An unsupported backfill source type was provided: {config.keys()}")
     raise UnsupportedBackfillTypeError(', '.join(config.keys()))
 
 
-def get_metrics_source(config):
+def get_metrics_source(config, client_options: Optional[ClientOptions] = None):
     if 'prometheus' in config:
-        return PrometheusMetricsSource(config)
+        return PrometheusMetricsSource(config=config, client_options=client_options)
     elif 'cloudwatch' in config:
-        return CloudwatchMetricsSource(config)
+        return CloudwatchMetricsSource(config=config, client_options=client_options)
     else:
         logger.error(f"An unsupported metrics source type was provided: {config.keys()}")
         raise UnsupportedMetricsSourceError(', '.join(config.keys()))
