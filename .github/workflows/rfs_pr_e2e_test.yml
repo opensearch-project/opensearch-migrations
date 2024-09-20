@@ -18,23 +18,13 @@ jobs:
   rfs-e2e-aws-test:
     runs-on: ubuntu-latest
     steps:
-      - name: Determine Github repository and branch
-        id: determine-repo-vars
-        run: |
-          if [[ "${GITHUB_EVENT_NAME}" == "pull_request_target" ]]; then
-            branch_name="${{ github.event.pull_request.head.ref }}"
-            pr_repo_url="https://github.com/${{ github.event.pull_request.head.repo.full_name }}.git"
-          else
-            branch_name="${{ github.ref_name }}"
-            pr_repo_url="https://github.com/${{ github.repository }}.git"
-          fi
-          echo "Running jenkins test on repo: $pr_repo_url and branch: $branch_name"
-          echo "branch_name=$branch_name" >> $GITHUB_OUTPUT
-          echo "pr_repo_url=$pr_repo_url" >> $GITHUB_OUTPUT
+      - env:
+          BRANCH_NAME: ${{ github.event.pull_request.head.ref || github.ref_name }}
+          REPO_BASE: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
       - name: Jenkins Job Trigger and Monitor
         uses: lewijacn/jenkins-trigger@1.0.4
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
           job_name: "rfs-default-e2e-test"
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
-          job_params: "GIT_REPO_URL=${{ steps.determine-repo-vars.outputs.pr_repo_url }},GIT_BRANCH=${{ steps.determine-repo-vars.outputs.branch_name }}"
+          job_params: "GIT_REPO_URL=https://github.com/$REPO_BASE.git,GIT_BRANCH=$BRANCH_NAME"
