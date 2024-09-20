@@ -10,6 +10,7 @@
     - [Metadata Migration](#metadata-migration)
     - [Replay](#replay)
     - [Kafka](#kafka)
+    - [Client Options](#client-options)
 - [Usage](#usage)
     - [Library](#library)
     - [CLI](#cli)
@@ -82,6 +83,8 @@ metadata_migration:
 kafka:
   broker_endpoints: "kafka:9092"
   standard:
+client_options:
+  user_agent_extra: "test-user-agent-v1.0"
 ```
 
 ## Services.yaml spec
@@ -225,12 +228,18 @@ Exactly one of the following blocks must be present:
 
 A Kafka cluster is used in the capture and replay stage of the migration to store recorded requests and responses before they're replayed. While it's not necessary for a user to directly interact with the Kafka cluster in most cases, there are a handful of commands that can be helpful for checking on the status or resetting state that are exposed by the Console CLI.
 
-- `broker_endpoints`: required, comma-separated list of kafaka broker endpoints
+- `broker_endpoints`: required, comma-separated list of kafka broker endpoints
 
 Exactly one of the following keys must be present, but both are nullable (they don't have or need any additional parameters).
 
 - `msk`: the Kafka instance is deployed as AWS Managed Service Kafka
 - `standard`: the Kafka instance is deployed as a standard Kafka cluster (e.g. on Docker)
+
+### Client Options
+
+Client options are global settings that are applied to different clients used throughout this library
+
+- `user_agent_extra`: optional, a user agent string that will be appended to the `User-Agent` header of all requests from this library
 
 ## Usage
 
