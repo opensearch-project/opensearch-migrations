@@ -6,7 +6,6 @@ import {EngineVersion, TLSSecurityPolicy} from "aws-cdk-lib/aws-opensearchservic
 import * as defaultValuesJson from "../default-values.json"
 import {NetworkStack} from "./network-stack";
 import {MigrationAssistanceStack} from "./migration-assistance-stack";
-import {FetchMigrationStack} from "./fetch-migration-stack";
 import {MigrationConsoleStack} from "./service-stacks/migration-console-stack";
 import {CaptureProxyESStack} from "./service-stacks/capture-proxy-es-stack";
 import {TrafficReplayerStack} from "./service-stacks/traffic-replayer-stack";
@@ -201,8 +200,6 @@ export class StackComposer {
         const captureProxyExtraArgs = this.getContextForType('captureProxyExtraArgs', 'string', defaultValues, contextJSON)
         const elasticsearchServiceEnabled = this.getContextForType('elasticsearchServiceEnabled', 'boolean', defaultValues, contextJSON)
         const kafkaBrokerServiceEnabled = this.getContextForType('kafkaBrokerServiceEnabled', 'boolean', defaultValues, contextJSON)
-        const fetchMigrationEnabled = this.getContextForType('fetchMigrationEnabled', 'boolean', defaultValues, contextJSON)
-        const dpPipelineTemplatePath = this.getContextForType('dpPipelineTemplatePath', 'string', defaultValues, contextJSON)
         const osContainerServiceEnabled = this.getContextForType('osContainerServiceEnabled', 'boolean', defaultValues, contextJSON)
         const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotServiceEnabled = this.getContextForType('reindexFromSnapshotServiceEnabled', 'boolean', defaultValues, contextJSON)
@@ -455,22 +452,6 @@ export class StackComposer {
             servicesYaml.kafka = kafkaBrokerStack.kafkaYaml;
         }
 
-        let fetchMigrationStack
-        if (fetchMigrationEnabled && networkStack && migrationStack && !sourceClusterDisabled) {
-            fetchMigrationStack = new FetchMigrationStack(scope, "fetchMigrationStack", {
-                vpc: networkStack.vpc,
-                dpPipelineTemplatePath: dpPipelineTemplatePath,
-                stackName: `OSMigrations-${stage}-${region}-FetchMigration`,
-                description: "This stack contains resources to assist migrating historical data to an OpenSearch Service domain",
-                stage: stage,
-                defaultDeployId: defaultDeployId,
-                fargateCpuArch: fargateCpuArch,
-                env: props.env
-            })
-            this.addDependentStacks(fetchMigrationStack, [migrationStack, openSearchStack, osContainerStack])
-            this.stacks.push(fetchMigrationStack)
-        }
-
         let reindexFromSnapshotStack
         if (reindexFromSnapshotServiceEnabled && networkStack && migrationStack) {
             reindexFromSnapshotStack = new ReindexFromSnapshotStack(scope, "reindexFromSnapshotStack", {
@@ -606,7 +587,6 @@ export class StackComposer {
                 migrationsSolutionVersion: props.migrationsSolutionVersion,
                 vpc: networkStack.vpc,
                 streamingSourceType: streamingSourceType,
-                fetchMigrationEnabled: fetchMigrationEnabled,
                 migrationConsoleEnableOSI: migrationConsoleEnableOSI,
                 migrationAPIEnabled: migrationAPIEnabled,
                 servicesYaml: servicesYaml,
@@ -623,7 +603,7 @@ export class StackComposer {
             // To enable the Migration Console to make requests to other service endpoints with services,
             // it must be deployed after any connected services
             this.addDependentStacks(migrationConsoleStack, [captureProxyESStack, captureProxyStack, elasticsearchStack,
-                fetchMigrationStack, openSearchStack, osContainerStack, migrationStack, kafkaBrokerStack])
+                openSearchStack, osContainerStack, migrationStack, kafkaBrokerStack])
             this.stacks.push(migrationConsoleStack)
         }
 

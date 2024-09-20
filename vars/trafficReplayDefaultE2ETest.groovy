@@ -42,7 +42,6 @@ def call(Map config = [:]) {
         "trafficReplayerExtraArgs": "--speedup-factor 10.0",
         "reindexFromSnapshotServiceEnabled": true,
         "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
-        "dpPipelineTemplatePath": "../../../test/dp_pipeline_aws_integ.yaml",
         "migrationConsoleEnableOSI": true,
         "migrationAPIEnabled": true
       }
