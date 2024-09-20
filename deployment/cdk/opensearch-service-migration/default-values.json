@@ -13,5 +13,5 @@
   "replayerOutputEFSRemovalPolicy": "DESTROY",
   "migrationConsoleServiceEnabled": true,
   "trafficReplayerServiceEnabled": false,
-  "otelCollectorEnabled": true,
+  "otelCollectorEnabled": true
 }
