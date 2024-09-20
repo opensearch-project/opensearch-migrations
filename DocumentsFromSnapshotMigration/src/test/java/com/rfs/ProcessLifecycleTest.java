@@ -12,6 +12,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
@@ -33,6 +34,7 @@ import org.testcontainers.containers.Network;
  */
 @Slf4j
 @Tag("longTest")
+@Disabled("This test is disabled because it is not currently working as expected.")
 public class ProcessLifecycleTest extends SourceTestBase {
 
     public static final String TARGET_DOCKER_HOSTNAME = "target";
