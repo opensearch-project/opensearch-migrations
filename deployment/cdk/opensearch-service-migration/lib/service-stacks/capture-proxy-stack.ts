@@ -89,7 +89,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
 
     constructor(scope: Construct, id: string, props: CaptureProxyProps) {
         super(scope, id, props)
-        const serviceName = props.serviceName || "capture-proxy";
+        const serviceName = props.serviceName ?? "capture-proxy";
 
         let securityGroupConfigs = [
             { id: "serviceSG", param: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID },

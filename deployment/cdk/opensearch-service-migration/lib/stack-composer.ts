@@ -79,10 +79,10 @@ export class StackComposer {
 
     private getEngineVersion(engineVersionString: string) : EngineVersion {
         let version: EngineVersion
-        if (engineVersionString && engineVersionString.startsWith("OS_")) {
+        if (engineVersionString?.startsWith("OS_")) {
             // Will accept a period delimited version string (i.e. 1.3) and return a proper EngineVersion
             version = EngineVersion.openSearch(engineVersionString.substring(3))
-        } else if (engineVersionString && engineVersionString.startsWith("ES_")) {
+        } else if (engineVersionString?.startsWith("ES_")) {
             version = EngineVersion.elasticsearch(engineVersionString.substring(3))
         } else {
             throw new Error(`Engine version (${engineVersionString}) is not present or does not match the expected format, i.e. OS_1.3 or ES_7.9`)
@@ -224,7 +224,7 @@ export class StackComposer {
                 "auth": {"type": "none"}
             }
         }
-        const sourceClusterDisabled = sourceClusterDefinition?.disabled ? true : false
+        const sourceClusterDisabled = !!sourceClusterDefinition?.disabled
         const sourceCluster = (sourceClusterDefinition && !sourceClusterDisabled) ? parseClusterDefinition(sourceClusterDefinition) : undefined
         const sourceClusterEndpoint = sourceCluster?.endpoint
 
@@ -263,7 +263,7 @@ export class StackComposer {
         }
 
         const targetClusterAuth = targetCluster?.auth
-        const targetVersion = this.getEngineVersion(targetCluster?.version || engineVersion)
+        const targetVersion = this.getEngineVersion(targetCluster?.version ?? engineVersion)
 
         const requiredFields: { [key: string]: any; } = {"stage":stage}
         for (let key in requiredFields) {
@@ -277,12 +277,12 @@ export class StackComposer {
         if (stage.length > 15) {
             throw new Error(`Maximum allowed stage name length is 15 characters but received ${stage}`)
         }
-        const clusterDomainName = domainName ? domainName : `os-cluster-${stage}`
+        const clusterDomainName = domainName ?? `os-cluster-${stage}`
         let preexistingOrContainerTargetEndpoint
         if (targetCluster && osContainerServiceEnabled) {
             throw new Error("The following options are mutually exclusive as only one target cluster can be specified for a given deployment: [targetCluster, osContainerServiceEnabled]")
         } else if (targetCluster || osContainerServiceEnabled) {
-            preexistingOrContainerTargetEndpoint = targetCluster?.endpoint || "https://opensearch:9200"
+            preexistingOrContainerTargetEndpoint = targetCluster?.endpoint ?? "https://opensearch:9200"
         }
 
         const fargateCpuArch = validateFargateCpuArch(defaultFargateCpuArch)
@@ -309,14 +309,14 @@ export class StackComposer {
             trafficReplayerCustomUserAgent = `${props.customReplayerUserAgent};${trafficReplayerUserAgentSuffix}`
         }
         else {
-            trafficReplayerCustomUserAgent = trafficReplayerUserAgentSuffix ? trafficReplayerUserAgentSuffix : props.customReplayerUserAgent
+            trafficReplayerCustomUserAgent = trafficReplayerUserAgentSuffix ?? props.customReplayerUserAgent
         }
 
         if (sourceClusterDisabled && (sourceCluster || captureProxyESServiceEnabled || elasticsearchServiceEnabled || captureProxyServiceEnabled)) {
             throw new Error("A source cluster must be specified by one of: [sourceCluster, captureProxyESServiceEnabled, elasticsearchServiceEnabled, captureProxyServiceEnabled]");
         }
 
-        const deployId = addOnMigrationDeployId ? addOnMigrationDeployId : defaultDeployId
+        const deployId = addOnMigrationDeployId ?? defaultDeployId
 
         // If enabled re-use existing VPC and/or associated resources or create new
         let networkStack: NetworkStack|undefined
@@ -392,10 +392,8 @@ export class StackComposer {
             this.addDependentStacks(openSearchStack, [networkStack])
             this.stacks.push(openSearchStack)
             servicesYaml.target_cluster = openSearchStack.targetClusterYaml;
-        } else {
-            if (targetCluster) {
-                servicesYaml.target_cluster = targetCluster
-            }
+        } else if (targetCluster) {
+            servicesYaml.target_cluster = targetCluster
         }
 
         let migrationStack
@@ -436,7 +434,7 @@ export class StackComposer {
             this.addDependentStacks(osContainerStack, [migrationStack])
             this.stacks.push(osContainerStack)
             servicesYaml.target_cluster = new ClusterYaml({
-                endpoint: preexistingOrContainerTargetEndpoint || "",
+                endpoint: preexistingOrContainerTargetEndpoint ?? "",
                 auth: new ClusterAuth({noAuth: new ClusterNoAuth()})
             })
         }
