@@ -297,6 +297,18 @@ def test_cli_snapshot_create(runner, mocker):
     mock.assert_called_once()
 
 
+def test_cli_snapshot_create_with_extra_args(runner, mocker):
+    mock = mocker.patch('subprocess.run', autospec=True)
+
+    extra_args = ['--extra-flag', '--extra-arg', 'extra-arg-value', 'this-is-an-option']
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'create'] + extra_args,
+                           catch_exceptions=True)
+
+    assert result.exit_code == 0
+    mock.assert_called_once()
+    assert all([arg in mock.call_args.args[0] for arg in extra_args])
+
+
 def test_cli_snapshot_status(runner, mocker):
     mock = mocker.patch('console_link.middleware.snapshot.status')
 
