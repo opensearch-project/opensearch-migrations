@@ -125,11 +125,15 @@ class S3Snapshot(Snapshot):
 
         wait = kwargs.get('wait', False)
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
+        extra_args = kwargs.get('extra_args')
 
         if not wait:
             command_args["--no-wait"] = FlagOnlyArgument
         if max_snapshot_rate_mb_per_node is not None:
             command_args["--max-snapshot-rate-mb-per-node"] = max_snapshot_rate_mb_per_node
+        if extra_args:
+            for arg in extra_args:
+                command_args[arg] = FlagOnlyArgument
 
         command_runner = CommandRunner(base_command, command_args, sensitive_fields=["--source-password"])
         try:
@@ -165,9 +169,13 @@ class FileSystemSnapshot(Snapshot):
         command_args["--file-system-repo-path"] = self.repo_path
 
         max_snapshot_rate_mb_per_node = kwargs.get('max_snapshot_rate_mb_per_node')
+        extra_args = kwargs.get('extra_args')
 
         if max_snapshot_rate_mb_per_node is not None:
             command_args["--max-snapshot-rate-mb-per-node"] = max_snapshot_rate_mb_per_node
+        if extra_args:
+            for arg in extra_args:
+                command_args[arg] = FlagOnlyArgument
 
         command_runner = CommandRunner(base_command, command_args, sensitive_fields=["--source-password"])
         try:

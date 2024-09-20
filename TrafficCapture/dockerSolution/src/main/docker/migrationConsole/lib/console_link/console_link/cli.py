@@ -150,16 +150,18 @@ def snapshot_group(ctx):
         raise click.UsageError("Snapshot is not set")
 
 
-@snapshot_group.command(name="create")
+@snapshot_group.command(name="create", context_settings=dict(ignore_unknown_options=True))
 @click.option('--wait', is_flag=True, default=False, help='Wait for snapshot completion')
 @click.option('--max-snapshot-rate-mb-per-node', type=int, default=None,
               help='Maximum snapshot rate in MB/s per node')
+@click.argument('extra_args', nargs=-1, type=click.UNPROCESSED)
 @click.pass_obj
-def create_snapshot_cmd(ctx, wait, max_snapshot_rate_mb_per_node):
+def create_snapshot_cmd(ctx, wait, max_snapshot_rate_mb_per_node, extra_args):
     """Create a snapshot of the source cluster"""
     snapshot = ctx.env.snapshot
     result = snapshot_.create(snapshot, wait=wait,
-                              max_snapshot_rate_mb_per_node=max_snapshot_rate_mb_per_node)
+                              max_snapshot_rate_mb_per_node=max_snapshot_rate_mb_per_node,
+                              extra_args=extra_args)
     click.echo(result.value)
 
 

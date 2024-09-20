@@ -371,3 +371,16 @@ def test_get_snapshot_repository_via_delete(s3_snapshot):
         ('/_snapshot/*/test_snapshot', HttpMethod.GET),  # This is the get_snapshot_repository call
         ('/_snapshot/None/test_snapshot', HttpMethod.DELETE)  # This is the delete_snapshot call
     ]
+
+
+@pytest.mark.parametrize("snapshot_fixture", ['s3_snapshot', 'fs_snapshot'])
+def test_handling_extra_args(mocker, request, snapshot_fixture):
+    snapshot = request.getfixturevalue(snapshot_fixture)
+    mock = mocker.patch('subprocess.run', autospec=True)
+    extra_args = ['--extra-flag', '--extra-arg', 'extra-arg-value', 'this-is-an-option']
+    
+    result = snapshot.create(extra_args=extra_args)
+
+    assert result.success
+    mock.assert_called_once()
+    assert all([arg in mock.call_args.args[0] for arg in extra_args])
