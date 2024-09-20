@@ -79,9 +79,9 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         let targetPassword = "";
         let targetPasswordArn = "";
         if (props.clusterAuthDetails.basicAuth) {
-            targetUser = props.clusterAuthDetails.basicAuth.username,
-            targetPassword = props.clusterAuthDetails.basicAuth.password || "",
-            targetPasswordArn = props.clusterAuthDetails.basicAuth.password_from_secret_arn || ""
+            targetUser = props.clusterAuthDetails.basicAuth.username
+            targetPassword = props.clusterAuthDetails.basicAuth.password ?? ""
+            targetPasswordArn = props.clusterAuthDetails.basicAuth.password_from_secret_arn ?? ""
         };
         const sharedLogFileSystem = new SharedLogFileSystem(this, props.stage, props.defaultDeployId);
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account);

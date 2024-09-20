@@ -1,7 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {ISecurityGroup, IVpc, SubnetType} from "aws-cdk-lib/aws-ec2";
 import {
-    CfnService as FargateCfnService,
     Cluster,
     ContainerImage, CpuArchitecture,
     FargateService,
@@ -140,8 +139,8 @@ export class MigrationServiceCore extends Stack {
             let startupPeriodSeconds = 30;
             // Add a separate container to monitor and fail healthcheck after a given maxUptime
             const maxUptimeContainer = serviceTaskDef.addContainer("MaxUptimeContainer", {
-                image: ContainerImage.fromRegistry("public.ecr.aws/amazonlinux/amazonlinux:2023-minimal"), 
-                memoryLimitMiB: 64, 
+                image: ContainerImage.fromRegistry("public.ecr.aws/amazonlinux/amazonlinux:2023-minimal"),
+                memoryLimitMiB: 64,
                 entryPoint: [
                     "/bin/sh",
                     "-c",
@@ -185,7 +184,7 @@ export class MigrationServiceCore extends Stack {
             securityGroups: props.securityGroups,
             vpcSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PRIVATE_WITH_EGRESS}),
         });
-        
+
         if (props.targetGroups) {
             props.targetGroups.filter(tg => tg !== undefined).forEach(tg => tg.addTarget(fargateService));
         }

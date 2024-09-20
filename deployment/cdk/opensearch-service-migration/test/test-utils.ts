@@ -1,4 +1,3 @@
-import {Construct} from "constructs";
 import {StackComposer} from "../lib/stack-composer";
 import {App} from "aws-cdk-lib";
 
