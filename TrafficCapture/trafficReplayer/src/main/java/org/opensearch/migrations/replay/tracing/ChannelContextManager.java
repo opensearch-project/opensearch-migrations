@@ -57,7 +57,7 @@ public class ChannelContextManager implements Function<ITrafficStreamKey, IRepla
     public IReplayContexts.IChannelKeyContext releaseContextFor(IReplayContexts.IChannelKeyContext ctx) {
         var connId = ctx.getConnectionId();
         var refCountedCtx = connectionToChannelContextMap.get(connId);
-        assert ctx == refCountedCtx.context;
+        assert ctx == refCountedCtx.context : "consistency mismatch";
         var finalRelease = refCountedCtx.release();
         if (finalRelease) {
             ctx.close();

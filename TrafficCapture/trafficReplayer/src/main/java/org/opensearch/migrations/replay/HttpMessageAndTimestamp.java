@@ -61,9 +61,7 @@ public class HttpMessageAndTimestamp {
         var compositeBuf = Unpooled.compositeBuffer();
         packetBytes.stream()
             .map(Unpooled::wrappedBuffer)
-            .forEach(buffer -> {
-                compositeBuf.addComponent(true, buffer);
-            });
+            .forEach(buffer -> compositeBuf.addComponent(true, buffer));
         return compositeBuf.asReadOnly();
     }
 

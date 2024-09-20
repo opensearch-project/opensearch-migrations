@@ -42,15 +42,17 @@ class OffsetLifecycleTracker {
     Optional<Long> removeAndReturnNewHead(long offsetToRemove) {
         synchronized (pQueue) {
             var topCursor = pQueue.peek();
-            assert topCursor != null : "Expected pQueue to be non-empty but it was when asked to remove "
-                + offsetToRemove;
-            var didRemove = pQueue.remove(offsetToRemove);
-            assert didRemove : "Expected all live records to have an entry and for them to be removed only once";
             if (topCursor == null) {
                 throw new IllegalStateException(
                     "pQueue looks to have been empty by the time we tried to remove " + offsetToRemove
                 );
             }
+            var didRemove = pQueue.remove(offsetToRemove);
+            if (!didRemove) {
+                throw new IllegalStateException(
+                    "Expected all live records to have an entry and for them to be removed only once");
+            }
+
             if (offsetToRemove == topCursor) {
                 topCursor = Optional.ofNullable(pQueue.peek()).orElse(cursorHighWatermark + 1); // most recent cursor
                                                                                                 // was previously popped

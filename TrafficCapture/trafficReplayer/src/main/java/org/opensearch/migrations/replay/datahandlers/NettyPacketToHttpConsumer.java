@@ -167,9 +167,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         return (eventLoop, ctx) -> NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext, uri, ctx);
     }
 
-    public static class ChannelNotActiveException extends IOException {
-        public ChannelNotActiveException() {}
-    }
+    public static class ChannelNotActiveException extends IOException { }
 
     public static TrackedFuture<String, ChannelFuture> createClientConnection(
         EventLoop eventLoop,
@@ -382,9 +380,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                             + packetData.toString(StandardCharsets.UTF_8)
                     )
                     .log();
-                return writePacketAndUpdateFuture(packetData).whenComplete((v2, t2) -> {
-                    log.atTrace().setMessage(() -> "finished writing " + httpContext() + " t=" + t2).log();
-                }, () -> "");
+                return writePacketAndUpdateFuture(packetData).whenComplete((v2, t2) ->
+                    log.atTrace().setMessage(() -> "finished writing " + httpContext() + " t=" + t2).log(), () -> "");
             } else {
                 log.atWarn()
                     .setMessage(

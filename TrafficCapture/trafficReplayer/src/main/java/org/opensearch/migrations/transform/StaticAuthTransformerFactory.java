@@ -15,7 +15,6 @@ public class StaticAuthTransformerFactory implements IAuthTransformerFactory {
             @Override
             public void rewriteHeaders(HttpJsonMessageWithFaultingPayload msg) {
                 msg.headers().put("authorization", authHeaderValue);
-                // TODO - wipe out more headers too?
             }
         };
     }
