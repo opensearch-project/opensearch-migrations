@@ -217,6 +217,7 @@ export class MigrationAssistanceStack extends Stack {
             bucketName: `migration-artifacts-${this.account}-${props.stage}-${this.region}`,
             encryption: BucketEncryption.S3_MANAGED,
             enforceSSL: true,
+            versioned: true,
             removalPolicy: bucketRemovalPolicy,
             autoDeleteObjects: !!(props.artifactBucketRemovalPolicy && bucketRemovalPolicy === RemovalPolicy.DESTROY)
         });
