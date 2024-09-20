@@ -122,15 +122,7 @@ def run(args: MigrationMonitorParams, dp_process: Optional[Popen] = None, poll_i
     progress_metrics = ProgressMetrics(args.target_count, __IDLE_THRESHOLD)
     logging.info("Starting migration monitor until target doc count: " + str(progress_metrics.get_target_doc_count()))
     while __should_continue_monitoring(progress_metrics, dp_process):
-        if dp_process is not None:
-            # Wait on local process
-            try:
-                dp_process.wait(timeout=poll_interval_seconds)
-            except subprocess.TimeoutExpired:
-                pass
-        else:
-            # Thread sleep
-            time.sleep(poll_interval_seconds)
+        __wait_for_next_poll(dp_process, poll_interval_seconds)
         if dp_process is None or is_process_alive(dp_process):
             progress_metrics = check_and_log_progress(endpoint_info, progress_metrics)
     # Loop terminated
@@ -152,6 +144,18 @@ def run(args: MigrationMonitorParams, dp_process: Optional[Popen] = None, poll_i
             return shutdown_process(dp_process)
         else:
             return dp_process.returncode
+
+
+def __wait_for_next_poll(dp_process: Optional[Popen], poll_interval_seconds: int):
+    if dp_process is not None:
+        # Wait on local process
+        try:
+            dp_process.wait(timeout=poll_interval_seconds)
+        except subprocess.TimeoutExpired:
+            pass
+    else:
+        # Thread sleep
+        time.sleep(poll_interval_seconds)
 
 
 if __name__ == '__main__':  # pragma no cover
