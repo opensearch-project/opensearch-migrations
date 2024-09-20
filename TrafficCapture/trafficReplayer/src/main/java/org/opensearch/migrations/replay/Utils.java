@@ -54,12 +54,4 @@ public class Utils {
             return Base64.getEncoder().encodeToString(binaryContents);
         }
     }
-
-    public TrafficStream trafficStreamFromCompressedString(String encodedAndZippedStr) throws IOException {
-        try (var bais = new ByteArrayInputStream(Base64.getDecoder().decode(encodedAndZippedStr))) {
-            try (var gzis = new GZIPInputStream(bais)) {
-                return TrafficStream.parseDelimitedFrom(gzis);
-            }
-        }
-    }
 }
