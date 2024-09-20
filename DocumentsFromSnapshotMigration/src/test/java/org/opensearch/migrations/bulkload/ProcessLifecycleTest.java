@@ -6,9 +6,11 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
 import org.junit.jupiter.api.Assertions;
@@ -23,6 +25,8 @@ import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.testcontainers.OpensearchContainer;
 
+import com.rfs.framework.SearchClusterContainer;
+import com.rfs.http.ClusterOperations;
 import eu.rekawek.toxiproxy.model.ToxicDirection;
 import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
@@ -64,10 +68,6 @@ public class ProcessLifecycleTest extends SourceTestBase {
         final var failHow = FailHow.valueOf(failAfterString);
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
 
-        var sourceImageArgs = makeParamsForBase(SearchClusterContainer.ES_V7_10_2);
-        var baseSourceImageVersion = (SearchClusterContainer.ContainerVersion) sourceImageArgs[0];
-        var generatorImage = (String) sourceImageArgs[1];
-        var generatorArgs = (String[]) sourceImageArgs[2];
         var targetImageName = SearchClusterContainer.OS_V2_14_0.getImageName();
 
         var tempDirSnapshot = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
@@ -75,12 +75,9 @@ public class ProcessLifecycleTest extends SourceTestBase {
 
         try (
             var network = Network.newNetwork();
-            var esSourceContainer = new PreloadedSearchClusterContainer(
-                baseSourceImageVersion,
-                SOURCE_SERVER_ALIAS,
-                generatorImage,
-                generatorArgs
-            );
+            var esSourceContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2)
+                .withNetwork(network)
+                .withNetworkAliases(SOURCE_SERVER_ALIAS);
             var osTargetContainer = new OpensearchContainer<>(targetImageName).withExposedPorts(OPENSEARCH_PORT)
                 .withNetwork(network)
                 .withNetworkAliases(TARGET_DOCKER_HOSTNAME);
@@ -97,6 +94,53 @@ public class ProcessLifecycleTest extends SourceTestBase {
                 proxyContainer.start(TARGET_DOCKER_HOSTNAME, OPENSEARCH_PORT);
                 return null;
             })).join();
+
+            var sourceUrl = esSourceContainer.getUrl();
+            System.err.println("Source cluster " + sourceUrl);
+            var operations = new ClusterOperations(sourceUrl);
+
+            var createDocThreadPool = Executors.newFixedThreadPool(20);
+            var futures = new ArrayList<CompletableFuture<Void>>();
+            // Fake document
+            var defaultBody = "{\"test\":\"abc\"}";
+            // OSB default indexes
+            var indices = List.of(
+                "geonames",
+                "logs-221998",
+                "logs-211998",
+                "logs-231998",
+                "logs-241998",
+                "logs-181998",
+                "logs-201998",
+                "logs-191998",
+                "sonested",
+                "nyc_taxis"
+            );
+
+            for (var index : indices) {
+                final var indexName = index;
+                try {
+                    operations.createIndex(index);
+                } catch (Exception e) {
+                    log.error("Unexpected failure" + e.getMessage());
+                }
+                for (int j = 0; j < 1000; j++) {
+                    final var docId = "doc" + j;
+                    futures.add(
+                        CompletableFuture.runAsync(() -> {
+                            try {
+                                operations.createDocument(indexName, docId, defaultBody);
+                            } catch (Exception e) {
+                                log.error("Unexpected failure" + e.getMessage());
+                            }
+                        }, createDocThreadPool)
+                    );
+                }
+            }
+            CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            operations.get("/_refresh");
+            var cat = operations.get("/_cat/indices?v");
+            System.err.println("indices:\n" + cat.getValue());
 
             var args = new CreateSnapshot.Args();
             args.snapshotName = SNAPSHOT_NAME;

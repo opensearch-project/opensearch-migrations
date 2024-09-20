@@ -53,7 +53,8 @@ public class ClusterOperations {
         }
     }
 
-    public void createDocument(final String index, final String docId, final String body) throws IOException {
+    @SneakyThrows
+    public void createDocument(final String index, final String docId, final String body) {
         var indexDocumentRequest = new HttpPut(clusterUrl + "/" + index + "/_doc/" + docId);
         indexDocumentRequest.setEntity(new StringEntity(body));
         indexDocumentRequest.setHeader("Content-Type", "application/json");
@@ -68,6 +69,30 @@ public class ClusterOperations {
 
         try (var response = httpClient.execute(deleteDocumentRequest)) {
             assertThat(response.getCode(), equalTo(200));
+        }
+    }
+
+    public void createIndex(final String index) {
+        var body = "{" + //
+        "  \"settings\": {" + //
+        "    \"index\": {" + //
+        "      \"number_of_shards\": 5," + //
+        "      \"number_of_replicas\": 0" + //
+        "    }" + //
+        "  }" + //
+        "}";
+        createIndex(index, body);
+    }
+
+    @SneakyThrows
+    public void createIndex(final String index, final String body) {
+        var createIndexRequest = new HttpPut(clusterUrl + "/" + index);
+        createIndexRequest.setEntity(new StringEntity(body));
+        createIndexRequest.setHeader("Content-Type", "application/json");
+
+        try (var response = httpClient.execute(createIndexRequest)) {
+            var responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+            assertThat(responseBody, response.getCode(), anyOf(equalTo(201), equalTo(200)));
         }
     }
 
