@@ -18,15 +18,15 @@ jobs:
   rfs-e2e-aws-test:
     runs-on: ubuntu-latest
     steps:
-      - env:
+      - name: Sanitize branch and repo names
+        env:
           BRANCH_NAME: ${{ github.event.pull_request.head.ref || github.ref_name }}
           REPO_BASE: ${{ github.event.pull_request.head.repo.full_name || github.repository }}
-      - name: Sanitize branch and repo names
         id: sanitize-input
         run: |
-          clean_branch_name = $(echo "$BRANCH_NAME" | tr -cd '[:alnum:]_-./')
-          clean_repo_base = $(echo "$REPO_BASE" | tr -cd '[:alnum:]_-./')
-          clean_repo_url = "https://github.com/$clean_repo_base.git"
+          clean_branch_name=$(echo "$BRANCH_NAME" | tr -cd '[:alnum:]_\-\./')
+          clean_repo_base=$(echo "$REPO_BASE" | tr -cd '[:alnum:]_\-\./')
+          clean_repo_url="https://github.com/$clean_repo_base.git"
           echo "Running jenkins test on repo: $clean_repo_url and branch: $clean_branch_name"
           echo "branch_name=$clean_branch_name" >> $GITHUB_OUTPUT
           echo "pr_repo_url=$clean_repo_url" >> $GITHUB_OUTPUT
