@@ -2,8 +2,6 @@ import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-i
 import {Construct} from "constructs";
 import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 import {RemovalPolicy} from "aws-cdk-lib";
-import { IApplicationLoadBalancer } from "aws-cdk-lib/aws-elasticloadbalancingv2";
-import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
 import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
 import * as forge from 'node-forge';
 import * as yargs from 'yargs';
@@ -211,20 +209,18 @@ export function createDefaultECSTaskRole(scope: Construct, serviceName: string):
 }
 
 export function validateFargateCpuArch(cpuArch?: string): CpuArchitecture {
-    const desiredArch = cpuArch ? cpuArch : process.arch
+    const desiredArch = cpuArch ?? process.arch
     const desiredArchUpper = desiredArch.toUpperCase()
 
     if (desiredArchUpper === "X86_64" || desiredArchUpper === "X64") {
         return CpuArchitecture.X86_64
     } else if (desiredArchUpper === "ARM64") {
         return CpuArchitecture.ARM64
-    } else {
-        if (cpuArch) {
-            throw new Error(`Unknown Fargate cpu architecture provided: ${desiredArch}`)
-        }
-        else {
-            throw new Error(`Unsupported process cpu architecture detected: ${desiredArch}, CDK requires X64 or ARM64 for Docker image compatability`)
-        }
+    } else if (cpuArch) {
+        throw new Error(`Unknown Fargate cpu architecture provided: ${desiredArch}`)
+    }
+    else {
+        throw new Error(`Unsupported process cpu architecture detected: ${desiredArch}, CDK requires X64 or ARM64 for Docker image compatability`)
     }
 }
 
@@ -235,21 +231,6 @@ export function parseRemovalPolicy(optionName: string, policyNameString?: string
     }
     return policy
 }
-
-
-export type ALBConfig = NewALBListenerConfig;
-
-export interface NewALBListenerConfig {
-    alb: IApplicationLoadBalancer,
-    albListenerCert: ICertificate,
-    albListenerPort?: number,
-}
-
-export function isNewALBListenerConfig(config: ALBConfig): config is NewALBListenerConfig {
-    const parsed = config as NewALBListenerConfig;
-    return parsed.alb !== undefined && parsed.albListenerCert !== undefined;
-}
-
 export function hashStringSHA256(message: string): string {
     const md = forge.md.sha256.create();
     md.update(message);
@@ -295,10 +276,6 @@ export enum MigrationSSMParameter {
     MIGRATION_LISTENER_URL = 'albMigrationListenerUrl',
     MIGRATION_LISTENER_URL_ALIAS = 'albMigrationListenerUrlAlias',
     ARTIFACT_S3_ARN = 'artifactS3Arn',
-    FETCH_MIGRATION_COMMAND = 'fetchMigrationCommand',
-    FETCH_MIGRATION_TASK_DEF_ARN = 'fetchMigrationTaskDefArn',
-    FETCH_MIGRATION_TASK_EXEC_ROLE_ARN = 'fetchMigrationTaskExecRoleArn',
-    FETCH_MIGRATION_TASK_ROLE_ARN = 'fetchMigrationTaskRoleArn',
     KAFKA_BROKERS = 'kafkaBrokers',
     MSK_CLUSTER_ARN = 'mskClusterARN',
     MSK_CLUSTER_NAME = 'mskClusterName',
@@ -317,7 +294,7 @@ export enum MigrationSSMParameter {
 }
 
 
-export class ClusterNoAuth {};
+export class ClusterNoAuth {}
 
 export class ClusterSigV4Auth {
     region?: string;

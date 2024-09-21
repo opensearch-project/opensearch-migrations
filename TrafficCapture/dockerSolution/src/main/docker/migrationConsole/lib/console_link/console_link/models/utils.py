@@ -1,6 +1,11 @@
-# define a custom exception for aws api errors
+from botocore import config
 from enum import Enum
-from typing import Dict
+from typing import Dict, Optional
+from datetime import datetime
+import boto3
+import requests.utils
+
+from console_link.models.client_options import ClientOptions
 
 
 class AWSAPIError(Exception):
@@ -26,3 +31,26 @@ def raise_for_aws_api_error(response: Dict) -> None:
 class ExitCode(Enum):
     SUCCESS = 0
     FAILURE = 1
+
+
+def generate_log_file_path(topic: str) -> str:
+    now = datetime.now().isoformat()
+    return f"{now}-{topic}.log"
+
+
+def create_boto3_client(aws_service_name: str, region: Optional[str] = None,
+                        client_options: Optional[ClientOptions] = None):
+    client_config = None
+    if client_options and client_options.user_agent_extra:
+        user_agent_extra_param = {"user_agent_extra": client_options.user_agent_extra}
+        client_config = config.Config(**user_agent_extra_param)
+    return boto3.client(aws_service_name, region_name=region, config=client_config)
+
+
+def append_user_agent_header_for_requests(headers: Optional[dict], user_agent_extra: str):
+    adjusted_headers = dict(headers) if headers else {}
+    if "User-Agent" in adjusted_headers:
+        adjusted_headers["User-Agent"] = f"{adjusted_headers['User-Agent']} {user_agent_extra}"
+    else:
+        adjusted_headers["User-Agent"] = f"{requests.utils.default_user_agent()} {user_agent_extra}"
+    return adjusted_headers

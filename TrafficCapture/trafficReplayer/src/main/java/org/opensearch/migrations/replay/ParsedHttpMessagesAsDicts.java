@@ -35,6 +35,7 @@ public class ParsedHttpMessagesAsDicts {
     public static final String STATUS_CODE_KEY = "Status-Code";
     public static final String RESPONSE_TIME_MS_KEY = "response_time_ms";
     public static final int MAX_PAYLOAD_BYTES_TO_CAPTURE = 256 * 1024 * 1024;
+    public static final String EXCEPTION_KEY_STRING = "Exception";
 
     public final Optional<Map<String, Object>> sourceRequestOp;
     public final Optional<Map<String, Object>> sourceResponseOp;
@@ -160,7 +161,7 @@ public class ParsedHttpMessagesAsDicts {
                 )
                 .setCause(e)
                 .log();
-            return Map.of("Exception", (Object) e.toString());
+            return Map.of(EXCEPTION_KEY_STRING, (Object) e.toString());
         }
     }
 
@@ -185,7 +186,7 @@ public class ParsedHttpMessagesAsDicts {
                     context.setHttpVersion(message.protocolVersion().toString());
                     return fillMap(map, message.headers(), message.content());
                 } else {
-                    return Map.of("Exception", "Message couldn't be parsed as a full http message");
+                    return Map.of(EXCEPTION_KEY_STRING, "Message couldn't be parsed as a full http message");
                 }
             }
         });
@@ -211,7 +212,7 @@ public class ParsedHttpMessagesAsDicts {
                     map.put(RESPONSE_TIME_MS_KEY, latency.toMillis());
                     return fillMap(map, message.headers(), message.content());
                 } else {
-                    return Map.of("Exception", "Message couldn't be parsed as a full http message");
+                    return Map.of(EXCEPTION_KEY_STRING, "Message couldn't be parsed as a full http message");
                 }
             }
         });

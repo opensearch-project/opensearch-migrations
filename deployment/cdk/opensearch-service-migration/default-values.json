@@ -13,6 +13,5 @@
   "replayerOutputEFSRemovalPolicy": "DESTROY",
   "migrationConsoleServiceEnabled": true,
   "trafficReplayerServiceEnabled": false,
-  "otelCollectorEnabled": true,
-  "dpPipelineTemplatePath": "./dp_pipeline_template.yaml"
+  "otelCollectorEnabled": true
 }

@@ -22,7 +22,7 @@ public class NettyScanningHttpProxy {
         this.proxyPort = proxyPort;
     }
 
-    public void start(ProxyChannelInitializer proxyChannelInitializer, int numThreads)
+    public void start(ProxyChannelInitializer<?> proxyChannelInitializer, int numThreads)
         throws InterruptedException
     {
         bossGroup = new NioEventLoopGroup(1, new DefaultThreadFactory("captureProxyPoolBoss"));
