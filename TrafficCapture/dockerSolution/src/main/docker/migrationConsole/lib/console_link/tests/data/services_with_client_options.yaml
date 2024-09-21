@@ -1,0 +1,43 @@
+source_cluster:
+  endpoint: "https://elasticsearch:9200"
+  allow_insecure: true
+  basic_auth:
+    username: "admin"
+    password: "admin"
+target_cluster:
+  endpoint: "https://opensearchtarget:9200"
+  allow_insecure: true
+  basic_auth:
+    username: "admin"
+    password: "myStrongPassword123!"
+metrics_source:
+  prometheus:
+    endpoint: "http://prometheus:9090"
+backfill:
+  reindex_from_snapshot:
+    ecs:
+      cluster_name: "migration-cluster"
+      service_name: "rfs-service"
+snapshot:
+  snapshot_name: "test_snapshot"
+  fs:
+    repo_path: "/snapshot/test-console"
+  otel_endpoint: "http://otel-collector:4317"
+metadata_migration:
+  from_snapshot: # If not provided, these are assumed from the snapshot object
+    snapshot_name: "snapshot_2023_01_01"
+    s3:
+      repo_uri: "s3://my-snapshot-bucket"
+      aws_region: "us-east-2"
+  otel_endpoint: "http://otel-collector:4317"
+  min_replicas: 0
+replay:
+  ecs:
+    cluster_name: "my-cluster"
+    service_name: "my-service"
+  scale: 2
+kafka:
+  broker_endpoints: "kafka1:9092,kafka2:9092,kafka3:9092"
+  standard:
+client_options:
+  user_agent_extra: "test-user-agent-v1.0"
