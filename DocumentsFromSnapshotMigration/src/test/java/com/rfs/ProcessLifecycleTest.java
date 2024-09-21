@@ -34,7 +34,6 @@ import org.testcontainers.containers.Network;
  */
 @Slf4j
 @Tag("longTest")
-@Disabled("This test is disabled because it is not currently working as expected.")
 public class ProcessLifecycleTest extends SourceTestBase {
 
     public static final String TARGET_DOCKER_HOSTNAME = "target";
