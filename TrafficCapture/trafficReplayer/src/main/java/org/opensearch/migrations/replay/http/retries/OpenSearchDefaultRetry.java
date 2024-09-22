@@ -75,7 +75,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
                 token != JsonToken.NOT_AVAILABLE)
             {
                 JsonToken finalToken = token;
-                log.atInfo().setMessage(() -> "Got token: " + finalToken).log();
+                log.atTrace().setMessage(() -> "Got token: " + finalToken).log();
                 if (token == JsonToken.FIELD_NAME && "errors".equals(parser.getCurrentName())) {
                     parser.nextToken();
                     errorField = parser.getValueAsBoolean();
