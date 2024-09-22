@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
+
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
 public class PruferTreeGeneratorTest {
 

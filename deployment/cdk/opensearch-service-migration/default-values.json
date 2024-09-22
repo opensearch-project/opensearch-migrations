@@ -1,7 +1,6 @@
 {
   "engineVersion": "OS_2.9",
   "targetClusterVersion": "OS_2.9",
-  "domainName": "os-service-domain",
   "tlsSecurityPolicy": "TLS_1_2",
   "enforceHTTPS": true,
   "nodeToNodeEncryptionEnabled": true,
@@ -14,6 +13,5 @@
   "replayerOutputEFSRemovalPolicy": "DESTROY",
   "migrationConsoleServiceEnabled": true,
   "trafficReplayerServiceEnabled": false,
-  "otelCollectorEnabled": true,
-  "dpPipelineTemplatePath": "./dp_pipeline_template.yaml"
+  "otelCollectorEnabled": true
 }

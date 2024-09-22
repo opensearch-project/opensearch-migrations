@@ -1,6 +1,6 @@
 import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {CpuArchitecture, MountPoint, PortMapping, Protocol, Volume} from "aws-cdk-lib/aws-ecs";
+import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
@@ -25,7 +25,6 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly migrationsSolutionVersion: string,
     readonly vpc: IVpc,
     readonly streamingSourceType: StreamingSourceType,
-    readonly fetchMigrationEnabled: boolean,
     readonly fargateCpuArch: CpuArchitecture,
     readonly migrationConsoleEnableOSI: boolean,
     readonly migrationAPIEnabled?: boolean,
@@ -278,43 +277,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
-        }
-        if (props.fetchMigrationEnabled) {
-            environment["FETCH_MIGRATION_COMMAND"] = getMigrationStringParameterValue(this, {
-                ...props,
-                parameter: MigrationSSMParameter.FETCH_MIGRATION_COMMAND,
-            });
-
-            const fetchMigrationTaskDefArn = getMigrationStringParameterValue(this, {
-                ...props,
-                parameter: MigrationSSMParameter.FETCH_MIGRATION_TASK_DEF_ARN,
-            });
-            const fetchMigrationTaskRunPolicy = new PolicyStatement({
-                effect: Effect.ALLOW,
-                resources: [fetchMigrationTaskDefArn],
-                actions: [
-                    "ecs:RunTask",
-                    "ecs:StopTask"
-                ]
-            })
-            const fetchMigrationTaskRoleArn = getMigrationStringParameterValue(this, {
-                ...props,
-                parameter: MigrationSSMParameter.FETCH_MIGRATION_TASK_ROLE_ARN,
-            });
-            const fetchMigrationTaskExecRoleArn = getMigrationStringParameterValue(this, {
-                ...props,
-                parameter: MigrationSSMParameter.FETCH_MIGRATION_TASK_EXEC_ROLE_ARN,
-            });
-            // Required as per https://docs.aws.amazon.com/AmazonECS/latest/userguide/task-iam-roles.html
-            const fetchMigrationPassRolePolicy = new PolicyStatement({
-                effect: Effect.ALLOW,
-                resources: [fetchMigrationTaskRoleArn, fetchMigrationTaskExecRoleArn],
-                actions: [
-                    "iam:PassRole"
-                ]
-            })
-            servicePolicies.push(fetchMigrationTaskRunPolicy)
-            servicePolicies.push(fetchMigrationPassRolePolicy)
         }
 
         if (props.migrationAPIEnabled) {

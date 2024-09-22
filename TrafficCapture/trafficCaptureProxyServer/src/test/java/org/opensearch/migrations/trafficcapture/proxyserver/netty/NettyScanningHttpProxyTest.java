@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import org.opensearch.common.collect.Tuple;
-import org.opensearch.migrations.testutils.HttpRequestFirstLine;
+import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
@@ -207,7 +207,8 @@ class NettyScanningHttpProxyTest {
                 var connectionPool = new BacksideConnectionPool(testServerUri, null, 10, Duration.ofSeconds(10));
 
                 nshp.get()
-                    .start(rootCtx, connectionPool, 1, null, connectionCaptureFactory, new RequestCapturePredicate());
+                    .start(new ProxyChannelInitializer(rootCtx, connectionPool, null,
+                        connectionCaptureFactory, new RequestCapturePredicate()), 1);
                 System.out.println("proxy port = " + port);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -217,7 +218,7 @@ class NettyScanningHttpProxyTest {
         return new Tuple<>(nshp.get(), underlyingPort);
     }
 
-    private static SimpleHttpResponse makeContext(HttpRequestFirstLine request) {
+    private static SimpleHttpResponse makeContext(HttpRequest request) {
         var headers = Map.of(
             "Content-Type",
             "text/plain",

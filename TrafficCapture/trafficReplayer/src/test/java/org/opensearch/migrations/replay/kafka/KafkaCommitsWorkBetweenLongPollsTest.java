@@ -13,6 +13,7 @@ import org.junit.jupiter.api.Test;
 
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
+import org.opensearch.migrations.testutils.SharedDockerImageNames;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 
 import lombok.Lombok;
@@ -21,7 +22,6 @@ import lombok.extern.slf4j.Slf4j;
 import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
-import org.testcontainers.utility.DockerImageName;
 
 @Slf4j
 @Testcontainers(disabledWithoutDocker = true)
@@ -33,9 +33,7 @@ public class KafkaCommitsWorkBetweenLongPollsTest extends InstrumentationTest {
     @Container
     // see
     // https://docs.confluent.io/platform/current/installation/versions-interoperability.html#cp-and-apache-kafka-compatibility
-    private final KafkaContainer embeddedKafkaBroker = new KafkaContainer(
-        DockerImageName.parse("confluentinc/cp-kafka:7.5.0")
-    );
+    private final KafkaContainer embeddedKafkaBroker = new KafkaContainer(SharedDockerImageNames.KAFKA);
 
     @SneakyThrows
     private KafkaConsumer<String, byte[]> buildKafkaConsumer() {

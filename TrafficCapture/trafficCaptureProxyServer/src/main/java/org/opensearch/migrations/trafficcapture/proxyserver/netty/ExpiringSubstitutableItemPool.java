@@ -234,16 +234,15 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
             throw new PoolClosedException();
         }
         var startTime = Instant.now();
-        {
-            log.trace("getAvailableOrNewItem: readyItems.size()=" + readyItems.size());
-            var item = readyItems.poll();
-            log.trace("getAvailableOrNewItem: item=" + item + " remaining readyItems.size()=" + readyItems.size());
-            if (item != null) {
-                stats.addHotGet();
-                beginLoadingNewItemIfNecessary();
-                stats.addWaitTime(Duration.between(startTime, Instant.now()));
-                return item.future;
-            }
+        log.atTrace().setMessage("getAvailableOrNewItem: readyItems.size()={}").addArgument(readyItems.size()).log();
+        var item = readyItems.poll();
+        log.atTrace().setMessage("getAvailableOrNewItem: item={} remaining readyItems.size()={}")
+            .addArgument(item).addArgument(readyItems.size()).log();
+        if (item != null) {
+            stats.addHotGet();
+            beginLoadingNewItemIfNecessary();
+            stats.addWaitTime(Duration.between(startTime, Instant.now()));
+            return item.future;
         }
 
         BiFunction<F, String, F> durationTrackingDecoratedItem = (itemsFuture, label) -> (F) itemsFuture.addListener(

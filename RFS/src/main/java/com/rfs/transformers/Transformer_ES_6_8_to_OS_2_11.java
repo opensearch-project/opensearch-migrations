@@ -41,7 +41,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
                 var templateCopy = (ObjectNode) template.getValue().deepCopy();
                 var indexTemplate = (Index) () -> templateCopy;
                 transformIndex(indexTemplate, IndexType.Template);
-                templates.set(template.getKey(), indexTemplate.rawJson());
+                templates.set(template.getKey(), indexTemplate.getRawJson());
             });
             newRoot.set("templates", templates);
         }
@@ -65,12 +65,12 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     public IndexMetadata transformIndexMetadata(IndexMetadata index) {
         var copy = index.deepCopy();
         transformIndex(copy, IndexType.Concrete);
-        return new IndexMetadataData_OS_2_11(copy.rawJson(), copy.getId(), copy.getName());
+        return new IndexMetadataData_OS_2_11(copy.getRawJson(), copy.getId(), copy.getName());
     }
 
     private void transformIndex(Index index, IndexType type) {
-        logger.debug("Original Object: " + index.rawJson().toString());
-        var newRoot = index.rawJson();
+        logger.debug("Original Object: " + index.getRawJson().toString());
+        var newRoot = index.getRawJson();
 
         switch (type) {
             case Concrete:

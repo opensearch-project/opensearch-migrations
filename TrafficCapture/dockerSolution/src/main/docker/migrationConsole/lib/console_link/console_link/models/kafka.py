@@ -29,6 +29,9 @@ SCHEMA = {
     }
 }
 
+KAFKA_TOPICS_COMMAND = '/root/kafka-tools/kafka/bin/kafka-topics.sh'
+MSK_AUTH_PARAMETERS = ['--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties']
+
 
 def get_result_for_command(command: List[str], operation_name: str) -> CommandResult:
     try:
@@ -103,28 +106,26 @@ class MSK(Kafka):
         super().__init__(config)
 
     def delete_topic(self, topic_name='logging-traffic-topic') -> CommandResult:
-        command = ['/root/kafka-tools/kafka/bin/kafka-topics.sh', '--bootstrap-server', f'{self.brokers}', '--delete',
-                   '--topic', f'{topic_name}', '--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties']
+        command = [KAFKA_TOPICS_COMMAND, '--bootstrap-server', f'{self.brokers}', '--delete',
+                   '--topic', f'{topic_name}'] + MSK_AUTH_PARAMETERS
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, "Delete Topic")
 
     def create_topic(self, topic_name='logging-traffic-topic') -> CommandResult:
-        command = ['/root/kafka-tools/kafka/bin/kafka-topics.sh', '--bootstrap-server', f'{self.brokers}', '--create',
-                   '--topic', f'{topic_name}', '--command-config', '/root/kafka-tools/aws/msk-iam-auth.properties']
+        command = [KAFKA_TOPICS_COMMAND, '--bootstrap-server', f'{self.brokers}', '--create',
+                   '--topic', f'{topic_name}'] + MSK_AUTH_PARAMETERS
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, "Create Topic")
 
     def describe_consumer_group(self, group_name='logging-group-default') -> CommandResult:
         command = ['/root/kafka-tools/kafka/bin/kafka-consumer-groups.sh', '--bootstrap-server', f'{self.brokers}',
-                   '--timeout', '100000', '--describe', '--group', f'{group_name}', '--command-config',
-                   '/root/kafka-tools/aws/msk-iam-auth.properties']
+                   '--timeout', '100000', '--describe', '--group', f'{group_name}'] + MSK_AUTH_PARAMETERS
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, "Describe Consumer Group")
 
     def describe_topic_records(self, topic_name='logging-traffic-topic') -> CommandResult:
         command = ['/root/kafka-tools/kafka/bin/kafka-run-class.sh', 'kafka.tools.GetOffsetShell', '--broker-list',
-                   f'{self.brokers}', '--topic', f'{topic_name}', '--time', '-1', '--command-config',
-                   '/root/kafka-tools/aws/msk-iam-auth.properties']
+                   f'{self.brokers}', '--topic', f'{topic_name}', '--time', '-1'] + MSK_AUTH_PARAMETERS
         logger.info(f"Executing command: {command}")
         result = get_result_for_command(command, "Describe Topic Records")
         if result.success and result.value:
@@ -142,13 +143,13 @@ class StandardKafka(Kafka):
         super().__init__(config)
 
     def delete_topic(self, topic_name='logging-traffic-topic') -> CommandResult:
-        command = ['/root/kafka-tools/kafka/bin/kafka-topics.sh', '--bootstrap-server', f'{self.brokers}', '--delete',
+        command = [KAFKA_TOPICS_COMMAND, '--bootstrap-server', f'{self.brokers}', '--delete',
                    '--topic', f'{topic_name}']
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, "Delete Topic")
 
     def create_topic(self, topic_name='logging-traffic-topic') -> CommandResult:
-        command = ['/root/kafka-tools/kafka/bin/kafka-topics.sh', '--bootstrap-server', f'{self.brokers}', '--create',
+        command = [KAFKA_TOPICS_COMMAND, '--bootstrap-server', f'{self.brokers}', '--create',
                    '--topic', f'{topic_name}']
         logger.info(f"Executing command: {command}")
         return get_result_for_command(command, "Create Topic")

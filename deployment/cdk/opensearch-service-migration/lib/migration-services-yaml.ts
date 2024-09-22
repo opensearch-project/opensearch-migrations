@@ -110,17 +110,14 @@ export class MetadataMigrationYaml {
     otel_endpoint: string = '';
     source_cluster_version?: string;
 }
-
-export class MSKYaml {
-}
-
-export class StandardKafkaYaml {
-}
-
 export class KafkaYaml {
     broker_endpoints: string = '';
     msk?: string | null;
     standard?: string | null;
+}
+
+export class ClientOptions {
+    user_agent_extra?: string;
 }
 
 export class ServicesYaml {
@@ -132,6 +129,7 @@ export class ServicesYaml {
     metadata_migration?: MetadataMigrationYaml;
     replayer?: ECSReplayerYaml;
     kafka?: KafkaYaml;
+    client_options?: ClientOptions;
 
     stringify(): string {
         return yaml.stringify({
@@ -142,7 +140,8 @@ export class ServicesYaml {
             snapshot: this.snapshot?.toDict(),
             metadata_migration: this.metadata_migration,
             replay: this.replayer?.toDict(),
-            kafka: this.kafka
+            kafka: this.kafka,
+            client_options: this.client_options
         },
         {
             'nullStr': ''

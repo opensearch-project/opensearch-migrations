@@ -7,6 +7,7 @@ import requests
 import requests_mock
 from botocore.stub import Stubber
 
+from console_link.models.client_options import ClientOptions
 from console_link.models.factories import (UnsupportedMetricsSourceError,
                                            get_metrics_source)
 from console_link.models.metrics_source import (CloudwatchMetricsSource,
@@ -17,6 +18,7 @@ from console_link.models.utils import AWSAPIError
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
 AWS_REGION = "us-east-1"
+USER_AGENT_EXTRA = "test-agent-v1.0"
 
 mock_metrics_list = {'captureProxy': ['kafkaCommitCount', 'captureConnectionDuration'],
                      'replayer': ['kafkaCommitCount']}
@@ -31,11 +33,15 @@ def prometheus_ms():
     # due to https://github.com/psf/requests/issues/6089, tests with request-mocker and query params will
     # fail if the endpoint doesn't start with http
     endpoint = "http://localhost:9090"
-    return PrometheusMetricsSource({
-        "prometheus": {
-            "endpoint": endpoint
-        }
-    })
+    return PrometheusMetricsSource(
+        config={
+            "prometheus": {
+                "endpoint": endpoint
+            }
+        },
+        client_options=ClientOptions(config={"user_agent_extra": USER_AGENT_EXTRA})
+
+    )
 
 
 @pytest.fixture
@@ -47,11 +53,14 @@ def cw_stubber():
 
 @pytest.fixture
 def cw_ms():
-    return CloudwatchMetricsSource({
-        "cloudwatch": {
-            "aws_region": AWS_REGION
-        }
-    })
+    return CloudwatchMetricsSource(
+        config={
+            "cloudwatch": {
+                "aws_region": AWS_REGION
+            }
+        },
+        client_options=ClientOptions(config={"user_agent_extra": USER_AGENT_EXTRA})
+    )
 
 
 def test_get_metrics_source():
@@ -151,7 +160,7 @@ def test_cloudwatch_metrics_get_metric_data(cw_ms, cw_stubber):
 
     cw_ms.client = cw_stubber.client
     metrics = cw_ms.get_metric_data(Component.CAPTUREPROXY, "kafkaCommitCount",
-                                    MetricStatistic.Average, startTime=datetime.datetime.now())
+                                    MetricStatistic.Average, start_time=datetime.datetime.now())
     assert metrics == mock_metric_data
 
 
@@ -184,5 +193,5 @@ def test_prometheus_get_metric_for_nonexistent_component(prometheus_ms):
     with pytest.raises(ValueError):
         prometheus_ms.get_metric_data(
             Component(3), "kafkaCommitCount",
-            MetricStatistic.Average, startTime=datetime.datetime.now()
+            MetricStatistic.Average, start_time=datetime.datetime.now()
         )

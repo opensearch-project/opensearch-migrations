@@ -15,23 +15,26 @@ export const handler = async (event: CloudFormationCustomResourceEvent, context:
 
   try {
     switch (event.RequestType) {
-      case 'Create':
+      case 'Create': {
         const { certificate, privateKey, certificateChain } = await generateSelfSignedCertificate();
         const certificateArn = await importCertificate(certificate, privateKey, certificateChain);
         console.log(`Certificate imported with ARN: ${certificateArn}`);
         responseData = { CertificateArn: certificateArn };
         physicalResourceId = certificateArn;
         break;
-      case 'Update':
+      }
+      case 'Update': {
         // No update logic needed, return existing physical resource id
         physicalResourceId = event.PhysicalResourceId;
-        break;  
-      case 'Delete':
+        break;
+      }
+      case 'Delete': {
         const arn = event.PhysicalResourceId;
         await deleteCertificate(arn);
         responseData = { CertificateArn: arn };
         physicalResourceId = arn;
         break;
+      }
     }
 
     return await sendResponse(event, context, 'SUCCESS', responseData, physicalResourceId);
@@ -45,7 +48,7 @@ async function generateSelfSignedCertificate(): Promise<{ certificate: string, p
   return new Promise((resolve, reject) => {
     const keys = forge.pki.rsa.generateKeyPair(2048);
     const cert = forge.pki.createCertificate();
-    
+
     cert.publicKey = keys.publicKey;
     cert.serialNumber = '01';
     cert.validity.notBefore = new Date(Date.UTC(1970, 0, 1, 0, 0, 0));
@@ -54,10 +57,10 @@ async function generateSelfSignedCertificate(): Promise<{ certificate: string, p
       name: 'commonName',
       value: 'localhost'
     }];
-  
+
     cert.setSubject(attrs);
     cert.setIssuer(attrs);
-  
+
     cert.setExtensions([{
       name: 'basicConstraints',
       cA: true
@@ -78,7 +81,7 @@ async function generateSelfSignedCertificate(): Promise<{ certificate: string, p
       clientAuth: true
     },]);
     cert.sign(keys.privateKey, forge.md.sha384.create());
-  
+
     const pemCert = forge.pki.certificateToPem(cert);
     const pemKey = forge.pki.privateKeyToPem(keys.privateKey);
 
@@ -165,7 +168,7 @@ async function sendResponse(event: CloudFormationCustomResourceEvent, context: C
       });
     });
 
-    request.on('error', (error) => {
+    request.on('error', (error: Error) => {
       console.error('sendResponse Error:', error);
       reject(error);
     });

@@ -26,12 +26,6 @@ COPY osiPipelineTemplate.yaml /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
 
-COPY humanReadableLogs.py /root/
-RUN chmod ug+x /root/humanReadableLogs.py
-
-COPY showFetchMigrationCommand.sh /root/
-RUN chmod ug+x /root/showFetchMigrationCommand.sh
-
 COPY kafkaExport.sh /root/kafka-tools
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
 
@@ -56,7 +50,7 @@ RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh
 RUN dnf install -y bash-completion
 RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo '. /etc/profile.d/venv.sh' >> ~/.bashrc && \
-    echo '@echo Welcome to the Migration Assistant Console' >> ~/.bashrc
+    echo 'echo Welcome to the Migration Assistant Console' >> ~/.bashrc
 # Set ENV to control startup script in /bin/sh mode
 ENV ENV=/root/.bashrc
 

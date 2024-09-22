@@ -12,7 +12,7 @@ import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Test;
 
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
-import org.opensearch.migrations.testutils.HttpRequestFirstLine;
+import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 
@@ -122,7 +122,7 @@ class RestClientTest {
         }
     }
 
-    SimpleHttpResponse makeResponseContext(HttpRequestFirstLine firstLine) {
+    SimpleHttpResponse makeResponseContext(HttpRequest firstLine) {
         var payloadBytes = "Hi".getBytes(StandardCharsets.UTF_8);
         return new SimpleHttpResponse(
             Map.of("Content-Type", "text/plain", "content-length", payloadBytes.length + ""),

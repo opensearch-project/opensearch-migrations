@@ -110,7 +110,7 @@ export class NetworkStack extends Stack {
             this.vpc = new Vpc(this, 'domainVPC', {
                 // IP space should be customized for use cases that have specific IP range needs
                 ipAddresses: IpAddresses.cidr('10.0.0.0/16'),
-                maxAzs: zoneCount ? zoneCount : 2,
+                maxAzs: zoneCount ?? 2,
                 subnetConfiguration: [
                     // Outbound internet access for private subnets require a NAT Gateway which must live in
                     // a public subnet
