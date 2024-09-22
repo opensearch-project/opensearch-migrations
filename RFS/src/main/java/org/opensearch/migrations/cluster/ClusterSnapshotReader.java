@@ -1,9 +1,8 @@
 package org.opensearch.migrations.cluster;
 
 import org.opensearch.migrations.Version;
-
-import com.rfs.common.SourceRepo;
-import com.rfs.models.ShardMetadata;
+import org.opensearch.migrations.bulkload.common.SourceRepo;
+import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
 /** Reads data for a cluster from a snapshot */
 public interface ClusterSnapshotReader extends ClusterReader {

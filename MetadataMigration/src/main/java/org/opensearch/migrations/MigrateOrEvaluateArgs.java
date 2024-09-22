@@ -2,10 +2,11 @@ package org.opensearch.migrations;
 
 
 
+import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.models.DataFilterArgs;
+
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
-import com.rfs.common.http.ConnectionContext;
-import com.rfs.models.DataFilterArgs;
 
 public class MigrateOrEvaluateArgs {
     @Parameter(names = {"--help", "-h"}, help = true, description = "Displays information about how to use this tool")

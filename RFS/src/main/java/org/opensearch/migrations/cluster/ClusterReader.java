@@ -1,7 +1,7 @@
 package org.opensearch.migrations.cluster;
 
-import com.rfs.models.GlobalMetadata;
-import com.rfs.models.IndexMetadata;
+import org.opensearch.migrations.bulkload.models.GlobalMetadata;
+import org.opensearch.migrations.bulkload.models.IndexMetadata;
 
 /** Reads data from a cluster */
 public interface ClusterReader extends VersionSpecificCluster {

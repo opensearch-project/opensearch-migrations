@@ -4,6 +4,11 @@ import java.util.ArrayList;
 
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
+import org.opensearch.migrations.bulkload.transformers.TransformFunctions;
+import org.opensearch.migrations.bulkload.transformers.Transformer;
+import org.opensearch.migrations.bulkload.worker.IndexMetadataResults;
+import org.opensearch.migrations.bulkload.worker.IndexRunner;
+import org.opensearch.migrations.bulkload.worker.MetadataRunner;
 import org.opensearch.migrations.cli.ClusterReaderExtractor;
 import org.opensearch.migrations.cli.Clusters;
 import org.opensearch.migrations.cli.Items;
@@ -11,11 +16,6 @@ import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.metadata.GlobalMetadataCreatorResults;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 
-import com.rfs.transformers.TransformFunctions;
-import com.rfs.transformers.Transformer;
-import com.rfs.worker.IndexMetadataResults;
-import com.rfs.worker.IndexRunner;
-import com.rfs.worker.MetadataRunner;
 import lombok.extern.slf4j.Slf4j;
 
 /** Shared functionality between migration and evaluation commands */

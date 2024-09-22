@@ -1,9 +1,8 @@
 package org.opensearch.migrations.reindexer.tracing;
 
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
+import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
-
-import com.rfs.tracing.IRfsContexts;
-import com.rfs.tracing.IWorkCoordinationContexts;
 
 public abstract class IDocumentMigrationContexts {
 

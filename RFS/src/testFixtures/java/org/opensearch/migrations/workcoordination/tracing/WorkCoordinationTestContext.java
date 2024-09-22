@@ -1,10 +1,9 @@
 package org.opensearch.migrations.workcoordination.tracing;
 
+import org.opensearch.migrations.bulkload.framework.tracing.TrackingTestContextFactory;
+import org.opensearch.migrations.bulkload.tracing.RootWorkCoordinationContext;
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
-
-import com.rfs.framework.tracing.TrackingTestContextFactory;
-import com.rfs.tracing.RootWorkCoordinationContext;
 
 public class WorkCoordinationTestContext extends RootWorkCoordinationContext {
     public final InMemoryInstrumentationBundle inMemoryInstrumentationBundle;

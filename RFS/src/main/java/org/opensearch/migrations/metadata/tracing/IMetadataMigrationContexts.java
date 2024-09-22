@@ -1,8 +1,7 @@
 package org.opensearch.migrations.metadata.tracing;
 
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
-
-import com.rfs.tracing.IRfsContexts;
 
 public abstract class IMetadataMigrationContexts {
 
