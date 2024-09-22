@@ -16,9 +16,8 @@ RUN wget --tries=5 --retry-connrefused --waitretry=15 -O kafka/libs/msk-iam-auth
 WORKDIR /root
 
 # Add Traffic Replayer jars for running KafkaPrinter from this container
-COPY staging/trafficReplayer/lib /root/kafka-tools/replayer-jars
-RUN printf "#!/bin/sh\njava -cp `echo /root/kafka-tools/replayer-jars/*.jar | tr \   :` \"\$@\" " > /root/kafka-tools/runJavaWithClasspath.sh
-RUN chmod +x /root/kafka-tools/runJavaWithClasspath.sh
+COPY staging/kafkaCommandLineFormatter/lib /root/kafka-tools/
+ENV CLASSPATH=/root/kafka-tools/kafkaCommandLineFormatter.jar
 
 COPY staging/CreateSnapshot /root/createSnapshot
 COPY staging/MetadataMigration /root/metadataMigration
