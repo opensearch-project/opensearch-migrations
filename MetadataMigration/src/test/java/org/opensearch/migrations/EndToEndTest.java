@@ -44,9 +44,9 @@ class EndToEndTest {
 
     private static Stream<Arguments> scenarios() {
         return Stream.of(
-            Arguments.of(TransferMedium.Http, MetadataCommands.Evaluate),
-            Arguments.of(TransferMedium.SnapshotImage, MetadataCommands.Migrate),
-            Arguments.of(TransferMedium.Http, MetadataCommands.Migrate)
+            Arguments.of(TransferMedium.Http, MetadataCommands.EVALUATE),
+            Arguments.of(TransferMedium.SnapshotImage, MetadataCommands.MIGRATE),
+            Arguments.of(TransferMedium.Http, MetadataCommands.MIGRATE)
         );
     }
 
@@ -183,7 +183,7 @@ class EndToEndTest {
         var metadata = new MetadataMigration();
         
         MigrationItemResult result;
-        if (MetadataCommands.Migrate.equals(command)) {
+        if (MetadataCommands.MIGRATE.equals(command)) {
             result = metadata.migrate(arguments).execute(metadataContext);
         } else {
             result = metadata.evaluate(arguments).execute(metadataContext);
@@ -223,7 +223,7 @@ class EndToEndTest {
         boolean sourceIsES6_8,
         TestData testData
         ) {
-        var expectUpdatesOnTarget = MetadataCommands.Migrate.equals(command);
+        var expectUpdatesOnTarget = MetadataCommands.MIGRATE.equals(command);
         // If the command was migrate, the target cluster should have the items, if not they
         var verifyResponseCode = expectUpdatesOnTarget ? equalTo(200) : equalTo(404);
 
