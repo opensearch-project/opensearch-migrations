@@ -1,6 +1,6 @@
 package org.opensearch.migrations.cluster;
 
-import com.rfs.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 
 /** Remote cluster */
 public interface RemoteCluster extends VersionSpecificCluster {

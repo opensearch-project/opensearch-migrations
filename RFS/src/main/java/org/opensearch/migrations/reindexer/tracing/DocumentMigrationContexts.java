@@ -2,15 +2,15 @@ package org.opensearch.migrations.reindexer.tracing;
 
 import io.opentelemetry.api.metrics.Meter;
 
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
+import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
+import org.opensearch.migrations.bulkload.tracing.RfsContexts;
+import org.opensearch.migrations.bulkload.tracing.RootWorkCoordinationContext;
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.BaseSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
-import com.rfs.tracing.IRfsContexts;
-import com.rfs.tracing.IWorkCoordinationContexts;
-import com.rfs.tracing.RfsContexts;
-import com.rfs.tracing.RootWorkCoordinationContext;
 import lombok.NonNull;
 
 public class DocumentMigrationContexts extends IDocumentMigrationContexts {

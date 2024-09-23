@@ -4,7 +4,8 @@ import java.util.Optional;
 import java.util.function.IntSupplier;
 import java.util.function.Supplier;
 
-import com.rfs.common.OpenSearchClient.OperationFailed;
+import org.opensearch.migrations.bulkload.common.OpenSearchClient.OperationFailed;
+
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

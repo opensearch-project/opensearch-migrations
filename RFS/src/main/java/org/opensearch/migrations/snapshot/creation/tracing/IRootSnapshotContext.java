@@ -1,6 +1,6 @@
 package org.opensearch.migrations.snapshot.creation.tracing;
 
-import com.rfs.tracing.IRfsContexts;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 
 public interface IRootSnapshotContext {
     IRfsContexts.ICreateSnapshotContext createSnapshotCreateContext();

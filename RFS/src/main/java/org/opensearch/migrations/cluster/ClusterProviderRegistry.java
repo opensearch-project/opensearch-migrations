@@ -4,15 +4,15 @@ import java.util.List;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.SourceRepo;
+import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.models.DataFilterArgs;
+import org.opensearch.migrations.bulkload.version_es_6_8.SnapshotReader_ES_6_8;
+import org.opensearch.migrations.bulkload.version_es_7_10.SnapshotReader_ES_7_10;
+import org.opensearch.migrations.bulkload.version_os_2_11.RemoteWriter_OS_2_11;
+import org.opensearch.migrations.bulkload.version_universal.RemoteReader;
 
-import com.rfs.common.OpenSearchClient;
-import com.rfs.common.SourceRepo;
-import com.rfs.common.http.ConnectionContext;
-import com.rfs.models.DataFilterArgs;
-import com.rfs.version_es_6_8.SnapshotReader_ES_6_8;
-import com.rfs.version_es_7_10.SnapshotReader_ES_7_10;
-import com.rfs.version_os_2_11.RemoteWriter_OS_2_11;
-import com.rfs.version_universal.RemoteReader;
 import lombok.experimental.UtilityClass;
 import lombok.extern.slf4j.Slf4j;
 

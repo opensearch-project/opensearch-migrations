@@ -11,17 +11,17 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
+import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
+import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.bulkload.http.ClusterOperations;
+import org.opensearch.migrations.bulkload.models.DataFilterArgs;
+import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
-import com.rfs.common.FileSystemSnapshotCreator;
-import com.rfs.common.OpenSearchClient;
-import com.rfs.common.http.ConnectionContextTestParams;
-import com.rfs.framework.SearchClusterContainer;
-import com.rfs.http.ClusterOperations;
-import com.rfs.models.DataFilterArgs;
-import com.rfs.worker.SnapshotRunner;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 

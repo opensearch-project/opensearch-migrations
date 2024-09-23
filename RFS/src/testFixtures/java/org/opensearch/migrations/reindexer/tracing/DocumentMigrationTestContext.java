@@ -1,11 +1,10 @@
 package org.opensearch.migrations.reindexer.tracing;
 
+import org.opensearch.migrations.bulkload.framework.tracing.TrackingTestContextFactory;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
+import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
-
-import com.rfs.framework.tracing.TrackingTestContextFactory;
-import com.rfs.tracing.IRfsContexts;
-import com.rfs.tracing.RfsContexts;
 
 public class DocumentMigrationTestContext extends RootDocumentMigrationContext {
     public final InMemoryInstrumentationBundle inMemoryInstrumentationBundle;

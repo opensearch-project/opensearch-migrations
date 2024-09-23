@@ -4,15 +4,15 @@ import java.nio.file.Path;
 
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.FileSystemRepo;
+import org.opensearch.migrations.bulkload.common.S3Repo;
+import org.opensearch.migrations.bulkload.common.S3Uri;
+import org.opensearch.migrations.bulkload.common.SourceRepo;
+import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.cluster.ClusterReader;
 
 import com.beust.jcommander.ParameterException;
-import com.rfs.common.FileSystemRepo;
-import com.rfs.common.S3Repo;
-import com.rfs.common.S3Uri;
-import com.rfs.common.SourceRepo;
-import com.rfs.common.http.ConnectionContext;
 import lombok.AllArgsConstructor;
 
 @AllArgsConstructor

@@ -6,14 +6,15 @@ import java.util.stream.Collectors;
 
 import org.junit.jupiter.api.Test;
 
-import com.rfs.http.BulkRequestGenerator;
+import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
+
 import org.testcontainers.shaded.com.google.common.collect.Streams;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.empty;
-import static com.rfs.http.BulkRequestGenerator.itemEntry;
-import static com.rfs.http.BulkRequestGenerator.itemEntryFailure;
+import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntry;
+import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntryFailure;
 
 class BulkResponseParserTest {
 
