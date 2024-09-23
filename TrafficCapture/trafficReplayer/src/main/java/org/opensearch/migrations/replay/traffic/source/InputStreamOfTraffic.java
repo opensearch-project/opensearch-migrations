@@ -1,8 +1,11 @@
 package org.opensearch.migrations.replay.traffic.source;
 
+import java.io.BufferedReader;
 import java.io.EOFException;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.util.Base64;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -22,14 +25,26 @@ import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
-    private final InputStream inputStream;
+public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource, AutoCloseable {
+    private final BufferedReader bufferedReader;
     private final AtomicInteger trafficStreamsRead = new AtomicInteger();
     private final ChannelContextManager channelContextManager;
 
     public InputStreamOfTraffic(RootReplayerContext context, InputStream inputStream) {
         this.channelContextManager = new ChannelContextManager(context);
-        this.inputStream = inputStream;
+        var isr = new InputStreamReader(inputStream);
+        try {
+            this.bufferedReader = new BufferedReader(isr);
+        } catch (Exception e) {
+            try {
+                isr.close();
+            } catch (Exception e2) {
+                log.atError().setMessage("Caught exception while closing InputStreamReader that " +
+                    "was in response to an earlier thrown exception.  Swallowing the inner exception and " +
+                    "throwing the original one.").setCause(e2).log();
+            }
+            throw e;
+        }
     }
 
     public static final class IOSTrafficStreamContext extends ReplayContexts.TrafficStreamLifecycleContext {
@@ -51,15 +66,17 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
         Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
     ) {
         return CompletableFuture.supplyAsync(() -> {
-            var builder = TrafficStream.newBuilder();
+            TrafficStream ts;
+            String line;
             try {
-                if (!builder.mergeDelimitedFrom(inputStream)) {
+                line = bufferedReader.readLine();
+                if (line == null) {
                     throw new EOFException();
                 }
+                ts = TrafficStream.parseFrom(Base64.getDecoder().decode(line));
             } catch (Exception e) {
                 throw Lombok.sneakyThrow(e);
             }
-            var ts = builder.build();
             trafficStreamsRead.incrementAndGet();
             log.trace("Parsed traffic stream #{}: {}", trafficStreamsRead.get(), ts);
             return List.<ITrafficStreamWithKey>of(
@@ -85,6 +102,6 @@ public class InputStreamOfTraffic implements ISimpleTrafficCaptureSource {
 
     @Override
     public void close() throws IOException {
-        inputStream.close();
+        bufferedReader.close();
     }
 }

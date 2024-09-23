@@ -1,6 +1,5 @@
 package org.opensearch.migrations.replay;
 
-import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.time.Instant;
@@ -8,7 +7,6 @@ import java.util.Base64;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.Stream;
-import java.util.zip.GZIPInputStream;
 import java.util.zip.GZIPOutputStream;
 
 import com.google.protobuf.ByteString;
@@ -52,14 +50,6 @@ public class Utils {
             baos.flush();
             var binaryContents = baos.toByteArray();
             return Base64.getEncoder().encodeToString(binaryContents);
-        }
-    }
-
-    public TrafficStream trafficStreamFromCompressedString(String encodedAndZippedStr) throws IOException {
-        try (var bais = new ByteArrayInputStream(Base64.getDecoder().decode(encodedAndZippedStr))) {
-            try (var gzis = new GZIPInputStream(bais)) {
-                return TrafficStream.parseDelimitedFrom(gzis);
-            }
         }
     }
 }
