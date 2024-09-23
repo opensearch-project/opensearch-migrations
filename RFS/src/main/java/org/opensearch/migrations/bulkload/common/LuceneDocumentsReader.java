@@ -6,6 +6,7 @@ import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
 
+import jdk.jshell.spi.ExecutionControl;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexCommit;
@@ -154,61 +155,65 @@ public class LuceneDocumentsReader {
     }
 
     protected RfsLuceneDocument getDocument(IndexReader reader, int docId, boolean isLive) {
+        Document document;
         try {
-            Document document = reader.document(docId);
-            String id = null;
-            BytesRef sourceBytes = null;
-            try {
-                for (var field : document.getFields()) {
-                    String fieldName = field.name();
-                    switch (fieldName) {
-                        case "_id": {
-                            // ES 6+
-                            var idBytes = field.binaryValue();
-                            id = Uid.decodeId(idBytes.bytes);
-                            break;
-                        }
-                        case "_uid": {
-                            // ES 5
-                            id = field.stringValue();
-                            break;
-                        }
-                        case "_source": {
-                            // All versions (?)
-                            sourceBytes = field.binaryValue();
-                            break;
-                        }
-                    }
-                }
-                if (id == null) {
-                    log.atError().setMessage("Document with index" + docId + " does not have an id. Skipping").log();
-                    return null;  // Skip documents with missing id
-                }
-
-                if (sourceBytes == null || sourceBytes.bytes.length == 0) {
-                    log.atWarn().setMessage("Document {} doesn't have the _source field enabled").addArgument(id).log();
-                    return null;  // Skip these
-                }
-
-                log.atDebug().setMessage("Reading document {}").addArgument(id).log();
-            } catch (Exception e) {
-                StringBuilder errorMessage = new StringBuilder();
-                errorMessage.append("Unable to parse Document id from Document.  The Document's Fields: ");
-                document.getFields().forEach(f -> errorMessage.append(f.name()).append(", "));
-                log.atError().setMessage(errorMessage.toString()).setCause(e).log();
-                return null; // Skip documents with invalid id
-            }
-
-            if (!isLive) {
-                log.atDebug().setMessage("Document {} is not live").addArgument(id).log();
-                return null; // Skip these
-            }
-
-            log.atDebug().setMessage("Document {} read successfully").addArgument(id).log();
-            return new RfsLuceneDocument(id, sourceBytes.utf8ToString());
-        } catch (Exception e) {
+            document = reader.document(docId);
+        } catch (IOException e) {
             log.atError().setMessage("Failed to read document at Lucene index location {}").addArgument(docId).setCause(e).log();
             return null;
         }
+
+        String id = null;
+        BytesRef sourceBytes = null;
+        try {
+            for (var field : document.getFields()) {
+                String fieldName = field.name();
+                switch (fieldName) {
+                    case "_id": {
+                        // ES 6+
+                        var idBytes = field.binaryValue();
+                        id = Uid.decodeId(idBytes.bytes);
+                        break;
+                    }
+                    case "_uid": {
+                        // ES 5
+                        id = field.stringValue();
+                        break;
+                    }
+                    case "_source": {
+                        // All versions (?)
+                        sourceBytes = field.binaryValue();
+                        break;
+                    }
+                    default:
+                        break;
+                }
+            }
+            if (id == null) {
+                log.atError().setMessage("Document with index" + docId + " does not have an id. Skipping").log();
+                return null;  // Skip documents with missing id
+            }
+
+            if (sourceBytes == null || sourceBytes.bytes.length == 0) {
+                log.atWarn().setMessage("Document {} doesn't have the _source field enabled").addArgument(id).log();
+                return null;  // Skip these
+            }
+
+            log.atDebug().setMessage("Reading document {}").addArgument(id).log();
+        } catch (RuntimeException e) {
+            StringBuilder errorMessage = new StringBuilder();
+            errorMessage.append("Unable to parse Document id from Document.  The Document's Fields: ");
+            document.getFields().forEach(f -> errorMessage.append(f.name()).append(", "));
+            log.atError().setMessage(errorMessage.toString()).setCause(e).log();
+            return null; // Skip documents with invalid id
+        }
+
+        if (!isLive) {
+            log.atDebug().setMessage("Document {} is not live").addArgument(id).log();
+            return null; // Skip these
+        }
+
+        log.atDebug().setMessage("Document {} read successfully").addArgument(id).log();
+        return new RfsLuceneDocument(id, sourceBytes.utf8ToString());
     }
 }

@@ -48,7 +48,6 @@ public class RestClient {
 
     private static final String USER_AGENT_HEADER_NAME = HttpHeaderNames.USER_AGENT.toString();
     private static final String CONTENT_TYPE_HEADER_NAME = HttpHeaderNames.CONTENT_TYPE.toString();
-    private static final String CONTENT_ENCODING_HEADER_NAME = HttpHeaderNames.CONTENT_ENCODING.toString();
     private static final String ACCEPT_ENCODING_HEADER_NAME = HttpHeaderNames.ACCEPT_ENCODING.toString();
     private static final String HOST_HEADER_NAME = HttpHeaderNames.HOST.toString();
 

@@ -9,7 +9,7 @@ import org.opensearch.migrations.bulkload.models.ShardMetadata;
 public abstract class SourceRepoAccessor {
     private final SourceRepo repo;
 
-    public SourceRepoAccessor(SourceRepo repo) {
+    protected SourceRepoAccessor(SourceRepo repo) {
         this.repo = repo;
     }
 
@@ -19,7 +19,7 @@ public abstract class SourceRepoAccessor {
 
     public InputStream getSnapshotRepoDataFile() {
         return load(repo.getSnapshotRepoDataFilePath());
-    };
+    }
 
     public InputStream getGlobalMetadataFile(String snapshotId) {
         return load(repo.getGlobalMetadataFilePath(snapshotId));

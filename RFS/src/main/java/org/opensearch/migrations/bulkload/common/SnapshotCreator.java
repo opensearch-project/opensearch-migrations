@@ -6,6 +6,7 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import lombok.Getter;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
@@ -20,9 +21,10 @@ public abstract class SnapshotCreator {
 
     private final OpenSearchClient client;
     private final IRfsContexts.ICreateSnapshotContext context;
+    @Getter
     private final String snapshotName;
 
-    public SnapshotCreator(String snapshotName, OpenSearchClient client, IRfsContexts.ICreateSnapshotContext context) {
+    protected SnapshotCreator(String snapshotName, OpenSearchClient client, IRfsContexts.ICreateSnapshotContext context) {
         this.snapshotName = snapshotName;
         this.client = client;
         this.context = context;
@@ -32,10 +34,6 @@ public abstract class SnapshotCreator {
 
     public String getRepoName() {
         return "migration_assistant_repo";
-    }
-
-    public String getSnapshotName() {
-        return snapshotName;
     }
 
     public void registerRepo() {

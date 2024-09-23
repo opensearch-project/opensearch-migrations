@@ -683,7 +683,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 ctx.addTraceException(e, false);
                 var sleepBeforeNextRetryDuration = Duration.ofMillis(
                     Math.min(MAX_ASSIGNED_DOCUMENT_NOT_FOUND_RETRY_INTERVAL,
-                        (long) (Math.pow(2.0, retries-1) * ACQUIRE_WORK_RETRY_BASE_MS)));
+                        (long) (Math.pow(2.0, (double) (retries-1)) * ACQUIRE_WORK_RETRY_BASE_MS)));
                 leaseChecker.checkRetryWaitTimeOrThrow(e, retries-1, sleepBeforeNextRetryDuration);
 
                 log.atWarn().setMessage(() -> "Couldn't complete work assignment due to exception.  "
@@ -711,7 +711,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
     @AllArgsConstructor
     public static class ResponseException extends Exception {
-        final AbstractedHttpClient.AbstractHttpResponse response;
+        final transient AbstractedHttpClient.AbstractHttpResponse response;
 
         @Override
         public String getMessage() {

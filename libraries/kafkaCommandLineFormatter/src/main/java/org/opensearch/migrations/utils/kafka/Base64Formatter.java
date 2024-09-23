@@ -9,9 +9,7 @@ import org.apache.kafka.common.MessageFormatter;
 
 public class Base64Formatter implements MessageFormatter {
     @Override
-    public void writeTo(ConsumerRecord<byte[], byte[]> record, PrintStream out) {
-        out.println(Base64.getEncoder().encodeToString(record.value()));
+    public void writeTo(ConsumerRecord<byte[], byte[]> kafkaRecord, PrintStream out) {
+        out.println(Base64.getEncoder().encodeToString(kafkaRecord.value()));
     }
-
-    @Override public void close() {}
 }
