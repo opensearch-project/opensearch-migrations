@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.version_os_2_11;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -109,8 +110,6 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         IClusterMetadataContext context
     ) {
 
-        var templatesToCreate = new HashMap<String, ObjectNode>();
-        var templateList = new ArrayList<String>();
         log.info("Setting {} ...", templateType);
 
         if (templates == null) {
@@ -121,7 +120,17 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         if (templateAllowlist != null && templateAllowlist.isEmpty()) {
             log.info("No {} in specified allowlist", templateType);
             return List.of();
-        } else if (templateAllowlist != null) {
+        }
+
+        var templatesToCreate = getTemplatesToCreate(templates, templateAllowlist, templateType);
+
+        return processTemplateCreation(templatesToCreate, templateType, mode, context);
+    }
+
+    private Map<String, ObjectNode> getTemplatesToCreate(ObjectNode templates, List<String> templateAllowlist, TemplateTypes templateType) {
+        var templatesToCreate = new HashMap<String, ObjectNode>();
+
+        if (templateAllowlist != null) {
             for (String templateName : templateAllowlist) {
                 if (!templates.has(templateName) || templates.get(templateName) == null) {
                     log.warn("{} not found: {}", templateType, templateName);
@@ -131,23 +140,29 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
                 templatesToCreate.put(templateName, settings);
             }
         } else {
-            // Get the template names
-            List<String> templateKeys = new ArrayList<>();
-            templates.fieldNames().forEachRemaining(templateKeys::add);
-
-            // Create each template
-            for (String templateName : templateKeys) {
+            templates.fieldNames().forEachRemaining(templateName -> {
                 ObjectNode settings = (ObjectNode) templates.get(templateName);
                 templatesToCreate.put(templateName, settings);
-            }
+            });
         }
+
+        return templatesToCreate;
+    }
+
+    private List<String> processTemplateCreation(
+            Map<String, ObjectNode> templatesToCreate,
+            TemplateTypes templateType,
+            MigrationMode mode,
+            IClusterMetadataContext context
+        ) {
+
+        List<String> templateList = new ArrayList<>();
 
         templatesToCreate.forEach((templateName, templateBody) -> {
             log.info("Creating {}: {}", templateType, templateName);
 
             if (mode == MigrationMode.SIMULATE) {
-                var alreadyExists = templateType.alreadyExistsCheck.templateAlreadyExists(client, templateName);
-                if (!alreadyExists) {
+                if (!templateType.alreadyExistsCheck.templateAlreadyExists(client, templateName)) {
                     templateList.add(templateName);
                 } else {
                     log.warn("Template {} already exists on the target, it will not be created during a migration", templateName);

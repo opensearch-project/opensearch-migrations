@@ -54,11 +54,11 @@ public class MetadataMigration {
 
         var command = Optional.ofNullable(jCommander.getParsedCommand())
             .map(MetadataCommands::fromString)
-            .orElse(MetadataCommands.Migrate);
+            .orElse(MetadataCommands.MIGRATE);
         Result result;
         switch (command) {
             default:
-            case Migrate:
+            case MIGRATE:
                 if (migrateArgs.help) {
                     printCommandUsage(jCommander);
                     return;
@@ -67,7 +67,7 @@ public class MetadataMigration {
                 log.info("Starting Metadata Migration");
                 result = meta.migrate(migrateArgs).execute(context);
                 break;
-            case Evaluate:
+            case EVALUATE:
                 if (evaluateArgs.help) {
                     printCommandUsage(jCommander);
                     return;

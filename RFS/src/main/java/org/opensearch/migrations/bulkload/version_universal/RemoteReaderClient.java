@@ -118,29 +118,41 @@ public class RemoteReaderClient extends OpenSearchClient {
         if (resp.statusCode != 200) {
             return Mono.error(new OperationFailed("Unexpected status code " + resp.statusCode, resp));
         }
+    
         try {
             var tree = (ObjectNode) objectMapper.readTree(resp.body);
+
             if (tree.size() == 1) {
-                var dearrayed = objectMapper.createObjectNode();
-                // This is OK because there is only a single item in this collection
-                var fieldName = tree.fieldNames().next();
-                var arrayOfItems = tree.get(fieldName);
-                for (var child : arrayOfItems) {
-                    var node = (ObjectNode)child;
-                    if (node.size() == 2) {
-                        var fields = node.fieldNames();
-                        var f1 = fields.next();
-                        var f2 = fields.next();
-                        var itemName = node.get(f1).isTextual() ? node.get(f1).asText() : node.get(f2).asText();
-                        var detailsNode = !node.get(f1).isTextual() ? node.get(f1) : node.get(f2);
-                        dearrayed.set(itemName, detailsNode);
-                    }
-                }
-                return Mono.just(dearrayed);
+                return Mono.just(handleSingleItemTree(tree));
             }
+    
             return Mono.just(tree);
         } catch (Exception e) {
             return logAndReturnJsonError(e, resp);
+        }
+    }
+    
+    private ObjectNode handleSingleItemTree(ObjectNode tree) {
+        var dearrayed = objectMapper.createObjectNode();
+        var fieldName = tree.fieldNames().next();
+        var arrayOfItems = tree.get(fieldName);
+    
+        for (var child : arrayOfItems) {
+            processChildNode((ObjectNode) child, dearrayed);
+        }
+    
+        return dearrayed;
+    }
+    
+    private void processChildNode(ObjectNode node, ObjectNode dearrayed) {
+        if (node.size() == 2) {
+            var fields = node.fieldNames();
+            var f1 = fields.next();
+            var f2 = fields.next();
+            var itemName = node.get(f1).isTextual() ? node.get(f1).asText() : node.get(f2).asText();
+            var detailsNode = !node.get(f1).isTextual() ? node.get(f1) : node.get(f2);
+    
+            dearrayed.set(itemName, detailsNode);
         }
     }
 
