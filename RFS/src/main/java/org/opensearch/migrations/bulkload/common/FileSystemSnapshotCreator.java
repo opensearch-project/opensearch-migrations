@@ -1,11 +1,11 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.util.List;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
-
-import java.util.List;
 
 public class FileSystemSnapshotCreator extends SnapshotCreator {
     private static final ObjectMapper mapper = new ObjectMapper();

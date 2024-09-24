@@ -1,5 +1,7 @@
 package org.opensearch.migrations;
 
+import java.util.List;
+
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.S3SnapshotCreator;
@@ -21,8 +23,6 @@ import com.beust.jcommander.ParametersDelegate;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
-
-import java.util.List;
 
 @AllArgsConstructor
 @Slf4j
