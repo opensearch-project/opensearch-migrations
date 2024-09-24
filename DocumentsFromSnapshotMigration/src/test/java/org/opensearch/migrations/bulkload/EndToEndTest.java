@@ -107,6 +107,7 @@ public class EndToEndTest extends SourceTestBase {
                 snapshotName,
                 sourceClient,
                 SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
+                List.of(),
                 snapshotContext.createSnapshotCreateContext()
             );
             SnapshotRunner.runAndWaitForCompletion(snapshotCreator);

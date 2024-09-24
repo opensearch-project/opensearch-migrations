@@ -22,6 +22,8 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
+import java.util.List;
+
 @AllArgsConstructor
 @Slf4j
 public class CreateSnapshot {
@@ -58,6 +60,10 @@ public class CreateSnapshot {
         @Parameter(names = {
             "--s3-role-arn" }, required = false, description = "The role ARN the cluster will assume to write a snapshot to S3")
         public String s3RoleArn;
+
+        @Parameter(names = {
+            "--index-allowlist" }, required = false, description = "A comma separated list of indices to include in the snapshot. If not provided, all indices are included.")
+        public List<String> indexAllowlist = List.of();
 
         @Parameter(required = false, names = {
             "--otel-collector-endpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
@@ -114,6 +120,7 @@ public class CreateSnapshot {
                     arguments.snapshotName,
                     client,
                     arguments.fileSystemRepoPath,
+                    arguments.indexAllowlist,
                     context
                 );
         } else {
@@ -122,6 +129,7 @@ public class CreateSnapshot {
                 client,
                 arguments.s3RepoUri,
                 arguments.s3Region,
+                arguments.indexAllowlist,
                 arguments.maxSnapshotRateMBPerNode,
                 arguments.s3RoleArn,
                 context

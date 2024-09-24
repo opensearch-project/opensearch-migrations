@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.util.List;
 import java.util.Optional;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
@@ -21,9 +22,11 @@ public abstract class SnapshotCreator {
     private final OpenSearchClient client;
     private final IRfsContexts.ICreateSnapshotContext context;
     private final String snapshotName;
+    private final List<String> indexAllowlist;
 
-    public SnapshotCreator(String snapshotName, OpenSearchClient client, IRfsContexts.ICreateSnapshotContext context) {
+    public SnapshotCreator(String snapshotName, List<String> indexAllowlist, OpenSearchClient client, IRfsContexts.ICreateSnapshotContext context) {
         this.snapshotName = snapshotName;
+        this.indexAllowlist = indexAllowlist;
         this.client = client;
         this.context = context;
     }
@@ -36,6 +39,14 @@ public abstract class SnapshotCreator {
 
     public String getSnapshotName() {
         return snapshotName;
+    }
+
+    public String getIndexAllowlist() {
+        if (this.indexAllowlist == null || this.indexAllowlist.isEmpty()) {
+            return "_all";
+        } else {
+            return String.join(",", this.indexAllowlist);
+        }
     }
 
     public void registerRepo() {
@@ -54,7 +65,7 @@ public abstract class SnapshotCreator {
     public void createSnapshot() {
         // Assemble the settings
         ObjectNode body = mapper.createObjectNode();
-        body.put("indices", "_all");
+        body.put("indices", this.getIndexAllowlist());
         body.put("ignore_unavailable", true);
         body.put("include_global_state", true);
 
