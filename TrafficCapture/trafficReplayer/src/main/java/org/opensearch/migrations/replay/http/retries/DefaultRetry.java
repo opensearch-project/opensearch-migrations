@@ -54,6 +54,10 @@ public class DefaultRetry implements RequestRetryEvaluator {
         return shouldRetry(targetRequestBytes, currentResponse, reconstructedSourceTransactionFuture);
     }
 
+    /**
+     * @param targetRequestBytes the raw request as it was sent to the target cluster, which can be useful because
+     *                           of the HTTP verb and path.
+     */
     public TrackedFuture<String, RequestSenderOrchestrator.RetryDirective>
     shouldRetry(ByteBuf targetRequestBytes,
                 AggregatedRawResponse currentResponse,

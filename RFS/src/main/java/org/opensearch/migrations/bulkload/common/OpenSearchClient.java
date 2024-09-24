@@ -451,7 +451,7 @@ public class OpenSearchClient {
     }
 
     public static class OperationFailed extends RfsException {
-        public final HttpResponse response;
+        public final transient HttpResponse response;
 
         public OperationFailed(String message, HttpResponse response) {
             super(message +"\nBody:\n" + response);

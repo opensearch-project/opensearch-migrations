@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 
 public class CaptureProxySetupTest {
 
-    public final static String kafkaBrokerString = "invalid:9092";
+    public static final String kafkaBrokerString = "invalid:9092";
     public static final String TLS_PROTOCOLS_KEY = "plugins.security.ssl.http.enabled_protocols";
 
     @Test

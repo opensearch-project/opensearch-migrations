@@ -27,11 +27,11 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String INDEX_NAME = ".migrations_working_state";
     public static final int MAX_REFRESH_RETRIES = 6;
     public static final int MAX_SETUP_RETRIES = 6;
-    final long ACQUIRE_WORK_RETRY_BASE_MS = 10;
+    static final long ACQUIRE_WORK_RETRY_BASE_MS = 10;
     // we'll retry lease acquisitions for up to
-    final int MAX_DRIFT_RETRIES = 13; // last delay before failure: 40 seconds
-    final int MAX_MALFORMED_ASSIGNED_WORK_DOC_RETRIES = 17; // last delay before failure: 655.36 seconds
-    final int MAX_ASSIGNED_DOCUMENT_NOT_FOUND_RETRY_INTERVAL = 60 * 1000;
+    static final int MAX_DRIFT_RETRIES = 13; // last delay before failure: 40 seconds
+    static final int MAX_MALFORMED_ASSIGNED_WORK_DOC_RETRIES = 17; // last delay before failure: 655.36 seconds
+    static final int MAX_ASSIGNED_DOCUMENT_NOT_FOUND_RETRY_INTERVAL = 60 * 1000;
 
     public static final String SCRIPT_VERSION_TEMPLATE = "{SCRIPT_VERSION}";
     public static final String WORKER_ID_TEMPLATE = "{WORKER_ID}";
@@ -115,6 +115,9 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         this.objectMapper = new ObjectMapper();
     }
 
+    /**
+     * IWorkCoordinator extends AutoCloseable but this class has no resources that it owns that need to be closed.
+     */
     @Override
     public void close() throws Exception {
     }
@@ -130,14 +133,10 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "  },\n"
             + "  \"mappings\": {\n"
             + "    \"properties\": {\n"
-            + "      \""
-            + EXPIRATION_FIELD_NAME
-            + "\": {\n"
+            + "      \"" + EXPIRATION_FIELD_NAME + "\": {\n"
             + "        \"type\": \"long\"\n"
             + "      },\n"
-            + "      \""
-            + COMPLETED_AT_FIELD_NAME
-            + "\": {\n"
+            + "      \"" + COMPLETED_AT_FIELD_NAME + "\": {\n"
             + "        \"type\": \"long\"\n"
             + "      },\n"
             + "      \"leaseHolderId\": {\n"
@@ -215,34 +214,20 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         final var upsertLeaseBodyTemplate = "{\n"
             + "  \"scripted_upsert\": true,\n"
             + "  \"upsert\": {\n"
-            + "    \"scriptVersion\": \""
-            + SCRIPT_VERSION_TEMPLATE
-            + "\",\n"
-            + "    \""
-            + EXPIRATION_FIELD_NAME
-            + "\": 0,\n"
-            + "    \"creatorId\": \""
-            + WORKER_ID_TEMPLATE
-            + "\",\n"
+            + "    \"scriptVersion\": \"" + SCRIPT_VERSION_TEMPLATE + "\",\n"
+            + "    \"" + EXPIRATION_FIELD_NAME + "\": 0,\n"
+            + "    \"creatorId\": \"" + WORKER_ID_TEMPLATE + "\",\n"
             + "    \"numAttempts\": 0\n"
             + "  },\n"
             + "  \"script\": {\n"
             + "    \"lang\": \"painless\",\n"
             + "    \"params\": { \n"
-            + "      \"clientTimestamp\": "
-            + CLIENT_TIMESTAMP_TEMPLATE
-            + ",\n"
-            + "      \"expirationWindow\": "
-            + EXPIRATION_WINDOW_TEMPLATE
-            + ",\n"
-            + "      \"workerId\": \""
-            + WORKER_ID_TEMPLATE
-            + "\"\n"
+            + "      \"clientTimestamp\": " + CLIENT_TIMESTAMP_TEMPLATE + ",\n"
+            + "      \"expirationWindow\": " + EXPIRATION_WINDOW_TEMPLATE + ",\n"
+            + "      \"workerId\": \"" + WORKER_ID_TEMPLATE + "\"\n"
             + "    },\n"
             + "    \"source\": \""
-            + "      if (ctx._source.scriptVersion != \\\""
-            + SCRIPT_VERSION_TEMPLATE
-            + "\\\") {"
+            + "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {"
             + "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx.source.scriptVersion);"
             + "      } "
             + "      long serverTimeSeconds = System.currentTimeMillis() / 1000;"
@@ -252,32 +237,16 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);"
             + "      if (params.expirationWindow > 0 && "
             +                 // don't obtain a lease lock
-            "          ctx._source."
-            + COMPLETED_AT_FIELD_NAME
-            + " == null) {"
+            "          ctx._source." + COMPLETED_AT_FIELD_NAME + " == null) {"
             +              // already done
-            "        if (ctx._source."
-            + LEASE_HOLDER_ID_FIELD_NAME
-            + " == params.workerId && "
-            + "            ctx._source."
-            + EXPIRATION_FIELD_NAME
-            + " > serverTimeSeconds) {"
+            "        if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " == params.workerId && "
+            + "            ctx._source." + EXPIRATION_FIELD_NAME + " > serverTimeSeconds) {"
             + // count as an update to force the caller to lookup the expiration time, but no need to modify it
             "          ctx.op = \\\"update\\\";"
-            + "        } else if (ctx._source."
-            + EXPIRATION_FIELD_NAME
-            + " < serverTimeSeconds && "
-            + // is expired
-            "                   ctx._source."
-            + EXPIRATION_FIELD_NAME
-            + " < newExpiration) {"
-            +      // sanity check
-            "          ctx._source."
-            + EXPIRATION_FIELD_NAME
-            + " = newExpiration;"
-            + "          ctx._source."
-            + LEASE_HOLDER_ID_FIELD_NAME
-            + " = params.workerId;"
+            + "        } else if (ctx._source." + EXPIRATION_FIELD_NAME + " < serverTimeSeconds && " + // is expired
+            "                     ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +      // sanity check
+            "            ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;"
+            + "          ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;"
             + "          ctx._source.numAttempts += 1;"
             + "        } else {"
             + "          ctx.op = \\\"noop\\\";"
@@ -394,29 +363,18 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 + "  \"script\": {\n"
                 + "    \"lang\": \"painless\",\n"
                 + "    \"params\": { \n"
-                + "      \"clientTimestamp\": "
-                + CLIENT_TIMESTAMP_TEMPLATE
-                + ",\n"
-                + "      \"workerId\": \""
-                + WORKER_ID_TEMPLATE
-                + "\"\n"
+                + "      \"clientTimestamp\": " + CLIENT_TIMESTAMP_TEMPLATE + ",\n"
+                + "      \"workerId\": \"" + WORKER_ID_TEMPLATE + "\"\n"
                 + "    },\n"
                 + "    \"source\": \""
-                + "      if (ctx._source.scriptVersion != \\\""
-                + SCRIPT_VERSION_TEMPLATE
-                + "\\\") {"
+                + "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {"
                 + "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx.source.scriptVersion);"
                 + "      } "
-                + "      if (ctx._source."
-                + LEASE_HOLDER_ID_FIELD_NAME
-                + " != params.workerId) {"
+                + "      if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " != params.workerId) {"
                 + "        throw new IllegalArgumentException(\\\"work item was owned by \\\" + ctx._source."
-                + LEASE_HOLDER_ID_FIELD_NAME
-                + " + \\\" not \\\" + params.workerId);"
+                +                        LEASE_HOLDER_ID_FIELD_NAME + " + \\\" not \\\" + params.workerId);"
                 + "      } else {"
-                + "        ctx._source."
-                + COMPLETED_AT_FIELD_NAME
-                + " = System.currentTimeMillis() / 1000;"
+                + "        ctx._source." + COMPLETED_AT_FIELD_NAME + " = System.currentTimeMillis() / 1000;"
                 + "     }"
                 + "\"\n"
                 + "  }\n"
@@ -460,16 +418,12 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 + "  \"bool\": {"
                 + "    \"must\": ["
                 + "      { \"exists\":"
-                + "        { \"field\": \""
-                + EXPIRATION_FIELD_NAME
-                + "\"}"
+                + "        { \"field\": \"" + EXPIRATION_FIELD_NAME + "\"}"
                 + "      }"
                 + "    ],"
                 + "    \"must_not\": ["
                 + "      { \"exists\":"
-                + "        { \"field\": \""
-                + COMPLETED_AT_FIELD_NAME
-                + "\"}"
+                + "        { \"field\": \"" + COMPLETED_AT_FIELD_NAME + "\"}"
                 + "      }"
                 + "    ]"
                 + "  }"
@@ -522,8 +476,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "\"query\": {"
             + "  \"function_score\": {\n" + QUERY_INCOMPLETE_EXPIRED_ITEMS_STR + ","
             + "    \"random_score\": {},\n"
-            + "    \"boost_mode\": \"replace\"\n"
-            + // Try to avoid the workers fighting for the same work items
+            + "    \"boost_mode\": \"replace\"\n" + // Try to avoid the workers fighting for the same work items
             "  }"
             + "},"
             + "\"size\": 1,\n"
@@ -543,10 +496,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");"
             + "      }"
             + "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);"
-            + "      if (ctx._source." + EXPIRATION_FIELD_NAME + " < serverTimeSeconds && "
-            + // is expired
-            "          ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {"
-            +      // sanity check
+            + "      if (ctx._source." + EXPIRATION_FIELD_NAME + " < serverTimeSeconds && " + // is expired
+            "          ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +        // sanity check
             "        ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;"
             + "        ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;"
             + "        ctx._source.numAttempts += 1;"
@@ -683,7 +634,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 ctx.addTraceException(e, false);
                 var sleepBeforeNextRetryDuration = Duration.ofMillis(
                     Math.min(MAX_ASSIGNED_DOCUMENT_NOT_FOUND_RETRY_INTERVAL,
-                        (long) (Math.pow(2.0, (double) (retries-1)) * ACQUIRE_WORK_RETRY_BASE_MS)));
+                        (long) (Math.pow(2.0, (retries-1)) * ACQUIRE_WORK_RETRY_BASE_MS)));
                 leaseChecker.checkRetryWaitTimeOrThrow(e, retries-1, sleepBeforeNextRetryDuration);
 
                 log.atWarn().setMessage(() -> "Couldn't complete work assignment due to exception.  "
@@ -695,8 +646,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
     @AllArgsConstructor
     private static class MaxTriesExceededException extends Exception {
-        Object suppliedValue;
-        Object transformedValue;
+        final transient Object suppliedValue;
+        final transient Object transformedValue;
     }
 
     @Getter

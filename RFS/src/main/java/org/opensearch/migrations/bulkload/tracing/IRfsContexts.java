@@ -3,22 +3,22 @@ package org.opensearch.migrations.bulkload.tracing;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
-public abstract class IRfsContexts {
-    public static class ActivityNames {
+public interface IRfsContexts {
+    class ActivityNames {
         private ActivityNames() {}
 
         public static final String HTTP_REQUEST = "httpRequest";
         public static final String CHECK_THEN_PUT_REQUESTS = "checkThenPutRequest";
     }
 
-    public static class MetricNames {
+    class MetricNames {
         private MetricNames() {}
 
         public static final String BYTES_READ = "bytesRead";
         public static final String BYTES_SENT = "bytesSent";
     }
 
-    public interface IRequestContext extends IScopedInstrumentationAttributes {
+    interface IRequestContext extends IScopedInstrumentationAttributes {
         String ACTIVITY_NAME = ActivityNames.HTTP_REQUEST;
 
         void addBytesSent(int i);
@@ -26,7 +26,7 @@ public abstract class IRfsContexts {
         void addBytesRead(int i);
     }
 
-    public interface ICheckedIdempotentPutRequestContext extends IScopedInstrumentationAttributes {
+    interface ICheckedIdempotentPutRequestContext extends IScopedInstrumentationAttributes {
         String ACTIVITY_NAME = ActivityNames.CHECK_THEN_PUT_REQUESTS;
 
         IRequestContext createCheckRequestContext();
@@ -34,7 +34,7 @@ public abstract class IRfsContexts {
         IRequestContext createPutContext();
     }
 
-    public interface ICreateSnapshotContext extends IScopedInstrumentationAttributes {
+    interface ICreateSnapshotContext extends IScopedInstrumentationAttributes {
         String ACTIVITY_NAME = IMetadataMigrationContexts.ActivityNames.CREATE_SNAPSHOT;
 
         IRequestContext createRegisterRequest();

@@ -9,6 +9,12 @@ import org.opensearch.migrations.VersionMatchers;
 
 public class TransformFunctions {
     private static final ObjectMapper mapper = new ObjectMapper();
+    public static final String MAPPINGS_KEY_STR = "mappings";
+    public static final String SETTINGS_KEY_STR = "settings";
+    public static final String NUMBER_OF_REPLICAS_KEY_STR = "number_of_replicas";
+    public static final String INDEX_KEY_STR = "index";
+
+    private TransformFunctions() {}
 
     public static Transformer getTransformer(
         Version sourceVersion,
@@ -61,13 +67,11 @@ public class TransformFunctions {
      * - [{"audit_message":{"properties":{"address":{"type":"text"}}}}]
      */
     public static void removeIntermediateMappingsLevels(ObjectNode root) {
-        if (root.has("mappings")) {
-            try {
-                ArrayNode mappingsList = (ArrayNode) root.get("mappings");
-                root.set("mappings", getMappingsFromBeneathIntermediate(mappingsList));
-            } catch (ClassCastException e) {
-                // mappings isn't an array
-                return;
+        if (root.has(MAPPINGS_KEY_STR)) {
+            var val = root.get(MAPPINGS_KEY_STR);
+            if (val instanceof ArrayNode) {
+                ArrayNode mappingsList = (ArrayNode) val;
+                root.set(MAPPINGS_KEY_STR, getMappingsFromBeneathIntermediate(mappingsList));
             }
         }
     }
@@ -94,13 +98,13 @@ public class TransformFunctions {
     public static void removeIntermediateIndexSettingsLevel(ObjectNode root) {
         // Remove the intermediate key "index" under "settings", will start like:
         // {"index":{"number_of_shards":"1","number_of_replicas":"1"}}
-        if (root.has("settings")) {
-            ObjectNode settingsRoot = (ObjectNode) root.get("settings");
-            if (settingsRoot.has("index")) {
-                ObjectNode indexSettingsRoot = (ObjectNode) settingsRoot.get("index");
+        if (root.has(SETTINGS_KEY_STR)) {
+            ObjectNode settingsRoot = (ObjectNode) root.get(SETTINGS_KEY_STR);
+            if (settingsRoot.has(INDEX_KEY_STR)) {
+                ObjectNode indexSettingsRoot = (ObjectNode) settingsRoot.get(INDEX_KEY_STR);
                 settingsRoot.setAll(indexSettingsRoot);
-                settingsRoot.remove("index");
-                root.set("settings", settingsRoot);
+                settingsRoot.remove(INDEX_KEY_STR);
+                root.set(SETTINGS_KEY_STR, settingsRoot);
             }
         }
     }
@@ -112,20 +116,20 @@ public class TransformFunctions {
      * the minimum number of replicas being 2.
      */
     public static void fixReplicasForDimensionality(ObjectNode root, int dimensionality) {
-        if (root.has("settings")) {
-            ObjectNode settingsRoot = (ObjectNode) root.get("settings");
-            if (settingsRoot.has("number_of_replicas")) {
+        if (root.has(SETTINGS_KEY_STR)) {
+            ObjectNode settingsRoot = (ObjectNode) root.get(SETTINGS_KEY_STR);
+            if (settingsRoot.has(NUMBER_OF_REPLICAS_KEY_STR)) {
                 // dimensionality must be at least 1
                 dimensionality = Math.max(dimensionality, 1);
                 // If the total number of copies requested in the original settings is not a multiple of the
                 // dimensionality, then up it to the next largest multiple of the dimensionality.
-                int numberOfCopies = settingsRoot.get("number_of_replicas").asInt() + 1;
+                int numberOfCopies = settingsRoot.get(NUMBER_OF_REPLICAS_KEY_STR).asInt() + 1;
                 int remainder = numberOfCopies % dimensionality;
                 int newNumberOfCopies = (remainder > 0)
                     ? (numberOfCopies + dimensionality - remainder)
                     : numberOfCopies;
                 int newNumberOfReplicas = newNumberOfCopies - 1;
-                settingsRoot.put("number_of_replicas", newNumberOfReplicas);
+                settingsRoot.put(NUMBER_OF_REPLICAS_KEY_STR, newNumberOfReplicas);
             }
         }
     }

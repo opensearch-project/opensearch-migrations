@@ -13,13 +13,11 @@ import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import lombok.Getter;
 import lombok.NonNull;
 
-public class RfsContexts extends IRfsContexts {
+public interface RfsContexts extends IRfsContexts {
 
-    private RfsContexts() {}
+    String COUNT_UNITS = "count";
 
-    public static final String COUNT_UNITS = "count";
-
-    public static class GenericRequestContext extends BaseSpanContext<BaseRootRfsContext>
+    class GenericRequestContext extends BaseSpanContext<BaseRootRfsContext>
         implements
             IRfsContexts.IRequestContext {
 
@@ -97,7 +95,7 @@ public class RfsContexts extends IRfsContexts {
         }
     }
 
-    public static class CheckedIdempotentPutRequestContext extends BaseSpanContext<BaseRootRfsContext>
+    class CheckedIdempotentPutRequestContext extends BaseSpanContext<BaseRootRfsContext>
         implements
             IRfsContexts.ICheckedIdempotentPutRequestContext {
         @Getter

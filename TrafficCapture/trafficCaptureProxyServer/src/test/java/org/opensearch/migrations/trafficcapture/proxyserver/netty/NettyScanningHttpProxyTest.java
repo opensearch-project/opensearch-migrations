@@ -37,7 +37,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 class NettyScanningHttpProxyTest {
 
-    private final static String EXPECTED_REQUEST_STRING = "GET / HTTP/1.1\r\n"
+    private static final String EXPECTED_REQUEST_STRING = "GET / HTTP/1.1\r\n"
         + "Host: localhost\r\n"
         + "User-Agent: UnitTest\r\n"
         + "DumbAndLongHeaderValue-0: 0\r\n"
@@ -63,7 +63,7 @@ class NettyScanningHttpProxyTest {
         + "Accept-Encoding: gzip, x-gzip, deflate\r\n"
         + "Connection: keep-alive\r\n"
         + "\r\n";
-    private final static String EXPECTED_RESPONSE_STRING = "HTTP/1.1 200 OK\r\n"
+    private static final String EXPECTED_RESPONSE_STRING = "HTTP/1.1 200 OK\r\n"
         + "Content-transfer-encoding: chunked\r\n"
         + "Date: Thu, 08 Jun 2023 23:06:23 GMT\r\n"
         + // This should be OK since it's always the same length

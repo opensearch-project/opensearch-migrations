@@ -29,7 +29,7 @@ public class IndexRunner {
         // TODO - parallelize this, maybe ~400-1K requests per thread and do it asynchronously
 
         BiConsumer<String, Boolean> logger = (indexName, accepted) -> {
-            if (!accepted) {
+            if (Boolean.FALSE.equals(accepted)) {
                 log.info("Index " + indexName + " rejected by allowlist");
             }
         };

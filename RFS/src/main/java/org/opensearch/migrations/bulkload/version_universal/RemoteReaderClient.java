@@ -89,16 +89,14 @@ public class RemoteReaderClient extends OpenSearchClient {
 
     ObjectNode combineIndexDetails(List<ObjectNode> indexDetailsResponse) {
         var combinedDetails = objectMapper.createObjectNode();
-        indexDetailsResponse.stream().forEach(detailsResponse -> {
+        indexDetailsResponse.stream().forEach(detailsResponse ->
             detailsResponse.fields().forEachRemaining(indexDetails -> {
                 var indexName = indexDetails.getKey();
                 combinedDetails.putIfAbsent(indexName, objectMapper.createObjectNode());
                 var existingIndexDetails = (ObjectNode)combinedDetails.get(indexName);
-                indexDetails.getValue().fields().forEachRemaining(details -> {
-                    existingIndexDetails.set(details.getKey(), details.getValue());
-                });
-            });
-        });
+                indexDetails.getValue().fields().forEachRemaining(details ->
+                    existingIndexDetails.set(details.getKey(), details.getValue()));
+            }));
         return combinedDetails;
     }
 

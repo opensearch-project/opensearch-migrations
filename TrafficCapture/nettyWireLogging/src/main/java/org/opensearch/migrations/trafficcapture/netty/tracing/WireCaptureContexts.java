@@ -10,11 +10,11 @@ import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 import lombok.Getter;
 import lombok.NonNull;
 
-public class WireCaptureContexts extends IWireCaptureContexts {
-    public static final String COUNT_UNITS = "count";
-    public static final String BYTES_UNIT = "bytes";
+public interface WireCaptureContexts extends IWireCaptureContexts {
+    String COUNT_UNITS = "count";
+    String BYTES_UNIT = "bytes";
 
-    public static class ConnectionContext extends org.opensearch.migrations.trafficcapture.tracing.ConnectionContext
+    class ConnectionContext extends org.opensearch.migrations.trafficcapture.tracing.ConnectionContext
         implements
             IWireCaptureContexts.ICapturingConnectionContext {
         public ConnectionContext(IRootWireLoggingContext rootInstrumentationScope, String connectionId, String nodeId) {
@@ -64,7 +64,7 @@ public class WireCaptureContexts extends IWireCaptureContexts {
     }
 
     @Getter
-    public abstract static class HttpMessageContext extends BaseNestedSpanContext<
+    abstract static class HttpMessageContext extends BaseNestedSpanContext<
         RootWireLoggingContext,
         IConnectionContext> implements IWireCaptureContexts.IHttpMessageContext {
 
@@ -118,7 +118,7 @@ public class WireCaptureContexts extends IWireCaptureContexts {
         }
     }
 
-    public static class RequestContext extends HttpMessageContext implements IWireCaptureContexts.IRequestContext {
+    class RequestContext extends HttpMessageContext implements IWireCaptureContexts.IRequestContext {
         public RequestContext(
             RootWireLoggingContext rootWireLoggingContext,
             IConnectionContext enclosingScope,
@@ -176,7 +176,7 @@ public class WireCaptureContexts extends IWireCaptureContexts {
         }
     }
 
-    public static class BlockingContext extends HttpMessageContext implements IWireCaptureContexts.IBlockingContext {
+    class BlockingContext extends HttpMessageContext implements IWireCaptureContexts.IBlockingContext {
         public BlockingContext(
             RootWireLoggingContext rootWireLoggingContext,
             IConnectionContext enclosingScope,
@@ -206,7 +206,7 @@ public class WireCaptureContexts extends IWireCaptureContexts {
         }
     }
 
-    public static class WaitingForResponseContext extends HttpMessageContext
+    class WaitingForResponseContext extends HttpMessageContext
         implements
             IWireCaptureContexts.IWaitingForResponseContext {
         public WaitingForResponseContext(
@@ -238,7 +238,7 @@ public class WireCaptureContexts extends IWireCaptureContexts {
         }
     }
 
-    public static class ResponseContext extends HttpMessageContext implements IWireCaptureContexts.IResponseContext {
+    class ResponseContext extends HttpMessageContext implements IWireCaptureContexts.IResponseContext {
         public ResponseContext(
             RootWireLoggingContext rootWireLoggingContext,
             IConnectionContext enclosingScope,

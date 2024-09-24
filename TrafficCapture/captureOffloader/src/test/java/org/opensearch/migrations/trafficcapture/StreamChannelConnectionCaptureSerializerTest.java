@@ -49,8 +49,8 @@ class StreamChannelConnectionCaptureSerializerTest {
 
     // Reference Timestamp chosen in the future with nanosecond precision resemble an upper bound on space overhead
     public static final Instant REFERENCE_TIMESTAMP = Instant.parse("2999-01-01T23:59:59.98765432Z");
-    private final static String FAKE_EXCEPTION_DATA = "abcdefghijklmnop";
-    private final static String FAKE_READ_PACKET_DATA = "ABCDEFGHIJKLMNOP";
+    private static final String FAKE_EXCEPTION_DATA = "abcdefghijklmnop";
+    private static final String FAKE_READ_PACKET_DATA = "ABCDEFGHIJKLMNOP";
 
     private static int getEstimatedTrafficStreamByteSize(int readWriteEventCount, int averageDataPacketSize) {
         var fixedTimestamp = Timestamp.newBuilder()

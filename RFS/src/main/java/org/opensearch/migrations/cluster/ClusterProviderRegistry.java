@@ -31,7 +31,7 @@ public class ClusterProviderRegistry {
     }
 
     /**
-     * Gets a snapshot resource provider for the given version and source repo 
+     * Gets a snapshot resource provider for the given version and source repo
      * @param version The version of the source cluster
      * @param repo The source repo that contains of the snapshot
      * @return The snapshot resource provider

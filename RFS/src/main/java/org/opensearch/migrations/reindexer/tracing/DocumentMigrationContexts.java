@@ -13,9 +13,9 @@ import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 import lombok.NonNull;
 
-public class DocumentMigrationContexts extends IDocumentMigrationContexts {
+public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
 
-    public static abstract class BaseDocumentMigrationContext extends BaseSpanContext<RootDocumentMigrationContext> {
+    abstract class BaseDocumentMigrationContext extends BaseSpanContext<RootDocumentMigrationContext> {
         protected BaseDocumentMigrationContext(RootDocumentMigrationContext rootScope) {
             super(rootScope);
         }
@@ -25,7 +25,7 @@ public class DocumentMigrationContexts extends IDocumentMigrationContexts {
         }
     }
 
-    public static class ShardSetupAttemptContext extends BaseDocumentMigrationContext
+    class ShardSetupAttemptContext extends BaseDocumentMigrationContext
         implements
             IShardSetupAttemptContext {
         protected ShardSetupAttemptContext(RootDocumentMigrationContext rootScope) {
@@ -75,7 +75,7 @@ public class DocumentMigrationContexts extends IDocumentMigrationContexts {
         }
     }
 
-    public static class AddShardWorkItemContext extends BaseNestedSpanContext<
+    class AddShardWorkItemContext extends BaseNestedSpanContext<
         RootDocumentMigrationContext,
         IShardSetupAttemptContext> implements IAddShardWorkItemContext {
 
@@ -115,7 +115,7 @@ public class DocumentMigrationContexts extends IDocumentMigrationContexts {
 
     }
 
-    public static class DocumentReindexContext extends BaseDocumentMigrationContext implements IDocumentReindexContext {
+    class DocumentReindexContext extends BaseDocumentMigrationContext implements IDocumentReindexContext {
 
         protected DocumentReindexContext(RootDocumentMigrationContext rootScope) {
             super(rootScope);

@@ -6,13 +6,10 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.Optional;
 
-import lombok.extern.slf4j.Slf4j;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
 import lombok.ToString;
+import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.regions.Region;
