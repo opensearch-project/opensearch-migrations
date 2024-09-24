@@ -115,13 +115,6 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         this.objectMapper = new ObjectMapper();
     }
 
-    /**
-     * IWorkCoordinator extends AutoCloseable but this class has no resources that it owns that need to be closed.
-     */
-    @Override
-    public void close() throws Exception {
-    }
-
     public void setup(Supplier<IWorkCoordinationContexts.IInitializeCoordinatorStateContext> contextSupplier)
         throws IOException, InterruptedException {
         var body = "{\n"

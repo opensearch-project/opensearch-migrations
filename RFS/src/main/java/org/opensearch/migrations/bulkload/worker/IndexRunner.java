@@ -30,7 +30,7 @@ public class IndexRunner {
 
         BiConsumer<String, Boolean> logger = (indexName, accepted) -> {
             if (Boolean.FALSE.equals(accepted)) {
-                log.info("Index " + indexName + " rejected by allowlist");
+                log.atInfo().setMessage("Index {} rejected by allowlist").addArgument(indexName).log();
             }
         };
         var results = IndexMetadataResults.builder();
@@ -44,11 +44,11 @@ public class IndexRunner {
                 var transformedRoot = transformer.transformIndexMetadata(indexMetadata);
                 var created = indexCreator.create(transformedRoot, mode, context);
                 if (created) {
-                    log.debug("Index " + indexName + " created successfully");
+                    log.atDebug().setMessage("Index {} created successfully").addArgument(indexName).log();
                     results.indexName(indexName);
                     transformedRoot.getAliases().fieldNames().forEachRemaining(results::alias);
                 } else {
-                    log.warn("Index " + indexName + " already existed; no work required");
+                    log.atWarn().setMessage("Index {} already existed; no work required").addArgument(indexName).log();
                 }
             });
         return results.build();
