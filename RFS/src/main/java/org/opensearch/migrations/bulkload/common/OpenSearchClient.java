@@ -70,7 +70,7 @@ public class OpenSearchClient {
     }
 
     public Version getClusterVersion() {
-        return client.getAsync("/", null)
+        return client.getAsync("", null)
             .flatMap(resp -> {
                 try {
                     return Mono.just(versionFromResponse(resp));
