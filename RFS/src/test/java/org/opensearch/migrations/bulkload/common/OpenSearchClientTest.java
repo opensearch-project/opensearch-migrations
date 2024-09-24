@@ -127,7 +127,7 @@ class OpenSearchClientTest {
     }
 
     @Test
-    void getVersion() {
+    void testGetClusterVersion() {
         var restClient = mock(RestClient.class);
         var failedRequestLogger = mock(FailedRequestsLogger.class);
         var openSearchClient = new OpenSearchClient(restClient, failedRequestLogger);
