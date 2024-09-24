@@ -1,3 +1,5 @@
+import os
+import pathlib
 from typing import Optional
 import tempfile
 import logging
@@ -165,6 +167,20 @@ class Metadata:
                 logger.warning(f"Ignoring extra value {arg}, there was no command name before it")
                 i += 1
 
+    def _run_command_and_build_result(self, command_runner: CommandRunner) -> CommandResult:
+        try:
+            result = command_runner.run()
+            logs_path = get_latest_metadata_logs_path()
+            if logs_path:
+                result.value += f"\n\nLogs for this run are available at {logs_path}"
+            return result
+        except CommandRunnerError as e:
+            logger.error(f"Metadata migration failed: {e}")
+            logs_path = get_latest_metadata_logs_path()
+            return CommandResult(success=False,
+                                 value=(f"Metadata migration failed: {e}" +
+                                        f"\n\nLogs for this run are available at {logs_path}" if logs_path else ""))
+
     def evaluate(self, extra_args=None) -> CommandResult:
         logger.info("Starting metadata migration")
         return self.migrate_or_evaluate("evaluate", extra_args)
@@ -237,8 +253,19 @@ class Metadata:
         command_runner = CommandRunner(command_base, command_args,
                                        sensitive_fields=["--target-password"])
         logger.info(f"Migrating metadata with command: {' '.join(command_runner.sanitized_command())}")
-        try:
-            return command_runner.run()
-        except CommandRunnerError as e:
-            logger.error(f"Metadata migration failed: {e}")
-            return CommandResult(success=False, value=f"Metadata migration failed: {e}")
+
+        return self._run_command_and_build_result(command_runner)
+
+
+def get_latest_metadata_logs_path() -> Optional[str]:
+    shared_logs_dir = os.getenv("SHARED_LOGS_DIR", "/shared-logs-output")
+    host = os.getenv("HOSTNAME", "*")
+    directory = pathlib.Path(shared_logs_dir) / host / "metadata"
+    file_pattern = "metadata_*.log"
+    files = directory.glob(file_pattern)
+    # If no files are found, return None
+    if not files:
+        return None
+    # Find the file with the most recent modification time
+    most_recent_file = max(files, key=os.path.getmtime)
+    return most_recent_file
