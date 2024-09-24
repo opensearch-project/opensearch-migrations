@@ -217,16 +217,6 @@ def test_valid_cluster_with_sigv4_region_doesnt_invoke_boto_client(mocker):
             cluster._get_sigv4_details(force_region=True)
 
 
-def test_valid_cluster_api_call_with_no_auth(requests_mock):
-    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
-    assert isinstance(cluster, Cluster)
-
-    requests_mock.get(f"{cluster.endpoint}/test_api", json={'test': True})
-    response = cluster.call_api("/test_api")
-    assert response.status_code == 200
-    assert response.json() == {'test': True}
-
-
 def test_valid_cluster_api_call_with_client_options(requests_mock):
     test_user_agent = "test-agent-v1.0"
     cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH,
