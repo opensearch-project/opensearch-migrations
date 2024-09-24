@@ -11,6 +11,7 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
 
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer.BulkDocSection;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
@@ -33,6 +34,7 @@ import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemE
 import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntryFailure;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -122,6 +124,30 @@ class OpenSearchClientTest {
 
         // Assertions
         assertThat(exception.getMessage(), containsString("illegal_argument_exception"));
+    }
+
+    @Test
+    void testGetClusterVersion() {
+        var restClient = mock(RestClient.class);
+        var failedRequestLogger = mock(FailedRequestsLogger.class);
+        var openSearchClient = new OpenSearchClient(restClient, failedRequestLogger);
+
+        var versionJson = "{\"version\": {\"number\": \"7.10.2\"}}";
+        var successResponse = new HttpResponse(200, "OK", Map.of(), versionJson);
+
+        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
+
+        when(restClient.getAsync(pathCaptor.capture(), any()))
+            .thenReturn(Mono.just(successResponse));
+
+        Version version = openSearchClient.getClusterVersion();
+
+        assertThat(version, equalTo(Version.fromString("ES 7.10.2")));
+
+        String capturedPath = pathCaptor.getValue();
+        assertThat(capturedPath, equalTo(""));
+
+        verify(restClient, times(1)).getAsync(anyString(), any());
     }
 
     @Test
