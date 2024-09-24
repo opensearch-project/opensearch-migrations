@@ -76,6 +76,9 @@ def cat_indices_cmd(ctx, refresh):
             )
         )
         return
+    
+    if not refresh:
+        click.echo("\nWARNING: Cluster information may be stale. Use --refresh to update.\n")
     click.echo("SOURCE CLUSTER")
     if ctx.env.source_cluster:
         click.echo(clusters_.cat_indices(ctx.env.source_cluster, refresh=refresh))
