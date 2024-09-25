@@ -60,42 +60,66 @@ public class TransformFunctions {
     }
 
     /**
-     * If the object has mappings, then we need to ensure they aren't burried underneath an intermediate levels.
-     * This can show up a number of ways:
-     * - [{"_doc":{"properties":{"address":{"type":"text"}}}}]
-     * - [{"doc":{"properties":{"address":{"type":"text"}}}}]
-     * - [{"audit_message":{"properties":{"address":{"type":"text"}}}}]
+     * If the object has mappings, then we need to ensure they aren't burried underneath intermediate levels.
      */
     public static void removeIntermediateMappingsLevels(ObjectNode root) {
         if (root.has(MAPPINGS_KEY_STR)) {
             var val = root.get(MAPPINGS_KEY_STR);
+            /**
+             * This probably came from a Snapshot
+             * There should only be a single member in the list because multi-type mappings were deprecated in ES 6.X and
+             * removed in ES 7.X.  This list structure appears to be a holdover from previous versions of Elasticsearch.
+             * The exact name of the type can be arbitrarily chosen by the user; the default is _doc.  We need to extract
+             * the mappings from beneath this intermediate key regardless of what it is named.
+             * - [{"_doc":{"properties":{"address":{"type":"text"}}}}]
+             * - [{"doc":{"properties":{"address":{"type":"text"}}}}]
+             * - [{"audit_message":{"properties":{"address":{"type":"text"}}}}]
+             *
+             * It's not impossible that the intermediate key is not present, in which case we should just extract the mappings:
+             * - [{"properties":{"address":{"type":"text"}}}]
+             */
             if (val instanceof ArrayNode) {
                 ArrayNode mappingsList = (ArrayNode) val;
-                root.set(MAPPINGS_KEY_STR, getMappingsFromBeneathIntermediate(mappingsList));
+                if (mappingsList.size() != 1) {
+                    throw new IllegalArgumentException("Mappings list contains more than one member; this is unexpected: " + val.toString());
+                }
+                ObjectNode actualMappingsRoot = (ObjectNode) mappingsList.get(0);
+
+                root.set(MAPPINGS_KEY_STR, getMappingsFromBeneathIntermediate(actualMappingsRoot));
+            }
+
+            /**
+             * This came from somewhere else (like a REST call to the source cluster).  It should be in a shape like:
+             * - {"_doc":{"properties":{"address":{"type":"text"}}}}
+             * - {"properties":{"address":{"type":"text"}}}
+             */
+            else if (val instanceof ObjectNode) {
+                root.set(MAPPINGS_KEY_STR, getMappingsFromBeneathIntermediate((ObjectNode) val));
+            }
+
+            else {
+                throw new IllegalArgumentException("Mappings object is not in the expected shape: " + val.toString());
             }
         }
     }
 
-    // Extract the mappings from their single-member list, will start like:
-    // [{"_doc":{"properties":{"address":{"type":"text"}}}}]
-    //
-    // There should only be a single member in the list because multi-type mappings were deprecated in ES 6.X and
-    // removed in ES 7.X.  This list structure appears to be a holdover from previous versions of Elasticsearch.
-    // The exact name of the type can be arbitrarily chosen by the user; the default is _doc.  We need to extract
-    // the mappings from beneath this intermediate key regardless of what it is named.
-    public static ObjectNode getMappingsFromBeneathIntermediate(ArrayNode mappingsRoot) {
-        if (mappingsRoot.size() != 1) {
-            throw new IllegalArgumentException("Mappings root does not contain a single member list");
-        }
-        ObjectNode actualMappingsRoot = (ObjectNode) mappingsRoot.get(0);
-        ObjectNode actualMappingCopy = (ObjectNode) actualMappingsRoot.get(actualMappingsRoot.fieldNames().next()).deepCopy();
-
-        // Confirm the thing we retrieved has the shape we expect
-        if (!actualMappingCopy.has("properties")) {
-            throw new IllegalArgumentException("Mappings object does not contain the expected properties key");
+    /**
+     * Extract the mappings from the type dict.  It may be that there is no intermediate type key as well.  So, the
+     * input could be:
+     * {"_doc":{"properties":{"address":{"type":"text"}}}}
+     * {"properties":{"address":{"type":"text"}}}
+     *
+     * If there is a type key ('_doc', etc), the key name can be arbitrary.  We need to extract the mappings from beneath
+     * it regardless of what it is named.
+     */
+    public static ObjectNode getMappingsFromBeneathIntermediate(ObjectNode mappingsRoot) {
+        if (mappingsRoot.has("properties")) {
+            return mappingsRoot;
+        } else if (!mappingsRoot.has("properties")) {
+            return (ObjectNode) mappingsRoot.get(mappingsRoot.fieldNames().next()).deepCopy();
         }
 
-        return actualMappingCopy;
+        throw new IllegalArgumentException("Mappings object is not in the expected shape: " + mappingsRoot.toString());
     }
 
     /**
