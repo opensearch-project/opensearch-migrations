@@ -5,8 +5,6 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.store.IOContext;
 import org.apache.lucene.store.IndexOutput;
@@ -17,10 +15,11 @@ import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @RequiredArgsConstructor
+@Slf4j
 public class SnapshotShardUnpacker {
-    private static final Logger logger = LogManager.getLogger(SnapshotShardUnpacker.class);
     private final SourceRepoAccessor repoAccessor;
     private final Path luceneFilesBasePath;
     private final ShardMetadata shardMetadata;
@@ -52,11 +51,9 @@ public class SnapshotShardUnpacker {
             Files.createDirectories(luceneIndexDir);
             try (FSDirectory primaryDirectory = FSDirectory.open(luceneIndexDir, lockFactory)) {
                 for (ShardFileInfo fileMetadata : shardMetadata.getFiles()) {
-                    logger.info(
-                        "Unpacking - Blob Name: {}, Lucene Name: {}",
-                        fileMetadata.getName(),
-                        fileMetadata.getPhysicalName()
-                    );
+                    log.atInfo().setMessage("Unpacking - Blob Name: {}, Lucene Name: {}")
+                        .addArgument(fileMetadata.getName())
+                        .addArgument(fileMetadata.getPhysicalName()).log();
                     try (
                         IndexOutput indexOutput = primaryDirectory.createOutput(
                             fileMetadata.getPhysicalName(),

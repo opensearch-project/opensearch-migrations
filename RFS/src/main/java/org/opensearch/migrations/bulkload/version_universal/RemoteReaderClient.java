@@ -37,7 +37,7 @@ public class RemoteReaderClient extends OpenSearchClient {
                 .flatMap(this::getJsonForTemplateApis)
                 .map(json -> Map.entry(entry.getKey(), json))
                 .doOnError(e -> log.error("Error fetching template {}: {}", entry.getKey(), e.getMessage()))
-                .retryWhen(checkIfItemExistsRetryStrategy)
+                .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
             )
             .collectMap(Entry::getKey, Entry::getValue)
             .block();
@@ -76,7 +76,7 @@ public class RemoteReaderClient extends OpenSearchClient {
                 .getAsync(endpoint, null)
                 .flatMap(this::getJsonForIndexApis)
                 .doOnError(e -> log.error(e.getMessage()))
-                .retryWhen(checkIfItemExistsRetryStrategy)
+                .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
             )
             .collectList()
             .block();
@@ -91,16 +91,14 @@ public class RemoteReaderClient extends OpenSearchClient {
 
     ObjectNode combineIndexDetails(List<ObjectNode> indexDetailsResponse) {
         var combinedDetails = objectMapper.createObjectNode();
-        indexDetailsResponse.stream().forEach(detailsResponse -> {
+        indexDetailsResponse.stream().forEach(detailsResponse ->
             detailsResponse.fields().forEachRemaining(indexDetails -> {
                 var indexName = indexDetails.getKey();
                 combinedDetails.putIfAbsent(indexName, objectMapper.createObjectNode());
                 var existingIndexDetails = (ObjectNode)combinedDetails.get(indexName);
-                indexDetails.getValue().fields().forEachRemaining(details -> {
-                    existingIndexDetails.set(details.getKey(), details.getValue());
-                });
-            });
-        });
+                indexDetails.getValue().fields().forEachRemaining(details ->
+                    existingIndexDetails.set(details.getKey(), details.getValue()));
+            }));
         return combinedDetails;
     }
 

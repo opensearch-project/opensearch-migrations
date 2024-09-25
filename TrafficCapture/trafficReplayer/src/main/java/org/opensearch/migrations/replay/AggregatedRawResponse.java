@@ -34,6 +34,7 @@ public class AggregatedRawResponse extends AggregatedRawResult {
             super(requestSendTime);
         }
 
+        @Override
         public AggregatedRawResponse build() {
             return new AggregatedRawResponse(
                 rawResponse,

@@ -23,15 +23,13 @@ import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.Setter;
-import lombok.extern.slf4j.Slf4j;
 
-@Slf4j
-public abstract class ReplayContexts extends IReplayContexts {
+public interface ReplayContexts extends IReplayContexts {
 
-    public static final String COUNT_UNIT_STR = "count";
-    public static final String BYTES_UNIT_STR = "bytes";
+    String COUNT_UNIT_STR = "count";
+    String BYTES_UNIT_STR = "bytes";
 
-    public static class SocketContext extends DirectNestedSpanContext<
+    class SocketContext extends DirectNestedSpanContext<
         RootReplayerContext,
         ChannelKeyContext,
         IChannelKeyContext> implements ISocketContext {
@@ -74,7 +72,7 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
     }
 
-    public static class ChannelKeyContext extends BaseNestedSpanContext<
+    class ChannelKeyContext extends BaseNestedSpanContext<
         RootReplayerContext,
         IScopedInstrumentationAttributes> implements IReplayContexts.IChannelKeyContext {
         @Getter
@@ -135,7 +133,7 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
     }
 
-    public static class KafkaRecordContext extends BaseNestedSpanContext<RootReplayerContext, IChannelKeyContext>
+    class KafkaRecordContext extends BaseNestedSpanContext<RootReplayerContext, IChannelKeyContext>
         implements
             IReplayContexts.IKafkaRecordContext {
 
@@ -189,7 +187,7 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
     }
 
-    public static class TrafficStreamLifecycleContext extends BaseNestedSpanContext<
+    class TrafficStreamLifecycleContext extends BaseNestedSpanContext<
         RootReplayerContext,
         IScopedInstrumentationAttributes> implements IReplayContexts.ITrafficStreamsLifecycleContext {
         private final ITrafficStreamKey trafficStreamKey;
@@ -255,7 +253,7 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
     }
 
-    public static class HttpTransactionContext extends BaseNestedSpanContext<
+    class HttpTransactionContext extends BaseNestedSpanContext<
         RootReplayerContext,
         IReplayContexts.ITrafficStreamsLifecycleContext> implements IReplayContexts.IReplayerHttpTransactionContext {
         final UniqueReplayerRequestKey replayerRequestKey;
@@ -347,7 +345,7 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
     }
 
-    public static class RequestAccumulationContext extends DirectNestedSpanContext<
+    class RequestAccumulationContext extends DirectNestedSpanContext<
         RootReplayerContext,
         HttpTransactionContext,
         IReplayContexts.IReplayerHttpTransactionContext> implements IReplayContexts.IRequestAccumulationContext {
@@ -371,7 +369,7 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
     }
 
-    public static class ResponseAccumulationContext extends DirectNestedSpanContext<
+    class ResponseAccumulationContext extends DirectNestedSpanContext<
         RootReplayerContext,
         HttpTransactionContext,
         IReplayContexts.IReplayerHttpTransactionContext> implements IReplayContexts.IResponseAccumulationContext {
@@ -395,7 +393,7 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
     }
 
-    public static class RequestTransformationContext extends DirectNestedSpanContext<
+    class RequestTransformationContext extends DirectNestedSpanContext<
         RootReplayerContext,
         HttpTransactionContext,
         IReplayContexts.IReplayerHttpTransactionContext> implements IReplayContexts.IRequestTransformationContext {
@@ -547,7 +545,7 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
     }
 
-    public static class ScheduledContext extends DirectNestedSpanContext<
+    class ScheduledContext extends DirectNestedSpanContext<
         RootReplayerContext,
         HttpTransactionContext,
         IReplayContexts.IReplayerHttpTransactionContext> implements IReplayContexts.IScheduledContext {
@@ -586,7 +584,7 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
     }
 
-    public static class TargetRequestContext extends DirectNestedSpanContext<
+    class TargetRequestContext extends DirectNestedSpanContext<
         RootReplayerContext,
         HttpTransactionContext,
         IReplayContexts.IReplayerHttpTransactionContext> implements IReplayContexts.ITargetRequestContext {
@@ -656,7 +654,7 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
     }
 
-    public static class RequestConnectingContext extends DirectNestedSpanContext<
+    class RequestConnectingContext extends DirectNestedSpanContext<
         RootReplayerContext,
         TargetRequestContext,
         IReplayContexts.ITargetRequestContext> implements IReplayContexts.IRequestConnectingContext {
@@ -680,7 +678,7 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
     }
 
-    public static class RequestSendingContext extends DirectNestedSpanContext<
+    class RequestSendingContext extends DirectNestedSpanContext<
         RootReplayerContext,
         TargetRequestContext,
         IReplayContexts.ITargetRequestContext> implements IReplayContexts.IRequestSendingContext {
@@ -704,7 +702,7 @@ public abstract class ReplayContexts extends IReplayContexts {
         }
     }
 
-    public static class WaitingForHttpResponseContext extends DirectNestedSpanContext<
+    class WaitingForHttpResponseContext extends DirectNestedSpanContext<
         RootReplayerContext,
         TargetRequestContext,
         IReplayContexts.ITargetRequestContext> implements IReplayContexts.IWaitingForHttpResponseContext {
@@ -729,7 +727,7 @@ public abstract class ReplayContexts extends IReplayContexts {
 
     }
 
-    public static class ReceivingHttpResponseContext extends DirectNestedSpanContext<
+    class ReceivingHttpResponseContext extends DirectNestedSpanContext<
         RootReplayerContext,
         TargetRequestContext,
         IReplayContexts.ITargetRequestContext> implements IReplayContexts.IReceivingHttpResponseContext {
@@ -756,7 +754,7 @@ public abstract class ReplayContexts extends IReplayContexts {
 
     @Getter
     @Setter
-    public static class TupleHandlingContext extends DirectNestedSpanContext<
+    class TupleHandlingContext extends DirectNestedSpanContext<
         RootReplayerContext,
         HttpTransactionContext,
         IReplayContexts.IReplayerHttpTransactionContext> implements IReplayContexts.ITupleHandlingContext {

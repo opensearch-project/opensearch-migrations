@@ -20,7 +20,7 @@ public class ChannelContextManager implements Function<ITrafficStreamKey, IRepla
         final IReplayContexts.IChannelKeyContext context;
         private int refCount;
 
-        private RefCountedContext(IReplayContexts.IChannelKeyContext context) {
+        RefCountedContext(IReplayContexts.IChannelKeyContext context) {
             this.context = context;
         }
 

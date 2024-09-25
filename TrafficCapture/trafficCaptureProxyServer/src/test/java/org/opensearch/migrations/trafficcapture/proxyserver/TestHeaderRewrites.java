@@ -25,10 +25,10 @@ import lombok.extern.slf4j.Slf4j;
 public class TestHeaderRewrites {
 
     public static final String ONLY_FOR_HEADERS_VALUE = "this is only for headers";
-public static final String BODY_WITH_HEADERS_CONTENTS = "\n" +
-    "body: should stay\n" +
-    "body: untouched\n" +
-    "body:\n";
+    public static final String BODY_WITH_HEADERS_CONTENTS = "\n" +
+        "body: should stay\n" +
+        "body: untouched\n" +
+        "body:\n";
 
     @Test
     public void testHeaderRewrites() throws Exception {

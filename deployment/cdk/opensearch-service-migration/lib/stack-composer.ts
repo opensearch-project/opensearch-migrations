@@ -343,7 +343,7 @@ export class StackComposer {
                 sourceClusterEndpoint,
                 targetClusterUsername: targetCluster ? targetClusterAuth?.basicAuth?.username : fineGrainedManagerUserName,
                 targetClusterPasswordSecretArn: targetCluster ? targetClusterAuth?.basicAuth?.password_from_secret_arn : fineGrainedManagerUserSecretManagerKeyARN,
-                env: props.env
+                env: props.env,
             })
             this.stacks.push(networkStack)
         }

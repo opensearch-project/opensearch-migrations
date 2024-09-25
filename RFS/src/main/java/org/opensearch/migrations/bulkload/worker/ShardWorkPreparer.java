@@ -100,7 +100,7 @@ public class ShardWorkPreparer {
         SnapshotRepo.Provider repoDataProvider = metadataFactory.getRepoDataProvider();
 
         BiConsumer<String, Boolean> logger = (indexName, accepted) -> {
-            if (!accepted) {
+            if (Boolean.FALSE.equals(accepted)) {
                 log.info("Index " + indexName + " rejected by allowlist");
             }
         };

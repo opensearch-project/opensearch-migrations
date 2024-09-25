@@ -11,8 +11,8 @@ import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
 import lombok.NonNull;
 
-public class MetadataMigrationContexts {
-    public static class ClusterMetadataContext extends BaseSpanContext<RootMetadataMigrationContext>
+public interface MetadataMigrationContexts {
+    class ClusterMetadataContext extends BaseSpanContext<RootMetadataMigrationContext>
         implements
             IMetadataMigrationContexts.IClusterMetadataContext {
 
@@ -70,7 +70,7 @@ public class MetadataMigrationContexts {
         }
     }
 
-    public static class MigrateTemplateContext extends BaseNestedSpanContext<
+    class MigrateTemplateContext extends BaseNestedSpanContext<
         RootMetadataMigrationContext,
         IMetadataMigrationContexts.IClusterMetadataContext> implements IMetadataMigrationContexts.ITemplateContext {
 
@@ -113,7 +113,7 @@ public class MetadataMigrationContexts {
         }
     }
 
-    public static class CreateIndexContext extends BaseSpanContext<RootMetadataMigrationContext>
+    class CreateIndexContext extends BaseSpanContext<RootMetadataMigrationContext>
         implements
             IMetadataMigrationContexts.ICreateIndexContext {
 

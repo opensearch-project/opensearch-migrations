@@ -37,8 +37,8 @@ import lombok.AllArgsConstructor;
  */
 public class SimpleHttpClientForTesting implements AutoCloseable {
 
-    private final static Timeout DEFAULT_RESPONSE_TIMEOUT = Timeout.ofSeconds(5);
-    private final static Timeout DEFAULT_CONNECTION_TIMEOUT = Timeout.ofSeconds(5);
+    private static final Timeout DEFAULT_RESPONSE_TIMEOUT = Timeout.ofSeconds(5);
+    private static final Timeout DEFAULT_CONNECTION_TIMEOUT = Timeout.ofSeconds(5);
 
     private final CloseableHttpClient httpClient;
 
