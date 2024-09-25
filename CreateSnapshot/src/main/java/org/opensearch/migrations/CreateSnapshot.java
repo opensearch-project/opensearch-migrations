@@ -74,7 +74,10 @@ public class CreateSnapshot {
 
     public static void main(String[] args) throws Exception {
         Args arguments = new Args();
-        JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
+        JCommander jCommander = JCommander.newBuilder()
+            .allowParameterOverwriting(true)
+            .addObject(arguments)
+            .build();
         jCommander.parse(args);
 
         if (arguments.help) {

@@ -25,6 +25,7 @@ import lombok.extern.slf4j.Slf4j;
 public class TestHeaderRewrites {
 
     public static final String ONLY_FOR_HEADERS_VALUE = "this is only for headers";
+    public static final String ONLY_FOR_HEADERS_VALUE_SPECIAL_CHARACTERS = "!@#$%^&*()_+,./:\":;\\/";
     public static final String BODY_WITH_HEADERS_CONTENTS = "\n" +
         "body: should stay\n" +
         "body: untouched\n" +
@@ -43,6 +44,9 @@ public class TestHeaderRewrites {
             "--setHeader",
             "host",
             "localhost",
+            "--setHeader",
+            "specialCharacters",
+            ONLY_FOR_HEADERS_VALUE_SPECIAL_CHARACTERS,
             "--setHeader",
             "X-new-header",
             "insignificant value"
@@ -70,7 +74,9 @@ public class TestHeaderRewrites {
             var capturedRequest = capturedRequestList.get(capturedRequestList.size()-1).getHeaders().stream()
                 .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
             Assertions.assertEquals("localhost", capturedRequest.get("host"));
+            Assertions.assertEquals(ONLY_FOR_HEADERS_VALUE_SPECIAL_CHARACTERS, capturedRequest.get("specialCharacters"));
             Assertions.assertEquals("insignificant value", capturedRequest.get("X-new-header"));
+
         }
     }
 

@@ -24,8 +24,9 @@ public class MetadataMigration {
     public static void main(String[] args) throws Exception {
         var metadataArgs = new MetadataArgs();
         var migrateArgs = new MigrateArgs();
-        var evaluateArgs = new EvaluateArgs(); 
+        var evaluateArgs = new EvaluateArgs();
         var jCommander = JCommander.newBuilder()
+            .allowParameterOverwriting(true)
             .addObject(metadataArgs)
             .addCommand(migrateArgs)
             .addCommand(evaluateArgs)

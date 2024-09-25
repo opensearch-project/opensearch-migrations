@@ -9,7 +9,6 @@ import {
     MigrationSSMParameter,
     createMSKProducerIAMPolicies,
     getMigrationStringParameterValue,
-    parseAndMergeArgs
 } from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 
@@ -67,7 +66,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
         command = props.streamingSourceType !== StreamingSourceType.DISABLED ? command.concat(`  --kafkaConnection ${brokerEndpoints}`) : command
         command = props.streamingSourceType === StreamingSourceType.AWS_MSK ? command.concat(" --enableMSKAuth") : command
         command = props.otelCollectorEnabled ? command.concat(` --otelCollectorEndpoint ${OtelCollectorSidecar.getOtelLocalhostEndpoint()}`) : command
-        command = parseAndMergeArgs(command, props.extraArgs);
+        command = props.extraArgs ? command.concat(` ${props.extraArgs}`) : command
 
         this.createService({
             serviceName: "capture-proxy-es",

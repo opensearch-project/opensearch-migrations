@@ -15,6 +15,7 @@ import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import org.opensearch.migrations.jcommander.NoSplitter;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
@@ -117,6 +118,7 @@ public class TrafficReplayer {
         @Parameter(
             required = false, names = {
             AWS_AUTH_HEADER_USER_AND_SECRET_ARG },
+            splitter = NoSplitter.class,
             arity = 2,
             description = "<USERNAME> <SECRET_ARN> pair to specify "
                 + "\"authorization\" header value for each request.  "
@@ -258,6 +260,7 @@ public class TrafficReplayer {
     private static Parameters parseArgs(String[] args) {
         Parameters p = new Parameters();
         JCommander jCommander = new JCommander(p);
+        jCommander.setAllowParameterOverwriting(true);
         try {
             jCommander.parse(args);
             return p;

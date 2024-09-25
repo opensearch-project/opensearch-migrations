@@ -11,7 +11,7 @@ import {
     createMSKConsumerIAMPolicies,
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy,
-    getMigrationStringParameterValue, parseAndMergeArgs
+    getMigrationStringParameterValue
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
 import { Duration } from "aws-cdk-lib";
@@ -80,15 +80,15 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         });
         const groupId = props.customKafkaGroupId ? props.customKafkaGroupId : `logging-group-${deployId}`
 
-        let replayerCommand = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint} --insecure --kafka-traffic-brokers ${brokerEndpoints} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id ${groupId}`
+        let replayerCommand = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint} --insecure --kafka-traffic-brokers ${brokerEndpoints} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id \"${groupId}\"`
         if (props.clusterAuthDetails.basicAuth) {
-            replayerCommand = replayerCommand.concat(` --auth-header-user-and-secret "${props.clusterAuthDetails.basicAuth.username} ${props.clusterAuthDetails.basicAuth.password_from_secret_arn}"`)
+            replayerCommand = replayerCommand.concat(` --auth-header-user-and-secret \"${props.clusterAuthDetails.basicAuth.username}\" \"${props.clusterAuthDetails.basicAuth.password_from_secret_arn}\""`)
         }
         replayerCommand = props.streamingSourceType === StreamingSourceType.AWS_MSK ? replayerCommand.concat(" --kafka-traffic-enable-msk-auth") : replayerCommand
-        replayerCommand = props.userAgentSuffix ? replayerCommand.concat(` --user-agent ${props.userAgentSuffix}`) : replayerCommand
+        replayerCommand = props.userAgentSuffix ? replayerCommand.concat(` --user-agent \"${props.userAgentSuffix}\"`) : replayerCommand
         replayerCommand = props.clusterAuthDetails.sigv4 ? replayerCommand.concat(` --sigv4-auth-header-service-region ${props.clusterAuthDetails.sigv4.serviceSigningName},${props.clusterAuthDetails.sigv4.region}`) : replayerCommand
         replayerCommand = props.otelCollectorEnabled ? replayerCommand.concat(` --otelCollectorEndpoint ${OtelCollectorSidecar.getOtelLocalhostEndpoint()}`) : replayerCommand
-        replayerCommand = parseAndMergeArgs(replayerCommand, props.extraArgs);
+        replayerCommand = props.extraArgs ? replayerCommand.concat(` ${props.extraArgs}`) : replayerCommand
 
         this.createService({
             serviceName: `traffic-replayer-${deployId}`,

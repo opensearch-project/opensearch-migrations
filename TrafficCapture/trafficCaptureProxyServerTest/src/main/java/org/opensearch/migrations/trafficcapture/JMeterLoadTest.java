@@ -42,6 +42,7 @@ public class JMeterLoadTest {
     public static Parameters parseArgs(String[] args) {
         Parameters p = new Parameters();
         JCommander jCommander = new JCommander(p);
+        jCommander.setAllowParameterOverwriting(true);
         try {
             jCommander.parse(args);
             return p;

@@ -18,7 +18,7 @@ echo "RFS_TARGET_PASSWORD_ARN: $RFS_TARGET_PASSWORD_ARN"
 if [[ $RFS_COMMAND != *"--target-username"* ]]; then
     if [[ -n "$RFS_TARGET_USER" ]]; then
         echo "Using username from ENV variable RFS_TARGET_USER.  Updating RFS Command with username."
-        RFS_COMMAND="$RFS_COMMAND --target-username $RFS_TARGET_USER"
+        RFS_COMMAND="$RFS_COMMAND --target-username \"$RFS_TARGET_USER\""
     fi
 fi
 
@@ -39,7 +39,7 @@ if [[ $RFS_COMMAND != *"--target-password"* ]]; then
     # Append the username/password to the RFS Command if have an updated password
     if [[ -n "$PASSWORD_TO_USE" ]]; then
         echo "Updating RFS Command with password."
-        RFS_COMMAND="$RFS_COMMAND --target-password $PASSWORD_TO_USE"
+        RFS_COMMAND="$RFS_COMMAND --target-password \"$PASSWORD_TO_USE\""
     fi
 fi
 

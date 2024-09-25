@@ -33,6 +33,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
 
 import org.opensearch.common.settings.Settings;
+import org.opensearch.migrations.jcommander.NoSplitter;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
@@ -159,12 +160,14 @@ public class CaptureProxy {
         @Parameter(required = false,
             names = "--setHeader",
             arity = 2,
+            splitter = NoSplitter.class,
             description = "[header-name header-value] Set an HTTP header (first argument) with to the specified value" +
                 " (second argument).  Any existing headers with that name will be removed.")
         public List<String> headerOverrides = new ArrayList<>();
         @Parameter(required = false,
             names = "--suppressCaptureForHeaderMatch",
             arity = 2,
+            splitter = NoSplitter.class,
             description = "The header name (which will be interpreted in a case-insensitive manner) and a regex "
                 + "pattern.  When the incoming request has a header that matches the regex, it will be passed "
                 + "through to the service but will NOT be captured.  E.g. user-agent 'healthcheck'.")
@@ -174,6 +177,7 @@ public class CaptureProxy {
     static Parameters parseArgs(String[] args) {
         Parameters p = new Parameters();
         JCommander jCommander = new JCommander(p);
+        jCommander.setAllowParameterOverwriting(true);
         try {
             jCommander.parse(args);
             // Exactly one these 3 options are required. See that exactly one is set by summing up their presence

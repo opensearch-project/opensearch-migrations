@@ -142,8 +142,6 @@ A number of options are currently available but deprecated. While they function 
 <!-- Footnotes -->
 
 [^1]: Extra arguments can be added, overridden, or removed as follows:
-    - To add a new argument: Include the argument with the value, e.g., `"--new-arg value"`
-    - To override an existing argument: Include the argument with the new value, e.g., `"--override-arg new-value"`
-    - To remove an argument: Use the negated form, e.g., `"--no-existing-arg"`
+    - To add/override an argument: Include the argument with the value, e.g., `"--new-arg value"`
+    - Include quotes/escaping as appropriate for bash processing  `"--new-arg \"my value\""`
 
-    Example: `"--new-arg value --existing-arg new-value --no-unwanted-arg"`

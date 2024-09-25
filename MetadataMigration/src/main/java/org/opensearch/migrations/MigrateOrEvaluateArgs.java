@@ -38,7 +38,7 @@ public class MigrateOrEvaluateArgs {
     public ConnectionContext.TargetArgs targetArgs = new ConnectionContext.TargetArgs();
 
     @ParametersDelegate
-    public DataFilterArgs dataFilterArgs = new DataFilterArgs(); 
+    public DataFilterArgs dataFilterArgs = new DataFilterArgs();
 
     // https://opensearch.org/docs/2.11/api-reference/cluster-api/cluster-awareness/
     @Parameter(names = {"--min-replicas" }, description = "Optional.  The minimum number of replicas configured for migrated indices on the target."
@@ -50,6 +50,6 @@ public class MigrateOrEvaluateArgs {
             + "forwarded. If no value is provided, metrics will not be forwarded.")
     String otelCollectorEndpoint;
 
-    @Parameter(names = {"--source-version" }, description = "Version of the source cluster, for example: Elasticsearch 7.10 or OS 1.3.  Defaults to: ES_7.10", converter = VersionConverter.class)
+    @Parameter(names = {"--source-version" }, description = "Version of the source cluster, for example: Elasticsearch 7.10 or OS 1.3.  Defaults to: ES 7.10", converter = VersionConverter.class)
     public Version sourceVersion = Version.fromString("ES 7.10");
 }
