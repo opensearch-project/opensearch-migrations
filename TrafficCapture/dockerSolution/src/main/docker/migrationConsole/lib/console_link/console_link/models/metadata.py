@@ -262,8 +262,7 @@ def get_latest_metadata_logs_path() -> Optional[str]:
     host = os.getenv("HOSTNAME", "*")
     directory = pathlib.Path(shared_logs_dir) / host / "metadata"
     file_pattern = "metadata_*.log"
-    files = directory.glob(file_pattern)
-    # If no files are found, return None
+    files = list(directory.glob(file_pattern))
     if not files:
         return None
     # Find the file with the most recent modification time
