@@ -22,9 +22,6 @@ dependencies {
     testImplementation testFixtures(project(":coreUtilities"))
     testImplementation testFixtures(project(":testHelperFixtures"))
     testImplementation group: 'org.testcontainers', name: 'junit-jupiter'
-    testImplementation group: 'org.testcontainers', name: 'testcontainers'
-    testImplementation group: 'eu.rekawek.toxiproxy', name: 'toxiproxy-java'
-    testImplementation group: 'org.testcontainers', name: 'toxiproxy'
     testImplementation group: 'io.netty', name: 'netty-all'
 }
 
