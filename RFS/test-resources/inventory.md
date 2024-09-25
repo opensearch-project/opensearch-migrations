@@ -343,3 +343,107 @@ curl -X PUT "localhost:19200/test_updates_deletes" -H "Content-Type: application
   }
 }'
 ```
+
+#### ES_7_10_BWC_Check
+An Elastic 7.10 snapshot repo designed to exercise backwards compatibility across a couple different features.  It contains two indices; one is created using pre-ES 7.8 templates and pre-ES 7.0 type declarations, and the other is created using forward-compatible index/component templates and no type declarations. Both indices contain a single document.
+
+```
+curl -X PUT "localhost:19200/_template/bwc_template?include_type_name=true" -H "Content-Type: application/json" -d '
+{
+  "index_patterns": ["bwc_index*"],
+  "settings": {
+    "index": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    }
+  },
+  "mappings": {
+    "arbitrary_type": {
+      "properties": {
+        "title": {
+          "type": "text"
+        },
+        "content": {
+          "type": "text"
+        }
+      }
+    }
+  },
+  "aliases": {
+    "bwc_alias": {}
+  }
+}'
+
+curl -X PUT "localhost:19200/bwc_index_1" -H "Content-Type: application/json"
+
+curl -X PUT "localhost:19200/bwc_alias/_doc/bwc_doc" -H "Content-Type: application/json" -d '
+{
+  "title": "This is a doc in a backwards compatible index",
+  "content": "Four score and seven years ago"
+}'
+
+curl -X PUT "localhost:19200/_component_template/fwc_mappings" -H "Content-Type: application/json" -d '
+{
+  "template": {
+    "mappings": {
+      "properties": {
+        "title": {
+          "type": "text"
+        },
+        "content": {
+          "type": "text"
+        }
+      }
+    }
+  }
+}'
+
+curl -X PUT "localhost:19200/_component_template/fwc_settings" -H "Content-Type: application/json" -d '
+{
+  "template": {
+    "settings": {
+      "index": {
+        "number_of_shards": 1,
+        "number_of_replicas": 0
+      }
+    }
+  }
+}'
+
+curl -X PUT "localhost:19200/_index_template/fwc_template" -H "Content-Type: application/json" -d '
+{
+  "index_patterns": ["fwc_index*"],
+  "composed_of": [
+    "fwc_mappings",
+    "fwc_settings"
+  ],
+  "template": {
+    "aliases": {
+      "fwc_alias": {}
+    }
+  }
+}'
+
+curl -X PUT "localhost:19200/fwc_index_1" -H "Content-Type: application/json"
+
+curl -X PUT "localhost:19200/fwc_alias/_doc/bwc_doc" -H "Content-Type: application/json" -d '
+{
+  "title": "This is a doc in a forward compatible index",
+  "content": "Life, the Universe, and Everything"
+}'
+
+curl -X PUT "localhost:19200/_snapshot/test_repository" -H "Content-Type: application/json" -d '{
+  "type": "fs",
+  "settings": {
+    "location": "/snapshots",
+    "compress": false
+  }
+}'
+
+curl -X PUT "localhost:19200/_snapshot/test_repository/rfs-snapshot" -H "Content-Type: application/json" -d '{
+  "indices": "bwc_index_1,fwc_index_1",
+  "ignore_unavailable": true,
+  "include_global_state": true
+}'
+
+```
