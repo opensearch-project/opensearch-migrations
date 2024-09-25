@@ -90,7 +90,7 @@ public class TransformFunctions {
         ObjectNode actualMappingsRoot = (ObjectNode) mappingsRoot.get(0);
         ObjectNode actualMappingCopy = (ObjectNode) actualMappingsRoot.get(actualMappingsRoot.fieldNames().next()).deepCopy();
 
-        // If the actual mappings root has a properties key, then we need to extract the mappings from beneath it.
+        // Confirm the thing we retrieved has the shape we expect
         if (!actualMappingCopy.has("properties")) {
             throw new IllegalArgumentException("Mappings object does not contain the expected properties key");
         }
