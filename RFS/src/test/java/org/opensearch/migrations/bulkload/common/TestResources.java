@@ -15,6 +15,7 @@ public class TestResources {
     public static final Snapshot SNAPSHOT_ES_5_6;
     public static final Snapshot SNAPSHOT_ES_6_8;
     public static final Snapshot SNAPSHOT_ES_6_8_MERGED;
+    public static final Snapshot SNAPSHOT_ES_7_10_BWC_CHECK;
     public static final Snapshot SNAPSHOT_ES_7_10_W_SOFT;
     public static final Snapshot SNAPSHOT_ES_7_10_WO_SOFT;
 
@@ -34,6 +35,11 @@ public class TestResources {
         SNAPSHOT_ES_6_8_MERGED = new Snapshot(
             rfsBaseDir.resolve(Paths.get("test-resources", "snapshots", "ES_6_8_Updates_Deletes_Merged")),
             "rfs_snapshot"
+        );
+
+        SNAPSHOT_ES_7_10_BWC_CHECK = new Snapshot(
+            rfsBaseDir.resolve(Paths.get("test-resources", "snapshots", "ES_7_10_BWC_Check")),
+            "rfs-snapshot"
         );
 
         SNAPSHOT_ES_7_10_W_SOFT = new Snapshot(

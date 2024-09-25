@@ -78,17 +78,20 @@ public class TransformFunctions {
 
     // Extract the mappings from their single-member list, will start like:
     // [{"_doc":{"properties":{"address":{"type":"text"}}}}]
+    //
+    // There should only be a single member in the list because multi-type mappings were deprecated in ES 6.X and
+    // removed in ES 7.X.  This list structure appears to be a holdover from previous versions of Elasticsearch.
+    // The exact name of the type can be arbitrarily chosen by the user; the default is _doc.  We need to extract
+    // the mappings from beneath this intermediate key regardless of what it is named.
     public static ObjectNode getMappingsFromBeneathIntermediate(ArrayNode mappingsRoot) {
         ObjectNode actualMappingsRoot = (ObjectNode) mappingsRoot.get(0);
-        if (actualMappingsRoot.has("_doc")) {
-            return (ObjectNode) actualMappingsRoot.get("_doc").deepCopy();
-        } else if (actualMappingsRoot.has("doc")) {
-            return (ObjectNode) actualMappingsRoot.get("doc").deepCopy();
-        } else if (actualMappingsRoot.has("audit_message")) {
-            return (ObjectNode) actualMappingsRoot.get("audit_message").deepCopy();
-        } else {
-            throw new IllegalArgumentException("Mappings root does not contain one of the expected keys");
+
+        if (mappingsRoot.size() != 1) {
+            throw new IllegalArgumentException("Mappings root does not contain a single member list");
         }
+        actualMappingsRoot.size();
+
+        return (ObjectNode) actualMappingsRoot.get(actualMappingsRoot.fieldNames().next()).deepCopy();
     }
 
     /**
