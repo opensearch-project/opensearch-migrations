@@ -12,9 +12,9 @@ def collect_snippet_dependencies(key, original_dict,
     if ground_truth_dict is None:
         return False
     found_match = False
-    for parent, innerMap in ground_truth_dict.items():
+    for parent, inner_map in ground_truth_dict.items():
         if parent == key or collect_snippet_dependencies(key, original_dict, depth + 1,
-                                                         innerMap, already_collected_set,
+                                                         inner_map, already_collected_set,
                                                          found_at_depth_map):
             if parent not in already_collected_set:
                 collect_snippet_dependencies(parent, original_dict, 0,
@@ -27,8 +27,8 @@ def collect_snippet_dependencies(key, original_dict,
 def construct_command(selected_keys, deps):
     dependency_depth_dict = dict()
     for key in selected_keys:
-        foundKey = collect_snippet_dependencies(key, deps, 0, deps, set(), dependency_depth_dict)
-        assert foundKey, f"key={key}"
+        found_key = collect_snippet_dependencies(key, deps, 0, deps, set(), dependency_depth_dict)
+        assert found_key, f"key={key}"
     ordered_snippets = sorted(dependency_depth_dict, key=lambda k: dependency_depth_dict[k])
 
     files = ' '.join([f"configSnippets/{dep}.yaml" for dep in ordered_snippets])
