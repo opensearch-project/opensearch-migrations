@@ -6,13 +6,14 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
 
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 
+import lombok.Getter;
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 public abstract class SnapshotCreator {
-    private static final Logger logger = LogManager.getLogger(SnapshotCreator.class);
     private static final ObjectMapper mapper = new ObjectMapper();
     static {
         mapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -20,9 +21,10 @@ public abstract class SnapshotCreator {
 
     private final OpenSearchClient client;
     private final IRfsContexts.ICreateSnapshotContext context;
+    @Getter
     private final String snapshotName;
 
-    public SnapshotCreator(String snapshotName, OpenSearchClient client, IRfsContexts.ICreateSnapshotContext context) {
+    protected SnapshotCreator(String snapshotName, OpenSearchClient client, IRfsContexts.ICreateSnapshotContext context) {
         this.snapshotName = snapshotName;
         this.client = client;
         this.context = context;
@@ -34,19 +36,15 @@ public abstract class SnapshotCreator {
         return "migration_assistant_repo";
     }
 
-    public String getSnapshotName() {
-        return snapshotName;
-    }
-
     public void registerRepo() {
         ObjectNode settings = getRequestBodyForRegisterRepo();
 
         // Register the repo; it's fine if it already exists
         try {
             client.registerSnapshotRepo(getRepoName(), settings, context);
-            logger.info("Snapshot repo registration successful");
+            log.atInfo().setMessage("Snapshot repo registration successful").log();
         } catch (Exception e) {
-            logger.error("Snapshot repo registration failed", e);
+            log.atError().setMessage("Snapshot repo registration failed").setCause(e).log();
             throw new RepoRegistrationFailed(getRepoName());
         }
     }
@@ -61,9 +59,9 @@ public abstract class SnapshotCreator {
         // Create the snapshot; idempotent operation
         try {
             client.createSnapshot(getRepoName(), snapshotName, body, context);
-            logger.info("Snapshot {} creation initiated", snapshotName);
+            log.atInfo().setMessage("Snapshot {} creation initiated").addArgument(snapshotName).log();
         } catch (Exception e) {
-            logger.error("Snapshot {} creation failed", snapshotName, e);
+            log.atError().setMessage("Snapshot {} creation failed").addArgument(snapshotName).setCause(e).log();
             throw new SnapshotCreationFailed(snapshotName);
         }
     }
@@ -73,12 +71,12 @@ public abstract class SnapshotCreator {
         try {
             response = client.getSnapshotStatus(getRepoName(), snapshotName, context);
         } catch (Exception e) {
-            logger.error("Failed to get snapshot status", e);
+            log.atError().setMessage("Failed to get snapshot status").setCause(e).log();
             throw new SnapshotStatusCheckFailed(snapshotName);
         }
 
         if (response.isEmpty()) {
-            logger.error("Snapshot {} does not exist", snapshotName);
+            log.atError().setMessage("Snapshot {} does not exist").addArgument(snapshotName).log();
             throw new SnapshotDoesNotExist(snapshotName);
         }
 
@@ -92,7 +90,9 @@ public abstract class SnapshotCreator {
         } else if (state.equals("IN_PROGRESS")) {
             return false;
         } else {
-            logger.error("Snapshot {} has failed with state {}", snapshotName, state);
+            log.atError().setMessage("Snapshot {} has failed with state {}")
+                .addArgument(snapshotName)
+                .addArgument(state).log();
             throw new SnapshotCreationFailed(snapshotName);
         }
     }

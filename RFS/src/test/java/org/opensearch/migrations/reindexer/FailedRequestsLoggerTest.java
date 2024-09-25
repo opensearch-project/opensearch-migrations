@@ -15,7 +15,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 class FailedRequestsLoggerTest {
     @Test
     void testLogBulkFailure_withNoBody() {
-        try (var logs = new CloseableLogSetup("FailedRequestsLogger")) {
+        try (var logs = new CloseableLogSetup(FailedRequestsLogger.class.getName())) {
             var logger = new FailedRequestsLogger();
 
             var indexName = "myIndexName";
@@ -40,7 +40,7 @@ class FailedRequestsLoggerTest {
 
     @Test
     void testLogBulkFailure_withResponseBody() {
-        try (var logs = new CloseableLogSetup("FailedRequestsLogger")) {
+        try (var logs = new CloseableLogSetup(FailedRequestsLogger.class.getName())) {
             var logger = new FailedRequestsLogger();
 
             var indexName = "yourIndexName";

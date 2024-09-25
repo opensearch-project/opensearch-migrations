@@ -45,7 +45,7 @@ public class ByteArrayIndexInput extends IndexInput {
         if (l < 0) {
             throw new IllegalArgumentException("Seeking to negative position: " + pos);
         } else if (l > length) {
-            throw new EOFException("seek past EOF");
+            throw new EOFException();
         }
         pos = (int) l;
     }
@@ -78,7 +78,7 @@ public class ByteArrayIndexInput extends IndexInput {
     @Override
     public byte readByte() throws IOException {
         if (pos >= offset + length) {
-            throw new EOFException("seek past EOF");
+            throw new EOFException();
         }
         return bytes[offset + pos++];
     }
@@ -86,7 +86,7 @@ public class ByteArrayIndexInput extends IndexInput {
     @Override
     public void readBytes(final byte[] b, final int offset, int len) throws IOException {
         if (pos + len > this.offset + length) {
-            throw new EOFException("seek past EOF");
+            throw new EOFException();
         }
         System.arraycopy(bytes, this.offset + pos, b, offset, len);
         pos += len;

@@ -37,7 +37,7 @@ import io.netty.buffer.ByteBuf;
 @WrapWithNettyLeakDetection
 class HttpJsonTransformingConsumerTest extends InstrumentationTest {
 
-    private final static String NDJSON_TEST_REQUEST = (
+    private static final String NDJSON_TEST_REQUEST = (
         "POST /test HTTP/1.1\r\n" +
             "Host: foo.example\r\n" +
             "Content-Type: application/json\r\n" +

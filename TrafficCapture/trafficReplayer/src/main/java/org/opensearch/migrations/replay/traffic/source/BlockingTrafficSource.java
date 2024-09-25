@@ -194,7 +194,9 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                             .setMessage(() -> "acquiring readGate semaphore with timeout=" + waitIntervalMs)
                             .log();
                         try (var waitContext = blockContext.createWaitForSignalContext()) {
-                            readGate.tryAcquire(waitIntervalMs, TimeUnit.MILLISECONDS);
+                            var didAcquire = readGate.tryAcquire(waitIntervalMs, TimeUnit.MILLISECONDS);
+                            log.atTrace().setMessage("semaphore ")
+                                .addArgument(() -> (didAcquire ? "" : "not ") + "acquired").log();
                         }
                     }
                 }

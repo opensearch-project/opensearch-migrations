@@ -263,7 +263,8 @@ public class RfsMigrateDocuments {
                                                        ShardMetadata.Factory shardMetadataFactory,
                                                        SnapshotShardUnpacker.Factory unpackerFactory,
                                                        long maxShardSizeBytes,
-                                                       RootDocumentMigrationContext rootDocumentContext) throws Exception
+                                                       RootDocumentMigrationContext rootDocumentContext)
+        throws IOException, InterruptedException, NoWorkLeftException
     {
         var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
         confirmShardPrepIsComplete(indexMetadataFactory,

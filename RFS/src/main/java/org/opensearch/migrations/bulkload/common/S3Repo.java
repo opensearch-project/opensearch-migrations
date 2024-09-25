@@ -6,12 +6,10 @@ import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.Optional;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
 import lombok.ToString;
+import lombok.extern.slf4j.Slf4j;
 import software.amazon.awssdk.auth.credentials.DefaultCredentialsProvider;
 import software.amazon.awssdk.core.async.AsyncResponseTransformer;
 import software.amazon.awssdk.regions.Region;
@@ -26,11 +24,12 @@ import software.amazon.awssdk.transfer.s3.model.DirectoryDownload;
 import software.amazon.awssdk.transfer.s3.model.DownloadDirectoryRequest;
 
 @ToString(onlyExplicitlyIncluded = true)
+@Slf4j
 public class S3Repo implements SourceRepo {
-    private static final Logger logger = LogManager.getLogger(S3Repo.class);
     private static final double S3_TARGET_THROUGHPUT_GIBPS = 8.0; // Arbitrarily chosen
     private static final long S3_MAX_MEMORY_BYTES = 1024L * 1024 * 1024; // Arbitrarily chosen
     private static final long S3_MINIMUM_PART_SIZE_BYTES = 8L * 1024 * 1024; // Default, but be explicit
+    public static final String INDICES_PREFIX_STR = "indices/";
 
     private final Path s3LocalDir;
     @ToString.Include
@@ -80,11 +79,12 @@ public class S3Repo implements SourceRepo {
         ensureS3LocalDirectoryExists(localPath.getParent());
 
         if (doesFileExistLocally(localPath)) {
-            logger.debug("File already exists locally: {}", localPath);
+            log.atDebug().setMessage("File already exists locally: {}").addArgument(localPath).log();
             return;
         }
 
-        logger.info("Downloading file from S3: {} to {}", s3Uri.uri, localPath);
+        log.atInfo()
+            .setMessage("Downloading file from S3: {} to {}").addArgument(s3Uri.uri).addArgument(localPath).log();
         GetObjectRequest getObjectRequest = GetObjectRequest.builder().bucket(s3Uri.bucketName).key(s3Uri.key).build();
 
         s3Client.getObject(getObjectRequest, AsyncResponseTransformer.toFile(localPath)).join();
@@ -147,7 +147,7 @@ public class S3Repo implements SourceRepo {
 
     @Override
     public Path getIndexMetadataFilePath(String indexId, String indexFileId) {
-        String suffix = "indices/" + indexId + "/meta-" + indexFileId + ".dat";
+        String suffix = INDICES_PREFIX_STR + indexId + "/meta-" + indexFileId + ".dat";
         Path filePath = s3LocalDir.resolve(suffix);
         S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + suffix);
         ensureFileExistsLocally(fileUri, filePath);
@@ -156,14 +156,13 @@ public class S3Repo implements SourceRepo {
 
     @Override
     public Path getShardDirPath(String indexId, int shardId) {
-        String suffix = "indices/" + indexId + "/" + shardId;
-        Path shardDirPath = s3LocalDir.resolve(suffix);
-        return shardDirPath;
+        String suffix = INDICES_PREFIX_STR + indexId + "/" + shardId;
+        return s3LocalDir.resolve(suffix);
     }
 
     @Override
     public Path getShardMetadataFilePath(String snapshotId, String indexId, int shardId) {
-        String suffix = "indices/" + indexId + "/" + shardId + "/snap-" + snapshotId + ".dat";
+        String suffix = INDICES_PREFIX_STR + indexId + "/" + shardId + "/snap-" + snapshotId + ".dat";
         Path filePath = s3LocalDir.resolve(suffix);
         S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + suffix);
         ensureFileExistsLocally(fileUri, filePath);
@@ -172,7 +171,7 @@ public class S3Repo implements SourceRepo {
 
     @Override
     public Path getBlobFilePath(String indexId, int shardId, String blobName) {
-        String suffix = "indices/" + indexId + "/" + shardId + "/" + blobName;
+        String suffix = INDICES_PREFIX_STR + indexId + "/" + shardId + "/" + blobName;
         Path filePath = s3LocalDir.resolve(suffix);
         S3Uri fileUri = new S3Uri(s3RepoUri.uri + "/" + suffix);
         ensureFileExistsLocally(fileUri, filePath);
@@ -181,39 +180,38 @@ public class S3Repo implements SourceRepo {
 
     @Override
     public void prepBlobFiles(ShardMetadata shardMetadata) {
-        S3TransferManager transferManager = S3TransferManager.builder().s3Client(s3Client).build();
+        try (S3TransferManager transferManager = S3TransferManager.builder().s3Client(s3Client).build()) {
 
-        Path shardDirPath = getShardDirPath(shardMetadata.getIndexId(), shardMetadata.getShardId());
-        ensureS3LocalDirectoryExists(shardDirPath);
+            Path shardDirPath = getShardDirPath(shardMetadata.getIndexId(), shardMetadata.getShardId());
+            ensureS3LocalDirectoryExists(shardDirPath);
 
-        String blobFilesS3Prefix = s3RepoUri.key
-            + "indices/"
-            + shardMetadata.getIndexId()
-            + "/"
-            + shardMetadata.getShardId()
-            + "/";
+            String blobFilesS3Prefix = s3RepoUri.key
+                + INDICES_PREFIX_STR
+                + shardMetadata.getIndexId()
+                + "/"
+                + shardMetadata.getShardId()
+                + "/";
 
-        logger.info(
-            "Downloading blob files from S3: s3://%s/%s to %s",
-            s3RepoUri.bucketName,
-            blobFilesS3Prefix,
-            shardDirPath
-        );
-        DirectoryDownload directoryDownload = transferManager.downloadDirectory(
-            DownloadDirectoryRequest.builder()
-                .destination(shardDirPath)
-                .bucket(s3RepoUri.bucketName)
-                .listObjectsV2RequestTransformer(l -> l.prefix(blobFilesS3Prefix))
-                .build()
-        );
+            log.atInfo().setMessage("Downloading blob files from S3: s3://%s/%s to %s")
+                .addArgument(s3RepoUri.bucketName)
+                .addArgument(blobFilesS3Prefix)
+                .addArgument(shardDirPath).log();
+            DirectoryDownload directoryDownload = transferManager.downloadDirectory(
+                DownloadDirectoryRequest.builder()
+                    .destination(shardDirPath)
+                    .bucket(s3RepoUri.bucketName)
+                    .listObjectsV2RequestTransformer(l -> l.prefix(blobFilesS3Prefix))
+                    .build()
+            );
 
-        // Wait for the transfer to complete
-        CompletedDirectoryDownload completedDirectoryDownload = directoryDownload.completionFuture().join();
+            // Wait for the transfer to complete
+            CompletedDirectoryDownload completedDirectoryDownload = directoryDownload.completionFuture().join();
 
-        logger.info("Blob file download(s) complete");
+            log.atInfo().setMessage(()->"Blob file download(s) complete").log();
 
-        // Print out any failed downloads
-        completedDirectoryDownload.failedTransfers().forEach(logger::error);
+            // Print out any failed downloads
+            completedDirectoryDownload.failedTransfers().forEach(x->log.error("{}", x));
+        }
     }
 
     public static class CannotFindSnapshotRepoRoot extends RfsException {

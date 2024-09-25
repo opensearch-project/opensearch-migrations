@@ -38,13 +38,12 @@ public class SnapshotRepoProvider_ES_7_10 implements SnapshotRepo.Provider {
             .orElse(null);
 
         if (targetSnapshot != null) {
-            targetSnapshot.getIndexMetadataLookup().keySet().forEach(indexId -> {
+            targetSnapshot.getIndexMetadataLookup().keySet().forEach(indexId ->
                 getRepoData().getIndices().forEach((indexName, rawIndex) -> {
                     if (indexId.equals(rawIndex.getId())) {
                         matchedIndices.add(SnapshotRepoData_ES_7_10.Index.fromRawIndex(indexName, rawIndex));
                     }
-                });
-            });
+                }));
         }
         return matchedIndices;
     }

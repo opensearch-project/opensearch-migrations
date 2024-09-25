@@ -12,11 +12,9 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.NonNull;
 
-public class WorkCoordinationContexts extends IWorkCoordinationContexts {
-    private WorkCoordinationContexts() {}
-
+public interface WorkCoordinationContexts extends IWorkCoordinationContexts {
     @AllArgsConstructor
-    public static class RetryLabels {
+    class RetryLabels {
         CommonScopedMetricInstruments.ScopeLabels scopeLabels;
         public final String retry;
         public final String failure;
@@ -30,7 +28,7 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
         );
     }
 
-    public static class RetryMetricInstruments extends CommonScopedMetricInstruments {
+    class RetryMetricInstruments extends CommonScopedMetricInstruments {
         public final LongCounter retryCounter;
         public final LongCounter failureCounter;
 
@@ -41,7 +39,7 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
         }
     }
 
-    public interface RetryableActivityContextMetricMixin<T extends RetryMetricInstruments>
+    interface RetryableActivityContextMetricMixin<T extends RetryMetricInstruments>
         extends
             IRetryableActivityContext {
         T getRetryMetrics();
@@ -60,7 +58,7 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     }
 
     @Getter
-    public static class InitializeCoordinatorStateContext extends BaseSpanContext<RootWorkCoordinationContext>
+    class InitializeCoordinatorStateContext extends BaseSpanContext<RootWorkCoordinationContext>
         implements
             IInitializeCoordinatorStateContext,
             RetryableActivityContextMetricMixin<InitializeCoordinatorStateContext.MetricInstruments> {
@@ -101,7 +99,7 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     }
 
     @Getter
-    public static class CreateUnassignedWorkItemContext extends BaseSpanContext<RootWorkCoordinationContext>
+    class CreateUnassignedWorkItemContext extends BaseSpanContext<RootWorkCoordinationContext>
         implements
             ICreateUnassignedWorkItemContext,
             RetryableActivityContextMetricMixin<CreateUnassignedWorkItemContext.MetricInstruments> {
@@ -138,7 +136,7 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     }
 
     @Getter
-    public static class PendingItems extends BaseSpanContext<RootWorkCoordinationContext>
+    class PendingItems extends BaseSpanContext<RootWorkCoordinationContext>
         implements
             IPendingWorkItemsContext {
         final IScopedInstrumentationAttributes enclosingScope;
@@ -180,7 +178,7 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     }
 
     @Getter
-    public static class Refresh extends BaseSpanContext<RootWorkCoordinationContext>
+    class Refresh extends BaseSpanContext<RootWorkCoordinationContext>
         implements
             IRefreshContext,
             RetryableActivityContextMetricMixin<Refresh.MetricInstruments> {
@@ -217,7 +215,7 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     }
 
     @Getter
-    public static class AcquireSpecificWorkContext extends BaseSpanContext<RootWorkCoordinationContext>
+    class AcquireSpecificWorkContext extends BaseSpanContext<RootWorkCoordinationContext>
         implements
             IAcquireSpecificWorkContext,
             RetryableActivityContextMetricMixin<AcquireSpecificWorkContext.MetricInstruments> {
@@ -254,7 +252,7 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     }
 
     @Getter
-    public static class AcquireNextWorkItemContext extends BaseSpanContext<RootWorkCoordinationContext>
+    class AcquireNextWorkItemContext extends BaseSpanContext<RootWorkCoordinationContext>
         implements
             IAcquireNextWorkItemContext,
             RetryableActivityContextMetricMixin<AcquireNextWorkItemContext.MetricInstruments> {
@@ -326,7 +324,7 @@ public class WorkCoordinationContexts extends IWorkCoordinationContexts {
     }
 
     @Getter
-    public static class CompleteWorkItemContext extends BaseSpanContext<RootWorkCoordinationContext>
+    class CompleteWorkItemContext extends BaseSpanContext<RootWorkCoordinationContext>
         implements
             ICompleteWorkItemContext,
             RetryableActivityContextMetricMixin<CompleteWorkItemContext.MetricInstruments> {

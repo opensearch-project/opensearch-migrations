@@ -32,23 +32,26 @@ public class OpenSearchClient {
 
     protected static final ObjectMapper objectMapper = new ObjectMapper();
 
-    private static final int defaultMaxRetryAttempts = 3;
-    private static final Duration defaultBackoff = Duration.ofSeconds(1);
-    private static final Duration defaultMaxBackoff = Duration.ofSeconds(10);
-    private static final Retry snapshotRetryStrategy = Retry.backoff(defaultMaxRetryAttempts, defaultBackoff)
-        .maxBackoff(defaultMaxBackoff);
-    protected static final Retry checkIfItemExistsRetryStrategy = Retry.backoff(defaultMaxRetryAttempts, defaultBackoff)
-        .maxBackoff(defaultMaxBackoff);
-    private static final Retry createItemExistsRetryStrategy = Retry.backoff(defaultMaxRetryAttempts, defaultBackoff)
-        .maxBackoff(defaultMaxBackoff)
-        .filter(throwable -> !(throwable instanceof InvalidResponse)); // Do not retry on this exception
+    private static final int DEFAULT_MAX_RETRY_ATTEMPTS = 3;
+    private static final Duration DEFAULT_BACKOFF = Duration.ofSeconds(1);
+    private static final Duration DEFAULT_MAX_BACKOFF = Duration.ofSeconds(10);
+    private static final Retry SNAPSHOT_RETRY_STRATEGY = Retry.backoff(DEFAULT_MAX_RETRY_ATTEMPTS, DEFAULT_BACKOFF)
+        .maxBackoff(DEFAULT_MAX_BACKOFF);
+    protected static final Retry CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY =
+        Retry.backoff(DEFAULT_MAX_RETRY_ATTEMPTS, DEFAULT_BACKOFF)
+            .maxBackoff(DEFAULT_MAX_BACKOFF);
+    private static final Retry CREATE_ITEM_EXISTS_RETRY_STRATEGY =
+        Retry.backoff(DEFAULT_MAX_RETRY_ATTEMPTS, DEFAULT_BACKOFF)
+            .maxBackoff(DEFAULT_MAX_BACKOFF)
+            .filter(throwable -> !(throwable instanceof InvalidResponse)); // Do not retry on this exception
 
-    private static final int bulkMaxRetryAttempts = 15;
-    private static final Duration bulkBackoff = Duration.ofSeconds(2);
-    private static final Duration bulkMaxBackoff = Duration.ofSeconds(60);
+    private static final int BULK_MAX_RETRY_ATTEMPTS = 15;
+    private static final Duration BULK_BACKOFF = Duration.ofSeconds(2);
+    private static final Duration BULK_MAX_BACKOFF = Duration.ofSeconds(60);
     /** Retries for up 10 minutes */
-    private static final Retry bulkRetryStrategy = Retry.backoff(bulkMaxRetryAttempts, bulkBackoff)
-        .maxBackoff(bulkMaxBackoff);
+    private static final Retry BULK_RETRY_STRATEGY = Retry.backoff(BULK_MAX_RETRY_ATTEMPTS, BULK_BACKOFF)
+        .maxBackoff(BULK_MAX_BACKOFF);
+    public static final String SNAPSHOT_PREFIX_STR = "_snapshot/";
 
     static {
         objectMapper.configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
@@ -76,7 +79,7 @@ public class OpenSearchClient {
                 }
             })
             .doOnError(e -> log.error(e.getMessage()))
-            .retryWhen(checkIfItemExistsRetryStrategy)
+            .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
             .block();
     }
 
@@ -198,19 +201,12 @@ public class OpenSearchClient {
                         new InvalidResponse("Create object failed for " + objectPath + "\r\n" + resp.body, resp)
                     );
                 } else {
-                    String errorMessage = ("Could not create object: "
-                        + objectPath
-                        + ". Response Code: "
-                        + resp.statusCode
-                        + ", Response Message: "
-                        + resp.statusText
-                        + ", Response Body: "
-                        + resp.body);
+                    String errorMessage = "Could not create object: " + objectPath + ". " + getString(resp);
                     return Mono.error(new OperationFailed(errorMessage, resp));
                 }
             })
                 .doOnError(e -> log.error(e.getMessage()))
-                .retryWhen(createItemExistsRetryStrategy)
+                .retryWhen(CREATE_ITEM_EXISTS_RETRY_STRATEGY)
                 .block();
 
             return Optional.of(settings);
@@ -221,35 +217,39 @@ public class OpenSearchClient {
         return Optional.empty();
     }
 
+    private static String getString(HttpResponse resp) {
+        return "Response Code: "
+            + resp.statusCode
+            + ", Response Message: "
+            + resp.statusText
+            + ", Response Body: "
+            + resp.body;
+    }
+
     private boolean hasObjectCheck(
         String objectPath,
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
         var requestContext = Optional.ofNullable(context)
-            .map(c -> c.createCheckRequestContext())
+            .map(IRfsContexts.ICheckedIdempotentPutRequestContext::createCheckRequestContext)
             .orElse(null);
         var getResponse = client.getAsync(objectPath, requestContext)
             .flatMap(resp -> {
-                if (resp.statusCode == HttpURLConnection.HTTP_NOT_FOUND || resp.statusCode == HttpURLConnection.HTTP_OK) {
+                if (resp.statusCode == HttpURLConnection.HTTP_NOT_FOUND ||
+                    resp.statusCode == HttpURLConnection.HTTP_OK)
+                {
                     return Mono.just(resp);
                 } else {
-                    String errorMessage = ("Could not create object: "
-                        + objectPath
-                        + ". Response Code: "
-                        + resp.statusCode
-                        + ", Response Message: "
-                        + resp.statusText
-                        + ", Response Body: "
-                        + resp.body);
+                    String errorMessage = "Could not create object: " + objectPath + ". " + getString(resp);
                     return Mono.error(new OperationFailed(errorMessage, resp));
                 }
             })
             .doOnError(e -> log.error(e.getMessage()))
-            .retryWhen(checkIfItemExistsRetryStrategy)
+            .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
             .block();
 
-        assert getResponse != null : ("getResponse should not be null; it should either be a valid response or an exception"
-            + " should have been thrown.");
+        assert getResponse != null : ("getResponse should not be null; it should either be a valid response or " +
+            "an exception should have been thrown.");
         return getResponse.statusCode == HttpURLConnection.HTTP_OK;
     }
 
@@ -261,24 +261,17 @@ public class OpenSearchClient {
         ObjectNode settings,
         IRfsContexts.ICreateSnapshotContext context
     ) {
-        String targetPath = "_snapshot/" + repoName;
+        String targetPath = SNAPSHOT_PREFIX_STR + repoName;
         client.putAsync(targetPath, settings.toString(), context.createRegisterRequest()).flatMap(resp -> {
             if (resp.statusCode == HttpURLConnection.HTTP_OK) {
                 return Mono.just(resp);
             } else {
-                String errorMessage = ("Could not register snapshot repo: "
-                    + targetPath
-                    + ". Response Code: "
-                    + resp.statusCode
-                    + ", Response Message: "
-                    + resp.statusText
-                    + ", Response Body: "
-                    + resp.body);
+                String errorMessage = "Could not register snapshot repo: " + targetPath + ". " + getString(resp);
                 return Mono.error(new OperationFailed(errorMessage, resp));
             }
         })
             .doOnError(e -> log.error(e.getMessage()))
-            .retryWhen(snapshotRetryStrategy)
+            .retryWhen(SNAPSHOT_RETRY_STRATEGY)
             .block();
     }
 
@@ -291,24 +284,17 @@ public class OpenSearchClient {
         ObjectNode settings,
         IRfsContexts.ICreateSnapshotContext context
     ) {
-        String targetPath = "_snapshot/" + repoName + "/" + snapshotName;
+        String targetPath = SNAPSHOT_PREFIX_STR + repoName + "/" + snapshotName;
         client.putAsync(targetPath, settings.toString(), context.createSnapshotContext()).flatMap(resp -> {
             if (resp.statusCode == HttpURLConnection.HTTP_OK) {
                 return Mono.just(resp);
             } else {
-                String errorMessage = ("Could not create snapshot: "
-                    + targetPath
-                    + ". Response Code: "
-                    + resp.statusCode
-                    + ", Response Message: "
-                    + resp.statusText
-                    + ", Response Body: "
-                    + resp.body);
+                String errorMessage = "Could not create snapshot: " + targetPath + "." + getString(resp);
                 return Mono.error(new OperationFailed(errorMessage, resp));
             }
         })
             .doOnError(e -> log.error(e.getMessage()))
-            .retryWhen(snapshotRetryStrategy)
+            .retryWhen(SNAPSHOT_RETRY_STRATEGY)
             .block();
     }
 
@@ -321,7 +307,7 @@ public class OpenSearchClient {
         String snapshotName,
         IRfsContexts.ICreateSnapshotContext context
     ) {
-        String targetPath = "_snapshot/" + repoName + "/" + snapshotName;
+        String targetPath = SNAPSHOT_PREFIX_STR + repoName + "/" + snapshotName;
         var getResponse = client.getAsync(targetPath, context.createGetSnapshotContext()).flatMap(resp -> {
             if (resp.statusCode == HttpURLConnection.HTTP_OK || resp.statusCode == HttpURLConnection.HTTP_NOT_FOUND) {
                 return Mono.just(resp);
@@ -336,11 +322,11 @@ public class OpenSearchClient {
             }
         })
             .doOnError(e -> log.error(e.getMessage()))
-            .retryWhen(snapshotRetryStrategy)
+            .retryWhen(SNAPSHOT_RETRY_STRATEGY)
             .block();
 
-        assert getResponse != null : ("getResponse should not be null; it should either be a valid response or an exception"
-            + " should have been thrown.");
+        assert getResponse != null : ("getResponse should not be null; it should either be a valid response or an "
+            + "exception should have been thrown.");
         if (getResponse.statusCode == HttpURLConnection.HTTP_OK) {
             try {
                 return Optional.of(objectMapper.readValue(getResponse.body, ObjectNode.class));
@@ -360,10 +346,12 @@ public class OpenSearchClient {
     }
 
     Retry getBulkRetryStrategy() {
-        return bulkRetryStrategy;
+        return BULK_RETRY_STRATEGY;
     }
 
-    public Mono<BulkResponse> sendBulkRequest(String indexName, List<DocumentReindexer.BulkDocSection> docs, IRfsContexts.IRequestContext context) {
+    public Mono<BulkResponse> sendBulkRequest(String indexName, List<DocumentReindexer.BulkDocSection> docs,
+                                              IRfsContexts.IRequestContext context)
+    {
         final var docsMap = docs.stream().collect(Collectors.toMap(d -> d.getDocId(), d -> d));
         return Mono.defer(() -> {
             final String targetPath = indexName + "/_bulk";
@@ -380,7 +368,8 @@ public class OpenSearchClient {
             }
             return client.postAsync(targetPath, body, additionalHeaders, context)
                 .flatMap(response -> {
-                    var resp = new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
+                    var resp =
+                        new BulkResponse(response.statusCode, response.statusText, response.headers, response.body);
                     if (!resp.hasBadStatusCode() && !resp.hasFailedOperations()) {
                         return Mono.just(resp);
                     }
@@ -462,7 +451,7 @@ public class OpenSearchClient {
     }
 
     public static class OperationFailed extends RfsException {
-        public final HttpResponse response;
+        public final transient HttpResponse response;
 
         public OperationFailed(String message, HttpResponse response) {
             super(message +"\nBody:\n" + response);

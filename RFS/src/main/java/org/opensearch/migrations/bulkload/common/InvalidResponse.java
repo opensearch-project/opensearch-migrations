@@ -17,9 +17,9 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class InvalidResponse extends RfsException {
-    private static final Pattern unknownSetting = Pattern.compile("unknown setting \\[(.+?)\\].+");
+    private static final Pattern UNKNOWN_SETTING = Pattern.compile("unknown setting \\[(.+?)\\].+");
     private static final ObjectMapper objectMapper = new ObjectMapper();
-    private final HttpResponse response;
+    private final transient HttpResponse response;
 
     public InvalidResponse(String message, HttpResponse response) {
         super(message);
@@ -41,22 +41,18 @@ public class InvalidResponse extends RfsException {
             errorBody.map(InvalidResponse::getUnknownSetting).ifPresent(interimResults::add);
 
             // Check root cause errors
-            errorBody.map(node -> node.get("root_cause")).ifPresent(nodes -> {
+            errorBody.map(node -> node.get("root_cause")).ifPresent(nodes ->
                 nodes.forEach(
-                    node -> {
-                        Optional.of(node).map(InvalidResponse::getUnknownSetting).ifPresent(interimResults::add);
-                    }
-                );
-            });
+                    node -> Optional.of(node).map(InvalidResponse::getUnknownSetting).ifPresent(interimResults::add)
+                )
+            );
 
             // Check all suppressed errors
-            errorBody.map(node -> node.get("suppressed")).ifPresent(nodes -> {
+            errorBody.map(node -> node.get("suppressed")).ifPresent(nodes ->
                 nodes.forEach(
-                    node -> {
-                        Optional.of(node).map(InvalidResponse::getUnknownSetting).ifPresent(interimResults::add);
-                    }
-                );
-            });
+                    node ->
+                        Optional.of(node).map(InvalidResponse::getUnknownSetting).ifPresent(interimResults::add)
+                ));
 
             var onlyExpectedErrors = interimResults.stream()
                 .map(Entry::getKey)
@@ -82,7 +78,7 @@ public class InvalidResponse extends RfsException {
             }
             return Map.entry(typeNode, reasonNode);
         }).map(entry -> {
-            var matcher = unknownSetting.matcher(entry.getValue().asText());
+            var matcher = UNKNOWN_SETTING.matcher(entry.getValue().asText());
             if (!matcher.matches()) {
                 return null;
             }
