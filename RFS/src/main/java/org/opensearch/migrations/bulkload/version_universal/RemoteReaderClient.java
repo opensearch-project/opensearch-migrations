@@ -10,6 +10,7 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 
+import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
@@ -40,7 +41,8 @@ public class RemoteReaderClient extends OpenSearchClient {
             )
             .collectMap(Entry::getKey, Entry::getValue)
             .block();
-    
+
+        assert responses != null;
         var globalMetadata = globalMetadataFromParts(responses);
         log.atDebug()
             .setMessage("Combined global metadata:\n{}")
@@ -49,11 +51,11 @@ public class RemoteReaderClient extends OpenSearchClient {
         return globalMetadata;
     }
     
-    private ObjectNode globalMetadataFromParts(Map<String, ObjectNode> templatesDetails) {
+    private ObjectNode globalMetadataFromParts(@NonNull Map<String, ObjectNode> templatesDetails) {
         var rootNode = objectMapper.createObjectNode();
     
         templatesDetails.forEach((name, json) -> {
-            if (json != null && json.size() != 0) {
+            if (json != null && !json.isEmpty()) {
                 var inner = objectMapper.createObjectNode().set(name, json);
                 rootNode.set(name, inner);
             }

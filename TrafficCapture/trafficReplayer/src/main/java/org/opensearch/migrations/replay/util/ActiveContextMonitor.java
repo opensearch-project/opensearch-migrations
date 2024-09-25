@@ -382,7 +382,8 @@ public class ActiveContextMonitor implements Runnable {
                 }
                 if (numOutput++ == 0) {
                     logger.accept(
-                        getHigherLevel(levelForElementOp, Optional.of(Level.INFO)).get(),
+                        getHigherLevel(levelForElementOp, Optional.of(Level.INFO))
+                            .orElseThrow(IllegalStateException::new),
                         () -> "Oldest of " + totalItems + trailingGroupLabel
                     );
                 }
