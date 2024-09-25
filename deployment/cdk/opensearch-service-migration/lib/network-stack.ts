@@ -1,4 +1,6 @@
 import {
+    GatewayVpcEndpointAwsService,
+    InterfaceVpcEndpointAwsService,
     IpAddresses, IVpc, Port, SecurityGroup,
     SubnetType,
     Vpc
@@ -11,8 +13,9 @@ import { ARecord, HostedZone, RecordTarget } from "aws-cdk-lib/aws-route53";
 import { LoadBalancerTarget } from "aws-cdk-lib/aws-route53-targets";
 import { AcmCertificateImporter } from "./service-stacks/acm-cert-importer";
 import { Stack } from "aws-cdk-lib";
-import { createMigrationStringParameter, getMigrationStringParameterName, MigrationSSMParameter } from "./common-utilities";
+import { createMigrationStringParameter, getMigrationStringParameterName, isStackInGovCloud, MigrationSSMParameter } from "./common-utilities";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
+import { GatewayVpcEndpoint, InterfaceVpcEndpoint } from "aws-cdk-lib/aws-ec2";
 
 export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string;
@@ -78,6 +81,43 @@ export class NetworkStack extends Stack {
         }
     }
 
+    private createVpcEndpoints(vpc: IVpc) {
+        // Gateway endpoints
+        new GatewayVpcEndpoint(this, 'S3VpcEndpoint', {
+            service: GatewayVpcEndpointAwsService.S3,
+            vpc: vpc,
+        });
+
+        // Interface endpoints
+        const createInterfaceVpcEndpoint = (service: InterfaceVpcEndpointAwsService) => {
+            new InterfaceVpcEndpoint(this, `${service.shortName}VpcEndpoint`, {
+                service: service,
+                vpc: vpc,
+            });
+        };
+
+        // General interface endpoints
+        const interfaceEndpoints = [
+            InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS, // Push Logs from tasks
+            InterfaceVpcEndpointAwsService.CLOUDWATCH_MONITORING, // Pull Metrics from Migration Console 
+            InterfaceVpcEndpointAwsService.ECR_DOCKER, // Pull Images on Startup
+            InterfaceVpcEndpointAwsService.ECR, // List Images on Startup
+            InterfaceVpcEndpointAwsService.ECS_AGENT, // Task Container Metrics
+            InterfaceVpcEndpointAwsService.ECS_TELEMETRY, // Task Container Metrics
+            InterfaceVpcEndpointAwsService.ECS, // ECS Task Control
+            InterfaceVpcEndpointAwsService.ELASTIC_LOAD_BALANCING, // Control ALB
+            InterfaceVpcEndpointAwsService.SECRETS_MANAGER, // Cluster Password Secret
+            InterfaceVpcEndpointAwsService.SSM_MESSAGES, // Session Manager
+            InterfaceVpcEndpointAwsService.SSM, // Parameter Store
+            InterfaceVpcEndpointAwsService.XRAY, // X-Ray Traces
+            isStackInGovCloud(this) ?
+                InterfaceVpcEndpointAwsService.ELASTIC_FILESYSTEM_FIPS : // EFS Control Plane GovCloud
+                InterfaceVpcEndpointAwsService.ELASTIC_FILESYSTEM, // EFS Control Plane 
+
+        ];
+        interfaceEndpoints.forEach(service => createInterfaceVpcEndpoint(service));
+    }
+
     constructor(scope: Construct, id: string, props: NetworkStackProps) {
         super(scope, id, props);
 
@@ -126,7 +166,10 @@ export class NetworkStack extends Stack {
                         cidrMask: 24,
                     },
                 ],
+                natGateways: 0,
             });
+            // Only create interface endpoints if VPC not imported
+            this.createVpcEndpoints(this.vpc);
         }
         this.validateVPC(this.vpc)
         if(!props.addOnMigrationDeployId) {
@@ -266,7 +309,7 @@ export class NetworkStack extends Stack {
     }
 
     getSecureListenerSslPolicy() {
-        return (this.partition === "aws-us-gov") ? SslPolicy.FIPS_TLS13_12_EXT2 : SslPolicy.RECOMMENDED_TLS
+        return isStackInGovCloud(this) ? SslPolicy.FIPS_TLS13_12_EXT2 : SslPolicy.RECOMMENDED_TLS
     }
 
     createSecureListener(serviceName: string, listeningPort: number, alb: IApplicationLoadBalancer, cert: ICertificate, albTargetGroup?: IApplicationTargetGroup) {

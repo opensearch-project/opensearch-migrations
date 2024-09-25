@@ -1,7 +1,7 @@
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {Construct} from "constructs";
 import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
-import {RemovalPolicy} from "aws-cdk-lib";
+import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
 import * as forge from 'node-forge';
 import * as yargs from 'yargs';
@@ -420,4 +420,12 @@ export function parseClusterDefinition(json: any): ClusterYaml {
         throw new Error(`Invalid auth type when parsing cluster definition: ${json.auth.type}`)
     }
     return new ClusterYaml({endpoint, version, auth})
+}
+
+export function isStackInGovCloud(stack: Stack): boolean {
+        return isRegionGovCloud(stack.region);
+}
+
+export function isRegionGovCloud(region: string): boolean {
+    return region.startsWith('us-gov-');
 }
