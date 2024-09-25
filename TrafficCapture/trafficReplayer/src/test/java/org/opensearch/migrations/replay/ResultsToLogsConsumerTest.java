@@ -41,7 +41,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     private static final ObjectMapper mapper = new ObjectMapper();
     public static final String TEST_EXCEPTION_MESSAGE = "TEST_EXCEPTION";
 
-    public final static String EXPECTED_RESPONSE_STRING = "HTTP/1.1 200 OK\r\n"
+    public static final String EXPECTED_RESPONSE_STRING = "HTTP/1.1 200 OK\r\n"
         + "Content-transfer-encoding: chunked\r\n"
         + "Date: Thu, 08 Jun 2023 23:06:23 GMT\r\n"
         + // This should be OK since it's always the same length

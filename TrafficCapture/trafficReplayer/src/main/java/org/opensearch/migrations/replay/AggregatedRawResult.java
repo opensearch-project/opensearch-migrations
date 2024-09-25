@@ -53,7 +53,7 @@ public class AggregatedRawResult {
         }
 
         public B addResponsePacket(byte[] packet) {
-            return (B) addResponsePacket(packet, Instant.now());
+            return addResponsePacket(packet, Instant.now());
         }
 
         public B addResponsePacket(byte[] packet, Instant timestamp) {

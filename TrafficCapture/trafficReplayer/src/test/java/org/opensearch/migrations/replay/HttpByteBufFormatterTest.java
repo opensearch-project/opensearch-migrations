@@ -29,13 +29,13 @@ public class HttpByteBufFormatterTest {
         CountingNettyResourceLeakDetector.activate();
     }
 
-    final static String SAMPLE_REQUEST_STRING = "GET / HTTP/1.1\r\n"
+    static final String SAMPLE_REQUEST_STRING = "GET / HTTP/1.1\r\n"
         + "Host: localhost\r\n"
         + "Connection: Keep-Alive\r\n"
         + "User-Agent: UnitTest\r\n"
         + "\r\n";
 
-    final static String SAMPLE_REQUEST_AS_BLOCKS = "[G],[E],[T],[ ],[/],[ ],[H],[T],[T],[P],[/],[1],[.],[1],"
+    static final String SAMPLE_REQUEST_AS_BLOCKS = "[G],[E],[T],[ ],[/],[ ],[H],[T],[T],[P],[/],[1],[.],[1],"
         + "[\r],[\n],"
         + "[H],[o],[s],[t],[:],[ ],[l],[o],[c],[a],[l],[h],[o],[s],[t],"
         + "[\r],[\n],"
@@ -45,13 +45,13 @@ public class HttpByteBufFormatterTest {
         + "[\r],[\n],"
         + "[\r],[\n]";
 
-    final static String SAMPLE_REQUEST_AS_PARSED_HTTP = "GET / HTTP/1.1\r\n"
+    static final String SAMPLE_REQUEST_AS_PARSED_HTTP = "GET / HTTP/1.1\r\n"
         + "Host: localhost\r\n"
         + "Connection: Keep-Alive\r\n"
         + "User-Agent: UnitTest\r\n"
         + "\r\n";
 
-    final static String SAMPLE_REQUEST_AS_PARSED_HTTP_SORTED = "GET / HTTP/1.1\r\n"
+    static final String SAMPLE_REQUEST_AS_PARSED_HTTP_SORTED = "GET / HTTP/1.1\r\n"
         + "Connection: Keep-Alive\r\n"
         + "Host: localhost\r\n"
         + "User-Agent: UnitTest\r\n"

@@ -177,4 +177,7 @@ public interface IWorkCoordinator extends AutoCloseable {
         }
     }
 
+    @Override
+    default void close() throws Exception {
+    }
 }

@@ -63,13 +63,13 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     public static final int LARGE_RESPONSE_CONTENT_LENGTH = 2 * 1024 * 1024;
     public static final int LARGE_RESPONSE_LENGTH = LARGE_RESPONSE_CONTENT_LENGTH + 107;
 
-    final static String EXPECTED_REQUEST_STRING = "GET / HTTP/1.1\r\n"
+    static final String EXPECTED_REQUEST_STRING = "GET / HTTP/1.1\r\n"
         + "Connection: Keep-Alive\r\n"
         + "Host: localhost\r\n"
         + "User-Agent: UnitTest\r\n"
         + "Connection: Keep-Alive\r\n"
         + "\r\n";
-    public final static String EXPECTED_RESPONSE_STRING = "HTTP/1.1 200 OK\r\n"
+    public static final String EXPECTED_RESPONSE_STRING = "HTTP/1.1 200 OK\r\n"
         + "Content-Type: text/plain\r\n"
         + "Funtime: checkIt!\r\n"
         + "transfer-encoding: chunked\r\n"

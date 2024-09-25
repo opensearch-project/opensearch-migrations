@@ -24,6 +24,8 @@ public class Utils {
     public static final int MAX_PAYLOAD_BYTES_TO_PRINT = 100 * 1024 * 1024; // 100MiB based on
                                                                             // https://docs.aws.amazon.com/opensearch-service/latest/developerguide/limits.html#network-limits
 
+    private Utils() {}
+
     public static Instant setIfLater(AtomicReference<Instant> referenceValue, Instant pointInTime) {
         return referenceValue.updateAndGet(
             existingInstant -> existingInstant.isBefore(pointInTime) ? pointInTime : existingInstant

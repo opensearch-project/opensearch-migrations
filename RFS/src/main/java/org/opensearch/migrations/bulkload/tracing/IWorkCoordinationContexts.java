@@ -3,9 +3,9 @@ package org.opensearch.migrations.bulkload.tracing;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
-public abstract class IWorkCoordinationContexts {
+public interface IWorkCoordinationContexts {
 
-    public static class ActivityNames {
+    class ActivityNames {
         public static final String COORDINATION_INITIALIZATION = "workCoordinationInitialization";
         public static final String CREATE_UNASSIGNED_WORK_ITEM = "createUnassignedWork";
         public static final String PENDING_WORK_CHECK = "pendingWorkCheck";
@@ -17,7 +17,7 @@ public abstract class IWorkCoordinationContexts {
         private ActivityNames() {}
     }
 
-    public static class MetricNames {
+    class MetricNames {
         public static final String NEXT_WORK_ASSIGNED = "nextWorkAssignedCount";
         public static final String NO_NEXT_WORK_AVAILABLE = "noNextWorkAvailableCount";
         public static final String RECOVERABLE_CLOCK_ERROR = "recoverableClockErrorCount";
@@ -26,37 +26,37 @@ public abstract class IWorkCoordinationContexts {
         private MetricNames() {}
     }
 
-    public interface IRetryableActivityContext extends IScopedInstrumentationAttributes {
+    interface IRetryableActivityContext extends IScopedInstrumentationAttributes {
         void recordRetry();
 
         void recordFailure();
     }
 
-    public interface IInitializeCoordinatorStateContext extends IRetryableActivityContext {
+    interface IInitializeCoordinatorStateContext extends IRetryableActivityContext {
         String ACTIVITY_NAME = ActivityNames.COORDINATION_INITIALIZATION;
     }
 
-    public interface ICreateUnassignedWorkItemContext extends IRetryableActivityContext {
+    interface ICreateUnassignedWorkItemContext extends IRetryableActivityContext {
         String ACTIVITY_NAME = ActivityNames.CREATE_UNASSIGNED_WORK_ITEM;
     }
 
-    public interface IPendingWorkItemsContext extends IScopedInstrumentationAttributes {
+    interface IPendingWorkItemsContext extends IScopedInstrumentationAttributes {
         String ACTIVITY_NAME = ActivityNames.PENDING_WORK_CHECK;
 
         IRefreshContext getRefreshContext();
     }
 
-    public interface IRefreshContext extends IRetryableActivityContext {
+    interface IRefreshContext extends IRetryableActivityContext {
         String ACTIVITY_NAME = ActivityNames.SYNC_REFRESH_CLUSTER;
     }
 
-    public interface IBaseAcquireWorkContext extends IRetryableActivityContext {}
+    interface IBaseAcquireWorkContext extends IRetryableActivityContext {}
 
-    public interface IAcquireSpecificWorkContext extends IBaseAcquireWorkContext {
+    interface IAcquireSpecificWorkContext extends IBaseAcquireWorkContext {
         String ACTIVITY_NAME = ActivityNames.ACQUIRE_SPECIFIC_WORK;
     }
 
-    public interface IAcquireNextWorkItemContext extends IBaseAcquireWorkContext {
+    interface IAcquireNextWorkItemContext extends IBaseAcquireWorkContext {
         String ACTIVITY_NAME = ActivityNames.ACQUIRE_NEXT_WORK;
 
         IRefreshContext getRefreshContext();
@@ -70,13 +70,13 @@ public abstract class IWorkCoordinationContexts {
         void recordFailure(OpenSearchWorkCoordinator.PotentialClockDriftDetectedException e);
     }
 
-    public interface ICompleteWorkItemContext extends IRetryableActivityContext {
+    interface ICompleteWorkItemContext extends IRetryableActivityContext {
         String ACTIVITY_NAME = ActivityNames.COMPLETE_WORK;
 
         IRefreshContext getRefreshContext();
     }
 
-    public interface IScopedWorkContext<C extends IBaseAcquireWorkContext> extends IScopedInstrumentationAttributes {
+    interface IScopedWorkContext<C extends IBaseAcquireWorkContext> extends IScopedInstrumentationAttributes {
         C createOpeningContext();
 
         ICompleteWorkItemContext createCloseContet();

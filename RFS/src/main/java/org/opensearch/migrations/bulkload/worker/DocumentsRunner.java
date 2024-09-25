@@ -49,7 +49,10 @@ public class DocumentsRunner {
             return workCoordinator.ensurePhaseCompletion(wc -> {
                 try {
                     return wc.acquireNextWorkItem(maxInitialLeaseDuration, context::createOpeningContext);
-                } catch (Exception e) {
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    throw Lombok.sneakyThrow(e);
+                } catch (IOException e) {
                     throw Lombok.sneakyThrow(e);
                 }
             }, new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<>() {

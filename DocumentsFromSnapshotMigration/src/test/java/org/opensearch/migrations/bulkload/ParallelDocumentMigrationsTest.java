@@ -34,10 +34,10 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class ParallelDocumentMigrationsTest extends SourceTestBase {
 
-    final static List<SearchClusterContainer.ContainerVersion> SOURCE_IMAGES = List.of(
+    static final List<SearchClusterContainer.ContainerVersion> SOURCE_IMAGES = List.of(
         SearchClusterContainer.ES_V7_10_2
     );
-    final static List<SearchClusterContainer.ContainerVersion> TARGET_IMAGES = List.of(SearchClusterContainer.OS_V2_14_0);
+    static final List<SearchClusterContainer.ContainerVersion> TARGET_IMAGES = List.of(SearchClusterContainer.OS_V2_14_0);
 
     public static Stream<Arguments> makeDocumentMigrationArgs() {
         List<Object[]> sourceImageArgs = SOURCE_IMAGES.stream()
