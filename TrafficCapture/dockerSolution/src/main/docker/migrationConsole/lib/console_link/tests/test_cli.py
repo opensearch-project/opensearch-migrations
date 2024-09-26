@@ -325,17 +325,30 @@ def test_cli_snapshot_status(runner, mocker):
     mock.assert_called_once()
 
 
-def test_cli_snapshot_delete(runner, mocker):
+def test_cli_snapshot_delete_with_acknowledgement(runner, mocker):
     mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
     mock.return_value.text = "Successfully deleted"
 
     # Test snapshot status
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'delete'],
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'delete', '--acknowledge-risk'],
                            catch_exceptions=True)
     assert result.exit_code == 0
 
     # Ensure the mocks were called
     mock.assert_called_once()
+
+
+def test_cli_snapshot_delete_without_acknowledgement_doesnt_run(runner, mocker):
+    mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
+    mock.return_value.text = "Successfully deleted"
+
+    # Test snapshot status
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'snapshot', 'delete'], input="n",
+                           catch_exceptions=True)
+    assert result.exit_code == 0
+
+    # Ensure the mocks were called
+    mock.assert_not_called()
 
 
 def test_cli_with_backfill_describe(runner, mocker):

@@ -178,9 +178,18 @@ def status_snapshot_cmd(ctx, deep_check):
 
 
 @snapshot_group.command(name="delete")
+@click.option("--acknowledge-risk", is_flag=True, show_default=True, default=False,
+              help="Flag to acknowledge risk and skip confirmation")
 @click.pass_obj
-def delete_snapshot_cmd(ctx):
+def delete_snapshot_cmd(ctx, acknowledge_risk: bool):
     """Delete the snapshot"""
+    if not acknowledge_risk:
+        confirmed = click.confirm('If you proceed with deleting the snapshot, the cluster will delete underlying local '
+                                  'and remote files associated with the snapshot. Are you sure you want to continue?')
+        if not confirmed:
+            click.echo("Aborting the command to delete snapshot.")
+            return
+    logger.info("Deleting snapshot")
     result = snapshot_.delete(ctx.env.snapshot)
     click.echo(result.value)
 
