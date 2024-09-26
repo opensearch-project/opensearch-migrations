@@ -176,6 +176,14 @@ def status_snapshot_cmd(ctx, deep_check):
     result = snapshot_.status(ctx.env.snapshot, deep_check=deep_check)
     click.echo(result.value)
 
+
+@snapshot_group.command(name="delete")
+@click.pass_obj
+def delete_snapshot_cmd(ctx):
+    """Delete the snapshot"""
+    result = snapshot_.delete(ctx.env.snapshot)
+    click.echo(result.value)
+
 # ##################### BACKFILL ###################
 
 # As we add other forms of backfill migrations, we should incorporate a way to dynamically allow different sets of
