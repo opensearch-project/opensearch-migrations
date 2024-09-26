@@ -1,6 +1,212 @@
 import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
-import {parseAndMergeArgs, parseClusterDefinition, validateFargateCpuArch} from "../lib/common-utilities";
+import {
+    parseClusterDefinition,
+    validateFargateCpuArch,
+    parseArgsToDict,
+    appendArgIfNotInExtraArgs
+} from "../lib/common-utilities";
 import {describe, test, expect} from '@jest/globals';
+
+describe('appendArgIfNotInExtraArgs', () => {
+
+    // Test when the arg is not present in extraArgsDict and has a value
+    test('appends arg and value when arg is not in extraArgsDict', () => {
+        const baseCommand = 'command';
+        const extraArgsDict = {
+            "--arg1": ["value1"]
+        };
+        const result = appendArgIfNotInExtraArgs(baseCommand, extraArgsDict, '--arg2', 'value2');
+        expect(result).toBe('command --arg2 value2');
+    });
+
+    // Test when the arg is not present in extraArgsDict and has no value
+    test('appends arg without value when arg is not in extraArgsDict', () => {
+        const baseCommand = 'command';
+        const extraArgsDict = {
+            "--arg1": ["value1"]
+        };
+        const result = appendArgIfNotInExtraArgs(baseCommand, extraArgsDict, '--flag');
+        expect(result).toBe('command --flag');
+    });
+
+    // Test when the arg is already present in extraArgsDict (should not append)
+    test('does not append arg and value when arg is in extraArgsDict', () => {
+        const baseCommand = 'command';
+        const extraArgsDict = {
+            "--arg1": ["value1"]
+        };
+        const result = appendArgIfNotInExtraArgs(baseCommand, extraArgsDict, '--arg1', 'value1');
+        expect(result).toBe('command');  // baseCommand should remain unchanged
+    });
+
+    // Test when extraArgsDict is empty (should append arg and value)
+    test('appends arg and value when extraArgsDict is empty', () => {
+        const baseCommand = 'command';
+        const extraArgsDict = {};
+        const result = appendArgIfNotInExtraArgs(baseCommand, extraArgsDict, '--arg1', 'value1');
+        expect(result).toBe('command --arg1 value1');
+    });
+
+    // Test when extraArgsDict is empty and arg has no value (should append only arg)
+    test('appends only arg when extraArgsDict is empty and value is null', () => {
+        const baseCommand = 'command';
+        const extraArgsDict = {};
+        const result = appendArgIfNotInExtraArgs(baseCommand, extraArgsDict, '--flag');
+        expect(result).toBe('command --flag');
+    });
+});
+
+describe('parseArgsToDict', () => {
+
+    // Test valid input with multiple arguments
+    test('parses valid input with multiple arguments', () => {
+        const input = "--valid-arg some value --another-arg more values";
+        const expectedOutput = {
+            "--valid-arg": ["some value"],
+            "--another-arg": ["more values"]
+        };
+        expect(parseArgsToDict(input)).toEqual(expectedOutput);
+    });
+
+    // Test valid input with special characters in values
+    test('parses arguments with special characters in values', () => {
+        const input = "--valid-arg some!@--#$%^&*() value --another-arg value with spaces";
+        const expectedOutput = {
+            "--valid-arg": ["some!@--#$%^&*() value"],
+            "--another-arg": ["value with spaces"]
+        };
+        expect(parseArgsToDict(input)).toEqual(expectedOutput);
+    });
+
+    // Test when there are multiple spaces between argument and value
+    test('parses input with multiple spaces between argument and value', () => {
+        const input = "--valid-arg    some value with spaces --another-arg   more   spaces";
+        const expectedOutput = {
+            "--valid-arg": ["some value with spaces"],
+            "--another-arg": ["more   spaces"]
+        };
+        expect(parseArgsToDict(input)).toEqual(expectedOutput);
+    });
+
+    // Test input with no value after an argument
+    test('handles argument with no value', () => {
+        const input = "--valid-arg --another-arg some value";
+        const expectedOutput = {
+            "--valid-arg": [""],
+            "--another-arg": ["some value"]
+        };
+        expect(parseArgsToDict(input)).toEqual(expectedOutput);
+    });
+
+    // Test input with argument at the start of the string
+    test('parses input with argument at the start of the string', () => {
+        const input = "--valid-arg start value --another-arg after value";
+        const expectedOutput = {
+            "--valid-arg": ["start value"],
+            "--another-arg": ["after value"]
+        };
+        expect(parseArgsToDict(input)).toEqual(expectedOutput);
+    });
+
+    // Test input with argument preceded by spaces
+    test('parses input where arguments are preceded by spaces', () => {
+        const input = "   --valid-arg start value  --another-arg after value";
+        const expectedOutput = {
+            "--valid-arg": ["start value"],
+            "--another-arg": ["after value"]
+        };
+        expect(parseArgsToDict(input)).toEqual(expectedOutput);
+    });
+
+    // Test input with empty string
+    test('returns empty object for empty input', () => {
+        const input = "";
+        const expectedOutput = {};
+        expect(parseArgsToDict(input)).toEqual(expectedOutput);
+    });
+
+    // Test input with argument --
+    test('throws error for argument --', () => {
+        const input = "-- invalid arg some value";
+        expect(() => parseArgsToDict(input)).toThrow("Invalid argument key: '--'. Argument keys must start with '--' and contain no spaces.");
+    });
+
+    // Test input with missing argument flag
+    test('throws error for missing argument flag', () => {
+        const input = "valid-arg some value";
+        expect(() => parseArgsToDict(input)).toThrow("Invalid argument key: 'valid-arg'. Argument keys must start with '--' and contain no spaces.");
+    });
+
+    // Test valid input with multiple special characters and whitespace
+    test('handles multiple spaces and special characters in value', () => {
+        const input = "--arg1 value with @#$%^&*! --arg2    multiple    spaces";
+        const expectedOutput = {
+            "--arg1": ["value with @#$%^&*!"],
+            "--arg2": ["multiple    spaces"]
+        };
+        expect(parseArgsToDict(input)).toEqual(expectedOutput);
+    });
+
+    // Test input with leading and trailing whitespace
+    test('trims leading and trailing whitespace from arguments and values', () => {
+        const input = "   --valid-arg  some value with spaces   --another-arg   more values  ";
+        const expectedOutput = {
+            "--valid-arg": ["some value with spaces"],
+            "--another-arg": ["more values"]
+        };
+        expect(parseArgsToDict(input)).toEqual(expectedOutput);
+    });
+
+    // Test input with only flags, no values
+    test('handles input with only flags and no values', () => {
+        const input = "--flag1 --flag2";
+        const expectedOutput = {
+            "--flag1": [""],
+            "--flag2": [""]
+        };
+        expect(parseArgsToDict(input)).toEqual(expectedOutput);
+    });
+
+    // Test input with no space between flag and value
+    test('handles input with no space between flag and value', () => {
+        const input = "--flag1value --flag2";
+        const expectedOutput = {
+            "--flag1value": [""],
+            "--flag2": [""]
+        };
+        expect(parseArgsToDict(input)).toEqual(expectedOutput);
+    });
+
+    // Handles multiple occurrences of the same key
+    test('handles multiple occurrences of the same key', () => {
+        const input = "--key1 value1 --key1 value2 --key2 value3";
+        const expectedOutput = {
+            "--key1": ["value1", "value2"],
+            "--key2": ["value3"]
+        };
+        expect(parseArgsToDict(input)).toEqual(expectedOutput);
+    });
+
+    // Handles multiple occurrences of the same key with empty values
+    test('handles multiple occurrences of the same key with empty values', () => {
+        const input = "--key1 --key1 value2 --key2 value3";
+        const expectedOutput = {
+            "--key1": ["", "value2"],
+            "--key2": ["value3"]
+        };
+        expect(parseArgsToDict(input)).toEqual(expectedOutput);
+    });
+
+    // Handles multiple occurrences of different keys
+    test('handles multiple occurrences of different keys', () => {
+        const input = "--key1 value1 --key2 value2 --key1 value3 --key2 value4";
+        const expectedOutput = {
+            "--key1": ["value1", "value3"],
+            "--key2": ["value2", "value4"]
+        };
+        expect(parseArgsToDict(input)).toEqual(expectedOutput);
+    });
+});
 
 describe('validateFargateCpuArch', () => {
     test('Test valid fargate cpu arch strings can be parsed', () => {
@@ -35,85 +241,6 @@ describe('validateFargateCpuArch', () => {
         const cpuArch = validateFargateCpuArch()
         expect(cpuArch).toEqual(expectedCpuArch)
     })
-    test('Test parseAndMergeArgs function', () => {
-        const baseCommand = 'node script.js --foo bar --baz --foo-bar bar';
-        const extraArgs = '--qux quux --foo override';
-
-        const result = parseAndMergeArgs(baseCommand, extraArgs);
-
-        expect(result).toBe('node script.js --foo override --baz --foo-bar bar --qux quux');
-    });
-
-    test('Test parseAndMergeArgs function with only args', () => {
-        const baseCommand = '--foo bar --baz --foo-bar bar';
-        const extraArgs = '--qux quux --foo override';
-
-        const result = parseAndMergeArgs(baseCommand, extraArgs);
-
-        expect(result).toBe('--foo override --baz --foo-bar bar --qux quux');
-    });
-
-    test('parseAndMergeArgs handles boolean flags correctly', () => {
-        const baseCommand = 'node script.js --verbose --quiet false';
-        const extraArgs = '--debug';
-
-        const result = parseAndMergeArgs(baseCommand, extraArgs);
-
-        expect(result).toBe('node script.js --verbose --quiet false --debug');
-    });
-
-    test('parseAndMergeArgs works without extra args', () => {
-        const baseCommand = 'node script.js --foo bar --baz';
-
-        const result = parseAndMergeArgs(baseCommand);
-
-        expect(result).toBe('node script.js --foo bar --baz');
-    });
-
-    test('parseAndMergeArgs propagates commands that start with --no in base command', () => {
-        const baseCommand = 'node script.js --no-verbose --debug';
-        const extraArgs = '--foo bar';
-
-        const result = parseAndMergeArgs(baseCommand, extraArgs);
-
-        expect(result).toBe('node script.js --no-verbose --debug --foo bar');
-    });
-
-    test('parseAndMergeArgs negates commands that start with --no in base command', () => {
-        const baseCommand = 'node script.js --no-verbose';
-        const extraArgs = '--no-no-verbose';
-
-        const result = parseAndMergeArgs(baseCommand, extraArgs);
-
-        expect(result).toBe('node script.js');
-    });
-
-    test('parseAndMergeArgs handles boolean negation in extra args removing boolean flags', () => {
-        const baseCommand = 'node script.js --verbose --debug';
-        const extraArgs = '--no-verbose --foo bar';
-
-        const result = parseAndMergeArgs(baseCommand, extraArgs);
-
-        expect(result).toBe('node script.js --debug --foo bar');
-    });
-
-    test('parseAndMergeArgs handles extraArgs boolean negations including only true flags in command', () => {
-        const baseCommand = 'node script.js --debug';
-        const extraArgs = '--no-debug --verbose --quiet';
-
-        const result = parseAndMergeArgs(baseCommand, extraArgs);
-
-        expect(result).toBe('node script.js --verbose --quiet');
-    });
-
-    test('parseAndMergeArgs handles extraArgs boolean negations on non-boolean fields', () => {
-        const baseCommand = 'node script.js --foo bar';
-        const extraArgs = '--no-foo';
-
-        const result = parseAndMergeArgs(baseCommand, extraArgs);
-
-        expect(result).toBe('node script.js');
-    });
 
     test('parseClusterDefinition with basic auth parameters', () => {
         const clusterDefinition = {

@@ -11,8 +11,7 @@ import {
     createOpenSearchServerlessIAMAccessPolicy,
     getTargetPasswordAccessPolicy,
     getMigrationStringParameterValue,
-    parseAndMergeArgs,
-    ClusterAuth
+    ClusterAuth, parseArgsToDict, appendArgIfNotInExtraArgs
 } from "../common-utilities";
 import { RFSBackfillYaml, SnapshotYaml } from "../migration-services-yaml";
 import { OtelCollectorSidecar } from "./migration-otel-collector-sidecar";
@@ -69,20 +68,40 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             parameter: MigrationSSMParameter.OS_CLUSTER_ENDPOINT,
         });
         const s3Uri = `s3://migration-artifacts-${this.account}-${props.stage}-${this.region}/rfs-snapshot-repo`;
-        let rfsCommand = `/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri ${s3Uri} --s3-region ${this.region} --snapshot-name rfs-snapshot --lucene-dir '/lucene' --target-host ${osClusterEndpoint}`
-        rfsCommand = props.clusterAuthDetails.sigv4 ? rfsCommand.concat(`--target-aws-service-signing-name ${props.clusterAuthDetails.sigv4.serviceSigningName} --target-aws-region ${props.clusterAuthDetails.sigv4.region}`) : rfsCommand
-        rfsCommand = props.otelCollectorEnabled ? rfsCommand.concat(` --otel-collector-endpoint ${OtelCollectorSidecar.getOtelLocalhostEndpoint()}`) : rfsCommand
-        rfsCommand = props.sourceClusterVersion ? rfsCommand.concat(` --source-version ${props.sourceClusterVersion}`) : rfsCommand
-        rfsCommand = parseAndMergeArgs(rfsCommand, props.extraArgs);
+        let command = "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments"
+        const extraArgsDict = parseArgsToDict(props.extraArgs)
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-local-dir", "/tmp/s3_files")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-repo-uri", `"${s3Uri}"`)
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-region", this.region)
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--snapshot-name", "rfs-snapshot")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--lucene-dir", "/lucene")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-host", osClusterEndpoint)
+        if (props.clusterAuthDetails.sigv4) {
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-aws-service-signing-name", props.clusterAuthDetails.sigv4.serviceSigningName)
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-aws-region", props.clusterAuthDetails.sigv4.region)
+        }
+        if (props.otelCollectorEnabled) {
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--otel-collector-endpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
+        }
+        if (props.sourceClusterVersion) {
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--source-version", `"${props.sourceClusterVersion}"`)
+        }
 
         let targetUser = "";
         let targetPassword = "";
         let targetPasswordArn = "";
         if (props.clusterAuthDetails.basicAuth) {
-            targetUser = props.clusterAuthDetails.basicAuth.username
-            targetPassword = props.clusterAuthDetails.basicAuth.password ?? ""
-            targetPasswordArn = props.clusterAuthDetails.basicAuth.password_from_secret_arn ?? ""
-        };
+            // Only set user or password if not overridden in extraArgs
+            if (extraArgsDict["--target-username"] === undefined) {
+                targetUser = props.clusterAuthDetails.basicAuth.username
+            }
+            if (extraArgsDict["--target-password"] === undefined) {
+                targetPassword = props.clusterAuthDetails.basicAuth.password ?? ""
+                targetPasswordArn = props.clusterAuthDetails.basicAuth.password_from_secret_arn ?? ""
+            }
+        }
+        command = props.extraArgs ? command.concat(` ${props.extraArgs}`) : command
+
         const sharedLogFileSystem = new SharedLogFileSystem(this, props.stage, props.defaultDeployId);
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account);
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account);
@@ -108,7 +127,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             taskMemoryLimitMiB: 4096,
             ephemeralStorageGiB: 200,
             environment: {
-                "RFS_COMMAND": rfsCommand,
+                "RFS_COMMAND": command,
                 "RFS_TARGET_USER": targetUser,
                 "RFS_TARGET_PASSWORD": targetPassword,
                 "RFS_TARGET_PASSWORD_ARN": targetPasswordArn,

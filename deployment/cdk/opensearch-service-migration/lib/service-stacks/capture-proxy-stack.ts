@@ -9,8 +9,7 @@ import {
     MigrationSSMParameter,
     createMSKProducerIAMPolicies,
     getCustomStringParameterValue,
-    getMigrationStringParameterValue,
-    parseAndMergeArgs
+    getMigrationStringParameterValue, parseArgsToDict, appendArgIfNotInExtraArgs,
 } from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 
@@ -122,11 +121,23 @@ export class CaptureProxyStack extends MigrationServiceCore {
 
         const destinationEndpoint = getDestinationEndpoint(this, props.destinationConfig, props);
 
-        let command = `/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy --destinationUri ${destinationEndpoint} --insecureDestination --listenPort 9200 --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml`
-        command = props.streamingSourceType !== StreamingSourceType.DISABLED ? command.concat(`  --kafkaConnection ${brokerEndpoints}`) : command
-        command = props.streamingSourceType === StreamingSourceType.AWS_MSK ? command.concat(" --enableMSKAuth") : command
-        command = props.otelCollectorEnabled ? command.concat(` --otelCollectorEndpoint ${OtelCollectorSidecar.getOtelLocalhostEndpoint()}`) : command
-        command = parseAndMergeArgs(command, props.extraArgs);
+        let command = "/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy"
+
+        const extraArgsDict = parseArgsToDict(props.extraArgs)
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--destinationUri", destinationEndpoint)
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--insecureDestination")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--listenPort", "9200")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--sslConfigFile", "/usr/share/elasticsearch/config/proxy_tls.yml")
+        if (props.streamingSourceType !== StreamingSourceType.DISABLED) {
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafkaConnection", brokerEndpoints)
+        }
+        if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--enableMSKAuth")
+        }
+        if (props.otelCollectorEnabled) {
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--otelCollectorEndpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
+        }
+        command = props.extraArgs ? command.concat(` ${props.extraArgs}`) : command
 
         this.createService({
             serviceName: serviceName,

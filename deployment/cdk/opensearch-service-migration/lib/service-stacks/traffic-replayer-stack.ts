@@ -11,7 +11,7 @@ import {
     createMSKConsumerIAMPolicies,
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy,
-    getMigrationStringParameterValue, parseAndMergeArgs
+    getMigrationStringParameterValue, appendArgIfNotInExtraArgs, parseArgsToDict
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
 import { Duration } from "aws-cdk-lib";
@@ -80,21 +80,37 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         });
         const groupId = props.customKafkaGroupId ? props.customKafkaGroupId : `logging-group-${deployId}`
 
-        let replayerCommand = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint} --insecure --kafka-traffic-brokers ${brokerEndpoints} --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id ${groupId}`
+        let command = `/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer ${osClusterEndpoint}`
+        const extraArgsDict = parseArgsToDict(props.extraArgs)
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--insecure")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafka-traffic-brokers", brokerEndpoints)
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafka-traffic-topic", "logging-traffic-topic")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafka-traffic-group-id", groupId)
+
         if (props.clusterAuthDetails.basicAuth) {
-            replayerCommand = replayerCommand.concat(` --auth-header-user-and-secret "${props.clusterAuthDetails.basicAuth.username} ${props.clusterAuthDetails.basicAuth.password_from_secret_arn}"`)
+            const bashSafeUserAndSecret = `"${props.clusterAuthDetails.basicAuth.username}" "${props.clusterAuthDetails.basicAuth.password_from_secret_arn}"`
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--auth-header-user-and-secret", bashSafeUserAndSecret)
         }
-        replayerCommand = props.streamingSourceType === StreamingSourceType.AWS_MSK ? replayerCommand.concat(" --kafka-traffic-enable-msk-auth") : replayerCommand
-        replayerCommand = props.userAgentSuffix ? replayerCommand.concat(` --user-agent ${props.userAgentSuffix}`) : replayerCommand
-        replayerCommand = props.clusterAuthDetails.sigv4 ? replayerCommand.concat(` --sigv4-auth-header-service-region ${props.clusterAuthDetails.sigv4.serviceSigningName},${props.clusterAuthDetails.sigv4.region}`) : replayerCommand
-        replayerCommand = props.otelCollectorEnabled ? replayerCommand.concat(` --otelCollectorEndpoint ${OtelCollectorSidecar.getOtelLocalhostEndpoint()}`) : replayerCommand
-        replayerCommand = parseAndMergeArgs(replayerCommand, props.extraArgs);
+        if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafka-traffic-enable-msk-auth")
+        }
+        if (props.userAgentSuffix) {
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--user-agent", `"${props.userAgentSuffix}"`)
+        }
+        if (props.clusterAuthDetails.sigv4) {
+            const sigv4AuthHeaderServiceRegion = `${props.clusterAuthDetails.sigv4.serviceSigningName},${props.clusterAuthDetails.sigv4.region}`
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--sigv4-auth-header-service-region", sigv4AuthHeaderServiceRegion)
+        }
+        if (props.otelCollectorEnabled) {
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--otelCollectorEndpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
+        }
+        command = props.extraArgs?.trim() ? command.concat(` ${props.extraArgs.trim()}`) : command
 
         this.createService({
             serviceName: `traffic-replayer-${deployId}`,
             taskInstanceCount: 0,
             dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficReplayer"),
-            dockerImageCommand: ['/bin/sh', '-c', replayerCommand],
+            dockerImageCommand: ['/bin/sh', '-c', command],
             securityGroups: securityGroups,
             volumes: [sharedLogFileSystem.asVolume()],
             mountPoints: [sharedLogFileSystem.asMountPoint()],
