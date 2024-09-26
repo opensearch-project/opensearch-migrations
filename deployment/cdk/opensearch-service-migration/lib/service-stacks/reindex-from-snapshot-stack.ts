@@ -9,7 +9,7 @@ import {
     MigrationSSMParameter,
     createOpenSearchIAMAccessPolicy,
     createOpenSearchServerlessIAMAccessPolicy,
-    getTargetPasswordAccessPolicy,
+    getSecretAccessPolicy,
     getMigrationStringParameterValue,
     ClusterAuth, parseArgsToDict, appendArgIfNotInExtraArgs
 } from "../common-utilities";
@@ -100,7 +100,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
                 targetPasswordArn = props.clusterAuthDetails.basicAuth.password_from_secret_arn ?? ""
             }
         }
-        command = props.extraArgs ? command.concat(` ${props.extraArgs}`) : command
+        command = props.extraArgs?.trim() ? command.concat(` ${props.extraArgs?.trim()}`) : command
 
         const sharedLogFileSystem = new SharedLogFileSystem(this, props.stage, props.defaultDeployId);
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account);
@@ -108,7 +108,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), artifactS3PublishPolicy, openSearchPolicy, openSearchServerlessPolicy];
 
         const getSecretsPolicy = props.clusterAuthDetails.basicAuth?.password_from_secret_arn ?
-            getTargetPasswordAccessPolicy(props.clusterAuthDetails.basicAuth.password_from_secret_arn) : null;
+            getSecretAccessPolicy(props.clusterAuthDetails.basicAuth.password_from_secret_arn) : null;
         if (getSecretsPolicy) {
             servicePolicies.push(getSecretsPolicy);
         }

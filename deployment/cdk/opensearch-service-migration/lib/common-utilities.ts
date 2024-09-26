@@ -6,10 +6,10 @@ import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
 import * as forge from 'node-forge';
 import { ClusterYaml } from "./migration-services-yaml";
 
-export function getTargetPasswordAccessPolicy(targetPasswordSecretArn: string): PolicyStatement {
+export function getSecretAccessPolicy(secretArn: string): PolicyStatement {
     return new PolicyStatement({
         effect: Effect.ALLOW,
-        resources: [targetPasswordSecretArn],
+        resources: [secretArn],
         actions: [
             "secretsmanager:GetSecretValue"
         ]

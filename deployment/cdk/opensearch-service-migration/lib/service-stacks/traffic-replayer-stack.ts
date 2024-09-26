@@ -14,10 +14,11 @@ import {
     getMigrationStringParameterValue, appendArgIfNotInExtraArgs, parseArgsToDict
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
-import { Duration } from "aws-cdk-lib";
+import {Duration, SecretValue} from "aws-cdk-lib";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { ECSReplayerYaml } from "../migration-services-yaml";
 import { SharedLogFileSystem } from "../components/shared-log-file-system";
+import {Secret} from "aws-cdk-lib/aws-secretsmanager";
 
 
 export interface TrafficReplayerProps extends StackPropsExt {
@@ -52,6 +53,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         );
 
         const sharedLogFileSystem = new SharedLogFileSystem(this, props.stage, props.defaultDeployId);
+
 
         const secretAccessPolicy = new PolicyStatement({
             effect: Effect.ALLOW,
@@ -88,9 +90,25 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafka-traffic-group-id", groupId)
 
         if (props.clusterAuthDetails.basicAuth) {
-            const bashSafeUserAndSecret = `"${props.clusterAuthDetails.basicAuth.username}" "${props.clusterAuthDetails.basicAuth.password_from_secret_arn}"`
+            let secret;
+            if (props.clusterAuthDetails.basicAuth.password) {
+                console.warn("Password passed in plain text, this is insecure and will leave" +
+                    "your password exposed.")
+                secret = new Secret(this,"ReplayerClusterPasswordSecret", {
+                    secretName: `replayer-user-secret-${props.stage}-${deployId}`,
+                    secretStringValue: SecretValue.unsafePlainText(props.clusterAuthDetails.basicAuth.password)
+                })
+            } else if (props.clusterAuthDetails.basicAuth.password_from_secret_arn) {
+                secret = Secret.fromSecretCompleteArn(this, "ReplayerClusterPasswordSecretImport",
+                props.clusterAuthDetails.basicAuth.password_from_secret_arn)
+            } else {
+                throw new Error("Replayer secret or password must be provided if using basic auth.")
+            }
+
+            const bashSafeUserAndSecret = `"${props.clusterAuthDetails.basicAuth.username}" "${secret.secretArn}"`
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--auth-header-user-and-secret", bashSafeUserAndSecret)
         }
+
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafka-traffic-enable-msk-auth")
         }
@@ -104,7 +122,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         if (props.otelCollectorEnabled) {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--otelCollectorEndpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
         }
-        command = props.extraArgs?.trim() ? command.concat(` ${props.extraArgs.trim()}`) : command
+        command = props.extraArgs?.trim() ? command.concat(` ${props.extraArgs?.trim()}`) : command
 
         this.createService({
             serviceName: `traffic-replayer-${deployId}`,
