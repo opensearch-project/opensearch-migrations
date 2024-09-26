@@ -1,17 +1,17 @@
 {
   "demo-deploy": {
     "stage": "dev",
-    "engineVersion": "OS_2.9",
-    "domainName": "demo-opensearch-cluster",
-    "dataNodeCount": 2,
-    "openAccessPolicyEnabled": true,
-    "domainRemovalPolicy": "DESTROY",
-    "artifactBucketRemovalPolicy": "DESTROY",
-    "enableDemoAdmin": true,
-    "trafficReplayerServiceEnabled": true,
-    "trafficReplayerEnableClusterFGACAuth": true,
-    "captureProxyESServiceEnabled": true,
+    "targetCluster": {
+      "endpoint": "<TARGET_CLUSTER_ENDPOINT>",
+      "auth": { "type": "none" }
+    },
+    "sourceCluster": {
+      "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
+      "auth": { "type": "none" }
+    },
+    "vpcId": "<VPC_ID>",
     "reindexFromSnapshotServiceEnabled": true,
+    "trafficReplayerServiceEnabled": true,
     "otelCollectorEnabled": true
   }
 }
