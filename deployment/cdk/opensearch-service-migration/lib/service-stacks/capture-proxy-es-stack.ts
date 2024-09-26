@@ -77,7 +77,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
         if (props.otelCollectorEnabled) {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--otelCollectorEndpoint", OtelCollectorSidecar.getOtelLocalhostEndpoint())
         }
-        command = props.extraArgs ? command.concat(` ${props.extraArgs}`) : command
+        command = props.extraArgs?.trim() ? command.concat(` ${props.extraArgs?.trim()}`) : command
 
         this.createService({
             serviceName: "capture-proxy-es",
