@@ -1,16 +1,7 @@
 {
-  "engineVersion": "OS_2.9",
-  "targetClusterVersion": "OS_2.9",
-  "tlsSecurityPolicy": "TLS_1_2",
-  "enforceHTTPS": true,
-  "nodeToNodeEncryptionEnabled": true,
-  "encryptionAtRestEnabled": true,
   "vpcEnabled": true,
-  "vpcAZCount": 2,
-  "domainAZCount": 2,
   "mskAZCount": 2,
   "migrationAssistanceEnabled": true,
-  "replayerOutputEFSRemovalPolicy": "DESTROY",
   "migrationConsoleServiceEnabled": true,
   "trafficReplayerServiceEnabled": false,
   "otelCollectorEnabled": true

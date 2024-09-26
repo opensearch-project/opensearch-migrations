@@ -1,17 +1,32 @@
 {
-  "demo-deploy": {
-    "stage": "dev",
-    "engineVersion": "OS_2.9",
-    "domainName": "demo-opensearch-cluster",
-    "dataNodeCount": 2,
-    "openAccessPolicyEnabled": true,
-    "domainRemovalPolicy": "DESTROY",
-    "artifactBucketRemovalPolicy": "DESTROY",
-    "enableDemoAdmin": true,
-    "trafficReplayerServiceEnabled": true,
-    "trafficReplayerEnableClusterFGACAuth": true,
-    "captureProxyESServiceEnabled": true,
+  "default": {
+    "stage": "<STAGE>",
+    "targetCluster": {
+      "endpoint": "<TARGET_CLUSTER_ENDPOINT>",
+      "auth": {
+        "type": "none | basic | sigv4",
+        // if basic
+        "username": "<USERNAME>",
+        "password_from_secret_arn": "<ARN_OF_SECRET_CONTAINING_PASSWORD>",
+        // if sigv4
+        "region": "<REGION>",
+        "serviceSigningName": "es | aoss"
+      }
+    },
+    "sourceCluster": {
+      "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
+      "auth": {
+        "type": "none | basic | sigv4",
+        // if basic
+        "username": "<USERNAME>",
+        "password_from_secret_arn": "<ARN_OF_SECRET_CONTAINING_PASSWORD>",
+        // if sigv4
+        "region": "<REGION>",
+        "serviceSigningName": "es | aoss"
+      }
+    },
+    "vpcId": "<VPC_ID>",
     "reindexFromSnapshotServiceEnabled": true,
-    "otelCollectorEnabled": true
+    "trafficReplayerServiceEnabled": true
   }
 }
