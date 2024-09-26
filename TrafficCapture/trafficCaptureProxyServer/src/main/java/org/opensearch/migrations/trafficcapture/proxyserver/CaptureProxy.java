@@ -33,6 +33,7 @@ import org.apache.kafka.clients.producer.ProducerConfig;
 import org.apache.kafka.common.config.SaslConfigs;
 
 import org.opensearch.common.settings.Settings;
+import org.opensearch.migrations.jcommander.NoSplitter;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
@@ -158,12 +159,14 @@ public class CaptureProxy {
         public String otelCollectorEndpoint;
         @Parameter(required = false,
             names = "--setHeader",
+            splitter = NoSplitter.class,
             arity = 2,
             description = "[header-name header-value] Set an HTTP header (first argument) with to the specified value" +
                 " (second argument).  Any existing headers with that name will be removed.")
         public List<String> headerOverrides = new ArrayList<>();
         @Parameter(required = false,
             names = "--suppressCaptureForHeaderMatch",
+            splitter = NoSplitter.class,
             arity = 2,
             description = "The header name (which will be interpreted in a case-insensitive manner) and a regex "
                 + "pattern.  When the incoming request has a header that matches the regex, it will be passed "

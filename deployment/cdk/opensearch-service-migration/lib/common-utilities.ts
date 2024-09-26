@@ -4,78 +4,7 @@ import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
 import * as forge from 'node-forge';
-import * as yargs from 'yargs';
 import { ClusterYaml } from "./migration-services-yaml";
-
-
-// parseAndMergeArgs, see @common-utilities.test.ts for an example of different cases
-export function parseAndMergeArgs(baseCommand: string, extraArgs?: string): string {
-    if (!extraArgs) {
-        return baseCommand;
-    }
-
-    // Extract command prefix
-    const commandPrefix = baseCommand.substring(0, baseCommand.indexOf('--')).trim();
-    const baseArgs = baseCommand.substring(baseCommand.indexOf('--'));
-
-    // Parse base command
-    const baseYargsConfig = {
-        parserConfiguration: {
-            'camel-case-expansion': false,
-            'boolean-negation': false,
-        }
-    };
-
-    const baseArgv = yargs(baseArgs)
-        .parserConfiguration(baseYargsConfig.parserConfiguration)
-        .parse();
-
-    // Parse extra args if provided
-    const extraYargsConfig = {
-        parserConfiguration: {
-            'camel-case-expansion': false,
-            'boolean-negation': true,
-        }
-    };
-
-    const extraArgv = extraArgs
-        ? yargs(extraArgs.split(' '))
-            .parserConfiguration(extraYargsConfig.parserConfiguration)
-            .parse()
-        : {};
-
-    // Merge arguments
-    const mergedArgv: { [key: string]: unknown } = { ...baseArgv };
-    for (const [key, value] of Object.entries(extraArgv)) {
-        if (key !== '_' && key !== '$0') {
-            if (!value &&
-                typeof value === 'boolean' &&
-                (
-                    typeof (baseArgv as any)[key] === 'boolean' ||
-                    (typeof (baseArgv as any)[`no-${key}`] != 'boolean' && typeof (baseArgv as any)[`no-${key}`])
-                )
-            ) {
-                delete mergedArgv[key];
-            } else {
-                mergedArgv[key] = value;
-            }
-        }
-    }
-
-    // Reconstruct command
-    const mergedArgs = Object.entries(mergedArgv)
-        .filter(([key]) => key !== '_' && key !== '$0')
-        .map(([key, value]) => {
-            if (typeof value === 'boolean') {
-                return value ? `--${key}` : `--no-${key}`;
-            }
-            return `--${key} ${value}`;
-        })
-        .join(' ');
-
-    let fullCommand = `${commandPrefix} ${mergedArgs}`.trim()
-    return fullCommand;
-}
 
 export function getTargetPasswordAccessPolicy(targetPasswordSecretArn: string): PolicyStatement {
     return new PolicyStatement({
@@ -85,6 +14,56 @@ export function getTargetPasswordAccessPolicy(targetPasswordSecretArn: string): 
             "secretsmanager:GetSecretValue"
         ]
     })
+}
+
+export function appendArgIfNotInExtraArgs(
+    baseCommand: string,
+    extraArgsDict: Record<string, string[]>,
+    arg: string,
+    value: string | null = null,
+): string {
+    if (extraArgsDict[arg] === undefined) {
+        // If not present, append the argument and value (only append value if it exists)
+        baseCommand = value !== null ? baseCommand.concat(" ", arg, " ", value) : baseCommand.concat(" ", arg);
+    }
+    return baseCommand;
+}
+
+export function parseArgsToDict(argString: string | undefined): Record<string, string[]> {
+    const args: Record<string, string[]> = {};
+    if (argString === undefined) {
+        return args;
+    }
+    // Split based on '--' at the start of the string or preceded by whitespace, use non-capturing groups to include -- in parts
+    const parts = argString.split(/(?=\s--|^--)/).filter(Boolean);
+
+    parts.forEach(part => {
+        const trimmedPart = part.trim();
+        if (trimmedPart.length === 0) return; // Skip empty parts
+
+        // Use a regular expression to find the first whitespace character
+        const firstWhitespaceMatch = trimmedPart.match(/\s/);
+        const firstWhitespaceIndex = firstWhitespaceMatch?.index;
+
+        const key = firstWhitespaceIndex === undefined ? trimmedPart : trimmedPart.slice(0, firstWhitespaceIndex).trim();
+        const value = firstWhitespaceIndex === undefined ? '' : trimmedPart.slice(firstWhitespaceIndex + 1).trim();
+
+        // Validate the key starts with -- followed by a non-whitespace characters
+        if (/^--\S+/.test(key)) {
+            if (args[key] !== undefined) {
+                args[key].push(value);
+            } else {
+                args[key] = [value];
+            }
+        } else {
+            throw new Error(`Invalid argument key: '${key}'. Argument keys must start with '--' and contain no spaces.`);
+        }
+    });
+    if (argString.trim() && !args) {
+        throw new Error(`Unable to parse args provided: '${argString}'`);
+    }
+
+    return args;
 }
 
 export function createOpenSearchIAMAccessPolicy(partition: string, region: string, accountId: string): PolicyStatement {

@@ -41,6 +41,9 @@ dependencies {
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
 
+    // JCommander
+    compileOnly group: 'org.jcommander', name: 'jcommander'
+
     // OpenTelemetry core
     api group: 'io.opentelemetry', name: 'opentelemetry-api'
     api group: 'io.opentelemetry', name: 'opentelemetry-sdk'

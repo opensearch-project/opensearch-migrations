@@ -115,7 +115,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
         Value: {
           "Fn::Join": [
             "",
-            [ "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir '/lucene' --target-host ",
+            [ "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri \"s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo\" --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir /lucene --target-host ",
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
@@ -182,11 +182,11 @@ describe('ReindexFromSnapshotStack Tests', () => {
         Value: {
           "Fn::Join": [
             "",
-            [ "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir '/lucene' --target-host ",
+            [ "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri \"s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo\" --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir /lucene --target-host ",
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              "--target-aws-service-signing-name aoss --target-aws-region eu-west-1",
+              " --target-aws-service-signing-name aoss --target-aws-region eu-west-1",
             ],
           ],
         }
@@ -235,7 +235,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
     expect(reindexStack.rfsSnapshotYaml.snapshot_name).toBe('rfs-snapshot');
   });
 
-  test('ReindexFromSnapshotStack correctly merges extraArgs', () => {
+  test('ReindexFromSnapshotStack correctly overrides with extraArgs', () => {
     const contextOptions = {
       vpcEnabled: true,
       reindexFromSnapshotServiceEnabled: true,
@@ -244,7 +244,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
         "endpoint": "https://test-cluster",
         "auth": {"type": "none"}
       },
-      reindexFromSnapshotExtraArgs: '--custom-arg value --flag --snapshot-name custom-snapshot',
+      reindexFromSnapshotExtraArgs: '--custom-arg value --flag --snapshot-name \"custom-snapshot\"',
       migrationAssistanceEnabled: true,
     };
 
@@ -271,11 +271,11 @@ describe('ReindexFromSnapshotStack Tests', () => {
         Value: {
           "Fn::Join": [
             "",
-            [ "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo --s3-region us-east-1 --snapshot-name custom-snapshot --lucene-dir /lucene --target-host ",
+            [ "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri \"s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo\" --s3-region us-east-1 --lucene-dir /lucene --target-host ",
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --custom-arg value --flag"
+              " --custom-arg value --flag --snapshot-name \"custom-snapshot\""
             ]
           ]
         }
