@@ -1,6 +1,6 @@
 {
-  "demo-deploy": {
-    "stage": "dev",
+  "default": {
+    "stage": "<STAGE>",
     "targetCluster": {
       "endpoint": "<TARGET_CLUSTER_ENDPOINT>",
       "auth": { "type": "none" }
@@ -11,7 +11,6 @@
     },
     "vpcId": "<VPC_ID>",
     "reindexFromSnapshotServiceEnabled": true,
-    "trafficReplayerServiceEnabled": true,
-    "otelCollectorEnabled": true
+    "trafficReplayerServiceEnabled": true
   }
 }
