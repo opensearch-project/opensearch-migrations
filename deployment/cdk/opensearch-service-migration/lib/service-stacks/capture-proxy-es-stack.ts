@@ -66,7 +66,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
         let command = "/usr/local/bin/docker-entrypoint.sh eswrapper & /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy"
         const extraArgsDict = parseArgsToDict(props.extraArgs)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--destinationUri", "https://localhost:19200")
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--insecureDestination", "https://localhost:19200")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--insecureDestination")
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--sslConfigFile", "/usr/share/elasticsearch/config/proxy_tls.yml")
         if (props.streamingSourceType !== StreamingSourceType.DISABLED) {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafkaConnection", brokerEndpoints)
