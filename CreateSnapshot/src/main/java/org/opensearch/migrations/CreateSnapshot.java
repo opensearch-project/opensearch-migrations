@@ -28,45 +28,67 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class CreateSnapshot {
     public static class Args {
-        @Parameter(names = {"--help", "-h"}, help = true, description = "Displays information about how to use this tool")
+        @Parameter(
+                names = {"--help", "-h"},
+                help = true,
+                description = "Displays information about how to use this tool")
         private boolean help;
 
-        @Parameter(names = { "--snapshot-name" }, required = true, description = "The name of the snapshot to migrate")
+        @Parameter(
+                names = { "--snapshot-name" },
+                required = true,
+                description = "The name of the snapshot to migrate")
         public String snapshotName;
 
-        @Parameter(names = {
-            "--file-system-repo-path" }, required = false, description = "The full path to the snapshot repo on the file system.")
+        @Parameter(
+                names = {"--file-system-repo-path" },
+                required = false,
+                description = "The full path to the snapshot repo on the file system.")
         public String fileSystemRepoPath;
 
-        @Parameter(names = {
-            "--s3-repo-uri" }, required = false, description = "The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2")
+        @Parameter(
+                names = {"--s3-repo-uri" },
+                required = false,
+                description = "The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2")
         public String s3RepoUri;
 
-        @Parameter(names = {
-            "--s3-region" }, required = false, description = "The AWS Region the S3 bucket is in, like: us-east-2")
+        @Parameter(
+                names = {"--s3-region" },
+                required = false,
+                description = "The AWS Region the S3 bucket is in, like: us-east-2")
         public String s3Region;
 
         @ParametersDelegate
         public ConnectionContext.SourceArgs sourceArgs = new ConnectionContext.SourceArgs();
 
-        @Parameter(names = {
-            "--no-wait" }, description = "Optional.  If provided, the snapshot runner will not wait for completion")
+        @Parameter(
+                names = {"--no-wait" },
+                description = "Optional.  If provided, the snapshot runner will not wait for completion")
         public boolean noWait = false;
 
-        @Parameter(names = {
-            "--max-snapshot-rate-mb-per-node" }, required = false, description = "The maximum snapshot rate in megabytes per second per node")
+        @Parameter(
+                names = {"--max-snapshot-rate-mb-per-node" },
+                required = false,
+                description = "The maximum snapshot rate in megabytes per second per node")
         public Integer maxSnapshotRateMBPerNode;
 
-        @Parameter(names = {
-            "--s3-role-arn" }, required = false, description = "The role ARN the cluster will assume to write a snapshot to S3")
+        @Parameter(
+                names = {"--s3-role-arn" },
+                required = false,
+                description = "The role ARN the cluster will assume to write a snapshot to S3")
         public String s3RoleArn;
 
-        @Parameter(names = {
-            "--index-allowlist" }, required = false, description = "A comma separated list of indices to include in the snapshot. If not provided, all indices are included.")
+        @Parameter(
+                names = {"--index-allowlist"},
+                required = false,
+                description = "A comma separated list of indices to include in the snapshot. If not provided, all indices are included.")
         public List<String> indexAllowlist = List.of();
 
-        @Parameter(required = false, names = {
-            "--otel-collector-endpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
+        @Parameter(
+                required = false,
+                names = {"--otel-collector-endpoint" },
+                arity = 1,
+                description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
                 + "forwarded. If no value is provided, metrics will not be forwarded.")
         String otelCollectorEndpoint;
     }

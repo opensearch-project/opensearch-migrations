@@ -2,11 +2,15 @@ package org.opensearch.migrations;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicReference;
 
-import org.apache.commons.lang3.tuple.Pair;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
@@ -18,7 +22,11 @@ import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 
 import io.netty.handler.codec.http.FullHttpRequest;
+import io.netty.handler.codec.http.HttpMethod;
 import lombok.extern.slf4j.Slf4j;
+
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.MatcherAssert.assertThat;
 
 @Slf4j
 public class TestCreateSnapshot {
@@ -35,11 +43,11 @@ public class TestCreateSnapshot {
     public void testRepoRegisterAndSnapshotCreateRequests() throws Exception {
         var snapshotName = "my_snap";
 
-        ArrayList<Pair<FullHttpRequest, String>> capturedRequestList = new ArrayList<Pair<FullHttpRequest, String>>();
+        ArrayList<Map.Entry<FullHttpRequest, String>> capturedRequestList = new ArrayList<>();
         try (var destinationServer = SimpleNettyHttpServer.makeNettyServer(false,
                 Duration.ofMinutes(10),
                 fl -> {
-                    capturedRequestList.add(Pair.of(fl, fl.content().toString(StandardCharsets.UTF_8)));
+                    capturedRequestList.add(new AbstractMap.SimpleEntry<>(fl, fl.content().toString(StandardCharsets.UTF_8)));
                     return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
                 }))
         {
@@ -60,17 +68,37 @@ public class TestCreateSnapshot {
             );
             SnapshotRunner.run(snapshotCreator);
 
-            FullHttpRequest registerRepoRequest = capturedRequestList.get(0).getLeft();
-            String registerRepoRequestContent = capturedRequestList.get(0).getRight();
-            FullHttpRequest createSnapshotRequest = capturedRequestList.get(1).getLeft();
-            String createSnapshotRequestContent = capturedRequestList.get(1).getRight();
+            FullHttpRequest registerRepoRequest = capturedRequestList.get(0).getKey();
+            String registerRepoRequestContent = capturedRequestList.get(0).getValue();
+            FullHttpRequest createSnapshotRequest = capturedRequestList.get(1).getKey();
+            String createSnapshotRequestContent = capturedRequestList.get(1).getValue();
 
-            assert registerRepoRequest.uri().equals("/_snapshot/migration_assistant_repo");
-            assert registerRepoRequest.method().toString().equals("PUT");
-            assert registerRepoRequestContent.equals("{\"type\":\"s3\",\"settings\":{\"bucket\":\"new-bucket\",\"region\":\"us-east-2\",\"base_path\":null}}");
-            assert createSnapshotRequest.uri().equals("/_snapshot/migration_assistant_repo/" + snapshotName);
-            assert createSnapshotRequest.method().toString().equals("PUT");
-            assert createSnapshotRequestContent.equals("{\"indices\":\"_all\",\"ignore_unavailable\":true,\"include_global_state\":true}");
+            Assertions.assertEquals("/_snapshot/migration_assistant_repo", registerRepoRequest.uri());
+            Assertions.assertEquals(HttpMethod.PUT, registerRepoRequest.method());
+
+            ObjectMapper objectMapper = new ObjectMapper();
+
+            // Parse both JSON strings into JsonNode objects
+            JsonNode actualRegisterRepoRequest = objectMapper.readTree(registerRepoRequestContent);
+            JsonNode expectedRegisterRepoRequest = objectMapper
+                    .createObjectNode()
+                    .put("type", "s3")
+                    .set("settings", objectMapper.createObjectNode()
+                            .put("bucket", "new-bucket")
+                            .put("region", "us-east-2")
+                            .set("base_path", null));
+
+            Assertions.assertEquals(expectedRegisterRepoRequest, actualRegisterRepoRequest);
+
+            JsonNode actualCreateSnapshotRequest = objectMapper.readTree(createSnapshotRequestContent);
+            JsonNode expectedCreateSnapshotRequest = objectMapper.createObjectNode()
+                            .put("indices", "_all")
+                            .put("ignore_unavailable", true)
+                            .put("include_global_state", true);
+
+            Assertions.assertEquals("/_snapshot/migration_assistant_repo/" + snapshotName, createSnapshotRequest.uri());
+            Assertions.assertEquals(HttpMethod.PUT, createSnapshotRequest.method());
+            Assertions.assertEquals(expectedCreateSnapshotRequest, actualCreateSnapshotRequest);
         }
     }
 
@@ -79,14 +107,14 @@ public class TestCreateSnapshot {
         var snapshotName = "my_snap";
         var indexAllowlist = List.of("allowed_index_1", "allowed_index_2");
 
-        final FullHttpRequest[] createSnapshotRequest = new FullHttpRequest[1];
-        final String[] createSnapshotRequestContent = {""};
+        final AtomicReference<FullHttpRequest> createSnapshotRequest = new AtomicReference<>();
+        final AtomicReference<String> createSnapshotRequestContent = new AtomicReference<>();
         try (var destinationServer = SimpleNettyHttpServer.makeNettyServer(false,
                 Duration.ofMinutes(10),
                 fl -> {
                     if (fl.uri().equals("/_snapshot/migration_assistant_repo/" + snapshotName)) {
-                        createSnapshotRequest[0] = fl;
-                        createSnapshotRequestContent[0] = fl.content().toString(StandardCharsets.UTF_8);
+                        createSnapshotRequest.set(fl);
+                        createSnapshotRequestContent.set(fl.content().toString(StandardCharsets.UTF_8));
                     }
                     return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
                 }))
@@ -108,8 +136,8 @@ public class TestCreateSnapshot {
             );
             SnapshotRunner.run(snapshotCreator);
 
-            assert createSnapshotRequest[0].method().toString().equals("PUT");
-            assert createSnapshotRequestContent[0].contains(String.join(",", indexAllowlist));
+            Assertions.assertEquals(HttpMethod.PUT, createSnapshotRequest.get().method());
+            assertThat(createSnapshotRequestContent.get(), containsString(String.join(",", indexAllowlist)));
         }
     }
 }

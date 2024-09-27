@@ -23,6 +23,7 @@ dependencies {
     testImplementation testFixtures(project(":testHelperFixtures"))
     testImplementation group: 'org.testcontainers', name: 'junit-jupiter'
     testImplementation group: 'io.netty', name: 'netty-all'
+    testImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
 }
 
 application {
