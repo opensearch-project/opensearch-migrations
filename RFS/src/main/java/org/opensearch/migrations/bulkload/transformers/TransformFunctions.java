@@ -10,6 +10,7 @@ import org.opensearch.migrations.VersionMatchers;
 public class TransformFunctions {
     private static final ObjectMapper mapper = new ObjectMapper();
     public static final String MAPPINGS_KEY_STR = "mappings";
+    public static final String PROPERTIES_KEY_STR = "properties";
     public static final String SETTINGS_KEY_STR = "settings";
     public static final String NUMBER_OF_REPLICAS_KEY_STR = "number_of_replicas";
     public static final String INDEX_KEY_STR = "index";
@@ -75,17 +76,21 @@ public class TransformFunctions {
              * - [{"doc":{"properties":{"address":{"type":"text"}}}}]
              * - [{"audit_message":{"properties":{"address":{"type":"text"}}}}]
              *
-             * It's not impossible that the intermediate key is not present, in which case we should just extract the mappings:
+             * It's also possible for this list to be empty, in which case we should set the mappings to an empty node.
+             *
+             * Finally, it may be possible that the intermediate key is not present, in which case we should just extract the mappings:
              * - [{"properties":{"address":{"type":"text"}}}]
              */
             if (val instanceof ArrayNode) {
                 ArrayNode mappingsList = (ArrayNode) val;
-                if (mappingsList.size() != 1) {
+                if (mappingsList.size() > 1) {
                     throw new IllegalArgumentException("Mappings list contains more than one member; this is unexpected: " + val.toString());
+                } else if (mappingsList.size() == 1) {
+                    ObjectNode actualMappingsRoot = (ObjectNode) mappingsList.get(0);
+                    root.set(MAPPINGS_KEY_STR, getMappingsFromBeneathIntermediate(actualMappingsRoot));
+                } else {
+                    root.set(MAPPINGS_KEY_STR, mapper.createObjectNode());
                 }
-                ObjectNode actualMappingsRoot = (ObjectNode) mappingsList.get(0);
-
-                root.set(MAPPINGS_KEY_STR, getMappingsFromBeneathIntermediate(actualMappingsRoot));
             }
 
             /**
@@ -113,9 +118,9 @@ public class TransformFunctions {
      * it regardless of what it is named.
      */
     public static ObjectNode getMappingsFromBeneathIntermediate(ObjectNode mappingsRoot) {
-        if (mappingsRoot.has("properties")) {
+        if (mappingsRoot.has(PROPERTIES_KEY_STR)) {
             return mappingsRoot;
-        } else if (!mappingsRoot.has("properties")) {
+        } else if (!mappingsRoot.has(PROPERTIES_KEY_STR)) {
             return (ObjectNode) mappingsRoot.get(mappingsRoot.fieldNames().next()).deepCopy();
         }
 

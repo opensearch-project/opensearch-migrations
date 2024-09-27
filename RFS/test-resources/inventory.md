@@ -345,7 +345,7 @@ curl -X PUT "localhost:19200/test_updates_deletes" -H "Content-Type: application
 ```
 
 #### ES_7_10_BWC_Check
-An Elastic 7.10 snapshot repo designed to exercise backwards compatibility across a couple different features.  It contains two indices; one is created using pre-ES 7.8 templates and pre-ES 7.0 type declarations, and the other is created using forward-compatible index/component templates and no type declarations. Both indices contain a single document.
+An Elastic 7.10 snapshot repo designed to exercise backwards compatibility across a couple different features.  It contains two indices; one is created using pre-ES 7.8 templates and pre-ES 7.0 type declarations, and the other is created using forward-compatible index/component templates and no type declarations. Both indices contain a single document.  It also contains two indices with either no mappings or an empty mapping entry and no documents; this exercises an edge case where there will be a mappings entry in the snapshot with no contents.
 
 ```
 curl -X PUT "localhost:19200/_template/bwc_template?include_type_name=true" -H "Content-Type: application/json" -d '
@@ -426,10 +426,34 @@ curl -X PUT "localhost:19200/_index_template/fwc_template" -H "Content-Type: app
 
 curl -X PUT "localhost:19200/fwc_index_1" -H "Content-Type: application/json"
 
-curl -X PUT "localhost:19200/fwc_alias/_doc/bwc_doc" -H "Content-Type: application/json" -d '
+curl -X PUT "localhost:19200/fwc_alias/_doc/fwc_doc" -H "Content-Type: application/json" -d '
 {
   "title": "This is a doc in a forward compatible index",
   "content": "Life, the Universe, and Everything"
+}'
+
+curl -X PUT "localhost:19200/no_mappings_no_docs" -H "Content-Type: application/json" -d '
+{
+  "settings": {
+    "index": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    }
+  }
+}'
+
+curl -X PUT "localhost:19200/empty_mappings_no_docs" -H "Content-Type: application/json" -d '
+{
+  "settings": {
+    "index": {
+      "number_of_shards": 1,
+      "number_of_replicas": 0
+    }
+  },
+  "mappings": {
+    "properties":{
+    }
+  }
 }'
 
 curl -X PUT "localhost:19200/_snapshot/test_repository" -H "Content-Type: application/json" -d '{
@@ -441,9 +465,8 @@ curl -X PUT "localhost:19200/_snapshot/test_repository" -H "Content-Type: applic
 }'
 
 curl -X PUT "localhost:19200/_snapshot/test_repository/rfs-snapshot" -H "Content-Type: application/json" -d '{
-  "indices": "bwc_index_1,fwc_index_1",
+  "indices": "bwc_index_1,fwc_index_1,no_mappings_no_docs,empty_mappings_no_docs",
   "ignore_unavailable": true,
   "include_global_state": true
 }'
-
 ```
