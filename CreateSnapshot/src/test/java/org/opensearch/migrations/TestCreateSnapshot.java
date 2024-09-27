@@ -61,7 +61,7 @@ public class TestCreateSnapshot {
             var snapshotCreator = new S3SnapshotCreator(
                     snapshotName,
                     sourceClient,
-                    "s3://new-bucket",
+                    "s3://new-bucket/path-to-repo",
                     "us-east-2",
                     List.of(),
                     snapshotContext.createSnapshotCreateContext()
@@ -86,7 +86,7 @@ public class TestCreateSnapshot {
                     .set("settings", objectMapper.createObjectNode()
                             .put("bucket", "new-bucket")
                             .put("region", "us-east-2")
-                            .set("base_path", null));
+                            .put("base_path", "path-to-repo"));
 
             Assertions.assertEquals(expectedRegisterRepoRequest, actualRegisterRepoRequest);
 
