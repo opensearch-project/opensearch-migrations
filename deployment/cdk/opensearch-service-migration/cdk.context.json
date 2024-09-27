@@ -5,10 +5,10 @@
       "endpoint": "<TARGET_CLUSTER_ENDPOINT>",
       "auth": {
         "type": "none | basic | sigv4",
-        // if basic
+        "// basic auth documentation": "The next two lines are releavant for basic auth only",
         "username": "<USERNAME>",
         "password_from_secret_arn": "<ARN_OF_SECRET_CONTAINING_PASSWORD>",
-        // if sigv4
+        "// sigv4 documentation": "The next two lines are releavant for sigv4 only",
         "region": "<REGION>",
         "serviceSigningName": "es | aoss"
       }
@@ -17,10 +17,10 @@
       "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
       "auth": {
         "type": "none | basic | sigv4",
-        // if basic
+        "// basic auth documentation": "The next two lines are releavant for basic auth only",
         "username": "<USERNAME>",
         "password_from_secret_arn": "<ARN_OF_SECRET_CONTAINING_PASSWORD>",
-        // if sigv4
+        "// sigv4 documentation": "The next two lines are releavant for sigv4 only",
         "region": "<REGION>",
         "serviceSigningName": "es | aoss"
       }

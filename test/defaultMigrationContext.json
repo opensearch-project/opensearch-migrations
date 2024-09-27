@@ -13,6 +13,14 @@
     "reindexFromSnapshotServiceEnabled": true,
     "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
     "migrationConsoleEnableOSI": true,
-    "migrationAPIEnabled": true
+    "migrationAPIEnabled": true,
+    "tlsSecurityPolicy": "TLS_1_2",
+    "enforceHTTPS": true,
+    "nodeToNodeEncryptionEnabled": true,
+    "encryptionAtRestEnabled": true,
+    "vpcAZCount": 2,
+    "domainAZCount": 2,
+    "mskAZCount": 2,
+    "replayerOutputEFSRemovalPolicy": "DESTROY"
   }
 }
