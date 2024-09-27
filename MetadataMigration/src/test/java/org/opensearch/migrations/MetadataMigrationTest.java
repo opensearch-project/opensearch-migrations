@@ -9,8 +9,28 @@ import org.opensearch.migrations.testutils.CloseableLogSetup;
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.hasSize;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 public class MetadataMigrationTest {
+
+    @Test
+    void testMain_expectNoPasswordLogged() {
+        List<String[]> testCases = List.of(
+            new String[]{"--source-password", "mySecretPassword", "--target-host", "http://localhost"},
+            new String[]{"--target-password", "mySecretPassword", "--target-host", "http://localhost"}
+        );
+        for (var testCase : testCases) {
+            try (var closeableLogSetup = new CloseableLogSetup(MetadataMigration.class.getName())) {
+
+                assertThrows(com.beust.jcommander.ParameterException.class, () -> MetadataMigration.main(testCase));
+
+                var logEvents = closeableLogSetup.getLogEvents();
+
+                assertFalse(logEvents.stream().anyMatch(s -> s.contains("mySecretPassword")));
+            }
+        }
+    }
 
     @Test
     void testMain_expectTopLevelHelp() throws Exception {
@@ -25,9 +45,8 @@ public class MetadataMigrationTest {
 
                 var logEvents = closeableLogSetup.getLogEvents();
 
-                assertThat(logEvents, hasSize(2));
-                assertThat(logEvents.get(0), containsString("Command line arguments"));
-                assertThat(logEvents.get(1), containsString("Usage: [options] [command] [commandOptions]"));
+                assertThat(logEvents, hasSize(1));
+                assertThat(logEvents.get(0), containsString("Usage: [options] [command] [commandOptions]"));
             }
         }
     }
@@ -44,9 +63,8 @@ public class MetadataMigrationTest {
 
                 var logEvents = closeableLogSetup.getLogEvents();
 
-                assertThat(logEvents, hasSize(2));
-                assertThat(logEvents.get(0), containsString("Command line arguments"));
-                assertThat(logEvents.get(1), containsString("Usage: " + testCase[0] + " [options]"));
+                assertThat(logEvents, hasSize(1));
+                assertThat(logEvents.get(0), containsString("Usage: " + testCase[0] + " [options]"));
             }
         }
     }
