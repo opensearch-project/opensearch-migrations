@@ -43,7 +43,19 @@ def call(Map config = [:]) {
         "reindexFromSnapshotServiceEnabled": true,
         "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
         "migrationConsoleEnableOSI": true,
-        "migrationAPIEnabled": true
+        "migrationAPIEnabled": true,
+        "tlsSecurityPolicy": "TLS_1_2",
+        "enforceHTTPS": true,
+        "nodeToNodeEncryptionEnabled": true,
+        "encryptionAtRestEnabled": true,
+        "vpcEnabled": true,
+        "vpcAZCount": 2,
+        "domainAZCount": 2,
+        "mskAZCount": 2,
+        "migrationAssistanceEnabled": true,
+        "replayerOutputEFSRemovalPolicy": "DESTROY",
+        "migrationConsoleServiceEnabled": true,
+        "otelCollectorEnabled": true
       }
     }
     """
