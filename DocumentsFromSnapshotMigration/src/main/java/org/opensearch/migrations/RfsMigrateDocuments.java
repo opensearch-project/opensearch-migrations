@@ -164,7 +164,7 @@ public class RfsMigrateDocuments {
     }
 
     public static void main(String[] args) throws Exception {
-        log.info("Got args: " + String.join("; ", args));
+        // TODO: Add back arg printing after not consuming plaintext password MIGRATIONS-1915
         var workerId = ProcessHelpers.getNodeInstanceName();
         log.info("Starting RfsMigrateDocuments with workerId =" + workerId);
 

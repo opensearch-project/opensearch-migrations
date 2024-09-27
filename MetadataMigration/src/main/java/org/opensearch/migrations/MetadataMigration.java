@@ -24,7 +24,7 @@ public class MetadataMigration {
     public static void main(String[] args) throws Exception {
         var metadataArgs = new MetadataArgs();
         var migrateArgs = new MigrateArgs();
-        var evaluateArgs = new EvaluateArgs(); 
+        var evaluateArgs = new EvaluateArgs();
         var jCommander = JCommander.newBuilder()
             .addObject(metadataArgs)
             .addCommand(migrateArgs)
@@ -40,7 +40,7 @@ public class MetadataMigration {
 
         var meta = new MetadataMigration();
 
-        log.atInfo().setMessage("Command line arguments: {}\n").addArgument(String.join(" ", args)).log();
+        // TODO: Add back arg printing after not consuming plaintext password MIGRATIONS-1915
 
         if (metadataArgs.help || jCommander.getParsedCommand() == null) {
             printTopLevelHelp(jCommander);
