@@ -23,3 +23,6 @@ If you are concerned about this scenario, we recommend fully mitigating it by pu
 The output tuples, available on the shared EFS volume via the Migration Console, contain the exact requests and responses received from both the source and target clusters with the headers and the body of the messages. The Authorization header is present on SigV4 signed requests and those using basic authorization, and with basic authorization credentials can be extracted from the header value. These values are often essential for debugging and so are not censored from the output.
 
 If you use basic authorization credentials, ensure that access to your output tuples is protected similarly to the credentials themselves.
+
+### Customer Managed Keys are not supported by the migration infrastructure
+We are able to migrate data to and from clusters with customer managed keys, but data in the intermediary stages (on Kafka, EFS volume, ephemeral storage on ECS) is stored with KMS managed keys.
