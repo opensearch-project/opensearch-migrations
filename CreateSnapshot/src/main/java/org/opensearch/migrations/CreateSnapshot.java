@@ -73,6 +73,7 @@ public class CreateSnapshot {
     }
 
     public static void main(String[] args) throws Exception {
+        // TODO: Add back arg printing after not consuming plaintext password MIGRATIONS-1915
         Args arguments = new Args();
         JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
         jCommander.parse(args);
@@ -98,7 +99,6 @@ public class CreateSnapshot {
             throw new ParameterException("If an s3 repo is being used, s3-region must be set");
         }
 
-        log.info("Running CreateSnapshot with {}", String.join(" ", args));
         var snapshotCreator = new CreateSnapshot(arguments, rootContext.createSnapshotCreateContext());
         snapshotCreator.run();
     }
