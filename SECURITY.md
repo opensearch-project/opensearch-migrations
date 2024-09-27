@@ -25,4 +25,4 @@ The output tuples, available on the shared EFS volume via the Migration Console,
 If you use basic authorization credentials, ensure that access to your output tuples is protected similarly to the credentials themselves.
 
 ### Customer Managed Keys are not supported by the migration infrastructure
-We are able to migrate data to and from clusters with customer managed keys, but data in the intermediary stages (on Kafka, EFS volume, ephemeral storage on ECS) is stored with KMS managed keys.
+We are able to migrate data to and from clusters with customer managed keys, but data in the intermediary stages (on Kafka, EFS volume, ephemeral storage on ECS) is stored with AWS managed keys.
