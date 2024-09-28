@@ -17,7 +17,7 @@ import {
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {Duration, RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
-import {PolicyStatement} from "aws-cdk-lib/aws-iam";
+import {PolicyStatement, Role} from "aws-cdk-lib/aws-iam";
 import {createDefaultECSTaskRole} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { IApplicationTargetGroup, INetworkTargetGroup } from "aws-cdk-lib/aws-elasticloadbalancingv2";
@@ -55,6 +55,7 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
 export type ELBTargetGroup = IApplicationTargetGroup | INetworkTargetGroup;
 
 export class MigrationServiceCore extends Stack {
+    serviceTaskRole: Role;
 
     createService(props: MigrationServiceCoreProps) {
         if ((!props.dockerDirectoryPath && !props.dockerImageRegistryName) || (props.dockerDirectoryPath && props.dockerImageRegistryName)) {
@@ -66,8 +67,8 @@ export class MigrationServiceCore extends Stack {
             vpc: props.vpc
         })
 
-        const serviceTaskRole = createDefaultECSTaskRole(this, props.serviceName)
-        props.taskRolePolicies?.forEach(policy => serviceTaskRole.addToPolicy(policy))
+        this.serviceTaskRole = createDefaultECSTaskRole(this, props.serviceName)
+        props.taskRolePolicies?.forEach(policy => this.serviceTaskRole.addToPolicy(policy))
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {
             ephemeralStorageGiB: props.ephemeralStorageGiB ? props.ephemeralStorageGiB : 75,
@@ -78,7 +79,7 @@ export class MigrationServiceCore extends Stack {
             family: `migration-${props.stage}-${props.serviceName}`,
             memoryLimitMiB: props.taskMemoryLimitMiB ? props.taskMemoryLimitMiB : 1024,
             cpu: props.taskCpuUnits ? props.taskCpuUnits : 256,
-            taskRole: serviceTaskRole
+            taskRole: this.serviceTaskRole
         });
         if (props.volumes) {
             props.volumes.forEach(vol => serviceTaskDef.addVolume(vol))

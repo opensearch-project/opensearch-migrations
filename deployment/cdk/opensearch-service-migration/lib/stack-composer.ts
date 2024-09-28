@@ -211,6 +211,7 @@ export class StackComposer {
         const reindexFromSnapshotServiceEnabled = this.getContextForType('reindexFromSnapshotServiceEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotExtraArgs = this.getContextForType('reindexFromSnapshotExtraArgs', 'string', defaultValues, contextJSON)
         const albAcmCertArn = this.getContextForType('albAcmCertArn', 'string', defaultValues, contextJSON);
+        const managedServiceSourceSnapshotEnabled = this.getContextForType('managedServiceSourceSnapshotEnabled', 'boolean', defaultValues, contextJSON)
 
         // We're in a transition state from an older model with limited, individually defined fields and heading towards objects
         // that fully define the source and target cluster configurations. For the time being, we're supporting both.
@@ -230,6 +231,11 @@ export class StackComposer {
         const sourceClusterDisabled = !!sourceClusterDefinition?.disabled
         const sourceCluster = (sourceClusterDefinition && !sourceClusterDisabled) ? parseClusterDefinition(sourceClusterDefinition) : undefined
         const sourceClusterEndpoint = sourceCluster?.endpoint
+
+        if (managedServiceSourceSnapshotEnabled && !sourceCluster?.auth.sigv4) {
+            throw new Error("A managed service source snapshot is only compatible with sigv4 authentication. If you would like to proceed" +
+                " please disable `managedServiceSourceSnapshotEnabled` and provide your own snapshot of the source cluster.")
+        }
 
         const targetClusterEndpointField = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
         let targetClusterDefinition = this.getContextForType('targetCluster', 'object', defaultValues, contextJSON)
@@ -266,7 +272,8 @@ export class StackComposer {
         }
 
         const targetClusterAuth = targetCluster?.auth
-        const targetVersion = this.getEngineVersion(targetCluster?.version ?? engineVersion)
+        const targetVersion = targetCluster?.version ? this.getEngineVersion(targetCluster?.version) : null
+        const engineVersionValue = engineVersion ? this.getEngineVersion(engineVersion) : this.getEngineVersion('OS_2.15')
 
         const requiredFields: { [key: string]: any; } = {"stage":stage}
         for (let key in requiredFields) {
@@ -275,7 +282,7 @@ export class StackComposer {
             }
         }
         if (addOnMigrationDeployId && vpcId) {
-            console.warn("Addon deployments will use the original deployment 'vpcId' regardless of passed 'vpcId' values")
+            console.warn("Add-on deployments will use the original deployment 'vpcId' regardless of passed 'vpcId' values")
         }
         if (stage.length > 15) {
             throw new Error(`Maximum allowed stage name length is 15 characters but received ${stage}`)
@@ -359,7 +366,7 @@ export class StackComposer {
         let openSearchStack
         if (!preexistingOrContainerTargetEndpoint) {
             openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
-                version: targetVersion,
+                version: engineVersionValue,
                 domainName: clusterDomainName,
                 dataNodeInstanceType: dataNodeType,
                 dataNodes: dataNodeCount,
@@ -609,6 +616,7 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 otelCollectorEnabled,
+                managedServiceSourceSnapshotEnabled,
                 env: props.env
             })
             // To enable the Migration Console to make requests to other service endpoints with services,
