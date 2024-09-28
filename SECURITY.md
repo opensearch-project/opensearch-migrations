@@ -25,4 +25,7 @@ The output tuples, available on the shared EFS volume via the Migration Console,
 If you use basic authorization credentials, ensure that access to your output tuples is protected similarly to the credentials themselves.
 
 ### Customer Managed Keys are not supported by the migration infrastructure
-We are able to migrate data to and from clusters with customer managed keys, but data in the intermediary stages (on Kafka, EFS volume, ephemeral storage on ECS) is stored with AWS managed keys.
+Each of the AWS services that are interacting with data will encrypt all data being stored at rest. While the services themselves can support performing the encryption via a KMS Key, the CDK deployment option of Migration Assistant doesn't have the ability to set a customer key for any of those services. That will leave all of the data at rest encrypted, but not under the control of a customer's KMS Key. See the links below for more details on forthcoming support:
+
+https://docs.aws.amazon.com/kms/latest/developerguide/concepts.html
+#1026
