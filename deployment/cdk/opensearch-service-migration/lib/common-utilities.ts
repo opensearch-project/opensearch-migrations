@@ -187,10 +187,12 @@ export function createDefaultECSTaskRole(scope: Construct, serviceName: string):
     return serviceTaskRole
 }
 
-export function createSnapshotOnAOSRole(scope: Construct, artifactS3Arn: string, migrationConsoleTaskRoleArn: string): Role {
+export function createSnapshotOnAOSRole(scope: Construct, artifactS3Arn: string, migrationConsoleTaskRoleArn: string,
+                                        region: string, stage: string, defaultDeployId: string): Role {
     const snapshotRole = new Role(scope, `SnapshotRole`, {
-        assumedBy: new ServicePrincipal('es.amazonaws.com'),
+        assumedBy: new ServicePrincipal('es.amazonaws.com'),  // Note that snapshots are not currently possible on AOSS
         description: 'Role that grants OpenSearch Service permissions to access S3 to create snapshots',
+        roleName: `OSMigrations-${stage}-${region}-${defaultDeployId}-SnapshotRole`
     });
     snapshotRole.addToPolicy(new PolicyStatement({
         effect: Effect.ALLOW,
@@ -421,7 +423,7 @@ export function parseClusterDefinition(json: any): ClusterYaml {
     }
     const auth = parseAuth(json.auth)
     if (!auth) {
-        throw new Error(`Invalid auth type when parsing cluster definition: ${json.auth}`)
+        throw new Error(`Invalid auth type when parsing cluster definition: ${json.auth.type}`)
     }
     return new ClusterYaml({endpoint, version, auth})
 }

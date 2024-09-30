@@ -328,8 +328,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         });
 
         if (props.managedServiceSourceSnapshotEnabled) {
-            const consoleServiceRoleName = "migration-console-TaskRole";
-            const snapshotRole = createSnapshotOnAOSRole(this, artifactS3Arn, this.serviceTaskRole.roleArn);
+            const snapshotRole = createSnapshotOnAOSRole(this, artifactS3Arn, this.serviceTaskRole.roleArn, this.region, props.stage, props.defaultDeployId);
         }
     }
 
