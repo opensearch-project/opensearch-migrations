@@ -22,7 +22,7 @@ def call_api(cluster: Cluster, path: str, method=HttpMethod.GET, data=None, head
 def cat_indices(cluster: Cluster, refresh=False, as_json=False):
     if refresh:
         cluster.call_api('/_refresh')
-    as_json_suffix = "?format=json" if as_json else "?v"
+    as_json_suffix = "?format=json" if as_json else "?v=true"
     cat_indices_path = f"/_cat/indices/_all{as_json_suffix}"
     r = cluster.call_api(cat_indices_path)
     return r.json() if as_json else r.content
