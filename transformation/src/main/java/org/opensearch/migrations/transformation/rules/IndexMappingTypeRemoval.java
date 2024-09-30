@@ -90,10 +90,14 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
         if (mappingsNode.isObject()) {
             var mappingsObjectNode = (ObjectNode) mappingsNode;
             var typeNode = mappingsNode.fields().next();
-            var propertiesNode = typeNode.getValue().fields().next();
+            var typeNodeChildren = typeNode.getValue().fields();
+            // Check if the type node is empty, then there is nothing to move
+            if (typeNodeChildren.hasNext()) {
+                var propertiesNode = typeNodeChildren.next();
 
+                mappingsObjectNode.set(propertiesNode.getKey(), propertiesNode.getValue());
+            }
             mappingsObjectNode.remove(typeNode.getKey());
-            mappingsObjectNode.set(propertiesNode.getKey(), propertiesNode.getValue());
         }
 
         return true;
