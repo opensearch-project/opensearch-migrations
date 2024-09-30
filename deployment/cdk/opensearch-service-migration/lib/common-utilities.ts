@@ -187,6 +187,33 @@ export function createDefaultECSTaskRole(scope: Construct, serviceName: string):
     return serviceTaskRole
 }
 
+export function createSnapshotOnAOSRole(scope: Construct, artifactS3Arn: string, migrationConsoleTaskRoleArn: string,
+                                        region: string, stage: string, defaultDeployId: string): Role {
+    const snapshotRole = new Role(scope, `SnapshotRole`, {
+        assumedBy: new ServicePrincipal('es.amazonaws.com'),  // Note that snapshots are not currently possible on AOSS
+        description: 'Role that grants OpenSearch Service permissions to access S3 to create snapshots',
+        roleName: `OSMigrations-${stage}-${region}-${defaultDeployId}-SnapshotRole`
+    });
+    snapshotRole.addToPolicy(new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['s3:ListBucket'],
+        resources: [artifactS3Arn],
+    }));
+
+    snapshotRole.addToPolicy(new PolicyStatement({
+        effect: Effect.ALLOW,
+        actions: ['s3:GetObject', 's3:PutObject', 's3:DeleteObject'],
+        resources: [`${artifactS3Arn}/*`],
+    }));
+
+    // The Migration Console Role needs to be able to pass the snapshot role
+    const requestingRole = Role.fromRoleArn(scope, 'RequestingRole', migrationConsoleTaskRoleArn);
+    snapshotRole.grantPassRole(requestingRole);
+
+    return snapshotRole
+}
+
+
 export function validateFargateCpuArch(cpuArch?: string): CpuArchitecture {
     const desiredArch = cpuArch ?? process.arch
     const desiredArchUpper = desiredArch.toUpperCase()

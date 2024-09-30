@@ -7,7 +7,7 @@
         "type": "none | basic | sigv4",
         "// basic auth documentation": "The next two lines are releavant for basic auth only",
         "username": "<USERNAME>",
-        "password_from_secret_arn": "<ARN_OF_SECRET_CONTAINING_PASSWORD>",
+        "passwordFromSecretArn": "<ARN_OF_SECRET_CONTAINING_PASSWORD>",
         "// sigv4 documentation": "The next two lines are releavant for sigv4 only",
         "region": "<REGION>",
         "serviceSigningName": "es | aoss"
@@ -19,7 +19,7 @@
         "type": "none | basic | sigv4",
         "// basic auth documentation": "The next two lines are releavant for basic auth only",
         "username": "<USERNAME>",
-        "password_from_secret_arn": "<ARN_OF_SECRET_CONTAINING_PASSWORD>",
+        "passwordFromSecretArn": "<ARN_OF_SECRET_CONTAINING_PASSWORD>",
         "// sigv4 documentation": "The next two lines are releavant for sigv4 only",
         "region": "<REGION>",
         "serviceSigningName": "es | aoss"

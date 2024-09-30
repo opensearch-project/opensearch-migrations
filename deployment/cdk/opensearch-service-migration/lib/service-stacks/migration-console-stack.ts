@@ -11,7 +11,8 @@ import {
     getSecretAccessPolicy,
     getMigrationStringParameterValue,
     hashStringSHA256,
-    MigrationSSMParameter
+    MigrationSSMParameter,
+    createSnapshotOnAOSRole
 } from "../common-utilities";
 import {StreamingSourceType} from "../streaming-source-type";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
@@ -33,6 +34,7 @@ export interface MigrationConsoleProps extends StackPropsExt {
     readonly servicesYaml: ServicesYaml,
     readonly otelCollectorEnabled?: boolean,
     readonly sourceCluster?: ClusterYaml,
+    readonly managedServiceSourceSnapshotEnabled?: boolean
 }
 
 export class MigrationConsoleStack extends MigrationServiceCore {
@@ -308,6 +310,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 parameter: MigrationSSMParameter.OSI_PIPELINE_LOG_GROUP_NAME,
             });
         }
+
         this.createService({
             serviceName: "migration-console",
             dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/migrationConsole"),
@@ -324,6 +327,9 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ...props
         });
 
+        if (props.managedServiceSourceSnapshotEnabled) {
+            const snapshotRole = createSnapshotOnAOSRole(this, artifactS3Arn, this.serviceTaskRole.roleArn, this.region, props.stage, props.defaultDeployId);
+        }
     }
 
 }
