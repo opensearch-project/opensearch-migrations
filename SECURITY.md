@@ -28,4 +28,4 @@ If you use basic authorization credentials, ensure that access to your output tu
 Each of the AWS services that are interacting with data will encrypt all data being stored at rest. While the services themselves can support performing the encryption via a KMS Key, the CDK deployment option of Migration Assistant doesn't have the ability to set a customer key for any of those services. That will leave all of the data at rest encrypted, but not under the control of a customer's KMS Key. See the links below for more details on forthcoming support:
 
 https://docs.aws.amazon.com/kms/latest/developerguide/concepts.html
-#1026
+[Issue #1026](https://github.com/opensearch-project/opensearch-migrations/issues/1026)
