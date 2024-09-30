@@ -17,7 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class InvalidResponse extends RfsException {
-    private static final Pattern UNKNOWN_SETTING = Pattern.compile("unknown setting \\[(.+?)\\].+");
+    private static final Pattern UNKNOWN_SETTING = Pattern.compile("unknown setting \\[([a-zA-Z0-9_.-]+)\\].+");
     private static final ObjectMapper objectMapper = new ObjectMapper();
     private final transient HttpResponse response;
 
