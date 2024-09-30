@@ -1,5 +1,7 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.util.List;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
@@ -14,9 +16,10 @@ public class FileSystemSnapshotCreator extends SnapshotCreator {
         String snapshotName,
         OpenSearchClient client,
         String snapshotRepoDirectoryPath,
+        List<String> indexAllowlist,
         IRfsContexts.ICreateSnapshotContext context
     ) {
-        super(snapshotName, client, context);
+        super(snapshotName, indexAllowlist, client, context);
         this.snapshotRepoDirectoryPath = snapshotRepoDirectoryPath;
     }
 

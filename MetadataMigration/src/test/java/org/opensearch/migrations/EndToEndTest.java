@@ -155,6 +155,7 @@ class EndToEndTest {
                     snapshotName,
                     sourceClient,
                     SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
+                    List.of(),
                     snapshotContext.createSnapshotCreateContext()
                 );
                 SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
