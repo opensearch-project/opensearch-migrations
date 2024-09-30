@@ -2,10 +2,9 @@ package org.opensearch.migrations.reindexer;
 
 import org.junit.jupiter.api.Test;
 
+import org.opensearch.migrations.bulkload.common.OpenSearchClient.OperationFailed;
+import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
-
-import com.rfs.common.OpenSearchClient.OperationFailed;
-import com.rfs.common.http.HttpResponse;
 
 import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.CoreMatchers.containsString;
@@ -16,7 +15,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 class FailedRequestsLoggerTest {
     @Test
     void testLogBulkFailure_withNoBody() {
-        try (var logs = new CloseableLogSetup("FailedRequestsLogger")) {
+        try (var logs = new CloseableLogSetup(FailedRequestsLogger.class.getName())) {
             var logger = new FailedRequestsLogger();
 
             var indexName = "myIndexName";
@@ -41,7 +40,7 @@ class FailedRequestsLoggerTest {
 
     @Test
     void testLogBulkFailure_withResponseBody() {
-        try (var logs = new CloseableLogSetup("FailedRequestsLogger")) {
+        try (var logs = new CloseableLogSetup(FailedRequestsLogger.class.getName())) {
             var logger = new FailedRequestsLogger();
 
             var indexName = "yourIndexName";

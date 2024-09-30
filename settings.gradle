@@ -9,9 +9,10 @@
 import java.nio.file.Paths
 
 plugins {
-    id("com.gradle.enterprise") version("3.16.2")
+    id("com.gradle.develocity") version("3.18.1")
     id 'org.gradle.toolchains.foojay-resolver-convention' version '0.7.0'
 }
+
 
 void addSubProjects(String path, File dir) {
     if (dir.isDirectory() == false) {
@@ -41,10 +42,12 @@ rootProject.name = 'OpensearchMigrations'
 include 'awsUtilities'
 include 'commonDependencyVersionConstraints'
 include 'coreUtilities'
+include 'libraries:kafkaCommandLineFormatter'
 include 'transformation'
 include 'testHelperFixtures'
 include 'RFS'
 include 'CreateSnapshot'
+include 'dashboardsSanitizer'
 include 'MetadataMigration'
 include 'DocumentsFromSnapshotMigration'
 include 'TrafficCapture:captureKafkaOffloader'
@@ -60,11 +63,17 @@ include 'TrafficCapture:trafficReplayer'
 addSubProjects(':TrafficCapture', Paths.get(rootProject.projectDir.getPath(), 'TrafficCapture', 'transformationPlugins').toFile())
 
 if (System.getenv().containsKey("OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED")) {
-    gradleEnterprise {
+    develocity {
         buildScan {
-            publishAlways()
-            termsOfServiceUrl = "https://gradle.com/terms-of-service"
-            termsOfServiceAgree = "yes"
+            publishing.onlyIf { true }
+            termsOfUseUrl = "https://gradle.com/help/legal-terms-of-use"
+            termsOfUseAgree = "yes"
+        }
+    }
+} else {
+    develocity {
+        buildScan {
+            publishing.onlyIf { false }
         }
     }
 }

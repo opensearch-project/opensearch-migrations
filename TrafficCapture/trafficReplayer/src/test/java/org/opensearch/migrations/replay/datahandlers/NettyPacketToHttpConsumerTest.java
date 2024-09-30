@@ -35,7 +35,7 @@ import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.http.retries.NoRetryEvaluatorFactory;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
 import org.opensearch.migrations.replay.util.TextTrackedFuture;
-import org.opensearch.migrations.testutils.HttpRequestFirstLine;
+import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
 import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
@@ -63,13 +63,13 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     public static final int LARGE_RESPONSE_CONTENT_LENGTH = 2 * 1024 * 1024;
     public static final int LARGE_RESPONSE_LENGTH = LARGE_RESPONSE_CONTENT_LENGTH + 107;
 
-    final static String EXPECTED_REQUEST_STRING = "GET / HTTP/1.1\r\n"
+    static final String EXPECTED_REQUEST_STRING = "GET / HTTP/1.1\r\n"
         + "Connection: Keep-Alive\r\n"
         + "Host: localhost\r\n"
         + "User-Agent: UnitTest\r\n"
         + "Connection: Keep-Alive\r\n"
         + "\r\n";
-    public final static String EXPECTED_RESPONSE_STRING = "HTTP/1.1 200 OK\r\n"
+    public static final String EXPECTED_RESPONSE_STRING = "HTTP/1.1 200 OK\r\n"
         + "Content-Type: text/plain\r\n"
         + "Funtime: checkIt!\r\n"
         + "transfer-encoding: chunked\r\n"
@@ -85,7 +85,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         return TestContext.withTracking(false, true);
     }
 
-    private static SimpleHttpResponse makeResponseContext(HttpRequestFirstLine request) {
+    private static SimpleHttpResponse makeResponseContext(HttpRequest request) {
         var headers = new TreeMap(
             Map.of(
                 "Content-Type",
@@ -100,7 +100,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
         return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
     }
 
-    private static SimpleHttpResponse makeResponseContextLarge(HttpRequestFirstLine request) {
+    private static SimpleHttpResponse makeResponseContextLarge(HttpRequest request) {
         var headers = new TreeMap(
             Map.of(
                 "Content-Type",
@@ -195,7 +195,6 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     @CsvSource({ "false, false", "false, true", "true, false", "true, true" })
     @Tag("longTest")
     @WrapWithNettyLeakDetection(repetitions = 1)
-    @Tag("longTest")
     public void testThatPeerResetTriggersFinalizeFuture(boolean useTls, boolean withServerReadTimeout)
         throws Exception {
         final var RESPONSE_TIMEOUT_FOR_HUNG_TEST = Duration.ofMillis(500);
@@ -261,7 +260,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 var br = new BufferedReader(isr)
             ) {
                 Assertions.assertEquals("", Optional.ofNullable(br.readLine()).orElse(""));
-                Assertions.assertEquals(0, result.getResponseSizeInBytes());
+                Assertions.assertEquals(0, result.getSizeInBytes());
             }
             if (withServerReadTimeout) {
                 log.trace(
@@ -285,6 +284,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
 
     @ParameterizedTest
     @CsvSource({ "false, false", "false, true", "true, false", "true, true" })
+    @WrapWithNettyLeakDetection(repetitions = 1)
     @Tag("longTest")
     public void testThatConnectionsAreKeptAliveAndShared(boolean useTls, boolean largeResponse) throws Exception {
         try (
@@ -396,6 +396,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     }
 
     @ParameterizedTest
+    @Tag("longTest")
     @CsvSource({ "false", "true" })
     public void testResponseTakesLongerThanTimeout(boolean useTls) throws Exception {
         var responseTimeout = Duration.ofMillis(50);
@@ -439,7 +440,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 Instant.now(),
                 Instant.now(),
                 () -> Stream.of(EXPECTED_REQUEST_STRING.getBytes(StandardCharsets.UTF_8)));
-            var maxTimeToWaitForTimeoutOrResponse = Duration.ofSeconds(10);
+            var maxTimeToWaitForTimeoutOrResponse = Duration.ofSeconds(30);
             var aggregatedResponse = requestFinishFuture.get(maxTimeToWaitForTimeoutOrResponse);
             log.atInfo().setMessage("RequestFinishFuture finished").log();
             Assertions.assertInstanceOf(ReadTimeoutException.class, aggregatedResponse.getError());
@@ -447,6 +448,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     }
 
     @ParameterizedTest
+    @Tag("longTest")
     @CsvSource({ "false", "true" })
     public void testTimeBetweenRequestsLongerThanResponseTimeout(boolean useTls) throws Exception {
         var responseTimeout = Duration.ofMillis(100);

@@ -1,10 +1,16 @@
 package org.opensearch.migrations.commands;
 
-import lombok.AllArgsConstructor;
+import org.opensearch.migrations.cli.Clusters;
+import org.opensearch.migrations.cli.Items;
+
+import lombok.Builder;
 import lombok.Getter;
 
-@AllArgsConstructor
-public class MigrateResult implements Result {
-    @Getter
+@Builder
+@Getter
+public class MigrateResult implements MigrationItemResult {
+    private final Clusters clusters;
+    private final Items items;
+    private final String errorMessage;
     private final int exitCode;
 }

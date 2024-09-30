@@ -1,0 +1,14 @@
+{
+    "attributes": {
+        "allowNoIndex": true
+    },
+    "coreMigrationVersion": "8.8.0",
+    "id": "ed0e56e0-eacc-11eb-b683-b11c3a9707cb",
+    "managed": false,
+    "originId": "ed0e56e0-eacc-11eb-b683-b11c3a9707cb",
+    "references": [],
+    "type": "index-pattern",
+    "typeMigrationVersion": "8.0.0",
+    "updated_at": "2024-07-01T08:01:56.451Z",
+    "version": "WzMxNDUxODgsMjFd"
+}

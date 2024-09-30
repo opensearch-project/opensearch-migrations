@@ -1,34 +1,26 @@
+import { ClusterAuth } from './common-utilities';
 import * as yaml from 'yaml';
-
-export class ClusterBasicAuth {
-    username: string;
-    password?: string;
-    password_from_secret_arn?: string;
-
-    constructor({
-        username,
-        password,
-        password_from_secret_arn,
-    }: {
-        username: string;
-        password?: string;
-        password_from_secret_arn?: string;
-    }) {
-        this.username = username;
-        this.password = password;
-        this.password_from_secret_arn = password_from_secret_arn;
-
-        // Validation: Exactly one of password or password_from_secret_arn must be provided
-        if ((password && password_from_secret_arn) || (!password && !password_from_secret_arn)) {
-            throw new Error('Exactly one of password or password_from_secret_arn must be provided');
-        }
-    }
-}
 
 export class ClusterYaml {
     endpoint: string = '';
-    no_auth?: string | null;
-    basic_auth?: ClusterBasicAuth | null;
+    version?: string;
+    auth: ClusterAuth;
+
+    constructor({endpoint, auth, version} : {endpoint: string, auth: ClusterAuth, version?: string}) {
+        this.endpoint = endpoint;
+        this.auth = auth;
+        this.version = version;
+    }
+    toDict() {
+        return {
+            endpoint: this.endpoint,
+            version: this.version,
+            ...this.auth.toDict(),
+            // TODO: figure out how version should be incorporated
+            // https://opensearch.atlassian.net/browse/MIGRATIONS-1951
+            // version: this.version?.version
+        };
+    }
 }
 
 export class MetricsSourceYaml {
@@ -116,18 +108,16 @@ export class MetadataMigrationYaml {
     from_snapshot: null = null;
     min_replicas: number = 1;
     otel_endpoint: string = '';
+    source_cluster_version?: string;
 }
-
-export class MSKYaml {
-}
-
-export class StandardKafkaYaml {
-}
-
 export class KafkaYaml {
     broker_endpoints: string = '';
     msk?: string | null;
     standard?: string | null;
+}
+
+export class ClientOptions {
+    user_agent_extra?: string;
 }
 
 export class ServicesYaml {
@@ -139,17 +129,19 @@ export class ServicesYaml {
     metadata_migration?: MetadataMigrationYaml;
     replayer?: ECSReplayerYaml;
     kafka?: KafkaYaml;
+    client_options?: ClientOptions;
 
     stringify(): string {
         return yaml.stringify({
-            source_cluster: this.source_cluster,
-            target_cluster: this.target_cluster,
+            source_cluster: this.source_cluster?.toDict(),
+            target_cluster: this.target_cluster?.toDict(),
             metrics_source: this.metrics_source,
             backfill: this.backfill?.toDict(),
             snapshot: this.snapshot?.toDict(),
             metadata_migration: this.metadata_migration,
             replay: this.replayer?.toDict(),
-            kafka: this.kafka
+            kafka: this.kafka,
+            client_options: this.client_options
         },
         {
             'nullStr': ''

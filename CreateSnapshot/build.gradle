@@ -9,25 +9,17 @@ import org.opensearch.migrations.common.CommonUtils
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     implementation project(":commonDependencyVersionConstraints")
 
     implementation project(':coreUtilities')
     implementation project(":RFS")
 
-    implementation group: 'com.beust', name: 'jcommander'
+    implementation group: 'org.jcommander', name: 'jcommander'
     implementation group: 'org.slf4j', name: 'slf4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
 }
 
 application {
-    mainClassName = 'com.rfs.CreateSnapshot'
-}
-
-test {
-    useJUnitPlatform()
+    mainClassName = 'org.opensearch.migrations.CreateSnapshot'
 }

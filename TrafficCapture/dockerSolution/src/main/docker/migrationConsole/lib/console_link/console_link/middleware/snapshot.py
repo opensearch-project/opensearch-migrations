@@ -22,7 +22,7 @@ def status(snapshot: Snapshot, *args, **kwargs) -> CommandResult:
 def delete(snapshot: Snapshot, *args, **kwargs) -> CommandResult:
     logger.info(f"Deleting snapshot with {args=} and {kwargs=}")
     try:
-        return snapshot.delete(*args, **kwargs)
+        return CommandResult(success=True, value=snapshot.delete(*args, **kwargs))
     except Exception as e:
         logger.error(f"Failure running delete snapshot: {e}")
-        return CommandResult(status=False, message=f"Failure running delete snapshot: {e}")
+        return CommandResult(success=False, value=f"Failure running delete snapshot: {e}")

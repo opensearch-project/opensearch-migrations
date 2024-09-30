@@ -141,6 +141,30 @@ def test_full_config_and_snapshot_gives_priority_to_config(s3_snapshot):
     assert metadata._local_dir == config["from_snapshot"]["local_dir"]
 
 
+def test_full_config_with_version_includes_version_string_in_subprocess(s3_snapshot, mocker):
+    config = {
+        "from_snapshot": {
+            "local_dir": "/tmp/s3",
+            "snapshot_name": "reindex_from_snapshot",
+            "s3": {
+                "repo_uri": "s3://my-bucket",
+                "aws_region": "us-east-1"
+            },
+        },
+        "source_cluster_version": "ES_6.8"
+
+    }
+    metadata = Metadata(config, create_valid_cluster(), s3_snapshot)
+
+    mock = mocker.patch("subprocess.run")
+    metadata.migrate()
+
+    mock.assert_called_once()
+    actual_call_args = mock.call_args.args[0]
+    assert '--source-version' in actual_call_args
+    assert config['source_cluster_version'] in actual_call_args
+
+
 def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
     config = {
         "from_snapshot": {
@@ -161,6 +185,8 @@ def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
 
     mock.assert_called_once_with([
         "/root/metadataMigration/bin/MetadataMigration",
+        "--otel-collector-endpoint", config["otel_endpoint"],
+        "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--min-replicas", '0',
@@ -168,7 +194,6 @@ def test_metadata_with_s3_snapshot_makes_correct_subprocess_call(mocker):
         "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
         "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
         "--target-insecure",
-        "--otel-collector-endpoint", config["otel_endpoint"],
     ], stdout=None, stderr=None, text=True, check=True
     )
 
@@ -191,12 +216,13 @@ def test_metadata_with_fs_snapshot_makes_correct_subprocess_call(mocker):
 
     mock.assert_called_once_with([
         "/root/metadataMigration/bin/MetadataMigration",
+        "--otel-collector-endpoint", config["otel_endpoint"],
+        "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--min-replicas", '0',
         "--file-system-repo-path", config["from_snapshot"]["fs"]["repo_path"],
         "--target-insecure",
-        "--otel-collector-endpoint", config["otel_endpoint"],
     ], stdout=None, stderr=None, text=True, check=True)
 
 
@@ -218,6 +244,7 @@ def test_metadata_with_min_replicas_makes_correct_subprocess_call(mocker):
 
     mock.assert_called_once_with([
         "/root/metadataMigration/bin/MetadataMigration",
+        "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--min-replicas", '2',
@@ -248,6 +275,8 @@ def test_metadata_with_allowlists_makes_correct_subprocess_call(mocker):
 
     mock.assert_called_once_with([
         "/root/metadataMigration/bin/MetadataMigration",
+        "--otel-collector-endpoint", config["otel_endpoint"],
+        "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--min-replicas", '0',
@@ -256,28 +285,8 @@ def test_metadata_with_allowlists_makes_correct_subprocess_call(mocker):
         "--index-allowlist", "index1,index2",
         "--index-template-allowlist", "index_template1,index_template2",
         "--component-template-allowlist", "component_template1,component_template2",
-        "--otel-collector-endpoint", config["otel_endpoint"],
     ], stdout=None, stderr=None, text=True, check=True
     )
-
-
-def test_metadata_migrate_detached_makes_correct_subprocess_call(mocker):
-    config = {
-        "from_snapshot": {
-            "snapshot_name": "reindex_from_snapshot",
-            "fs": {
-                "repo_path": "path/to/repo"
-            },
-        },
-        "min_replicas": 2,
-    }
-    target = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
-    metadata = Metadata(config, target, None)
-
-    mock = mocker.patch("subprocess.Popen")
-    metadata.migrate(detached_log="/tmp/log_file.log")
-
-    mock.assert_called_once()
 
 
 def test_metadata_with_target_config_auth_makes_correct_subprocess_call(mocker):
@@ -299,6 +308,7 @@ def test_metadata_with_target_config_auth_makes_correct_subprocess_call(mocker):
 
     mock.assert_called_once_with([
         "/root/metadataMigration/bin/MetadataMigration",
+        "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--min-replicas", '0',
@@ -334,6 +344,7 @@ def test_metadata_with_target_sigv4_makes_correct_subprocess_call(mocker):
 
     mock.assert_called_once_with([
         "/root/metadataMigration/bin/MetadataMigration",
+        "migrate",
         "--snapshot-name", config["from_snapshot"]["snapshot_name"],
         "--target-host", target.endpoint,
         "--min-replicas", '0',
@@ -345,3 +356,43 @@ def test_metadata_with_target_sigv4_makes_correct_subprocess_call(mocker):
         "--target-insecure",
     ], stdout=None, stderr=None, text=True, check=True
     )
+
+
+def test_metadata_init_with_minimal_config_and_extra_args(mocker):
+    config = {
+        "from_snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "s3": {
+                "repo_uri": "s3://my-bucket",
+                "aws_region": "us-east-1"
+            },
+        }
+    }
+    metadata = Metadata(config, create_valid_cluster(), None)
+
+    mock = mocker.patch("subprocess.run")
+    metadata.evaluate(extra_args=[
+        "--foo", "bar",  # Pair of command and value
+        "--flag",  # Flag with no value afterward
+        "--bar", "baz",  # Another pair of command and value
+        "bazzy"  # Lone value, will be ignored
+    ])
+
+    print(mock.call_args_list)
+
+    mock.assert_called_once_with([
+        '/root/metadataMigration/bin/MetadataMigration',
+        "evaluate",
+        "--snapshot-name", config["from_snapshot"]["snapshot_name"],
+        '--target-host', 'https://opensearchtarget:9200',
+        '--min-replicas', '0',
+        "--s3-local-dir", mocker.ANY,
+        "--s3-repo-uri", config["from_snapshot"]["s3"]["repo_uri"],
+        "--s3-region", config["from_snapshot"]["s3"]["aws_region"],
+        '--target-username', 'admin',
+        '--target-password', 'myStrongPassword123!',
+        '--target-insecure',
+        '--foo', 'bar',
+        '--flag',
+        '--bar', 'baz'
+    ], stdout=None, stderr=None, text=True, check=True)

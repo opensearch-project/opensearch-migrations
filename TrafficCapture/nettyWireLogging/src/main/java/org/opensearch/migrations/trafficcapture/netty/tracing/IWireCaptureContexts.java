@@ -4,9 +4,9 @@ import org.opensearch.migrations.tracing.IWithStartTimeAndAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
 import org.opensearch.migrations.tracing.commoncontexts.IHttpTransactionContext;
 
-public abstract class IWireCaptureContexts {
+public interface IWireCaptureContexts {
 
-    public static class ActivityNames {
+    class ActivityNames {
         private ActivityNames() {}
 
         public static final String BLOCKED = "blocked";
@@ -15,7 +15,7 @@ public abstract class IWireCaptureContexts {
         public static final String GATHERING_RESPONSE = "gatheringResponse";
     }
 
-    public static class MetricNames {
+    class MetricNames {
         private MetricNames() {}
 
         public static final String UNREGISTERED = "unregistered";
@@ -28,7 +28,7 @@ public abstract class IWireCaptureContexts {
         public static final String BYTES_WRITTEN = "bytesWritten";
     }
 
-    public interface ICapturingConnectionContext
+    interface ICapturingConnectionContext
         extends
             org.opensearch.migrations.tracing.commoncontexts.IConnectionContext {
         IHttpMessageContext createInitialRequestContext();
@@ -38,7 +38,7 @@ public abstract class IWireCaptureContexts {
         void onRemoved();
     }
 
-    public interface IHttpMessageContext
+    interface IHttpMessageContext
         extends
             IHttpTransactionContext,
             IWithStartTimeAndAttributes,
@@ -52,7 +52,7 @@ public abstract class IWireCaptureContexts {
         IRequestContext createNextRequestContext();
     }
 
-    public interface IRequestContext extends IHttpMessageContext {
+    interface IRequestContext extends IHttpMessageContext {
         String ACTIVITY_NAME = ActivityNames.GATHERING_REQUEST;
 
         default String getActivityName() {
@@ -68,7 +68,7 @@ public abstract class IWireCaptureContexts {
         void onBytesRead(int size);
     }
 
-    public interface IBlockingContext extends IHttpMessageContext {
+    interface IBlockingContext extends IHttpMessageContext {
         String ACTIVITY_NAME = ActivityNames.BLOCKED;
 
         default String getActivityName() {
@@ -76,7 +76,7 @@ public abstract class IWireCaptureContexts {
         }
     }
 
-    public interface IWaitingForResponseContext extends IHttpMessageContext {
+    interface IWaitingForResponseContext extends IHttpMessageContext {
         String ACTIVITY_NAME = ActivityNames.WAITING_FOR_RESPONSE;
 
         default String getActivityName() {
@@ -84,7 +84,7 @@ public abstract class IWireCaptureContexts {
         }
     }
 
-    public interface IResponseContext extends IHttpMessageContext {
+    interface IResponseContext extends IHttpMessageContext {
         String ACTIVITY_NAME = ActivityNames.GATHERING_RESPONSE;
 
         default String getActivityName() {

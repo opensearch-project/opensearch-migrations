@@ -1,11 +1,10 @@
 package org.opensearch.migrations.snapshot.creation.tracing;
 
+import org.opensearch.migrations.bulkload.framework.tracing.TrackingTestContextFactory;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
+import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.InMemoryInstrumentationBundle;
-
-import com.rfs.framework.tracing.TrackingTestContextFactory;
-import com.rfs.tracing.IRfsContexts;
-import com.rfs.tracing.RfsContexts;
 
 public class SnapshotTestContext extends RootSnapshotContext {
     public final InMemoryInstrumentationBundle inMemoryInstrumentationBundle;

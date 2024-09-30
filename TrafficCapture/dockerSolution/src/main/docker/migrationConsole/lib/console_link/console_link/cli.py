@@ -1,5 +1,6 @@
 import json
 from pprint import pprint
+import sys
 import click
 import console_link.middleware.clusters as clusters_
 import console_link.middleware.metrics as metrics_
@@ -7,6 +8,8 @@ import console_link.middleware.backfill as backfill_
 import console_link.middleware.snapshot as snapshot_
 import console_link.middleware.metadata as metadata_
 import console_link.middleware.replay as replay_
+import console_link.middleware.kafka as kafka_
+import console_link.middleware.tuples as tuples_
 
 from console_link.models.utils import ExitCode
 from console_link.environment import Environment
@@ -73,6 +76,9 @@ def cat_indices_cmd(ctx, refresh):
             )
         )
         return
+    
+    if not refresh:
+        click.echo("\nWARNING: Cluster information may be stale. Use --refresh to update.\n")
     click.echo("SOURCE CLUSTER")
     if ctx.env.source_cluster:
         click.echo(clusters_.cat_indices(ctx.env.source_cluster, refresh=refresh))
@@ -147,16 +153,18 @@ def snapshot_group(ctx):
         raise click.UsageError("Snapshot is not set")
 
 
-@snapshot_group.command(name="create")
+@snapshot_group.command(name="create", context_settings=dict(ignore_unknown_options=True))
 @click.option('--wait', is_flag=True, default=False, help='Wait for snapshot completion')
 @click.option('--max-snapshot-rate-mb-per-node', type=int, default=None,
               help='Maximum snapshot rate in MB/s per node')
+@click.argument('extra_args', nargs=-1, type=click.UNPROCESSED)
 @click.pass_obj
-def create_snapshot_cmd(ctx, wait, max_snapshot_rate_mb_per_node):
+def create_snapshot_cmd(ctx, wait, max_snapshot_rate_mb_per_node, extra_args):
     """Create a snapshot of the source cluster"""
     snapshot = ctx.env.snapshot
     result = snapshot_.create(snapshot, wait=wait,
-                              max_snapshot_rate_mb_per_node=max_snapshot_rate_mb_per_node)
+                              max_snapshot_rate_mb_per_node=max_snapshot_rate_mb_per_node,
+                              extra_args=extra_args)
     click.echo(result.value)
 
 
@@ -166,6 +174,23 @@ def create_snapshot_cmd(ctx, wait, max_snapshot_rate_mb_per_node):
 def status_snapshot_cmd(ctx, deep_check):
     """Check the status of the snapshot"""
     result = snapshot_.status(ctx.env.snapshot, deep_check=deep_check)
+    click.echo(result.value)
+
+
+@snapshot_group.command(name="delete")
+@click.option("--acknowledge-risk", is_flag=True, show_default=True, default=False,
+              help="Flag to acknowledge risk and skip confirmation")
+@click.pass_obj
+def delete_snapshot_cmd(ctx, acknowledge_risk: bool):
+    """Delete the snapshot"""
+    if not acknowledge_risk:
+        confirmed = click.confirm('If you proceed with deleting the snapshot, the cluster will delete underlying local '
+                                  'and remote files associated with the snapshot. Are you sure you want to continue?')
+        if not confirmed:
+            click.echo("Aborting the command to delete snapshot.")
+            return
+    logger.info("Deleting snapshot")
+    result = snapshot_.delete(ctx.env.snapshot)
     click.echo(result.value)
 
 # ##################### BACKFILL ###################
@@ -307,11 +332,27 @@ def metadata_group(ctx):
         raise click.UsageError("Metadata is not set")
 
 
-@metadata_group.command(name="migrate")
-@click.option("--detach", is_flag=True, help="Run metadata migration in detached mode")
+@metadata_group.command(name="migrate", context_settings=dict(
+    ignore_unknown_options=True,
+    help_option_names=[]
+))
+@click.argument('extra_args', nargs=-1, type=click.UNPROCESSED)
 @click.pass_obj
-def migrate_metadata_cmd(ctx, detach):
-    exitcode, message = metadata_.migrate(ctx.env.metadata, detach)
+def migrate_metadata_cmd(ctx, extra_args):
+    exitcode, message = metadata_.migrate(ctx.env.metadata, extra_args)
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(message)
+
+
+@metadata_group.command(name="evaluate", context_settings=dict(
+    ignore_unknown_options=True,
+    help_option_names=[]
+))
+@click.argument('extra_args', nargs=-1, type=click.UNPROCESSED)
+@click.pass_obj
+def evaluate_metadata_cmd(ctx, extra_args):
+    exitcode, message = metadata_.evaluate(ctx.env.metadata, extra_args)
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
@@ -381,7 +422,7 @@ def kafka_group(ctx):
 @click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to create')
 @click.pass_obj
 def create_topic_cmd(ctx, topic_name):
-    result = ctx.env.kafka.create_topic(topic_name=topic_name)
+    result = kafka_.create_topic(ctx.env.kafka, topic_name=topic_name)
     click.echo(result.value)
 
 
@@ -392,13 +433,13 @@ def create_topic_cmd(ctx, topic_name):
 @click.pass_obj
 def delete_topic_cmd(ctx, acknowledge_risk, topic_name):
     if acknowledge_risk:
-        result = ctx.env.kafka.delete_topic(topic_name=topic_name)
+        result = kafka_.delete_topic(ctx.env.kafka, topic_name=topic_name)
         click.echo(result.value)
     else:
         if click.confirm('Deleting a topic will irreversibly delete all captured traffic records stored in that '
                          'topic. Are you sure you want to continue?'):
             click.echo(f"Performing delete topic operation on {topic_name} topic...")
-            result = ctx.env.kafka.delete_topic(topic_name=topic_name)
+            result = kafka_.delete_topic(ctx.env.kafka, topic_name=topic_name)
             click.echo(result.value)
         else:
             click.echo("Aborting command.")
@@ -408,7 +449,7 @@ def delete_topic_cmd(ctx, acknowledge_risk, topic_name):
 @click.option('--group-name', default="logging-group-default", help='Specify a group name to describe')
 @click.pass_obj
 def describe_group_command(ctx, group_name):
-    result = ctx.env.kafka.describe_consumer_group(group_name=group_name)
+    result = kafka_.describe_consumer_group(ctx.env.kafka, group_name=group_name)
     click.echo(result.value)
 
 
@@ -416,7 +457,7 @@ def describe_group_command(ctx, group_name):
 @click.option('--topic-name', default="logging-traffic-topic", help='Specify a topic name to describe')
 @click.pass_obj
 def describe_topic_records_cmd(ctx, topic_name):
-    result = ctx.env.kafka.describe_topic_records(topic_name=topic_name)
+    result = kafka_.describe_topic_records(ctx.env.kafka, topic_name=topic_name)
     click.echo(result.value)
 
 # ##################### UTILITIES ###################
@@ -466,6 +507,26 @@ def completion(ctx, config_file, json, shell):
     except RuntimeError as exc:
         click.echo(f"Error: {exc}", err=True)
         ctx.exit(1)
+
+
+@cli.group(name="tuples")
+@click.pass_obj
+def tuples_group(ctx):
+    """ All commands related to tuples. """
+    pass
+
+
+@tuples_group.command()
+@click.option('--in', 'inputfile',
+              type=click.File('r'),
+              default=sys.stdin)
+@click.option('--out', 'outputfile',
+              type=click.File('a'),
+              default=sys.stdout)
+def show(inputfile, outputfile):
+    tuples_.convert(inputfile, outputfile)
+    if outputfile != sys.stdout:
+        click.echo(f"Converted tuples output to {outputfile.name}")
 
 
 #################################################

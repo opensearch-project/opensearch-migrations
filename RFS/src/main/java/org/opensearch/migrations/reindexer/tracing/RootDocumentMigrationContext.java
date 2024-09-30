@@ -2,10 +2,10 @@ package org.opensearch.migrations.reindexer.tracing;
 
 import io.opentelemetry.api.OpenTelemetry;
 
+import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
+import org.opensearch.migrations.bulkload.tracing.RootWorkCoordinationContext;
 import org.opensearch.migrations.tracing.IContextTracker;
 
-import com.rfs.tracing.BaseRootRfsContext;
-import com.rfs.tracing.RootWorkCoordinationContext;
 import lombok.Getter;
 
 public class RootDocumentMigrationContext extends BaseRootRfsContext implements IRootDocumentMigrationContext {
@@ -19,12 +19,11 @@ public class RootDocumentMigrationContext extends BaseRootRfsContext implements 
 
     public RootDocumentMigrationContext(
         OpenTelemetry sdk,
-        IContextTracker contextTracker,
-        RootWorkCoordinationContext workCoordinationContext
+        IContextTracker contextTracker
     ) {
         super(SCOPE_NAME, sdk, contextTracker);
         var meter = this.getMeterProvider().get(SCOPE_NAME);
-        this.workCoordinationContext = workCoordinationContext;
+        workCoordinationContext = new RootWorkCoordinationContext(sdk, contextTracker, this);
         documentReindexInstruments = DocumentMigrationContexts.DocumentReindexContext.makeMetrics(meter);
         shardSetupMetrics = DocumentMigrationContexts.ShardSetupAttemptContext.makeMetrics(meter);
         addShardWorkItemMetrics = DocumentMigrationContexts.AddShardWorkItemContext.makeMetrics(meter);

@@ -32,15 +32,17 @@ dependencies {
     implementation project(':TrafficCapture:captureKafkaOffloader')
     implementation project(':coreUtilities')
 
+    implementation group: "com.google.protobuf", name: "protobuf-java"
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    implementation group: 'com.lmax', name: 'disruptor'
     implementation group: 'io.netty', name: 'netty-all'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+    implementation group: 'org.jcommander', name: 'jcommander'
     implementation group: 'org.slf4j', name: 'slf4j-api'
-    implementation group: 'com.lmax', name: 'disruptor'
 
-    implementation group: 'com.beust', name: 'jcommander'
-    implementation group: "com.google.protobuf", name: "protobuf-java"
 
     testImplementation project(':TrafficCapture:captureProtobufs')
     testImplementation testFixtures(project(path: ':testHelperFixtures'))

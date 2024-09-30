@@ -19,13 +19,12 @@ import lombok.extern.slf4j.Slf4j;
  * Reference implementation of a TrafficStream protobuf-encoded sink.
  * TrafficStreams are dumped to individual files that are named according to the TrafficStream id.
  *
- * @deprecated - This class is NOT meant to be used for production.
+ * <b>WARNING:</b> This class is NOT intended to be used for production.
  */
 @Slf4j
-@Deprecated(since = "0.1", forRemoval = false)
 public class FileConnectionCaptureFactory implements IConnectionCaptureFactory<Void> {
     private final BiFunction<String, Integer, FileOutputStream> outputStreamCreator;
-    private String nodeId;
+    private final String nodeId;
     private final int bufferSize;
 
     public FileConnectionCaptureFactory(
@@ -72,14 +71,11 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory<V
             var osh = (CodedOutputStreamAndByteBufferWrapper) outputStreamHolder;
             return CompletableFuture.runAsync(() -> {
                 try {
-                    FileOutputStream fs = outputStreamCreator.apply(connectionId, index);
-                    var bb = osh.getByteBuffer();
-                    byte[] filledBytes = Arrays.copyOfRange(bb.array(), 0, bb.position());
-                    fs.write(filledBytes);
-                    fs.flush();
-                    log.warn(
-                        "NOT removing the CodedOutputStream from the WeakHashMap, which is a memory leak.  Doing this until the system knows when to properly flush buffers"
-                    );
+                    try (FileOutputStream fs = outputStreamCreator.apply(connectionId, index)) {
+                        var bb = osh.getByteBuffer();
+                        fs.write(Arrays.copyOfRange(bb.array(), 0, bb.position()));
+                        fs.flush();
+                    }
                 } catch (IOException e) {
                     throw Lombok.sneakyThrow(e);
                 }
@@ -88,7 +84,7 @@ public class FileConnectionCaptureFactory implements IConnectionCaptureFactory<V
     }
 
     @Override
-    public IChannelConnectionCaptureSerializer createOffloader(IConnectionContext ctx) {
+    public IChannelConnectionCaptureSerializer<Void> createOffloader(IConnectionContext ctx) {
         final var connectionId = ctx.getConnectionId();
         return new StreamChannelConnectionCaptureSerializer<>(nodeId, connectionId, new StreamManager(connectionId));
     }

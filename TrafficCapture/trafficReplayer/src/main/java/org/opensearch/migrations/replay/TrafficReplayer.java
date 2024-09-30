@@ -9,11 +9,13 @@ import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 
+import org.opensearch.migrations.jcommander.NoSplitter;
 import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
@@ -27,6 +29,7 @@ import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
+import org.opensearch.migrations.utils.ProcessHelpers;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
@@ -50,7 +53,7 @@ public class TrafficReplayer {
     public static final String PACKET_TIMEOUT_SECONDS_PARAMETER_NAME = "--packet-timeout-seconds";
 
     public static final String LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME = "--lookahead-time-window";
-    private static final long ACTIVE_WORK_MONITOR_CADENCE_MS = 30 * 1000;
+    private static final long ACTIVE_WORK_MONITOR_CADENCE_MS = 30 * 1000L;
 
     public static class DualException extends Exception {
         public final Throwable originalCause;
@@ -89,93 +92,167 @@ public class TrafficReplayer {
     }
 
     public static class Parameters {
-        @Parameter(required = true, arity = 1, description = "URI of the target cluster/domain")
+        @Parameter(
+            required = true,
+            arity = 1,
+            description = "URI of the target cluster/domain")
         String targetUriString;
-        @Parameter(required = false, names = {
-            "--insecure" }, arity = 0, description = "Do not check the server's certificate")
+        @Parameter(
+            required = false,
+            names = {"--insecure" },
+            arity = 0, description = "Do not check the server's certificate")
         boolean allowInsecureConnections;
 
-        @Parameter(required = false, names = {
-            REMOVE_AUTH_HEADER_VALUE_ARG }, arity = 0, description = "Remove the authorization header if present and do not replace it with anything.  "
+        @Parameter(
+            required = false,
+            names = {REMOVE_AUTH_HEADER_VALUE_ARG },
+            arity = 0, description = "Remove the authorization header if present and do not replace it with anything.  "
                 + "(cannot be used with other auth arguments)")
         boolean removeAuthHeader;
-        @Parameter(required = false, names = {
-            AUTH_HEADER_VALUE_ARG }, arity = 1, description = "Static value to use for the \"authorization\" header of each request "
+        @Parameter(
+            required = false,
+            names = { AUTH_HEADER_VALUE_ARG },
+            arity = 1, description = "Static value to use for the \"authorization\" header of each request "
                 + "(cannot be used with other auth arguments)")
         String authHeaderValue;
-        @Parameter(required = false, names = {
-            AWS_AUTH_HEADER_USER_AND_SECRET_ARG }, arity = 2, description = "<USERNAME> <SECRET_ARN> pair to specify "
+        @Parameter(
+            required = false, names = {
+            AWS_AUTH_HEADER_USER_AND_SECRET_ARG },
+            splitter = NoSplitter.class,
+            arity = 2,
+            description = "<USERNAME> <SECRET_ARN> pair to specify "
                 + "\"authorization\" header value for each request.  "
                 + "The USERNAME specifies the plaintext user and the SECRET_ARN specifies the ARN or "
                 + "Secret name from AWS Secrets Manager to retrieve the password from for the password section"
                 + "(cannot be used with other auth arguments)")
         List<String> awsAuthHeaderUserAndSecret;
-        @Parameter(required = false, names = {
-            SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG }, arity = 1, description = "Use AWS SigV4 to sign each request with the specified service name and region.  "
+        @Parameter(
+            required = false,
+            names = { SIGV_4_AUTH_HEADER_SERVICE_REGION_ARG },
+            arity = 1,
+            description = "Use AWS SigV4 to sign each request with the specified service name and region.  "
                 + "(e.g. es,us-east-1)  "
                 + "DefaultCredentialsProvider is used to resolve credentials.  "
                 + "(cannot be used with other auth arguments)")
         String useSigV4ServiceAndRegion;
 
-        @Parameter(required = false, names = "--transformer-config", arity = 1, description = "Configuration of message transformers.  Either as a string that identifies the "
+        @Parameter(
+            required = false,
+            names = "--transformer-config-base64",
+            arity = 1,
+            description = "Configuration of message transformers.  The same contents as --transformer-config but " +
+                "Base64 encoded so that the configuration is easier to pass as a command line parameter.")
+        String transformerConfigEncoded;
+
+        @Parameter(
+            required = false,
+            names = "--transformer-config",
+            arity = 1,
+            description = "Configuration of message transformers.  Either as a string that identifies the "
             + "transformer that should be run (with default settings) or as json to specify options "
             + "as well as multiple transformers to run in sequence.  "
             + "For json, keys are the (simple) names of the loaded transformers and values are the "
             + "configuration passed to each of the transformers.")
         String transformerConfig;
-        @Parameter(required = false, names = "--transformer-config-file", arity = 1, description = "Path to the JSON configuration file of message transformers.")
+
+        @Parameter(
+            required = false,
+            names = "--transformer-config-file",
+            arity = 1,
+            description = "Path to the JSON configuration file of message transformers.")
         String transformerConfigFile;
-        @Parameter(required = false, names = "--user-agent", arity = 1, description = "For HTTP requests to the target cluster, append this string (after \"; \") to"
+        @Parameter(
+            required = false,
+            names = "--user-agent",
+            arity = 1,
+            description = "For HTTP requests to the target cluster, append this string (after \"; \") to"
             + "the existing user-agent field or if the field wasn't present, simply use this value")
         String userAgent;
 
-        @Parameter(required = false, names = {
-            "-i",
-            "--input" }, arity = 1, description = "input file to read the request/response traces for the source cluster")
+        @Parameter(
+            required = false,
+            names = { "-i", "--input" },
+            arity = 1,
+            description = "input file to read the request/response traces for the source cluster")
         String inputFilename;
-        @Parameter(required = false, names = {
-            "-t",
-            PACKET_TIMEOUT_SECONDS_PARAMETER_NAME }, arity = 1, description = "assume that connections were terminated after this many "
+        @Parameter(
+            required = false,
+            names = {"-t", PACKET_TIMEOUT_SECONDS_PARAMETER_NAME },
+            arity = 1,
+            description = "assume that connections were terminated after this many "
                 + "seconds of inactivity observed in the captured stream")
         int observedPacketConnectionTimeout = 70;
-        @Parameter(required = false, names = {
-            "--speedup-factor" }, arity = 1, description = "Accelerate the replayed communications by this factor.  "
+        @Parameter(
+            required = false,
+            names = { "--speedup-factor" },
+            arity = 1, description = "Accelerate the replayed communications by this factor.  "
                 + "This means that between each interaction will be replayed at this rate faster "
                 + "than the original observations, provided that the replayer and target are able to keep up.")
         double speedupFactor = 1.0;
-        @Parameter(required = false, names = {
-            LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME }, arity = 1, description = "Number of seconds of data that will be buffered.")
+        @Parameter(
+            required = false,
+            names = { LOOKAHEAD_TIME_WINDOW_PARAMETER_NAME },
+            arity = 1,
+            description = "Number of seconds of data that will be buffered.")
         int lookaheadTimeSeconds = 300;
-        @Parameter(required = false, names = {
-            "--max-concurrent-requests" }, arity = 1, description = "Maximum number of requests at a time that can be outstanding")
+        @Parameter(
+            required = false,
+            names = { "--max-concurrent-requests" },
+            arity = 1,
+            description = "Maximum number of requests at a time that can be outstanding")
         int maxConcurrentRequests = 1024;
-        @Parameter(required = false, names = {
-            "--num-client-threads" }, arity = 1, description = "Number of threads to use to send requests from.")
+        @Parameter(
+            required = false,
+            names = { "--num-client-threads" },
+            arity = 1,
+            description = "Number of threads to use to send requests from.")
         int numClientThreads = 0;
 
         // https://github.com/opensearch-project/opensearch-java/blob/main/java-client/src/main/java/org/opensearch/client/transport/httpclient5/ApacheHttpClient5TransportBuilder.java#L49-L54
-        @Parameter(required = false, names = {
-            "--target-response-timeout" }, arity = 1, description = "Seconds to wait before timing out a replayed request to the target.")
+        @Parameter(
+            required = false,
+            names = { "--target-response-timeout" },
+            arity = 1,
+            description = "Seconds to wait before timing out a replayed request to the target.")
         int targetServerResponseTimeoutSeconds = 30;
 
-        @Parameter(required = false, names = {
-            "--kafka-traffic-brokers" }, arity = 1, description = "Comma-separated list of host and port pairs that are the addresses of the Kafka brokers to bootstrap with i.e. 'kafka-1:9092,kafka-2:9092'")
+        @Parameter(
+            required = false,
+            names = { "--kafka-traffic-brokers" },
+            arity = 1,
+            description = "Comma-separated list of host and port pairs that are the addresses of the Kafka brokers " +
+                "to bootstrap with i.e. 'kafka-1:9092,kafka-2:9092'")
         String kafkaTrafficBrokers;
-        @Parameter(required = false, names = {
-            "--kafka-traffic-topic" }, arity = 1, description = "Topic name used to pull messages from Kafka")
+        @Parameter(
+            required = false,
+            names = { "--kafka-traffic-topic" },
+            arity = 1,
+            description = "Topic name used to pull messages from Kafka")
         String kafkaTrafficTopic;
-        @Parameter(required = false, names = {
-            "--kafka-traffic-group-id" }, arity = 1, description = "Consumer group id that is used when pulling messages from Kafka")
+        @Parameter(
+            required = false,
+            names = { "--kafka-traffic-group-id" },
+            arity = 1,
+            description = "Consumer group id that is used when pulling messages from Kafka")
         String kafkaTrafficGroupId;
-        @Parameter(required = false, names = {
-            "--kafka-traffic-enable-msk-auth" }, arity = 0, description = "Enables SASL properties required for connecting to MSK with IAM auth")
+        @Parameter(
+            required = false,
+            names = { "--kafka-traffic-enable-msk-auth" },
+            arity = 0,
+            description = "Enables SASL properties required for connecting to MSK with IAM auth")
         boolean kafkaTrafficEnableMSKAuth;
-        @Parameter(required = false, names = {
-            "--kafka-traffic-property-file" }, arity = 1, description = "File path for Kafka properties file to use for additional or overriden Kafka properties")
+        @Parameter(
+            required = false,
+            names = { "--kafka-traffic-property-file" },
+            arity = 1,
+            description = "File path for Kafka properties file to use for additional or overriden Kafka properties")
         String kafkaTrafficPropertyFile;
 
-        @Parameter(required = false, names = {
-            "--otelCollectorEndpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
+        @Parameter(
+            required = false,
+            names = { "--otelCollectorEndpoint" },
+            arity = 1,
+            description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
                 + "forwarded. If no value is provided, metrics will not be forwarded.")
         String otelCollectorEndpoint;
     }
@@ -195,12 +272,17 @@ public class TrafficReplayer {
         }
     }
 
+    private static int isConfigured(String s) {
+        return (s == null || s.isBlank()) ? 0 : 1;
+    }
+
     private static String getTransformerConfig(Parameters params) {
-        if (params.transformerConfigFile != null
-            && !params.transformerConfigFile.isBlank()
-            && params.transformerConfig != null
-            && !params.transformerConfig.isBlank()) {
-            System.err.println("Specify either --transformer-config or --transformer-config-file, not both.");
+        var configuredCount = isConfigured(params.transformerConfigFile) +
+                isConfigured(params.transformerConfigEncoded) +
+                isConfigured(params.transformerConfig);
+        if (configuredCount > 1) {
+            System.err.println("Specify only one of --transformer-config-base64, --transformer-config or " +
+                "--transformer-config-file.");
             System.exit(4);
         }
 
@@ -217,15 +299,21 @@ public class TrafficReplayer {
             return params.transformerConfig;
         }
 
+        if (params.transformerConfigEncoded != null && !params.transformerConfigEncoded.isBlank()) {
+            return new String(Base64.getDecoder().decode(params.transformerConfigEncoded));
+        }
+
         return null;
     }
 
     public static void main(String[] args) throws Exception {
+        System.err.println("Got args: " + String.join("; ", args));
+        final var workerId = ProcessHelpers.getNodeInstanceName();
+        log.info("Starting Traffic Replayer with id=" + workerId);
+
         var activeContextLogger = LoggerFactory.getLogger(ALL_ACTIVE_CONTEXTS_MONITOR_LOGGER);
         var params = parseArgs(args);
         URI uri;
-        System.err.println("Starting Traffic Replayer");
-        System.err.println("Got args: " + String.join("; ", args));
         try {
             uri = new URI(params.targetUriString);
         } catch (Exception e) {
@@ -258,7 +346,9 @@ public class TrafficReplayer {
         );
         var contextTrackers = new CompositeContextTracker(globalContextTracker, perContextTracker);
         var topContext = new RootReplayerContext(
-            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint, "replay"),
+            RootOtelContext.initializeOpenTelemetryWithCollectorOrAsNoop(params.otelCollectorEndpoint,
+                "replay",
+                ProcessHelpers.getNodeInstanceName()),
             contextTrackers
         );
 
@@ -269,7 +359,8 @@ public class TrafficReplayer {
                 params,
                 Duration.ofSeconds(params.lookaheadTimeSeconds)
             );
-            var authTransformer = buildAuthTransformerFactory(params)
+            var authTransformer = buildAuthTransformerFactory(params);
+            var trafficStreamLimiter = new TrafficStreamLimiter(params.maxConcurrentRequests)
         ) {
             var timeShifter = new TimeShifter(params.speedupFactor);
             var serverTimeout = Duration.ofSeconds(params.targetServerResponseTimeoutSeconds);
@@ -291,7 +382,7 @@ public class TrafficReplayer {
                     params.allowInsecureConnections,
                     params.numClientThreads
                 ),
-                new TrafficStreamLimiter(params.maxConcurrentRequests),
+                trafficStreamLimiter,
                 orderedRequestTracker
             );
             activeContextMonitor = new ActiveContextMonitor(
@@ -341,20 +432,20 @@ public class TrafficReplayer {
             // both Log4J and the java builtin loggers add shutdown hooks.
             // The API for addShutdownHook says that those hooks registered will run in an undetermined order.
             // Hence, the reason that this code logs via slf4j logging AND stderr.
-            {
-                var beforeMsg = "Running TrafficReplayer Shutdown.  "
+            Optional.of("Running TrafficReplayer Shutdown.  "
                     + "The logging facilities may also be shutting down concurrently, "
-                    + "resulting in missing logs messages.";
-                log.atWarn().setMessage(beforeMsg).log();
-                System.err.println(beforeMsg);
-            }
+                    + "resulting in missing logs messages.")
+                .ifPresent(beforeMsg -> {
+                    log.atWarn().setMessage(beforeMsg).log();
+                    System.err.println(beforeMsg);
+                });
             Optional.ofNullable(weakTrafficReplayer.get()).ifPresent(o -> o.shutdown(null));
-            {
-                var afterMsg = "Done shutting down TrafficReplayer (due to Runtime shutdown).  "
-                    + "Logs may be missing for events that have happened after the Shutdown event was received.";
-                log.atWarn().setMessage(afterMsg).log();
-                System.err.println(afterMsg);
-            }
+            Optional.of("Done shutting down TrafficReplayer (due to Runtime shutdown).  "
+                    + "Logs may be missing for events that have happened after the Shutdown event was received.")
+                .ifPresent(afterMsg -> {
+                    log.atWarn().setMessage(afterMsg).log();
+                    System.err.println(afterMsg);
+                });
         }));
     }
 

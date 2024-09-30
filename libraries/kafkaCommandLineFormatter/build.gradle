@@ -1,0 +1,9 @@
+
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+}
+
+dependencies {
+    implementation group: 'org.apache.kafka', name:'kafka-clients', version:'3.8.0'
+}

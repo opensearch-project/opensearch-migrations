@@ -15,6 +15,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.impl.Log4jContextFactory;
 import org.apache.logging.log4j.core.selector.ClassLoaderContextSelector;
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 
@@ -40,7 +41,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     private static final ObjectMapper mapper = new ObjectMapper();
     public static final String TEST_EXCEPTION_MESSAGE = "TEST_EXCEPTION";
 
-    public final static String EXPECTED_RESPONSE_STRING = "HTTP/1.1 200 OK\r\n"
+    public static final String EXPECTED_RESPONSE_STRING = "HTTP/1.1 200 OK\r\n"
         + "Content-transfer-encoding: chunked\r\n"
         + "Date: Thu, 08 Jun 2023 23:06:23 GMT\r\n"
         + // This should be OK since it's always the same length
@@ -116,6 +117,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     }
 
     @Test
+    @Tag("longTest")
     @ResourceLock("TestContext")
     public void testOutputterForGet() throws IOException {
         final String EXPECTED_LOGGED_OUTPUT = ""
@@ -174,6 +176,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     }
 
     @Test
+    @Tag("longTest")
     @ResourceLock("TestContext")
     public void testOutputterForPost() throws IOException {
         final String EXPECTED_LOGGED_OUTPUT = ""

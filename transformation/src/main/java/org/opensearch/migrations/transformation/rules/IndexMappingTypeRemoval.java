@@ -11,7 +11,7 @@ import org.opensearch.migrations.transformation.entity.Index;
 
 /**
  * Supports transformation of the Index Mapping types that were changed from mutliple types to a single type between ES 6 to ES 7
- * 
+ *
  * Example:
  * Starting state (ES 6):
  * {
@@ -26,7 +26,7 @@ import org.opensearch.migrations.transformation.entity.Index;
  *     }
  *   ]
  * }
- * 
+ *
  * Ending state (ES 7):
  * {
  *   "mappings": {
@@ -39,22 +39,32 @@ import org.opensearch.migrations.transformation.entity.Index;
  */
 public class IndexMappingTypeRemoval implements TransformationRule<Index> {
 
+    public static final String MAPPINGS_KEY = "mappings";
+
     @Override
     public CanApplyResult canApply(final Index index) {
-        final var mappingNode = index.rawJson().get("mappings");
+        final var mappingNode = index.getRawJson().get(MAPPINGS_KEY);
 
-        if (mappingNode == null || mappingNode.isObject()) {
+        if (mappingNode == null) {
             return CanApplyResult.NO;
         }
 
-        // Detect unsupported multiple type mappings, eg:
-        // { "mappings": [{ "foo": {...}}, { "bar": {...} }] }
-        // { "mappings": [{ "foo": {...}, "bar": {...} }] }
-        if (mappingNode.size() > 1 || mappingNode.get(0).size() > 1) {
+
+        // Detect unsupported multiple type mappings:
+        // 1. <pre>{"mappings": [{ "foo": {...} }, { "bar": {...} }]}</pre>
+        // 2. <pre>{"mappings": [{ "foo": {...}, "bar": {...}  }]}</pre>
+        if (mappingNode.isArray() && (mappingNode.size() > 1 || mappingNode.get(0).size() > 1)) {
             return new Unsupported("Multiple mapping types are not supported");
         }
 
-        // There is a type under mappings, e.g. { "mappings": [{ "foo": {...} }] }
+        // Check for absence of intermediate type node
+        // 1. <pre>{"mappings": {"properties": {...} }}</pre>
+        if (mappingNode.isObject() && mappingNode.get("properties") != null) {
+            return CanApplyResult.NO;
+        }
+
+        // There is a type under mappings
+        // 1. <pre>{ "mappings": [{ "foo": {...} }] }</pre>
         return CanApplyResult.YES;
     }
 
@@ -64,15 +74,27 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
             return false;
         }
 
-        final var mappingsNode = index.rawJson().get("mappings");
-        final var mappingsInnerNode = (ObjectNode) mappingsNode.get(0);
+        final var mappingsNode = index.getRawJson().get(MAPPINGS_KEY);
+        // Handle array case
+        if (mappingsNode.isArray()) {
+            final var mappingsInnerNode = (ObjectNode) mappingsNode.get(0);
 
-        final var typeName = mappingsInnerNode.properties().stream().map(Entry::getKey).findFirst().orElseThrow();
-        final var typeNode = mappingsInnerNode.get(typeName);
+            final var typeName = mappingsInnerNode.properties().stream().map(Entry::getKey).findFirst().orElseThrow();
+            final var typeNode = mappingsInnerNode.get(typeName);
 
-        mappingsInnerNode.remove(typeName);
-        typeNode.fields().forEachRemaining(node -> mappingsInnerNode.set(node.getKey(), node.getValue()));
-        index.rawJson().set("mappings", mappingsInnerNode);
+            mappingsInnerNode.remove(typeName);
+            typeNode.fields().forEachRemaining(node -> mappingsInnerNode.set(node.getKey(), node.getValue()));
+            index.getRawJson().set(MAPPINGS_KEY, mappingsInnerNode);
+        }
+
+        if (mappingsNode.isObject()) {
+            var mappingsObjectNode = (ObjectNode) mappingsNode;
+            var typeNode = mappingsNode.fields().next();
+            var propertiesNode = typeNode.getValue().fields().next();
+
+            mappingsObjectNode.remove(typeNode.getKey());
+            mappingsObjectNode.set(propertiesNode.getKey(), propertiesNode.getValue());
+        }
 
         return true;
     }

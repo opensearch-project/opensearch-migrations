@@ -284,11 +284,13 @@ def create_pipeline_from_env(osi_client,
     source_endpoint_clean = sanitize_endpoint(endpoint=source_cluster.endpoint, remove_port=False)
     # Target endpoints for OSI are not currently allowed a port
     target_endpoint_clean = sanitize_endpoint(target_cluster.endpoint, True)
-
+    source_auth_secret = None
+    if source_cluster.auth_details and "password_from_secret_arn" in source_cluster.auth_details:
+        source_auth_secret = source_cluster.auth_details["password_from_secret_arn"]
     pipeline_config_string = construct_pipeline_config(pipeline_config_file_path=pipeline_template_path,
                                                        source_endpoint=source_endpoint_clean,
                                                        source_auth_type=source_cluster.auth_type,
-                                                       source_auth_secret=source_cluster.aws_secret_arn,
+                                                       source_auth_secret=source_auth_secret,
                                                        target_endpoint=target_endpoint_clean,
                                                        target_auth_type=target_cluster.auth_type,
                                                        pipeline_role_arn=osi_props.pipeline_role_arn,

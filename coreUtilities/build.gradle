@@ -26,10 +26,6 @@ plugins {
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     api project(":commonDependencyVersionConstraints")
 
@@ -44,6 +40,9 @@ dependencies {
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
+
+    // JCommander
+    compileOnly group: 'org.jcommander', name: 'jcommander'
 
     // OpenTelemetry core
     api group: 'io.opentelemetry', name: 'opentelemetry-api'
@@ -63,8 +62,4 @@ dependencies {
     testFixturesImplementation group: 'io.opentelemetry', name: 'opentelemetry-api'
     testFixturesImplementation group: 'io.opentelemetry', name: 'opentelemetry-sdk-testing'
     testFixturesImplementation group: 'org.slf4j', name: 'slf4j-api'
-}
-
-tasks.named('test') {
-    useJUnitPlatform()
 }

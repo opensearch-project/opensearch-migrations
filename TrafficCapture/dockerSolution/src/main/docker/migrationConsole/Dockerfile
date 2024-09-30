@@ -16,9 +16,8 @@ RUN wget --tries=5 --retry-connrefused --waitretry=15 -O kafka/libs/msk-iam-auth
 WORKDIR /root
 
 # Add Traffic Replayer jars for running KafkaPrinter from this container
-COPY staging/trafficReplayer/lib /root/kafka-tools/replayer-jars
-RUN printf "#!/bin/sh\njava -cp `echo /root/kafka-tools/replayer-jars/*.jar | tr \   :` \"\$@\" " > /root/kafka-tools/runJavaWithClasspath.sh
-RUN chmod +x /root/kafka-tools/runJavaWithClasspath.sh
+COPY staging/kafkaCommandLineFormatter/lib /root/kafka-tools/
+ENV CLASSPATH=/root/kafka-tools/kafkaCommandLineFormatter.jar
 
 COPY staging/CreateSnapshot /root/createSnapshot
 COPY staging/MetadataMigration /root/metadataMigration
@@ -26,12 +25,6 @@ COPY staging/MetadataMigration /root/metadataMigration
 COPY osiPipelineTemplate.yaml /root/
 COPY msk-iam-auth.properties /root/kafka-tools/aws
 COPY kafkaCmdRef.md /root/kafka-tools
-
-COPY humanReadableLogs.py /root/
-RUN chmod ug+x /root/humanReadableLogs.py
-
-COPY showFetchMigrationCommand.sh /root/
-RUN chmod ug+x /root/showFetchMigrationCommand.sh
 
 COPY kafkaExport.sh /root/kafka-tools
 RUN chmod ug+x /root/kafka-tools/kafkaExport.sh
@@ -56,7 +49,8 @@ WORKDIR /root
 RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh
 RUN dnf install -y bash-completion
 RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
-    echo '. /etc/profile.d/venv.sh' >> ~/.bashrc
+    echo '. /etc/profile.d/venv.sh' >> ~/.bashrc && \
+    echo 'echo Welcome to the Migration Assistant Console' >> ~/.bashrc
 # Set ENV to control startup script in /bin/sh mode
 ENV ENV=/root/.bashrc
 

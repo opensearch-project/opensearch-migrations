@@ -9,6 +9,7 @@ from console_link.models.command_runner import CommandRunner, CommandRunnerError
 from console_link.models.schema_tools import list_schema
 from console_link.models.cluster import AuthMethod, Cluster
 from console_link.models.snapshot import S3Snapshot, Snapshot, FileSystemSnapshot
+from typing import Any, Dict, List
 
 logger = logging.getLogger(__name__)
 
@@ -51,7 +52,8 @@ SCHEMA = {
     "min_replicas": {"type": "integer", "min": 0, "required": False},
     "index_allowlist": list_schema(required=False),
     "index_template_allowlist": list_schema(required=False),
-    "component_template_allowlist": list_schema(required=False)
+    "component_template_allowlist": list_schema(required=False),
+    "source_cluster_version": {"type": "string", "required": False}
 }
 
 
@@ -79,6 +81,7 @@ class Metadata:
         self._index_template_allowlist = config.get("index_template_allowlist", None)
         self._component_template_allowlist = config.get("component_template_allowlist", None)
         self._otel_endpoint = config.get("otel_endpoint", None)
+        self._source_cluster_version = config.get("source_cluster_version", None)
 
         logger.debug(f"Min replicas: {self._min_replicas}")
         logger.debug(f"Index allowlist: {self._index_allowlist}")
@@ -133,14 +136,58 @@ class Metadata:
         self._snapshot_location = "fs"
         self._repo_path = snapshot.repo_path
 
-    def migrate(self, detached_log=None) -> CommandResult:
+    def _append_args(self, commands: Dict[str, Any], args_to_add: List[str]) -> None:
+        if args_to_add is None:
+            return
+
+        def is_command(arg: Optional[str]) -> bool:
+            if arg is None:
+                return False
+            return arg.startswith('--') or arg.startswith('-')
+
+        def is_value(arg: Optional[str]) -> bool:
+            if arg is None:
+                return False
+            return not is_command(arg)
+
+        i = 0
+        while i < len(args_to_add):
+            arg = args_to_add[i]
+            next_arg = args_to_add[i + 1] if (i + 1 < len(args_to_add)) else None
+
+            if is_command(arg) and is_value(next_arg):
+                commands[arg] = next_arg
+                i += 2  # Move past the command and value
+            elif is_command(arg):
+                commands[arg] = None
+                i += 1  # Move past the command, its a flag
+            else:
+                logger.warning(f"Ignoring extra value {arg}, there was no command name before it")
+                i += 1
+
+    def evaluate(self, extra_args=None) -> CommandResult:
         logger.info("Starting metadata migration")
+        return self.migrate_or_evaluate("evaluate", extra_args)
+
+    def migrate(self, extra_args=None) -> CommandResult:
+        logger.info("Starting metadata migration")
+        return self.migrate_or_evaluate("migrate", extra_args)
+
+    def migrate_or_evaluate(self, command: str, extra_args=None) -> CommandResult:
         command_base = "/root/metadataMigration/bin/MetadataMigration"
-        command_args = {
+        command_args = {}
+
+        # Add any common metadata parameter before the command
+        if self._otel_endpoint:
+            command_args.update({"--otel-collector-endpoint": self._otel_endpoint})
+
+        command_args.update({
+            command: None,
             "--snapshot-name": self._snapshot_name,
             "--target-host": self._target_cluster.endpoint,
             "--min-replicas": self._min_replicas
-        }
+        })
+
         if self._snapshot_location == 's3':
             command_args.update({
                 "--s3-local-dir": self._local_dir,
@@ -181,13 +228,14 @@ class Metadata:
         if self._component_template_allowlist:
             command_args.update({"--component-template-allowlist": ",".join(self._component_template_allowlist)})
 
-        if self._otel_endpoint:
-            command_args.update({"--otel-collector-endpoint": self._otel_endpoint})
+        if self._source_cluster_version:
+            command_args.update({"--source-version": self._source_cluster_version})
+
+        # Extra args might not be represented with dictionary, so convert args to list and append commands
+        self._append_args(command_args, extra_args)
 
         command_runner = CommandRunner(command_base, command_args,
-                                       sensitive_fields=["--target-password"],
-                                       run_as_detatched=detached_log is not None,
-                                       log_file=detached_log)
+                                       sensitive_fields=["--target-password"])
         logger.info(f"Migrating metadata with command: {' '.join(command_runner.sanitized_command())}")
         try:
             return command_runner.run()

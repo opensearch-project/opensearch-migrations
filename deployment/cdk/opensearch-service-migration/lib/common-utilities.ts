@@ -1,91 +1,69 @@
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {Construct} from "constructs";
 import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
-import {RemovalPolicy} from "aws-cdk-lib";
-import { IApplicationLoadBalancer } from "aws-cdk-lib/aws-elasticloadbalancingv2";
-import { ICertificate } from "aws-cdk-lib/aws-certificatemanager";
+import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
 import * as forge from 'node-forge';
-import * as yargs from 'yargs';
+import { ClusterYaml } from "./migration-services-yaml";
 
-
-// parseAndMergeArgs, see @common-utilities.test.ts for an example of different cases
-export function parseAndMergeArgs(baseCommand: string, extraArgs?: string): string {
-    if (!extraArgs) {
-        return baseCommand;
-    }
-
-    // Extract command prefix
-    const commandPrefix = baseCommand.substring(0, baseCommand.indexOf('--')).trim();
-    const baseArgs = baseCommand.substring(baseCommand.indexOf('--'));
-
-    // Parse base command
-    const baseYargsConfig = {
-        parserConfiguration: {
-            'camel-case-expansion': false,
-            'boolean-negation': false,
-        }
-    };
-
-    const baseArgv = yargs(baseArgs)
-        .parserConfiguration(baseYargsConfig.parserConfiguration)
-        .parse();
-
-    // Parse extra args if provided
-    const extraYargsConfig = {
-        parserConfiguration: {
-            'camel-case-expansion': false,
-            'boolean-negation': true,
-        }
-    };
-
-    const extraArgv = extraArgs
-        ? yargs(extraArgs.split(' '))
-            .parserConfiguration(extraYargsConfig.parserConfiguration)
-            .parse()
-        : {};
-
-    // Merge arguments
-    const mergedArgv: { [key: string]: unknown } = { ...baseArgv };
-    for (const [key, value] of Object.entries(extraArgv)) {
-        if (key !== '_' && key !== '$0') {
-            if (!value &&
-                typeof value === 'boolean' &&
-                (
-                    typeof (baseArgv as any)[key] === 'boolean' ||
-                    (typeof (baseArgv as any)[`no-${key}`] != 'boolean' && typeof (baseArgv as any)[`no-${key}`])
-                )
-            ) {
-                delete mergedArgv[key];
-            } else {
-                mergedArgv[key] = value;
-            }
-        }
-    }
-
-    // Reconstruct command
-    const mergedArgs = Object.entries(mergedArgv)
-        .filter(([key]) => key !== '_' && key !== '$0')
-        .map(([key, value]) => {
-            if (typeof value === 'boolean') {
-                return value ? `--${key}` : `--no-${key}`;
-            }
-            return `--${key} ${value}`;
-        })
-        .join(' ');
-
-    let fullCommand = `${commandPrefix} ${mergedArgs}`.trim()
-    return fullCommand;
-}
-
-export function getTargetPasswordAccessPolicy(targetPasswordSecretArn: string): PolicyStatement {
+export function getSecretAccessPolicy(secretArn: string): PolicyStatement {
     return new PolicyStatement({
         effect: Effect.ALLOW,
-        resources: [targetPasswordSecretArn],
+        resources: [secretArn],
         actions: [
             "secretsmanager:GetSecretValue"
         ]
     })
+}
+
+export function appendArgIfNotInExtraArgs(
+    baseCommand: string,
+    extraArgsDict: Record<string, string[]>,
+    arg: string,
+    value: string | null = null,
+): string {
+    if (extraArgsDict[arg] === undefined) {
+        // If not present, append the argument and value (only append value if it exists)
+        baseCommand = value !== null ? baseCommand.concat(" ", arg, " ", value) : baseCommand.concat(" ", arg);
+    }
+    return baseCommand;
+}
+
+export function parseArgsToDict(argString: string | undefined): Record<string, string[]> {
+    const args: Record<string, string[]> = {};
+    if (argString === undefined) {
+        return args;
+    }
+    // Split based on '--' at the start of the string or preceded by whitespace, use non-capturing groups to include -- in parts
+    const parts = argString.split(/(?=\s--|^--)/).filter(Boolean);
+
+    parts.forEach(part => {
+        const trimmedPart = part.trim();
+        if (trimmedPart.length === 0) return; // Skip empty parts
+
+        // Use a regular expression to find the first whitespace character
+        const firstWhitespaceMatch = trimmedPart.match(/\s/);
+        const firstWhitespaceIndex = firstWhitespaceMatch?.index;
+
+        const key = firstWhitespaceIndex === undefined ? trimmedPart : trimmedPart.slice(0, firstWhitespaceIndex).trim();
+        const value = firstWhitespaceIndex === undefined ? '' : trimmedPart.slice(firstWhitespaceIndex + 1).trim();
+
+        // Validate the key starts with -- followed by a non-whitespace characters
+        if (/^--\S+/.test(key)) {
+            if (args[key] !== undefined) {
+                args[key].push(value);
+            } else {
+                args[key] = [value];
+            }
+        } else {
+            throw new Error(`Invalid argument key: '${key}'. Argument keys must start with '--' and contain no spaces.`);
+        }
+    });
+    if (argString.trim() && !args) {
+        throw new Error(`Unable to parse args provided: '${argString}'`);
+    }
+
+    return args;
 }
 
 export function createOpenSearchIAMAccessPolicy(partition: string, region: string, accountId: string): PolicyStatement {
@@ -210,20 +188,18 @@ export function createDefaultECSTaskRole(scope: Construct, serviceName: string):
 }
 
 export function validateFargateCpuArch(cpuArch?: string): CpuArchitecture {
-    const desiredArch = cpuArch ? cpuArch : process.arch
+    const desiredArch = cpuArch ?? process.arch
     const desiredArchUpper = desiredArch.toUpperCase()
 
     if (desiredArchUpper === "X86_64" || desiredArchUpper === "X64") {
         return CpuArchitecture.X86_64
     } else if (desiredArchUpper === "ARM64") {
         return CpuArchitecture.ARM64
-    } else {
-        if (cpuArch) {
-            throw new Error(`Unknown Fargate cpu architecture provided: ${desiredArch}`)
-        }
-        else {
-            throw new Error(`Unsupported process cpu architecture detected: ${desiredArch}, CDK requires X64 or ARM64 for Docker image compatability`)
-        }
+    } else if (cpuArch) {
+        throw new Error(`Unknown Fargate cpu architecture provided: ${desiredArch}`)
+    }
+    else {
+        throw new Error(`Unsupported process cpu architecture detected: ${desiredArch}, CDK requires X64 or ARM64 for Docker image compatability`)
     }
 }
 
@@ -234,21 +210,6 @@ export function parseRemovalPolicy(optionName: string, policyNameString?: string
     }
     return policy
 }
-
-
-export type ALBConfig = NewALBListenerConfig;
-
-export interface NewALBListenerConfig {
-    alb: IApplicationLoadBalancer,
-    albListenerCert: ICertificate,
-    albListenerPort?: number,
-}
-
-export function isNewALBListenerConfig(config: ALBConfig): config is NewALBListenerConfig {
-    const parsed = config as NewALBListenerConfig;
-    return parsed.alb !== undefined && parsed.albListenerCert !== undefined;
-}
-
 export function hashStringSHA256(message: string): string {
     const md = forge.md.sha256.create();
     md.update(message);
@@ -287,8 +248,6 @@ export function getMigrationStringParameterName(props: MigrationSSMConfig): stri
 }
 
 export enum MigrationSSMParameter {
-    MIGRATION_API_URL = 'albMigrationApiUrl',
-    MIGRATION_API_URL_ALIAS = 'albMigrationApiUrlAlias',
     SOURCE_PROXY_URL = 'albSourceProxyUrl',
     SOURCE_PROXY_URL_ALIAS = 'albSourceProxyUrlAlias',
     TARGET_PROXY_URL = 'albTargetProxyUrl',
@@ -296,10 +255,6 @@ export enum MigrationSSMParameter {
     MIGRATION_LISTENER_URL = 'albMigrationListenerUrl',
     MIGRATION_LISTENER_URL_ALIAS = 'albMigrationListenerUrlAlias',
     ARTIFACT_S3_ARN = 'artifactS3Arn',
-    FETCH_MIGRATION_COMMAND = 'fetchMigrationCommand',
-    FETCH_MIGRATION_TASK_DEF_ARN = 'fetchMigrationTaskDefArn',
-    FETCH_MIGRATION_TASK_EXEC_ROLE_ARN = 'fetchMigrationTaskExecRoleArn',
-    FETCH_MIGRATION_TASK_ROLE_ARN = 'fetchMigrationTaskRoleArn',
     KAFKA_BROKERS = 'kafkaBrokers',
     MSK_CLUSTER_ARN = 'mskClusterARN',
     MSK_CLUSTER_NAME = 'mskClusterName',
@@ -315,4 +270,141 @@ export enum MigrationSSMParameter {
     SERVICES_YAML_FILE = 'servicesYamlFile',
     TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID = 'trafficStreamSourceAccessSecurityGroupId',
     VPC_ID = 'vpcId',
+}
+
+
+export class ClusterNoAuth {}
+
+export class ClusterSigV4Auth {
+    region?: string;
+    serviceSigningName?: string;
+    constructor({region, serviceSigningName: service}: {region: string, serviceSigningName: string}) {
+        this.region = region;
+        this.serviceSigningName = service;
+    }
+
+    toDict() {
+        return {
+            region: this.region,
+            service: this.serviceSigningName
+        }
+    }
+}
+
+export class ClusterBasicAuth {
+    username: string;
+    password?: string;
+    password_from_secret_arn?: string;
+
+    constructor({
+        username,
+        password,
+        password_from_secret_arn,
+    }: {
+        username: string;
+        password?: string;
+        password_from_secret_arn?: string;
+    }) {
+        this.username = username;
+        this.password = password;
+        this.password_from_secret_arn = password_from_secret_arn;
+
+        // Validation: Exactly one of password or password_from_secret_arn must be provided
+        if ((password && password_from_secret_arn) || (!password && !password_from_secret_arn)) {
+            throw new Error('Exactly one of password or password_from_secret_arn must be provided');
+        }
+    }
+}
+
+export class ClusterAuth {
+    basicAuth?: ClusterBasicAuth
+    noAuth?: ClusterNoAuth
+    sigv4?: ClusterSigV4Auth
+
+    constructor({basicAuth, noAuth, sigv4}: {basicAuth?: ClusterBasicAuth, noAuth?: ClusterNoAuth, sigv4?: ClusterSigV4Auth}) {
+        this.basicAuth = basicAuth;
+        this.noAuth = noAuth;
+        this.sigv4 = sigv4;
+    }
+
+    validate() {
+        const numDefined = (this.basicAuth? 1 : 0) + (this.noAuth? 1 : 0) + (this.sigv4? 1 : 0)
+        if (numDefined != 1) {
+            throw new Error(`Exactly one authentication method can be defined. ${numDefined} are currently set.`)
+        }
+    }
+
+    toDict() {
+        if (this.basicAuth) {
+            return {basic_auth: this.basicAuth};
+        }
+        if (this.noAuth) {
+            return {no_auth: ""};
+        }
+        if (this.sigv4) {
+            return {sigv4: this.sigv4.toDict()};
+        }
+        return {};
+    }
+}
+
+function getBasicClusterAuth(basicAuthObject: { [key: string]: any }): ClusterBasicAuth {
+    // Destructure and validate the input object
+    const { username, password, passwordFromSecretArn } = basicAuthObject;
+    // Ensure the required 'username' field is present
+    if (typeof username !== 'string' || !username) {
+        throw new Error('Invalid input: "username" must be a non-empty string');
+    }
+    // Ensure that exactly one of 'password' or 'passwordFromSecretArn' is provided
+    const hasPassword = typeof password === 'string' && password.trim() !== '';
+    const hasPasswordFromSecretArn = typeof passwordFromSecretArn === 'string' && passwordFromSecretArn.trim() !== '';
+    if ((hasPassword && hasPasswordFromSecretArn) || (!hasPassword && !hasPasswordFromSecretArn)) {
+        throw new Error('Exactly one of "password" or "passwordFromSecretArn" must be provided');
+    }
+    return new ClusterBasicAuth({
+        username,
+        password: hasPassword ? password : undefined,
+        password_from_secret_arn: hasPasswordFromSecretArn ? passwordFromSecretArn : undefined,
+    });
+}
+
+function getSigV4ClusterAuth(sigv4AuthObject: { [key: string]: any }): ClusterSigV4Auth {
+    // Destructure and validate the input object
+    const { serviceSigningName, region } = sigv4AuthObject;
+
+    // Create and return the ClusterSigV4Auth object
+    return new ClusterSigV4Auth({serviceSigningName, region});
+}
+
+// Function to parse and validate auth object
+function parseAuth(json: any): ClusterAuth | null {
+    if (json.type === 'basic' && typeof json.username === 'string' && (typeof json.password === 'string' || typeof json.passwordFromSecretArn === 'string') && !(typeof json.password === 'string' && typeof json.passwordFromSecretArn === 'string')) {
+        return new ClusterAuth({basicAuth: getBasicClusterAuth(json)});
+    } else if (json.type === 'sigv4' && typeof json.region === 'string' && typeof json.serviceSigningName === 'string') {
+        return new ClusterAuth({sigv4: getSigV4ClusterAuth(json)});
+    } else if (json.type === 'none') {
+        return new ClusterAuth({noAuth: new ClusterNoAuth()});
+    }
+    return null; // Invalid auth type
+}
+
+export function parseClusterDefinition(json: any): ClusterYaml {
+    const endpoint = json.endpoint
+    const version = json.version
+    if (!endpoint) {
+        throw new Error('Missing required field in cluster definition: endpoint')
+    }
+    const auth = parseAuth(json.auth)
+    if (!auth) {
+        throw new Error(`Invalid auth type when parsing cluster definition: ${json.auth.type}`)
+    }
+    return new ClusterYaml({endpoint, version, auth})
+}
+
+export function isStackInGovCloud(stack: Stack): boolean {
+        return isRegionGovCloud(stack.region);
+}
+
+export function isRegionGovCloud(region: string): boolean {
+    return region.startsWith('us-gov-');
 }

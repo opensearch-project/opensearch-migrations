@@ -13,8 +13,9 @@ import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.Test;
 
-import com.rfs.http.BulkRequestGenerator;
-import com.rfs.http.BulkRequestGenerator.BulkItemResponseEntry;
+import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
+import org.opensearch.migrations.bulkload.http.BulkRequestGenerator.BulkItemResponseEntry;
+
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Measurement;

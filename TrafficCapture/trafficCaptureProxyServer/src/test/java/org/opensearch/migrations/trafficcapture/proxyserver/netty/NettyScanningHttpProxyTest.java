@@ -18,7 +18,7 @@ import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 import org.opensearch.common.collect.Tuple;
-import org.opensearch.migrations.testutils.HttpRequestFirstLine;
+import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.PortFinder;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
@@ -37,7 +37,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 class NettyScanningHttpProxyTest {
 
-    private final static String EXPECTED_REQUEST_STRING = "GET / HTTP/1.1\r\n"
+    private static final String EXPECTED_REQUEST_STRING = "GET / HTTP/1.1\r\n"
         + "Host: localhost\r\n"
         + "User-Agent: UnitTest\r\n"
         + "DumbAndLongHeaderValue-0: 0\r\n"
@@ -63,7 +63,7 @@ class NettyScanningHttpProxyTest {
         + "Accept-Encoding: gzip, x-gzip, deflate\r\n"
         + "Connection: keep-alive\r\n"
         + "\r\n";
-    private final static String EXPECTED_RESPONSE_STRING = "HTTP/1.1 200 OK\r\n"
+    private static final String EXPECTED_RESPONSE_STRING = "HTTP/1.1 200 OK\r\n"
         + "Content-transfer-encoding: chunked\r\n"
         + "Date: Thu, 08 Jun 2023 23:06:23 GMT\r\n"
         + // This should be OK since it's always the same length
@@ -207,7 +207,8 @@ class NettyScanningHttpProxyTest {
                 var connectionPool = new BacksideConnectionPool(testServerUri, null, 10, Duration.ofSeconds(10));
 
                 nshp.get()
-                    .start(rootCtx, connectionPool, 1, null, connectionCaptureFactory, new RequestCapturePredicate());
+                    .start(new ProxyChannelInitializer(rootCtx, connectionPool, null,
+                        connectionCaptureFactory, new RequestCapturePredicate()), 1);
                 System.out.println("proxy port = " + port);
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
@@ -217,7 +218,7 @@ class NettyScanningHttpProxyTest {
         return new Tuple<>(nshp.get(), underlyingPort);
     }
 
-    private static SimpleHttpResponse makeContext(HttpRequestFirstLine request) {
+    private static SimpleHttpResponse makeContext(HttpRequest request) {
         var headers = Map.of(
             "Content-Type",
             "text/plain",

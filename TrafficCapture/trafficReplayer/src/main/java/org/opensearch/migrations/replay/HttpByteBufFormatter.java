@@ -176,7 +176,7 @@ public class HttpByteBufFormatter {
 
         public TruncatingAggregator(int payloadSize) {
             bytesLeftToRead = payloadSize;
-            this.aggregatedContents = Unpooled.compositeBuffer(1024);
+            this.aggregatedContents = Unpooled.compositeBuffer();
         }
 
         @Override
@@ -189,9 +189,14 @@ public class HttpByteBufFormatter {
                     var bytesToTruncate = contentSize - bytesLeftToRead;
                     bytesDropped += bytesToTruncate;
                     content.writerIndex(content.writerIndex() - bytesToTruncate);
+                    contentSize = content.readableBytes();
                 }
-                bytesLeftToRead -= content.readableBytes();
-                aggregatedContents.addComponent(true, content);
+                if (contentSize > 0) {
+                    bytesLeftToRead -= contentSize;
+                    aggregatedContents.addComponent(true, content);
+                } else {
+                    content.release();
+                }
             } else if (msg instanceof HttpMessage) {
                 message = (HttpMessage) msg;
             }

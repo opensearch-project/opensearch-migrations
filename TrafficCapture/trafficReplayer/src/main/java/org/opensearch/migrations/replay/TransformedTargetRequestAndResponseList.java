@@ -50,7 +50,7 @@ public class TransformedTargetRequestAndResponseList {
     @Override
     public String toString() {
         final StringBuilder sb = new StringBuilder("TransformedTargetRequestAndResponse{");
-        sb.append(", transformStatus=").append(getTransformationStatus());
+        sb.append("transformStatus=").append(getTransformationStatus());
         sb.append(responseList.stream()
             .map(AggregatedRawResponse::toString)
             .collect(Collectors.joining("\n", "[", "]")));

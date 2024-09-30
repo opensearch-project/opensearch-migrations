@@ -81,10 +81,10 @@ public class OnlineRadixSorter {
                     "index (" + index + ")" + " must be > last processed item (" + currentOffset + ")"
                 );
             }
-            for (int nextKey = Math.max(
-                currentOffset,
-                items.isEmpty() ? Integer.MIN_VALUE : items.lastKey() + 1
-            ); nextKey <= index; ++nextKey) {
+            for (int nextKey = Math.max(currentOffset, items.isEmpty() ? Integer.MIN_VALUE : items.lastKey() + 1);
+                 nextKey <= index;
+                 ++nextKey)
+            {
                 int finalNextKey = nextKey;
                 var signalFuture = items.isEmpty()
                     ? new TextTrackedFuture<Void>(
@@ -108,6 +108,8 @@ public class OnlineRadixSorter {
                 }, () -> "cleaning up spent work for idx #" + finalNextKey);
                 items.put(nextKey, workItem);
             }
+            assert workItem != null : "workItem wasn't set and the earlier checks didn't signal " +
+                "why there might have been an issue idx=" + index + " this=" + this;
         }
         return workItem.addWorkFuture(processor, index);
     }

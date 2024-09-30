@@ -7,21 +7,19 @@ plugins {
 java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
 
-repositories {
-    mavenCentral()
-}
-
 dependencies {
     implementation project(":commonDependencyVersionConstraints")
 
     implementation project(":coreUtilities")
     implementation project(":RFS")
+    implementation project(':transformation')
 
-    implementation group: 'com.beust', name: 'jcommander'
+    implementation group: 'org.jcommander', name: 'jcommander'
     implementation group: 'org.slf4j', name: 'slf4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
 
-    testImplementation testFixtures(project(path: ':RFS'))
+    testImplementation testFixtures(project(':RFS'))
+    testImplementation testFixtures(project(':testHelperFixtures'))
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-core'
     testImplementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
     testImplementation group: 'org.junit.jupiter', name: 'junit-jupiter-api'
@@ -36,23 +34,4 @@ dependencies {
 
 application {
     mainClassName = 'org.opensearch.migrations.MetadataMigration'
-}
-
-test {
-    useJUnitPlatform {
-        excludeTags 'longTest'
-    }
-    testLogging {
-        events "passed", "skipped", "failed"
-        exceptionFormat "full"
-        showExceptions true
-        showCauses true
-    }
-}
-
-task slowTest(type: Test) {
-    // include longTest
-    jacoco {
-        enabled = true
-    }
 }

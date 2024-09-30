@@ -167,9 +167,7 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         return (eventLoop, ctx) -> NettyPacketToHttpConsumer.createClientConnection(eventLoop, sslContext, uri, ctx);
     }
 
-    public static class ChannelNotActiveException extends IOException {
-        public ChannelNotActiveException() {}
-    }
+    public static class ChannelNotActiveException extends IOException { }
 
     public static TrackedFuture<String, ChannelFuture> createClientConnection(
         EventLoop eventLoop,
@@ -336,28 +334,35 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
     }
 
     private void deactivateChannel() {
-        var pipeline = channel.pipeline();
-        log.atDebug()
-            .setMessage(() -> "Resetting the pipeline for channel " + channel + "currently at: " + pipeline)
-            .log();
-        for (var handlerName : new String[] { WRITE_COUNT_WATCHER_HANDLER_NAME, READ_COUNT_WATCHER_HANDLER_NAME }) {
-            try {
-                pipeline.remove(handlerName);
-            } catch (NoSuchElementException e) {
-                log.atWarn()
-                    .setMessage(() -> "Ignoring an exception that the " + handlerName + " wasn't present")
-                    .log();
+        try {
+            var pipeline = channel.pipeline();
+            log.atDebug()
+                .setMessage(() -> "Resetting the pipeline for channel {} currently at: {}")
+                .addArgument(channel)
+                .addArgument(pipeline)
+                .log();
+            for (var handlerName : new String[] { WRITE_COUNT_WATCHER_HANDLER_NAME, READ_COUNT_WATCHER_HANDLER_NAME }) {
+                try {
+                    pipeline.remove(handlerName);
+                } catch (NoSuchElementException e) {
+                    log.atWarn()
+                        .setMessage(() -> "Ignoring an exception that the " + handlerName + " wasn't present")
+                        .log();
+                }
             }
-        }
-        while (true) {
-            var lastHandler = pipeline.last();
-            if (lastHandler instanceof SslHandler || lastHandler instanceof ConnectionClosedListenerHandler) {
-                break;
+            while (true) {
+                var lastHandler = pipeline.last();
+                if (lastHandler instanceof SslHandler || lastHandler instanceof ConnectionClosedListenerHandler) {
+                    break;
+                }
+                pipeline.removeLast();
             }
-            pipeline.removeLast();
+            channel.config().setAutoRead(false);
+            log.atDebug().setMessage(() -> "Reset the pipeline for channel " + channel + " back to: " + pipeline).log();
+        } finally {
+            getCurrentRequestSpan().close();
+            getParentContext().close();
         }
-        channel.config().setAutoRead(false);
-        log.atDebug().setMessage(() -> "Reset the pipeline for channel " + channel + " back to: " + pipeline).log();
     }
 
     @Override
@@ -375,9 +380,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                             + packetData.toString(StandardCharsets.UTF_8)
                     )
                     .log();
-                return writePacketAndUpdateFuture(packetData).whenComplete((v2, t2) -> {
-                    log.atTrace().setMessage(() -> "finished writing " + httpContext() + " t=" + t2).log();
-                }, () -> "");
+                return writePacketAndUpdateFuture(packetData).whenComplete((v2, t2) ->
+                    log.atTrace().setMessage(() -> "finished writing " + httpContext() + " t=" + t2).log(), () -> "");
             } else {
                 log.atWarn()
                     .setMessage(
@@ -441,7 +445,8 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
         .map(f -> f.whenComplete((v, t) -> {
             try {
                 if (channel == null) {
-                    log.atInfo().setMessage(() -> "").log();
+                    log.atTrace().setMessage(() ->
+                        "finalizeRequest().whenComplete has no channel present that needs to be to deactivated.").log();
                 } else {
                     deactivateChannel();
                 }

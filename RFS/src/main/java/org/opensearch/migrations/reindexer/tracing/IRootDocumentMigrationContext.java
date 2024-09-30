@@ -1,6 +1,6 @@
 package org.opensearch.migrations.reindexer.tracing;
 
-import com.rfs.tracing.RootWorkCoordinationContext;
+import org.opensearch.migrations.bulkload.tracing.RootWorkCoordinationContext;
 
 public interface IRootDocumentMigrationContext {
     RootWorkCoordinationContext getWorkCoordinationContext();

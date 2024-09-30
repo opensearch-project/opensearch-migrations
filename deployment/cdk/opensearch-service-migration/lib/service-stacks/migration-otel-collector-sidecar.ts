@@ -13,8 +13,8 @@ import { DockerImageAsset } from "aws-cdk-lib/aws-ecr-assets";
 import { join } from "path";
 
 export class OtelCollectorSidecar {
-    public static OTEL_CONTAINER_PORT = 4317;
-    public static OTEL_CONTAINER_HEALTHCHECK_PORT = 13133;
+    public static readonly OTEL_CONTAINER_PORT = 4317;
+    public static readonly OTEL_CONTAINER_HEALTHCHECK_PORT = 13133;
 
     static getOtelLocalhostEndpoint() {
         return "http://localhost:" + OtelCollectorSidecar.OTEL_CONTAINER_PORT;

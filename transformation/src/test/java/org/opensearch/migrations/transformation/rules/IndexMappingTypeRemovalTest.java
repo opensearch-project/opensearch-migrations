@@ -102,14 +102,14 @@ public class IndexMappingTypeRemovalTest {
     private CanApplyResult canApply(final ObjectNode indexJson) {
         var transformer = new IndexMappingTypeRemoval();
         var index = mock(Index.class);
-        Mockito.when(index.rawJson()).thenReturn(indexJson);
+        Mockito.when(index.getRawJson()).thenReturn(indexJson);
         return transformer.canApply(index);
     }
 
     private boolean applyTransformation(final ObjectNode indexJson) {
         var transformer = new IndexMappingTypeRemoval();
         var index = mock(Index.class);
-        Mockito.when(index.rawJson()).thenReturn(indexJson);
+        Mockito.when(index.getRawJson()).thenReturn(indexJson);
 
         log.atInfo().setMessage("Original\n{}").addArgument(indexJson.toPrettyString()).log();
         var wasChanged = transformer.applyTransformation(index);
@@ -138,7 +138,7 @@ public class IndexMappingTypeRemovalTest {
     }
 
     @Test
-    void testApplyTransformation_mappingIsObjectNotArray() {
+    void testApplyTransformation_mappingNestedObject() {
         // Setup
         var typeName = "foobar";
         var originalJson = mappingObjectWithCustomType.apply(typeName);
@@ -146,12 +146,12 @@ public class IndexMappingTypeRemovalTest {
 
         // Action
         var wasChanged = applyTransformation(indexJson);
-        assertThat(canApply(originalJson), equalTo(CanApplyResult.NO));
+        assertThat(canApply(originalJson), equalTo(CanApplyResult.YES));
 
         // Verification
-        assertThat(wasChanged, equalTo(false));
-        assertThat(indexJson.toPrettyString(), equalTo(originalJson.toPrettyString()));
-        assertThat(indexJson.toPrettyString(), containsString(typeName));
+        assertThat(wasChanged, equalTo(true));
+        assertThat(indexJson.toPrettyString(), not(equalTo(originalJson.toPrettyString())));
+        assertThat(indexJson.toPrettyString(), not(containsString(typeName)));
     }
 
     @Test

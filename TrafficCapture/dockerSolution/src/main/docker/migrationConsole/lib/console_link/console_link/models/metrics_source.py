@@ -1,11 +1,10 @@
 from datetime import datetime
 from enum import Enum
 from typing import Any, Dict, List, Optional, Tuple
-
-import boto3
-import botocore
 from cerberus import Validator
-from console_link.models.utils import raise_for_aws_api_error
+from console_link.models.client_options import ClientOptions
+from console_link.models.utils import raise_for_aws_api_error, create_boto3_client, \
+    append_user_agent_header_for_requests
 import requests
 import logging
 
@@ -74,9 +73,9 @@ class MetricsSource:
         component: Component,
         metric: str,
         statistic: MetricStatistic,
-        startTime: datetime,
+        start_time: datetime,
         period_in_seconds: int = 60,
-        endTime: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
         dimensions: Optional[Dict] = None,
     ) -> List[Tuple[str, float]]:
         raise NotImplementedError
@@ -112,16 +111,15 @@ class CloudwatchMetricMetadata:
 
 
 class CloudwatchMetricsSource(MetricsSource):
-    def __init__(self, config: Dict) -> None:
+    def __init__(self, config: Dict, client_options: Optional[ClientOptions] = None) -> None:
         super().__init__(config)
+        self.client_options = client_options
         logger.info(f"Initializing CloudwatchMetricsSource from config {config}")
+        self.aws_region = None
         if type(config["cloudwatch"]) is dict and "aws_region" in config["cloudwatch"]:
             self.aws_region = config["cloudwatch"]["aws_region"]
-            self.boto_config = botocore.config.Config(region_name=self.aws_region)
-        else:
-            self.aws_region = None
-            self.boto_config = None
-        self.client = boto3.client("cloudwatch", config=self.boto_config)
+        self.client = create_boto3_client(aws_service_name="cloudwatch", region=self.aws_region,
+                                          client_options=self.client_options)
 
     def get_metrics(self, recent=True) -> Dict[str, List[str]]:
         logger.info(f"{self.__class__.__name__}.get_metrics called with {recent=}")
@@ -147,21 +145,21 @@ class CloudwatchMetricsSource(MetricsSource):
         component: Component,
         metric: str,
         statistic: MetricStatistic,
-        startTime: datetime,
+        start_time: datetime,
         period_in_seconds: int = 60,
-        endTime: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
         dimensions: Optional[Dict[str, str]] = None,
     ) -> List[Tuple[str, float]]:
         logger.info(f"{self.__class__.__name__}.get_metric_data called with {component=}, {metric=}, {statistic=},"
-                    f"{startTime=}, {period_in_seconds=}, {endTime=}, {dimensions=}")
+                    f"{start_time=}, {period_in_seconds=}, {end_time=}, {dimensions=}")
 
         aws_dimensions = [{"Name": "OTelLib", "Value": component.value}]
         if dimensions:
             aws_dimensions += [{"Name": k, "Value": v} for k, v in dimensions.items()]
         logger.debug(f"AWS Dimensions set to: {aws_dimensions}")
-        if not endTime:
-            endTime = datetime.now()
-            logger.debug(f"No endTime provided, using current time: {endTime}")
+        if not end_time:
+            end_time = datetime.now()
+            logger.debug(f"No endTime provided, using current time: {end_time}")
         response = self.client.get_metric_data(
             MetricDataQueries=[
                 {
@@ -177,8 +175,8 @@ class CloudwatchMetricsSource(MetricsSource):
                     },
                 },
             ],
-            StartTime=startTime,
-            EndTime=endTime,
+            StartTime=start_time,
+            EndTime=end_time,
             ScanBy="TimestampAscending",
         )
         raise_for_aws_api_error(response)
@@ -199,13 +197,13 @@ def prometheus_component_names(c: Component) -> str:
         return "capture"
     elif c == Component.REPLAYER:
         return "replay"
-    else:
-        raise ValueError(f"Unsupported component: {c}")
+    raise ValueError(f"Unsupported component: {c}")
 
 
 class PrometheusMetricsSource(MetricsSource):
-    def __init__(self, config: Dict) -> None:
+    def __init__(self, config: Dict, client_options: Optional[ClientOptions] = None) -> None:
         super().__init__(config)
+        self.client_options = client_options
         logger.info(f"Initializing PrometheusMetricsSource from config {config}")
 
         self.endpoint = config["prometheus"]["endpoint"]
@@ -217,9 +215,14 @@ class PrometheusMetricsSource(MetricsSource):
             raise NotImplementedError("Recent metrics are not implemented for Prometheus")
         for c in Component:
             exported_job = prometheus_component_names(c)
+            headers = None
+            if self.client_options and self.client_options.user_agent_extra:
+                headers = append_user_agent_header_for_requests(headers=None,
+                                                                user_agent_extra=self.client_options.user_agent_extra)
             r = requests.get(
                 f"{self.endpoint}/api/v1/query",
                 params={"query": f'{{exported_job="{exported_job}"}}'},
+                headers=headers,
             )
             logger.debug(f"Request to Prometheus: {r.request}")
             logger.debug(f"Response status code: {r.status_code}")
@@ -235,23 +238,28 @@ class PrometheusMetricsSource(MetricsSource):
         component: Component,
         metric: str,
         statistic: MetricStatistic,
-        startTime: datetime,
+        start_time: datetime,
         period_in_seconds: int = 60,
-        endTime: Optional[datetime] = None,
+        end_time: Optional[datetime] = None,
         dimensions: Optional[Dict] = None,
     ) -> List[Tuple[str, float]]:
         logger.info(f"{self.__class__.__name__} get_metric_data called with {component=}, {metric=}, {statistic=},"
-                    f"{startTime=}, {period_in_seconds=}, {endTime=}, {dimensions=}")
-        if not endTime:
-            endTime = datetime.now()
+                    f"{start_time=}, {period_in_seconds=}, {end_time=}, {dimensions=}")
+        if not end_time:
+            end_time = datetime.now()
+        headers = None
+        if self.client_options and self.client_options.user_agent_extra:
+            headers = append_user_agent_header_for_requests(headers=None,
+                                                            user_agent_extra=self.client_options.user_agent_extra)
         r = requests.get(
             f"{self.endpoint}/api/v1/query_range",
             params={  # type: ignore
                 "query": f'{metric}{{exported_job="{prometheus_component_names(component)}"}}',
-                "start": startTime.timestamp(),
-                "end": endTime.timestamp(),
+                "start": start_time.timestamp(),
+                "end": end_time.timestamp(),
                 "step": period_in_seconds,
             },
+            headers=headers,
         )
         logger.debug(f"Request to Prometheus: {r.request}")
         logger.debug(f"Response status code: {r.status_code}")
