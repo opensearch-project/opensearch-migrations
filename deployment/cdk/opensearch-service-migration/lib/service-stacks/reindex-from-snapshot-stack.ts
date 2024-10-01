@@ -79,7 +79,8 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         let command = "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments"
         const extraArgsDict = parseArgsToDict(props.extraArgs)
         const storagePath = "/storage"
-        const maxShardSizeBytes = props.maxShardSizeGiB ? `${props.maxShardSizeGiB * 1024 * 1024 * 1024}` : "8589934592"
+        const planningSize = props.maxShardSizeGiB ?? 80;
+        const maxShardSizeBytes = `${planningSize * 1024 * 1024 * 1024}`
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-local-dir", `"${storagePath}/s3_files"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-repo-uri", `"${s3Uri}"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-region", this.region)
@@ -129,7 +130,6 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
 
         // Calculate the volume size based on the max shard size
         // Have space for the snapshot and an unpacked copy, with buffer
-        const planningSize = props.maxShardSizeGiB ?? 80;
         const volumeSize = Math.max(
             Math.ceil(planningSize * 2 * 1.15),
             1
@@ -148,8 +148,12 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
                 volumeType: EbsDeviceVolumeType.GP3,
                 fileSystemType: FileSystemType.XFS,
                 tagSpecifications: [{
+                    tags: {
+                        name: `rfs-snapshot-volume-${props.stage}`,
+                    },
                     propagateTags: EbsPropagatedTagSource.SERVICE,
                 }],
+                encrypted: true,
             },
         });
 

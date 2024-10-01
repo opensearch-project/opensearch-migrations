@@ -100,7 +100,6 @@ export class NetworkStack extends Stack {
         const interfaceEndpoints = [
             InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS, // Push Logs from tasks
             InterfaceVpcEndpointAwsService.CLOUDWATCH_MONITORING, // Pull Metrics from Migration Console
-            InterfaceVpcEndpointAwsService.EBS_DIRECT, // Enable EBS Volumes
             InterfaceVpcEndpointAwsService.ECR_DOCKER, // Pull Images on Startup
             InterfaceVpcEndpointAwsService.ECR, // List Images on Startup
             InterfaceVpcEndpointAwsService.ECS_AGENT, // Task Container Metrics

@@ -119,6 +119,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
+              " --max-shard-size-bytes 8589934592"
             ],
           ],
         }
@@ -186,7 +187,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --target-aws-service-signing-name aoss --target-aws-region eu-west-1",
+              " --max-shard-size-bytes 8589934592 --target-aws-service-signing-name aoss --target-aws-region eu-west-1",
             ],
           ],
         }
@@ -275,7 +276,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --custom-arg value --flag --snapshot-name \"custom-snapshot\""
+              " --max-shard-size-bytes 8589934592 --custom-arg value --flag --snapshot-name \"custom-snapshot\""
             ]
           ]
         }
