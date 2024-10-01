@@ -9,7 +9,6 @@ plugins {
 }
 
 dependencies {
-    implementation project(":commonDependencyVersionConstraints")
     implementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
     implementation group: 'com.bazaarvoice.jolt', name: 'jolt-core'
