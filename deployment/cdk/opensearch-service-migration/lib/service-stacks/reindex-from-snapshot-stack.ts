@@ -79,12 +79,14 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         let command = "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments"
         const extraArgsDict = parseArgsToDict(props.extraArgs)
         const storagePath = "/storage"
+        const maxShardSizeBytes = props.maxShardSizeGiB ? `${props.maxShardSizeGiB * 1024 * 1024 * 1024}` : "8589934592"
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-local-dir", `"${storagePath}/s3_files"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-repo-uri", `"${s3Uri}"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-region", this.region)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--snapshot-name", "rfs-snapshot")
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--lucene-dir", `"${storagePath}/lucene"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-host", osClusterEndpoint)
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-shard-size-bytes", maxShardSizeBytes)
         if (props.clusterAuthDetails.sigv4) {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-aws-service-signing-name", props.clusterAuthDetails.sigv4.serviceSigningName)
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-aws-region", props.clusterAuthDetails.sigv4.region)
@@ -130,20 +132,22 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         const planningSize = props.maxShardSizeGiB ?? 80;
         const volumeSize = Math.max(
             Math.ceil(planningSize * 2 * 1.15),
-            125 // Minimum volume size for ST1
+            1
         )
+
+        if (volumeSize > 16000) {
+            // 16 TiB is the maximum volume size for GP3
+            throw new Error(`"Your max shard size of ${props.maxShardSizeGiB} GiB is too large to migrate."`)
+        }
 
         // Volume we'll use to download and unpack the snapshot
         const snapshotVolume = new ServiceManagedVolume(this, 'SnapshotVolume', {
             name: 'snapshot-volume',
             managedEBSVolume: {
                 size: Size.gibibytes(volumeSize),
-                volumeType: EbsDeviceVolumeType.ST1,
+                volumeType: EbsDeviceVolumeType.GP3,
                 fileSystemType: FileSystemType.XFS,
                 tagSpecifications: [{
-                    tags: {
-                    purpose: 'production',
-                    },
                     propagateTags: EbsPropagatedTagSource.SERVICE,
                 }],
             },
@@ -168,7 +172,6 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 2048,
             taskMemoryLimitMiB: 4096,
-            ephemeralStorageGiB: 60, // Use for the RFS Process; not the snapshot & lucene storage
             environment: {
                 "RFS_COMMAND": command,
                 "RFS_TARGET_USER": targetUser,
