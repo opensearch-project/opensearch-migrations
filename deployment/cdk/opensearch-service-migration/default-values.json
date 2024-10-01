@@ -4,5 +4,6 @@
   "migrationAssistanceEnabled": true,
   "migrationConsoleServiceEnabled": true,
   "trafficReplayerServiceEnabled": false,
-  "otelCollectorEnabled": true
+  "otelCollectorEnabled": true,
+  "reindexFromSnapshotMaxShardSizeGiB": 80
 }
