@@ -8,8 +8,6 @@ plugins {
 }
 
 dependencies {
-    api project(":commonDependencyVersionConstraints")
-
     implementation project(':TrafficCapture:captureOffloader')
     implementation project(':coreUtilities')
     api            group: 'io.netty', name: 'netty-buffer'
