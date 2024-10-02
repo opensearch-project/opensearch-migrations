@@ -149,7 +149,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
                 fileSystemType: FileSystemType.XFS,
                 tagSpecifications: [{
                     tags: {
-                        name: `rfs-snapshot-volume-${props.stage}`,
+                        Name: `rfs-snapshot-volume-${props.stage}`,
                     },
                     propagateTags: EbsPropagatedTagSource.SERVICE,
                 }],
