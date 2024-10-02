@@ -19,9 +19,6 @@ repositories {
 }
 
 dependencies {
-
-    implementation project(":commonDependencyVersionConstraints")
-
     implementation project(':coreUtilities')
     implementation project(":RFS")
 

@@ -23,7 +23,6 @@ class DockerServiceProps {
 }
 
 dependencies {
-    implementation project(":commonDependencyVersionConstraints")
     implementation platform('io.projectreactor:reactor-bom:2023.0.5')
     testImplementation platform('io.projectreactor:reactor-bom:2023.0.5')
 
