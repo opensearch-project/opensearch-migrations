@@ -43,5 +43,6 @@ if [[ $RFS_COMMAND != *"--target-password"* ]]; then
     fi
 fi
 
-echo "Executing RFS Command"
-eval $RFS_COMMAND
+[ -z "$RFS_COMMAND" ] && \
+{ echo "Warning: RFS_COMMAND is empty! Exiting."; exit 1; } || \
+until ! { echo "Running command $RFS_COMMAND"; eval "$RFS_COMMAND"; }; do :; done

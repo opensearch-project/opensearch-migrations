@@ -62,7 +62,8 @@ def setup_backfill(request):
     assert metadata_result.success
     backfill_start_result: CommandResult = backfill.start()
     assert backfill_start_result.success
-    backfill_scale_result: CommandResult = backfill.scale(units=10)
+    # small enough to allow containers to be reused, big enough to test scaling out
+    backfill_scale_result: CommandResult = backfill.scale(units=2)
     assert backfill_scale_result.success
 
 
