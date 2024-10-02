@@ -1,12 +1,11 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
-import io.opentelemetry.api.OpenTelemetry;
-
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.IRootKafkaOffloaderContext;
 import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.KafkaRecordContext;
 import org.opensearch.migrations.trafficcapture.netty.tracing.RootWireLoggingContext;
 
+import io.opentelemetry.api.OpenTelemetry;
 import lombok.Getter;
 
 public class RootCaptureContext extends RootWireLoggingContext implements IRootKafkaOffloaderContext {

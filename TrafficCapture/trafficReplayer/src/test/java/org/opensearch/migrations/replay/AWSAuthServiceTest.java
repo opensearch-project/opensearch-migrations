@@ -2,12 +2,11 @@ package org.opensearch.migrations.replay;
 
 import java.util.function.Consumer;
 
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-
-import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import software.amazon.awssdk.services.secretsmanager.SecretsManagerClient;

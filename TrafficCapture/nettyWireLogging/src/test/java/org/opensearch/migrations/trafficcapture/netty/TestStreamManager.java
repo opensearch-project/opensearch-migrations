@@ -5,12 +5,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
-import com.google.protobuf.CodedOutputStream;
-
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamAndByteBufferWrapper;
 import org.opensearch.migrations.trafficcapture.CodedOutputStreamHolder;
 import org.opensearch.migrations.trafficcapture.OrderedStreamLifecyleManager;
 
+import com.google.protobuf.CodedOutputStream;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 

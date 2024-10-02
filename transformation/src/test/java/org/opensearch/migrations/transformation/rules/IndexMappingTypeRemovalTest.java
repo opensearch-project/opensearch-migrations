@@ -3,15 +3,14 @@ package org.opensearch.migrations.transformation.rules;
 import java.util.function.BiFunction;
 import java.util.function.Function;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.transformation.CanApplyResult;
 import org.opensearch.migrations.transformation.CanApplyResult.Unsupported;
 import org.opensearch.migrations.transformation.entity.Index;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Test;
 import org.mockito.Mockito;
 
 import static org.hamcrest.CoreMatchers.instanceOf;

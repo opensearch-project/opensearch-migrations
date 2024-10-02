@@ -10,9 +10,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
@@ -20,6 +17,8 @@ import org.opensearch.migrations.testutils.SimpleNettyHttpServer;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.CaptureProxyContainer;
 
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 @Slf4j
 public class TestHeaderRewrites {

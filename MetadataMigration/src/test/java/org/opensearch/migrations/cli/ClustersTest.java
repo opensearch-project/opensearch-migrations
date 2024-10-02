@@ -1,15 +1,15 @@
 package org.opensearch.migrations.cli;
 
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.cluster.ClusterReader;
 import org.opensearch.migrations.cluster.ClusterWriter;
+
+import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.opensearch.migrations.matchers.HasLineCount.hasLineCount;
 import static org.mockito.Mockito.mock;
+import static org.opensearch.migrations.matchers.HasLineCount.hasLineCount;
 
 public class ClustersTest {
     @Test

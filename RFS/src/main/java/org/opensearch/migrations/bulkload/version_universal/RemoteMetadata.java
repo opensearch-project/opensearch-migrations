@@ -2,10 +2,9 @@ package org.opensearch.migrations.bulkload.version_universal;
 
 import java.util.Optional;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
-
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.AllArgsConstructor;
 
 @AllArgsConstructor

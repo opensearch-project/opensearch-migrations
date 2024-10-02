@@ -9,12 +9,6 @@ import java.time.Instant;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.IntStream;
 
-import com.google.protobuf.ByteOutput;
-import com.google.protobuf.CodedOutputStream;
-import com.google.protobuf.Descriptors;
-import com.google.protobuf.Timestamp;
-import com.google.protobuf.WireFormat;
-
 import org.opensearch.migrations.trafficcapture.protos.CloseObservation;
 import org.opensearch.migrations.trafficcapture.protos.ConnectionExceptionObservation;
 import org.opensearch.migrations.trafficcapture.protos.EndOfMessageIndication;
@@ -27,6 +21,11 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
 import org.opensearch.migrations.trafficcapture.protos.WriteSegmentObservation;
 
+import com.google.protobuf.ByteOutput;
+import com.google.protobuf.CodedOutputStream;
+import com.google.protobuf.Descriptors;
+import com.google.protobuf.Timestamp;
+import com.google.protobuf.WireFormat;
 import io.netty.buffer.ByteBuf;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;

@@ -1,9 +1,8 @@
 package org.opensearch.migrations.replay.kafka;
 
 import com.google.protobuf.InvalidProtocolBufferException;
-import org.apache.kafka.clients.consumer.ConsumerRecord;
-
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.consumer.ConsumerRecord;
 
 @Slf4j
 public class KafkaBehavioralPolicy {

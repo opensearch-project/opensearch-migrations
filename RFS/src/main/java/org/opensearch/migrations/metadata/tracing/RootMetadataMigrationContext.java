@@ -1,9 +1,9 @@
 package org.opensearch.migrations.metadata.tracing;
 
-import io.opentelemetry.api.OpenTelemetry;
-
 import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
 import org.opensearch.migrations.tracing.IContextTracker;
+
+import io.opentelemetry.api.OpenTelemetry;
 
 public class RootMetadataMigrationContext extends BaseRootRfsContext {
     public static final String SCOPE_NAME = "metadataMigration";

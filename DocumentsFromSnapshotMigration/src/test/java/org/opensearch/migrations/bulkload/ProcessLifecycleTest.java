@@ -11,11 +11,6 @@ import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
-
 import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.bulkload.framework.PreloadedSearchClusterContainer;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
@@ -26,6 +21,10 @@ import org.opensearch.testcontainers.OpensearchContainer;
 import eu.rekawek.toxiproxy.model.ToxicDirection;
 import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.testcontainers.containers.Network;
 
 /**
