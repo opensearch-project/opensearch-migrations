@@ -15,7 +15,7 @@ The Migration Console serves as the control plane for orchestrating and managing
 
 The Migration Console is deployed into the customer's VPC and maintains connections with effectively all other components of the Migration Assistant. The below diagram is not comprehensive and does not illustrate any of the data flow between various other components.
 
-![[diagrams/migration-console-arch.svg]]
+![Migration Solution Architecture](diagrams/migration-console-arch.svg)
 [Source](https://tiny.amazon.com/jmayhucf/desia2zIMi)
 
 ### Individual Connections
@@ -56,7 +56,8 @@ It allows "frontends" (a CLI app, a Web API, etc.) to ask questions and control 
 
 The overall architecture can be seen in this diagram. Each of the subsections below discusses a component in more detail, moving from left (user) to right (deployed services). Green indicates examples, not definite implementations.
 
-![[diagrams/migration-console-library.svg]]
+![Library Diagram](diagrams/migration-console-library.svg)
+
 [source](diagrams/migration-console-library-source.md) (This is an [excalidraw](https://github.com/excalidraw/excalidraw) markdown file, not particularly human readable.)
 
 ### Interfaces
