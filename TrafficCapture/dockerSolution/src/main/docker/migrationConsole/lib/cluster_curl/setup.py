@@ -9,6 +9,7 @@ setup(
     entry_points={
         "console_scripts": [
             "ccurl = cli:cli",
+            "cluster-curl = cli:cli",
         ],
     },
     classifiers=[
