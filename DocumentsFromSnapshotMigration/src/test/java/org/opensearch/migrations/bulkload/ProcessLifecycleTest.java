@@ -12,9 +12,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
-import lombok.SneakyThrows;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -29,6 +26,9 @@ import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.testcontainers.OpensearchContainer;
 
 import eu.rekawek.toxiproxy.model.ToxicDirection;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
 import org.testcontainers.containers.Network;
