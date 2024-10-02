@@ -5,15 +5,15 @@ import java.io.FileInputStream;
 import java.io.InputStream;
 import java.nio.file.Path;
 
+import org.opensearch.migrations.bulkload.common.ByteArrayIndexInput;
+import org.opensearch.migrations.bulkload.common.RfsException;
+import org.opensearch.migrations.bulkload.common.SnapshotRepo;
+
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.fasterxml.jackson.dataformat.smile.SmileFactory;
 import org.apache.lucene.codecs.CodecUtil;
-
-import org.opensearch.migrations.bulkload.common.ByteArrayIndexInput;
-import org.opensearch.migrations.bulkload.common.RfsException;
-import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 
 public interface GlobalMetadata {
     /**

@@ -4,10 +4,9 @@ import java.io.IOException;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
 
+import org.junit.jupiter.api.Test;
 import org.testcontainers.shaded.com.google.common.collect.Streams;
 
 import static org.hamcrest.CoreMatchers.equalTo;

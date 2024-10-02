@@ -3,7 +3,6 @@ package org.opensearch.migrations.trafficcapture;
 import java.nio.ByteBuffer;
 
 import com.google.protobuf.CodedOutputStream;
-
 import lombok.Getter;
 import lombok.NonNull;
 

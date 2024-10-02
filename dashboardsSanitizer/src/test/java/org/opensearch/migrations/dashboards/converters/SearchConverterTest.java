@@ -1,11 +1,11 @@
 package org.opensearch.migrations.dashboards.converters;
 
+import org.opensearch.migrations.dashboards.converter.SearchConverter;
+import org.opensearch.migrations.dashboards.savedobjects.SavedObject;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.Test;
-
-import org.opensearch.migrations.dashboards.converter.SearchConverter;
-import org.opensearch.migrations.dashboards.savedobjects.SavedObject;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

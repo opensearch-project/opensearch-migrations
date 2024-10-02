@@ -7,17 +7,16 @@ import java.util.Set;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-
 import org.opensearch.migrations.dashboards.Sanitizer;
 import org.opensearch.migrations.dashboards.savedobjects.Dashboard;
 import org.opensearch.migrations.dashboards.savedobjects.Dashboard.Panel;
 import org.opensearch.migrations.dashboards.savedobjects.Reference;
 import org.opensearch.migrations.dashboards.savedobjects.SavedObject;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j

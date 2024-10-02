@@ -2,9 +2,9 @@ package org.opensearch.migrations;
 
 import java.util.List;
 
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.testutils.CloseableLogSetup;
+
+import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.MatcherAssert.assertThat;

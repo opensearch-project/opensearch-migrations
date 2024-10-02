@@ -7,15 +7,14 @@ import java.util.Random;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
+import org.opensearch.migrations.bulkload.http.BulkRequestGenerator.BulkItemResponseEntry;
+
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.StreamReadFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.Test;
-
-import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
-import org.opensearch.migrations.bulkload.http.BulkRequestGenerator.BulkItemResponseEntry;
-
 import org.openjdk.jmh.annotations.Benchmark;
 import org.openjdk.jmh.annotations.BenchmarkMode;
 import org.openjdk.jmh.annotations.Measurement;

@@ -1,9 +1,8 @@
 package org.opensearch.migrations.dashboards.converter;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
-
 import org.opensearch.migrations.dashboards.savedobjects.SavedObject;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 
 /**

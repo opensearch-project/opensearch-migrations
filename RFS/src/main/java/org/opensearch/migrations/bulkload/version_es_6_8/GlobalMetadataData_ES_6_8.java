@@ -1,8 +1,8 @@
 package org.opensearch.migrations.bulkload.version_es_6_8;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
-
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
+
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class GlobalMetadataData_ES_6_8 implements GlobalMetadata {
     private final ObjectNode root;

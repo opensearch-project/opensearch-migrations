@@ -1,10 +1,10 @@
 package org.opensearch.migrations.commands;
 
-import org.apache.logging.log4j.util.Strings;
-
 import org.opensearch.migrations.cli.Clusters;
 import org.opensearch.migrations.cli.Format;
 import org.opensearch.migrations.cli.Items;
+
+import org.apache.logging.log4j.util.Strings;
 
 /** All shared cli result information */
 public interface MigrationItemResult extends Result {

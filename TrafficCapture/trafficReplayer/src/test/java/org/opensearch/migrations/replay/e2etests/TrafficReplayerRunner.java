@@ -16,9 +16,6 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import javax.net.ssl.SSLException;
 
-import com.google.common.base.Strings;
-import org.junit.jupiter.api.Assertions;
-
 import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
 import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import org.opensearch.migrations.replay.TimeShifter;
@@ -32,8 +29,10 @@ import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSour
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 
+import com.google.common.base.Strings;
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Assertions;
 import org.slf4j.event.Level;
 
 @Slf4j

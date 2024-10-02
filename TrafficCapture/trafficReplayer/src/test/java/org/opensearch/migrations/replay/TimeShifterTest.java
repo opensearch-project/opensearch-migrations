@@ -4,10 +4,10 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.Optional;
 
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-
-import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
 class TimeShifterTest {

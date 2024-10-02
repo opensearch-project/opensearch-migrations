@@ -1,7 +1,6 @@
 package org.opensearch.migrations.dashboards.savedobjects;
 
 import com.fasterxml.jackson.databind.node.ObjectNode;
-
 import lombok.ToString;
 
 @ToString(includeFieldNames = true)

@@ -6,7 +6,6 @@ import java.util.function.Function;
 import java.util.stream.Stream;
 
 import com.google.errorprone.annotations.MustBeClosed;
-
 import io.netty.util.ReferenceCounted;
 
 public final class RefSafeStreamUtils {
