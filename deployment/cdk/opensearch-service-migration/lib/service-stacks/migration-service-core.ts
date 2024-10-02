@@ -13,6 +13,7 @@ import {
     Volume,
     AwsLogDriverMode,
     ContainerDependencyCondition,
+    ServiceManagedVolume
 } from "aws-cdk-lib/aws-ecs";
 import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {Duration, RemovalPolicy, Stack} from "aws-cdk-lib";
@@ -185,6 +186,11 @@ export class MigrationServiceCore extends Stack {
             securityGroups: props.securityGroups,
             vpcSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PRIVATE_WITH_EGRESS}),
         });
+
+        // Add any ServiceManagedVolumes to the service, if they exist
+        if (props.volumes) {
+            props.volumes.filter(vol => vol instanceof ServiceManagedVolume).forEach(vol => fargateService.addVolume(vol as ServiceManagedVolume));
+        }
 
         if (props.targetGroups) {
             props.targetGroups.filter(tg => tg !== undefined).forEach(tg => tg.addTarget(fargateService));

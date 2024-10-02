@@ -27,6 +27,7 @@
     },
     "vpcId": "<VPC_ID>",
     "reindexFromSnapshotServiceEnabled": true,
+    "reindexFromSnapshotMaxShardSizeGiB": 80,
     "trafficReplayerServiceEnabled": true
   }
 }

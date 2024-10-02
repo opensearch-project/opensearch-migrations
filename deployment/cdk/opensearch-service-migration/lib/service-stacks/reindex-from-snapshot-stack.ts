@@ -1,6 +1,12 @@
 import {StackPropsExt} from "../stack-composer";
-import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
-import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
+import {Size} from "aws-cdk-lib/core";
+import {IVpc, SecurityGroup, EbsDeviceVolumeType} from "aws-cdk-lib/aws-ec2";
+import {
+    CpuArchitecture,
+    ServiceManagedVolume,
+    FileSystemType,
+    EbsPropagatedTagSource
+} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
 import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
@@ -24,7 +30,9 @@ export interface ReindexFromSnapshotProps extends StackPropsExt {
     readonly extraArgs?: string,
     readonly otelCollectorEnabled: boolean,
     readonly clusterAuthDetails: ClusterAuth
-    readonly sourceClusterVersion?: string
+    readonly sourceClusterVersion?: string,
+    readonly maxShardSizeGiB?: number
+
 }
 
 export class ReindexFromSnapshotStack extends MigrationServiceCore {
@@ -70,12 +78,16 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         const s3Uri = `s3://migration-artifacts-${this.account}-${props.stage}-${this.region}/rfs-snapshot-repo`;
         let command = "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments"
         const extraArgsDict = parseArgsToDict(props.extraArgs)
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-local-dir", "/tmp/s3_files")
+        const storagePath = "/storage"
+        const planningSize = props.maxShardSizeGiB ?? 80;
+        const maxShardSizeBytes = `${planningSize * 1024 * 1024 * 1024}`
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-local-dir", `"${storagePath}/s3_files"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-repo-uri", `"${s3Uri}"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-region", this.region)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--snapshot-name", "rfs-snapshot")
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--lucene-dir", "/lucene")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--lucene-dir", `"${storagePath}/lucene"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-host", osClusterEndpoint)
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-shard-size-bytes", maxShardSizeBytes)
         if (props.clusterAuthDetails.sigv4) {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-aws-service-signing-name", props.clusterAuthDetails.sigv4.serviceSigningName)
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-aws-region", props.clusterAuthDetails.sigv4.region)
@@ -113,19 +125,57 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
             servicePolicies.push(getSecretsPolicy);
         }
 
+        const volumes = [sharedLogFileSystem.asVolume()];
+        const mountPoints = [sharedLogFileSystem.asMountPoint()];
+
+        // Calculate the volume size based on the max shard size
+        // Have space for the snapshot and an unpacked copy, with buffer
+        const volumeSize = Math.max(
+            Math.ceil(planningSize * 2 * 1.15),
+            1
+        )
+
+        if (volumeSize > 16000) {
+            // 16 TiB is the maximum volume size for GP3
+            throw new Error(`"Your max shard size of ${props.maxShardSizeGiB} GiB is too large to migrate."`)
+        }
+
+        // Volume we'll use to download and unpack the snapshot
+        const snapshotVolume = new ServiceManagedVolume(this, 'SnapshotVolume', {
+            name: 'snapshot-volume',
+            managedEBSVolume: {
+                size: Size.gibibytes(volumeSize),
+                volumeType: EbsDeviceVolumeType.GP3,
+                fileSystemType: FileSystemType.XFS,
+                tagSpecifications: [{
+                    tags: {
+                        Name: `rfs-snapshot-volume-${props.stage}`,
+                    },
+                    propagateTags: EbsPropagatedTagSource.SERVICE,
+                }],
+                encrypted: true,
+            },
+        });
+
+        volumes.push(snapshotVolume);
+        mountPoints.push({
+            containerPath: storagePath,
+            readOnly: false,
+            sourceVolume: snapshotVolume.name,
+        });
+
         this.createService({
             serviceName: 'reindex-from-snapshot',
             taskInstanceCount: 0,
             dockerDirectoryPath: join(__dirname, "../../../../../", "DocumentsFromSnapshotMigration/docker"),
             dockerImageCommand: ['/bin/sh', '-c', "/rfs-app/entrypoint.sh"],
             securityGroups: securityGroups,
-            volumes: [sharedLogFileSystem.asVolume()],
-            mountPoints: [sharedLogFileSystem.asMountPoint()],
+            volumes: volumes,
+            mountPoints: mountPoints,
             taskRolePolicies: servicePolicies,
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 2048,
             taskMemoryLimitMiB: 4096,
-            ephemeralStorageGiB: 200,
             environment: {
                 "RFS_COMMAND": command,
                 "RFS_TARGET_USER": targetUser,
