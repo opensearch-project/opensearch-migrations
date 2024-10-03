@@ -108,9 +108,7 @@ export class OpenSearchDomainStack extends Stack {
       defaultDeployId: deployId,
       stage,
     });
-    if (domain.masterUserPassword && !adminUserSecret) {
-      console.log(`An OpenSearch domain fine-grained access control user was configured without an existing Secrets Manager secret, will not create SSM Parameter: /migration/${stage}/${deployId}/osUserAndSecret`)
-    } else if (domain.masterUserPassword && adminUserSecret) {
+    if (domain.masterUserPassword && adminUserSecret) {
       createMigrationStringParameter(this, `${adminUserName} ${adminUserSecret.secretArn}`, {
           parameter: MigrationSSMParameter.OS_USER_AND_SECRET_ARN,
           defaultDeployId: deployId,

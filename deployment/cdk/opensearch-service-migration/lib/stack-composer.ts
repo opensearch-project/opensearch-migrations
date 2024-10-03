@@ -144,10 +144,6 @@ export class StackComposer {
             throw new Error("Required context field 'contextId' not provided")
         }
         const contextJSON = this.parseContextBlock(scope, contextId)
-        console.log('Received following context block for deployment: ')
-        console.log(contextJSON)
-        console.log('End of context block.')
-
         const stage = this.getContextForType('stage', 'string', defaultValues, contextJSON)
 
         const domainName = this.getContextForType('domainName', 'string', defaultValues, contextJSON)
@@ -302,7 +298,6 @@ export class StackComposer {
         if (captureProxyServiceEnabled || captureProxyESServiceEnabled || trafficReplayerServiceEnabled || kafkaBrokerServiceEnabled) {
             streamingSourceType = determineStreamingSourceType(kafkaBrokerServiceEnabled)
         } else {
-            console.log("MSK is not enabled and will not be deployed.")
             streamingSourceType = StreamingSourceType.DISABLED
         }
 
