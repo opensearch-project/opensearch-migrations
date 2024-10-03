@@ -5,7 +5,7 @@ helm repo add strimzi https://strimzi.io/charts/
 helm repo update
 
 helm dependency build  mockCustomerClusters # not sure if this is required
-helm upgrade mock-context  mockCustomerClusters --values ../helmValues/localTesting/sourceElasticsearchCluster.yaml --values ../helmValues/localTesting/targetOpenSearchCluster.yaml --values ../helmValues/localTesting/captureProxy.yaml
+helm install mock-context  mockCustomerClusters --values ../helmValues/localTesting/sourceElasticsearchCluster.yaml --values ../helmValues/localTesting/targetOpenSearchCluster.yaml --values ../helmValues/localTesting/captureProxy.yaml
 kubectl port-forward service/capture-proxy 9200:9200 &
 kubectl port-forward service/elasticsearch 19200:9200 &
 kubectl port-forward service/opensearch 29200:9200 &
