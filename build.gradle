@@ -48,6 +48,11 @@ spotless {
         indentWithSpaces()
         endWithNewline()
     }
+    json {
+        target 'deployment/cdk/opensearch-service-migration/*.json'
+        prettier()
+        endWithNewline()
+    }
 }
 
 subprojects {
