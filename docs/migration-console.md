@@ -13,16 +13,20 @@ The Migration Console serves as the control plane for orchestrating and managing
 
 ## System Architecture
 
-The Migration Console is deployed into the customer's VPC and maintains connections with effectively all other components of the Migration Assistant. The below diagram is not comprehensive and does not illustrate any of the data flow between various other components.
+The Migration Console is deployed into the customer's VPC and maintains connections with most other components of the Migration Assistant. The below diagram is not comprehensive and does not illustrate any of the data flow between various other components. Additionally, it shows the deployment resulting from using the `deployment/cdk` tooling. A user may also deploy with Docker, in which case each of the ECS containers and Kafka in the diagram are actually Docker containers, the EFS volume is a shared volume, and Cloudwatch is replaced with Prometheus and Jaeger. Regardless, the Migration Console maintains contact with each of the components.
 
 ![Migration Solution Architecture](diagrams/migration-console-arch.svg)
 [Source](https://tiny.amazon.com/jmayhucf/desia2zIMi)
 
-### Individual Connections
+### Components & their Relation to the Migration Console
 
-#### Bootstrap Box
+#### Deployment Environment
 
-The Bootstrap Box an EC2 instance that's used to deploy all other services and components of the Migration Assistant solution, including the Migration Console. The Migration Console is accessed from the Bootstrap Box using the `./accessContainer` script which uses the AWS CLI `execute-command` function to start an interactive bash session on the Migration Console. This is how a user runs commands on the Migration Console.
+In a Migration Assistant deployment on AWS, the Bootstrap Box is an EC2 instance that's used to deploy all other services and components of the solution, including the Migration Console. The Migration Console is accessed from the Bootstrap Box using the `./accessContainer` script which uses the AWS CLI `execute-command` function to start an interactive bash session on the Migration Console. This is how a user runs commands on the Migration Console.
+
+The Bootstrap Box doesn't exist in a open-source deployment, and instead the user generally uses their local system or another designated environment to deploy the Migration Console and other components.
+
+In either case, it is the responsibility of the deployment environment to populate a `migration-services.yaml` file on the Migration Console that describes the other services that are deployed. This includes the endpoints and authorization schemes of the clusters, the cluster names and service names for any ECS services, the Kafka broker endpoints, etc.
 
 #### Source Cluster
 
@@ -30,7 +34,7 @@ The source cluster connection is optional.  A customer can configure the `cdk.co
 
 #### Target Cluster
 
-The target cluster is also populated in the `cdk.context.json` and the Migration Console uses the connection details to make http requests directly, as well as passing them to the `MetadataMigration` tool. Direct HTTP requests are used during an RFS migration to query the `.migrations_working_state` index and inform the user about the progress of the backfill.
+The target cluster is also populated in the `cdk.context.json` and the Migration Console uses the connection details to make http requests directly, as well as passing them to the `MetadataMigration` tool. Direct HTTP requests are used during an Reindex-from-Snapshot (RFS) migration to query the `.migrations_working_state` index and inform the user about the progress of the backfill.
 
 #### Kafka
 
@@ -38,15 +42,15 @@ In a migration with replayer components deployed, the Migration Console has some
 
 #### Reindex-From-Snapshot & Replayer Service
 
-The Reindex-From-Snapshot and Replayer services are deployed (if enabled) by the CDK scripts to ECS, in the same cluster as the Migration Console. The Migration Console does not directly interact with either of these services. Instead, it uses the AWS API to manipulate them at the control-plane level by changing the number of desired services to disable, enable, and scale the services.
+The Reindex-From-Snapshot and Replayer services are deployed (if enabled) by the CDK scripts to ECS, in the same cluster as the Migration Console, or by the `docker-compose.yml` as Docker containers. In the AWS deployment, the Migration Console does not directly interact with either of these services. Instead, it uses the AWS API to manipulate them at the control-plane level by changing the number of desired services to disable, enable, and scale the services.
 
-#### Shared Logs EFS Volume
+#### Shared Logs Volume
 
-The Shared Logs Volume is an EFS volume that's mounted to the Migration Console task, as well as the Replayer task (if deployed). Logs are written to the volume from the Replayer (in the form of tuples) and processes on the Migration Console (specifically Metadata Migration). These logs can be accessed directly by the user (e.g. with shell commands `ls`, `cat`, `jq`, etc.) or, in the case of tuples, manipulated using Migration Console CLI commands.
+In an AWS deployment, the Shared Logs Volume is an EFS volume that's mounted to the Migration Console task, as well as the Replayer task (if deployed).  In a Docker deployment, it's a shared volume between those containers. In both cases, logs are written to the volume from the Replayer (in the form of tuples) and processes on the Migration Console (specifically Metadata Migration). These logs can be accessed directly by the user (e.g. with shell commands `ls`, `cat`, `jq`, etc.) or, in the case of tuples, manipulated using Migration Console CLI commands.
 
 #### Cloudwatch Metrics
 
-The various services making up the Migration Assistant emit metrics to Cloudwatch. The Migration Console contains basic functionality to query the metrics in Cloudwatch via the AWS SDK.
+The various services making up the Migration Assistant emit metrics and traces via an OpenTelemetry Collector to the configured metrics provider. In an AWS deployment, that's Cloudwatch & X-Ray, and in a Docker deployment it's Prometheus and Jaeger. The Migration Console contains basic functionality to query the metrics, and supports both the AWS and Docker deployment sources.
 
 ## Library Architecture and Interface
 
@@ -58,33 +62,25 @@ The overall architecture can be seen in this diagram. Each of the subsections be
 
 ![Library Diagram](diagrams/migration-console-library.svg)
 
-[source](diagrams/migration-console-library-source.md) (This is an [excalidraw](https://github.com/excalidraw/excalidraw) markdown file, not particularly human readable.)
+[source](diagrams/migration-console-library-source.excalidraw) (This is an [excalidraw](https://github.com/excalidraw/excalidraw) markdown file, not particularly human readable.)
 
 ### Interfaces
 
-The frontends currently envisioned are a command line interface (CLI) and a web API. While these are not explicitly part of the library, they are closely linked and discussing them is helpful context for the design decisions of the library interfaces.
+Currently, we have a couple of frontends that leverage the Migration Console library. The primary and most comprehensive is the command line interface (CLI), [source](https://github.com/opensearch-project/opensearch-migrations/blob/main/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/console_link/cli.py). There is also a web API that supports a small subset of commands, [source](https://github.com/opensearch-project/opensearch-migrations/tree/main/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/console_api). Additionally, the `cluster-curl` application exposes only cluster-related calls (currently [in PR here](https://github.com/opensearch-project/opensearch-migrations/pull/1046)), and the integ tests that run on the Migration Console ([source](https://github.com/opensearch-project/opensearch-migrations/tree/main/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/integ_test)) make extensive use of the console library and serve as another frontend, though in a different form-factor (i.e. not user-facing).
+
+We intend to support a full web API that matches the CLI by programatically generating both the API and the CLI from a spec (yet to be defined). In the short term, a subset of the functionality is exposed via a Web API.
 
 #### CLI
 
 In the near term of the Migration Assistant, the CLI is the primary way for users to manage and understand their migration. After deploying their tools, a user will log onto the Migration Console and use the CLI for tasks like starting and checking the progress of their historic backfill, turning on and off the replayer, running `_cat/indices` against the source and target cluster, etc. These functions will be performed in the same way by the user, regardless of whether their tools are deployed locally on Docker, remotely on AWS, a different hosting platform, or a combination thereof.
 
-#### Web API
-
-Parallel to the CLI, there will be a web API to access the same functionality. A web API to access the full functionality, with authorization, etc., is not on our roadmap yet, but this is envisioned as being a powerful way for users to access and manage their migration from their own environment, potentially programatically. We could also use the web API to build a web frontend with UI, etc. down the line.
-
-##### DMS API
-
-In the short term, a small subset of the functionality is necessary to meet the requirements of our in-progress collaboration with Database Migration Service (DMS). In some of these cases, DMS has specified an API contract that doesn't align with our plan for the API endpoints and data received.  In these cases, we will build out DMS specific endpoints that meet these exact purposes without trying to also match the general case.
-
 #### Generation from a spec
 
-For the CLI and (standard) web API, the intention is that the “frontend” should be very small—essentially just the necessary code to get the user’s data from the input source (either CLI commands or http requests) into the library itself. To accomplish this, the actual endpoints in both cases could be generated from an API spec or one of them from the other. This will be a helpful way to minimize the developer effort to support additional commands and ensure that behavior is consistent between the two modalities.
+For the CLI and (standard) web API, the intention is that the “frontend” should be very small--essentially just the necessary code to get the user’s data from the input source (either CLI commands or http requests) into the library itself. To accomplish this, the actual endpoints in both cases could be generated from an API spec or one of them from the other. This will be a helpful way to minimize the developer effort to support additional commands and ensure that behavior is consistent between the two modalities.
 
 #### Custom Frontends
 
-It is also possible and supported for users or ourselves in the future to write additional custom frontends that leverage the library. For instance, we could write a "wizard" that walks a user step-by-step through a deployment and migration, by importing the library and leveraging its abstraction for the services. Or an SA could write an application that manages automatic performance testing with a large fleet of target clusters and replayers.
-
-While we have no immediate plans to write applications like this, the library is currently being used directly by the end to end integration tests.
+As mentioned above, there are several smaller frontends that expose specific functionality (`cluster-curl`) or directly use the functionality (integ tests), leveraging the library to manage all direct communication with components, without the frontend needing to know how or where the components are deployed. These frontends install and import the library's middleware and models. In the future, these frontends could be expanded--for instance, we could write a "wizard" that walks a user step-by-step through a deployment and migration or an application to help manage multi-target performance testing.
 
 ### Configuration & the Environment Object
 
