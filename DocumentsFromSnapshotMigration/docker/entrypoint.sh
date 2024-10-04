@@ -43,6 +43,20 @@ if [[ $RFS_COMMAND != *"--target-password"* ]]; then
     fi
 fi
 
+# Monitor how much aggregate free space is left, if we drop below a certain amount,
+# don't allow another process to run again
+space_drop_fraction=4
+initial_free_space=$(df --output=avail | awk 'NR>1 {sum+=$1} END {print sum}')
+still_enough_space_left() {
+  current_free=$(df --output=avail | awk 'NR>1 {sum+=$1} END {print sum}')
+  if (((initial_free_space - current_free) >= (initial_free_space / $space_drop_fraction))); then
+    return 1;
+  else
+    return 0;
+  fi
+}
+
+
 [ -z "$RFS_COMMAND" ] && \
 { echo "Warning: RFS_COMMAND is empty! Exiting."; exit 1; } || \
-until ! { echo "Running command $RFS_COMMAND"; eval "$RFS_COMMAND"; }; do :; done
+until ! { echo "Running command $RFS_COMMAND"; eval "$RFS_COMMAND" && still_enough_space_left; }; do :; done
