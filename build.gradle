@@ -68,7 +68,8 @@ subprojects {
             target "**/*.java"
             targetExclude '**/build/**', ".gradle/**"
             importOrder(
-                    'java|javax',
+                    'javax',
+                    'java',
                     'org.opensearch',
                     '',
                     '\\#')

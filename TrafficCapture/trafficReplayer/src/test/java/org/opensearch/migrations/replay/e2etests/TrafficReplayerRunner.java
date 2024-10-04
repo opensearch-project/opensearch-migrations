@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay.e2etests;
 
+import javax.net.ssl.SSLException;
+
 import java.net.URI;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -14,7 +16,6 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
-import javax.net.ssl.SSLException;
 
 import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
 import org.opensearch.migrations.replay.SourceTargetCaptureTuple;

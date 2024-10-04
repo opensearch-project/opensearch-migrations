@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay.e2etests;
 
+import javax.net.ssl.SSLException;
+
 import java.io.EOFException;
 import java.io.IOException;
 import java.net.URI;
@@ -13,7 +15,6 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import javax.net.ssl.SSLException;
 
 import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumulator;
 import org.opensearch.migrations.replay.ReplayEngine;

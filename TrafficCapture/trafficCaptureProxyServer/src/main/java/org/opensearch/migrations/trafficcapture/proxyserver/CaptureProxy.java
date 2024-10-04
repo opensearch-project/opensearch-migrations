@@ -1,5 +1,8 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLException;
+
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
@@ -20,8 +23,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import javax.net.ssl.SSLEngine;
-import javax.net.ssl.SSLException;
 
 import org.opensearch.common.settings.Settings;
 import org.opensearch.migrations.jcommander.NoSplitter;
