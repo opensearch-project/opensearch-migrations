@@ -6,6 +6,8 @@ public class JsonKeysForHttpMessage {
 
     public static final String HTTP_MESSAGE_SCHEMA_VERSION_KEY = "transformerMessageVersion";
     public static final String METHOD_KEY = "method";
+    public static final String STATUS_CODE_KEY = "code";
+    public static final String STATUS_REASON_KEY = "reason";
     public static final String URI_KEY = "URI";
     public static final String PROTOCOL_KEY = "protocol";
     public static final String HEADERS_KEY = "headers";
@@ -25,4 +27,6 @@ public class JsonKeysForHttpMessage {
      * Any consumers should retain if they need to access it later.  This may be UTF8, UTF16 encoded, or something else.
      */
     public static final String INLINED_BINARY_BODY_DOCUMENT_KEY = "inlinedBinaryBody";
+    public static final String INLINED_BASE64_BODY_DOCUMENT_KEY = "inlinedBase64Body";
+
 }

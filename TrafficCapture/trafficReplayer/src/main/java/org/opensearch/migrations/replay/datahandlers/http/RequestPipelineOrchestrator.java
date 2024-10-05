@@ -103,18 +103,28 @@ public class RequestPipelineOrchestrator<R> {
         addLoggingHandler(pipeline, "A");
         pipeline.addLast(new ReadMeteringHandler(httpTransactionContext::aggregateInputChunk));
         // IN: Netty HttpRequest(1) + HttpContent(1) blocks (which may be compressed) + EndOfInput + ByteBuf
-        // OUT: ByteBufs(1) OR Netty HttpRequest(1) + HttpJsonMessage(1) with only headers PLUS + HttpContent(1) blocks
-        // Note1: original Netty headers are preserved so that HttpContentDecompressor can work appropriately.
-        // HttpJsonMessage is used so that we can capture the headers exactly as they were and to
-        // observe packet sizes.
-        // Note2: This handler may remove itself and all other handlers and replace the pipeline ONLY with the
-        // "baseline" handlers. In that case, the pipeline will be processing only ByteBufs, hence the
-        // reason that there's some branching in the types that different handlers consume.
-        // Note3: ByteBufs will be sent through when there were pending bytes left to be parsed by the
-        // HttpRequestDecoder when the HttpRequestDecoder is removed from the pipeline BEFORE the
-        // NettyDecodedHttpRequestHandler is removed.
+        // OUT after Preliminary Handler: Netty HttpJsonRequest(1) with only headers PLUS + HttpContent(1) blocks
+        // OUT after Convert Handler: ByteBufs(1) OR Netty HttpRequest(1) + HttpJsonRequest(2) with transformed headers and payload PLUS + HttpContent(2) blocks
+        // Note1:
+        // - Original Netty headers are preserved by the Preliminary Handler to ensure HttpContentDecompressor functions correctly.
+        // - The Preliminary Handler converts HttpRequest into HttpJsonRequest containing only headers to capture and observe packet sizes.
+        //
+        // - The Convert Handler transforms HttpJsonRequest by applying JSON and Authorization transformations.
+        //   It may modify headers and payload, potentially removing and replacing handlers based on transformation requirements.
+        //
+        // Note2: These handlers may remove themselves and all previous handlers, replacing the pipeline exclusively with the
+        // "baseline" handlers. In such cases, the pipeline will process only ByteBufs, which explains the branching in the types
+        // consumed by different handlers.
+        //
+        // Note3: ByteBufs will continue to flow through if there are pending bytes left to be parsed by the
+        // HttpRequestDecoder when it is removed from the pipeline before the Preliminary and Convert Handlers are removed.
         pipeline.addLast(
-            new NettyDecodedHttpRequestPreliminaryConvertHandler<R>(
+            new NettyDecodedHttpRequestPreliminaryHandler(
+                httpTransactionContext
+            )
+        );
+        pipeline.addLast(
+            new NettyDecodedHttpRequestConvertHandler<R>(
                 transformer,
                 chunkSizes,
                 this,
@@ -133,22 +143,22 @@ public class RequestPipelineOrchestrator<R> {
         log.debug("Adding content parsing handlers to pipeline");
         var pipeline = ctx.pipeline();
         pipeline.addLast(new ReadMeteringHandler(httpTransactionContext::onPayloadBytesIn));
-        // IN: Netty HttpRequest(1) + HttpJsonMessage(1) with headers + HttpContent(1) blocks (which may be compressed)
-        // OUT: Netty HttpRequest(2) + HttpJsonMessage(1) with headers + HttpContent(2) uncompressed blocks
+        // IN: Netty HttpRequest(1) + HttpJsonRequest(1) with headers + HttpContent(1) blocks (which may be compressed)
+        // OUT: Netty HttpRequest(2) + HttpJsonRequest(1) with headers + HttpContent(2) uncompressed blocks
         pipeline.addLast(new HttpContentDecompressor());
         pipeline.addLast(new ReadMeteringHandler(httpTransactionContext::onUncompressedBytesIn));
         if (transformer != null) {
             httpTransactionContext.onJsonPayloadParseRequired();
             log.debug("Adding JSON handlers to pipeline");
-            // IN: Netty HttpRequest(2) + HttpJsonMessage(1) with headers + HttpContent(2) blocks
-            // OUT: Netty HttpRequest(2) + HttpJsonMessage(2) with headers AND payload
+            // IN: Netty HttpRequest(2) + HttpJsonRequest(1) with headers + HttpContent(2) blocks
+            // OUT: Netty HttpRequest(2) + HttpJsonRequest(2) with headers AND payload
             addLoggingHandler(pipeline, "C");
             pipeline.addLast(new NettyJsonBodyAccumulateHandler(httpTransactionContext));
-            // IN: Netty HttpRequest(2) + HttpJsonMessage(2) with headers AND payload
-            // OUT: Netty HttpRequest(2) + HttpJsonMessage(3) with headers AND payload (transformed)
+            // IN: Netty HttpRequest(2) + HttpJsonRequest(2) with headers AND payload
+            // OUT: Netty HttpRequest(2) + HttpJsonRequest(3) with headers AND payload (transformed)
             pipeline.addLast(new NettyJsonBodyConvertHandler(transformer));
-            // IN: Netty HttpRequest(2) + HttpJsonMessage(3) with headers AND payload
-            // OUT: Netty HttpRequest(2) + HttpJsonMessage(3) with headers only + HttpContent(3) blocks
+            // IN: Netty HttpRequest(2) + HttpJsonRequest(3) with headers AND payload
+            // OUT: Netty HttpRequest(2) + HttpJsonRequest(3) with headers only + HttpContent(3) blocks
             pipeline.addLast(new NettyJsonBodySerializeHandler());
             addLoggingHandler(pipeline, "F");
         }
@@ -158,13 +168,13 @@ public class RequestPipelineOrchestrator<R> {
         }
         pipeline.addLast(new LastHttpContentListener(httpTransactionContext::onPayloadParseSuccess));
         pipeline.addLast(new ReadMeteringHandler(httpTransactionContext::onUncompressedBytesOut));
-        // IN: Netty HttpRequest(2) + HttpJsonMessage(3) with headers only + HttpContent(3) blocks
-        // OUT: Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + HttpContent(4) blocks
+        // IN: Netty HttpRequest(2) + HttpJsonRequest(3) with headers only + HttpContent(3) blocks
+        // OUT: Netty HttpRequest(3) + HttpJsonRequest(4) with headers only + HttpContent(4) blocks
         pipeline.addLast(new NettyJsonContentCompressor());
         pipeline.addLast(new ReadMeteringHandler(httpTransactionContext::onFinalBytesOut));
         addLoggingHandler(pipeline, "H");
-        // IN: Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + HttpContent(4) blocks + EndOfInput
-        // OUT: Netty HttpRequest(3) + HttpJsonMessage(4) with headers only + ByteBufs(2)
+        // IN: Netty HttpRequest(3) + HttpJsonRequest(4) with headers only + HttpContent(4) blocks + EndOfInput
+        // OUT: Netty HttpRequest(3) + HttpJsonRequest(4) with headers only + ByteBufs(2)
         pipeline.addLast(new NettyJsonContentStreamToByteBufHandler());
         addLoggingHandler(pipeline, "I");
         addBaselineHandlers(pipeline);
@@ -172,7 +182,7 @@ public class RequestPipelineOrchestrator<R> {
 
     void addBaselineHandlers(ChannelPipeline pipeline) {
         addLoggingHandler(pipeline, "J");
-        // IN: ByteBufs(2) + HttpJsonMessage(4) with headers only + HttpContent(1) (if the repackaging handlers were
+        // IN: ByteBufs(2) + HttpJsonRequest(4) with headers only + HttpContent(1) (if the repackaging handlers were
         // skipped)
         // OUT: ByteBufs(3) which are sized similarly to how they were received
         pipeline.addLast(new NettyJsonToByteBufHandler(Collections.unmodifiableList(chunkSizes)));

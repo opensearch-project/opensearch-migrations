@@ -14,6 +14,7 @@ import java.util.stream.Stream;
 import com.fasterxml.jackson.databind.ObjectMapper;
 
 import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
+import org.opensearch.migrations.transform.IJsonTransformer;
 
 import io.netty.buffer.ByteBuf;
 import lombok.Lombok;
@@ -27,26 +28,27 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
     public static final String TRANSACTION_SUMMARY_LOGGER = "TransactionSummaryLogger";
     private static final String MISSING_STR = "-";
     private static final ObjectMapper PLAIN_MAPPER = new ObjectMapper();
+    private static final IJsonTransformer NOOP_JSON_TRANSFORMER = new TransformationLoader().getTransformerFactoryLoader(
+        null, null, "NoopTransformerProvider");
 
     private final Logger tupleLogger;
     private final Logger progressLogger;
+    private final IJsonTransformer tupleTransformer;
+
     private final AtomicInteger tupleCounter;
 
-    public ResultsToLogsConsumer() {
-        this(null, null);
-    }
-
-    public ResultsToLogsConsumer(Logger tupleLogger, Logger progressLogger) {
+    public ResultsToLogsConsumer(Logger tupleLogger, Logger progressLogger, IJsonTransformer tupleTransformer) {
         this.tupleLogger = tupleLogger != null ? tupleLogger : LoggerFactory.getLogger(OUTPUT_TUPLE_JSON_LOGGER);
         this.progressLogger = progressLogger != null ? progressLogger : makeTransactionSummaryLogger();
         tupleCounter = new AtomicInteger();
+        this.tupleTransformer = tupleTransformer != null ? tupleTransformer : NOOP_JSON_TRANSFORMER ;
     }
 
     // set this up so that the preamble prints out once, right after we have a logger
     // if it's configured to output at all
     private static Logger makeTransactionSummaryLogger() {
         var logger = LoggerFactory.getLogger(TRANSACTION_SUMMARY_LOGGER);
-        logger.atInfo().setMessage("{}").addArgument(() -> getTransactionSummaryStringPreamble()).log();
+        logger.atInfo().setMessage("{}").addArgument(ResultsToLogsConsumer::getTransactionSummaryStringPreamble).log();
         return logger;
     }
 
@@ -73,43 +75,64 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
     /**
      * Writes a tuple object to an output stream as a JSON object.
      * The JSON tuple is output on one line, and has several objects: "sourceRequest", "sourceResponse",
-     * "targetRequest", and "targetResponse". The "connectionId" is also included to aid in debugging.
+     * "targetRequest", and "targetResponses". The "connectionId", "numRequests", and "numErrors" are also included to aid in debugging.
      * An example of the format is below.
      * <p>
      * {
-     * "sourceRequest": {
-     * "Request-URI": XYZ,
-     * "Method": XYZ,
-     * "HTTP-Version": XYZ
-     * "body": XYZ,
-     * "header-1": XYZ,
-     * "header-2": XYZ
-     * },
-     * "targetRequest": {
-     * "Request-URI": XYZ,
-     * "Method": XYZ,
-     * "HTTP-Version": XYZ
-     * "body": XYZ,
-     * "header-1": XYZ,
-     * "header-2": XYZ
-     * },
-     * "sourceResponse": {
-     * "HTTP-Version": ABC,
-     * "Status-Code": ABC,
-     * "Reason-Phrase": ABC,
-     * "response_time_ms": 123,
-     * "body": ABC,
-     * "header-1": ABC
-     * },
-     * "targetResponse": {
-     * "HTTP-Version": ABC,
-     * "Status-Code": ABC,
-     * "Reason-Phrase": ABC,
-     * "response_time_ms": 123,
-     * "body": ABC,
-     * "header-2": ABC
-     * },
-     * "connectionId": "0242acfffe1d0008-0000000c-00000003-0745a19f7c3c5fc9-121001ff.0"
+     *   "sourceRequest": {
+     *     "Request-URI": "/api/v1/resource",
+     *     "Method": "POST",
+     *     "HTTP-Version": "HTTP/1.1",
+     *     "header-1": "Content-Type: application/json",
+     *     "header-2": "Authorization: Bearer token",
+     *     "payload": {
+     *       "inlinedJsonBody": {
+     *         "key1": "value1",
+     *         "key2": "value2"
+     *       }
+     *     }
+     *   },
+     *   "targetRequest": {
+     *     "Request-URI": "/api/v1/target",
+     *     "Method": "GET",
+     *     "HTTP-Version": "HTTP/1.1",
+     *     "header-1": "Accept: application/json",
+     *     "header-2": "Authorization: Bearer token",
+     *     "payload": {
+     *       "inlinedBinaryBody": "0101010101"
+     *     }
+     *   },
+     *   "sourceResponse": {
+     *     "response_time_ms": 150,
+     *     "HTTP-Version": "HTTP/1.1",
+     *     "Status-Code": 200,
+     *     "Reason-Phrase": "OK",
+     *     "header-1": "Content-Type: application/json",
+     *     "header-2": "Cache-Control: no-cache",
+     *     "payload": {
+     *       "inlinedJsonBody": {
+     *         "responseKey1": "responseValue1",
+     *         "responseKey2": "responseValue2"
+     *       }
+     *     }
+     *   },
+     *   "targetResponses": [{
+     *     "response_time_ms": 100,
+     *     "HTTP-Version": "HTTP/1.1",
+     *     "Status-Code": 201,
+     *     "Reason-Phrase": "Created",
+     *     "header-1": "Content-Type: application/json",
+     *     "payload": {
+     *       "inlinedJsonSequenceBodies": [
+     *         {"sequenceKey1": "sequenceValue1"},
+     *         {"sequenceKey2": "sequenceValue2"}
+     *       ]
+     *     }
+     *   }],
+     *   "connectionId": "conn-12345",
+     *   "numRequests": 5,
+     *   "numErrors": 1,
+     *   "error": "TimeoutException: Request timed out"
      * }
      *
      * @param tuple the RequestResponseResponseTriple object to be converted into json and written to the stream.
@@ -122,7 +145,9 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
             .log();
         if (tupleLogger.isInfoEnabled()) {
             try {
-                var tupleString = PLAIN_MAPPER.writeValueAsString(toJSONObject(tuple, parsedMessages));
+                var originalTuple = toJSONObject(tuple, parsedMessages);
+                var transformedTuple = tupleTransformer.transformJson(originalTuple);
+                var tupleString = PLAIN_MAPPER.writeValueAsString(transformedTuple);
                 tupleLogger.atInfo().setMessage("{}").addArgument(() -> tupleString).log();
             } catch (Exception e) {
                 log.atError().setMessage("Exception converting tuple to string").setCause(e).log();

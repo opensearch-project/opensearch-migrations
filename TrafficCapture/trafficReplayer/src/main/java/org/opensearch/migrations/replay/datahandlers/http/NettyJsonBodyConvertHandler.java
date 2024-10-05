@@ -19,16 +19,16 @@ public class NettyJsonBodyConvertHandler extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        if (msg instanceof HttpJsonMessageWithFaultingPayload) {
-            var httpMsg = (HttpJsonMessageWithFaultingPayload) msg;
+        if (msg instanceof HttpJsonRequestWithFaultingPayload) {
+            var httpMsg = (HttpJsonRequestWithFaultingPayload) msg;
             if (httpMsg.payload() instanceof PayloadAccessFaultingMap) {
                 // no reason for transforms to fault if there wasn't a body in the message
                 ((PayloadAccessFaultingMap) httpMsg.payload()).setDisableThrowingPayloadNotLoaded(true);
             }
-            HttpJsonMessageWithFaultingPayload newHttpJson;
+            HttpJsonRequestWithFaultingPayload newHttpJson;
             try {
                 var output = transformer.transformJson(httpMsg);
-                newHttpJson = new HttpJsonMessageWithFaultingPayload(output);
+                newHttpJson = new HttpJsonRequestWithFaultingPayload(output);
             } catch (Exception e) {
                 var remainingBytes = httpMsg.payload().get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
                 ReferenceCountUtil.release(remainingBytes); // release because we're not passing it along for cleanup

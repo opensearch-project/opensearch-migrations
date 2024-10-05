@@ -1,24 +1,24 @@
 package org.opensearch.migrations.replay.util;
 
-import javax.annotation.Nullable;
-
 import com.google.errorprone.annotations.MustBeClosed;
 
 import io.netty.util.ReferenceCountUtil;
+import lombok.NonNull;
 
-public class RefSafeHolder<T> implements AutoCloseable {
+public class NonNullRefSafeHolder<T> implements AutoCloseable {
     private final T resource;
 
-    private RefSafeHolder(@Nullable T resource) {
+    @MustBeClosed
+    private NonNullRefSafeHolder(T resource) {
         this.resource = resource;
     }
 
     @MustBeClosed
-    public static <T> RefSafeHolder<T> create(@Nullable T resource) {
-        return new RefSafeHolder<>(resource);
+    public static <T> NonNullRefSafeHolder<T> create(@NonNull T resource) {
+        return new NonNullRefSafeHolder<>(resource);
     }
 
-    public @Nullable T get() {
+    public T get() {
         return resource;
     }
 
@@ -29,6 +29,6 @@ public class RefSafeHolder<T> implements AutoCloseable {
 
     @Override
     public String toString() {
-        return "RefSafeHolder{" + resource + "}";
+        return "NonNullRefSafeHolder{" + resource + "}";
     }
 }

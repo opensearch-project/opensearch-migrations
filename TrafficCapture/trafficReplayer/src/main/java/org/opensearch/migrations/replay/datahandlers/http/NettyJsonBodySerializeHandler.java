@@ -21,8 +21,8 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        if (msg instanceof HttpJsonMessageWithFaultingPayload) {
-            var jsonMessage = (HttpJsonMessageWithFaultingPayload) msg;
+        if (msg instanceof HttpJsonRequestWithFaultingPayload) {
+            var jsonMessage = (HttpJsonRequestWithFaultingPayload) msg;
             var payload = jsonMessage.payload();
             jsonMessage.setPayloadFaultMap(null);
             ctx.fireChannelRead(msg);

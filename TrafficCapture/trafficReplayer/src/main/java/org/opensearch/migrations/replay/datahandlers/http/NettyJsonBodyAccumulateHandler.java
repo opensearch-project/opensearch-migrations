@@ -76,9 +76,10 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
         } else if (msg instanceof HttpContent) {
             var contentBuf = ((HttpContent) msg).content();
             accumulatedBody.addComponent(true, contentBuf.retainedDuplicate());
+            var nioBuf = contentBuf.nioBuffer();
+            contentBuf.release();
             try {
                 if (!jsonWasInvalid) {
-                    var nioBuf = contentBuf.nioBuffer();
                     jsonAccumulator.consumeByteBuffer(nioBuf);
                     Object nextObj;
                     while ((nextObj = jsonAccumulator.getNextTopLevelObject()) != null) {
@@ -117,10 +118,9 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
                         .put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
                             accumulatedBody.retainedSlice(jsonBodyByteLength,
                                 accumulatedBody.readableBytes() - jsonBodyByteLength));
-                } else {
-                    accumulatedBody.release();
-                    accumulatedBody = null;
                 }
+                accumulatedBody.release();
+                accumulatedBody = null;
                 ctx.fireChannelRead(capturedHttpJsonMessage);
             }
         } else {

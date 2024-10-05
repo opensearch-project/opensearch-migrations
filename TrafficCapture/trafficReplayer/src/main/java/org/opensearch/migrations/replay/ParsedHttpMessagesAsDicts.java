@@ -9,15 +9,26 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonRequestWithFaultingPayload;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonResponseWithFaultingPayload;
+import org.opensearch.migrations.replay.datahandlers.http.NettyDecodedHttpRequestPreliminaryHandler;
+import org.opensearch.migrations.replay.datahandlers.http.NettyDecodedHttpResponsePreliminaryHandler;
+import org.opensearch.migrations.replay.datahandlers.http.NettyJsonBodyAccumulateHandler;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.util.NettyUtils;
+import org.opensearch.migrations.replay.util.NonNullRefSafeHolder;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
+import org.opensearch.migrations.replay.util.RefSafeStreamUtils;
+import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.handler.codec.base64.Base64;
+import io.netty.buffer.Unpooled;
+import io.netty.channel.embedded.EmbeddedChannel;
 import io.netty.handler.codec.base64.Base64Dialect;
-import io.netty.handler.codec.http.HttpHeaders;
+import io.netty.handler.codec.http.HttpContentDecompressor;
+import io.netty.handler.codec.http.HttpRequestDecoder;
+import io.netty.handler.codec.http.HttpResponseDecoder;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
@@ -34,7 +45,6 @@ import lombok.extern.slf4j.Slf4j;
 public class ParsedHttpMessagesAsDicts {
     public static final String STATUS_CODE_KEY = "Status-Code";
     public static final String RESPONSE_TIME_MS_KEY = "response_time_ms";
-    public static final int MAX_PAYLOAD_BYTES_TO_CAPTURE = 256 * 1024 * 1024;
     public static final String EXCEPTION_KEY_STRING = "Exception";
 
     public final Optional<Map<String, Object>> sourceRequestOp;
@@ -129,18 +139,12 @@ public class ParsedHttpMessagesAsDicts {
             context.setTargetStatus((Integer) targetResponseList.get(targetResponseList.size() - 1).get(STATUS_CODE_KEY));
         }
     }
-
-    private static Map<String, Object> fillMap(
-        LinkedHashMap<String, Object> map,
-        HttpHeaders headers,
-        ByteBuf content
-    ) {
-        try (var encodedBufHolder = RefSafeHolder.create(Base64.encode(content, false, Base64Dialect.STANDARD))) {
+    private static String byteBufToBase64String(ByteBuf content) {
+        try (var encodedBufHolder = RefSafeHolder.create(io.netty.handler.codec.base64.Base64.encode(content.duplicate(),
+            false, Base64Dialect.STANDARD))) {
             var encodedBuf = encodedBufHolder.get();
             assert encodedBuf != null : "Base64.encode should not return null";
-            headers.entries().forEach(kvp -> map.put(kvp.getKey(), kvp.getValue()));
-            map.put("body", encodedBuf.toString(StandardCharsets.UTF_8));
-            return map;
+            return encodedBuf.toString(StandardCharsets.UTF_8);
         }
     }
 
@@ -170,21 +174,43 @@ public class ParsedHttpMessagesAsDicts {
         @NonNull List<byte[]> data
     ) {
         return makeSafeMap(context, () -> {
-            var map = new LinkedHashMap<String, Object>();
-            try (
-                var bufStream = NettyUtils.createRefCntNeutralCloseableByteBufStream(data);
-                var messageHolder = RefSafeHolder.create(HttpByteBufFormatter.parseHttpRequestFromBufs(bufStream,
-                    MAX_PAYLOAD_BYTES_TO_CAPTURE))
-            ) {
-                var message = messageHolder.get();
+            try (var compositeByteBufHolder = NonNullRefSafeHolder.create(RefSafeStreamUtils.refSafeTransform(
+                    data.stream(),
+                    Unpooled::wrappedBuffer,
+                    ByteBufList::asCompositeByteBufRetained
+                    ))) {
+
+                var channel = new EmbeddedChannel(
+                    // IN ByteBuf, OUT DefaultHttpRequest | LastHttpContent
+                    new HttpRequestDecoder(),
+                    // IN: DefaultHttpRequest | LastHttpContent(Compressed), OUT: DefaultHttpRequest | LastHttpContent(Uncompressed)
+                    new HttpContentDecompressor(),
+                    // IN DefaultHttpRequest, OUT HttpJsonRequestWithFaultingPayload
+                    new NettyDecodedHttpRequestPreliminaryHandler(
+                        context.getLogicalEnclosingScope().createTransformationContext()),
+                    // IN HttpJsonRequestWithFaultingPayload | HttpContent | LastHttpContent
+                    // OUT HttpJsonRequestWithFaultingPayload
+                    new NettyJsonBodyAccumulateHandler(
+                        context.getLogicalEnclosingScope().createTransformationContext())
+                );
+
+                channel.writeInbound(compositeByteBufHolder.get().retainedDuplicate());
+                HttpJsonRequestWithFaultingPayload message = channel.readInbound();
+                channel.finishAndReleaseAll();
+
                 if (message != null) {
-                    map.put("Request-URI", message.uri());
-                    map.put("Method", message.method().toString());
-                    map.put("HTTP-Version", message.protocolVersion().toString());
-                    context.setMethod(message.method().toString());
-                    context.setEndpoint(message.uri());
-                    context.setHttpVersion(message.protocolVersion().toString());
-                    return fillMap(map, message.headers(), message.content());
+                    var map = new LinkedHashMap<>(message.headers());
+                    map.put("Request-URI", message.path());
+                    map.put("Method", message.method());
+                    map.put("HTTP-Version", message.protocol());
+                    context.setMethod(message.method());
+                    context.setEndpoint(message.path());
+                    context.setHttpVersion(message.protocol());
+                    encodeBinaryPayloadIfExists(message);
+                    if (!message.payload().isEmpty()) {
+                        map.put("payload", message.payload());
+                    }
+                    return map;
                 } else {
                     return Map.of(EXCEPTION_KEY_STRING, "Message couldn't be parsed as a full http message");
                 }
@@ -198,23 +224,56 @@ public class ParsedHttpMessagesAsDicts {
         Duration latency
     ) {
         return makeSafeMap(context, () -> {
-            var map = new LinkedHashMap<String, Object>();
-            try (
-                var bufStream = NettyUtils.createRefCntNeutralCloseableByteBufStream(data);
-                var messageHolder = RefSafeHolder.create(HttpByteBufFormatter.parseHttpResponseFromBufs(bufStream,
-                    MAX_PAYLOAD_BYTES_TO_CAPTURE))
-            ) {
-                var message = messageHolder.get();
+            try (var compositeByteBufHolder = NonNullRefSafeHolder.create(
+                    RefSafeStreamUtils.refSafeTransform(data.stream(),
+                    Unpooled::wrappedBuffer,
+                    ByteBufList::asCompositeByteBufRetained
+                ))) {
+                var channel = new EmbeddedChannel(
+                    // IN ByteBuf, OUT DefaultHttpResponse | LastHttpContent
+                    new HttpResponseDecoder(),
+                    // IN: DefaultHttpRequest | LastHttpContent(Compressed), OUT: DefaultHttpRequest | LastHttpContent(Uncompressed)
+                    new HttpContentDecompressor(),
+                    // IN DefaultHttpResponse, OUT HttpJsonResponseWithFaultingPayload
+                    new NettyDecodedHttpResponsePreliminaryHandler(
+                        context.getLogicalEnclosingScope().createTransformationContext()),
+                    // IN HttpJsonResponseWithFaultingPayload | HttpContent | LastHttpContent
+                    // OUT HttpJsonResponseWithFaultingPayload
+                    new NettyJsonBodyAccumulateHandler(
+                        context.getLogicalEnclosingScope().createTransformationContext())
+                );
+
+                channel.writeInbound(compositeByteBufHolder.get().retainedDuplicate());
+                HttpJsonResponseWithFaultingPayload message = channel.readInbound();
+                channel.finishAndReleaseAll();
+
                 if (message != null) {
-                    map.put("HTTP-Version", message.protocolVersion());
-                    map.put(STATUS_CODE_KEY, message.status().code());
-                    map.put("Reason-Phrase", message.status().reasonPhrase());
+                    var map = new LinkedHashMap<>(message.headers());
+                    context.setHttpVersion(message.protocol());
+                    map.put("HTTP-Version", message.protocol());
+                    map.put(STATUS_CODE_KEY, Integer.parseInt(message.code()));
+                    map.put("Reason-Phrase", message.reason());
                     map.put(RESPONSE_TIME_MS_KEY, latency.toMillis());
-                    return fillMap(map, message.headers(), message.content());
+                    encodeBinaryPayloadIfExists(message);
+                    if (!message.payload().isEmpty()) {
+                        map.put("payload", message.payload());
+                    }
+                    return map;
                 } else {
                     return Map.of(EXCEPTION_KEY_STRING, "Message couldn't be parsed as a full http message");
                 }
             }
         });
+    }
+
+    private static void encodeBinaryPayloadIfExists(HttpJsonMessageWithFaultingPayload message) {
+        if (message.payload() != null) {
+            if (message.payload().containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY)) {
+                var byteBufBinaryBody = (ByteBuf) message.payload().get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
+                message.payload().put(JsonKeysForHttpMessage.INLINED_BASE64_BODY_DOCUMENT_KEY, byteBufToBase64String(byteBufBinaryBody));
+                message.payload().remove(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
+                byteBufBinaryBody.release();
+            }
+        }
     }
 }
