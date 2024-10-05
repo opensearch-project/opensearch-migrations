@@ -211,7 +211,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     @Tag("longTest")
     @WrapWithNettyLeakDetection(repetitions = 1)
     public void testThatWithBigResponseReadTimeoutResponseWouldHang(boolean useTls) throws Exception {
-        testPeerResets(useTls, false, Duration.ofSeconds(30), Duration.ofMillis(1250));
+        testPeerResets(useTls, false, Duration.ofSeconds(30), Duration.ofSeconds(5));
     }
 
     private void testPeerResets(
