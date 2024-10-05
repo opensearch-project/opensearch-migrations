@@ -9,6 +9,7 @@ import java.util.Optional;
 import java.util.concurrent.Callable;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.replay.HttpByteBufFormatter.HttpMessageType;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonRequestWithFaultingPayload;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonResponseWithFaultingPayload;
@@ -17,18 +18,14 @@ import org.opensearch.migrations.replay.datahandlers.http.NettyDecodedHttpRespon
 import org.opensearch.migrations.replay.datahandlers.http.NettyJsonBodyAccumulateHandler;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.util.NonNullRefSafeHolder;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
 import org.opensearch.migrations.replay.util.RefSafeStreamUtils;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.embedded.EmbeddedChannel;
+import io.netty.channel.ChannelHandler;
 import io.netty.handler.codec.base64.Base64Dialect;
-import io.netty.handler.codec.http.HttpContentDecompressor;
-import io.netty.handler.codec.http.HttpRequestDecoder;
-import io.netty.handler.codec.http.HttpResponseDecoder;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
@@ -174,30 +171,23 @@ public class ParsedHttpMessagesAsDicts {
         @NonNull List<byte[]> data
     ) {
         return makeSafeMap(context, () -> {
-            try (var compositeByteBufHolder = NonNullRefSafeHolder.create(RefSafeStreamUtils.refSafeTransform(
+            ChannelHandler[] channelHandlers = new ChannelHandler[]{
+                new NettyDecodedHttpRequestPreliminaryHandler(
+                    context.getLogicalEnclosingScope().createTransformationContext()),
+                new NettyJsonBodyAccumulateHandler(
+                    context.getLogicalEnclosingScope().createTransformationContext())
+            };
+            try (var messageHolder = RefSafeHolder.create(
+                    RefSafeStreamUtils.refSafeTransform(
                     data.stream(),
                     Unpooled::wrappedBuffer,
-                    ByteBufList::asCompositeByteBufRetained
+                    byteBufStream ->
+                        HttpByteBufFormatter.processHttpMessageFromBufs(
+                        HttpMessageType.REQUEST,
+                            byteBufStream,
+                            channelHandlers)
                     ))) {
-
-                var channel = new EmbeddedChannel(
-                    // IN ByteBuf, OUT DefaultHttpRequest | LastHttpContent
-                    new HttpRequestDecoder(),
-                    // IN: DefaultHttpRequest | LastHttpContent(Compressed), OUT: DefaultHttpRequest | LastHttpContent(Uncompressed)
-                    new HttpContentDecompressor(),
-                    // IN DefaultHttpRequest, OUT HttpJsonRequestWithFaultingPayload
-                    new NettyDecodedHttpRequestPreliminaryHandler(
-                        context.getLogicalEnclosingScope().createTransformationContext()),
-                    // IN HttpJsonRequestWithFaultingPayload | HttpContent | LastHttpContent
-                    // OUT HttpJsonRequestWithFaultingPayload
-                    new NettyJsonBodyAccumulateHandler(
-                        context.getLogicalEnclosingScope().createTransformationContext())
-                );
-
-                channel.writeInbound(compositeByteBufHolder.get().retainedDuplicate());
-                HttpJsonRequestWithFaultingPayload message = channel.readInbound();
-                channel.finishAndReleaseAll();
-
+                var message = (HttpJsonRequestWithFaultingPayload) messageHolder.get();
                 if (message != null) {
                     var map = new LinkedHashMap<>(message.headers());
                     map.put("Request-URI", message.path());
@@ -224,29 +214,23 @@ public class ParsedHttpMessagesAsDicts {
         Duration latency
     ) {
         return makeSafeMap(context, () -> {
-            try (var compositeByteBufHolder = NonNullRefSafeHolder.create(
-                    RefSafeStreamUtils.refSafeTransform(data.stream(),
+            ChannelHandler[] channelHandlers = new ChannelHandler[]{
+                new NettyDecodedHttpResponsePreliminaryHandler(
+                    context.getLogicalEnclosingScope().createTransformationContext()),
+                new NettyJsonBodyAccumulateHandler(
+                    context.getLogicalEnclosingScope().createTransformationContext())
+            };
+            try (var messageHolder = RefSafeHolder.create(
+                RefSafeStreamUtils.refSafeTransform(
+                    data.stream(),
                     Unpooled::wrappedBuffer,
-                    ByteBufList::asCompositeByteBufRetained
+                    byteBufStream ->
+                        HttpByteBufFormatter.processHttpMessageFromBufs(
+                            HttpMessageType.RESPONSE,
+                            byteBufStream,
+                            channelHandlers)
                 ))) {
-                var channel = new EmbeddedChannel(
-                    // IN ByteBuf, OUT DefaultHttpResponse | LastHttpContent
-                    new HttpResponseDecoder(),
-                    // IN: DefaultHttpRequest | LastHttpContent(Compressed), OUT: DefaultHttpRequest | LastHttpContent(Uncompressed)
-                    new HttpContentDecompressor(),
-                    // IN DefaultHttpResponse, OUT HttpJsonResponseWithFaultingPayload
-                    new NettyDecodedHttpResponsePreliminaryHandler(
-                        context.getLogicalEnclosingScope().createTransformationContext()),
-                    // IN HttpJsonResponseWithFaultingPayload | HttpContent | LastHttpContent
-                    // OUT HttpJsonResponseWithFaultingPayload
-                    new NettyJsonBodyAccumulateHandler(
-                        context.getLogicalEnclosingScope().createTransformationContext())
-                );
-
-                channel.writeInbound(compositeByteBufHolder.get().retainedDuplicate());
-                HttpJsonResponseWithFaultingPayload message = channel.readInbound();
-                channel.finishAndReleaseAll();
-
+                var message = (HttpJsonResponseWithFaultingPayload) messageHolder.get();
                 if (message != null) {
                     var map = new LinkedHashMap<>(message.headers());
                     context.setHttpVersion(message.protocol());

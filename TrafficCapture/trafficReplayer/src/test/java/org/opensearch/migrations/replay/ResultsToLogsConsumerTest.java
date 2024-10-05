@@ -530,7 +530,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "\"numRequests\": 1, " +
             "\"numErrors\": 0 " +
             "}";
-        testOutputterForRequest("post_json_gzip.txt", EXPECTED_LOGGED_OUTPUT, null);
+        testOutputterForRequest("post_json_gzip.gz", EXPECTED_LOGGED_OUTPUT, null);
     }
 
     @Test
@@ -562,7 +562,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "}";
         String fullConfig = "[{\"JsonJoltTransformerProvider\": { \"script\": " + joltSpec + "}}]";
         IJsonTransformer jsonJoltTransformer = new TransformationLoader().getTransformerFactoryLoader(null, null, fullConfig);
-        testOutputterForRequest("post_json_gzip.txt", EXPECTED_LOGGED_OUTPUT, jsonJoltTransformer);
+        testOutputterForRequest("post_json_gzip.gz", EXPECTED_LOGGED_OUTPUT, jsonJoltTransformer);
     }
 
 }

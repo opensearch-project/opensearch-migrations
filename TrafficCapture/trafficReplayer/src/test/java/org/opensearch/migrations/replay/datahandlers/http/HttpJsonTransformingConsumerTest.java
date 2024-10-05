@@ -50,14 +50,14 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
             "{\"delete\":{\"_index\":\"test\",\"_id\":\"1\"}}\n");
 
     private static Stream<Arguments> provideTestParameters() {
-        Integer[] attemptedChunks = { 1,}; //2, 4, 8, 100, 1000, Integer.MAX_VALUE };
+        Integer[] attemptedChunks = { 1, 2, 4, 8, 100, 1000, Integer.MAX_VALUE };
         Boolean[] transformationOptions = { true, };
         String[] requestFiles = {
-//            "/requests/raw/post_formUrlEncoded_withFixedLength.txt",
-//            "/requests/raw/post_formUrlEncoded_withLargeHeader.txt",
-//            "/requests/raw/post_formUrlEncoded_withDuplicateHeaders.txt",
-//            "/requests/raw/get_withAuthHeader.txt",
-            "/requests/raw/post_json_gzip.txt"
+            "/requests/raw/post_formUrlEncoded_withFixedLength.txt",
+            "/requests/raw/post_formUrlEncoded_withLargeHeader.txt",
+            "/requests/raw/post_formUrlEncoded_withDuplicateHeaders.txt",
+            "/requests/raw/get_withAuthHeader.txt",
+            "/requests/raw/post_json_gzip.gz"
         };
 
         return Stream.of(attemptedChunks)
@@ -366,25 +366,13 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
                 // No match, return original bytes
                 return originalBytes;
             }
-
-            // Create a new ByteBuf to store the result
             resultBuffer = Unpooled.buffer();
-
-            // Copy bytes before the match
             resultBuffer.writeBytes(buffer, 0, matchIndex);
-
-            // Write the replacement bytes
             resultBuffer.writeBytes(replacement);
-
-            // Copy the remaining bytes after the match
             resultBuffer.writeBytes(buffer, matchIndex + target.readableBytes(), buffer.readableBytes() - (matchIndex + target.readableBytes()));
-
-            // Convert the result buffer back to a byte array
             byte[] resultBytes = new byte[resultBuffer.readableBytes()];
             resultBuffer.readBytes(resultBytes);
-
             return resultBytes;
-
         } finally {
             ReferenceCountUtil.release(buffer);
             ReferenceCountUtil.release(target);

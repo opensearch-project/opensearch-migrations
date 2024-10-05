@@ -14,6 +14,8 @@ import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
@@ -104,17 +106,47 @@ public class NettyDecodedHttpRequestConvertHandler<R> extends ChannelInboundHand
         IJsonTransformer transformer,
         HttpJsonRequestWithFaultingPayload httpJsonMessage
     ) {
+        var originalHttpJsonMessage = httpJsonMessage;
         var beforeContentHeaders = getEncodingHeaders(httpJsonMessage);
+
+        ByteBuf innerPayloadByteBuf = null;
+        ByteBuf protectedByteBuf = null;
+        try {
+            innerPayloadByteBuf = (ByteBuf) httpJsonMessage.payload().get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
+            if (innerPayloadByteBuf != null) {
+                protectedByteBuf = Unpooled.unreleasableBuffer(innerPayloadByteBuf);
+                httpJsonMessage.payload().put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
+                    protectedByteBuf);
+            }
+        } catch (PayloadNotLoadedException e) {
+            // Skip byteBuf protection if payload not loaded
+        }
+
         var returnedObject = transformer.transformJson(httpJsonMessage);
-        var afterContentHeaders = getEncodingHeaders(returnedObject);
+
+        if (returnedObject != httpJsonMessage) {
+            httpJsonMessage = new HttpJsonRequestWithFaultingPayload(returnedObject);
+        }
+
+        if (innerPayloadByteBuf != null) {
+            // replace protected byteBuf if was hidden and still there
+            var transformedByteBuf = httpJsonMessage.payload().get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
+            assert protectedByteBuf != null : "Expected protectedByteBuf to be defined if innerPayloadByteBuf is";
+            if (protectedByteBuf.equals(transformedByteBuf)) {
+                httpJsonMessage.payload().put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY, innerPayloadByteBuf);
+            }
+        }
+
+        var afterContentHeaders = getEncodingHeaders(httpJsonMessage);
 
         if (!Objects.deepEquals(beforeContentHeaders, afterContentHeaders)) {
             // Ensure payload was loaded during transformations if modified content headers
-            httpJsonMessage.payload().forEach((key, val) -> {});
+            originalHttpJsonMessage.payload().forEach((key, val) -> {});
         }
-        if (returnedObject != httpJsonMessage) {
-            httpJsonMessage.clear();
-            httpJsonMessage = new HttpJsonRequestWithFaultingPayload(returnedObject);
+
+        if (originalHttpJsonMessage != httpJsonMessage) {
+            // clear originalHttpJsonMessage for faster garbage collection if not persisted along
+            originalHttpJsonMessage.clear();
         }
         return httpJsonMessage;
     }
