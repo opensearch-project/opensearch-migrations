@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -102,7 +103,7 @@ public class NettyDecodedHttpRequestConvertHandler<R> extends ChannelInboundHand
         }
     }
 
-    private static HttpJsonRequestWithFaultingPayload transform(
+    public static HttpJsonRequestWithFaultingPayload transform(
         IJsonTransformer transformer,
         HttpJsonRequestWithFaultingPayload httpJsonMessage
     ) {
@@ -130,10 +131,19 @@ public class NettyDecodedHttpRequestConvertHandler<R> extends ChannelInboundHand
 
         if (innerPayloadByteBuf != null) {
             // replace protected byteBuf if was hidden and still there
-            var transformedByteBuf = httpJsonMessage.payload().get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
+            var transformedValue = httpJsonMessage.payload().get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
             assert protectedByteBuf != null : "Expected protectedByteBuf to be defined if innerPayloadByteBuf is";
-            if (protectedByteBuf.equals(transformedByteBuf)) {
+            if (protectedByteBuf.equals(transformedValue)) {
                 httpJsonMessage.payload().put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY, innerPayloadByteBuf);
+            } else {
+                innerPayloadByteBuf.release();
+                if (transformedValue instanceof String) {
+                    httpJsonMessage.payload().put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
+                        Unpooled.wrappedBuffer(((String) transformedValue).getBytes(StandardCharsets.UTF_8)));
+                } else if (!(transformedValue instanceof ByteBuf)) {
+                    throw new UnsupportedOperationException("Type of " + JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY
+                 + " not supported.");
+                }
             }
         }
 

@@ -27,8 +27,7 @@ public class NettyJsonBodyConvertHandler extends ChannelInboundHandlerAdapter {
             }
             HttpJsonRequestWithFaultingPayload newHttpJson;
             try {
-                var output = transformer.transformJson(httpMsg);
-                newHttpJson = new HttpJsonRequestWithFaultingPayload(output);
+                newHttpJson = NettyDecodedHttpRequestConvertHandler.transform(transformer, httpMsg);
             } catch (Exception e) {
                 var remainingBytes = httpMsg.payload().get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
                 ReferenceCountUtil.release(remainingBytes); // release because we're not passing it along for cleanup

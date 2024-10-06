@@ -57,7 +57,8 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
             "/requests/raw/post_formUrlEncoded_withLargeHeader.txt",
             "/requests/raw/post_formUrlEncoded_withDuplicateHeaders.txt",
             "/requests/raw/get_withAuthHeader.txt",
-            "/requests/raw/post_json_gzip.gz"
+            "/requests/raw/post_json_gzip.gz",
+            "/requests/raw/post_withPlainText.txt",
         };
 
         return Stream.of(attemptedChunks)
@@ -158,6 +159,49 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         Assertions.assertEquals(HttpRequestTransformationStatus.skipped(), returnedResponse.transformationStatus);
         Assertions.assertEquals(new String(testBytes, StandardCharsets.UTF_8), testPacketCapture.getCapturedAsString());
         Assertions.assertArrayEquals(testBytes, testPacketCapture.getBytesCaptured());
+    }
+
+    @Test
+    @Tag("longTest")
+    public void testRemoveBinaryPayloadWorks() throws Exception {
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
+        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
+        String redactBody = "{ " +
+            "    \"operation\": \"modify-overwrite-beta\", " +
+            "    \"spec\": { " +
+            "       \"payload\": { " +
+            "         \"inlinedBinaryBody\": \"REDACTED\" " +
+            "       } " +
+            "   } " +
+            "}";
+        String fullConfig = "[{\"JsonJoltTransformerProvider\": { \"script\": " + redactBody + "}}]";
+        IJsonTransformer jsonJoltTransformer = new TransformationLoader().getTransformerFactoryLoader(null, null, fullConfig);
+
+        var transformingHandler = new HttpJsonTransformingConsumer<>(
+            jsonJoltTransformer,
+            null,
+            testPacketCapture,
+            rootContext.getTestConnectionRequestContext(0)
+        );
+        byte[] testBytes;
+        try (
+            var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
+                "/requests/raw/post_withPlainText.txt"
+            )
+        ) {
+            assert sampleStream != null;
+            testBytes = sampleStream.readAllBytes();
+        }
+        transformingHandler.consumeBytes(testBytes);
+        var returnedResponse = transformingHandler.finalizeRequest().get();
+        var expectedString = new String(testBytes, StandardCharsets.UTF_8)
+            .replace("This is a test\r\n","REDACTED")
+            .replace("Content-Length: 15", "Content-Length: 8");
+        Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
+        Assertions.assertArrayEquals(expectedString.getBytes(StandardCharsets.UTF_8),
+            testPacketCapture.getBytesCaptured());
+        Assertions.assertEquals(HttpRequestTransformationStatus.completed(), returnedResponse.transformationStatus);
+        Assertions.assertNull(returnedResponse.transformationStatus.getException());
     }
 
     @Test
