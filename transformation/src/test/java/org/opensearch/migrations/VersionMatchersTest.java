@@ -21,12 +21,12 @@ public class VersionMatchersTest {
     }
 
     @Test
-    void isES_6_8Test() {
+    void isES_6_XTest() {
         testPredicate(
             VersionMatchers.isES_6_X,
             "isES_6_X",
             List.of("ES 6.8", "ES 6.8.23", "ES 6.9"),
-            List.of("ES 6.7", "OS 1.3")
+            List.of("ES 5.7", "OS 1.3")
         );
     }
 
