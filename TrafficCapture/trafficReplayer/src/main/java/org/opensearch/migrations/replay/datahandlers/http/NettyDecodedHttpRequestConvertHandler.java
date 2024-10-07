@@ -134,6 +134,8 @@ public class NettyDecodedHttpRequestConvertHandler<R> extends ChannelInboundHand
             var transformedValue = httpJsonMessage.payload().get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
             assert protectedByteBuf != null : "Expected protectedByteBuf to be defined if innerPayloadByteBuf is";
             if (protectedByteBuf.equals(transformedValue)) {
+                innerPayloadByteBuf.readerIndex(protectedByteBuf.readerIndex());
+                innerPayloadByteBuf.writerIndex(protectedByteBuf.writerIndex());
                 httpJsonMessage.payload().put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY, innerPayloadByteBuf);
             } else {
                 innerPayloadByteBuf.release();
