@@ -143,7 +143,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "    \"Reason-Phrase\": \"OK\", " +
             "    \"response_time_ms\": 0, " +
             "    \"payload\": { " +
-            "        \"inlinedBase64Body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\" " +
+            "        \"inlinedTextBody\": \"I should be decrypted tester!\\r\" " +
             "    } " +
             "}, " +
             "\"targetRequest\": { " +
@@ -168,7 +168,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "    \"Reason-Phrase\": \"OK\", " +
             "    \"response_time_ms\": 267, " +
             "    \"payload\": { " +
-            "        \"inlinedBase64Body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\" " +
+            "        \"inlinedTextBody\": \"I should be decrypted tester!\\r\" " +
             "    } " +
             "} ], " +
             "\"connectionId\": \"testConnection.1\", " +
@@ -240,7 +240,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "    \"Reason-Phrase\": \"OK\", " +
             "    \"response_time_ms\": 0, " +
             "    \"payload\": { " +
-            "        \"inlinedBase64Body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\" " +
+            "        \"inlinedTextBody\": \"I should be decrypted tester!\\r\" " +
             "    } " +
             "}, " +
             "\"targetRequest\": { " +
@@ -300,7 +300,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "    \"Reason-Phrase\": \"OK\", " +
             "    \"response_time_ms\": 267, " +
             "    \"payload\": { " +
-            "        \"inlinedBase64Body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\" " +
+            "        \"inlinedTextBody\": \"I should be decrypted tester!\\r\" " +
             "    } " +
             "} ], " +
             "\"connectionId\": \"testConnection.1\", " +
@@ -394,7 +394,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "    \"Reason-Phrase\": \"OK\", " +
             "    \"response_time_ms\": 0, " +
             "    \"payload\": { " +
-            "        \"inlinedBase64Body\": \"REDACTED\" " +
+            "        \"inlinedTextBody\": \"REDACTED\" " +
             "    } " +
             "}, " +
             "\"targetRequest\": { " +
@@ -419,7 +419,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "    \"Reason-Phrase\": \"OK\", " +
             "    \"response_time_ms\": 267, " +
             "    \"payload\": { " +
-            "        \"inlinedBase64Body\": \"REDACTED\" " +
+            "        \"inlinedTextBody\": \"REDACTED\" " +
             "    } " +
             "} ], " +
             "\"connectionId\": \"testConnection.1\", " +
@@ -438,7 +438,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "      }, " +
             "      \"sourceResponse\": { " +
             "        \"payload\": { " +
-            "          \"inlinedBase64Body\": \"REDACTED\" " +
+            "          \"inlinedTextBody\": \"REDACTED\" " +
             "        } " +
             "      }, " +
             "      \"targetRequest\": { " +
@@ -450,7 +450,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "      \"targetResponses\": { " +
             "        \"*\": { " +
             "          \"payload\": { " +
-            "            \"inlinedBase64Body\": \"REDACTED\" " +
+            "            \"inlinedTextBody\": \"REDACTED\" " +
             "          } " +
             "        } " +
             "      } " +
@@ -493,7 +493,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "    \"Reason-Phrase\": \"OK\", " +
             "    \"response_time_ms\": 0, " +
             "    \"payload\": { " +
-            "        \"inlinedBase64Body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\" " +
+            "        \"inlinedTextBody\": \"I should be decrypted tester!\\r\" " +
             "    } " +
             "}, " +
             "\"targetRequest\": { " +
@@ -523,7 +523,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "    \"Reason-Phrase\": \"OK\", " +
             "    \"response_time_ms\": 267, " +
             "    \"payload\": { " +
-            "        \"inlinedBase64Body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\" " +
+            "        \"inlinedTextBody\": \"I should be decrypted tester!\\r\" " +
             "    } " +
             "} ], " +
             "\"connectionId\": \"testConnection.1\", " +

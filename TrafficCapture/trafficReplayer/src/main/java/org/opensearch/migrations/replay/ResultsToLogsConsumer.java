@@ -99,7 +99,7 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
      *     "header-1": "Accept: application/json",
      *     "header-2": "Authorization: Bearer token",
      *     "payload": {
-     *       "inlinedBinaryBody": "0101010101"
+     *       "inlinedBinaryBody": "ByteBuf{...}"
      *     }
      *   },
      *   "sourceResponse": {
@@ -107,12 +107,10 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
      *     "HTTP-Version": "HTTP/1.1",
      *     "Status-Code": 200,
      *     "Reason-Phrase": "OK",
-     *     "header-1": "Content-Type: application/json",
+     *     "header-1": "Content-Type: text/plain",
      *     "header-2": "Cache-Control: no-cache",
      *     "payload": {
-     *       "inlinedJsonBody": {
-     *         "responseKey1": "responseValue1",
-     *         "responseKey2": "responseValue2"
+     *       "inlinedTextBody": "The quick brown fox jumped over the lazy dog\r"
      *       }
      *     }
      *   },

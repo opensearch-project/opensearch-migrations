@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import org.opensearch.migrations.replay.datahandlers.JsonEmitter;
@@ -39,6 +40,15 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
                     ctx.fireChannelRead(new DefaultHttpContent(rawBody));
                 } else {
                     ReferenceCountUtil.release(rawBody);
+                }
+            } else if (payload.containsKey(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY)) {
+                var bodyString = (String) payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY);
+                ByteBuf body = ctx.alloc().buffer();
+                body.writeCharSequence(bodyString, StandardCharsets.UTF_8);
+                if (body.readableBytes() > 0) {
+                    ctx.fireChannelRead(new DefaultHttpContent(body));
+                } else {
+                    ReferenceCountUtil.release(body);
                 }
             }
             ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);

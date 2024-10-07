@@ -29,4 +29,9 @@ public class JsonKeysForHttpMessage {
     public static final String INLINED_BINARY_BODY_DOCUMENT_KEY = "inlinedBinaryBody";
     public static final String INLINED_BASE64_BODY_DOCUMENT_KEY = "inlinedBase64Body";
 
+    /**
+     * This maps the body for utf-8 encoded text. This is used for text/plain encoding.
+     */
+    public static final String INLINED_TEXT_BODY_DOCUMENT_KEY = "inlinedTextBody";
+
 }

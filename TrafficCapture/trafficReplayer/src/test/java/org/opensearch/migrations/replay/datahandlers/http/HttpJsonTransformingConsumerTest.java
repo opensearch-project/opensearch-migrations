@@ -163,14 +163,14 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
 
     @Test
     @Tag("longTest")
-    public void testRemoveBinaryPayloadWorks() throws Exception {
+    public void testRemovePayloadWorks() throws Exception {
         final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         String redactBody = "{ " +
             "    \"operation\": \"modify-overwrite-beta\", " +
             "    \"spec\": { " +
             "       \"payload\": { " +
-            "         \"inlinedBinaryBody\": null " +
+            "         \"inlinedTextBody\": \"ReplacedPlainText\" " +
             "       } " +
             "   } " +
             "}";
@@ -195,8 +195,8 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         transformingHandler.consumeBytes(testBytes);
         var returnedResponse = transformingHandler.finalizeRequest().get();
         var expectedString = new String(testBytes, StandardCharsets.UTF_8)
-            .replace("This is a test\r\n","")
-            .replace("Content-Length: 15", "Content-Length: 0");
+            .replace("This is a test\r\n","ReplacedPlainText")
+            .replace("Content-Length: 15", "Content-Length: 17");
         Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
         Assertions.assertArrayEquals(expectedString.getBytes(StandardCharsets.UTF_8),
             testPacketCapture.getBytesCaptured());

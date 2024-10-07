@@ -1,7 +1,11 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import com.fasterxml.jackson.core.JacksonException;
 
@@ -14,6 +18,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
+import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.util.ReferenceCountUtil;
 import lombok.SneakyThrows;
@@ -114,10 +119,35 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
                     var jsonBodyByteLength = jsonWasInvalid ? 0 : (int) jsonAccumulator.getTotalBytesFullyConsumed();
                     assert accumulatedBody.readerIndex() == 0 :
                         "Didn't expect the reader index to advance since this is an internal object";
-                    capturedHttpJsonMessage.payload()
-                        .put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
-                            accumulatedBody.retainedSlice(jsonBodyByteLength,
-                                accumulatedBody.readableBytes() - jsonBodyByteLength));
+
+                    // Attempt to encode as utf-8, if not, fallback to binary body
+                    if (Optional.ofNullable(capturedHttpJsonMessage.headers().getInsensitive(HttpHeaderNames.CONTENT_TYPE.toString()))
+                        .map(s -> s.stream().anyMatch(v -> v.startsWith("text"))).orElse(false)) {
+                        var decoder = StandardCharsets.UTF_8.newDecoder();
+                        decoder.onMalformedInput(CodingErrorAction.REPORT);
+                        decoder.onUnmappableCharacter(CodingErrorAction.REPORT);
+
+                        try {
+                            // Try to decode the ByteBuffer
+                            var rawBuffer = accumulatedBody.nioBuffer();
+                            var charBuffer = decoder.decode(rawBuffer);
+                            capturedHttpJsonMessage.payload()
+                                .put(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY,
+                                    charBuffer.toString());
+                        } catch (CharacterCodingException e) {
+                            log.atTrace().setMessage("Payload not valid utf-8, falback to binary")
+                                .setCause(e).log();
+                            capturedHttpJsonMessage.payload()
+                                .put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
+                                    accumulatedBody.retainedSlice(jsonBodyByteLength,
+                                        accumulatedBody.readableBytes() - jsonBodyByteLength));
+                        }
+                    } else {
+                        capturedHttpJsonMessage.payload()
+                            .put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
+                                accumulatedBody.retainedSlice(jsonBodyByteLength,
+                                    accumulatedBody.readableBytes() - jsonBodyByteLength));
+                    }
                 }
                 accumulatedBody.release();
                 accumulatedBody = null;
