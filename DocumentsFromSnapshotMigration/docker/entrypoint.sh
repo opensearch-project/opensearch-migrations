@@ -43,20 +43,47 @@ if [[ $RFS_COMMAND != *"--target-password"* ]]; then
     fi
 fi
 
-# Monitor how much aggregate free space is left, if we drop below a certain amount,
-# don't allow another process to run again
-space_drop_fraction=4
-initial_free_space=$(df --output=avail | awk 'NR>1 {sum+=$1} END {print sum}')
-still_enough_space_left() {
-  current_free=$(df --output=avail | awk 'NR>1 {sum+=$1} END {print sum}')
-  if (((initial_free_space - current_free) >= (initial_free_space / $space_drop_fraction))); then
-    return 1;
-  else
-    return 0;
-  fi
+# Extract the value passed after --s3-local-dir
+S3_LOCAL_DIR=$(echo "$RFS_COMMAND" | sed -n 's/.*--s3-local-dir\s\+\("[^"]\+"\|[^ ]\+\).*/\1/p' | tr -d '"')
+# Extract the value passed after --lucene-dir
+LUCENE_DIR=$(echo "$RFS_COMMAND"  | sed -n 's/.*--lucene-dir\s\+\("[^"]\+"\|[^ ]\+\).*/\1/p' | tr -d '"')
+if [[ -n "$S3_LOCAL_DIR" ]]; then
+    echo "Will delete S3 local directory between runs: $S3_LOCAL_DIR"
+    rm -rf "$S3_LOCAL_DIR"
+    echo "Directory $S3_LOCAL_DIR has been deleted."
+else
+    echo "--s3-local-dir argument not found in RFS_COMMAND. Will not delete S3 local directory between runs."
+fi
+
+if [[ -n "$LUCENE_DIR" ]]; then
+    echo "Will delete lucene local directory between runs: $LUCENE_DIR"
+else
+    echo "--lucene-dir argument not found in RFS_COMMAND. This is required."
+    exit 1
+fi
+
+cleanup_directories() {
+    if [[ -n "$S3_LOCAL_DIR" ]]; then
+        echo "Cleaning up S3 local directory: $S3_LOCAL_DIR"
+        rm -rf "$S3_LOCAL_DIR"
+        echo "Directory $S3_LOCAL_DIR has been cleaned up."
+    fi
+
+    if [[ -n "$LUCENE_DIR" ]]; then
+        echo "Cleaning up Lucene local directory: $LUCENE_DIR"
+        rm -rf "$LUCENE_DIR"
+        echo "Directory $LUCENE_DIR has been cleaned up."
+    fi
 }
+
 
 
 [ -z "$RFS_COMMAND" ] && \
 { echo "Warning: RFS_COMMAND is empty! Exiting."; exit 1; } || \
-until ! { echo "Running command $RFS_COMMAND"; eval "$RFS_COMMAND" && still_enough_space_left; }; do :; done
+until ! {
+    echo "Running command $RFS_COMMAND"
+    eval "$RFS_COMMAND"
+}; do
+    echo "Cleaning up directories before the next run."
+    cleanup_directories
+done
