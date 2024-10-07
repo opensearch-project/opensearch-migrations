@@ -119,12 +119,12 @@ public class RequestPipelineOrchestrator<R> {
         // Note3: ByteBufs will continue to flow through if there are pending bytes left to be parsed by the
         // HttpRequestDecoder when it is removed from the pipeline before the Preliminary and Convert Handlers are removed.
         pipeline.addLast(
-            new NettyDecodedHttpRequestPreliminaryHandler(
+            new NettyDecodedHttpRequestConvertHandler(
                 httpTransactionContext
             )
         );
         pipeline.addLast(
-            new NettyDecodedHttpRequestConvertHandler<R>(
+            new NettyDecodedHttpRequestPreliminaryTransformHandler<R>(
                 transformer,
                 chunkSizes,
                 this,

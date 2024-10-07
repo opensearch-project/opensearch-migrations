@@ -13,8 +13,8 @@ import org.opensearch.migrations.replay.HttpByteBufFormatter.HttpMessageType;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonRequestWithFaultingPayload;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonResponseWithFaultingPayload;
-import org.opensearch.migrations.replay.datahandlers.http.NettyDecodedHttpRequestPreliminaryHandler;
-import org.opensearch.migrations.replay.datahandlers.http.NettyDecodedHttpResponsePreliminaryHandler;
+import org.opensearch.migrations.replay.datahandlers.http.NettyDecodedHttpRequestConvertHandler;
+import org.opensearch.migrations.replay.datahandlers.http.NettyDecodedHttpResponseConvertHandler;
 import org.opensearch.migrations.replay.datahandlers.http.NettyJsonBodyAccumulateHandler;
 import org.opensearch.migrations.replay.datatypes.ByteBufList;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -172,7 +172,7 @@ public class ParsedHttpMessagesAsDicts {
     ) {
         return makeSafeMap(context, () -> {
             ChannelHandler[] channelHandlers = new ChannelHandler[]{
-                new NettyDecodedHttpRequestPreliminaryHandler(
+                new NettyDecodedHttpRequestConvertHandler(
                     context.getLogicalEnclosingScope().createTransformationContext()),
                 new NettyJsonBodyAccumulateHandler(
                     context.getLogicalEnclosingScope().createTransformationContext())
@@ -215,7 +215,7 @@ public class ParsedHttpMessagesAsDicts {
     ) {
         return makeSafeMap(context, () -> {
             ChannelHandler[] channelHandlers = new ChannelHandler[]{
-                new NettyDecodedHttpResponsePreliminaryHandler(
+                new NettyDecodedHttpResponseConvertHandler(
                     context.getLogicalEnclosingScope().createTransformationContext()),
                 new NettyJsonBodyAccumulateHandler(
                     context.getLogicalEnclosingScope().createTransformationContext())

@@ -170,7 +170,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
             "    \"operation\": \"modify-overwrite-beta\", " +
             "    \"spec\": { " +
             "       \"payload\": { " +
-            "         \"inlinedBinaryBody\": \"REDACTED\" " +
+            "         \"inlinedBinaryBody\": null " +
             "       } " +
             "   } " +
             "}";
@@ -195,8 +195,8 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         transformingHandler.consumeBytes(testBytes);
         var returnedResponse = transformingHandler.finalizeRequest().get();
         var expectedString = new String(testBytes, StandardCharsets.UTF_8)
-            .replace("This is a test\r\n","REDACTED")
-            .replace("Content-Length: 15", "Content-Length: 8");
+            .replace("This is a test\r\n","")
+            .replace("Content-Length: 15", "Content-Length: 0");
         Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
         Assertions.assertArrayEquals(expectedString.getBytes(StandardCharsets.UTF_8),
             testPacketCapture.getBytesCaptured());

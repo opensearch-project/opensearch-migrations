@@ -13,6 +13,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.GZIPInputStream;
 
 import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
@@ -33,6 +34,7 @@ public class AddCompressionEncodingTest extends InstrumentationTest {
     public static final byte BYTE_FILL_VALUE = (byte) '7';
 
     @Test
+    @Tag("longTest")
     public void addingCompressionRequestHeaderCompressesPayload() throws ExecutionException, InterruptedException,
         IOException {
         final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);

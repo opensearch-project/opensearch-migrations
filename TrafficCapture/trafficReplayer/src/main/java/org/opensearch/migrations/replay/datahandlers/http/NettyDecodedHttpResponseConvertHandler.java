@@ -8,17 +8,17 @@ import org.opensearch.migrations.replay.tracing.IReplayContexts;
 
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.handler.codec.http.HttpRequest;
+import io.netty.handler.codec.http.HttpResponse;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class NettyDecodedHttpRequestPreliminaryHandler extends ChannelInboundHandlerAdapter {
+public class NettyDecodedHttpResponseConvertHandler extends ChannelInboundHandlerAdapter {
 
     final String diagnosticLabel;
     private final IReplayContexts.IRequestTransformationContext httpTransactionContext;
 
-    public NettyDecodedHttpRequestPreliminaryHandler(
+    public NettyDecodedHttpResponseConvertHandler(
         IReplayContexts.IRequestTransformationContext httpTransactionContext
     ) {
         this.diagnosticLabel = "[" + httpTransactionContext + "] ";
@@ -27,33 +27,33 @@ public class NettyDecodedHttpRequestPreliminaryHandler extends ChannelInboundHan
 
     @Override
     public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
-        if (msg instanceof HttpRequest) {
+        if (msg instanceof HttpResponse) {
             httpTransactionContext.onHeaderParse();
-            var request = (HttpRequest) msg;
+            var response = (HttpResponse) msg;
             log.atInfo()
                 .setMessage(
                     () -> diagnosticLabel
-                        + " parsed request: "
-                        + request.method()
+                        + " parsed response: "
+                        + response.status().code()
                         + " "
-                        + request.uri()
+                        + response.status().reasonPhrase()
                         + " "
-                        + request.protocolVersion().text()
+                        + response.protocolVersion().text()
                 )
                 .log();
-            var httpJsonMessage = parseHeadersIntoMessage(request);
-                ctx.fireChannelRead(httpJsonMessage);
+            var httpJsonMessage = parseHeadersIntoMessage(response);
+            ctx.fireChannelRead(httpJsonMessage);
         } else {
             super.channelRead(ctx, msg);
         }
     }
 
-    public static HttpJsonRequestWithFaultingPayload parseHeadersIntoMessage(HttpRequest request) {
-        var jsonMsg = new HttpJsonRequestWithFaultingPayload();
-        jsonMsg.setPath(request.uri());
-        jsonMsg.setMethod(request.method().toString());
-        jsonMsg.setProtocol(request.protocolVersion().text());
-        var headers = request.headers()
+    public static HttpJsonResponseWithFaultingPayload parseHeadersIntoMessage(HttpResponse response) {
+        var jsonMsg = new HttpJsonResponseWithFaultingPayload();
+        jsonMsg.setProtocol(response.protocolVersion().text());
+        jsonMsg.setCode(String.valueOf(response.status().code()));
+        jsonMsg.setReason(response.status().reasonPhrase());
+        var headers = response.headers()
             .entries()
             .stream()
             .collect(

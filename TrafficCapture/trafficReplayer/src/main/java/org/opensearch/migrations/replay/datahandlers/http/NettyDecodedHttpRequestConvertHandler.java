@@ -1,324 +1,70 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
-import java.util.Map.Entry;
-import java.util.Objects;
-import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
-import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.transform.IAuthTransformer;
-import org.opensearch.migrations.transform.IJsonTransformer;
-import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
-import io.netty.handler.codec.http.HttpContent;
-import io.netty.handler.codec.http.HttpHeaderNames;
+import io.netty.handler.codec.http.HttpRequest;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class NettyDecodedHttpRequestConvertHandler<R> extends ChannelInboundHandlerAdapter {
-    public static final int EXPECTED_PACKET_COUNT_GUESS_FOR_PAYLOAD = 32;
+public class NettyDecodedHttpRequestConvertHandler extends ChannelInboundHandlerAdapter {
 
-    final RequestPipelineOrchestrator<R> requestPipelineOrchestrator;
-    final IJsonTransformer transformer;
-    final List<List<Integer>> chunkSizes;
     final String diagnosticLabel;
+    private final IReplayContexts.IRequestTransformationContext httpTransactionContext;
 
     public NettyDecodedHttpRequestConvertHandler(
-        IJsonTransformer transformer,
-        List<List<Integer>> chunkSizes,
-        RequestPipelineOrchestrator<R> requestPipelineOrchestrator,
         IReplayContexts.IRequestTransformationContext httpTransactionContext
     ) {
-        this.transformer = transformer;
-        this.chunkSizes = chunkSizes;
-        this.requestPipelineOrchestrator = requestPipelineOrchestrator;
         this.diagnosticLabel = "[" + httpTransactionContext + "] ";
-    }
-
-    public ListKeyAdaptingCaseInsensitiveHeadersMap clone(ListKeyAdaptingCaseInsensitiveHeadersMap original) {
-        var originalStrictMap = original.asStrictMap();
-        var newStrictMap = new StrictCaseInsensitiveHttpHeadersMap();
-        for (var entry : originalStrictMap.entrySet()) {
-            newStrictMap.put(entry.getKey(), new ArrayList<>(entry.getValue()));
-        }
-        return new ListKeyAdaptingCaseInsensitiveHeadersMap(newStrictMap);
+        this.httpTransactionContext = httpTransactionContext;
     }
 
     @Override
     public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
-        if (msg instanceof HttpJsonRequestWithFaultingPayload) {
-            var originalHttpJsonMessage = (HttpJsonRequestWithFaultingPayload) msg;
-            originalHttpJsonMessage.setHeaders(clone(originalHttpJsonMessage.headers()));
-
-            var httpJsonMessage = new HttpJsonRequestWithFaultingPayload();
-            httpJsonMessage.setPath(originalHttpJsonMessage.path());
-            httpJsonMessage.setHeaders(clone(originalHttpJsonMessage.headers()));
-            httpJsonMessage.setMethod(originalHttpJsonMessage.method());
-            httpJsonMessage.setProtocol(originalHttpJsonMessage.protocol());
-            httpJsonMessage.setPayloadFaultMap((PayloadAccessFaultingMap) originalHttpJsonMessage.payload());
-
-
-            // TODO - this is super ugly and sloppy - this has to be improved
-            chunkSizes.add(new ArrayList<>(EXPECTED_PACKET_COUNT_GUESS_FOR_PAYLOAD));
-            IAuthTransformer authTransformer = requestPipelineOrchestrator.authTransfomerFactory.getAuthTransformer(
-                httpJsonMessage
-            );
-            try {
-                handlePayloadNeutralTransformationOrThrow(
-                    ctx,
-                    originalHttpJsonMessage,
-                    transform(transformer, httpJsonMessage),
-                    authTransformer
-                );
-            } catch (PayloadNotLoadedException pnle) {
-                log.debug(
-                    "The transforms for this message require payload manipulation, "
-                        + "all content handlers are being loaded."
-                );
-                // make a fresh message and its headers
-                requestPipelineOrchestrator.addJsonParsingHandlers(
-                    ctx,
-                    transformer,
-                    getAuthTransformerAsStreamingTransformer(authTransformer)
-                );
-                ctx.fireChannelRead(handleAuthHeaders(httpJsonMessage, authTransformer));
-            }
-        } else if (msg instanceof HttpContent) {
-            ctx.fireChannelRead(msg);
+        if (msg instanceof HttpRequest) {
+            httpTransactionContext.onHeaderParse();
+            var request = (HttpRequest) msg;
+            log.atInfo()
+                .setMessage(
+                    () -> diagnosticLabel
+                        + " parsed request: "
+                        + request.method()
+                        + " "
+                        + request.uri()
+                        + " "
+                        + request.protocolVersion().text()
+                )
+                .log();
+            var httpJsonMessage = parseHeadersIntoMessage(request);
+                ctx.fireChannelRead(httpJsonMessage);
         } else {
-            assert false
-                : "Only HttpRequest and HttpContent should come through here as per RequestPipelineOrchestrator";
-            // In case message comes through, pass downstream
             super.channelRead(ctx, msg);
         }
     }
 
-    public static HttpJsonRequestWithFaultingPayload transform(
-        IJsonTransformer transformer,
-        HttpJsonRequestWithFaultingPayload httpJsonMessage
-    ) {
-        var originalHttpJsonMessage = httpJsonMessage;
-        var beforeContentHeaders = getEncodingHeaders(httpJsonMessage);
-
-        ByteBuf innerPayloadByteBuf = null;
-        ByteBuf protectedByteBuf = null;
-        try {
-            innerPayloadByteBuf = (ByteBuf) httpJsonMessage.payload().get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
-            if (innerPayloadByteBuf != null) {
-                protectedByteBuf = Unpooled.unreleasableBuffer(innerPayloadByteBuf);
-                httpJsonMessage.payload().put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
-                    protectedByteBuf);
-            }
-        } catch (PayloadNotLoadedException e) {
-            // Skip byteBuf protection if payload not loaded
-        }
-
-        var returnedObject = transformer.transformJson(httpJsonMessage);
-
-        if (returnedObject != httpJsonMessage) {
-            httpJsonMessage = new HttpJsonRequestWithFaultingPayload(returnedObject);
-        }
-
-        if (innerPayloadByteBuf != null) {
-            // replace protected byteBuf if was hidden and still there
-            var transformedValue = httpJsonMessage.payload().get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
-            assert protectedByteBuf != null : "Expected protectedByteBuf to be defined if innerPayloadByteBuf is";
-            if (protectedByteBuf.equals(transformedValue)) {
-                innerPayloadByteBuf.readerIndex(protectedByteBuf.readerIndex());
-                innerPayloadByteBuf.writerIndex(protectedByteBuf.writerIndex());
-                httpJsonMessage.payload().put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY, innerPayloadByteBuf);
-            } else {
-                innerPayloadByteBuf.release();
-                if (transformedValue instanceof String) {
-                    httpJsonMessage.payload().put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
-                        Unpooled.wrappedBuffer(((String) transformedValue).getBytes(StandardCharsets.UTF_8)));
-                } else if (!(transformedValue instanceof ByteBuf)) {
-                    throw new UnsupportedOperationException("Type of " + JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY
-                 + " not supported.");
-                }
-            }
-        }
-
-        var afterContentHeaders = getEncodingHeaders(httpJsonMessage);
-
-        if (!Objects.deepEquals(beforeContentHeaders, afterContentHeaders)) {
-            // Ensure payload was loaded during transformations if modified content headers
-            originalHttpJsonMessage.payload().forEach((key, val) -> {});
-        }
-
-        if (originalHttpJsonMessage != httpJsonMessage) {
-            // clear originalHttpJsonMessage for faster garbage collection if not persisted along
-            originalHttpJsonMessage.clear();
-        }
-        return httpJsonMessage;
-    }
-
-    private static List<Entry<String, List<String>>> getEncodingHeaders(Map<String, ?> jsonRequest) {
-        @SuppressWarnings("unchecked")
-        var headersOp = Optional.ofNullable(jsonRequest).map(m -> m.get(JsonKeysForHttpMessage.HEADERS_KEY))
-            .map(o -> (Map<String, List<String>>) o)
-            .map(StrictCaseInsensitiveHttpHeadersMap::fromMap)
-            .map(ListKeyAdaptingCaseInsensitiveHeadersMap::new);
-
-        var contentHeadersList = List.of(
-            HttpHeaderNames.CONTENT_TYPE.toString(),
-            HttpHeaderNames.CONTENT_ENCODING.toString(),
-            HttpHeaderNames.CONTENT_TRANSFER_ENCODING.toString(),
-            HttpHeaderNames.CONTENT_LENGTH.toString(),
-            HttpHeaderNames.TRANSFER_ENCODING.toString()
-        );
-
-        var contentHeaders = new ArrayList<Entry<String, List<String>>>();
-
-        contentHeadersList.forEach(header ->
-            headersOp.map(h -> h.getInsensitive(header)).ifPresent(
-                val -> contentHeaders.add(Map.entry(header, new ArrayList<>(val)))
-            )
-        );
-
-        return contentHeaders;
-    }
-
-    private void handlePayloadNeutralTransformationOrThrow(
-        ChannelHandlerContext ctx,
-        HttpJsonRequestWithFaultingPayload originalRequest,
-        HttpJsonRequestWithFaultingPayload httpJsonMessage,
-        IAuthTransformer authTransformer
-    ) {
-        // if the auth transformer only requires header manipulations, just do it right away, otherwise,
-        // if it's a streaming transformer, require content parsing and send it in there
-        handleAuthHeaders(httpJsonMessage, authTransformer);
-        var streamingAuthTransformer = getAuthTransformerAsStreamingTransformer(authTransformer);
-
-        var pipeline = ctx.pipeline();
-        if (streamingAuthTransformer != null) {
-            log.info(
-                diagnosticLabel
-                    + "An Authorization Transformation is required for this message.  "
-                    + "The headers and payload will be parsed and reformatted."
+    public static HttpJsonRequestWithFaultingPayload parseHeadersIntoMessage(HttpRequest request) {
+        var jsonMsg = new HttpJsonRequestWithFaultingPayload();
+        jsonMsg.setPath(request.uri());
+        jsonMsg.setMethod(request.method().toString());
+        jsonMsg.setProtocol(request.protocolVersion().text());
+        var headers = request.headers()
+            .entries()
+            .stream()
+            .collect(
+                Collectors.groupingBy(
+                    Map.Entry::getKey,
+                    StrictCaseInsensitiveHttpHeadersMap::new,
+                    Collectors.mapping(Map.Entry::getValue, Collectors.toList())
+                )
             );
-            requestPipelineOrchestrator.addContentRepackingHandlers(ctx, streamingAuthTransformer);
-            ctx.fireChannelRead(httpJsonMessage);
-        } else if (headerFieldsAreIdentical(originalRequest, httpJsonMessage)) {
-            log.info(
-                diagnosticLabel
-                    + "Transformation isn't necessary.  "
-                    + "Resetting the processing pipeline to let the caller send the original network bytes as-is."
-            );
-            RequestPipelineOrchestrator.removeAllHandlers(pipeline);
-
-        } else if (headerFieldIsIdentical("content-encoding", originalRequest, httpJsonMessage)
-            && headerFieldIsIdentical("transfer-encoding", originalRequest, httpJsonMessage)) {
-                log.info(
-                    diagnosticLabel
-                        + "There were changes to the headers that require the message to be reformatted "
-                        + "but the payload doesn't need to be transformed."
-                );
-                // By adding the baseline handlers and removing this and previous handlers in reverse order,
-                // we will cause the upstream handlers to flush their in-progress accumulated ByteBufs downstream
-                // to be processed accordingly
-                requestPipelineOrchestrator.addBaselineHandlers(pipeline);
-                ctx.fireChannelRead(httpJsonMessage);
-                RequestPipelineOrchestrator.removeThisAndPreviousHandlers(pipeline, this);
-            } else {
-                log.info(
-                    diagnosticLabel
-                        + "New headers have been specified that require the payload stream to be "
-                        + "reformatted.  Setting up the processing pipeline to parse and reformat the request payload."
-                );
-                requestPipelineOrchestrator.addContentRepackingHandlers(ctx, streamingAuthTransformer);
-                ctx.fireChannelRead(httpJsonMessage);
-            }
-    }
-
-    private static HttpJsonRequestWithFaultingPayload handleAuthHeaders(
-        HttpJsonRequestWithFaultingPayload httpJsonMessage,
-        IAuthTransformer authTransformer
-    ) {
-        if (authTransformer instanceof IAuthTransformer.HeadersOnlyTransformer) {
-            ((IAuthTransformer.HeadersOnlyTransformer) authTransformer).rewriteHeaders(httpJsonMessage);
-        }
-        return httpJsonMessage;
-    }
-
-    private static IAuthTransformer.StreamingFullMessageTransformer getAuthTransformerAsStreamingTransformer(
-        IAuthTransformer authTransformer
-    ) {
-        return (authTransformer instanceof IAuthTransformer.StreamingFullMessageTransformer)
-            ? (IAuthTransformer.StreamingFullMessageTransformer) authTransformer
-            : null;
-    }
-
-    public static boolean headerFieldsAreIdentical(HttpJsonRequestWithFaultingPayload request1,
-        HttpJsonRequestWithFaultingPayload request2) {
-        // Check if both maps are the same size
-        if (request1.size() != request2.size()) {
-            return false;
-        }
-
-        // Iterate through the entries of request1 and compare with request2 except and headers
-        for (Map.Entry<String, Object> entry : request1.entrySet()) {
-            String key = entry.getKey();
-            if (JsonKeysForHttpMessage.PAYLOAD_KEY.equals(key) || JsonKeysForHttpMessage.HEADERS_KEY.equals(key)) {
-                continue;
-            }
-            Object value1 = entry.getValue();
-            Object value2 = request2.getOrDefault(key, null);
-            if (!Objects.deepEquals(value1, value2)) {
-                return false;
-            }
-        }
-
-        var headers1 = request1.headers();
-        var headers2 = request2.headers();
-        if (headers1 == null) {
-            return headers2 == null;
-        }
-
-        if (headers1.size() != headers2.size()) {
-            return false;
-        }
-
-        for (Map.Entry<String, Object> entry : headers1.entrySet()) {
-            String key = entry.getKey();
-            Object value1 = entry.getValue();
-            Object value2 = headers2.getOrDefault(key, null);
-            if (!Objects.deepEquals(value1, value2)) {
-                return false;
-            }
-        }
-        return true;
-    }
-
-    private boolean headerFieldIsIdentical(
-        String headerName,
-        HttpJsonRequestWithFaultingPayload request,
-        HttpJsonRequestWithFaultingPayload httpJsonMessage
-    ) {
-        var originalValue = Optional.ofNullable(request)
-            .map(HttpJsonMessageWithFaultingPayload::headers)
-            .map(ListKeyAdaptingCaseInsensitiveHeadersMap::asStrictMap)
-            .map(s -> s.getOrDefault(s, null))
-            .filter(s -> !s.isEmpty());
-        var newValue = Optional.ofNullable(httpJsonMessage)
-            .map(HttpJsonMessageWithFaultingPayload::headers)
-            .map(ListKeyAdaptingCaseInsensitiveHeadersMap::asStrictMap)
-            .map(s -> s.getOrDefault(s, null))
-            .filter(s -> !s.isEmpty());
-
-        if (originalValue.isEmpty() || newValue.isEmpty()) {
-            return originalValue.isEmpty() == newValue.isEmpty();
-        }
-        return originalValue.get().equals(newValue.get());
+        jsonMsg.setHeaders(new ListKeyAdaptingCaseInsensitiveHeadersMap(headers));
+        jsonMsg.setPayloadFaultMap(new PayloadAccessFaultingMap(headers));
+        return jsonMsg;
     }
 }
