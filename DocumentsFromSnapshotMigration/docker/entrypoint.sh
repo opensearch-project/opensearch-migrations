@@ -49,8 +49,6 @@ S3_LOCAL_DIR=$(echo "$RFS_COMMAND" | sed -n 's/.*--s3-local-dir\s\+\("[^"]\+"\|[
 LUCENE_DIR=$(echo "$RFS_COMMAND"  | sed -n 's/.*--lucene-dir\s\+\("[^"]\+"\|[^ ]\+\).*/\1/p' | tr -d '"')
 if [[ -n "$S3_LOCAL_DIR" ]]; then
     echo "Will delete S3 local directory between runs: $S3_LOCAL_DIR"
-    rm -rf "$S3_LOCAL_DIR"
-    echo "Directory $S3_LOCAL_DIR has been deleted."
 else
     echo "--s3-local-dir argument not found in RFS_COMMAND. Will not delete S3 local directory between runs."
 fi
