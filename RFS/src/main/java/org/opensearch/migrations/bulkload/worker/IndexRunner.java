@@ -8,7 +8,6 @@ import org.opensearch.migrations.bulkload.common.FilterScheme;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.metadata.CreationResult;
-import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 import org.opensearch.migrations.metadata.IndexCreator;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 
@@ -45,9 +44,7 @@ public class IndexRunner {
                 results.indexName(indexResult);
                 transformedRoot.getAliases().fieldNames().forEachRemaining( alias -> {
                     var aliasResult = CreationResult.builder().name(alias);
-                    if (!indexResult.wasSuccessful()) {
-                        aliasResult.failureType(CreationFailureType.DEPENDENCY_FAILURE);
-                    }
+                    aliasResult.failureType(indexResult.getFailureType());
                     results.alias(aliasResult.build());
                 });
             });

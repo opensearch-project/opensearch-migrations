@@ -12,6 +12,7 @@ import org.junit.jupiter.api.Test;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.InvalidResponse;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 
 import lombok.SneakyThrows;
@@ -21,7 +22,6 @@ import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
@@ -45,7 +45,7 @@ class IndexCreator_OS_2_11Test {
         var result = create(client, MIN_INDEX_JSON, "indexName");
 
         // Assertions
-        assertThat(result, equalTo(true));
+        assertThat(result.wasSuccessful(), equalTo(true));
         verify(client).createIndex(any(), any(), any());
     }
 
@@ -57,10 +57,10 @@ class IndexCreator_OS_2_11Test {
         when(client.createIndex(any(), any(), any())).thenThrow(invalidResponse);
 
         // Action
-        var exception = assertThrows(InvalidResponse.class, () -> create(client, MIN_INDEX_JSON, "indexName"));
+        var result = create(client, MIN_INDEX_JSON, "indexName");
 
         // Assertions
-        assertThat(exception, equalTo(invalidResponse));
+        assertThat(result.getException(), equalTo(invalidResponse));
         verify(client).createIndex(any(), any(), any());
     }
 
@@ -76,10 +76,10 @@ class IndexCreator_OS_2_11Test {
         when(client.createIndex(any(), any(), any())).thenThrow(invalidResponse);
 
         // Action
-        var exception = assertThrows(InvalidResponse.class, () -> create(client, MIN_INDEX_JSON, "indexName"));
+        var result = create(client, MIN_INDEX_JSON, "indexName");
 
         // Assertions
-        assertThat(exception, equalTo(invalidResponse));
+        assertThat(result.getException(), equalTo(invalidResponse));
         verify(client).createIndex(any(), any(), any());
     }
 
@@ -113,7 +113,7 @@ class IndexCreator_OS_2_11Test {
         var result = create(client, rawJson, "indexName");
 
         // Assertions
-        assertThat(result, equalTo(true));
+        assertThat(result.wasSuccessful(), equalTo(true));
 
         var requestBodyCapture = ArgumentCaptor.forClass(ObjectNode.class);
         verify(client, times(2)).createIndex(any(), requestBodyCapture.capture(), any());
@@ -127,7 +127,7 @@ class IndexCreator_OS_2_11Test {
     }
 
     @SneakyThrows
-    private boolean create(OpenSearchClient client, String rawJson, String indexName) {
+    private CreationResult create(OpenSearchClient client, String rawJson, String indexName) {
         var node = (ObjectNode) OBJECT_MAPPER.readTree(rawJson);
         var indexId = "indexId";
         var indexData = new IndexMetadataData_OS_2_11(node, indexId, indexName);

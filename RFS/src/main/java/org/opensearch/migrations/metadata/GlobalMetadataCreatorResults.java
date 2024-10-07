@@ -16,7 +16,7 @@ public class GlobalMetadataCreatorResults {
     public long fatalIssueCount() {
         return Stream.of(getLegacyTemplates(), getIndexTemplates(), getComponentTemplates())
             .flatMap(List::stream)
-            .filter(r -> !r.wasFatal())
+            .filter(CreationResult::wasFatal)
             .count();
     }
 }
