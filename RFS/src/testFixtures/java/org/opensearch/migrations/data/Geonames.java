@@ -8,6 +8,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import static org.opensearch.migrations.data.GeneratedData.createField;
+import static org.opensearch.migrations.data.GeneratedData.createFieldTextRawKeyword;
 
 public class Geonames {
 
@@ -15,17 +16,29 @@ public class Geonames {
     private static final String[] countryCodes = {"US", "DE", "FR", "GB", "CN", "IN", "BR"};
 
     public static ObjectNode generateGeonameIndex() {
-        var index = mapper.createObjectNode();
-        var mappings = mapper.createObjectNode();
         var properties = mapper.createObjectNode();
         
-        properties.set("geonameId", createField("integer"));
-        properties.set("name", createField("text"));
-        properties.set("latitude", createField("float"));
-        properties.set("longitude", createField("float"));
-        properties.set("countryCode", createField("keyword"));
-        
+        properties.set("geonameId", createField("long"));
+        properties.set("name", createFieldTextRawKeyword());
+        properties.set("asciiname", createFieldTextRawKeyword());
+        properties.set("alternatenames", createFieldTextRawKeyword());
+        properties.set("feature_class", createFieldTextRawKeyword());
+        properties.set("feature_code", createFieldTextRawKeyword());
+        properties.set("cc2", createFieldTextRawKeyword());
+        properties.set("admin1_code", createFieldTextRawKeyword());
+        properties.set("population", createField("long"));
+        properties.set("dem", createFieldTextRawKeyword());
+        properties.set("timezone", createFieldTextRawKeyword());
+        properties.set("location", createField("geo_point"));
+        var countryCodeField = createFieldTextRawKeyword();
+        countryCodeField.put("fielddata", true);
+        properties.set("country_code", countryCodeField);
+
+        var mappings = mapper.createObjectNode();
+        mappings.put("dynamic", "strict");
         mappings.set("properties", properties);
+
+        var index = mapper.createObjectNode();
         index.set("mappings", mappings);
         return index;
     }
@@ -38,8 +51,19 @@ public class Geonames {
                 var doc = mapper.createObjectNode();
                 doc.put("geonameId", i + 1000);
                 doc.put("name", "City" + (i + 1));
-                doc.put("latitude", randomLatitude(random));
-                doc.put("longitude", randomLongitude(random));
+                doc.put("asciiname", "City" + (i + 1));
+                doc.put("alternatenames", "City" + (i + 1));
+                doc.put("feature_class", "FCl" + (i + 1));
+                doc.put("feature_code", "FCo" + (i + 1));
+                doc.put("cc2", "cc2" + (i + 1));
+                doc.put("admin1_code", "admin" + (i + 1));
+                doc.put("population", random.nextInt(1000));
+                doc.put("dem", random.nextInt(1000)+"");
+                doc.put("timezone", "TZ"+ (i + 1));
+                var location = mapper.createArrayNode();
+                location.add(randomLatitude(random));
+                location.add(randomLongitude(random));
+                doc.set("location", location);
                 doc.put("countryCode", randomCountryCode(random));
                 return doc;
             }

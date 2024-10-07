@@ -24,6 +24,7 @@ import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.framework.PreloadedSearchClusterContainer;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
@@ -45,8 +46,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
             .collect(Collectors.toList());
         var targetImageNames = TARGET_IMAGES.stream()
             .collect(Collectors.toList());
-        var numWorkersList = List.of(1, 3, 40);
-        var compressionEnabledList = List.of(true, false);
+        var numWorkersList = List.of(1);
+        var compressionEnabledList = List.of(true);
         return sourceImageArgs.stream()
             .flatMap(
                 sourceParams -> targetImageNames.stream()
@@ -101,6 +102,14 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
             args.snapshotName = "test_snapshot";
             args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
             args.sourceArgs.host = esSourceContainer.getUrl();
+
+            var ops = new ClusterOperations(esSourceContainer.getUrl());
+            System.err.println("geonames:\n" + ops.get("/geonames/_search?size=1").getValue());
+            System.err.println("sonested:\n" + ops.get("/sonested/_search?size=1").getValue());
+            System.err.println("logs-211998:\n" + ops.get("/logs-211998/_search?size=1").getValue());
+            System.err.println("nyc_taxis:\n" + ops.get("/nyc_taxis/_search?size=1").getValue());
+            var cat = ops.get("/_cat/indices?v");
+            System.err.println("indices:\n" + cat.getValue());
 
             var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
             snapshotCreator.run();

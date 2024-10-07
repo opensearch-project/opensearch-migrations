@@ -76,6 +76,10 @@ dependencies {
 
     testFixturesImplementation project(':transformation')
     testFixturesImplementation testFixtures(project(":coreUtilities"))
+    testFixturesImplementation platform('io.projectreactor:reactor-bom:2023.0.5')
+
+    testFixturesImplementation 'io.projectreactor.netty:reactor-netty-core'
+    testFixturesImplementation 'io.projectreactor.netty:reactor-netty-http'
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java'
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java-core'
     testFixturesImplementation group: 'com.github.docker-java', name: 'docker-java-transport-httpclient5'

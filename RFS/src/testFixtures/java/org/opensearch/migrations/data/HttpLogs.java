@@ -12,6 +12,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.experimental.UtilityClass;
 
 import static org.opensearch.migrations.data.GeneratedData.createField;
+import static org.opensearch.migrations.data.GeneratedData.createFieldTextRawKeyword;
 
 @UtilityClass
 public class HttpLogs {
@@ -23,38 +24,52 @@ public class HttpLogs {
     private static final int ONE_DAY_IN_MILLIS = 24 * 60 * 60 * 1000;
 
     public static ObjectNode generateHttpLogIndex() {
-        var index = mapper.createObjectNode();
-        var mappings = mapper.createObjectNode();
         var properties = mapper.createObjectNode();
-        
         properties.set("logId", createField("integer"));
-        properties.set("ip_address", createField("ip"));
-        properties.set("timestamp", createField("date"));
-        properties.set("method", createField("keyword"));
-        properties.set("url", createField("keyword"));
-        properties.set("response_code", createField("integer"));
-        properties.set("response_time", createField("float"));
+        var timestamp = createField("date");
+        timestamp.put("format", "strict_date_optional_time||epoch_second")
+        properties.set("@timestamp", timestamp);
+        var message = createField("keyword");
+        message.put("index", false);
+        message.put("doc_values", false);
+        properties.set("message", message);
+        properties.set("clientip", createField("ip"));
+        var request = createFieldTextRawKeyword();
+        var requestRaw = (ObjectNode)request.get("fields").get("raw");
+        requestRaw.put("ignore_above", 256);
+        properties.set("request", request);
+        properties.set("status", createField("integer"));
+        properties.set("integer", createField("integer"));
+        var geoip = mapper.createObjectNode();
+        var geoipProps = mapper.createObjectNode();
+        geoip.set("properties", geoipProps);
+        geoipProps.set("country_name", createField("keyword"));
+        geoipProps.set("city_name", createField("keyword"));
+        geoipProps.set("location", createField("geo_point"));
+        properties.set("geoip", geoip);
         
+        var mappings = mapper.createObjectNode();
+        mappings.put("dynamic", "strict");
         mappings.set("properties", properties);
+
+        var index = mapper.createObjectNode();
         index.set("mappings", mappings);
         return index;
     }
 
     public static Stream<ObjectNode> generateHttpLogDocs(int numDocs) {
         var random = new Random(1L);
-        var sdf = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ");
         var currentTime = System.currentTimeMillis();
 
         return IntStream.range(0, numDocs)
             .mapToObj(i -> {
                 ObjectNode doc = mapper.createObjectNode();
                 doc.put("logId", i + 1000);
-                doc.put("ip_address", randomIpAddress(random));
-                doc.put("timestamp", sdf.format(randomTimeWithin24Hours(currentTime, random)));
-                doc.put("method", randomHttpMethod(random));
-                doc.put("url", randomUrl(random));
-                doc.put("response_code", randomResponseCode(random));
-                doc.put("response_time", randomResponseTime(random));
+                doc.put("clientip", randomIpAddress(random));
+                doc.put("@timestamp", randomTimeWithin24Hours(currentTime, random));
+                doc.put("request", randomHttpMethod(random) + " " + randomUrl(random) + " HTTP/1.0");
+                doc.put("status", randomStatus(random));
+                doc.put("size", randomResponseSize(random));
                 return doc;
             }
         );
@@ -64,9 +79,8 @@ public class HttpLogs {
         return random.nextInt(256) + "." + random.nextInt(256) + "." + random.nextInt(256) + "." + random.nextInt(256);
     }
 
-    private static Date randomTimeWithin24Hours(long timeFrom, Random random) {
-        return new Date(timeFrom - random.nextInt(ONE_DAY_IN_MILLIS));
-
+    private static long randomTimeWithin24Hours(long timeFrom, Random random) {
+        return timeFrom - random.nextInt(ONE_DAY_IN_MILLIS);
     }
 
     private static String randomHttpMethod(Random random) {
@@ -77,11 +91,11 @@ public class HttpLogs {
         return URLS[random.nextInt(URLS.length)];
     }
 
-    private static int randomResponseCode(Random random) {
+    private static int randomStatus(Random random) {
         return RESPONSE_CODES[random.nextInt(RESPONSE_CODES.length)];
     }
 
-    private static double randomResponseTime(Random random) {
-        return 0.1 + (5 * random.nextDouble()); // Response time between 0.1 and 5.0 seconds
+    private static int randomResponseSize(Random random) {
+        return random.nextInt(50 * 1024 * 1024);
     }
 }
