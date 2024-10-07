@@ -38,8 +38,6 @@ WORKDIR /root/lib/console_link
 RUN pipenv install --deploy
 WORKDIR /root/lib/integ_test
 RUN pipenv install --deploy
-WORKDIR /root/lib/cluster_curl
-RUN pipenv install --deploy
 
 COPY console_api /root/console_api
 WORKDIR /root/console_api
