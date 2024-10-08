@@ -154,7 +154,7 @@ def parse_headers(header: str) -> Dict:
     return headers
 
 
-@cluster_group.command(name="rest-call")
+@cluster_group.command(name="curl")
 @click.option('-X', '--request', default='GET', help="HTTP method to use",
               type=click.Choice([m.name for m in HttpMethod]))
 @click.option('-H', '--header', multiple=True, help='Pass custom header(s) to the server.')
@@ -163,7 +163,7 @@ def parse_headers(header: str) -> Dict:
 @click.argument('cluster', required=True, type=click.Choice(['target_cluster', 'source_cluster'], case_sensitive=False))
 @click.argument('path', required=True)
 @click.pass_obj
-def rest_call_cmd(ctx, cluster, path, request, header, data, json_data):
+def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
     """This implements a small subset of curl commands, formatted for use against configured source or target clusters.
     By default the cluster definition is configured to use the `/etc/migration-services.yaml` file that is pre-prepared
     on the migration console, but `--config-file` can point to any YAML file that defines a `source_cluster` or

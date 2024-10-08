@@ -223,11 +223,11 @@ def test_cli_cluster_run_test_benchmarks_without_source_raises_error(runner, moc
     assert result.exit_code == 2
 
 
-def test_cli_cluster_run_call_rest_source_cluster(runner, mocker):
+def test_cli_cluster_run_curl_source_cluster(runner, mocker):
     middleware_mock = mocker.spy(middleware.clusters, 'call_api')
     model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
     json_body = '{"id": 3, "number": 5}'
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'rest-call',
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
                                  'source_cluster', '/new_index/_doc', '-XPOST', '--json', json_body],
                            catch_exceptions=True)
     middleware_mock.assert_called_once()
@@ -239,10 +239,10 @@ def test_cli_cluster_run_call_rest_source_cluster(runner, mocker):
     assert result.exit_code == 0
 
 
-def test_cli_cluster_run_call_rest_target_cluster(runner, mocker):
+def test_cli_cluster_run_curl_target_cluster(runner, mocker):
     middleware_mock = mocker.spy(middleware.clusters, 'call_api')
     model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'rest-call',
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
                                  'target_cluster', '/_cat/indices', '-XGET', '-H', 'user-agent:TestAgent'],
                            catch_exceptions=True)
     middleware_mock.assert_called_once()
@@ -253,10 +253,10 @@ def test_cli_cluster_run_call_rest_target_cluster(runner, mocker):
     assert result.exit_code == 0
 
 
-def test_cli_cluster_run_call_rest_nonexistent_cluster(runner, mocker):
+def test_cli_cluster_run_curl_nonexistent_cluster(runner, mocker):
     middleware_mock = mocker.spy(middleware.clusters, 'call_api')
     model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
-    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'rest-call',
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
                                  'made_up_cluster', '/_cat/indices'],
                            catch_exceptions=True)
     middleware_mock.assert_not_called()
