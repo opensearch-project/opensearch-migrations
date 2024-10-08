@@ -107,7 +107,8 @@ These files are rolled over as they hit 10 MB to a series of `output_tuples-%d{y
 
 The data in these files is in the format of JSON lines, each of which is a log message containing a specific source-target-request-response(s) tuple.
 
-To read the tuples from the Migration Console:
+To read the tuples from the Migration Console follow the command shown below.
+Note: This may expose sensitive security details as the tuples may contain raw document and authorization details.
 
 <details>
 <summary>See example tuples:</summary>
@@ -301,7 +302,6 @@ $ cat /shared-logs-output/traffic-replayer-default/*/tuples/tuples.log | jq
     "numRequests": 1,
     "numErrors": 0
   }
-}
 ]
 ```
 
