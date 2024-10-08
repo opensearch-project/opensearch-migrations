@@ -154,7 +154,7 @@ def parse_headers(header: str) -> Dict:
     return headers
 
 
-@cluster_group.command(name="call-api")
+@cluster_group.command(name="rest-call")
 @click.option('-X', '--request', default='GET', help="HTTP method to use",
               type=click.Choice([m.name for m in HttpMethod]))
 @click.option('-H', '--header', multiple=True, help='Pass custom header(s) to the server.')
@@ -163,7 +163,7 @@ def parse_headers(header: str) -> Dict:
 @click.argument('cluster', required=True, type=click.Choice(['target_cluster', 'source_cluster'], case_sensitive=False))
 @click.argument('path', required=True)
 @click.pass_obj
-def cli(ctx, cluster, path, verbose, request, header, data, json_data):
+def rest_call_cmd(ctx, cluster, path, request, header, data, json_data):
     """This implements a small subset of curl commands, formatted for use against configured source or target clusters.
     By default the cluster definition is configured to use the `/etc/migration-services.yaml` file that is pre-prepared
     on the migration console, but `--config-file` can point to any YAML file that defines a `source_cluster` or
@@ -171,10 +171,7 @@ def cli(ctx, cluster, path, verbose, request, header, data, json_data):
     
     In specifying the path of the route, use the name of the YAML object as the domain, followed by a space and the
     path, e.g. `source_cluster /_cat/indices`."""
-    logging.basicConfig(level=logging.WARN - (10 * verbose))
-    logger.info(f"Logging set to {logging.getLevelName(logger.getEffectiveLevel())}")
 
-    # Parse headers
     headers = parse_headers(header)
     
     if json_data:
@@ -183,12 +180,15 @@ def cli(ctx, cluster, path, verbose, request, header, data, json_data):
             headers['Content-Type'] = 'application/json'
         except json.JSONDecodeError:
             raise click.BadParameter("Invalid JSON format.")
-    
+
     try:
         cluster = ctx.env.__getattribute__(cluster)
     except AttributeError:
         raise ValueError(f"Unknown cluster {cluster}. Currently only `source_cluster` and `target_cluster`"
-                         "are valid and must also be defined in the config file.")
+                         " are valid and must also be defined in the config file.")
+
+    if path[0] != '/':
+        path = '/' + path
 
     response = clusters_.call_api(cluster, path, method=HttpMethod[request], headers=headers, data=data)
     if not response.ok:
