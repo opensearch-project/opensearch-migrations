@@ -2,10 +2,9 @@ package org.opensearch.migrations.replay.util;
 
 import java.util.concurrent.Semaphore;
 
-import org.junit.jupiter.api.Test;
-
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Test;
 
 @Slf4j
 class TrackedFutureTest {

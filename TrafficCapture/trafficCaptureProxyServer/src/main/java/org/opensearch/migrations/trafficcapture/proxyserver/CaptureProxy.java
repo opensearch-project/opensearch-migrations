@@ -1,5 +1,8 @@
 package org.opensearch.migrations.trafficcapture.proxyserver;
 
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLException;
+
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
@@ -20,17 +23,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-import javax.net.ssl.SSLEngine;
-import javax.net.ssl.SSLException;
-
-import com.google.protobuf.CodedOutputStream;
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
-import org.apache.kafka.clients.CommonClientConfigs;
-import org.apache.kafka.clients.producer.KafkaProducer;
-import org.apache.kafka.clients.producer.ProducerConfig;
-import org.apache.kafka.common.config.SaslConfigs;
 
 import org.opensearch.common.settings.Settings;
 import org.opensearch.migrations.jcommander.NoSplitter;
@@ -58,6 +50,10 @@ import org.opensearch.security.ssl.util.SSLConfigConstants;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
+import com.google.protobuf.CodedOutputStream;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.socket.SocketChannel;
@@ -68,6 +64,10 @@ import lombok.Lombok;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.kafka.clients.CommonClientConfigs;
+import org.apache.kafka.clients.producer.KafkaProducer;
+import org.apache.kafka.clients.producer.ProducerConfig;
+import org.apache.kafka.common.config.SaslConfigs;
 
 @Slf4j
 public class CaptureProxy {

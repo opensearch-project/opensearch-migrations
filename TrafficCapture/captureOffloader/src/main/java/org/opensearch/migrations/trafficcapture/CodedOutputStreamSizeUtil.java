@@ -2,12 +2,11 @@ package org.opensearch.migrations.trafficcapture;
 
 import java.time.Instant;
 
-import com.google.protobuf.CodedOutputStream;
-import com.google.protobuf.Timestamp;
-
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
+import com.google.protobuf.CodedOutputStream;
+import com.google.protobuf.Timestamp;
 import io.netty.buffer.ByteBuf;
 
 /**

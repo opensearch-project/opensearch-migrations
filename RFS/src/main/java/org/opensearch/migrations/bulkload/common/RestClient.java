@@ -1,5 +1,9 @@
 package org.opensearch.migrations.bulkload.common;
 
+import javax.net.ssl.SSLEngine;
+import javax.net.ssl.SSLException;
+import javax.net.ssl.SSLParameters;
+
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
@@ -8,9 +12,6 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.BiFunction;
 import java.util.stream.Collectors;
-import javax.net.ssl.SSLEngine;
-import javax.net.ssl.SSLException;
-import javax.net.ssl.SSLParameters;
 
 import org.opensearch.migrations.bulkload.common.http.CompositeTransformer;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;

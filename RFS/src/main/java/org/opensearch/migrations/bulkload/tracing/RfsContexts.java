@@ -1,15 +1,14 @@
 package org.opensearch.migrations.bulkload.tracing;
 
+import org.opensearch.migrations.tracing.BaseSpanContext;
+import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
+import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
+
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.Meter;
-
-import org.opensearch.migrations.tracing.BaseSpanContext;
-import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
-import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
-
 import lombok.Getter;
 import lombok.NonNull;
 

@@ -4,10 +4,9 @@ import java.io.File;
 import java.time.Duration;
 import java.util.Map;
 
-import com.google.common.collect.ImmutableMap;
-
 import org.opensearch.migrations.Version;
 
+import com.google.common.collect.ImmutableMap;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;

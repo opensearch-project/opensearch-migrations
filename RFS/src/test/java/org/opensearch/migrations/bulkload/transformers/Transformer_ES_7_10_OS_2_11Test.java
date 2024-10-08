@@ -1,8 +1,6 @@
 package org.opensearch.migrations.bulkload.transformers;
 
 
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.TestResources;
@@ -13,6 +11,7 @@ import org.opensearch.migrations.bulkload.version_os_2_11.IndexMetadataData_OS_2
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

@@ -7,7 +7,6 @@ import java.util.stream.Stream;
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.AttributesBuilder;
 import io.opentelemetry.api.trace.Span;
-
 import lombok.Getter;
 import lombok.NonNull;
 

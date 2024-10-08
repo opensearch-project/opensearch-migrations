@@ -1,10 +1,10 @@
 package org.opensearch.migrations.reindexer;
 
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.bulkload.common.OpenSearchClient.OperationFailed;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.testutils.CloseableLogSetup;
+
+import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.CoreMatchers.containsString;

@@ -1,9 +1,9 @@
 package org.opensearch.migrations.commands;
 
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.cli.Clusters;
 import org.opensearch.migrations.cli.Items;
+
+import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.MatcherAssert.assertThat;

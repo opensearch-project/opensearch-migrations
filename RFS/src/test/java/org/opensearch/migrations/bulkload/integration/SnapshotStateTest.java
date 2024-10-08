@@ -4,11 +4,6 @@ import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
 
-import org.junit.jupiter.api.AfterEach;
-import org.junit.jupiter.api.BeforeEach;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.io.TempDir;
-
 import org.opensearch.migrations.bulkload.common.DocumentReindexer.BulkDocSection;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
@@ -16,6 +11,10 @@ import org.opensearch.migrations.bulkload.framework.SimpleRestoreFromSnapshot_ES
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
 import reactor.core.publisher.Mono;
 

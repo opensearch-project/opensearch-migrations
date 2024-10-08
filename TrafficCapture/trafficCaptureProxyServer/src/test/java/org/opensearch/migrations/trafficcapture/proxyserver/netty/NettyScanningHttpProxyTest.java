@@ -14,9 +14,6 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.stream.IntStream;
 
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.common.collect.Tuple;
 import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.PortFinder;
@@ -33,6 +30,8 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 @Slf4j
 class NettyScanningHttpProxyTest {

@@ -6,12 +6,11 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
+import org.opensearch.migrations.bulkload.common.S3Repo.CannotFindSnapshotRepoRoot;
+
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-
-import org.opensearch.migrations.bulkload.common.S3Repo.CannotFindSnapshotRepoRoot;
-
 import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
