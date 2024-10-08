@@ -13,6 +13,20 @@ allprojects {
     }
 }
 
+subprojects { subproject ->
+    subproject.afterEvaluate {
+        if (subproject.plugins.hasPlugin('java') && subproject.name != 'commonDependencyVersionConstraints') {
+            subproject.dependencies {
+                implementation project(":commonDependencyVersionConstraints")
+                annotationProcessor project(":commonDependencyVersionConstraints")
+                if (subproject.plugins.hasPlugin('java-test-fixtures')) {
+                    testFixturesImplementation project(":commonDependencyVersionConstraints")
+                }
+            }
+        }
+    }
+}
+
 task buildDockerImages() {
     dependsOn(':TrafficCapture:dockerSolution:buildDockerImages')
     dependsOn(':DocumentsFromSnapshotMigration:buildDockerImages')
@@ -32,6 +46,11 @@ spotless {
         targetExclude '**/node_modules/**', '**/opensearch-cluster-cdk/**', '**/cdk.out/**'
         trimTrailingWhitespace()
         indentWithSpaces()
+        endWithNewline()
+    }
+    json {
+        target 'deployment/cdk/opensearch-service-migration/*.json'
+        prettier()
         endWithNewline()
     }
 }

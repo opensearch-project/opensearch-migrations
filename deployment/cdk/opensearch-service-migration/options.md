@@ -60,6 +60,7 @@ The optional component is:
 | reindexFromSnapshotExtraArgs        | string  | "--target-aws-region us-east-1 --target-aws-service-signing-name es" | Extra arguments to provide to the Document Migration command with space separation. See [RFS Arguments](../../../DocumentsFromSnapshotMigration/README.md#Arguments). [^1] |
 | sourceClusterEndpoint               | string  | `"https://source-cluster.elb.us-east-1.endpoint.com"`                | The endpoint for the source cluster from which RFS will take a snapshot                                                                                                    |
 | managedServiceSourceSnapshotEnabled | boolean | true                                                                 | Create the necessary roles and trust relationships to take a snapshot of a managed service source cluster. This is only compatible with SigV4 auth.                        |
+| reindexFromSnapshotMaxShardSizeGiB                     | integer | 80                                                                   | OPTIONAL: The size, in whole GiB, of the largest shard you want to migrate across all indices; used to ensure we have enough disk space reserved to perform the migration.  Default: 80 GiB                                   |
 
 ### VPC Options
 

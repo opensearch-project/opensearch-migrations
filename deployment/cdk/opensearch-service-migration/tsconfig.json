@@ -3,9 +3,7 @@
     "outDir": "dist",
     "target": "ES2020",
     "module": "commonjs",
-    "lib": [
-      "es2020"
-    ],
+    "lib": ["es2020"],
     "resolveJsonModule": true,
     "declaration": true,
     "strict": true,
@@ -21,15 +19,7 @@
     "inlineSources": true,
     "experimentalDecorators": true,
     "strictPropertyInitialization": false,
-    "typeRoots": [
-      "./node_modules/@types"
-    ]
+    "typeRoots": ["./node_modules/@types"]
   },
-  "exclude": [
-    "node_modules",
-    "cdk.out",
-    "dist",
-    "test",
-    "bin"
-  ]
+  "exclude": ["node_modules", "cdk.out", "dist", "test", "bin"]
 }

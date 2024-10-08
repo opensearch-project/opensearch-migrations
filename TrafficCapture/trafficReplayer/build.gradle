@@ -16,8 +16,6 @@ plugins {
 }
 
 dependencies {
-    implementation project(":commonDependencyVersionConstraints")
-
     implementation project(':TrafficCapture:captureProtobufs')
     implementation project(':coreUtilities')
     implementation project(':awsUtilities')
