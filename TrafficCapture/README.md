@@ -105,52 +105,207 @@ The data generated from the replayer is stored on an Elastic File System volume 
 It is mounted to the Migration Console at the path `/shared_replayer_output`. The Replayer generates files named `output_tuples.log`.
 These files are rolled over as they hit 10 MB to a series of `output_tuples-%d{yyyy-MM-dd-HH:mm}.log` files.
 
-The data in these files is in the format of JSON lines, each of which is a log message containing a specific request-response-response tuple.
-The body of the messages is sometimes gzipped which makes it difficult to represent as text in a JSON. Therefore, the body field of all requests
-and responses is base64 encoded before it is logged. This makes the files stable, but not human-readable.
+The data in these files is in the format of JSON lines, each of which is a log message containing a specific source-target-request-response(s) tuple.
 
-We have provided a utility script that can parse these files and output them to a human-readable format: the bodies are
-base64 decoded and parsed as JSON if applicable. They're then saved back to JSON format to stdout or file.
+To read the tuples from the Migration Console:
 
-To use this utility from the Migration Console,
+<details>
+<summary>See example tuples:</summary>
+
 ```sh
-$ console tuples show --help
-Usage: console tuples convert [OPTIONS]
-
-Options:
-  --in FILENAME
-  --out FILENAME
-  --help          Show this message and exit.
-
-# By default, the input and output files are `stdin` and `stdout` respectively, so they can be piped together with other tools.
-$ console tuples show --in /shared-logs-output/traffic-replayer-default/86ca83e66197/tuples/mini_tuples.log | jq
-{
-  "sourceRequest": {
-    "Request-URI": "/",
-    "Method": "GET",
-    "HTTP-Version": "HTTP/1.1",
-    "Host": "capture-proxy:9200",
-    "User-Agent": "python-requests/2.32.3",
-    "Accept-Encoding": "gzip, deflate, zstd",
-    "Accept": "*/*",
-    "Connection": "keep-alive",
-    "Authorization": "Basic YWRtaW46YWRtaW4=",
-    "body": ""
-  },
-  "sourceResponse": {
-    "HTTP-Version": {
-      "keepAliveDefault": true
+$ cat /shared-logs-output/traffic-replayer-default/*/tuples/tuples.log | jq
+[
+  {
+    "sourceRequest": {
+      "Host": [
+        "localhost:9200"
+      ],
+      "Authorization": [
+        "Basic YWRtaW46YWRtaW4="
+      ],
+      "User-Agent": [
+        "curl/8.7.1"
+      ],
+      "Accept": [
+        "*/*"
+      ],
+      "Request-URI": "/",
+      "Method": "GET",
+      "HTTP-Version": "HTTP/1.1",
+      "payload": {
+        "inlinedBase64Body": ""
+      }
     },
-    "Status-Code": 200,
-    "Reason-Phrase": "OK",
-    ...
+    "sourceResponse": {
+      "content-type": [
+        "application/json; charset=UTF-8"
+      ],
+      "content-length": [
+        "538"
+      ],
+      "HTTP-Version": "HTTP/1.1",
+      "Status-Code": 200,
+      "Reason-Phrase": "OK",
+      "response_time_ms": 10,
+      "payload": {
+        "inlinedJsonBody": {
+          "name": "2383a194365a",
+          "cluster_name": "docker-cluster",
+          "cluster_uuid": "fhZZvFEiS92srLRLvGXKrA",
+          "version": {
+            "number": "7.10.2",
+            "build_flavor": "oss",
+            "build_type": "docker",
+            "build_hash": "747e1cc71def077253878a59143c1f785afa92b9",
+            "build_date": "2021-01-13T00:42:12.435326Z",
+            "build_snapshot": false,
+            "lucene_version": "8.7.0",
+            "minimum_wire_compatibility_version": "6.8.0",
+            "minimum_index_compatibility_version": "6.0.0-beta1"
+          },
+          "tagline": "You Know, for Search"
+        }
+      }
+    },
+    "targetRequest": {
+      "Host": [
+        "opensearchtarget"
+      ],
+      "Authorization": [
+        "Basic YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE="
+      ],
+      "User-Agent": [
+        "curl/8.7.1"
+      ],
+      "Accept": [
+        "*/*"
+      ],
+      "Request-URI": "/",
+      "Method": "GET",
+      "HTTP-Version": "HTTP/1.1",
+      "payload": {
+        "inlinedBase64Body": ""
+      }
+    },
+    "targetResponses": [
+      {
+        "content-type": [
+          "application/json; charset=UTF-8"
+        ],
+        "content-length": [
+          "568"
+        ],
+        "HTTP-Version": "HTTP/1.1",
+        "Status-Code": 200,
+        "Reason-Phrase": "OK",
+        "response_time_ms": 112,
+        "payload": {
+          "inlinedJsonBody": {
+            "name": "758b4454da60",
+            "cluster_name": "docker-cluster",
+            "cluster_uuid": "Uu3orSZ-Tie1Jnq7p-GrVw",
+            "version": {
+              "distribution": "opensearch",
+              "number": "2.15.0",
+              "build_type": "tar",
+              "build_hash": "61dbcd0795c9bfe9b81e5762175414bc38bbcadf",
+              "build_date": "2024-06-20T03:27:32.562036890Z",
+              "build_snapshot": false,
+              "lucene_version": "9.10.0",
+              "minimum_wire_compatibility_version": "7.10.0",
+              "minimum_index_compatibility_version": "7.0.0"
+            },
+            "tagline": "The OpenSearch Project: https://opensearch.org/"
+          }
+        }
+      }
+    ],
+    "connectionId": "0242acfffe12000b-0000000a-0000000f-d1aa22e30e1211a4-eba39e55.0",
+    "numRequests": 1,
+    "numErrors": 0
   },
-  ...
+  {
+    "sourceRequest": {
+      "Host": [
+        "localhost:9200"
+      ],
+      "Authorization": [
+        "Basic YWRtaW46YWRtaW4="
+      ],
+      "User-Agent": [
+        "curl/8.7.1"
+      ],
+      "Accept": [
+        "*/*"
+      ],
+      "Request-URI": "/_cat/indices",
+      "Method": "GET",
+      "HTTP-Version": "HTTP/1.1",
+      "payload": {
+        "inlinedBase64Body": ""
+      }
+    },
+    "sourceResponse": {
+      "content-type": [
+        "text/plain; charset=UTF-8"
+      ],
+      "content-length": [
+        "162"
+      ],
+      "HTTP-Version": "HTTP/1.1",
+      "Status-Code": 200,
+      "Reason-Phrase": "OK",
+      "response_time_ms": 12,
+      "payload": {
+        "inlinedTextBody": "green  open searchguard             KRWtFn0nQwi6BdObOAsCYQ 1 0 8 0 45.4kb 45.4kb\nyellow open sg7-auditlog-2024.10.04 F2PV5IeTT0aVxP_BmuJSaQ 1 1 4 0 57.8kb 57.8kb\n"
+      }
+    },
+    "targetRequest": {
+      "Host": [
+        "opensearchtarget"
+      ],
+      "Authorization": [
+        "Basic YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE="
+      ],
+      "User-Agent": [
+        "curl/8.7.1"
+      ],
+      "Accept": [
+        "*/*"
+      ],
+      "Request-URI": "/_cat/indices",
+      "Method": "GET",
+      "HTTP-Version": "HTTP/1.1",
+      "payload": {
+        "inlinedBase64Body": ""
+      }
+    },
+    "targetResponses": [
+      {
+        "content-type": [
+          "text/plain; charset=UTF-8"
+        ],
+        "content-length": [
+          "249"
+        ],
+        "HTTP-Version": "HTTP/1.1",
+        "Status-Code": 200,
+        "Reason-Phrase": "OK",
+        "response_time_ms": 39,
+        "payload": {
+          "inlinedTextBody": "green open .plugins-ml-config        hfn4ZxQCQvOe0BN5TejuJA 1 0  1 0  3.9kb  3.9kb\ngreen open .opensearch-observability 7LKST3UWQDiNZyG3rnSqxg 1 0  0 0   208b   208b\ngreen open .opendistro_security      AvLAB1yDR4uk8PEQ212Yvg 1 0 10 0 78.3kb 78.3kb\n"
+        }
+      }
+    ],
+    "connectionId": "0242acfffe12000b-0000000a-00000011-657b97d8be126192-72df00be.0",
+    "numRequests": 1,
+    "numErrors": 0
+  }
 }
-# A specific output file can also be specified.
-$ console tuples show --in /shared_replayer_output/tuples.log --out local-tuples.log
-Converted tuples output to local-tuples.log
+]
 ```
+
+</details>
 
 ### Capture Kafka Offloader
 
