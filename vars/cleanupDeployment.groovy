@@ -6,13 +6,12 @@ def call(Map config = [:]) {
         parameters {
             string(name: 'GIT_REPO_URL', defaultValue: 'https://github.com/opensearch-project/opensearch-migrations.git', description: 'Git repository url')
             string(name: 'GIT_BRANCH', defaultValue: 'main', description: 'Git branch to use for repository')
-            string(name: 'STAGE_GROUP', defaultValue: 'rfs-integ', description: 'Deployment stage group name (e.g. rfs-integ)')
             string(name: 'STAGE', description: 'Deployment stage name in group to delete (e.g. rfs-integ1)')
         }
 
         options {
             // Acquire lock on a given deployment stage
-            lock(label: params.STAGE_GROUP, resource: params.STAGE, quantity: 1, variable: 'stage')
+            lock(resource: params.STAGE, variable: 'stage')
             timeout(time: 1, unit: 'HOURS')
             buildDiscarder(logRotator(daysToKeepStr: '30'))
         }
