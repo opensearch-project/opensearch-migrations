@@ -85,9 +85,11 @@ def wait_for_stack_deletion(cfn_client, stack_delete_requests: List[StackDeletio
         wait_time_seconds += WAIT_INTERVAL_SECONDS
 
     if remaining_requests:
-        logger.error(f"Timeout reached. The following stacks were still in progress: {[r.stack_name for r in remaining_requests]}")
+        logger.error(f"Timeout reached. The following stacks were still in "
+                     f"progress: {[r.stack_name for r in remaining_requests]}")
     else:
-        logger.info(f"The following stacks have been deleted successfully: {[s.stack_name for s in stack_delete_requests]}")
+        logger.info(f"The following stacks have been deleted "
+                    f"successfully: {[s.stack_name for s in stack_delete_requests]}")
 
 
 def delete_stacks(cfn_client, stack_names):
@@ -114,12 +116,14 @@ def delete_stacks_for_environment(stage_name: str):
     client = boto3.client('cloudformation')
     list_stacks_response = client.list_stacks()
     # https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/cloudformation/client/list_stacks.html
-    stack_names = [stack['StackName'] for stack in list_stacks_response['StackSummaries'] if stack['StackStatus'] not in CFN_INITIAL_STATUS_SKIP]
+    stack_names = [stack['StackName'] for stack in list_stacks_response['StackSummaries']
+                   if stack['StackStatus'] not in CFN_INITIAL_STATUS_SKIP]
     next_token = list_stacks_response.get("NextToken", None)
     # If list stacks response is paginated, continue till all stacks are retrieved
     while next_token is not None:
         next_list_stacks_response = client.list_stacks(NextToken=next_token)
-        next_stack_names = [stack['StackName'] for stack in next_list_stacks_response['StackSummaries'] if stack['StackStatus'] not in CFN_INITIAL_STATUS_SKIP]
+        next_stack_names = [stack['StackName'] for stack in next_list_stacks_response['StackSummaries']
+                            if stack['StackStatus'] not in CFN_INITIAL_STATUS_SKIP]
         stack_names.extend(next_stack_names)
         list_stacks_response.get("NextToken", None)
 
@@ -139,6 +143,7 @@ def main():
     start_time = time.time()
     delete_stacks_for_environment(args.stage)
     print(f"Total running time: {time.time() - start_time} seconds")
+
 
 if __name__ == "__main__":
     main()
