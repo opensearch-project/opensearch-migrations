@@ -183,9 +183,11 @@ def cluster_curl_cmd(ctx, cluster, path, request, header, data, json_data):
 
     try:
         cluster = ctx.env.__getattribute__(cluster)
+        if cluster is None:
+            raise AttributeError
     except AttributeError:
-        raise ValueError(f"Unknown cluster {cluster}. Currently only `source_cluster` and `target_cluster`"
-                         " are valid and must also be defined in the config file.")
+        raise click.BadArgumentUsage(f"Unknown cluster {cluster}. Currently only `source_cluster` and `target_cluster`"
+                                     " are valid and must also be defined in the config file.")
 
     if path[0] != '/':
         path = '/' + path
