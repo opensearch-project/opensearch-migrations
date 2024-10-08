@@ -30,10 +30,10 @@ def call(Map config = [:]) {
                     timeout(time: 1, unit: 'HOURS') {
                         dir('test/cleanupDeployment') {
                             script {
-                                sh "sudo --preserve-env pipenv install --deploy"
+                                sh "sudo --preserve-env pipenv install --deploy --ignore-pipfile"
                                 def command = "pipenv run python3 cleanup_deployment.py --stage ${stage}"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
-                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
                                         sh "sudo --preserve-env ${command}"
                                     }
                                 }
