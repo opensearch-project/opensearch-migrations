@@ -1,7 +1,8 @@
 package org.opensearch.migrations.testutils;
 
-import java.lang.management.ManagementFactory;
 import javax.management.MBeanServer;
+
+import java.lang.management.ManagementFactory;
 
 import com.sun.management.HotSpotDiagnosticMXBean;
 

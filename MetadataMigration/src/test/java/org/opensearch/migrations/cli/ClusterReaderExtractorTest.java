@@ -1,7 +1,5 @@
 package org.opensearch.migrations.cli;
 
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
@@ -10,6 +8,7 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.cluster.ClusterReader;
 
 import com.beust.jcommander.ParameterException;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import static org.hamcrest.CoreMatchers.equalTo;

@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay.e2etests;
 
+import javax.net.ssl.SSLException;
+
 import java.io.EOFException;
 import java.io.IOException;
 import java.net.URI;
@@ -13,14 +15,6 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
-import javax.net.ssl.SSLException;
-
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.api.parallel.ResourceLock;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 
 import org.opensearch.migrations.replay.CapturedTrafficToHttpTransactionAccumulator;
 import org.opensearch.migrations.replay.ReplayEngine;
@@ -56,6 +50,12 @@ import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.parallel.ResourceLock;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 @Slf4j
 // It would be great to test with leak detection here, but right now this test relies upon TrafficReplayer.shutdown()

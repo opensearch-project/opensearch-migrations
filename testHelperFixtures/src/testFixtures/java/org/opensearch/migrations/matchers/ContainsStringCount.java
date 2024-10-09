@@ -1,9 +1,8 @@
 package org.opensearch.migrations.matchers;
 
+import lombok.AllArgsConstructor;
 import org.hamcrest.Description;
 import org.hamcrest.TypeSafeMatcher;
-
-import lombok.AllArgsConstructor;
 
 @AllArgsConstructor
 public class ContainsStringCount extends TypeSafeMatcher<String> {

@@ -14,6 +14,12 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.locks.ReentrantLock;
 
+import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.TestRootKafkaOffloaderContext;
+import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
+
+import io.netty.buffer.Unpooled;
+import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.kafka.clients.ApiVersions;
 import org.apache.kafka.clients.producer.Callback;
 import org.apache.kafka.clients.producer.MockProducer;
@@ -28,13 +34,6 @@ import org.apache.kafka.common.serialization.StringSerializer;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-
-import org.opensearch.migrations.trafficcapture.kafkaoffloader.tracing.TestRootKafkaOffloaderContext;
-import org.opensearch.migrations.trafficcapture.tracing.ConnectionContext;
-
-import io.netty.buffer.Unpooled;
-import lombok.SneakyThrows;
-import lombok.extern.slf4j.Slf4j;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 

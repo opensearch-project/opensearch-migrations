@@ -45,7 +45,8 @@ import org.slf4j.MDC;
 
 @Slf4j
 public class RfsMigrateDocuments {
-    public static final int PROCESS_TIMED_OUT = 2;
+    public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
+    public static final int NO_WORK_LEFT_EXIT_CODE = 3;
     public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
     public static final String LOGGING_MDC_WORKER_ID = "workerId";
 
@@ -184,15 +185,12 @@ public class RfsMigrateDocuments {
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
         var connectionContext = arguments.targetArgs.toConnectionContext();
-        try (var processManager = new LeaseExpireTrigger(workItemId -> {
-            log.error("Terminating RfsMigrateDocuments because the lease has expired for " + workItemId);
-            System.exit(PROCESS_TIMED_OUT);
-        }, Clock.systemUTC());
-            var workCoordinator = new OpenSearchWorkCoordinator(
-                new CoordinateWorkHttpClient(connectionContext),
-                TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                workerId
-            )) {
+        try (var processManager = new LeaseExpireTrigger(RfsMigrateDocuments::exitOnLeaseTimeout, Clock.systemUTC());
+             var workCoordinator = new OpenSearchWorkCoordinator(
+                 new CoordinateWorkHttpClient(connectionContext),
+                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                 workerId)
+        ) {
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
             OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
             DocumentReindexer reindexer = new DocumentReindexer(targetClient,
@@ -233,10 +231,18 @@ public class RfsMigrateDocuments {
                 unpackerFactory,
                 arguments.maxShardSizeBytes,
                 context);
+        } catch (NoWorkLeftException e) {
+            log.atWarn().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
+            System.exit(NO_WORK_LEFT_EXIT_CODE);
         } catch (Exception e) {
             log.atError().setMessage("Unexpected error running RfsWorker").setCause(e).log();
             throw e;
         }
+    }
+
+    private static void exitOnLeaseTimeout(String workItemId) {
+        log.error("Terminating RfsMigrateDocuments because the lease has expired for " + workItemId);
+        System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
     }
 
     private static RootDocumentMigrationContext makeRootContext(Args arguments, String workerId) {

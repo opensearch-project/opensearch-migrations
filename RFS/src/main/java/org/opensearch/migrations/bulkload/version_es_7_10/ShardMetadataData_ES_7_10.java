@@ -4,6 +4,9 @@ import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 
+import org.opensearch.migrations.bulkload.models.ShardFileInfo;
+import org.opensearch.migrations.bulkload.models.ShardMetadata;
+
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.core.JsonParser;
@@ -12,12 +15,8 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import org.apache.lucene.util.BytesRef;
-
-import org.opensearch.migrations.bulkload.models.ShardFileInfo;
-import org.opensearch.migrations.bulkload.models.ShardMetadata;
-
 import lombok.Getter;
+import org.apache.lucene.util.BytesRef;
 
 @Getter
 public class ShardMetadataData_ES_7_10 implements ShardMetadata {

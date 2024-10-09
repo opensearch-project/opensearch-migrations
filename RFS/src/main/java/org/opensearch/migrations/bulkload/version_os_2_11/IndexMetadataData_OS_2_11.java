@@ -1,8 +1,8 @@
 package org.opensearch.migrations.bulkload.version_os_2_11;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
-
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
+
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class IndexMetadataData_OS_2_11 implements IndexMetadata {
     private ObjectNode root;

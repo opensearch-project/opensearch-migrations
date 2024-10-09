@@ -1,11 +1,10 @@
 package org.opensearch.migrations.reindexer.tracing;
 
-import io.opentelemetry.api.OpenTelemetry;
-
 import org.opensearch.migrations.bulkload.tracing.BaseRootRfsContext;
 import org.opensearch.migrations.bulkload.tracing.RootWorkCoordinationContext;
 import org.opensearch.migrations.tracing.IContextTracker;
 
+import io.opentelemetry.api.OpenTelemetry;
 import lombok.Getter;
 
 public class RootDocumentMigrationContext extends BaseRootRfsContext implements IRootDocumentMigrationContext {

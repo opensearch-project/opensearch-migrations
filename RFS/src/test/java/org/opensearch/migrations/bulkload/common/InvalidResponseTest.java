@@ -2,9 +2,9 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.util.Map;
 
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+
+import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
