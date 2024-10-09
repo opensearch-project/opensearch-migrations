@@ -1,5 +1,6 @@
-package org.opensearch.migrations.data;
+package org.opensearch.migrations.data.workloads;
 
+import java.util.List;
 import java.util.Random;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -7,15 +8,22 @@ import java.util.stream.Stream;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import static org.opensearch.migrations.data.GeneratedData.createField;
-import static org.opensearch.migrations.data.GeneratedData.createFieldTextRawKeyword;
+import static org.opensearch.migrations.data.FieldBuilders.createField;
+import static org.opensearch.migrations.data.FieldBuilders.createFieldTextRawKeyword;
+import static org.opensearch.migrations.data.RandomDataBuilders.randomElement;
 
-public class Geonames {
+public class Geonames implements Workload {
 
     private static final ObjectMapper mapper = new ObjectMapper();
-    private static final String[] countryCodes = {"US", "DE", "FR", "GB", "CN", "IN", "BR"};
+    private static final String[] COUNTRY_CODES = {"US", "DE", "FR", "GB", "CN", "IN", "BR"};
 
-    public static ObjectNode generateGeonameIndex() {
+    @Override
+    public List<String> indexNames() {
+        return List.of("geonames");
+    }
+
+    @Override
+    public ObjectNode createIndex(ObjectNode defaultSettings) {
         var properties = mapper.createObjectNode();
         
         properties.set("geonameId", createField("long"));
@@ -40,10 +48,12 @@ public class Geonames {
 
         var index = mapper.createObjectNode();
         index.set("mappings", mappings);
+        index.set("settings", defaultSettings);
         return index;
     }
 
-    public static Stream<ObjectNode> generateGeoNameDocs(int numDocs) {
+    @Override
+    public Stream<ObjectNode> createDocs(int numDocs) {
         var random = new Random(1L);
 
         return IntStream.range(0, numDocs)
@@ -79,6 +89,6 @@ public class Geonames {
     }
 
     private static String randomCountryCode(Random random) {
-        return countryCodes[random.nextInt(countryCodes.length)];
+        return randomElement(COUNTRY_CODES, random);
     }
 }

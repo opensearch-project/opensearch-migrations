@@ -1,6 +1,9 @@
-package org.opensearch.migrations.data;
+package org.opensearch.migrations.data.workloads;
 
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Random;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
@@ -8,12 +11,12 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import lombok.experimental.UtilityClass;
+import static org.opensearch.migrations.data.FieldBuilders.createField;
+import static org.opensearch.migrations.data.RandomDataBuilders.randomElement;
+import static org.opensearch.migrations.data.RandomDataBuilders.randomTime;
+import static org.opensearch.migrations.data.RandomDataBuilders.randomTimeISOString;
 
-import static org.opensearch.migrations.data.GeneratedData.createField;
-
-@UtilityClass
-public class Nested {
+public class Nested implements Workload {
 
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final String[] USER_NAMES = {
@@ -29,9 +32,14 @@ public class Nested {
         "hello", "world", "data", "code", "example", "test", "random",
         "generate", "method", "class", "object", "function"
     };
-    private static final int ONE_DAY_IN_MILLIS = 24 * 60 * 60 * 1000;
 
-    public static ObjectNode generateNestedIndex() {
+    @Override
+    public List<String> indexNames() {
+        return List.of("nyc_taxis");
+    }
+
+    @Override
+    public ObjectNode createIndex(ObjectNode defaultSettings) {
         var properties = mapper.createObjectNode();
         properties.set("user", createField("keyword"));
         properties.set("creationDate", createField("date"));
@@ -51,10 +59,13 @@ public class Nested {
 
         var index = mapper.createObjectNode();
         index.set("mappings", mappings);
+        index.set("settings", defaultSettings);
+
         return index;
     }
 
-    public static Stream<ObjectNode> generateNestedDocs(int numDocs) {
+    @Override
+    public Stream<ObjectNode> createDocs(int numDocs) {
         var random = new Random(1L);
         var currentTime = System.currentTimeMillis();
 
@@ -63,10 +74,10 @@ public class Nested {
                 var doc = mapper.createObjectNode();
                 doc.put("qid", i + 1000);
                 doc.put("user", randomUser(random));
-                var creationTime = randomTimeWithin24Hours(currentTime, random);
-                doc.put("creationDate", creationTime /** TODO */);
+                var creationTime = randomTime(currentTime, random);
+                doc.put("creationDate", creationTime);
                 doc.put("title", randomTitle(random));
-                doc.put("tag", randomTag(random));
+                doc.set("tag", randomTags(random));
                 var children = generateAnswers(mapper, creationTime, random);
                 doc.set("answers", children);
                 return doc;
@@ -80,25 +91,36 @@ public class Nested {
 
         for (int i = 0; i < numAnswers; i++) {
             var answer = mapper.createObjectNode();
-            var answerTime = randomTimeWithin24Hours(timeFrom, random);
-            answer.put("date", answerTime /** TODO */);
-            answer.set("user", randomUser(random));
+            answer.put("date", randomTimeISOString(timeFrom, random));
+            answer.put("user", randomUser(random));
 
             answers.add(answer);
         }
         return answers;
     }
 
-    private static long randomTimeWithin24Hours(long timeFrom, Random random) {
-        return timeFrom - random.nextInt(ONE_DAY_IN_MILLIS);
-    }
-
     private static String randomUser(Random random) {
-        return USER_NAMES[random.nextInt(USER_NAMES.length)] + " (" + random.nextInt(10) + 1000 + ")";
+        // Extra random int simulates more users
+        return randomElement(USER_NAMES, random) + " (" + (random.nextInt(10) + 1000) + ")";
     }
 
-    private static String randomTags(Random random) {
+    private static ArrayNode randomTags(Random random) {
         var tags = mapper.createArrayNode();
-        return TAGS[random.nextInt(TAGS.length)] + "v" + random.nextInt(10);
+        var tagsToCreate = random.nextInt(3);
+
+        for (int i = 0; i < tagsToCreate; i++) {
+            tags.add(randomElement(TAGS, random) + "v" + random.nextInt(10)); // Extra random int simulates more tags
+        }
+        return tags;
+    }
+
+    private static String randomTitle(Random random) {
+        var titleWordLength = random.nextInt(5);
+        var words = new ArrayList<String>();
+        
+        for (int i = 0; i < titleWordLength; i++) {
+            words.add(randomElement(WORDS, random) + "" + random.nextInt(10));  // Extra random int simulates more words
+        }
+        return words.stream().collect(Collectors.joining(" "));
     }
 }

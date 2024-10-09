@@ -1,7 +1,6 @@
-package org.opensearch.migrations.data;
+package org.opensearch.migrations.data.workloads;
 
-import java.text.SimpleDateFormat;
-import java.util.Date;
+import java.util.List;
 import java.util.Random;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
@@ -9,25 +8,37 @@ import java.util.stream.Stream;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
-import lombok.experimental.UtilityClass;
+import static org.opensearch.migrations.data.FieldBuilders.createField;
+import static org.opensearch.migrations.data.FieldBuilders.createFieldTextRawKeyword;
+import static org.opensearch.migrations.data.RandomDataBuilders.randomElement;
+import static org.opensearch.migrations.data.RandomDataBuilders.randomTime;
 
-import static org.opensearch.migrations.data.GeneratedData.createField;
-import static org.opensearch.migrations.data.GeneratedData.createFieldTextRawKeyword;
-
-@UtilityClass
-public class HttpLogs {
+public class HttpLogs implements Workload {
 
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final String[] HTTP_METHODS = {"GET", "POST", "PUT", "DELETE"};
     private static final String[] URLS = {"/home", "/login", "/search", "/api/data", "/contact"};
     private static final int[] RESPONSE_CODES = {200, 201, 400, 401, 403, 404, 500};
-    private static final int ONE_DAY_IN_MILLIS = 24 * 60 * 60 * 1000;
 
-    public static ObjectNode generateHttpLogIndex() {
+    @Override
+    public List<String> indexNames() {
+        return List.of(
+            "logs-181998",
+            "logs-191998",
+            "logs-201998",
+            "logs-211998",
+            "logs-221998",
+            "logs-231998",
+            "logs-241998"
+        );
+    }
+
+    @Override
+    public ObjectNode createIndex(ObjectNode defaultSettings) {
         var properties = mapper.createObjectNode();
         properties.set("logId", createField("integer"));
         var timestamp = createField("date");
-        timestamp.put("format", "strict_date_optional_time||epoch_second")
+        timestamp.put("format", "strict_date_optional_time||epoch_second");
         properties.set("@timestamp", timestamp);
         var message = createField("keyword");
         message.put("index", false);
@@ -54,10 +65,12 @@ public class HttpLogs {
 
         var index = mapper.createObjectNode();
         index.set("mappings", mappings);
+        index.set("settings", defaultSettings);
         return index;
     }
 
-    public static Stream<ObjectNode> generateHttpLogDocs(int numDocs) {
+    @Override
+    public Stream<ObjectNode> createDocs(int numDocs) {
         var random = new Random(1L);
         var currentTime = System.currentTimeMillis();
 
@@ -66,8 +79,8 @@ public class HttpLogs {
                 ObjectNode doc = mapper.createObjectNode();
                 doc.put("logId", i + 1000);
                 doc.put("clientip", randomIpAddress(random));
-                doc.put("@timestamp", randomTimeWithin24Hours(currentTime, random));
-                doc.put("request", randomHttpMethod(random) + " " + randomUrl(random) + " HTTP/1.0");
+                doc.put("@timestamp", randomTime(currentTime, random));
+                doc.put("request", randomRequest(random));
                 doc.put("status", randomStatus(random));
                 doc.put("size", randomResponseSize(random));
                 return doc;
@@ -79,20 +92,20 @@ public class HttpLogs {
         return random.nextInt(256) + "." + random.nextInt(256) + "." + random.nextInt(256) + "." + random.nextInt(256);
     }
 
-    private static long randomTimeWithin24Hours(long timeFrom, Random random) {
-        return timeFrom - random.nextInt(ONE_DAY_IN_MILLIS);
+    private static String randomHttpMethod(Random random) {
+        return randomElement(HTTP_METHODS, random);
     }
 
-    private static String randomHttpMethod(Random random) {
-        return HTTP_METHODS[random.nextInt(HTTP_METHODS.length)];
+    private static String randomRequest(Random random) {
+        return randomHttpMethod(random) + " " + randomUrl(random) + " HTTP/1.0";
     }
 
     private static String randomUrl(Random random) {
-        return URLS[random.nextInt(URLS.length)];
+        return randomElement(URLS, random);
     }
 
     private static int randomStatus(Random random) {
-        return RESPONSE_CODES[random.nextInt(RESPONSE_CODES.length)];
+        return randomElement(RESPONSE_CODES, random);
     }
 
     private static int randomResponseSize(Random random) {
