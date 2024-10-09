@@ -3,13 +3,12 @@ package org.opensearch.migrations.bulkload.common;
 import java.util.List;
 import java.util.Optional;
 
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
+
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-
-import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
-
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 

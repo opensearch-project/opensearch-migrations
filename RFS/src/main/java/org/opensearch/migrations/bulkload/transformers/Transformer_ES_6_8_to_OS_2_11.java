@@ -2,9 +2,6 @@ package org.opensearch.migrations.bulkload.transformers;
 
 import java.util.List;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.version_os_2_11.GlobalMetadataData_OS_2_11;
@@ -13,6 +10,8 @@ import org.opensearch.migrations.transformation.TransformationRule;
 import org.opensearch.migrations.transformation.entity.Index;
 import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j

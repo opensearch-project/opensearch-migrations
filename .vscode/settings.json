@@ -1,0 +1,4 @@
+{
+    "java.compile.nullAnalysis.mode": "automatic",
+    "java.completion.importOrder": ["javax","java","org.opensearch","","#"]
+}

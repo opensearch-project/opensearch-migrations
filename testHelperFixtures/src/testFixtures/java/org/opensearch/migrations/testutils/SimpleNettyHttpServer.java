@@ -1,5 +1,8 @@
 package org.opensearch.migrations.testutils;
 
+import javax.net.ssl.SSLContext;
+import javax.net.ssl.SSLEngine;
+
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Duration;
@@ -8,8 +11,6 @@ import java.util.Map;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
-import javax.net.ssl.SSLContext;
-import javax.net.ssl.SSLEngine;
 
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.Unpooled;

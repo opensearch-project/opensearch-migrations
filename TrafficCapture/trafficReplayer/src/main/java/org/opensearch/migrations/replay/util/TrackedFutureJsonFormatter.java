@@ -8,7 +8,6 @@ import java.util.function.Function;
 import java.util.stream.Collectors;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-
 import lombok.Lombok;
 import lombok.NonNull;
 import lombok.SneakyThrows;

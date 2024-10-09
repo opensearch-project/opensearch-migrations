@@ -73,12 +73,12 @@ A set of demo context values (using the `demo-deploy` label) has been set in the
 
 This demo solution can be deployed with the following command:
 ```shell
-cdk deploy "*" --c contextId=demo-deploy --require-approval never --concurrency 3
+./deploy.sh demo-deploy
 ```
 
 Additionally, another context block in the `cdk.context.json` could be created with say the label `uat-deploy` with its own custom context configuration and be deployed with the command:
 ```shell
-cdk deploy "*" --c contextId=uat-deploy --require-approval never --concurrency 3
+./deploy.sh uat-deploy
 ```
 **Note**: Separate deployments within the same account and region should use unique `stage` context values to avoid resource naming conflicts when deploying (**Except** in the multiple replay scenario stated [here](#how-to-run-multiple-traffic-replayer-scenarios))
 
@@ -155,7 +155,7 @@ To give an example of this process, a user could decide to configure an addition
 ```
 And then deploy this additional infrastructure with the command:
 ```shell
-cdk deploy "*" --c contextId=demo-addon1 --require-approval never --concurrency 3
+./deploy.sh demo-addon1
 ```
 
 Finally, the additional infrastructure can be removed with:

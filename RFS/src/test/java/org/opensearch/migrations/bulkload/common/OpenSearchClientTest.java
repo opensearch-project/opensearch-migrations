@@ -5,12 +5,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import com.fasterxml.jackson.core.StreamReadFeature;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.json.JsonMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer.BulkDocSection;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
@@ -20,7 +14,12 @@ import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 
+import com.fasterxml.jackson.core.StreamReadFeature;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.SneakyThrows;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mockito;
 import reactor.core.publisher.Mono;
@@ -30,8 +29,6 @@ import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntry;
-import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntryFailure;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -44,6 +41,8 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
+import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntry;
+import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntryFailure;
 
 class OpenSearchClientTest {
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder()

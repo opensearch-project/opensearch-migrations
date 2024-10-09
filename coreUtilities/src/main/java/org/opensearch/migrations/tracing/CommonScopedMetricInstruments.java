@@ -7,7 +7,6 @@ import java.util.stream.DoubleStream;
 import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.Meter;
-
 import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 

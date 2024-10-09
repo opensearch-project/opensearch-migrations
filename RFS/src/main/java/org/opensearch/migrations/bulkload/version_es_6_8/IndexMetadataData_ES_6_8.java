@@ -1,11 +1,10 @@
 package org.opensearch.migrations.bulkload.version_es_6_8;
 
-import com.fasterxml.jackson.databind.JsonNode;
-import com.fasterxml.jackson.databind.node.ObjectNode;
-
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.transformers.TransformFunctions;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.Getter;
 
 public class IndexMetadataData_ES_6_8 implements IndexMetadata {

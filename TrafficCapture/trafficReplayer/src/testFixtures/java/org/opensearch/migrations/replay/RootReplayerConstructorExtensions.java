@@ -1,8 +1,9 @@
 package org.opensearch.migrations.replay;
 
+import javax.net.ssl.SSLException;
+
 import java.net.URI;
 import java.time.Duration;
-import javax.net.ssl.SSLException;
 
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BufferedFlowController;
