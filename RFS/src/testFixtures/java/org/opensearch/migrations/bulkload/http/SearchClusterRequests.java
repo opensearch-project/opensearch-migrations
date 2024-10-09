@@ -5,11 +5,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 
 import static org.hamcrest.MatcherAssert.assertThat;

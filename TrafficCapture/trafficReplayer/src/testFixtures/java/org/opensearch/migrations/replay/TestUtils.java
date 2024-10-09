@@ -15,8 +15,6 @@ import java.util.function.Function;
 import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 
-import org.junit.jupiter.api.Assertions;
-
 import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.replay.datahandlers.IPacketConsumer;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
@@ -35,6 +33,7 @@ import io.netty.handler.codec.http.HttpContentDecompressor;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpRequestDecoder;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Assertions;
 
 @Slf4j
 public class TestUtils {

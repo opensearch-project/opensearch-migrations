@@ -11,11 +11,10 @@ import java.util.function.Predicate;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-
 import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.buffer.ByteBuf;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;

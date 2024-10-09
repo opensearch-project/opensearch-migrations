@@ -7,7 +7,6 @@ import java.util.List;
 import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonParser;
 import com.fasterxml.jackson.core.JsonToken;
-
 import lombok.Builder;
 import lombok.Getter;
 import lombok.experimental.UtilityClass;

@@ -1,10 +1,10 @@
 package org.opensearch.migrations.bulkload.tracing;
 
-import io.opentelemetry.api.OpenTelemetry;
-
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.RootOtelContext;
+
+import io.opentelemetry.api.OpenTelemetry;
 
 public class RootWorkCoordinationContext extends RootOtelContext {
     private static final String SCOPE_NAME = "workCoordination";

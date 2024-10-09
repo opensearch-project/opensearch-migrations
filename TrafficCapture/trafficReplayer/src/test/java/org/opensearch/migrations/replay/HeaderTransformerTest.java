@@ -10,9 +10,6 @@ import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.util.TrackedFuture;
@@ -21,6 +18,8 @@ import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 2)

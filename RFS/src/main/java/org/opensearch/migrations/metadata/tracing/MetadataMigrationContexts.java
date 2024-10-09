@@ -1,7 +1,5 @@
 package org.opensearch.migrations.metadata.tracing;
 
-import io.opentelemetry.api.metrics.Meter;
-
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.bulkload.tracing.RfsContexts;
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
@@ -9,6 +7,7 @@ import org.opensearch.migrations.tracing.BaseSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
+import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
 
 public interface MetadataMigrationContexts {

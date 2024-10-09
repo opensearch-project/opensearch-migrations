@@ -15,12 +15,6 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import com.google.protobuf.ByteString;
-import com.google.protobuf.Timestamp;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.replay.RootReplayerConstructorExtensions;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TransformationLoader;
@@ -38,7 +32,12 @@ import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 
+import com.google.protobuf.ByteString;
+import com.google.protobuf.Timestamp;
 import lombok.SneakyThrows;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 
 public class SlowAndExpiredTrafficStreamBecomesTwoTargetChannelsTest {
 
