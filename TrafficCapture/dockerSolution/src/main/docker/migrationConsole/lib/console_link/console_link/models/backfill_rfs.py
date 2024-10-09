@@ -92,7 +92,7 @@ class ECSRFSBackfill(RFSBackfill):
         super().__init__(config)
         self.client_options = client_options
         self.target_cluster = target_cluster
-        self.default_scale = self.config["reindex_from_snapshot"].get("scale", 1)
+        self.default_scale = self.config["reindex_from_snapshot"].get("scale", 5)
 
         self.ecs_config = self.config["reindex_from_snapshot"]["ecs"]
         self.ecs_client = ECSService(cluster_name=self.ecs_config["cluster_name"],
