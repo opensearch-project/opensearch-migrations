@@ -48,7 +48,7 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
     // if it's configured to output at all
     private static Logger makeTransactionSummaryLogger() {
         var logger = LoggerFactory.getLogger(TRANSACTION_SUMMARY_LOGGER);
-        logger.atInfo().setMessage("{}").addArgument(ResultsToLogsConsumer::getTransactionSummaryStringPreamble).log();
+        logger.atDebug().setMessage("{}").addArgument(ResultsToLogsConsumer::getTransactionSummaryStringPreamble).log();
         return logger;
     }
 
@@ -76,7 +76,7 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
      * Writes a tuple object to an output stream as a JSON object.
      * The JSON tuple is output on one line, and has several objects: "sourceRequest", "sourceResponse",
      * "targetRequest", and "targetResponses". The "connectionId", "numRequests", and "numErrors" are also included to aid in debugging.
-     * An example of the format is below.
+     * An example of the format is below to highlight the different possibilities in the format, not to convey the representation for an actual http exchange.
      * <p>
      * {
      *   "sourceRequest": {
@@ -99,7 +99,7 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
      *     "header-1": "Accept: application/json",
      *     "header-2": "Authorization: Bearer token",
      *     "payload": {
-     *       "inlinedBinaryBody": "ByteBuf{...}"
+     *       "inlinedBinaryBody": ByteBuf{...}
      *     }
      *   },
      *   "sourceResponse": {
@@ -130,7 +130,7 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
      *   "connectionId": "conn-12345",
      *   "numRequests": 5,
      *   "numErrors": 1,
-     *   "error": "TimeoutException: Request timed out"
+     *   "error": "Request timed out"
      * }
      *
      * @param tuple the RequestResponseResponseTriple object to be converted into json and written to the stream.

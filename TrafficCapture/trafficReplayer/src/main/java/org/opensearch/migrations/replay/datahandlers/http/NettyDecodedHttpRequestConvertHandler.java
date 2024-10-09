@@ -30,7 +30,7 @@ public class NettyDecodedHttpRequestConvertHandler extends ChannelInboundHandler
         if (msg instanceof HttpRequest) {
             httpTransactionContext.onHeaderParse();
             var request = (HttpRequest) msg;
-            log.atInfo()
+            log.atDebug()
                 .setMessage(
                     () -> diagnosticLabel
                         + " parsed request: "
@@ -42,7 +42,7 @@ public class NettyDecodedHttpRequestConvertHandler extends ChannelInboundHandler
                 )
                 .log();
             var httpJsonMessage = parseHeadersIntoMessage(request);
-                ctx.fireChannelRead(httpJsonMessage);
+            ctx.fireChannelRead(httpJsonMessage);
         } else {
             super.channelRead(ctx, msg);
         }

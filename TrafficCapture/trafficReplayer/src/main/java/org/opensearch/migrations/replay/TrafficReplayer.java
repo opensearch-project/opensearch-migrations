@@ -241,6 +241,7 @@ public class TrafficReplayer {
     }
 
     public interface TransformerParams {
+        String getTransformerConfigParameterArgPrefix();
         String getTransformerConfigEncoded();
         String getTransformerConfig();
         String getTransformerConfigFile();
@@ -248,10 +249,15 @@ public class TrafficReplayer {
 
     @Getter
     public static class RequestTransformationParams implements TransformerParams {
+        @Override
+        public String getTransformerConfigParameterArgPrefix() {
+            return REQUEST_TRANSFORMER_ARG_PREFIX;
+        }
+        private final static String REQUEST_TRANSFORMER_ARG_PREFIX = "";
 
         @Parameter(
             required = false,
-            names = "--transformer-config-encoded",
+            names = "--" + REQUEST_TRANSFORMER_ARG_PREFIX + "transformer-config-encoded",
             arity = 1,
             description = "Configuration of message transformers.  The same contents as --transformer-config but " +
                 "Base64 encoded so that the configuration is easier to pass as a command line parameter.")
@@ -259,7 +265,7 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = "--transformer-config",
+            names = "--" + REQUEST_TRANSFORMER_ARG_PREFIX + "transformer-config",
             arity = 1,
             description = "Configuration of message transformers.  Either as a string that identifies the "
                 + "transformer that should be run (with default settings) or as json to specify options "
@@ -270,7 +276,7 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = "--transformer-config-file",
+            names = "--" + REQUEST_TRANSFORMER_ARG_PREFIX + "transformer-config-file",
             arity = 1,
             description = "Path to the JSON configuration file of message transformers.")
         private String transformerConfigFile;
@@ -278,10 +284,14 @@ public class TrafficReplayer {
 
     @Getter
     public static class TupleTransformationParams implements TransformerParams {
+        public String getTransformerConfigParameterArgPrefix() {
+            return TUPLE_TRANSFORMER_CONFIG_PARAMETER_ARG_PREFIX;
+        }
+        final static String TUPLE_TRANSFORMER_CONFIG_PARAMETER_ARG_PREFIX = "tuple-";
 
         @Parameter(
             required = false,
-            names = "--tuple-transformer-config-base64",
+            names = "--" + TUPLE_TRANSFORMER_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config-base64",
             arity = 1,
             description = "Configuration of tuple transformers.  The same contents as --tuple-transformer-config but " +
                 "Base64 encoded so that the configuration is easier to pass as a command line parameter.")
@@ -289,7 +299,7 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = "--tuple-transformer-config",
+            names = "--" + TUPLE_TRANSFORMER_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config",
             arity = 1,
             description = "Configuration of tuple transformers.  Either as a string that identifies the "
                 + "transformer that should be run (with default settings) or as json to specify options "
@@ -300,7 +310,7 @@ public class TrafficReplayer {
 
         @Parameter(
             required = false,
-            names = "--tuple-transformer-config-file",
+            names = "--" + TUPLE_TRANSFORMER_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config-file",
             arity = 1,
             description = "Path to the JSON configuration file of tuple transformers.")
         private String transformerConfigFile;
@@ -331,8 +341,10 @@ public class TrafficReplayer {
                 isConfigured(params.getTransformerConfigEncoded()) +
                 isConfigured(params.getTransformerConfig());
         if (configuredCount > 1) {
-            System.err.println("Specify only one of --[...]transformer-config-base64, --[...]transformer-config or " +
-                "--[...]transformer-config-file.");
+            System.err.println("Specify only one of " +
+                "--" + params.getTransformerConfigParameterArgPrefix() + "transformer-config-base64" + ", " +
+                "--" + params.getTransformerConfigParameterArgPrefix() + "transformer-config" + ", or " +
+                "--" + params.getTransformerConfigParameterArgPrefix() + "transformer-config-file" + ".");
             System.exit(4);
         }
 
@@ -463,7 +475,7 @@ public class TrafficReplayer {
 
             setupShutdownHookForReplayer(tr);
             var tupleWriter = new TupleParserChainConsumer(new ResultsToLogsConsumer(null, null,
-                new TransformationLoader().getTransformerFactoryLoader(null, null, tupleTransformerConfig)));
+                new TransformationLoader().getTransformerFactoryLoader(tupleTransformerConfig)));
             tr.setupRunAndWaitForReplayWithShutdownChecks(
                 Duration.ofSeconds(params.observedPacketConnectionTimeout),
                 serverTimeout,

@@ -24,7 +24,6 @@ import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
-import io.netty.channel.ChannelHandler;
 import io.netty.handler.codec.base64.Base64Dialect;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
@@ -171,21 +170,18 @@ public class ParsedHttpMessagesAsDicts {
         @NonNull List<byte[]> data
     ) {
         return makeSafeMap(context, () -> {
-            ChannelHandler[] channelHandlers = new ChannelHandler[]{
-                new NettyDecodedHttpRequestConvertHandler(
-                    context.getLogicalEnclosingScope().createTransformationContext()),
-                new NettyJsonBodyAccumulateHandler(
-                    context.getLogicalEnclosingScope().createTransformationContext())
-            };
-            try (var messageHolder = RefSafeHolder.create(
+            try (var transformationCtx = context.getLogicalEnclosingScope().createTransformationContext();
+                var messageHolder = RefSafeHolder.create(
                     RefSafeStreamUtils.refSafeTransform(
                     data.stream(),
                     Unpooled::wrappedBuffer,
                     byteBufStream ->
                         HttpByteBufFormatter.processHttpMessageFromBufs(
-                        HttpMessageType.REQUEST,
+                            HttpMessageType.REQUEST,
                             byteBufStream,
-                            channelHandlers)
+                            new NettyDecodedHttpRequestConvertHandler(transformationCtx),
+                            new NettyJsonBodyAccumulateHandler(transformationCtx)
+                        )
                     ))) {
                 var message = (HttpJsonRequestWithFaultingPayload) messageHolder.get();
                 if (message != null) {
@@ -214,30 +210,27 @@ public class ParsedHttpMessagesAsDicts {
         Duration latency
     ) {
         return makeSafeMap(context, () -> {
-            ChannelHandler[] channelHandlers = new ChannelHandler[]{
-                new NettyDecodedHttpResponseConvertHandler(
-                    context.getLogicalEnclosingScope().createTransformationContext()),
-                new NettyJsonBodyAccumulateHandler(
-                    context.getLogicalEnclosingScope().createTransformationContext())
-            };
-            try (var messageHolder = RefSafeHolder.create(
-                RefSafeStreamUtils.refSafeTransform(
-                    data.stream(),
-                    Unpooled::wrappedBuffer,
-                    byteBufStream ->
-                        HttpByteBufFormatter.processHttpMessageFromBufs(
-                            HttpMessageType.RESPONSE,
-                            byteBufStream,
-                            channelHandlers)
-                ))) {
+            try (var transformationCtx = context.getLogicalEnclosingScope().createTransformationContext();
+                var messageHolder = RefSafeHolder.create(
+                    RefSafeStreamUtils.refSafeTransform(
+                        data.stream(),
+                        Unpooled::wrappedBuffer,
+                        byteBufStream ->
+                            HttpByteBufFormatter.processHttpMessageFromBufs(
+                                HttpMessageType.RESPONSE,
+                                byteBufStream,
+                                new NettyDecodedHttpResponseConvertHandler(transformationCtx),
+                                new NettyJsonBodyAccumulateHandler(transformationCtx)
+                            )
+                    ))) {
                 var message = (HttpJsonResponseWithFaultingPayload) messageHolder.get();
                 if (message != null) {
                     var map = new LinkedHashMap<>(message.headers());
-                    context.setHttpVersion(message.protocol());
                     map.put("HTTP-Version", message.protocol());
                     map.put(STATUS_CODE_KEY, Integer.parseInt(message.code()));
                     map.put("Reason-Phrase", message.reason());
                     map.put(RESPONSE_TIME_MS_KEY, latency.toMillis());
+                    context.setHttpVersion(message.protocol());
                     encodeBinaryPayloadIfExists(message);
                     if (!message.payload().isEmpty()) {
                         map.put("payload", message.payload());
@@ -254,6 +247,8 @@ public class ParsedHttpMessagesAsDicts {
         if (message.payload() != null) {
             if (message.payload().containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY)) {
                 var byteBufBinaryBody = (ByteBuf) message.payload().get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
+                assert !message.payload().containsKey(JsonKeysForHttpMessage.INLINED_BASE64_BODY_DOCUMENT_KEY) :
+                    "Expected " + JsonKeysForHttpMessage.INLINED_BASE64_BODY_DOCUMENT_KEY + " to not exist.";
                 message.payload().put(JsonKeysForHttpMessage.INLINED_BASE64_BODY_DOCUMENT_KEY, byteBufToBase64String(byteBufBinaryBody));
                 message.payload().remove(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
                 byteBufBinaryBody.release();

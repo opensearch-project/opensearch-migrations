@@ -90,7 +90,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
             dummyAggregatedResponse
         );
         var transformingHandler = new HttpJsonTransformingConsumer<>(
-            new TransformationLoader().getTransformerFactoryLoader(hostTransformation ? "bar.example" : null),
+            new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(hostTransformation ? "bar.example" : null),
             null,
             testPacketCapture,
             rootContext.getTestConnectionRequestContext(0)
@@ -138,7 +138,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var transformingHandler = new HttpJsonTransformingConsumer<>(
-            new TransformationLoader().getTransformerFactoryLoader("test.domain"),
+            new TransformationLoader().getTransformerFactoryLoaderWithNewHostName("test.domain"),
             RemovingAuthTransformerFactory.instance,
             testPacketCapture,
             rootContext.getTestConnectionRequestContext(0)
@@ -175,7 +175,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
             "   } " +
             "}";
         String fullConfig = "[{\"JsonJoltTransformerProvider\": { \"script\": " + redactBody + "}}]";
-        IJsonTransformer jsonJoltTransformer = new TransformationLoader().getTransformerFactoryLoader(null, null, fullConfig);
+        IJsonTransformer jsonJoltTransformer = new TransformationLoader().getTransformerFactoryLoader(fullConfig);
 
         var transformingHandler = new HttpJsonTransformingConsumer<>(
             jsonJoltTransformer,
@@ -290,13 +290,14 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var sizeCalculatingTransformer = new JsonCompositeTransformer(incomingJson -> {
             var payload = (Map) incomingJson.get("payload");
-            Assertions.assertNull(payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
-            Assertions.assertNotNull(payload.get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY));
+            Assertions.assertFalse(payload.containsKey(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
+            Assertions.assertFalse(payload.containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY));
+            Assertions.assertNotNull(payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY));
             var list = (List) payload.get(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY);
-            var leftoverBytes = (ByteBuf) payload.get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
+            var leftoverString = (String) payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY);
             var headers = (Map<String,Object>) incomingJson.get("headers");
             headers.put("listSize", "" + list.size());
-            headers.put("leftover", "" + leftoverBytes.readableBytes());
+            headers.put("leftover", "" + leftoverString.getBytes(StandardCharsets.UTF_8).length);
             return incomingJson;
         });
         var transformingHandler = new HttpJsonTransformingConsumer<AggregatedRawResponse>(

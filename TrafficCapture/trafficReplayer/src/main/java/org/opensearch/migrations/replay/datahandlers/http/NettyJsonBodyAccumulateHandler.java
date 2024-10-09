@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
 import java.nio.charset.CharacterCodingException;
 import java.nio.charset.CodingErrorAction;
 import java.nio.charset.StandardCharsets;
@@ -120,33 +122,32 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
                     assert accumulatedBody.readerIndex() == 0 :
                         "Didn't expect the reader index to advance since this is an internal object";
 
-                    // Attempt to encode as utf-8, if not, fallback to binary body
-                    if (Optional.ofNullable(capturedHttpJsonMessage.headers().getInsensitive(HttpHeaderNames.CONTENT_TYPE.toString()))
-                        .map(s -> s.stream().anyMatch(v -> v.startsWith("text"))).orElse(false)) {
-                        var decoder = StandardCharsets.UTF_8.newDecoder();
-                        decoder.onMalformedInput(CodingErrorAction.REPORT);
-                        decoder.onUnmappableCharacter(CodingErrorAction.REPORT);
-
+                    var leftoverBody = accumulatedBody.slice(jsonBodyByteLength,
+                        accumulatedBody.readableBytes() - jsonBodyByteLength);
+                    if (jsonBodyByteLength == 0 && isRequestContentTypeNotText(capturedHttpJsonMessage)) {
+                        context.onPayloadSetBinary();
+                        capturedHttpJsonMessage.payload()
+                            .put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
+                                leftoverBody.retainedDuplicate()
+                            );
+                    } else {
+                        // Attempt to decode as utf-8, if not, fallback to binary body
                         try {
-                            // Try to decode the ByteBuffer
-                            var rawBuffer = accumulatedBody.nioBuffer();
-                            var charBuffer = decoder.decode(rawBuffer);
+                            var charBuffer = decodeToUTF8(leftoverBody.nioBuffer());
                             capturedHttpJsonMessage.payload()
                                 .put(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY,
                                     charBuffer.toString());
+                            context.onTextPayloadParseSucceeded();
                         } catch (CharacterCodingException e) {
-                            log.atTrace().setMessage("Payload not valid utf-8, falback to binary")
+                            context.onTextPayloadParseFailed();
+                            log.atDebug().setMessage("Payload not valid utf-8, fallback to binary")
                                 .setCause(e).log();
+                            context.onPayloadSetBinary();
                             capturedHttpJsonMessage.payload()
                                 .put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
                                     accumulatedBody.retainedSlice(jsonBodyByteLength,
                                         accumulatedBody.readableBytes() - jsonBodyByteLength));
                         }
-                    } else {
-                        capturedHttpJsonMessage.payload()
-                            .put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
-                                accumulatedBody.retainedSlice(jsonBodyByteLength,
-                                    accumulatedBody.readableBytes() - jsonBodyByteLength));
                     }
                 }
                 accumulatedBody.release();
@@ -156,5 +157,23 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
         } else {
             super.channelRead(ctx, msg);
         }
+    }
+
+    private boolean isRequestContentTypeNotText(HttpJsonMessageWithFaultingPayload message) {
+        // ContentType not text if specified and has a value with / and that value does not start with text/
+        return Optional.ofNullable(capturedHttpJsonMessage.headers().insensitiveGet(HttpHeaderNames.CONTENT_TYPE.toString()))
+            .map(s -> s.stream()
+                .filter(v -> v.contains("/"))
+                .filter(v -> !v.startsWith("text/"))
+                .count() > 1
+            )
+            .orElse(false);
+    }
+
+    private CharBuffer decodeToUTF8(ByteBuffer buffer) throws CharacterCodingException {
+        var decoder = StandardCharsets.UTF_8.newDecoder();
+        decoder.onMalformedInput(CodingErrorAction.REPORT);
+        decoder.onUnmappableCharacter(CodingErrorAction.REPORT);
+        return decoder.decode(buffer);
     }
 }

@@ -32,7 +32,8 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
             } else if (payload.containsKey(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY)) {
                 serializePayloadList(ctx,
                     (List) payload.get(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY),
-                    !payload.containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY));
+                    !payload.containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY) &&
+                        !payload.containsKey(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY));
             }
             if (payload.containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY)) {
                 var rawBody = (ByteBuf) payload.get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);

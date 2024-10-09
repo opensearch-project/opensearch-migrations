@@ -17,8 +17,8 @@ public class TransformationLoaderTest {
 
     @Test
     public void testTransformationLoader() throws Exception {
-        var toNewHostTransformer = new TransformationLoader().getTransformerFactoryLoader("testhostname");
-        var toOldHostTransformer = new TransformationLoader().getTransformerFactoryLoader("localhost");
+        var toNewHostTransformer = new TransformationLoader().getTransformerFactoryLoaderWithNewHostName("testhostname");
+        var toOldHostTransformer = new TransformationLoader().getTransformerFactoryLoaderWithNewHostName("localhost");
         var origDoc = parseAsMap(SampleContents.loadSampleJsonRequestAsString());
         var origDocStr = mapper.writeValueAsString(origDoc);
         var outputWithNewHostname = toNewHostTransformer.transformJson(origDoc);
@@ -52,7 +52,7 @@ public class TransformationLoaderTest {
     @Test
     public void testThatNoConfigMeansNoThrow() throws Exception {
         var transformer = Assertions.assertDoesNotThrow(
-            () -> new TransformationLoader().getTransformerFactoryLoader("localhost")
+            () -> new TransformationLoader().getTransformerFactoryLoaderWithNewHostName("localhost")
         );
         Assertions.assertNotNull(transformer);
         var origDoc = parseAsMap(SampleContents.loadSampleJsonRequestAsString());

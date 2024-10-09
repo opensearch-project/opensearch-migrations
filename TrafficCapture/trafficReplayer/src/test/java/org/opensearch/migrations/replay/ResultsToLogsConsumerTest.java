@@ -124,12 +124,11 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "\"sourceRequest\": { " +
             "    \"Host\": [ \"foo.example\" ], " +
             "    \"auTHorization\": [ \"Basic YWRtaW46YWRtaW4=\" ], " +
-            "    \"Content-Type\": [ \"application/json\" ], " +
             "    \"Request-URI\": \"/test\", " +
             "    \"Method\": \"GET\", " +
             "    \"HTTP-Version\": \"HTTP/1.1\", " +
             "    \"payload\": { " +
-            "        \"inlinedBase64Body\": \"\" " +
+            "        \"inlinedTextBody\": \"\" " +
             "    } " +
             "}, " +
             "\"sourceResponse\": { " +
@@ -149,12 +148,11 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "\"targetRequest\": { " +
             "    \"Host\": [ \"foo.example\" ], " +
             "    \"auTHorization\": [ \"Basic YWRtaW46YWRtaW4=\" ], " +
-            "    \"Content-Type\": [ \"application/json\" ], " +
             "    \"Request-URI\": \"/test\", " +
             "    \"Method\": \"GET\", " +
             "    \"HTTP-Version\": \"HTTP/1.1\", " +
             "    \"payload\": { " +
-            "        \"inlinedBase64Body\": \"\" " +
+            "        \"inlinedTextBody\": \"\" " +
             "    } " +
             "}, " +
             "\"targetResponses\": [ { " +
@@ -375,12 +373,11 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "\"sourceRequest\": { " +
             "    \"Host\": [ \"foo.example\" ], " +
             "    \"auTHorization\": \"REDACTED\", " +
-            "    \"Content-Type\": [ \"application/json\" ], " +
             "    \"Request-URI\": \"/test\", " +
             "    \"Method\": \"GET\", " +
             "    \"HTTP-Version\": \"HTTP/1.1\", " +
             "    \"payload\": { " +
-            "        \"inlinedBase64Body\": \"REDACTED\" " +
+            "        \"inlinedTextBody\": \"\" " +
             "    } " +
             "}, " +
             "\"sourceResponse\": { " +
@@ -400,12 +397,11 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "\"targetRequest\": { " +
             "    \"Host\": [ \"foo.example\" ], " +
             "    \"auTHorization\": \"REDACTED\", " +
-            "    \"Content-Type\": [ \"application/json\" ], " +
             "    \"Request-URI\": \"/test\", " +
             "    \"Method\": \"GET\", " +
             "    \"HTTP-Version\": \"HTTP/1.1\", " +
             "    \"payload\": { " +
-            "        \"inlinedBase64Body\": \"REDACTED\" " +
+            "        \"inlinedTextBody\": \"\" " +
             "    } " +
             "}, " +
             "\"targetResponses\": [ { " +
@@ -431,10 +427,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "    \"operation\": \"modify-overwrite-beta\", " +
             "    \"spec\": { " +
             "      \"sourceRequest\": { " +
-            "        \"auTHorization\": \"REDACTED\", " +
-            "        \"payload\": { " +
-            "          \"inlinedBase64Body\": \"REDACTED\" " +
-            "        } " +
+            "        \"auTHorization\": \"REDACTED\" " +
             "      }, " +
             "      \"sourceResponse\": { " +
             "        \"payload\": { " +
@@ -442,10 +435,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "        } " +
             "      }, " +
             "      \"targetRequest\": { " +
-            "        \"auTHorization\": \"REDACTED\", " +
-            "        \"payload\": { " +
-            "          \"inlinedBase64Body\": \"REDACTED\" " +
-            "        } " +
+            "        \"auTHorization\": \"REDACTED\" " +
             "      }, " +
             "      \"targetResponses\": { " +
             "        \"*\": { " +
@@ -457,7 +447,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "   } " +
             "}";
         String fullConfig = "[{\"JsonJoltTransformerProvider\": { \"script\": " + joltSpec + "}}]";
-        IJsonTransformer jsonJoltTransformer = new TransformationLoader().getTransformerFactoryLoader(null, null, fullConfig);
+        IJsonTransformer jsonJoltTransformer = new TransformationLoader().getTransformerFactoryLoader(fullConfig);
         testOutputterForRequest("get_withAuthHeader.txt", EXPECTED_LOGGED_OUTPUT, jsonJoltTransformer);
     }
 
@@ -561,7 +551,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
             "   } " +
             "}";
         String fullConfig = "[{\"JsonJoltTransformerProvider\": { \"script\": " + joltSpec + "}}]";
-        IJsonTransformer jsonJoltTransformer = new TransformationLoader().getTransformerFactoryLoader(null, null, fullConfig);
+        IJsonTransformer jsonJoltTransformer = new TransformationLoader().getTransformerFactoryLoader(fullConfig);
         testOutputterForRequest("post_json_gzip.gz", EXPECTED_LOGGED_OUTPUT, jsonJoltTransformer);
     }
 

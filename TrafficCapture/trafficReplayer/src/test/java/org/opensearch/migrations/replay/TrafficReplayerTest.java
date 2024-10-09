@@ -272,7 +272,7 @@ class TrafficReplayerTest extends InstrumentationTest {
                 rootContext,
                 uri,
                 null,
-                new TransformationLoader().getTransformerFactoryLoader("localhost"),
+                new TransformationLoader().getTransformerFactoryLoaderWithNewHostName("localhost"),
                 RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(uri)
             )
         ) {

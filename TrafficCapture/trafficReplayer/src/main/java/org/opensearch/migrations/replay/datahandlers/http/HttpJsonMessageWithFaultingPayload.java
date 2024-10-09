@@ -8,7 +8,7 @@ import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 public class HttpJsonMessageWithFaultingPayload extends LinkedHashMap<String, Object> {
 
-    public static final String MESSAGE_SCHEMA_VERSION = "1.0";
+    public static final String MESSAGE_SCHEMA_VERSION = "2.0";
 
     public HttpJsonMessageWithFaultingPayload() {}
 

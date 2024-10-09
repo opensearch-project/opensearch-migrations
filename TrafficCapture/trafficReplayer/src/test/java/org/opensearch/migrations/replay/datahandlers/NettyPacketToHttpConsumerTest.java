@@ -299,7 +299,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 ? null
                 : SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
             var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
-                new TransformationLoader().getTransformerFactoryLoader(null),
+                new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(null),
                 null
             );
             var timeShifter = new TimeShifter();
@@ -410,7 +410,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 ? null
                 : SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
             var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
-                new TransformationLoader().getTransformerFactoryLoader(null),
+                new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(null),
                 null
             );
 
@@ -471,7 +471,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 ? null
                 : SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
             var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
-                new TransformationLoader().getTransformerFactoryLoader(null),
+                new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(null),
                 null
             );
 
