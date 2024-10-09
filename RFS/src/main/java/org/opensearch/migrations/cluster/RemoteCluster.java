@@ -6,5 +6,5 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 public interface RemoteCluster extends VersionSpecificCluster {
 
     /** Remote clusters are communicated with via a connection */
-    void initialize(ConnectionContext connection);
+    RemoteCluster initialize(ConnectionContext connection);
 }

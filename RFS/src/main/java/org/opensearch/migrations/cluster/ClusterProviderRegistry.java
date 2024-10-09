@@ -1,6 +1,7 @@
 package org.opensearch.migrations.cluster;
 
 import java.util.List;
+import java.util.Optional;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
@@ -42,7 +43,7 @@ public class ClusterProviderRegistry {
             .filter(p -> p.compatibleWith(version))
             .filter(ClusterSnapshotReader.class::isInstance)
             .map(ClusterSnapshotReader.class::cast)
-            .peek(p -> p.initialize(version))
+            .map(p -> p.initialize(version))
             .findFirst()
             .orElseThrow(() -> new UnsupportedVersionException("No snapshot provider found for version: " + version));
 
@@ -76,15 +77,16 @@ public class ClusterProviderRegistry {
      * @param connection The connection context for the cluster
      * @return The remote resource creator
      */
-    public ClusterWriter getRemoteWriter(ConnectionContext connection, DataFilterArgs dataFilterArgs) {
-        var client = new OpenSearchClient(connection);
-        var version = client.getClusterVersion();
+    public ClusterWriter getRemoteWriter(ConnectionContext connection, Version versionOverride, DataFilterArgs dataFilterArgs) {
+        var version = Optional.ofNullable(versionOverride)
+            .orElseGet(() -> new OpenSearchClient(connection).getClusterVersion());
 
         var remoteProvider = getRemoteProviders(connection)
             .filter(p -> p.compatibleWith(version))
             .filter(ClusterWriter.class::isInstance)
             .map(ClusterWriter.class::cast)
-            .peek(p -> p.initialize(dataFilterArgs))
+            .map(p -> p.initialize(versionOverride))
+            .map(p -> p.initialize(dataFilterArgs))
             .findFirst()
             .orElseThrow(() -> new UnsupportedVersionException("Unable to find compatible writer for " + connection + ", " + version));
 
@@ -97,7 +99,7 @@ public class ClusterProviderRegistry {
             .stream()
             .filter(RemoteCluster.class::isInstance)
             .map(RemoteCluster.class::cast)
-            .peek(p -> p.initialize(connection));
+            .map(p -> p.initialize(connection));
     }
 
     static class UnsupportedVersionException extends RuntimeException {
