@@ -61,7 +61,7 @@ export class OSIBackfillYaml {
 
 export class ECSReplayerYaml {
     ecs: ECSService;
-    scale: number = 1;
+    scale: number = 5;
 
     constructor() {
         this.ecs = new ECSService();
