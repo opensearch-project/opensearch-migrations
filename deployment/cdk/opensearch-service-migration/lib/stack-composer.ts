@@ -619,10 +619,8 @@ export class StackComposer {
                 managedServiceSourceSnapshotEnabled,
                 env: props.env
             })
-            // To enable the Migration Console to make requests to other service endpoints with services,
-            // it must be deployed after any connected services
-            this.addDependentStacks(migrationConsoleStack, [captureProxyESStack, captureProxyStack, elasticsearchStack,
-                openSearchStack, osContainerStack, migrationStack, kafkaBrokerStack])
+            
+            this.addDependentStacks(migrationConsoleStack, [migrationStack])
             this.stacks.push(migrationConsoleStack)
         }
 
