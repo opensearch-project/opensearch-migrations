@@ -7,7 +7,6 @@ import org.opensearch.migrations.metadata.CreationResult;
 
 import lombok.Builder;
 import lombok.Data;
-import lombok.NonNull;
 
 /**
  * Either items that are candidates for migration or have been migrated;
@@ -17,13 +16,9 @@ import lombok.NonNull;
 public class Items {
     static final String NONE_FOUND_MARKER = "<NONE FOUND>";
     private final boolean dryRun;
-    @NonNull
     private final List<CreationResult> indexTemplates;
-    @NonNull
     private final List<CreationResult> componentTemplates;
-    @NonNull
     private final List<CreationResult> indexes;
-    @NonNull
     private final List<CreationResult> aliases;
     private final String failureMessage;
 
@@ -48,7 +43,7 @@ public class Items {
           .append(":")
           .append(System.lineSeparator());
 
-        if (items.isEmpty()) {
+        if (items == null || items.isEmpty()) {
             sb.append(Format.indentToLevel(2))
                 .append(NONE_FOUND_MARKER)
                 .append(System.lineSeparator());
