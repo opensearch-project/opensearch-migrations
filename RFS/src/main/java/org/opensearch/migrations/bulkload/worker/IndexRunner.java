@@ -6,8 +6,10 @@ import java.util.function.BiConsumer;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
+import org.opensearch.migrations.bulkload.transformers.IndexTransformationException;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.metadata.CreationResult;
+import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 import org.opensearch.migrations.metadata.IndexCreator;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 
@@ -39,12 +41,25 @@ public class IndexRunner {
             .forEach(index -> {
                 var indexName = index.getName();
                 var indexMetadata = metadataFactory.fromRepo(snapshotName, indexName);
-                var transformedRoot = transformer.transformIndexMetadata(indexMetadata);
-                var indexResult = indexCreator.create(transformedRoot, mode, context);
-                results.indexName(indexResult);
-                transformedRoot.getAliases().fieldNames().forEachRemaining( alias -> {
+
+                CreationResult indexResult = null;
+                try {
+                    indexMetadata = transformer.transformIndexMetadata(indexMetadata);
+                    indexResult = indexCreator.create(indexMetadata, mode, context);
+                } catch (Throwable t) {
+                    indexResult = CreationResult.builder()
+                        .name(indexName)
+                        .exception(new IndexTransformationException(indexName, t))
+                        .failureType(CreationFailureType.UNABLE_TO_TRANSFORM_FAILURE)
+                        .build();
+                }
+
+                var finalResult = indexResult;
+                results.index(finalResult);
+
+                indexMetadata.getAliases().fieldNames().forEachRemaining(alias -> {
                     var aliasResult = CreationResult.builder().name(alias);
-                    aliasResult.failureType(indexResult.getFailureType());
+                    aliasResult.failureType(finalResult.getFailureType());
                     results.alias(aliasResult.build());
                 });
             });

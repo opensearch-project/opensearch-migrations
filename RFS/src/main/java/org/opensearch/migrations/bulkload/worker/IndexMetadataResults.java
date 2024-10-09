@@ -10,12 +10,12 @@ import lombok.Singular;
 @Builder
 public class IndexMetadataResults {
     @Singular
-    private final List<CreationResult> indexNames;
+    private final List<CreationResult> indexes;
     @Singular
     private final List<CreationResult> aliases;
 
-    public List<CreationResult> getIndexNames() {
-        return indexNames == null ? List.of() : indexNames;
+    public List<CreationResult> getIndexes() {
+        return indexes == null ? List.of() : indexes;
     }
 
     public List<CreationResult> getAliases() {

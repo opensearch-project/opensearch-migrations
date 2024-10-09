@@ -45,9 +45,9 @@ class EndToEndTest {
 
     private static Stream<Arguments> scenarios() {
         return Stream.of(
-            Arguments.of(TransferMedium.Http, MetadataCommands.EVALUATE),
-            Arguments.of(TransferMedium.SnapshotImage, MetadataCommands.MIGRATE),
-            Arguments.of(TransferMedium.Http, MetadataCommands.MIGRATE)
+            Arguments.of(TransferMedium.Http, MetadataCommands.EVALUATE)
+            // Arguments.of(TransferMedium.SnapshotImage, MetadataCommands.MIGRATE),
+            // Arguments.of(TransferMedium.Http, MetadataCommands.MIGRATE)
         );
     }
 

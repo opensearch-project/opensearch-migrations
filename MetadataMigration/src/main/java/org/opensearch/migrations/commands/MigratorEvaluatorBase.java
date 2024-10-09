@@ -68,7 +68,7 @@ public abstract class MigratorEvaluatorBase {
 
         if (metadataResults.fatalIssueCount() == 0) {
             var indexResults = migrateIndices(migrationMode, clusters, transformer, context);
-            items.indexes(indexResults.getIndexNames());
+            items.indexes(indexResults.getIndexes());
             items.aliases(indexResults.getAliases());
         } else {
             items.indexes(List.of());
