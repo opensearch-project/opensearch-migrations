@@ -40,6 +40,7 @@ export class ECSService {
 
 export class RFSBackfillYaml {
     ecs: ECSService;
+    scale: number = 5;
     constructor() {
         this.ecs = new ECSService();
     }
@@ -61,7 +62,7 @@ export class OSIBackfillYaml {
 
 export class ECSReplayerYaml {
     ecs: ECSService;
-    scale: number = 5;
+    scale: number = 1;
 
     constructor() {
         this.ecs = new ECSService();
