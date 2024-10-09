@@ -16,9 +16,9 @@ import static org.opensearch.migrations.data.RandomDataBuilders.randomTime;
 public class HttpLogs implements Workload {
 
     private static final ObjectMapper mapper = new ObjectMapper();
-    private static final String[] HTTP_METHODS = {"GET", "POST", "PUT", "DELETE"};
-    private static final String[] URLS = {"/home", "/login", "/search", "/api/data", "/contact"};
-    private static final int[] RESPONSE_CODES = {200, 201, 400, 401, 403, 404, 500};
+    private static final String[] HTTP_METHODS = { "GET", "POST", "PUT", "DELETE" };
+    private static final String[] URLS = { "/home", "/login", "/search", "/api/data", "/contact" };
+    private static final int[] RESPONSE_CODES = { 200, 201, 400, 401, 403, 404, 500 };
 
     @Override
     public List<String> indexNames() {
@@ -46,11 +46,11 @@ public class HttpLogs implements Workload {
         properties.set("message", message);
         properties.set("clientip", createField("ip"));
         var request = createFieldTextRawKeyword();
-        var requestRaw = (ObjectNode)request.get("fields").get("raw");
+        var requestRaw = (ObjectNode) request.get("fields").get("raw");
         requestRaw.put("ignore_above", 256);
         properties.set("request", request);
         properties.set("status", createField("integer"));
-        properties.set("integer", createField("integer"));
+        properties.set("size", createField("integer"));
         var geoip = mapper.createObjectNode();
         var geoipProps = mapper.createObjectNode();
         geoip.set("properties", geoipProps);
@@ -58,7 +58,7 @@ public class HttpLogs implements Workload {
         geoipProps.set("city_name", createField("keyword"));
         geoipProps.set("location", createField("geo_point"));
         properties.set("geoip", geoip);
-        
+
         var mappings = mapper.createObjectNode();
         mappings.put("dynamic", "strict");
         mappings.set("properties", properties);

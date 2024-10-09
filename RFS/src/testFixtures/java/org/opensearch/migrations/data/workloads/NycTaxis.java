@@ -17,9 +17,9 @@ import static org.opensearch.migrations.data.RandomDataBuilders.randomTimeISOStr
 public class NycTaxis implements Workload {
 
     private static final ObjectMapper mapper = new ObjectMapper();
-    private static final String[] TRIP_TYPES = {"1", "2"};
-    private static final String[] PAYMENT_TYPES = {"1", "2", "3", "4"};
-    private static final String[] STORE_AND_FWD_FLAGS = {"Y", "N"};
+    private static final String[] TRIP_TYPES = {"1" , "2"}; 
+    private static final String[] PAYMENT_TYPES = {"1", " 2", "3",  "4"};
+    private static final String[] STORE_AND_FWD_FLAGS =  {"Y", "N"};
     private static final String[] VENDOR_IDS = {"1", "2"};
 
     @Override
@@ -30,28 +30,29 @@ public class NycTaxis implements Workload {
     @Override
     public ObjectNode createIndex(ObjectNode defaultSettings) {
         var properties = mapper.createObjectNode();
-        properties.set("surcharge", createScaledFloatField());
-        properties.set("dropoff_datetime", createDateField());
-        properties.set("trip_type", createField("keyword"));
-        properties.set("mta_tax", createScaledFloatField());
-        properties.set("rate_code_id", createField("keyword"));
-        properties.set("passenger_count", createField("integer"));
-        properties.set("pickup_datetime", createDateField());
-        properties.set("tolls_amount", createScaledFloatField());
-        properties.set("tip_amount", createField("half_float"));
-        properties.set("payment_type", createField("keyword"));
-        properties.set("extra", createScaledFloatField());
-        properties.set("vendor_id", createField("keyword"));
-        properties.set("store_and_fwd_flag", createField("keyword"));
-        properties.set("improvement_surcharge", createScaledFloatField());
-        properties.set("fare_amount", createScaledFloatField());
-        properties.set("ehail_fee", createScaledFloatField());
         properties.set("cab_color", createField("keyword"));
+        properties.set("dropoff_datetime", createDateField());
         properties.set("dropoff_location", createField("geo_point"));
-        properties.set("vendor_name", createField("text"));
+        properties.set("ehail_fee", createScaledFloatField());
+        properties.set("extra", createScaledFloatField());
+        properties.set("fare_amount", createScaledFloatField());
+        properties.set("improvement_surcharge", createScaledFloatField());
+        properties.set("mta_tax", createScaledFloatField());
+        properties.set("passenger_count", createField("integer"));
+        properties.set("payment_type", createField("keyword"));
+        properties.set("pickup_datetime", createDateField());
+        properties.set("pickup_location", createField("geo_point"));
+        properties.set("rate_code_id", createField("keyword"));
+        properties.set("store_and_fwd_flag", createField("keyword"));
+        properties.set("surcharge", createScaledFloatField());
+        properties.set("tip_amount", createField("half_float"));
+        properties.set("tolls_amount", createScaledFloatField());
         properties.set("total_amount", createScaledFloatField());
         properties.set("trip_distance", createScaledFloatField());
-        properties.set("pickup_location", createField("geo_point"));
+        properties.set("trip_type", createField("keyword"));
+        properties.set("vendor_id", createField("keyword"));
+        properties.set("vendor_name", createField("text"));
+       
 
         var mappings = mapper.createObjectNode();
         mappings.set("properties", properties);
@@ -84,28 +85,34 @@ public class NycTaxis implements Workload {
         var currentTime = System.currentTimeMillis();
 
         return IntStream.range(0, numDocs)
-                .mapToObj(i -> {
-                    var doc = mapper.createObjectNode();
-                    doc.put("total_amount", randomDouble(random, 5.0, 50.0));
-                    doc.put("improvement_surcharge", 0.3);
-                    doc.set("pickup_location", randomLocation(random));
-                    doc.put("pickup_datetime", randomTimeISOString(currentTime, random));
-                    doc.put("trip_type", randomTripType(random));
-                    doc.put("dropout_datetime", randomTimeISOString(currentTime, random));
-                    doc.put("rate_code_id", "1");
-                    doc.put("tolls_amount", randomDouble(random, 0.0, 5.0));
-                    doc.set("dropoff_location", randomLocation(random));
-                    doc.put("passenger_count", random.nextInt(4) + 1);
-                    doc.put("fare_amount", randomDouble(random, 5.0, 50.0));
-                    doc.put("extra", randomDouble(random, 0.0, 1.0));
-                    doc.put("trip_distance", randomDouble(random, 0.5, 20.0));
-                    doc.put("tip_amount", randomDouble(random, 0.0, 15.0));
-                    doc.put("store_and_fwd_flag", randomStoreAndFwdFlag(random));
-                    doc.put("payment_type", randomPaymentType(random));
-                    doc.put("mta_tax", 0.5);
-                    doc.put("vendor_id", randomVendorId(random));
-                    return doc;
-                });
+            .mapToObj(i -> {
+                var doc = mapper.createObjectNode();
+                // "cab_color"
+                doc.put("dropoff_datetime", randomTimeISOString(currentTime, random));
+                doc.set("dropoff_location", randomLocation(random));
+                // "ehail_fee"
+                doc.put("extra", randomDouble(random, 0.0, 1.0));
+                doc.put("fare_amount", randomDouble(random, 5.0, 50.0));
+                doc.put("improvement_surcharge", 0.3);
+                doc.put("mta_tax", 0.5);
+                doc.put("passenger_count", random.nextInt(4) + 1);
+                doc.put("payment_type", randomPaymentType(random));
+                doc.put("pickup_datetime", randomTimeISOString(currentTime, random));
+                doc.set("pickup_location", randomLocation(random));
+                doc.put("rate_code_id", "1");
+                doc.put("store_and_fwd_flag", randomStoreAndFwdFlag(random));
+                // "surcharge"
+                doc.put("tip_amount", randomDouble(random, 0.0, 15.0));
+                doc.put("tolls_amount", randomDouble(random, 0.0, 5.0));
+                doc.put("total_amount", randomDouble(random, 5.0, 50.0));
+                doc.put("trip_distance", randomDouble(random, 0.5, 20.0));
+                doc.put("trip_type", randomTripType(random));
+                doc.put("vendor_id", randomVendorId(random));
+                // "vendor_name"
+
+                return doc;
+            }
+        );
     }
 
     private static ArrayNode randomLocation(Random random) {

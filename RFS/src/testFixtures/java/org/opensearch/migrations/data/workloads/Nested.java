@@ -28,14 +28,12 @@ public class Nested implements Workload {
         "css", "sql", "bash", "docker", "kubernetes"
     };
     private static final String[] WORDS = {
-        "the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog",
-        "hello", "world", "data", "code", "example", "test", "random",
-        "generate", "method", "class", "object", "function"
+        "the", "quick", "brown", "fox", "jumps", "over", "lazy", "dog"
     };
 
     @Override
     public List<String> indexNames() {
-        return List.of("nyc_taxis");
+        return List.of("sonested");
     }
 
     @Override
@@ -52,6 +50,7 @@ public class Nested implements Workload {
         answers.set("properties", answersProps);
         answersProps.set("user", createField("keyword"));
         answersProps.set("date", createField("date"));
+        properties.set("answers", answers);
 
         var mappings = mapper.createObjectNode();
         mappings.put("dynamic", "strict");
@@ -72,7 +71,7 @@ public class Nested implements Workload {
         return IntStream.range(0, numDocs)
             .mapToObj(i -> {
                 var doc = mapper.createObjectNode();
-                doc.put("qid", i + 1000);
+                doc.put("qid", (i + 1000) + "");
                 doc.put("user", randomUser(random));
                 var creationTime = randomTime(currentTime, random);
                 doc.put("creationDate", creationTime);
@@ -91,7 +90,7 @@ public class Nested implements Workload {
 
         for (int i = 0; i < numAnswers; i++) {
             var answer = mapper.createObjectNode();
-            answer.put("date", randomTimeISOString(timeFrom, random));
+            answer.put("date", randomTime(timeFrom, random));
             answer.put("user", randomUser(random));
 
             answers.add(answer);
@@ -117,9 +116,9 @@ public class Nested implements Workload {
     private static String randomTitle(Random random) {
         var titleWordLength = random.nextInt(5);
         var words = new ArrayList<String>();
-        
+
         for (int i = 0; i < titleWordLength; i++) {
-            words.add(randomElement(WORDS, random) + "" + random.nextInt(10));  // Extra random int simulates more words
+            words.add(randomElement(WORDS, random) + "" + random.nextInt(10)); // Extra random int simulates more words
         }
         return words.stream().collect(Collectors.joining(" "));
     }

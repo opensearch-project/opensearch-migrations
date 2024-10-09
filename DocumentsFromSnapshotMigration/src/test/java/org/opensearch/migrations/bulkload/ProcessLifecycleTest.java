@@ -63,7 +63,6 @@ public class ProcessLifecycleTest extends SourceTestBase {
     }
 
     @Test
-    @Tag("longTest")
     public void testExitsZeroThenThreeForSimpleSetup() throws Exception {
         testProcess(3,
             d -> {
@@ -142,6 +141,10 @@ public class ProcessLifecycleTest extends SourceTestBase {
                 .toConnectionContext());
 
             var operations = new ClusterOperations(esSourceContainer.getUrl());
+
+            var settings = operations.get("/nyc_taxis/_mappings?v");
+            System.err.println("settings:\n" + settings.getValue());
+
 
             WorkloadGenerator.createDefaultTestData(client);
 

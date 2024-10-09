@@ -15,7 +15,7 @@ import static org.opensearch.migrations.data.RandomDataBuilders.randomElement;
 public class Geonames implements Workload {
 
     private static final ObjectMapper mapper = new ObjectMapper();
-    private static final String[] COUNTRY_CODES = {"US", "DE", "FR", "GB", "CN", "IN", "BR"};
+    private static final String[] COUNTRY_CODES = { "US", "DE", "FR", "GB", "CN", "IN", "BR" };
 
     @Override
     public List<String> indexNames() {
@@ -25,7 +25,7 @@ public class Geonames implements Workload {
     @Override
     public ObjectNode createIndex(ObjectNode defaultSettings) {
         var properties = mapper.createObjectNode();
-        
+
         properties.set("geonameId", createField("long"));
         properties.set("name", createFieldTextRawKeyword());
         properties.set("asciiname", createFieldTextRawKeyword());
@@ -68,13 +68,13 @@ public class Geonames implements Workload {
                 doc.put("cc2", "cc2" + (i + 1));
                 doc.put("admin1_code", "admin" + (i + 1));
                 doc.put("population", random.nextInt(1000));
-                doc.put("dem", random.nextInt(1000)+"");
-                doc.put("timezone", "TZ"+ (i + 1));
+                doc.put("dem", random.nextInt(1000) + "");
+                doc.put("timezone", "TZ" + (i + 1));
                 var location = mapper.createArrayNode();
-                location.add(randomLatitude(random));
                 location.add(randomLongitude(random));
+                location.add(randomLatitude(random));
                 doc.set("location", location);
-                doc.put("countryCode", randomCountryCode(random));
+                doc.put("country_code", randomCountryCode(random));
                 return doc;
             }
         );

@@ -7,6 +7,8 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public interface Workload {
     ObjectNode createIndex(ObjectNode defaultSettings);
+
     Stream<ObjectNode> createDocs(int numDocs);
+
     List<String> indexNames();
 }

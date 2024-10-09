@@ -1,6 +1,7 @@
 package org.opensearch.migrations.data;
 
 import java.time.Instant;
+import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Random;
 
@@ -8,6 +9,8 @@ import lombok.experimental.UtilityClass;
 
 @UtilityClass
 public class RandomDataBuilders {
+    private static final ZoneId UTC_ZONE = ZoneId.of("UTC");
+    private static final DateTimeFormatter SIMPLE_DATE_PATTERN = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int ONE_DAY_IN_MILLIS = 24 * 60 * 60 * 1000;
 
     public static long randomTime(long timeFrom, Random random) {
@@ -16,7 +19,8 @@ public class RandomDataBuilders {
 
     public static String randomTimeISOString(long timeFrom, Random random) {
         var timeMillis = randomTime(timeFrom, random);
-        return DateTimeFormatter.ISO_DATE_TIME.format(Instant.ofEpochMilli(timeMillis));
+        var timeInstant = Instant.ofEpochMilli(timeMillis).atZone(UTC_ZONE);
+        return SIMPLE_DATE_PATTERN.format(timeInstant);
     }
 
     public static double randomDouble(Random random, double min, double max) {

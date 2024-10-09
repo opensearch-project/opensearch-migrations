@@ -16,6 +16,10 @@ import lombok.extern.slf4j.Slf4j;
 public class WorkloadGenerator {
 
     /** Replacement for OSB startup script */
+    public static void createDefaultTestData(OpenSearchClient client) {
+        createDefaultTestData(client, new WorkloadOptions());
+    }
+
     public static void createDefaultTestData(OpenSearchClient client, WorkloadOptions options) {
         log.info("Starting document creation");
 
@@ -35,18 +39,13 @@ public class WorkloadGenerator {
         log.info("All document completed");
     }
 
-    private static List<CompletableFuture<?>> generateDocs(
-        OpenSearchClient client,
-        String indexName,
-        Workload workload,
-        WorkloadOptions options) {
+    private static List<CompletableFuture<?>> generateDocs(OpenSearchClient client, String indexName, Workload workload, WorkloadOptions options) {
         // This happens inline to be sure the index exists before docs are indexed on it
         client.createIndex(indexName, workload.createIndex(options.index.indexSettings), null);
 
         var docIdCounter = new AtomicInteger(0);
         var allDocs = workload.createDocs(options.totalDocs)
-            .map(doc -> new DocumentReindexer.BulkDocSection(
-                docIdCounter.incrementAndGet() + "", doc.toString()))
+            .map(doc -> new DocumentReindexer.BulkDocSection(docIdCounter.incrementAndGet() + "", doc.toString()))
             .collect(Collectors.toList());
 
         var bulkDocGroups = new ArrayList<List<DocumentReindexer.BulkDocSection>>();
