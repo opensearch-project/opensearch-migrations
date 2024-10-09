@@ -93,8 +93,12 @@ public class TransformationLoader {
         throw new IllegalArgumentException("Could not find a provider named: " + key);
     }
 
-    public IJsonTransformer getTransformerFactoryLoader(String newHostName) {
+    public IJsonTransformer getTransformerFactoryLoaderWithNewHostName(String newHostName) {
         return getTransformerFactoryLoader(newHostName, null, null);
+    }
+
+    public IJsonTransformer getTransformerFactoryLoader(String fullConfig) {
+        return getTransformerFactoryLoader(null, null, fullConfig);
     }
 
     public IJsonTransformer getTransformerFactoryLoader(String newHostName, String userAgent, String fullConfig) {

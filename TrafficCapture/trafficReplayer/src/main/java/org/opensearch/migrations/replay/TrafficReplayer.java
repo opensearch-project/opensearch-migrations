@@ -34,7 +34,9 @@ import org.opensearch.migrations.utils.ProcessHelpers;
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
+import com.beust.jcommander.ParametersDelegate;
 import io.netty.util.concurrent.DefaultThreadFactory;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.LoggerFactory;
 import org.slf4j.event.Level;
@@ -136,31 +138,12 @@ public class TrafficReplayer {
                 + "(cannot be used with other auth arguments)")
         String useSigV4ServiceAndRegion;
 
-        @Parameter(
-            required = false,
-            names = "--transformer-config-base64",
-            arity = 1,
-            description = "Configuration of message transformers.  The same contents as --transformer-config but " +
-                "Base64 encoded so that the configuration is easier to pass as a command line parameter.")
-        String transformerConfigEncoded;
+        @ParametersDelegate
+        private RequestTransformationParams requestTransformationParams = new RequestTransformationParams();
 
-        @Parameter(
-            required = false,
-            names = "--transformer-config",
-            arity = 1,
-            description = "Configuration of message transformers.  Either as a string that identifies the "
-            + "transformer that should be run (with default settings) or as json to specify options "
-            + "as well as multiple transformers to run in sequence.  "
-            + "For json, keys are the (simple) names of the loaded transformers and values are the "
-            + "configuration passed to each of the transformers.")
-        String transformerConfig;
+        @ParametersDelegate
+        private TupleTransformationParams tupleTransformationParams = new TupleTransformationParams();
 
-        @Parameter(
-            required = false,
-            names = "--transformer-config-file",
-            arity = 1,
-            description = "Path to the JSON configuration file of message transformers.")
-        String transformerConfigFile;
         @Parameter(
             required = false,
             names = "--user-agent",
@@ -257,6 +240,83 @@ public class TrafficReplayer {
         String otelCollectorEndpoint;
     }
 
+    public interface TransformerParams {
+        String getTransformerConfigParameterArgPrefix();
+        String getTransformerConfigEncoded();
+        String getTransformerConfig();
+        String getTransformerConfigFile();
+    }
+
+    @Getter
+    public static class RequestTransformationParams implements TransformerParams {
+        @Override
+        public String getTransformerConfigParameterArgPrefix() {
+            return REQUEST_TRANSFORMER_ARG_PREFIX;
+        }
+        private final static String REQUEST_TRANSFORMER_ARG_PREFIX = "";
+
+        @Parameter(
+            required = false,
+            names = "--" + REQUEST_TRANSFORMER_ARG_PREFIX + "transformer-config-encoded",
+            arity = 1,
+            description = "Configuration of message transformers.  The same contents as --transformer-config but " +
+                "Base64 encoded so that the configuration is easier to pass as a command line parameter.")
+        private String transformerConfigEncoded;
+
+        @Parameter(
+            required = false,
+            names = "--" + REQUEST_TRANSFORMER_ARG_PREFIX + "transformer-config",
+            arity = 1,
+            description = "Configuration of message transformers.  Either as a string that identifies the "
+                + "transformer that should be run (with default settings) or as json to specify options "
+                + "as well as multiple transformers to run in sequence.  "
+                + "For json, keys are the (simple) names of the loaded transformers and values are the "
+                + "configuration passed to each of the transformers.")
+        private String transformerConfig;
+
+        @Parameter(
+            required = false,
+            names = "--" + REQUEST_TRANSFORMER_ARG_PREFIX + "transformer-config-file",
+            arity = 1,
+            description = "Path to the JSON configuration file of message transformers.")
+        private String transformerConfigFile;
+    }
+
+    @Getter
+    public static class TupleTransformationParams implements TransformerParams {
+        public String getTransformerConfigParameterArgPrefix() {
+            return TUPLE_TRANSFORMER_CONFIG_PARAMETER_ARG_PREFIX;
+        }
+        final static String TUPLE_TRANSFORMER_CONFIG_PARAMETER_ARG_PREFIX = "tuple-";
+
+        @Parameter(
+            required = false,
+            names = "--" + TUPLE_TRANSFORMER_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config-base64",
+            arity = 1,
+            description = "Configuration of tuple transformers.  The same contents as --tuple-transformer-config but " +
+                "Base64 encoded so that the configuration is easier to pass as a command line parameter.")
+        private String transformerConfigEncoded;
+
+        @Parameter(
+            required = false,
+            names = "--" + TUPLE_TRANSFORMER_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config",
+            arity = 1,
+            description = "Configuration of tuple transformers.  Either as a string that identifies the "
+                + "transformer that should be run (with default settings) or as json to specify options "
+                + "as well as multiple transformers to run in sequence.  "
+                + "For json, keys are the (simple) names of the loaded transformers and values are the "
+                + "configuration passed to each of the transformers.")
+        private String transformerConfig;
+
+        @Parameter(
+            required = false,
+            names = "--" + TUPLE_TRANSFORMER_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config-file",
+            arity = 1,
+            description = "Path to the JSON configuration file of tuple transformers.")
+        private String transformerConfigFile;
+    }
+
+
     private static Parameters parseArgs(String[] args) {
         Parameters p = new Parameters();
         JCommander jCommander = new JCommander(p);
@@ -276,31 +336,33 @@ public class TrafficReplayer {
         return (s == null || s.isBlank()) ? 0 : 1;
     }
 
-    private static String getTransformerConfig(Parameters params) {
-        var configuredCount = isConfigured(params.transformerConfigFile) +
-                isConfigured(params.transformerConfigEncoded) +
-                isConfigured(params.transformerConfig);
+    private static String getTransformerConfig(TransformerParams params) {
+        var configuredCount = isConfigured(params.getTransformerConfigFile()) +
+                isConfigured(params.getTransformerConfigEncoded()) +
+                isConfigured(params.getTransformerConfig());
         if (configuredCount > 1) {
-            System.err.println("Specify only one of --transformer-config-base64, --transformer-config or " +
-                "--transformer-config-file.");
+            System.err.println("Specify only one of " +
+                "--" + params.getTransformerConfigParameterArgPrefix() + "transformer-config-base64" + ", " +
+                "--" + params.getTransformerConfigParameterArgPrefix() + "transformer-config" + ", or " +
+                "--" + params.getTransformerConfigParameterArgPrefix() + "transformer-config-file" + ".");
             System.exit(4);
         }
 
-        if (params.transformerConfigFile != null && !params.transformerConfigFile.isBlank()) {
+        if (params.getTransformerConfigFile() != null && !params.getTransformerConfigFile().isBlank()) {
             try {
-                return Files.readString(Paths.get(params.transformerConfigFile), StandardCharsets.UTF_8);
+                return Files.readString(Paths.get(params.getTransformerConfigFile()), StandardCharsets.UTF_8);
             } catch (IOException e) {
                 System.err.println("Error reading transformer configuration file: " + e.getMessage());
                 System.exit(5);
             }
         }
 
-        if (params.transformerConfig != null && !params.transformerConfig.isBlank()) {
-            return params.transformerConfig;
+        if (params.getTransformerConfig() != null && !params.getTransformerConfig().isBlank()) {
+            return params.getTransformerConfig();
         }
 
-        if (params.transformerConfigEncoded != null && !params.transformerConfigEncoded.isBlank()) {
-            return new String(Base64.getDecoder().decode(params.transformerConfigEncoded));
+        if (params.getTransformerConfigEncoded() != null && !params.getTransformerConfigEncoded().isBlank()) {
+            return new String(Base64.getDecoder().decode(params.getTransformerConfigEncoded()));
         }
 
         return null;
@@ -365,10 +427,18 @@ public class TrafficReplayer {
             var timeShifter = new TimeShifter(params.speedupFactor);
             var serverTimeout = Duration.ofSeconds(params.targetServerResponseTimeoutSeconds);
 
-            String transformerConfig = getTransformerConfig(params);
-            if (transformerConfig != null) {
-                log.atInfo().setMessage(() -> "Transformations config string: " + transformerConfig).log();
+            String requestTransformerConfig = getTransformerConfig(params.requestTransformationParams);
+            if (requestTransformerConfig != null) {
+                log.atInfo().setMessage("Request Transformations config string: {}")
+                    .addArgument(requestTransformerConfig).log();
             }
+
+            String tupleTransformerConfig = getTransformerConfig(params.tupleTransformationParams);
+            if (requestTransformerConfig != null) {
+                log.atInfo().setMessage("Tuple Transformations config string: {}")
+                    .addArgument(tupleTransformerConfig).log();
+            }
+
             final var orderedRequestTracker = new OrderedWorkerTracker<Void>();
             final var hostname = uri.getHost();
 
@@ -376,7 +446,7 @@ public class TrafficReplayer {
                 topContext,
                 uri,
                 authTransformer,
-                new TransformationLoader().getTransformerFactoryLoader(hostname, params.userAgent, transformerConfig),
+                new TransformationLoader().getTransformerFactoryLoader(hostname, params.userAgent, requestTransformerConfig),
                 TrafficReplayerTopLevel.makeNettyPacketConsumerConnectionPool(
                     uri,
                     params.allowInsecureConnections,
@@ -404,7 +474,8 @@ public class TrafficReplayer {
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
 
             setupShutdownHookForReplayer(tr);
-            var tupleWriter = new TupleParserChainConsumer(new ResultsToLogsConsumer());
+            var tupleWriter = new TupleParserChainConsumer(new ResultsToLogsConsumer(null, null,
+                new TransformationLoader().getTransformerFactoryLoader(tupleTransformerConfig)));
             tr.setupRunAndWaitForReplayWithShutdownChecks(
                 Duration.ofSeconds(params.observedPacketConnectionTimeout),
                 serverTimeout,

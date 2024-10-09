@@ -126,7 +126,7 @@ public class FullReplayerWithTracingChecksTest extends FullTrafficReplayerTest {
                     rootContext,
                     serverUri,
                     new StaticAuthTransformerFactory("TEST"),
-                    new TransformationLoader().getTransformerFactoryLoader(serverUri.getHost()),
+                    new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(serverUri.getHost()),
                     RootReplayerConstructorExtensions.makeNettyPacketConsumerConnectionPool(serverUri, 10),
                     10 * 1024
                 );

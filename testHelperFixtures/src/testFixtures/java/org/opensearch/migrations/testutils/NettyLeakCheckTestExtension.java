@@ -68,7 +68,8 @@ public class NettyLeakCheckTestExtension implements InvocationInterceptor {
                 }
             }
 
-            Assertions.assertEquals(0, CountingNettyResourceLeakDetector.getNumLeaks());
+            Assertions.assertEquals(0, CountingNettyResourceLeakDetector.getNumLeaks(),
+                "Expected 0 leaks but got " + CountingNettyResourceLeakDetector.getNumLeaks());
         }
     }
 

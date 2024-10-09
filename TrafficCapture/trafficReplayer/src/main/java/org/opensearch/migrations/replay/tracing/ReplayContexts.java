@@ -407,6 +407,9 @@ public interface ReplayContexts extends IReplayContexts {
             private final LongCounter payloadSuccessParses;
             private final LongCounter jsonPayloadParses;
             private final LongCounter jsonTransformSuccess;
+            private final LongCounter textParseSuccess;
+            private final LongCounter textParseFailed;
+            private final LongCounter payloadTransformBinary;
             private final LongCounter payloadBytesIn;
             private final LongCounter uncompressedBytesIn;
             private final LongCounter uncompressedBytesOut;
@@ -432,6 +435,15 @@ public interface ReplayContexts extends IReplayContexts {
                     .setUnit(COUNT_UNIT_STR)
                     .build();
                 jsonTransformSuccess = meter.counterBuilder(MetricNames.TRANSFORM_JSON_SUCCEEDED)
+                    .setUnit(COUNT_UNIT_STR)
+                    .build();
+                textParseSuccess = meter.counterBuilder(MetricNames.TRANSFORM_TEXT_SUCCEEDED)
+                    .setUnit(COUNT_UNIT_STR)
+                    .build();
+                textParseFailed = meter.counterBuilder(MetricNames.TRANSFORM_TEXT_FAILED)
+                    .setUnit(COUNT_UNIT_STR)
+                    .build();
+                payloadTransformBinary = meter.counterBuilder(MetricNames.TRANSFORM_PAYLOAD_BINARY)
                     .setUnit(COUNT_UNIT_STR)
                     .build();
                 payloadBytesIn = meter.counterBuilder(MetricNames.TRANSFORM_PAYLOAD_BYTES_IN)
@@ -494,6 +506,21 @@ public interface ReplayContexts extends IReplayContexts {
         @Override
         public void onJsonPayloadParseSucceeded() {
             meterIncrementEvent(getMetrics().jsonTransformSuccess);
+        }
+
+        @Override
+        public void onTextPayloadParseSucceeded() {
+            meterIncrementEvent(getMetrics().textParseSuccess);
+        }
+
+        @Override
+        public void onTextPayloadParseFailed() {
+            meterIncrementEvent(getMetrics().textParseFailed);
+        }
+
+        @Override
+        public void onPayloadSetBinary() {
+            meterIncrementEvent(getMetrics().payloadTransformBinary);
         }
 
         @Override

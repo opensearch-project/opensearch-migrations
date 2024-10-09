@@ -1,7 +1,13 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
+import java.nio.ByteBuffer;
+import java.nio.CharBuffer;
+import java.nio.charset.CharacterCodingException;
+import java.nio.charset.CodingErrorAction;
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 
 import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -13,6 +19,7 @@ import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;
 import io.netty.channel.ChannelInboundHandlerAdapter;
 import io.netty.handler.codec.http.HttpContent;
+import io.netty.handler.codec.http.HttpHeaderNames;
 import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.util.ReferenceCountUtil;
 import lombok.SneakyThrows;
@@ -75,9 +82,10 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
         } else if (msg instanceof HttpContent) {
             var contentBuf = ((HttpContent) msg).content();
             accumulatedBody.addComponent(true, contentBuf.retainedDuplicate());
+            var nioBuf = contentBuf.nioBuffer();
+            contentBuf.release();
             try {
                 if (!jsonWasInvalid) {
-                    var nioBuf = contentBuf.nioBuffer();
                     jsonAccumulator.consumeByteBuffer(nioBuf);
                     Object nextObj;
                     while ((nextObj = jsonAccumulator.getNextTopLevelObject()) != null) {
@@ -112,18 +120,59 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
                     var jsonBodyByteLength = jsonWasInvalid ? 0 : (int) jsonAccumulator.getTotalBytesFullyConsumed();
                     assert accumulatedBody.readerIndex() == 0 :
                         "Didn't expect the reader index to advance since this is an internal object";
-                    capturedHttpJsonMessage.payload()
-                        .put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
-                            accumulatedBody.retainedSlice(jsonBodyByteLength,
-                                accumulatedBody.readableBytes() - jsonBodyByteLength));
-                } else {
-                    accumulatedBody.release();
-                    accumulatedBody = null;
+
+                    var leftoverBody = accumulatedBody.slice(jsonBodyByteLength,
+                        accumulatedBody.readableBytes() - jsonBodyByteLength);
+                    if (jsonBodyByteLength == 0 && isRequestContentTypeNotText(capturedHttpJsonMessage)) {
+                        context.onPayloadSetBinary();
+                        capturedHttpJsonMessage.payload()
+                            .put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
+                                leftoverBody.retainedDuplicate()
+                            );
+                    } else {
+                        // Attempt to decode as utf-8, if not, fallback to binary body
+                        try {
+                            var charBuffer = decodeToUTF8(leftoverBody.nioBuffer());
+                            capturedHttpJsonMessage.payload()
+                                .put(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY,
+                                    charBuffer.toString());
+                            context.onTextPayloadParseSucceeded();
+                        } catch (CharacterCodingException e) {
+                            context.onTextPayloadParseFailed();
+                            log.atDebug().setMessage("Payload not valid utf-8, fallback to binary")
+                                .setCause(e).log();
+                            context.onPayloadSetBinary();
+                            capturedHttpJsonMessage.payload()
+                                .put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
+                                    accumulatedBody.retainedSlice(jsonBodyByteLength,
+                                        accumulatedBody.readableBytes() - jsonBodyByteLength));
+                        }
+                    }
                 }
+                accumulatedBody.release();
+                accumulatedBody = null;
                 ctx.fireChannelRead(capturedHttpJsonMessage);
             }
         } else {
             super.channelRead(ctx, msg);
         }
+    }
+
+    private boolean isRequestContentTypeNotText(HttpJsonMessageWithFaultingPayload message) {
+        // ContentType not text if specified and has a value with / and that value does not start with text/
+        return Optional.ofNullable(capturedHttpJsonMessage.headers().insensitiveGet(HttpHeaderNames.CONTENT_TYPE.toString()))
+            .map(s -> s.stream()
+                .filter(v -> v.contains("/"))
+                .filter(v -> !v.startsWith("text/"))
+                .count() > 1
+            )
+            .orElse(false);
+    }
+
+    private CharBuffer decodeToUTF8(ByteBuffer buffer) throws CharacterCodingException {
+        var decoder = StandardCharsets.UTF_8.newDecoder();
+        decoder.onMalformedInput(CodingErrorAction.REPORT);
+        decoder.onUnmappableCharacter(CodingErrorAction.REPORT);
+        return decoder.decode(buffer);
     }
 }

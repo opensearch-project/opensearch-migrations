@@ -210,7 +210,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     @Tag("longTest")
     @WrapWithNettyLeakDetection(repetitions = 1)
     public void testThatWithBigResponseReadTimeoutResponseWouldHang(boolean useTls) throws Exception {
-        testPeerResets(useTls, false, Duration.ofSeconds(30), Duration.ofMillis(1250));
+        testPeerResets(useTls, false, Duration.ofSeconds(30), Duration.ofSeconds(5));
     }
 
     private void testPeerResets(
@@ -298,7 +298,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 ? null
                 : SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
             var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
-                new TransformationLoader().getTransformerFactoryLoader(null),
+                new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(null),
                 null
             );
             var timeShifter = new TimeShifter();
@@ -409,7 +409,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 ? null
                 : SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
             var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
-                new TransformationLoader().getTransformerFactoryLoader(null),
+                new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(null),
                 null
             );
 
@@ -470,7 +470,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 ? null
                 : SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
             var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
-                new TransformationLoader().getTransformerFactoryLoader(null),
+                new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(null),
                 null
             );
 

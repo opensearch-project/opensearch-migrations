@@ -33,7 +33,7 @@ public class ListKeyAdaptingCaseInsensitiveHeadersMap extends AbstractMap<String
         return strictHeadersMap.get(key);
     }
 
-    public List<String> getInsensitive(String key) {
+    public List<String> insensitiveGet(String key) {
         return get(key);
     }
 

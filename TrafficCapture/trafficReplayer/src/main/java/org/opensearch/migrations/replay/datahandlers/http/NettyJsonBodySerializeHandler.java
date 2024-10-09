@@ -1,6 +1,7 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
 
 import org.opensearch.migrations.replay.datahandlers.JsonEmitter;
@@ -21,8 +22,8 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        if (msg instanceof HttpJsonMessageWithFaultingPayload) {
-            var jsonMessage = (HttpJsonMessageWithFaultingPayload) msg;
+        if (msg instanceof HttpJsonRequestWithFaultingPayload) {
+            var jsonMessage = (HttpJsonRequestWithFaultingPayload) msg;
             var payload = jsonMessage.payload();
             jsonMessage.setPayloadFaultMap(null);
             ctx.fireChannelRead(msg);
@@ -31,7 +32,8 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
             } else if (payload.containsKey(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY)) {
                 serializePayloadList(ctx,
                     (List) payload.get(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY),
-                    !payload.containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY));
+                    !payload.containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY) &&
+                        !payload.containsKey(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY));
             }
             if (payload.containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY)) {
                 var rawBody = (ByteBuf) payload.get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
@@ -39,6 +41,15 @@ public class NettyJsonBodySerializeHandler extends ChannelInboundHandlerAdapter 
                     ctx.fireChannelRead(new DefaultHttpContent(rawBody));
                 } else {
                     ReferenceCountUtil.release(rawBody);
+                }
+            } else if (payload.containsKey(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY)) {
+                var bodyString = (String) payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY);
+                ByteBuf body = ctx.alloc().buffer();
+                body.writeCharSequence(bodyString, StandardCharsets.UTF_8);
+                if (body.readableBytes() > 0) {
+                    ctx.fireChannelRead(new DefaultHttpContent(body));
+                } else {
+                    ReferenceCountUtil.release(body);
                 }
             }
             ctx.fireChannelRead(LastHttpContent.EMPTY_LAST_CONTENT);

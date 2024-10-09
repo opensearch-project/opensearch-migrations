@@ -1,6 +1,6 @@
 package org.opensearch.migrations.transform;
 
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonRequestWithFaultingPayload;
 
 public class RemovingAuthTransformerFactory implements IAuthTransformerFactory {
 
@@ -9,7 +9,7 @@ public class RemovingAuthTransformerFactory implements IAuthTransformerFactory {
     private RemovingAuthTransformerFactory() {}
 
     @Override
-    public IAuthTransformer getAuthTransformer(HttpJsonMessageWithFaultingPayload httpMessage) {
+    public IAuthTransformer getAuthTransformer(HttpJsonRequestWithFaultingPayload httpMessage) {
         return RemovingAuthTransformer.instance;
     }
 
@@ -17,7 +17,7 @@ public class RemovingAuthTransformerFactory implements IAuthTransformerFactory {
         private static final RemovingAuthTransformer instance = new RemovingAuthTransformer();
 
         @Override
-        public void rewriteHeaders(HttpJsonMessageWithFaultingPayload msg) {
+        public void rewriteHeaders(HttpJsonRequestWithFaultingPayload msg) {
             msg.headers().remove("authorization");
         }
     }

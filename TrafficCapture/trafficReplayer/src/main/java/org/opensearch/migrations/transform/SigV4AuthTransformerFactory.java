@@ -11,7 +11,7 @@ import java.util.function.Supplier;
 
 import org.opensearch.migrations.IHttpMessage;
 import org.opensearch.migrations.aws.SigV4Signer;
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonRequestWithFaultingPayload;
 
 import software.amazon.awssdk.auth.credentials.AwsCredentialsProvider;
 
@@ -36,7 +36,7 @@ public class SigV4AuthTransformerFactory implements IAuthTransformerFactory {
     }
 
     @Override
-    public IAuthTransformer getAuthTransformer(HttpJsonMessageWithFaultingPayload httpMessage) {
+    public IAuthTransformer getAuthTransformer(HttpJsonRequestWithFaultingPayload httpMessage) {
         SigV4Signer signer = new SigV4Signer(credentialsProvider, service, region, protocol, timestampSupplier);
         return new IAuthTransformer.StreamingFullMessageTransformer() {
             @Override
@@ -45,7 +45,7 @@ public class SigV4AuthTransformerFactory implements IAuthTransformerFactory {
             }
 
             @Override
-            public void finalizeSignature(HttpJsonMessageWithFaultingPayload msg) {
+            public void finalizeSignature(HttpJsonRequestWithFaultingPayload msg) {
                 var signatureHeaders = signer.finalizeSignature(IHttpMessageAdapter.toIHttpMessage(httpMessage));
                 msg.headers().putAll(signatureHeaders);
             }
@@ -53,7 +53,7 @@ public class SigV4AuthTransformerFactory implements IAuthTransformerFactory {
     }
 
     private interface IHttpMessageAdapter {
-        static IHttpMessage toIHttpMessage(HttpJsonMessageWithFaultingPayload message) {
+        static IHttpMessage toIHttpMessage(HttpJsonRequestWithFaultingPayload message) {
             return new IHttpMessage() {
                 @Override
                 public String method() {
@@ -72,7 +72,7 @@ public class SigV4AuthTransformerFactory implements IAuthTransformerFactory {
 
                 @Override
                 public Optional<String> getFirstHeaderValueCaseInsensitive(String key) {
-                    return Optional.ofNullable(message.headers().getInsensitive(key))
+                    return Optional.ofNullable(message.headers().insensitiveGet(key))
                         .filter(l -> !l.isEmpty())
                         .map(l -> l.get(0));
                 }
