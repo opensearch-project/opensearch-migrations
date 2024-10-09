@@ -5,9 +5,11 @@ import java.util.function.BiConsumer;
 
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
-import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
+import org.opensearch.migrations.bulkload.transformers.IndexTransformationException;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
+import org.opensearch.migrations.metadata.CreationResult;
+import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 import org.opensearch.migrations.metadata.IndexCreator;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 
@@ -25,9 +27,7 @@ public class IndexRunner {
     private final List<String> indexAllowlist;
 
     public IndexMetadataResults migrateIndices(MigrationMode mode, ICreateIndexContext context) {
-        SnapshotRepo.Provider repoDataProvider = metadataFactory.getRepoDataProvider();
-        // TODO - parallelize this, maybe ~400-1K requests per thread and do it asynchronously
-
+        var repoDataProvider = metadataFactory.getRepoDataProvider();
         BiConsumer<String, Boolean> logger = (indexName, accepted) -> {
             if (Boolean.FALSE.equals(accepted)) {
                 log.atInfo().setMessage("Index {} rejected by allowlist").addArgument(indexName).log();
@@ -41,15 +41,27 @@ public class IndexRunner {
             .forEach(index -> {
                 var indexName = index.getName();
                 var indexMetadata = metadataFactory.fromRepo(snapshotName, indexName);
-                var transformedRoot = transformer.transformIndexMetadata(indexMetadata);
-                var created = indexCreator.create(transformedRoot, mode, context);
-                if (created) {
-                    log.atDebug().setMessage("Index {} created successfully").addArgument(indexName).log();
-                    results.indexName(indexName);
-                    transformedRoot.getAliases().fieldNames().forEachRemaining(results::alias);
-                } else {
-                    log.atWarn().setMessage("Index {} already existed; no work required").addArgument(indexName).log();
+
+                CreationResult indexResult = null;
+                try {
+                    indexMetadata = transformer.transformIndexMetadata(indexMetadata);
+                    indexResult = indexCreator.create(indexMetadata, mode, context);
+                } catch (Throwable t) {
+                    indexResult = CreationResult.builder()
+                        .name(indexName)
+                        .exception(new IndexTransformationException(indexName, t))
+                        .failureType(CreationFailureType.UNABLE_TO_TRANSFORM_FAILURE)
+                        .build();
                 }
+
+                var finalResult = indexResult;
+                results.index(finalResult);
+
+                indexMetadata.getAliases().fieldNames().forEachRemaining(alias -> {
+                    var aliasResult = CreationResult.builder().name(alias);
+                    aliasResult.failureType(finalResult.getFailureType());
+                    results.alias(aliasResult.build());
+                });
             });
         return results.build();
     }
