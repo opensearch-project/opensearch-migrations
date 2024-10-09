@@ -219,7 +219,7 @@ class EndToEndTest {
         var migratedItems = result.getItems();
         assertThat(getNames(migratedItems.getIndexTemplates()), containsInAnyOrder(testData.indexTemplateName));
         assertThat(getNames(migratedItems.getComponentTemplates()), equalTo(sourceIsES6_8 ? List.of() : List.of(testData.compoTemplateName)));
-        assertThat(getNames(migratedItems.getIndexes()), containsInAnyOrder(testData.blogIndexName, testData.movieIndexName));
+        assertThat(getNames(migratedItems.getIndexes()), containsInAnyOrder(testData.blogIndexName, testData.movieIndexName, testData.indexThatAlreadyExists));
         assertThat(getNames(migratedItems.getAliases()), containsInAnyOrder(testData.aliasInTemplate, testData.aliasName));
     }
 

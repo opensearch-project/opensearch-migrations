@@ -1,6 +1,7 @@
 package org.opensearch.migrations.commands;
 
 import java.util.ArrayList;
+import java.util.List;
 
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
@@ -65,13 +66,15 @@ public abstract class MigratorEvaluatorBase {
         items.indexTemplates(indexTemplates);
         items.componentTemplates(metadataResults.getComponentTemplates());
 
-        if (metadataResults.fatalIssueCount() != 0) {
-            log.warn("Stopping before index migration due to issues");
+        if (metadataResults.fatalIssueCount() == 0) {
             var indexResults = migrateIndices(migrationMode, clusters, transformer, context);
             items.indexes(indexResults.getIndexNames());
             items.aliases(indexResults.getAliases());
         } else {
-            items.failureMessage("Encountered " + metadataResults.fatalIssueCount() + " unrecoverable issues, details above.");
+            items.indexes(List.of());
+            items.aliases(List.of());
+            log.warn("Stopping before index migration due to issues");
+            items.failureMessage("Encountered " + metadataResults.fatalIssueCount() + " fatal issue(s) while moving global objects.");
         }
 
         return items.build();

@@ -6,9 +6,11 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.Getter;
+import lombok.ToString;
 
 @Builder
 @Data
+@ToString
 public class CreationResult implements Comparable<CreationResult>  {
     private final String name;
     private final Exception exception;
