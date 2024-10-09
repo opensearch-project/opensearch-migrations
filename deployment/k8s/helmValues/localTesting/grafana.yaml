@@ -1,0 +1,26 @@
+grafana:
+  ## Grafana data sources configuration
+  datasources:
+    datasources.yaml:
+      apiVersion: 1
+      datasources:
+        - name: Prometheus
+          type: prometheus
+          access: proxy
+          url: http://prometheus-server.prometheus.svc.cluster.local:9090
+          isDefault: true
+          editable: true
+        - name: Jaeger
+          type: jaeger
+          access: proxy
+          url: http://jaeger-query.jaeger.svc.cluster.local:16686
+          isDefault: false
+          editable: true
+
+  ## Set up the sidecar to import data sources (usually enabled by default)
+  sidecar:
+    datasources:
+      enabled: true
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
