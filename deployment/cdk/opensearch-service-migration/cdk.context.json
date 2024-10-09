@@ -28,6 +28,9 @@
     "vpcId": "<VPC_ID>",
     "reindexFromSnapshotServiceEnabled": true,
     "reindexFromSnapshotMaxShardSizeGiB": 80,
+    "// <VERSION> of the source cluster": "examples such as ES_6_8, ES_7_10, or OS_1_3",
+    "// Any additional reindex from snapshot parameters": "Passed with spaces seperating, example --key1 value1 --key2 value2",
+    "reindexFromSnapshotExtraArgs": "--source-version <VERSION>",
     "trafficReplayerServiceEnabled": true
   }
 }
