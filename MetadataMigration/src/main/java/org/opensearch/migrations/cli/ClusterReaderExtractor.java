@@ -40,6 +40,9 @@ public class ClusterReaderExtractor {
             throw new ParameterException("Unable to find valid resource provider");
         }
 
+        if (arguments.sourceVersion == null) {
+            throw new ParameterException("Unable to read from snapshot without --source-version parameter");
+        }
         return getSnapshotReader(arguments.sourceVersion, repo);
     }
 

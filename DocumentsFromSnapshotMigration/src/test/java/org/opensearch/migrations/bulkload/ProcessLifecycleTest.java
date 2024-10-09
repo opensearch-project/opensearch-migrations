@@ -224,6 +224,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
             "10",
             "--max-connections",
             "1",
+            "--source-version",
+            "ES_7_10",
             "--initial-lease-duration",
             failHow == FailHow.NEVER ? "PT10M" : "PT1S" };
 

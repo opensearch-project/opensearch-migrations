@@ -128,9 +128,9 @@ public class RfsMigrateDocuments {
                 "used to communicate to the target, default 10")
         int maxConnections = 10;
 
-        @Parameter(names = { "--source-version" }, description = ("Optional. Version of the source cluster.  Default: ES_7.10"), required = false,
+        @Parameter(names = { "--source-version" }, description = ("Version of the source cluster."), required = true,
             converter = VersionConverter.class)
-        public Version sourceVersion = Version.fromString("ES 7.10");
+        public Version sourceVersion = null;
     }
 
     public static class NoWorkLeftException extends Exception {

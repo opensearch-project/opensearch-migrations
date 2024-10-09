@@ -22,7 +22,7 @@ Metadata migration is a relatively fast process to execute so we recommend attem
 By scanning the contents of the source cluster, applying filtering, and applying modifications a list of all items that will be migrated will be created.  Any items not seen in this output will not be migrated onto the target cluster if the migrate command was to be run.  This is a safety check before making modifications on the target cluster.
 
 ```shell
-console metadata evaluate
+console metadata evaluate [...]
 ```
 
 <details>
@@ -64,7 +64,7 @@ Results:
 Running through the same data as the evaluate command all of the migrated items will be applied onto the target cluster.  If re-run multiple times items that were previously migrated will not be recreated.  If any items do need to be remigrated, please delete them from the target cluster and then rerun the evaluate then migrate commands to ensure the desired changes are made.
 
 ```shell
-console metadata migrate
+console metadata migrate [...]
 ```
 
 <details>
