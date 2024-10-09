@@ -1,12 +1,11 @@
 package org.opensearch.migrations.trafficcapture.netty.tracing;
 
-import io.opentelemetry.api.metrics.LongCounter;
-import io.opentelemetry.api.metrics.Meter;
-
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.commoncontexts.IConnectionContext;
 
+import io.opentelemetry.api.metrics.LongCounter;
+import io.opentelemetry.api.metrics.Meter;
 import lombok.Getter;
 import lombok.NonNull;
 

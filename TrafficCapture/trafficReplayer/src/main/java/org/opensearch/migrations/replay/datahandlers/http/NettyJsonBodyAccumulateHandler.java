@@ -3,12 +3,11 @@ package org.opensearch.migrations.replay.datahandlers.http;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.fasterxml.jackson.core.JacksonException;
-
 import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
+import com.fasterxml.jackson.core.JacksonException;
 import io.netty.buffer.CompositeByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;

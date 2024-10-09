@@ -6,6 +6,11 @@ import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.function.Function;
 
+import org.opensearch.migrations.cluster.ClusterSnapshotReader;
+
+import lombok.Lombok;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexCommit;
@@ -14,12 +19,6 @@ import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.index.SoftDeletesDirectoryReaderWrapper;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
-
-import org.opensearch.migrations.cluster.ClusterSnapshotReader;
-
-import lombok.Lombok;
-import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;

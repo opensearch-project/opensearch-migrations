@@ -3,7 +3,6 @@ package org.opensearch.migrations.tracing;
 import java.util.stream.Stream;
 
 import io.opentelemetry.api.trace.Span;
-
 import lombok.NonNull;
 
 public interface IInstrumentConstructor extends IContextTracker {

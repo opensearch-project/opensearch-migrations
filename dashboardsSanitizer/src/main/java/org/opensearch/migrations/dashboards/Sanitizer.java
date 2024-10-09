@@ -6,8 +6,6 @@ import java.util.Map;
 import java.util.Queue;
 import java.util.Set;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
-
 import org.opensearch.migrations.dashboards.converter.DashboardConverter;
 import org.opensearch.migrations.dashboards.converter.IndexPatternConverter;
 import org.opensearch.migrations.dashboards.converter.QueryConverter;
@@ -19,6 +17,7 @@ import org.opensearch.migrations.dashboards.savedobjects.SavedObject;
 import org.opensearch.migrations.dashboards.savedobjects.SavedObjectParser;
 import org.opensearch.migrations.dashboards.util.Stats;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 

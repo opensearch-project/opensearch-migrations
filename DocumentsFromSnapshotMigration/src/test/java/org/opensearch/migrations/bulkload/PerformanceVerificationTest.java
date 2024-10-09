@@ -5,6 +5,15 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.bulkload.common.DocumentReindexer;
+import org.opensearch.migrations.bulkload.common.LuceneDocumentsReader;
+import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.OpenSearchClient.BulkResponse;
+import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
+import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
+
+import lombok.extern.slf4j.Slf4j;
 import org.apache.lucene.document.Document;
 import org.apache.lucene.document.StoredField;
 import org.apache.lucene.index.DirectoryReader;
@@ -15,16 +24,6 @@ import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-
-import org.opensearch.migrations.bulkload.common.DocumentReindexer;
-import org.opensearch.migrations.bulkload.common.LuceneDocumentsReader;
-import org.opensearch.migrations.bulkload.common.OpenSearchClient;
-import org.opensearch.migrations.bulkload.common.OpenSearchClient.BulkResponse;
-import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
-import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
-import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
-
-import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 import reactor.core.scheduler.Schedulers;
 

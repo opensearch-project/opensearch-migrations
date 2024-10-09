@@ -1,11 +1,11 @@
 package org.opensearch.migrations.bulkload.transformers;
 
+import org.opensearch.migrations.Version;
+import org.opensearch.migrations.VersionMatchers;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-
-import org.opensearch.migrations.Version;
-import org.opensearch.migrations.VersionMatchers;
 
 public class TransformFunctions {
     private static final ObjectMapper mapper = new ObjectMapper();
@@ -118,7 +118,9 @@ public class TransformFunctions {
      * it regardless of what it is named.
      */
     public static ObjectNode getMappingsFromBeneathIntermediate(ObjectNode mappingsRoot) {
-        if (mappingsRoot.has(PROPERTIES_KEY_STR)) {
+        if (mappingsRoot.size() == 0) {
+            return mappingsRoot;
+        } else if (mappingsRoot.has(PROPERTIES_KEY_STR)) {
             return mappingsRoot;
         } else if (!mappingsRoot.has(PROPERTIES_KEY_STR)) {
             return (ObjectNode) mappingsRoot.get(mappingsRoot.fieldNames().next()).deepCopy();

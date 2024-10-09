@@ -3,13 +3,12 @@ package org.opensearch.migrations.bulkload.version_universal;
 import java.util.ArrayList;
 import java.util.List;
 
-import com.fasterxml.jackson.databind.node.ObjectNode;
-
 import org.opensearch.migrations.bulkload.common.SnapshotRepo.Index;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo.Provider;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo.Snapshot;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.AllArgsConstructor;
 
 @AllArgsConstructor

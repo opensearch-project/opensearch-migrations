@@ -5,14 +5,14 @@ import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.util.Random;
 
+import org.opensearch.migrations.replay.GenerateRandomNestedJsonObject;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
-
-import org.opensearch.migrations.replay.GenerateRandomNestedJsonObject;
-import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
 @WrapWithNettyLeakDetection
 public class JsonAccumulatorTest {

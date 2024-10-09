@@ -1,11 +1,10 @@
 package org.opensearch.migrations.replay.tracing;
 
-import io.opentelemetry.api.metrics.Meter;
-
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
+import io.opentelemetry.api.metrics.Meter;
 import lombok.NonNull;
 
 public class TrafficSourceContexts {
