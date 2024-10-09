@@ -16,6 +16,7 @@ import { Stack } from "aws-cdk-lib";
 import { createMigrationStringParameter, getMigrationStringParameterName, isStackInGovCloud, MigrationSSMParameter } from "./common-utilities";
 import { StringParameter } from "aws-cdk-lib/aws-ssm";
 import { GatewayVpcEndpoint, InterfaceVpcEndpoint } from "aws-cdk-lib/aws-ec2";
+import { CdkLogger } from "./cdk-logger";
 
 export interface NetworkStackProps extends StackPropsExt {
     readonly vpcId?: string;
@@ -75,6 +76,7 @@ export class NetworkStack extends Stack {
                 onePerAz: true
             }).subnetIds
         }
+        CdkLogger.info(`Detected VPC with ${vpc.privateSubnets.length} private subnets, ${vpc.publicSubnets.length} public subnets, and ${vpc.isolatedSubnets.length} isolated subnets`)
         if (uniqueAzPrivateSubnets.length < 2) {
             throw new Error(`Not enough AZs (${uniqueAzPrivateSubnets.length} unique AZs detected) used for private subnets to meet 2 or 3 AZ requirement`)
         }

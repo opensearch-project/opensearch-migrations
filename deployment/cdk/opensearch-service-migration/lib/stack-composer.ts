@@ -25,6 +25,7 @@ import {
 } from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
 import {ClientOptions, ClusterYaml, ServicesYaml} from "./migration-services-yaml";
+import { CdkLogger } from "./cdk-logger";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -70,7 +71,7 @@ export class StackComposer {
                     return JSON.parse(option)
                 } catch (e) {
                     if (e instanceof SyntaxError) {
-                        console.error(`Unable to parse option: ${optionName} with expected type: ${expectedType}`)
+                        CdkLogger.error(`Unable to parse option: ${optionName} with expected type: ${expectedType}`)
                     }
                     throw e
                 }
@@ -144,6 +145,8 @@ export class StackComposer {
             throw new Error("Required context field 'contextId' not provided")
         }
         const contextJSON = this.parseContextBlock(scope, contextId)
+        CdkLogger.info(`Context block for '${contextId}':\n---\n${JSON.stringify(contextJSON, null, 3)}\n---`);
+
         const stage = this.getContextForType('stage', 'string', defaultValues, contextJSON)
 
         const domainName = this.getContextForType('domainName', 'string', defaultValues, contextJSON)
@@ -217,8 +220,8 @@ export class StackComposer {
         let sourceClusterDefinition = this.getContextForType('sourceCluster', 'object', defaultValues, contextJSON)
 
         if (!sourceClusterDefinition && (sourceClusterEndpointField || sourceClusterDisabledField)) {
-            console.warn("`sourceClusterDisabled` and `sourceClusterEndpoint` are being deprecated in favor of a `sourceCluster` object.")
-            console.warn("Please update your CDK context block to use the `sourceCluster` object.")
+            CdkLogger.warn("`sourceClusterDisabled` and `sourceClusterEndpoint` are being deprecated in favor of a `sourceCluster` object.")
+            CdkLogger.warn("Please update your CDK context block to use the `sourceCluster` object.")
             sourceClusterDefinition = {
                 "disabled": sourceClusterDisabledField,
                 "endpoint": sourceClusterEndpointField,
@@ -238,11 +241,11 @@ export class StackComposer {
         let targetClusterDefinition = this.getContextForType('targetCluster', 'object', defaultValues, contextJSON)
         const usePreexistingTargetCluster = !!(targetClusterEndpointField || targetClusterDefinition)
         if (!targetClusterDefinition && usePreexistingTargetCluster) {
-            console.warn("`targetClusterEndpoint` is being deprecated in favor of a `targetCluster` object.")
-            console.warn("Please update your CDK context block to use the `targetCluster` object.")
+            CdkLogger.warn("`targetClusterEndpoint` is being deprecated in favor of a `targetCluster` object.")
+            CdkLogger.warn("Please update your CDK context block to use the `targetCluster` object.")
             let auth: any = {"type": "none"}
             if (fineGrainedManagerUserName || fineGrainedManagerUserSecretManagerKeyARN) {
-                console.warn(`Use of ${fineGrainedManagerUserName} and ${fineGrainedManagerUserSecretManagerKeyARN} with a preexisting target cluster
+                CdkLogger.warn(`Use of ${fineGrainedManagerUserName} and ${fineGrainedManagerUserSecretManagerKeyARN} with a preexisting target cluster
                     will be deprecated in favor of using a \`targetCluster\` object. Please update your CDK context block.`)
                 auth = {
                     "type": "basic",
@@ -263,7 +266,7 @@ export class StackComposer {
         // Ensure that target version is not defined in multiple places, but `engineVersion` is set as a default value, so this is
         // a warning instead of an error.
         if (usePreexistingTargetCluster && engineVersion) {
-            console.warn("The `engineVersion` value will be ignored because it's only used when a domain is being provisioned by this tooling" +
+            CdkLogger.warn("The `engineVersion` value will be ignored because it's only used when a domain is being provisioned by this tooling" +
                 "and in this case, `targetCluster` was provided to define an existing target cluster."
             )
         }
@@ -279,7 +282,7 @@ export class StackComposer {
             }
         }
         if (addOnMigrationDeployId && vpcId) {
-            console.warn("Add-on deployments will use the original deployment 'vpcId' regardless of passed 'vpcId' values")
+            CdkLogger.warn("Add-on deployments will use the original deployment 'vpcId' regardless of passed 'vpcId' values")
         }
         if (stage.length > 15) {
             throw new Error(`Maximum allowed stage name length is 15 characters but received ${stage}`)
