@@ -15,7 +15,7 @@ public class HasLineCount extends TypeSafeMatcher<String> {
 
     @Override
     protected void describeMismatchSafely(String item, Description mismatchDescription) {
-        mismatchDescription.appendText("was a string with " + item.split(System.lineSeparator()).length + " lines");
+        mismatchDescription.appendText("was a string with " + item.split(System.lineSeparator()).length + " lines in '" + item + "'");
     }
 
     @Override

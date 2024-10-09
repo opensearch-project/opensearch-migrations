@@ -2,6 +2,9 @@ package org.opensearch.migrations.cli;
 
 import java.util.List;
 
+import org.opensearch.migrations.metadata.CreationResult;
+import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
+
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
@@ -33,10 +36,22 @@ public class ItemsTest {
     @Test
     void testAsString_full() {
         var items = Items.builder()
-            .indexTemplates(List.of("it1", "it2"))
-            .componentTemplates(List.of("ct1", "ct2"))
-            .indexes(List.of("i1", "i2"))
-            .aliases(List.of("a1", "a2"))
+            .indexTemplates(List.of(
+                CreationResult.builder().name("it1").build(),
+                CreationResult.builder().name("it2").build()
+            ))
+            .componentTemplates(List.of(
+                CreationResult.builder().name("ct1").build(),
+                CreationResult.builder().name("ct2").build()
+            ))
+            .indexes(List.of(
+                CreationResult.builder().name("i1").build(),
+                CreationResult.builder().name("i2").build()
+            ))
+            .aliases(List.of(
+                CreationResult.builder().name("a1").build(),
+                CreationResult.builder().name("a2").build()
+            ))
             .build();
 
         var result = items.asCliOutput();
@@ -55,11 +70,42 @@ public class ItemsTest {
     }
 
     @Test
+    void testAsString_indexTemplates_failures() {
+        var items = Items.builder()
+            .indexTemplates(List.of(
+                CreationResult.builder().name("it1").failureType(CreationFailureType.ALREADY_EXISTS).build(),
+                CreationResult.builder().name("it2").failureType(CreationFailureType.TARGET_CLUSTER_FAILURE).exception(new RuntimeException("403 Forbidden")).build()
+            ))
+            .componentTemplates(List.of())
+            .indexes(List.of())
+            .aliases(List.of())
+            .build();
+
+        var result = items.asCliOutput();
+
+        assertThat(result, containsString("Migrated Items:"));
+        assertThat(result, containsString("ERROR - it2 failed on target cluster: 403 Forbidden"));
+        assertThat(result, containsString("WARN - it1 already exists"));
+        assertThat(result, containsString("Index Templates:"));
+        assertThat(result, containsString("Component Templates:"));
+        assertThat(result, containsString("Indexes:"));
+        assertThat(result, containsString("Aliases:"));
+        assertThat(result, containsStringCount(Items.NONE_FOUND_MARKER, 3));
+        assertThat(result, hasLineCount(13));
+    }
+
+    @Test
     void testAsString_itemOrdering() {
         var items = Items.builder()
             .indexTemplates(List.of())
             .componentTemplates(List.of())
-            .indexes(List.of("i1", "i2", "i5", "i3", "i4"))
+            .indexes(List.of(
+                CreationResult.builder().name("i1").build(),
+                CreationResult.builder().name("i2").build(),
+                CreationResult.builder().name("i5").build(),
+                CreationResult.builder().name("i3").build(),
+                CreationResult.builder().name("i4").build()
+            ))
             .aliases(List.of())
             .build();
 

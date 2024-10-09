@@ -9,6 +9,8 @@ import java.util.Optional;
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
+import org.opensearch.migrations.metadata.CreationResult;
+import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
 import org.opensearch.migrations.metadata.GlobalMetadataCreator;
 import org.opensearch.migrations.metadata.GlobalMetadataCreatorResults;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.IClusterMetadataContext;
@@ -40,7 +42,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         return results.build();
     }
 
-    public List<String> createLegacyTemplates(GlobalMetadataData_OS_2_11 metadata, MigrationMode mode, IClusterMetadataContext context) {
+    public List<CreationResult> createLegacyTemplates(GlobalMetadataData_OS_2_11 metadata, MigrationMode mode, IClusterMetadataContext context) {
         return createTemplates(
             metadata.getTemplates(),
             legacyTemplateAllowlist,
@@ -50,7 +52,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         );
     }
 
-    public List<String> createComponentTemplates(GlobalMetadataData_OS_2_11 metadata, MigrationMode mode, IClusterMetadataContext context) {
+    public List<CreationResult> createComponentTemplates(GlobalMetadataData_OS_2_11 metadata, MigrationMode mode, IClusterMetadataContext context) {
         return createTemplates(
             metadata.getComponentTemplates(),
             componentTemplateAllowlist,
@@ -60,7 +62,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         );
     }
 
-    public List<String> createIndexTemplates(GlobalMetadataData_OS_2_11 metadata, MigrationMode mode, IClusterMetadataContext context) {
+    public List<CreationResult> createIndexTemplates(GlobalMetadataData_OS_2_11 metadata, MigrationMode mode, IClusterMetadataContext context) {
         return createTemplates(
             metadata.getIndexTemplates(),
             indexTemplateAllowlist,
@@ -101,7 +103,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
     }
 
 
-    private List<String> createTemplates(
+    private List<CreationResult> createTemplates(
         ObjectNode templates,
         List<String> templateAllowlist,
         TemplateTypes templateType,
@@ -148,32 +150,36 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         return templatesToCreate;
     }
 
-    private List<String> processTemplateCreation(
+    private List<CreationResult> processTemplateCreation(
             Map<String, ObjectNode> templatesToCreate,
             TemplateTypes templateType,
             MigrationMode mode,
             IClusterMetadataContext context
         ) {
 
-        List<String> templateList = new ArrayList<>();
+        List<CreationResult> templateList = new ArrayList<>();
 
         templatesToCreate.forEach((templateName, templateBody) -> {
+            var creationResult = CreationResult.builder().name(templateName);
             log.info("Creating {}: {}", templateType, templateName);
-
-            if (mode == MigrationMode.SIMULATE) {
-                if (!templateType.alreadyExistsCheck.templateAlreadyExists(client, templateName)) {
-                    templateList.add(templateName);
-                } else {
-                    log.warn("Template {} already exists on the target, it will not be created during a migration", templateName);
+            try {
+                if (mode == MigrationMode.SIMULATE) {
+                    if (templateType.alreadyExistsCheck.templateAlreadyExists(client, templateName)) {
+                        creationResult.failureType(CreationFailureType.ALREADY_EXISTS);
+                        log.warn("Template {} already exists on the target, it will not be created during a migration", templateName);
+                    }
+                } else if (mode == MigrationMode.PERFORM) {
+                    var createdTemplate = templateType.creator.createTemplate(client, templateName, templateBody, context);
+                    if (createdTemplate.isEmpty()) {
+                        creationResult.failureType(CreationFailureType.ALREADY_EXISTS);
+                        log.warn("Template {} already exists on the target, unable to create", templateName);
+                    }
                 }
-            } else if (mode == MigrationMode.PERFORM) {
-                var createdTemplate = templateType.creator.createTemplate(client, templateName, templateBody, context);
-                if (createdTemplate.isPresent()) {
-                    templateList.add(templateName);
-                } else {
-                    log.warn("Template {} already exists on the target, unable to create", templateName);
-                }
+            } catch (Exception e) {
+                creationResult.failureType(CreationFailureType.TARGET_CLUSTER_FAILURE);
+                creationResult.exception(e);
             }
+            templateList.add(creationResult.build());
         });
 
         return templateList;

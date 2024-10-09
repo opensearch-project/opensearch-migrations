@@ -1,6 +1,7 @@
 package org.opensearch.migrations.commands;
 
 import java.util.ArrayList;
+import java.util.List;
 
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
@@ -13,6 +14,7 @@ import org.opensearch.migrations.cli.ClusterReaderExtractor;
 import org.opensearch.migrations.cli.Clusters;
 import org.opensearch.migrations.cli.Items;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
+import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.GlobalMetadataCreatorResults;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 
@@ -58,15 +60,22 @@ public abstract class MigratorEvaluatorBase {
         items.dryRun(migrationMode.equals(MigrationMode.SIMULATE));
         var metadataResults = migrateGlobalMetadata(migrationMode, clusters, transformer, context);
 
-        var indexTemplates = new ArrayList<String>();
+        var indexTemplates = new ArrayList<CreationResult>();
         indexTemplates.addAll(metadataResults.getLegacyTemplates());
         indexTemplates.addAll(metadataResults.getIndexTemplates());
         items.indexTemplates(indexTemplates);
         items.componentTemplates(metadataResults.getComponentTemplates());
 
-        var indexResults = migrateIndices(migrationMode, clusters, transformer, context);
-        items.indexes(indexResults.getIndexNames());
-        items.aliases(indexResults.getAliases());
+        if (metadataResults.fatalIssueCount() == 0) {
+            var indexResults = migrateIndices(migrationMode, clusters, transformer, context);
+            items.indexes(indexResults.getIndexes());
+            items.aliases(indexResults.getAliases());
+        } else {
+            items.indexes(List.of());
+            items.aliases(List.of());
+            log.warn("Stopping before index migration due to issues");
+            items.failureMessage("Encountered " + metadataResults.fatalIssueCount() + " fatal issue(s) while moving global objects.");
+        }
 
         return items.build();
     }
