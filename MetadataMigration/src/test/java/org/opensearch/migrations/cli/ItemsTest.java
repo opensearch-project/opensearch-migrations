@@ -2,10 +2,10 @@ package org.opensearch.migrations.cli;
 
 import java.util.List;
 
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
+
+import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.MatcherAssert.assertThat;

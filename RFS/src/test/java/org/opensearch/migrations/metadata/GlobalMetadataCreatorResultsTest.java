@@ -2,9 +2,9 @@ package org.opensearch.migrations.metadata;
 
 import java.util.List;
 
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.metadata.CreationResult.CreationFailureType;
+
+import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
