@@ -59,7 +59,9 @@ class CommonUtils {
                 from "migrations/${dependentDockerImageName}:${hashNonce}"
                 def dependencyName = "buildDockerImage_${baseImageOverrideProjectName}";
                 dependsOn dependencyName
-                runCommand("sed -i -e \"s|mirrorlist=|#mirrorlist=|g\" /etc/yum.repos.d/CentOS-* ;  sed -i -e \"s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g\" /etc/yum.repos.d/CentOS-*")
+                if (!baseImageOverrideProjectName.contains("captureProxyBase")) {
+                    runCommand("sed -i -e \"s|mirrorlist=|#mirrorlist=|g\" /etc/yum.repos.d/CentOS-* ;  sed -i -e \"s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g\" /etc/yum.repos.d/CentOS-*")
+                }
             } else {
                 from 'amazoncorretto:11-al2023-headless'
             }
