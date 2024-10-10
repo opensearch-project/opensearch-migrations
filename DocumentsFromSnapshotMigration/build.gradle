@@ -145,5 +145,5 @@ tasks.named('composeUp') {
 
 tasks.named('slowTest') {
     dependsOn(':TrafficCapture:dockerSolution:buildDockerImage_elasticsearchTestConsole')
-    testLogging.showStandardStreams = true
+    testLogging.showStandardStreams = false
 }
