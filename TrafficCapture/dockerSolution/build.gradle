@@ -25,6 +25,7 @@ dependencies {
 
 def dockerFilesForExternalServices = [
         "elasticsearchWithSearchGuard": "elasticsearch_searchguard",
+        "captureProxyBase": "capture_proxy_base",
         "elasticsearchTestConsole": "elasticsearch_client_test_console",
         "migrationConsole": "migration_console",
         "otelCollector": "otel_collector",
@@ -95,7 +96,7 @@ def javaContainerServices = [
         ":TrafficCapture:trafficReplayer": "traffic_replayer"
 ]
 def baseImageProjectOverrides = [
-        "trafficCaptureProxyServer": "elasticsearchWithSearchGuard"
+        "trafficCaptureProxyServer": "captureProxyBase"
 ]
 javaContainerServices.each { projectName, dockerImageName ->
     def artifactProject = project(projectName);
