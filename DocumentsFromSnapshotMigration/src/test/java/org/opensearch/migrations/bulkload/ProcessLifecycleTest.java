@@ -89,15 +89,15 @@ public class ProcessLifecycleTest extends SourceTestBase {
     @CsvSource(value = {
         // This test will go through a proxy that doesn't add any defects and the process will use defaults
         // so that it successfully runs to completion on a small dataset in a short amount of time
-        "NEVER, 0"
+        "NEVER, 0",
         // This test is dependent on the toxiproxy being disabled before Migrate Documents is called.
         // The Document Migration process will throw an exception immediately, which will cause an exit.
-        // "AT_STARTUP, 1",
+        "AT_STARTUP, 1",
         // This test is dependent upon the max lease duration that is passed to the command line. It's set
         // to such a short value (1s) that no document migration will exit in that amount of time. For good
         // measure though, the toxiproxy also adds latency to the requests to make it impossible for the
         // migration to complete w/in that 1s.
-        // "WITH_DELAYS, 2"
+        "WITH_DELAYS, 2"
     })
     public void testProcessExitsAsExpected(String failAfterString, int expectedExitCode) throws Exception {
         final var failHow = FailHow.valueOf(failAfterString);
@@ -124,35 +124,22 @@ public class ProcessLifecycleTest extends SourceTestBase {
                 .withNetworkAliases(TARGET_DOCKER_HOSTNAME);
             var proxyContainer = new ToxiProxyWrapper(network)
         ) {
+            CompletableFuture.allOf(
+                CompletableFuture.runAsync(() -> esSourceContainer.start()),
+                CompletableFuture.runAsync(() -> osTargetContainer.start()),
+                CompletableFuture.runAsync(() -> proxyContainer.start(TARGET_DOCKER_HOSTNAME, OPENSEARCH_PORT))
+            ).join();
 
-            CompletableFuture.allOf(CompletableFuture.supplyAsync(() -> {
-                esSourceContainer.start();
-                return null;
-            }), CompletableFuture.supplyAsync(() -> {
-                osTargetContainer.start();
-                return null;
-            }), CompletableFuture.supplyAsync(() -> {
-                proxyContainer.start(TARGET_DOCKER_HOSTNAME, OPENSEARCH_PORT);
-                return null;
-            })).join();
-
+            // Populate the source cluster with data
             var client = new OpenSearchClient(ConnectionContextTestParams.builder()
                 .host(esSourceContainer.getUrl())
                 .build()
-                .toConnectionContext());
+                .toConnectionContext()
+            );
+            var generator = new WorkloadGenerator(client);
+            generator.generate(new WorkloadOptions());
 
-            var operations = new ClusterOperations(esSourceContainer.getUrl());
-
-            var settings = operations.get("/nyc_taxis/_mappings?v");
-            System.err.println("settings:\n" + settings.getValue());
-
-
-            WorkloadGenerator.generate(client, new WorkloadOptions());
-
-            operations.get("/_refresh");
-            var cat = operations.get("/_cat/indices?v");
-            System.err.println("indices:\n" + cat.getValue());
-
+            // Create the snapshot from the source cluster
             var args = new CreateSnapshot.Args();
             args.snapshotName = SNAPSHOT_NAME;
             args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;

@@ -13,6 +13,10 @@ import static org.opensearch.migrations.data.FieldBuilders.createField;
 import static org.opensearch.migrations.data.FieldBuilders.createFieldTextRawKeyword;
 import static org.opensearch.migrations.data.RandomDataBuilders.randomElement;
 
+/**
+ * Workload based off of Geonames
+ * https://github.com/opensearch-project/opensearch-benchmark-workloads/tree/main/geonames
+ */
 public class Geonames implements Workload {
 
     private static final ObjectMapper mapper = new ObjectMapper();
@@ -23,10 +27,13 @@ public class Geonames implements Workload {
         return List.of("geonames");
     }
 
+    /**
+     * Mirroring index configuration from 
+     * https://github.com/opensearch-project/opensearch-benchmark-workloads/blob/main/geonames/index.json
+     */
     @Override
     public ObjectNode createIndex(ObjectNode defaultSettings) {
         var properties = mapper.createObjectNode();
-
         properties.set("geonameid", createField("long"));
         properties.set("name", createFieldTextRawKeyword());
         properties.set("asciiname", createFieldTextRawKeyword());
@@ -43,6 +50,7 @@ public class Geonames implements Workload {
         properties.set("dem", createFieldTextRawKeyword());
         properties.set("timezone", createFieldTextRawKeyword());
         properties.set("location", createField("geo_point"));
+
         var countryCodeField = createFieldTextRawKeyword();
         countryCodeField.put("fielddata", true);
         properties.set("country_code", countryCodeField);
@@ -57,12 +65,34 @@ public class Geonames implements Workload {
         return index;
     }
 
+    /**
+     * Example generated document:
+       {
+           "geonameid": 1018,
+           "name": "City19",
+           "asciiname": "City19",
+           "alternatenames": "City19",
+           "feature_class": "FCl19",
+           "feature_code": "FCo19",
+           "country_code": "DE",
+           "cc2": "cc219",
+           "admin1_code": "admin19",
+           "population": 621,
+           "dem": "699",
+           "timezone": "TZ19",
+           "location": [
+               -104.58261595311684,
+               -58.923212235479056
+           ]
+       }
+     */
     @Override
     public Stream<ObjectNode> createDocs(int numDocs) {
-        var random = new Random(1L);
-
         return IntStream.range(0, numDocs)
             .mapToObj(i -> {
+                // These documents are have a low degree of uniqueness,
+                // there is an opportunity to augment them by using Random more.
+                var random = new Random(i);
                 var doc = mapper.createObjectNode();
                 doc.put("geonameid", i + 1000);
                 doc.put("name", "City" + (i + 1));

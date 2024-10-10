@@ -13,6 +13,10 @@ import static org.opensearch.migrations.data.FieldBuilders.createFieldTextRawKey
 import static org.opensearch.migrations.data.RandomDataBuilders.randomElement;
 import static org.opensearch.migrations.data.RandomDataBuilders.randomTime;
 
+/**
+ * Workload based off of http_logs
+ * https://github.com/opensearch-project/opensearch-benchmark-workloads/tree/main/http_logs
+ */
 public class HttpLogs implements Workload {
 
     private static final ObjectMapper mapper = new ObjectMapper();
@@ -35,6 +39,10 @@ public class HttpLogs implements Workload {
         );
     }
 
+    /**
+     * Mirroring index configuration from 
+     * https://github.com/opensearch-project/opensearch-benchmark-workloads/blob/main/http_logs/index.json
+     */
     @Override
     public ObjectNode createIndex(ObjectNode defaultSettings) {
         var properties = mapper.createObjectNode();
@@ -70,6 +78,16 @@ public class HttpLogs implements Workload {
         return index;
     }
 
+    /**
+     * Example generated document:
+     {
+         "@timestamp": 1728504268181,
+         "clientip": "106.171.39.19",
+         "request": "POST /contact HTTP/1.0",
+         "status": 403,
+         "size": 16672893
+     }
+     */
     @Override
     public Stream<ObjectNode> createDocs(int numDocs) {
         var random = new Random(1L);

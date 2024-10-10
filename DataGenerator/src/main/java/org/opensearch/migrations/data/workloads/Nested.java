@@ -15,6 +15,10 @@ import static org.opensearch.migrations.data.FieldBuilders.createField;
 import static org.opensearch.migrations.data.RandomDataBuilders.randomElement;
 import static org.opensearch.migrations.data.RandomDataBuilders.randomTime;
 
+/**
+ * Workload based off of nested
+ * https://github.com/opensearch-project/opensearch-benchmark-workloads/tree/main/nested
+ */
 public class Nested implements Workload {
 
     private static final ObjectMapper mapper = new ObjectMapper();
@@ -35,6 +39,10 @@ public class Nested implements Workload {
         return List.of("sonested");
     }
 
+    /**
+     * Mirroring index configuration from 
+     * https://github.com/opensearch-project/opensearch-benchmark-workloads/blob/main/nested/index.json
+     */
     @Override
     public ObjectNode createIndex(ObjectNode defaultSettings) {
         var properties = mapper.createObjectNode();
@@ -62,6 +70,24 @@ public class Nested implements Workload {
         return index;
     }
 
+    /**
+     * Example generated document:
+     {
+         "title": "",
+         "qid": "1405",
+         "answers": [
+             {
+                 "date": 1728487507935,
+                 "user": "frank (1006)"
+             }
+         ],
+         "tag": [
+             "bashv6"
+         ],
+         "user": "judy (1001)",
+         "creationDate": 1728506897762
+     }
+     */
     @Override
     public Stream<ObjectNode> createDocs(int numDocs) {
         var random = new Random(1L);

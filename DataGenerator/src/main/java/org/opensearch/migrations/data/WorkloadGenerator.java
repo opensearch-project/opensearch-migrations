@@ -10,12 +10,16 @@ import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.data.workloads.Workload;
 
+import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
+@AllArgsConstructor
 public class WorkloadGenerator {
 
-    public static void generate(OpenSearchClient client, WorkloadOptions options) {
+    private final OpenSearchClient client;
+
+    public void generate(WorkloadOptions options) {
         log.info("Starting document creation");
 
         var allDocs = new ArrayList<CompletableFuture<?>>();
@@ -24,7 +28,7 @@ public class WorkloadGenerator {
             var docs = workloadInstance
                 .indexNames()
                 .stream()
-                .map(indexName -> generateDocs(client, indexName, workloadInstance, options))
+                .map(indexName -> generateDocs(indexName, workloadInstance, options))
                 .flatMap(List::stream)
                 .collect(Collectors.toList());
             allDocs.addAll(docs);
@@ -35,7 +39,7 @@ public class WorkloadGenerator {
         log.info("All document completed");
     }
 
-    private static List<CompletableFuture<?>> generateDocs(OpenSearchClient client, String indexName, Workload workload, WorkloadOptions options) {
+    private List<CompletableFuture<?>> generateDocs(String indexName, Workload workload, WorkloadOptions options) {
         // This happens inline to be sure the index exists before docs are indexed on it
         client.createIndex(indexName, workload.createIndex(options.index.indexSettings.deepCopy()), null);
 

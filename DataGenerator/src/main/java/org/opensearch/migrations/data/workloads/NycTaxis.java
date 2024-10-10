@@ -14,6 +14,10 @@ import static org.opensearch.migrations.data.RandomDataBuilders.randomDouble;
 import static org.opensearch.migrations.data.RandomDataBuilders.randomElement;
 import static org.opensearch.migrations.data.RandomDataBuilders.randomTimeISOString;
 
+/**
+ * Workload based off of nyc_taxis
+ * https://github.com/opensearch-project/opensearch-benchmark-workloads/tree/main/nyc_taxis
+ */
 public class NycTaxis implements Workload {
 
     private static final ObjectMapper mapper = new ObjectMapper();
@@ -27,6 +31,10 @@ public class NycTaxis implements Workload {
         return List.of("nyc_taxis");
     }
 
+    /**
+     * Mirroring index configuration from 
+     * https://github.com/opensearch-project/opensearch-benchmark-workloads/blob/main/nyc_taxis/index.json
+     */
     @Override
     public ObjectNode createIndex(ObjectNode defaultSettings) {
         var properties = mapper.createObjectNode();
@@ -79,6 +87,35 @@ public class NycTaxis implements Workload {
         return field;
     }
 
+    /**
+     * Example generated document:
+     {
+         "total_amount": 48.96852646813233,
+         "improvement_surcharge": 0.3,
+         "pickup_location": [
+             -73.96071975181356,
+             40.761333931139575
+         ],
+         "pickup_datetime": "2024-10-10 03:39:22",
+         "trip_type": "2",
+         "dropoff_datetime": "2024-10-09 17:54:43",
+         "rate_code_id": "1",
+         "tolls_amount": 0.9381693846282485,
+         "dropoff_location": [
+             -73.9126110288055,
+             40.715247495239176
+         ],
+         "passenger_count": 4,
+         "fare_amount": 21.07896409187173,
+         "extra": 0.5291259818883527,
+         "trip_distance": 1.124182854144491,
+         "tip_amount": 0.372383809916233,
+         "store_and_fwd_flag": "Y",
+         "payment_type": "3",
+         "mta_tax": 0.5,
+         "vendor_id": "2"
+     }
+     */
     @Override
     public Stream<ObjectNode> createDocs(int numDocs) {
         var random = new Random(1L);
