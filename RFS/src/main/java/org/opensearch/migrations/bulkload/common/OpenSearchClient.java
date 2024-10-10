@@ -44,7 +44,7 @@ public class OpenSearchClient {
             .maxBackoff(DEFAULT_MAX_BACKOFF)
             .filter(throwable -> !(throwable instanceof InvalidResponse)); // Do not retry on this exception
 
-    private static final int BULK_MAX_RETRY_ATTEMPTS = 15;
+    private static final int BULK_MAX_RETRY_ATTEMPTS = 2;
     private static final Duration BULK_BACKOFF = Duration.ofSeconds(2);
     private static final Duration BULK_MAX_BACKOFF = Duration.ofSeconds(60);
     /** Retries for up 10 minutes */
@@ -192,7 +192,8 @@ public class OpenSearchClient {
     ) {
         var objectDoesNotExist = !hasObjectCheck(objectPath, context);
         if (objectDoesNotExist) {
-            client.putAsync(objectPath, settings.toString(), context.createCheckRequestContext()).flatMap(resp -> {
+            var putRequestContext = context == null ? null : context.createCheckRequestContext();
+            client.putAsync(objectPath, settings.toString(), putRequestContext).flatMap(resp -> {
                 if (resp.statusCode == HttpURLConnection.HTTP_OK) {
                     return Mono.just(resp);
                 } else if (resp.statusCode == HttpURLConnection.HTTP_BAD_REQUEST) {

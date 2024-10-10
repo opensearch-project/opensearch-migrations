@@ -13,8 +13,11 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 
 import org.opensearch.migrations.CreateSnapshot;
-import org.opensearch.migrations.bulkload.framework.PreloadedSearchClusterContainer;
+import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.data.WorkloadGenerator;
+import org.opensearch.migrations.data.WorkloadOptions;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.testcontainers.OpensearchContainer;
@@ -60,7 +63,6 @@ public class ProcessLifecycleTest extends SourceTestBase {
     }
 
     @Test
-    @Tag("longTest")
     public void testExitsZeroThenThreeForSimpleSetup() throws Exception {
         testProcess(3,
             d -> {
@@ -94,7 +96,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
         // to such a short value (1s) that no document migration will exit in that amount of time. For good
         // measure though, the toxiproxy also adds latency to the requests to make it impossible for the
         // migration to complete w/in that 1s.
-        "WITH_DELAYS, 2" })
+        "WITH_DELAYS, 2"
+    })
     public void testProcessExitsAsExpected(String failAfterString, int expectedExitCode) throws Exception {
         final var failHow = FailHow.valueOf(failAfterString);
         testProcess(expectedExitCode,
@@ -105,10 +108,6 @@ public class ProcessLifecycleTest extends SourceTestBase {
     private void testProcess(int expectedExitCode, Function<RunData, Integer> processRunner) {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
 
-        var sourceImageArgs = makeParamsForBase(SearchClusterContainer.ES_V7_10_2);
-        var baseSourceImageVersion = (SearchClusterContainer.ContainerVersion) sourceImageArgs[0];
-        var generatorImage = (String) sourceImageArgs[1];
-        var generatorArgs = (String[]) sourceImageArgs[2];
         var targetImageName = SearchClusterContainer.OS_V2_14_0.getImageName();
 
         var tempDirSnapshot = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
@@ -116,29 +115,30 @@ public class ProcessLifecycleTest extends SourceTestBase {
 
         try (
             var network = Network.newNetwork();
-            var esSourceContainer = new PreloadedSearchClusterContainer(
-                baseSourceImageVersion,
-                SOURCE_SERVER_ALIAS,
-                generatorImage,
-                generatorArgs
-            );
+            var esSourceContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2)
+                .withNetwork(network)
+                .withNetworkAliases(SOURCE_SERVER_ALIAS);
             var osTargetContainer = new OpensearchContainer<>(targetImageName).withExposedPorts(OPENSEARCH_PORT)
                 .withNetwork(network)
                 .withNetworkAliases(TARGET_DOCKER_HOSTNAME);
             var proxyContainer = new ToxiProxyWrapper(network)
         ) {
+            CompletableFuture.allOf(
+                CompletableFuture.runAsync(() -> esSourceContainer.start()),
+                CompletableFuture.runAsync(() -> osTargetContainer.start()),
+                CompletableFuture.runAsync(() -> proxyContainer.start(TARGET_DOCKER_HOSTNAME, OPENSEARCH_PORT))
+            ).join();
 
-            CompletableFuture.allOf(CompletableFuture.supplyAsync(() -> {
-                esSourceContainer.start();
-                return null;
-            }), CompletableFuture.supplyAsync(() -> {
-                osTargetContainer.start();
-                return null;
-            }), CompletableFuture.supplyAsync(() -> {
-                proxyContainer.start(TARGET_DOCKER_HOSTNAME, OPENSEARCH_PORT);
-                return null;
-            })).join();
+            // Populate the source cluster with data
+            var client = new OpenSearchClient(ConnectionContextTestParams.builder()
+                .host(esSourceContainer.getUrl())
+                .build()
+                .toConnectionContext()
+            );
+            var generator = new WorkloadGenerator(client);
+            generator.generate(new WorkloadOptions());
 
+            // Create the snapshot from the source cluster
             var args = new CreateSnapshot.Args();
             args.snapshotName = SNAPSHOT_NAME;
             args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
