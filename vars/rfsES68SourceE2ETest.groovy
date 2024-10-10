@@ -69,6 +69,6 @@ def call(Map config = [:]) {
             defaultStageId: 'rfs-integ-es68',
             skipCaptureProxyOnNodeSetup: true,
             jobName: 'rfs-es68source-e2e-test',
-            integTestCommand: '/root/lib/integ_test/integ_test/backfill_tests.py'
+            integTestCommand: '/root/lib/integ_test/integ_test/backfill_tests_es68.py'
     )
 }
