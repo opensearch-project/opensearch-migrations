@@ -19,16 +19,30 @@ MAX_WAIT_MINUTES = 45
 WAIT_INTERVAL_SECONDS = 15
 
 
+class DeleteStackFailure(Exception):
+    pass
+
+
+class DeleteStackTimeout(Exception):
+    pass
+
+
 class StackDeletionRequest:
-    def __init__(self, stack_name, client_request_token=None):
+    def __init__(self, stack_name):
         self.stack_name = stack_name
-        self.client_request_token = client_request_token
         self.retry_count = 0
 
 
 def delete_stack(cfn_client, stack_name: str) -> StackDeletionRequest:
-    describe_stack_response = cfn_client.describe_stacks(StackName=stack_name)
-    stack_status = describe_stack_response['Stacks'][0]['StackStatus']
+    try:
+        describe_stack_response = cfn_client.describe_stacks(StackName=stack_name)
+        stack_status = describe_stack_response['Stacks'][0]['StackStatus']
+    except ClientError as client_error:
+        if 'does not exist' in client_error.response['Error']['Message']:
+            logger.warning(f"Stack {stack_name} no longer exists, skipping its deletion")
+            return StackDeletionRequest(stack_name=stack_name)
+        else:
+            raise client_error
     if 'IN_PROGRESS' in stack_status:
         logger.warning(f"Unexpected status: {stack_status} for {stack_name} when preparing to delete stack")
     logger.info(f"Deleting stack: {stack_name}")
@@ -38,8 +52,8 @@ def delete_stack(cfn_client, stack_name: str) -> StackDeletionRequest:
 
 def retry_delete_stack(cfn_client, deletion_request: StackDeletionRequest):
     if deletion_request.retry_count >= MAX_DELETE_STACK_RETRIES:
-        raise RuntimeError(f"Max attempts of {MAX_DELETE_STACK_RETRIES} have failed to delete stack: "
-                           f"{deletion_request.stack_name}. Please see CFN stack logs for more details")
+        raise DeleteStackFailure(f"Max attempts of {MAX_DELETE_STACK_RETRIES} have failed to delete "
+                                 f"stack: {deletion_request.stack_name}. Please see CFN stack logs for more details")
     logger.info(f"Retry attempt {deletion_request.retry_count + 1} of {MAX_DELETE_STACK_RETRIES} for "
                 f"stack: {deletion_request.stack_name}")
     delete_stack(cfn_client=cfn_client, stack_name=deletion_request.stack_name)
@@ -85,8 +99,8 @@ def wait_for_stack_deletion(cfn_client, stack_delete_requests: List[StackDeletio
         wait_time_seconds += WAIT_INTERVAL_SECONDS
 
     if remaining_requests:
-        logger.error(f"Timeout reached. The following stacks were still in "
-                     f"progress: {[r.stack_name for r in remaining_requests]}")
+        raise DeleteStackTimeout(f"Timeout reached. The following stacks were still in "
+                                 f"progress: {[r.stack_name for r in remaining_requests]}")
     else:
         logger.info(f"The following stacks have been deleted "
                     f"successfully: {[s.stack_name for s in stack_delete_requests]}")
@@ -129,6 +143,7 @@ def delete_stacks_for_environment(stage_name: str):
 
     stage_stack_names = []
     for name in stack_names:
+        # Add stack that has stage name in middle(-stage-) or at end(-stage) of stack name
         if re.match(rf".*-{stage_name}-.*|.*-{stage_name}$", name):
             stage_stack_names.append(name)
     logging.info(f"Collected the following stacks to delete: {stage_stack_names}")
