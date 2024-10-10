@@ -37,7 +37,7 @@ public class WorkloadGenerator {
 
     private static List<CompletableFuture<?>> generateDocs(OpenSearchClient client, String indexName, Workload workload, WorkloadOptions options) {
         // This happens inline to be sure the index exists before docs are indexed on it
-        client.createIndex(indexName, workload.createIndex(options.index.indexSettings), null);
+        client.createIndex(indexName, workload.createIndex(options.index.indexSettings.deepCopy()), null);
 
         var docIdCounter = new AtomicInteger(0);
         var allDocs = workload.createDocs(options.totalDocs)

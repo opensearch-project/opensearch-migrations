@@ -6,6 +6,7 @@ import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 import static org.opensearch.migrations.data.FieldBuilders.createField;
@@ -26,7 +27,7 @@ public class Geonames implements Workload {
     public ObjectNode createIndex(ObjectNode defaultSettings) {
         var properties = mapper.createObjectNode();
 
-        properties.set("geonameId", createField("long"));
+        properties.set("geonameid", createField("long"));
         properties.set("name", createFieldTextRawKeyword());
         properties.set("asciiname", createFieldTextRawKeyword());
         properties.set("alternatenames", createFieldTextRawKeyword());
@@ -34,6 +35,10 @@ public class Geonames implements Workload {
         properties.set("feature_code", createFieldTextRawKeyword());
         properties.set("cc2", createFieldTextRawKeyword());
         properties.set("admin1_code", createFieldTextRawKeyword());
+        properties.set("admin2_code", createFieldTextRawKeyword());
+        properties.set("admin3_code", createFieldTextRawKeyword());
+        properties.set("admin4_code", createFieldTextRawKeyword());
+        properties.set("elevation", createField("integer"));
         properties.set("population", createField("long"));
         properties.set("dem", createFieldTextRawKeyword());
         properties.set("timezone", createFieldTextRawKeyword());
@@ -59,25 +64,29 @@ public class Geonames implements Workload {
         return IntStream.range(0, numDocs)
             .mapToObj(i -> {
                 var doc = mapper.createObjectNode();
-                doc.put("geonameId", i + 1000);
+                doc.put("geonameid", i + 1000);
                 doc.put("name", "City" + (i + 1));
                 doc.put("asciiname", "City" + (i + 1));
                 doc.put("alternatenames", "City" + (i + 1));
                 doc.put("feature_class", "FCl" + (i + 1));
                 doc.put("feature_code", "FCo" + (i + 1));
+                doc.put("country_code", randomCountryCode(random));
                 doc.put("cc2", "cc2" + (i + 1));
                 doc.put("admin1_code", "admin" + (i + 1));
                 doc.put("population", random.nextInt(1000));
                 doc.put("dem", random.nextInt(1000) + "");
                 doc.put("timezone", "TZ" + (i + 1));
-                var location = mapper.createArrayNode();
-                location.add(randomLongitude(random));
-                location.add(randomLatitude(random));
-                doc.set("location", location);
-                doc.put("country_code", randomCountryCode(random));
+                doc.set("location", randomLocation(random));
                 return doc;
             }
         );
+    }
+
+    private static ArrayNode randomLocation(Random random) {
+        var location = mapper.createArrayNode();
+        location.add(randomLongitude(random));
+        location.add(randomLatitude(random));
+        return location;
     }
 
     private static double randomLatitude(Random random) {

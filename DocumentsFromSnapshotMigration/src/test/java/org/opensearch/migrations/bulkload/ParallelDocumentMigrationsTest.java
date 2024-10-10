@@ -30,6 +30,8 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+import static org.junit.jupiter.api.Assertions.fail;
+
 @Tag("isolatedTest")
 @Slf4j
 public class ParallelDocumentMigrationsTest extends SourceTestBase {
@@ -103,12 +105,13 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
             args.sourceArgs.host = esSourceContainer.getUrl();
 
             var ops = new ClusterOperations(esSourceContainer.getUrl());
-            System.err.println("geonames:\n" + ops.get("/geonames/_search?size=1").getValue());
-            System.err.println("sonested:\n" + ops.get("/sonested/_search?size=1").getValue());
-            System.err.println("logs-211998:\n" + ops.get("/logs-211998/_search?size=1").getValue());
-            System.err.println("nyc_taxis:\n" + ops.get("/nyc_taxis/_search?size=1").getValue());
+            System.err.println("geonames:\n" + ops.get("/geonames").getValue() + "\n" + ops.get("/geonames/_search?size=5").getValue());
+            System.err.println("sonested:\n" + ops.get("/sonested").getValue() + "\n" + ops.get("/sonested/_search?size=5").getValue());
+            System.err.println("logs-211998:\n" + ops.get("/logs-211998").getValue() + "\n" + ops.get("/logs-211998/_search?size=5").getValue());
+            System.err.println("nyc_taxis:\n" + ops.get("/nyc_taxis").getValue() + "\n" + ops.get("/nyc_taxis/_search?size=5").getValue());
             var cat = ops.get("/_cat/indices?v");
             System.err.println("indices:\n" + cat.getValue());
+            fail("Done!");
 
             var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
             snapshotCreator.run();

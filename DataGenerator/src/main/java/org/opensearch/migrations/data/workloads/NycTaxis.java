@@ -45,7 +45,7 @@ public class NycTaxis implements Workload {
         properties.set("rate_code_id", createField("keyword"));
         properties.set("store_and_fwd_flag", createField("keyword"));
         properties.set("surcharge", createScaledFloatField());
-        properties.set("tip_amount", createField("half_float"));
+        properties.set("tip_amount", createScaledFloatField());
         properties.set("tolls_amount", createScaledFloatField());
         properties.set("total_amount", createScaledFloatField());
         properties.set("trip_distance", createScaledFloatField());
@@ -87,28 +87,24 @@ public class NycTaxis implements Workload {
         return IntStream.range(0, numDocs)
             .mapToObj(i -> {
                 var doc = mapper.createObjectNode();
-                // "cab_color"
-                doc.put("dropoff_datetime", randomTimeISOString(currentTime, random));
-                doc.set("dropoff_location", randomLocation(random));
-                // "ehail_fee"
-                doc.put("extra", randomDouble(random, 0.0, 1.0));
-                doc.put("fare_amount", randomDouble(random, 5.0, 50.0));
-                doc.put("improvement_surcharge", 0.3);
-                doc.put("mta_tax", 0.5);
-                doc.put("passenger_count", random.nextInt(4) + 1);
-                doc.put("payment_type", randomPaymentType(random));
-                doc.put("pickup_datetime", randomTimeISOString(currentTime, random));
-                doc.set("pickup_location", randomLocation(random));
-                doc.put("rate_code_id", "1");
-                doc.put("store_and_fwd_flag", randomStoreAndFwdFlag(random));
-                // "surcharge"
-                doc.put("tip_amount", randomDouble(random, 0.0, 15.0));
-                doc.put("tolls_amount", randomDouble(random, 0.0, 5.0));
                 doc.put("total_amount", randomDouble(random, 5.0, 50.0));
-                doc.put("trip_distance", randomDouble(random, 0.5, 20.0));
+                doc.put("improvement_surcharge", 0.3);
+                doc.set("pickup_location", randomLocation(random));
+                doc.put("pickup_datetime", randomTimeISOString(currentTime, random));
                 doc.put("trip_type", randomTripType(random));
+                doc.put("dropoff_datetime", randomTimeISOString(currentTime, random));
+                doc.put("rate_code_id", "1");
+                doc.put("tolls_amount", randomDouble(random, 0.0, 5.0));
+                doc.set("dropoff_location", randomLocation(random));
+                doc.put("passenger_count", random.nextInt(4) + 1);
+                doc.put("fare_amount", randomDouble(random, 5.0, 50.0));
+                doc.put("extra", randomDouble(random, 0.0, 1.0));
+                doc.put("trip_distance", randomDouble(random, 0.5, 20.0));
+                doc.put("tip_amount", randomDouble(random, 0.0, 15.0));
+                doc.put("store_and_fwd_flag", randomStoreAndFwdFlag(random));
+                doc.put("payment_type", randomPaymentType(random));
+                doc.put("mta_tax", 0.5);
                 doc.put("vendor_id", randomVendorId(random));
-                // "vendor_name"
 
                 return doc;
             }

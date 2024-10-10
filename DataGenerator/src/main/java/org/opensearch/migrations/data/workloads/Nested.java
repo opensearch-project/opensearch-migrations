@@ -69,21 +69,20 @@ public class Nested implements Workload {
 
         return IntStream.range(0, numDocs)
             .mapToObj(i -> {
-                var doc = mapper.createObjectNode();
-                doc.put("qid", (i + 1000) + "");
-                doc.put("user", randomUser(random));
                 var creationTime = randomTime(currentTime, random);
-                doc.put("creationDate", creationTime);
+                var doc = mapper.createObjectNode();
                 doc.put("title", randomTitle(random));
+                doc.put("qid", (i + 1000) + "");
+                doc.set("answers", randomAnswers(mapper, creationTime, random));
                 doc.set("tag", randomTags(random));
-                var children = generateAnswers(mapper, creationTime, random);
-                doc.set("answers", children);
+                doc.put("user", randomUser(random));
+                doc.put("creationDate", creationTime);
                 return doc;
             }
         );
     }
 
-    private static ArrayNode generateAnswers(ObjectMapper mapper, long timeFrom, Random random) {
+    private static ArrayNode randomAnswers(ObjectMapper mapper, long timeFrom, Random random) {
         var answers = mapper.createArrayNode();
         var numAnswers = random.nextInt(5) + 1; // 1 to 5
 
@@ -104,7 +103,7 @@ public class Nested implements Workload {
 
     private static ArrayNode randomTags(Random random) {
         var tags = mapper.createArrayNode();
-        var tagsToCreate = random.nextInt(3);
+        var tagsToCreate = random.nextInt(3) + 1;
 
         for (int i = 0; i < tagsToCreate; i++) {
             tags.add(randomElement(TAGS, random) + "v" + random.nextInt(10)); // Extra random int simulates more tags

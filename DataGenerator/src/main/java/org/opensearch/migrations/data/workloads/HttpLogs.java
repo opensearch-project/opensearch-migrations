@@ -17,8 +17,10 @@ public class HttpLogs implements Workload {
 
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final String[] HTTP_METHODS = { "GET", "POST", "PUT", "DELETE" };
-    private static final String[] URLS = { "/home", "/login", "/search", "/api/data", "/contact" };
     private static final int[] RESPONSE_CODES = { 200, 201, 400, 401, 403, 404, 500 };
+    private static final String[] URLS = {
+        "/home", "/login", "/search", "/api/data", "/contact"
+    };
 
     @Override
     public List<String> indexNames() {
@@ -36,7 +38,6 @@ public class HttpLogs implements Workload {
     @Override
     public ObjectNode createIndex(ObjectNode defaultSettings) {
         var properties = mapper.createObjectNode();
-        properties.set("logId", createField("integer"));
         var timestamp = createField("date");
         timestamp.put("format", "strict_date_optional_time||epoch_second");
         properties.set("@timestamp", timestamp);
@@ -77,9 +78,8 @@ public class HttpLogs implements Workload {
         return IntStream.range(0, numDocs)
             .mapToObj(i -> {
                 ObjectNode doc = mapper.createObjectNode();
-                doc.put("logId", i + 1000);
-                doc.put("clientip", randomIpAddress(random));
                 doc.put("@timestamp", randomTime(currentTime, random));
+                doc.put("clientip", randomIpAddress(random));
                 doc.put("request", randomRequest(random));
                 doc.put("status", randomStatus(random));
                 doc.put("size", randomResponseSize(random));

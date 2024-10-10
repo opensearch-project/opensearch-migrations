@@ -8,7 +8,7 @@ public class IndexOptions {
 
     public ObjectNode indexSettings = mapper.createObjectNode()
         .put("index.number_of_shards", 5)
-        .put("index.number_of_replicas", 1)
-        .put("index.queries.cache.enabled", true)
-        .put("index.requests.cache.enable", true);
+        .put("index.number_of_replicas", 0)
+        .put("index.queries.cache.enabled", false)
+        .put("index.requests.cache.enable", false);
 }

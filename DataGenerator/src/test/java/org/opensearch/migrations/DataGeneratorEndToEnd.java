@@ -4,6 +4,7 @@ import java.util.Map;
 
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
@@ -14,6 +15,7 @@ import org.junit.jupiter.api.Test;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.hasEntry;
+import static org.junit.jupiter.api.Assertions.fail;
 
 /**
  * Tests focused on running end to end test cases for Data Generator
@@ -69,5 +71,15 @@ class DataGeneratorEndToEnd {
         expectedIndexes.forEach((index, expectedDocs) -> 
             assertThat(indexMap, hasEntry(index, expectedDocs))
         );
+
+        var ops = new ClusterOperations(targetCluster.getUrl());
+        System.err.println("geonames:\n" + ops.get("/geonames").getValue() + "\n" + ops.get("/geonames/_search?size=5").getValue());
+        System.err.println("sonested:\n" + ops.get("/sonested").getValue() + "\n" + ops.get("/sonested/_search?size=5").getValue());
+        System.err.println("logs-211998:\n" + ops.get("/logs-211998").getValue() + "\n" + ops.get("/logs-211998/_search?size=5").getValue());
+        System.err.println("nyc_taxis:\n" + ops.get("/nyc_taxis").getValue() + "\n" + ops.get("/nyc_taxis/_search?size=5").getValue());
+        var cat = ops.get("/_cat/indices?v");
+        System.err.println("indices:\n" + cat.getValue());
+        fail("Done!");
+
     }
 }

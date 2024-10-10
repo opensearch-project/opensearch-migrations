@@ -18,6 +18,7 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParam
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.data.WorkloadGenerator;
+import org.opensearch.migrations.data.WorkloadOptions;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.testcontainers.OpensearchContainer;
@@ -146,7 +147,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
             System.err.println("settings:\n" + settings.getValue());
 
 
-            WorkloadGenerator.createDefaultTestData(client);
+            WorkloadGenerator.generate(client, new WorkloadOptions());
 
             operations.get("/_refresh");
             var cat = operations.get("/_cat/indices?v");
