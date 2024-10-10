@@ -102,8 +102,7 @@ class Environment:
             logger.info("No snapshot provided")
         if 'metadata_migration' in self.config:
             self.metadata: Metadata = Metadata(self.config["metadata_migration"],
-                                               target_cluster=self.target_cluster,
-                                               snapshot=self.snapshot)
+                                               config_file)
         if 'kafka' in self.config:
             self.kafka: Kafka = get_kafka(self.config["kafka"])
             logger.info(f"Kafka initialized: {self.kafka}")

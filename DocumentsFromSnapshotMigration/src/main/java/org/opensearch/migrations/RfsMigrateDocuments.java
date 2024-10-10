@@ -58,6 +58,8 @@ public class RfsMigrateDocuments {
     }
 
     public static class Args {
+
+        
         @Parameter(names = {"--help", "-h"}, help = true, description = "Displays information about how to use this tool")
         private boolean help;
 

@@ -21,7 +21,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Define the output file path
-OUTPUT_FILE="/etc/migration_services.yaml"
+OUTPUT_FILE="/shared-logs-output/migration_services.yaml"
 
 # Write the parameter value to the file
 echo "$PARAMETER_VALUE" > "$OUTPUT_FILE"
