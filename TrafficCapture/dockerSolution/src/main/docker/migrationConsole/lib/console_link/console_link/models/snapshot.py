@@ -17,7 +17,6 @@ SNAPSHOT_SCHEMA = {
         'type': 'dict',
         'schema': {
             'snapshot_name': {'type': 'string', 'required': True},
-            'otel_endpoint': {'type': 'string', 'required': False},
             's3': {
                 'type': 'dict',
                 'schema': {

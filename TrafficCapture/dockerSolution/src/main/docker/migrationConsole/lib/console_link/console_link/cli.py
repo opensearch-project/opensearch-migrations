@@ -37,7 +37,7 @@ class Context(object):
 
 @click.group()
 @click.option(
-    "--config-file", default="/etc/migration_services.yaml", help="Path to config file"
+    "--config-file", default="/shared-logs-output/migration_services.yaml", help="Path to config file"
 )
 @click.option("--json", is_flag=True)
 @click.option('-v', '--verbose', count=True, help="Verbosity level. Default is warn, -v is info, -vv is debug.")
@@ -522,7 +522,7 @@ def describe_topic_records_cmd(ctx, topic_name):
 
 @cli.command()
 @click.option(
-    "--config-file", default="/etc/migration_services.yaml", help="Path to config file"
+    "--config-file", default="/shared-logs-output/migration_services.yaml", help="Path to config file"
 )
 @click.option("--json", is_flag=True)
 @click.argument('shell', type=click.Choice(['bash', 'zsh', 'fish']))

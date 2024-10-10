@@ -11,7 +11,8 @@ services:
     networks:
       - migrations
     volumes:
-      - ./lib/console_link/services.yaml:/etc/migration_services.yaml
+      - sharedLogsVolume:/shared-logs-output
+      - ./lib/console_link/services.yaml:/shared-logs-output/migration_services.yaml
       # this is a convenience thing for testing -- it should be removed before this makes it to prod.
       - ./lib:/root/lib
       - ~/.aws:/root/.aws
@@ -25,6 +26,10 @@ services:
     ports:
       - "8000:8000"
     command: pipenv run python /root/console_api/manage.py runserver_plus 0.0.0.0:8000
+
+volumes:
+  sharedLogsVolume:
+    driver: local
 
 networks:
   migrations:

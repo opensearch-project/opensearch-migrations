@@ -41,6 +41,7 @@ dependencies {
 
     // JCommander
     compileOnly group: 'org.jcommander', name: 'jcommander'
+    implementation group: 'org.yaml', name: 'snakeyaml'
 
     // OpenTelemetry core
     api group: 'io.opentelemetry', name: 'opentelemetry-api'

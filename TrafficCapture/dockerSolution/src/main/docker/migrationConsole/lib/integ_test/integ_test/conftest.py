@@ -16,7 +16,7 @@ def pytest_configure(config):
 
 def pytest_addoption(parser):
     parser.addoption("--unique_id", action="store", default=uuid.uuid4().hex)
-    parser.addoption("--config_file_path", action="store", default="/etc/migration_services.yaml",
+    parser.addoption("--config_file_path", action="store", default="/shared-logs-output/migration_services.yaml",
                      help="Path to config file for console library")
 
 

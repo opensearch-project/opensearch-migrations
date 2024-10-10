@@ -26,7 +26,7 @@ The console link library is designed to provide a unified interface for the many
 
 ![Console_link Library Diagram](console_library_diagram.svg)
 
-The user defines their migration services in a `migration_services.yaml` file, by default found at `/etc/migration_services.yaml`.
+The user defines their migration services in a `migration_services.yaml` file, by default found at `/shared-logs-output/migration_services.yaml`.
 
 Currently, the supported services are:
 
@@ -46,12 +46,14 @@ source_cluster:
     endpoint: "https://capture-proxy-es:9200"
     allow_insecure: true
     no_auth:
+    version: ES_7_10
 target_cluster:
     endpoint: "https://opensearchtarget:9200"
     allow_insecure: true
     basic_auth:
         username: "admin"
         password: "myStrongPassword123!"
+    version: OS_2_15
 metrics_source:
     prometheus:
         endpoint: "http://prometheus:9090"
@@ -71,8 +73,8 @@ backfill:
             - "migration_deployment=1.0.6"
 replay:
   ecs:
-    cluster-name: "migrations-dev-cluster"
-    service-name: "migrations-dev-replayer-service"
+    cluster_name: "migrations-dev-cluster"
+    service_name: "migrations-dev-replayer-service"
 snapshot:
   snapshot_name: "snapshot_2023_01_01"
   s3:
@@ -165,7 +167,7 @@ backfill:
         ecs:
             cluster_name: migration-aws-integ-ecs-cluster
             service_name: migration-aws-integ-reindex-from-snapshot
-            aws-region: us-east-1
+            aws_region: us-east-1
 ```
 
 #### OpenSearch Ingestion
@@ -262,7 +264,7 @@ The structure of cli commands is:
 
 The available global options are:
 
-- `--config-file FILE` to specify the path to a config file (default is `/etc/migration_services.yaml`)
+- `--config-file FILE` to specify the path to a config file (default is `/shared-logs-output/migration_services.yaml`)
 - `--json` to get output in JSON designed for machine consumption instead of printing to the console
 
 #### Objects
