@@ -40,6 +40,11 @@ def call(Map config = [:]) {
             "trafficReplayerServiceEnabled": false,
             "reindexFromSnapshotServiceEnabled": true,
             "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
+            "sourceCluster": {
+                "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
+                "auth": {"type": "none"},
+                "version": "ES_6.8.23"
+            },
             "tlsSecurityPolicy": "TLS_1_2",
             "enforceHTTPS": true,
             "nodeToNodeEncryptionEnabled": true,
