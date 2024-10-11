@@ -313,7 +313,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: "migration-console",
-            dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/migrationConsole"),
+            dockerImageRegistryName: "migrations/migration_console:latest",
             securityGroups: securityGroups,
             portMappings: servicePortMappings,
             dockerImageCommand: imageCommand,

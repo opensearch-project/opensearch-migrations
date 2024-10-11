@@ -141,7 +141,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: serviceName,
-            dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),
+            dockerImageRegistryName: "migrations/capture_proxy:latest",
             dockerImageCommand: ['/bin/sh', '-c', command],
             securityGroups: securityGroups,
             taskRolePolicies: servicePolicies,

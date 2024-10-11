@@ -11,10 +11,6 @@ def calculateDockerHash = { projectName ->
     CommonUtils.calculateDockerHash(project.fileTree("src/main/docker/${projectName}"))
 }
 
-clean.doFirst {
-    delete project.file("./src/main/docker/migrationConsole/build")
-}
-
 dependencies {
     constraints {
         implementation('software.amazon.awssdk:secretsmanager:2.25.19') {
@@ -25,89 +21,108 @@ dependencies {
 
 def dockerFilesForExternalServices = [
         "elasticsearchWithSearchGuard": "elasticsearch_searchguard",
+        "captureProxyBase": "capture_proxy_base",
         "elasticsearchTestConsole": "elasticsearch_client_test_console",
         "migrationConsole": "migration_console",
         "otelCollector": "otel_collector",
         "grafana": "grafana"
 ]
-// Create the static docker files that aren't hosting migrations java code from this repo
+
 dockerFilesForExternalServices.each { projectName, dockerImageName ->
     def escapedProjectName = projectName;
     task("buildDockerImage_${escapedProjectName}", type: DockerBuildImage) {
         if (escapedProjectName == "migrationConsole") {
-            def dependencies = []
-            dependencies += stageConsoleDependenciesFromLibraries(project as Project,
-                    List.of(project(":libraries:kafkaCommandLineFormatter")),
-                    projectName, "src/main/docker/${escapedProjectName}")
-            dependencies +=stageConsoleDependenciesFromApplications(project as Project,
-                    List.of(project(":CreateSnapshot"),
-                            project(":MetadataMigration"),
-                    ), projectName, "src/main/docker/${escapedProjectName}")
+            // Define lists of libraries and applications
+            def libraries = [
+                project(":libraries:kafkaCommandLineFormatter")
+            ]
 
+            def applications = [
+                project(":CreateSnapshot"),
+                project(":MetadataMigration")
+            ]
 
-            def parentCopyTask = project.tasks.create("copyArtifact_${projectName}")
-            dependencies.forEach { d -> parentCopyTask.dependsOn(d) }
+            // Create a single sync task to copy the required files
+            def destDir = "build/docker/${dockerImageName}_${escapedProjectName}"
+            def syncTask = project.tasks.create("syncArtifact_${dockerImageName}_${escapedProjectName}", Sync) {
+                into destDir
+                duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
-            dependsOn "copyArtifact_${escapedProjectName}"
+                // Copy libraries
+                libraries.each { libProject ->
+                    def applicationDestDir = "staging/${libProject.name}/"
+                    from (libProject.configurations.findByName("runtimeClasspath").files) {
+                        into "${applicationDestDir}/lib"
+                    }
+                    from (libProject.tasks.getByName('jar')) {
+                        into "${applicationDestDir}/lib"
+                    }
+                }
+
+                // Copy applications
+                applications.each { appProject ->
+                    def applicationDestDir = "staging/${appProject.name}/"
+                    from (appProject.configurations.findByName("runtimeClasspath").files) {
+                        into "${applicationDestDir}/lib"
+                    }
+                    from (appProject.tasks.getByName('jar')) {
+                        into "${applicationDestDir}/lib"
+                    }
+                    from (appProject.tasks.getByName('startScripts').outputs.files) {
+                        into "${applicationDestDir}/bin"
+                    }
+                }
+
+                from "src/main/docker/${projectName}"
+            }
+
+            // Collect assemble tasks from libraries and applications
+            def assembleTasks = (libraries + applications).collect { it.tasks.named("assemble") }
+            // Ensure the sync task depends on the assemble tasks
+            syncTask.dependsOn(assembleTasks)
+
+            dependsOn syncTask
+            dependsOn assembleTasks
+            // Migration Console base image is the test console
             dependsOn "buildDockerImage_elasticsearchTestConsole"
+        } else {
+            // Sync the src into the build folder
+            def syncTask = project.tasks.create("syncArtifact_${dockerImageName}_${escapedProjectName}", Sync) {
+                from "src/main/docker/${projectName}"
+                into "build/docker/${dockerImageName}_${escapedProjectName}"
+                duplicatesStrategy = DuplicatesStrategy.FAIL
+            }
+
+            // Ensure the sync task depends on the build task
+            dependsOn syncTask
         }
         def hash = calculateDockerHash(projectName)
         images.add("migrations/${dockerImageName}:$hash")
         images.add("migrations/${dockerImageName}:latest")
-        inputDir = project.file("src/main/docker/${projectName}")
+        inputDir = project.file("build/docker/${dockerImageName}_${projectName}")
     }
-}
-
-
-static def List<Task> stageConsoleDependenciesFromLibraries(Project dockerBuildProject,
-                                                            List<Project> sourceArtifactProjects,
-                                                            String destProjectName, String destDir) {
-    return sourceArtifactProjects.collect { sourceArtifactProject ->
-        def applicationDestDir = "${destDir}/staging/${sourceArtifactProject.name}/";
-        def libCopyTask = dockerBuildProject.tasks.create("copyLibArtifacts_${destProjectName}_${sourceArtifactProject.name}", Sync) {
-            from { sourceArtifactProject.configurations.findByName("runtimeClasspath").files }
-            from { sourceArtifactProject.tasks.getByName('jar') }
-            into "${applicationDestDir}/lib"
-        }
-        libCopyTask.dependsOn(sourceArtifactProject.tasks.named("assemble"))
-        return libCopyTask
-    }
-}
-
-static def List<Task> stageConsoleDependenciesFromApplications(Project dockerBuildProject,
-                                                               List<Project> sourceArtifactProjects,
-                                                               String destProjectName, String destDir) {
-    def libDeps = stageConsoleDependenciesFromLibraries(dockerBuildProject, sourceArtifactProjects, destProjectName, destDir)
-    def appDeps = sourceArtifactProjects.collect { sourceArtifactProject ->
-        def applicationDestDir = "${destDir}/staging/${sourceArtifactProject.name}/";
-        def binCopyTask = dockerBuildProject.tasks.create("copyBinArtifacts_${destProjectName}_${sourceArtifactProject.name}", Sync) {
-            from { sourceArtifactProject.tasks.getByName('startScripts').outputs.files }
-            into "${applicationDestDir}/bin"
-        }
-        binCopyTask.dependsOn(sourceArtifactProject.tasks.named("assemble"))
-        return binCopyTask;
-    }
-    return libDeps + appDeps;
 }
 
 def javaContainerServices = [
-        ":TrafficCapture:trafficCaptureProxyServer": "capture_proxy",
-        ":TrafficCapture:trafficReplayer": "traffic_replayer"
+        "capture_proxy": ":TrafficCapture:trafficCaptureProxyServer",
+        "capture_proxy_es": ":TrafficCapture:trafficCaptureProxyServer",
+        "traffic_replayer": ":TrafficCapture:trafficReplayer"
 ]
 def baseImageProjectOverrides = [
-        "trafficCaptureProxyServer": "elasticsearchWithSearchGuard"
+        "capture_proxy": "captureProxyBase",
+        "capture_proxy_es": "elasticsearchWithSearchGuard",
 ]
-javaContainerServices.each { projectName, dockerImageName ->
+javaContainerServices.each { dockerImageName, projectName ->
     def artifactProject = project(projectName);
-    CommonUtils.copyArtifactFromProjectToProjectsDockerStaging(project as Project, artifactProject)
-    CommonUtils.createDockerfile(project, artifactProject, baseImageProjectOverrides, dockerFilesForExternalServices)
+    CommonUtils.copyArtifactFromProjectToProjectsDockerStaging(project as Project, artifactProject, dockerImageName)
+    CommonUtils.createDockerfile(project, artifactProject, baseImageProjectOverrides[dockerImageName], dockerFilesForExternalServices, dockerImageName)
 }
 
-javaContainerServices.forEach { projectName, dockerImageName ->
+javaContainerServices.forEach { dockerImageName, projectName ->
     def escapedProjectName = project(projectName).name;
-    def dockerBuildDir = "build/docker/${escapedProjectName}"
-    task "buildDockerImage_${escapedProjectName}"(type: DockerBuildImage) {
-        dependsOn "createDockerfile_${escapedProjectName}"
+    def dockerBuildDir = "build/docker/${dockerImageName}_${escapedProjectName}"
+    task "buildDockerImage_${dockerImageName}"(type: DockerBuildImage) {
+        dependsOn "createDockerfile_${dockerImageName}"
         inputDir = project.file("${dockerBuildDir}")
         images.add("migrations/${dockerImageName}:${version}")
         images.add("migrations/${dockerImageName}:latest")
@@ -130,9 +145,9 @@ task buildDockerImages {
     dependsOn buildDockerImage_migrationConsole
     dependsOn buildDockerImage_otelCollector
     dependsOn buildDockerImage_grafana
-
-    dependsOn buildDockerImage_trafficCaptureProxyServer
-    dependsOn buildDockerImage_trafficReplayer
+    dependsOn buildDockerImage_traffic_replayer
+    dependsOn buildDockerImage_capture_proxy
+    dependsOn buildDockerImage_capture_proxy_es
 }
 
 tasks.getByName('composeUp')

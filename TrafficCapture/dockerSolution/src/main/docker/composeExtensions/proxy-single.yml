@@ -4,7 +4,7 @@ services:
 
   # Run combined instance of Capture Proxy and Elasticsearch
 #  capture-proxy-es:
-#    image: 'migrations/capture_proxy:latest'
+#    image: 'migrations/capture_proxy_es:latest'
 #    networks:
 #      - migrations
 #    ports:
