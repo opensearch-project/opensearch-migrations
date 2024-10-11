@@ -11,10 +11,10 @@ public class WorkloadOptions {
     @Parameter(names = { "--workloads", "-w" }, description = "The list of workloads to run, defaults to all available workloads.", required = false)
     public List<Workloads> workloads = Arrays.asList(Workloads.values());
 
-    @Parameter(names = { "--docs-per-workload" }, description = "The number of documents per each workload")
+    @Parameter(names = { "--docs-per-workload-count" }, description = "The number of documents per workload")
     public int totalDocs = 1000;
 
-    @Parameter(names = { "--max-bulk-request-batch-size "}, description = "For bulk requests the larger batch size")
+    @Parameter(names = { "--max-bulk-request-batch-count" }, description = "The maximum batch count for bulk requests")
     public int maxBulkBatchSize = 50;
 
     public IndexOptions index = new IndexOptions();

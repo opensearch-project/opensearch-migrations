@@ -22,7 +22,7 @@ public class WorkloadGenerator {
     public void generate(WorkloadOptions options) {
         log.info("Starting document creation");
 
-        // This workflow creates ALL documents in memory, schedules them and waits for completion.
+        // This workload creates ALL documents in memory, schedules them and waits for completion.
         // If larger scale is needed remove the toList() calls and stream all data.  
         var allDocs = new ArrayList<CompletableFuture<?>>();
         for (var workload : options.workloads) {
@@ -36,9 +36,9 @@ public class WorkloadGenerator {
             allDocs.addAll(docs);
         }
 
-        log.info("All document queued");
+        log.info("All documents queued");
         CompletableFuture.allOf(allDocs.toArray(new CompletableFuture[0])).join();
-        log.info("All document completed");
+        log.info("All documents completed");
     }
 
     private List<CompletableFuture<?>> generateDocs(String indexName, Workload workload, WorkloadOptions options) {

@@ -9,6 +9,7 @@ import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -18,7 +19,7 @@ import static org.hamcrest.Matchers.hasEntry;
 /**
  * Tests focused on running end to end test cases for Data Generator
  */
-// @Tag("isolatedTest")
+@Tag("isolatedTest")
 @Slf4j
 class DataGeneratorEndToEnd {
 
