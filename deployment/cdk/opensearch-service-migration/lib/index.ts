@@ -1,3 +1,4 @@
+export * from './cdk-logger';
 export * from './common-utilities';
 export * from './lambda'
 export * from './migration-assistance-stack';
