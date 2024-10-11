@@ -1,0 +1,12 @@
+apiVersion: v2
+name: full-environment
+version: 0.1.0
+dependencies:
+  - name: elasticsearch
+    version: "8.5.1"
+    repository: https://helm.elastic.co
+    alias: source
+#  - name: opensearch
+#    version: "2.23.1"
+#    repository: "https://opensearch-project.github.io/helm-charts/"
+#    alias: target

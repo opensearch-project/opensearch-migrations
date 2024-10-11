@@ -1,0 +1,43 @@
+source:
+  service:
+    type: LoadBalancer
+    ports:
+      - name: http
+        port: 9200
+        protocol: TCP
+        targetPort: 9200
+  secret:
+    password: myStrongPassword123!
+  # Permit co-located instances for solitary minikube virtual machines.
+  antiAffinity: "soft"
+
+  # Shrink default JVM heap.
+  esJavaOpts: "-Xmx128m -Xms128m"
+
+  # Allocate smaller chunks of memory per pod.
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "512M"
+    limits:
+      cpu: "1000m"
+      memory: "512M"
+
+  # Request smaller persistent volumes.
+  volumeClaimTemplate:
+    accessModes: [ "ReadWriteOnce" ]
+    storageClassName: "standard"
+    resources:
+      requests:
+        storage: 100M
+  fullnameOverride: "source"
+
+target:
+  fullnameOverride: "target"
+  #singleNode: true
+  httpPort: 29200
+#  config:
+#    discovery.type: single-node
+  extraEnvs:
+    - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+      value: myStrongPassword123!

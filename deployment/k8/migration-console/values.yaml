@@ -1,0 +1,50 @@
+# Default values for traffic replayer.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+replicaCount: 1
+
+image:
+  repository: migrations/migration_console
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+service:
+  # This makes the service available only within the cluster
+  type: ClusterIP
+  port: 80
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+env:
+  SHARED_LOGS_DIR_PATH: /shared-logs-output/traffic-replayer-default
+
+# For minikube required: minikube mount /Volumes/workplace/opensearch/lewijacn-migrations/opensearch-migrations:/opensearch-migrations
+servicesYamlVolume:
+  path: /opensearch-migrations/TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/services.yaml  # Local file path on the host
+  mountPath: /etc/migration_services.yaml  # Path inside the container
+
+# Additional volumes on the output Deployment definition.
+volumes: []
+# - name: foo
+#   secret:
+#     secretName: mysecret
+#     optional: false
+
+# Additional volumeMounts on the output Deployment definition.
+volumeMounts: []
+# - name: foo
+#   mountPath: "/etc/foo"
+#   readOnly: true
+
+nodeSelector: {}
+
+tolerations: []
+
+affinity: {}

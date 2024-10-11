@@ -1,0 +1,21 @@
+opensearch-local:
+  fullnameOverride: "target-cluster"
+  image:
+    tag: "2.17.0"
+  replicas: 1
+  singleNode: true
+  config:
+    discovery.type: single-node
+#  httpPort: 29200
+  extraEnvs:
+    - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+      value: myStrongPassword123!
+#    - name: http.port
+#      value: "29200"
+  service:
+    type: LoadBalancer
+    ports:
+      - name: http
+        port: 9200
+        protocol: TCP
+        targetPort: 9200
