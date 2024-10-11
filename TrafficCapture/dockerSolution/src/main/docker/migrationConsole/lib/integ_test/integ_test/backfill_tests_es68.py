@@ -88,7 +88,5 @@ class BackfillTests(unittest.TestCase):
         # Assert preloaded document exists
         get_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id, test_case=self)
 
-        # TODO Determine when backfill is completed
-
         get_document(cluster=target_cluster, index_name=index_name, doc_id=doc_id, max_attempts=30, delay=30.0,
                      test_case=self)
