@@ -1,6 +1,6 @@
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {Construct} from "constructs";
-import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
+import {ContainerImage, CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
 import * as forge from 'node-forge';
@@ -15,6 +15,10 @@ export function getSecretAccessPolicy(secretArn: string): PolicyStatement {
         ]
     })
 }
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import { DockerImageAsset } from "aws-cdk-lib/aws-ecr-assets";
 
 export function appendArgIfNotInExtraArgs(
     baseCommand: string,
@@ -435,3 +439,27 @@ export function isStackInGovCloud(stack: Stack): boolean {
 export function isRegionGovCloud(region: string): boolean {
     return region.startsWith('us-gov-');
 }
+
+/**
+ * Creates a Docker image asset from the specified image name.
+ *
+ * This function creates a Docker image asset from the specified image name.
+ * It can use a local or remote image.
+ *
+ * @param {string} imageName - The name of the Docker image to use as the base image.
+ * @returns {ContainerImage} - A `ContainerImage` object representing the Docker image asset.
+ */
+export function makeDockerImageAsset(scope: Construct, serviceName: string, imageName: string): ContainerImage {
+    const sanitizedImageName = imageName.replace(/[^a-zA-Z0-9-_]/g, '_');
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'docker-build-' + sanitizedImageName));
+    const dockerfilePath = path.join(tempDir, 'Dockerfile');
+    const dockerfileContent = `
+        FROM ${imageName}
+    `;
+    fs.writeFileSync(dockerfilePath, dockerfileContent);
+    const asset = new DockerImageAsset(scope, serviceName + 'Image', {
+        directory: tempDir,
+    });
+    return ContainerImage.fromDockerImageAsset(asset);
+}
+

@@ -15,11 +15,10 @@ import {
     ContainerDependencyCondition,
     ServiceManagedVolume
 } from "aws-cdk-lib/aws-ecs";
-import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {Duration, RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {PolicyStatement, Role} from "aws-cdk-lib/aws-iam";
-import {createDefaultECSTaskRole} from "../common-utilities";
+import {createDefaultECSTaskRole, makeDockerImageAsset} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { IApplicationTargetGroup, INetworkTargetGroup } from "aws-cdk-lib/aws-elasticloadbalancingv2";
 
@@ -29,9 +28,7 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly securityGroups: ISecurityGroup[],
     readonly cpuArchitecture: CpuArchitecture,
-    readonly dockerFilePath?: string,
-    readonly dockerDirectoryPath?: string,
-    readonly dockerImageRegistryName?: string,
+    readonly dockerImageRegistryName: string,
     readonly dockerImageCommand?: string[],
     readonly dockerBuildArgs?: {
         [key: string]: string
@@ -59,10 +56,6 @@ export class MigrationServiceCore extends Stack {
     serviceTaskRole: Role;
 
     createService(props: MigrationServiceCoreProps) {
-        if ((!props.dockerDirectoryPath && !props.dockerImageRegistryName) || (props.dockerDirectoryPath && props.dockerImageRegistryName)) {
-            throw new Error(`Exactly one option [dockerDirectoryPath, dockerImageRegistryName] is required to create the "${props.serviceName}" service`)
-        }
-
         const ecsCluster = Cluster.fromClusterAttributes(this, 'ecsCluster', {
             clusterName: `migration-${props.stage}-ecs-cluster`,
             vpc: props.vpc
@@ -86,19 +79,7 @@ export class MigrationServiceCore extends Stack {
             props.volumes.forEach(vol => serviceTaskDef.addVolume(vol))
         }
 
-        let serviceImage
-        if (props.dockerDirectoryPath) {
-            serviceImage = ContainerImage.fromDockerImageAsset(new DockerImageAsset(this, "ServiceImage", {
-                directory: props.dockerDirectoryPath,
-                buildArgs: props.dockerBuildArgs,
-                // File path relative to above directory path
-                file: props.dockerFilePath
-            }))
-        }
-        else {
-            // @ts-ignore
-            serviceImage = ContainerImage.fromRegistry(props.dockerImageRegistryName)
-        }
+        const serviceImage = makeDockerImageAsset(this, props.serviceName, props.dockerImageRegistryName)
 
         const serviceLogGroup = new LogGroup(this, 'ServiceLogGroup',  {
             retention: RetentionDays.ONE_MONTH,
