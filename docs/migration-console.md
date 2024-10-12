@@ -100,7 +100,7 @@ This Environment object will be a parameter to every command function in the mid
 
 The frontend has a few options for how to interact with the Environment object. In the basic case, the frontend can ask the middleware layer to instantiate and populate the Environment. In this case, the middleware will load the YAML (from the default or a specified path), validate it, and create implementation models for each service involved. It will then return the Environment object to the frontend, and the frontend will supply it along with all command calls.
 
-In the "power user" case--likely to be used by the DMS API, which may not rely on a `services.yaml` file--the frontend can start with an empty Environment, and define and instantiate the underlying models itself. When that Environment is passed into the commands exposed by the middleware layer, it will be used as the source of truth for all deployed services. One option for tools taking this option would be to define a custom configuration format and include an Environment builder/factory to convert that configuration into a suitable Environment object.
+In the "power user" case--likely to be used by an API, which may not rely on a `services.yaml` file--the frontend can start with an empty Environment, and define and instantiate the underlying models itself. When that Environment is passed into the commands exposed by the middleware layer, it will be used as the source of truth for all deployed services. One option for tools taking this option would be to define a custom configuration format and include an Environment builder/factory to convert that configuration into a suitable Environment object.
 
 ### Middleware Layer
 
