@@ -1,102 +1,175 @@
-## OpenSearch upgrades, migrations, and comparison tooling
-
-OpenSearch upgrade, migration, and comparison tooling facilitates OpenSearch migrations and upgrades. With these tools, you can set up a proof-of-concept environment locally using Docker containers or deploy to AWS using a one-click deployment script. Once set up and deployed, users can redirect their production traffic from a source cluster to a provisioned target cluster, enabling a comparison of results between the two clusters. All traffic directed to the source cluster is stored for future replay. Meanwhile, traffic to the target cluster is replayed at an identical rate to ensure a direct "apple-to-apple" comparison. This toolset empowers users to fine-tune cluster configurations and manage workloads more effectively.
+# OpenSearch Migrations Engine
 
 ## Table of Contents
+1. [Overview](#overview)
+2. [Key Features](#key-features)
+3. [Supported Versions and Platforms](#supported-versions-and-platforms)
+4. [Issue Tracking](#issue-tracking)
+5. [Project Structure](#project-structure)
+6. [Documentation](#documentation)
+7. [Getting Started](#getting-started)
+    - [Local Deployment](#local-deployment)
+    - [AWS Deployment](#aws-deployment)
+8. [Development](#development)
+    - [Prerequisites](#prerequisites)
+    - [Building the Project](#building-the-project)
+    - [Running Tests](#running-tests)
+    - [Code Style](#code-style)
+    - [Pre-commit Hooks](#pre-commit-hooks)
+9. [Contributing](#contributing)
+10. [Publishing](#publishing)
+11. [Security](#security)
+12. [License](#license)
+13. [Acknowledgments](#acknowledgments)
 
-- [OpenSearch upgrades, migrations, and comparison tooling](#opensearch-upgrades-migrations-and-comparison-tooling)
-- [Table of Contents](#table-of-contents)
-- [Supported cluster versions and platforms](#supported-cluster-versions-and-platforms)
-  - [Supported Source and Target Versions](#supported-source-and-target-versions)
-  - [Supported Source and Target Platforms](#supported-source-and-target-platforms)
-- [Build and deploy](#build-and-deploy)
-  - [Local deployment](#local-deployment)
-  - [AWS deployment](#aws-deployment)
-- [Developer contributions](#developer-contributions)
-  - [Code Style](#code-style)
-  - [Pre-commit hooks](#pre-commit-hooks)
-  - [Traffic Capture Proxy and Replayer](#traffic-capture-proxy-and-replayer)
-  - [Running Tests](#running-tests)
-- [Security](#security)
-- [License](#license)
-- [Releasing](#releasing)
-- [Publishing](#publishing)
+## Overview
 
-## Supported cluster versions and platforms
+The OpenSearch Migrations Engine is a comprehensive set of tools designed to facilitate upgrades, migrations, and comparisons for OpenSearch and Elasticsearch clusters. This project aims to simplify the process of moving between different versions and platforms while ensuring data integrity and performance.
 
-There are numerous combinations of source clusters, target clusters, and platforms. While the tools provided in this repository might work with various combinations, they might not support breaking changes between different source and target versions. Below is a list of supported source and target versions and platforms.
+## Key Features
 
-### Supported Source and Target Versions
-* Elasticsearch 6.x (Coming soon...)
-* Elasticsearch 7.0 - 7.17.x
-* OpenSearch 1.x
-* OpenSearch 2.x
+- **Upgrade and Migration Support**: Tools for migrating between Elasticsearch and OpenSearch versions.
+  - **[Metadata Migration](MetadataMigration/README.md)**: Utilities for migrating cluster metadata, including cluster configuration, settings, templates, and aliases.
+  - **Multi-version hop**: Jump more than one major Version (For example, from Elasticsearch 6.8 to OpenSearch 2.15), reducing effort and risk by bypassing the sequential major version upgrade requirements of snapshot/restore and rolling upgrades.
+  - **Downgrade Support**: Move from a more recent version (for example, Elasticsearch 7.17 to Elasticsearch 7.10.2)
+  - **Existing Data Migration with [Reindex-from-Snapshot](RFS/docs/DESIGN.md)**: Tools for migrating existing indices and documents from snapshots.
+  - **Live Traffic Capture/Change Data Capture with [Capture-and-Replay](TrafficCaptureAndReplayDesign.md)**: Change data capture, or live capture tooling to capture source cluster traffic and replay it on a target cluster for comparison.
+- **Zero-downtime with [live traffic routing options](docs/ClientTrafficSwinging.md)**: Load balancer tooling to faciliate client traffic switchover while maintaining service availability.
+- **Back-out-of-migration capabilities**: This solution is designed to synchronize source and target clusters, leaving the source cluster intact while exact traffic patterns can be replicated to target cluster. The target cluster performance and behavior can be analyzed before switching over client traffic.
+- **User Interface via a [Migration Console](https://github.com/opensearch-project/opensearch-migrations/blob/main/docs/migration-console.md)**: Command Line Interface (CLI) used to facilitate the steps in a migration.
+- **Local and Cloud Deployment Options**
+  - **[AWS Deployment](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/)**: Automated cloud deployment to AWS.
+  - **[Local Docker Deployment](/TrafficCapture/dockerSolution/README.md)**: Containerized solution for local testing and development.
 
-### Supported Source and Target Platforms
-* Self-managed (hosted by cloud provider)
-* Self-managed (on-premises)
-* Managed cloud offerings (e.g., Amazon OpenSearch, Amazon OpenSearch Serverless)
+## Supported Versions and Platforms
 
-## Build and deploy
+- **Tested Migration Paths**:
+  - Elasticsearch 6.8 to OpenSearch 1.3, 2.14
+  - Elasticsearch 7.10.2 to OpenSearch 1.3, 2.14
+  - Elasticsearch 7.17 to OpenSearch 1.3, 2.14
+  - OpenSearch 1.3 to OpenSearch 2.14
 
-### Local deployment
+Note that testing is done on specific minor versions, but any minor versions within a listed major version are expected to work.
 
-A containerized end-to-end solution can be deployed locally using the 
-[Docker Solution](TrafficCapture/dockerSolution/README.md).
+- **Platforms**:
+  - Self-managed (cloud provider hosted)
+  - Self-managed (on-premises)
+  - Managed cloud offerings (e.g., Amazon OpenSearch, Amazon OpenSearch Serverless)
 
-### AWS deployment
+While untested, alternative cloud providers are expected to work.
 
-Refer to [AWS Deployment](deployment/README.md) to deploy this solution to AWS.
+## Issue Tracking
 
-## Developer contributions
+We encourage users to open bugs and feature requests in this GitHub repository. For issue prioritization and management, the migrations team uses Jira:
 
-### Code Style
+https://opensearch.atlassian.net/
 
-There are many different source type under this project, the overall style is enforced via `./gradlew spotlessCheck` and is verified on all pull requests.  Spotless can resolve these issues automatically with `./gradlew spotlessApply`.  An recommended eclipse formatter [formatter.xml](./formatter.xml) is available at the root of the project, consult your IDE extensions/plugins for how to use this formatter during development.
+## Project Structure
 
-### Pre-commit hooks
+- `CreateSnapshot`: Tools for creating cluster snapshots.
+- `DocumentsFromSnapshotMigration`: Utilities for migrating documents from snapshots.
+- `MetadataMigration`: Core functionality for migrating cluster metadata.
+- `RFS` (Reindex-From-Snapshot):
+  - Migration utilities for document reindexing and metadata migration.
+  - Includes tracing contexts for both document and metadata migrations.
+- `TrafficCapture`: Projects for proxying, capturing, and replaying HTTP traffic.
+- `migrationConsole`: A comprehensive CLI tool for executing the migration workflow.
+  - `console_api`: Django-based API for orchestrating migration tasks.
+  - `lib/console_link`: Core library for migration operations.
+    - Provides CLI interface (`cli.py`) for user interactions.
+    - Implements various middleware components for error handling, metadata management, metrics collection, and more.
+    - Includes models for clusters, backfill operations, replay functionality, and other migration-related tasks.
+  - Supports various migration scenarios including backfill, replay, and metrics collection.
+  - Integrates with AWS services like ECS and CloudWatch for deployment and monitoring.
+- `deployment`: AWS deployment scripts and configurations.
+- `dev-tools`: Development utilities and API request templates.
+- `docs`: Project documentation and architecture diagrams.
+- `libraries`: Shared libraries used across the project.
+- `test`: End-to-end testing scripts and configurations.
+- `transformation`: Data transformation utilities for migration processes.
+- `dashboardsSanitizer`: CLI tool for sanitizing dashboard configurations.
+- `testHelperFixtures`: Test utilities including HTTP client for testing.
 
-Developers must run the "install_githooks.sh" script in order to add any pre-commit hooks.  Developers should run these hooks before opening a pull request to ensure checks pass and prevent potential rejection of the pull request."
+The migration console CLI provides users with a centralized interface to execute and manage the entire migration workflow, including:
+- Configuring source and target clusters
+- Managing backfill operations
+- Controlling traffic replay
+- Monitoring migration progress through metrics
+- Handling snapshots and metadata
+- Integrating with various deployment environments (Docker locally and AWS ECS)
 
-### Traffic Capture Proxy and Replayer
+Users can interact with the migration process through the CLI, which orchestrates the different components of the migration toolkit to perform a seamless migration between Elasticsearch and OpenSearch clusters.
 
-The TrafficCapture directory hosts a set of projects designed to facilitate the proxying and capturing of HTTP traffic, which can then be offloaded and replayed to other HTTP(S) server(s).
+## Documentation
 
-More documentation on this directory including the projects within it can be found here: [Traffic Capture](TrafficCapture/README.md).
+User guide documentation is available in the [OpenSearch Migrations Wiki](https://github.com/opensearch-project/opensearch-migrations/wiki).
+
+## Getting Started
+
+### Local Deployment
+
+For local development and testing, use the Docker solution:
+
+ ```
+ cd TrafficCapture/dockerSolution
+ # Follow instructions in the README.md file
+ ```
+
+### AWS Deployment
+
+To deploy the solution on AWS, follow the steps outlined in [Migration Assistant for Amazon OpenSearch Service](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/), specifically [deploying the solution](https://docs.aws.amazon.com/solutions/latest/migration-assistant-for-amazon-opensearch-service/deploy-the-solution.html).
+
+
+## Development
+
+### Prerequisites
+
+- Java Development Kit (JDK)
+- Gradle
+- Docker and Docker Compose (for local deployment)
+- AWS CLI (for AWS deployment)
+
+### Building the Project
+
+```bash
+./gradlew build
+```
 
 ### Running Tests
 
-Developers can run a test script which will verify the end-to-end Local Docker Solution.
+```bash
+./gradlew test
+```
 
-More documentation on this test script can be found here:
-[End-to-End Testing](test/README.md)
+### Code Style
 
-## Security
+We use Spotless for code formatting. To check and apply the code style:
 
-See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
+```bash
+./gradlew spotlessCheck
+./gradlew spotlessApply
+```
 
-## License
+### Pre-commit Hooks
 
-This project is licensed under the Apache-2.0 License.
+Install the pre-commit hooks:
 
+```bash
+./install_githooks.sh
+```
 
-## Releasing
+## Contributing
 
-The release process is standard across repositories in this org and is run by a release manager volunteering from amongst [maintainers](MAINTAINERS.md).
-
-1. Create a tag, e.g. 0.1.0, and push it to this GitHub repository.
-2. The [release-drafter.yml](.github/workflows/release-drafter.yml) will be automatically kicked off and a draft release will be created.
-3. This draft release triggers the [jenkins release workflow](https://build.ci.opensearch.org/job/opensearch-migrations-release) as a result of which the opensearch-migrations toolset is released and published on artifacts.opensearch.org example as https://artifacts.opensearch.org/migrations/0.1.0/opensearch-migrations-0.1.0.tar.gz. 
-4. Once the above release workflow is successful, the drafted release on GitHub is published automatically.
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
 
 ## Publishing
 
-This project can be published to a local maven repository with:
+This project can be published to a local Maven repository with:
 ```sh
 ./gradlew publishToMavenLocal
 ```
 
-And subsequently imported into a separate gradle project with (replacing name with any subProject name)
+And subsequently imported into a separate Gradle project with (replacing name with any subProject name)
 ```groovy
 repositories {
     mavenCentral()
@@ -115,8 +188,22 @@ The entire list of published subprojects can be viewed with
 ```
 
 
-To include a testFixture dependency, define the import like
+To include a test Fixture dependency, define the import like
 
 ```groovy
 testImplementation testFixtures('org.opensearch.migrations.trafficcapture:trafficReplayer:0.1.0-SNAPSHOT')
 ```
+## Security
+
+See [SECURITY.md](SECURITY.md) for information about reporting security vulnerabilities.
+
+## License
+
+This project is licensed under the Apache-2.0 License - see the [LICENSE](LICENSE) file for details.
+
+## Acknowledgments
+
+- OpenSearch Community
+- Contributors and maintainers
+
+For more detailed information about specific components, please refer to the README files in the respective directories.
