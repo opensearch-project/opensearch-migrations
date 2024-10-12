@@ -1,6 +1,18 @@
 dependencies:
 - name: elasticsearch
-  repository: https://helm.elastic.co
-  version: 8.5.1
-digest: sha256:f7a682bf9bfda4c29805019d307797674832e5fcbabd07d98df47497dbc9bdff
-generated: "2024-10-10T23:53:32.505149-05:00"
+  repository: file://../../elasticsearch
+  version: 0.1.0
+- name: opensearch-helm
+  repository: file://../../opensearch-helm
+  version: 0.1.0
+- name: kafka-helm
+  repository: file://../../kafka-helm
+  version: 0.1.0
+- name: migration-console
+  repository: file://../../migration-console
+  version: 0.1.0
+- name: replayer
+  repository: file://../../replayer
+  version: 0.1.0
+digest: sha256:43ce1396b019dcf63e55b87d0d0580fc4483a56d6a2eece10f356456c2d7a635
+generated: "2024-10-11T21:40:26.248116-05:00"

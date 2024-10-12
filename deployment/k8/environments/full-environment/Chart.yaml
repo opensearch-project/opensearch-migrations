@@ -3,10 +3,17 @@ name: full-environment
 version: 0.1.0
 dependencies:
   - name: elasticsearch
-    version: "8.5.1"
-    repository: https://helm.elastic.co
-    alias: source
-#  - name: opensearch
-#    version: "2.23.1"
-#    repository: "https://opensearch-project.github.io/helm-charts/"
-#    alias: target
+    version: "0.1.0"
+    repository: "file://../../elasticsearch"
+  - name: opensearch-helm
+    version: "0.1.0"
+    repository: "file://../../opensearch-helm"
+  - name: kafka-helm
+    version: "0.1.0"
+    repository: "file://../../kafka-helm"
+  - name: migration-console
+    version: "0.1.0"
+    repository: "file://../../migration-console"
+  - name: replayer
+    version: "0.1.0"
+    repository: "file://../../replayer"

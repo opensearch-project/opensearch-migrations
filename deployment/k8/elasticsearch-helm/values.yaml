@@ -1,7 +1,18 @@
 elasticsearch-local:
   fullnameOverride: "source-cluster"
+  image: docker.elastic.co/elasticsearch/elasticsearch-oss
   imageTag: "7.10.2"
+
   replicas: 1
+
+  resources:
+    requests:
+      cpu: "1"
+      memory: "2Gi"
+    limits:
+      cpu: "2"
+      memory: "4Gi"
+
   service:
     type: LoadBalancer
     ports:
@@ -9,30 +20,21 @@ elasticsearch-local:
         port: 9200
         protocol: TCP
         targetPort: 9200
-#  esConfig:
-#    elasticsearch.yml: |
-#      xpack.security.enabled: false
 
-#  secret:
-#    password: admin123!
-  # Permit co-located instances for solitary minikube virtual machines.
-  antiAffinity: "soft"
+  esConfig:
+    elasticsearch.yml: |
+      xpack:
+        security:
+          enabled: false
+          transport:
+            ssl:
+              key: ""
+      cluster.name: "docker-cluster"
+      network.host: "0.0.0.0"
+      discovery.type: "single-node"
 
-  # Shrink default JVM heap.
-  esJavaOpts: "-Xmx128m -Xms128m"
-  # Allocate smaller chunks of memory per pod.
-  resources:
-    requests:
-      cpu: "100m"
-      memory: "512M"
-    limits:
-      cpu: "1000m"
-      memory: "512M"
-
-  # Request smaller persistent volumes.
-  volumeClaimTemplate:
-    accessModes: [ "ReadWriteOnce" ]
-    storageClassName: "standard"
-    resources:
-      requests:
-        storage: 100M
+  roles:
+    - master
+    - data
+    - ingest
+    - remote_cluster_client

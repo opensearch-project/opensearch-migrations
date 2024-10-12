@@ -1,11 +1,11 @@
 source_cluster:
-  endpoint: "https://capture-proxy:9200"
+  endpoint: "https://elasticsearch:19200"
   allow_insecure: true
   basic_auth:
     username: "admin"
     password: "admin"
 target_cluster:
-  endpoint: "https://opensearchtarget:9200"
+  endpoint: "https://opensearch-cluster-master:9200"
   allow_insecure: true
   basic_auth:
     username: "admin"
