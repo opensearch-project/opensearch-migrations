@@ -68,7 +68,14 @@ While untested, alternative cloud providers are expected to work.
 
 ## Issue Tracking
 
-We encourage users to open bugs and feature requests in this GitHub repository. For issue prioritization and management, the migrations team uses Jira:
+We encourage users to open bugs and feature requests in this GitHub repository. 
+
+**Encountering a compatibility issue or missing feature?**
+
+- [Search existing issues](https://github.com/opensearch-project/opensearch-migrations/issues) to see if it’s already reported. If it is, feel free to **upvote** and **comment**.
+- Can’t find it? [Create a new issue](https://github.com/opensearch-project/opensearch-migrations/issues/new/choose) to let us know.
+
+For issue prioritization and management, the migrations team uses Jira, but uses GitHub issues for community intake:
 
 https://opensearch.atlassian.net/
 
