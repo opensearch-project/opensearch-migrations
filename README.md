@@ -37,7 +37,7 @@ Here's an updated and simplified version of the **Key Features** section to impr
   - **Multi-Version Upgrade**: Easily migrate across major versions (e.g., from Elasticsearch 6.8 to OpenSearch 2.15), skipping intermediate upgrades and reducing time and risk.
   - **Downgrade Support**: Downgrade to an earlier version if needed (e.g., from Elasticsearch 7.17 to 7.10.2).
   - **Existing Data Migration with [Reindex-from-Snapshot](RFS/docs/DESIGN.md)**: Migrate indices and documents using snapshots, updating your data to the latest Lucene version quickly without impacting the target cluster.
-  - **Live Traffic Capture with [Capture-and-Replay](TrafficCaptureAndReplayDesign.md)**: Capture live traffic from the source cluster and replay it on the target cluster for validation. This ensures the target cluster can handle real-world traffic patterns before fully migrating.
+  - **Live Traffic Capture with [Capture-and-Replay](docs/TrafficCaptureAndReplayDesign.md)**: Capture live traffic from the source cluster and replay it on the target cluster for validation. This ensures the target cluster can handle real-world traffic patterns before fully migrating.
   
 - **Zero-Downtime Migration with [Live Traffic Routing](docs/ClientTrafficSwinging.md)**: Tools to seamlessly switch client traffic between clusters while keeping services fully operational.
 
@@ -87,7 +87,7 @@ https://opensearch.atlassian.net/
 - [`RFS`](RFS/README.md) (Reindex-From-Snapshot):
   - Migration utilities for document reindexing and metadata migration.
   - Includes tracing contexts for both document and metadata migrations.
-- [`TrafficCapture`](TrafficCapture/README.md): Projects for proxying, capturing, and replaying HTTP traffic.
+- [`TrafficCapture`](TrafficCapture/README.md) (Capture-and-Replay): Projects for proxying, capturing, and replaying HTTP traffic.
 - [`migrationConsole`](TrafficCapture/dockerSolution/src/main/docker/migrationConsole/README.md): A comprehensive CLI tool for executing the migration workflow.
   - [`console_api`](TrafficCapture/dockerSolution/src/main/docker/migrationConsole/console_api/README.md) (experimental): Django-based API for orchestrating migration tasks.
   - [`lib/console_link`](TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/README.md): Core library for migration operations.
