@@ -96,15 +96,20 @@ public class DocumentReindexer {
         private final String docId;
         private final String bulkIndex;
 
+        public BulkDocSection(String id, String docBody) {
+            this.docId = id;
+            this.bulkIndex = createBulkIndex(docId, docBody);
+        }
+
         public BulkDocSection(RfsLuceneDocument doc) {
             this.docId = doc.id;
-            this.bulkIndex = createBulkIndex(docId, doc);
+            this.bulkIndex = createBulkIndex(docId, doc.source);
         }
 
         @SneakyThrows
-        private static String createBulkIndex(final String docId, final RfsLuceneDocument doc) {
+        private static String createBulkIndex(final String docId, final String doc) {
             // For a successful bulk ingestion, we cannot have any leading or trailing whitespace, and  must be on a single line.
-            String trimmedSource = doc.source.trim().replace("\n", "");
+            String trimmedSource = doc.trim().replace("\n", "");
             return "{\"index\":{\"_id\":\"" + docId + "\"}}" + "\n" + trimmedSource;
         }
 
