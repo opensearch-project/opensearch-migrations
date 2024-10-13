@@ -26,20 +26,28 @@
 
 The OpenSearch Migrations Engine is a comprehensive set of tools designed to facilitate upgrades, migrations, and comparisons for OpenSearch and Elasticsearch clusters. This project aims to simplify the process of moving between different versions and platforms while ensuring data integrity and performance.
 
+Here's an updated and simplified version of the **Key Features** section to improve clarity and readability:
+
+---
+
 ## Key Features
 
-- **Upgrade and Migration Support**: Tools for migrating between Elasticsearch and OpenSearch versions.
-  - **[Metadata Migration](MetadataMigration/README.md)**: Utilities for migrating cluster metadata, including cluster configuration, settings, templates, and aliases.
-  - **Multi-version hop**: Jump more than one major Version (For example, from Elasticsearch 6.8 to OpenSearch 2.15), reducing effort and risk by bypassing the sequential major version upgrade requirements of snapshot/restore and rolling upgrades.
-  - **Downgrade Support**: Move from a more recent version (for example, Elasticsearch 7.17 to Elasticsearch 7.10.2)
-  - **Existing Data Migration with [Reindex-from-Snapshot](RFS/docs/DESIGN.md)**: Tools for migrating existing indices and documents from snapshots.
-  - **Live Traffic Capture/Change Data Capture with [Capture-and-Replay](TrafficCaptureAndReplayDesign.md)**: Change data capture, or live capture tooling to capture source cluster traffic and replay it on a target cluster for comparison.
-- **Zero-downtime with [live traffic routing options](docs/ClientTrafficSwinging.md)**: Load balancer tooling to faciliate client traffic switchover while maintaining service availability.
-- **Back-out-of-migration capabilities**: This solution is designed to synchronize source and target clusters, leaving the source cluster intact while exact traffic patterns can be replicated to target cluster. The target cluster performance and behavior can be analyzed before switching over client traffic.
-- **User Interface via a [Migration Console](https://github.com/opensearch-project/opensearch-migrations/blob/main/docs/migration-console.md)**: Command Line Interface (CLI) used to facilitate the steps in a migration.
-- **Local and Cloud Deployment Options**
-  - **[AWS Deployment](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/)**: Automated cloud deployment to AWS.
-  - **[Local Docker Deployment](/TrafficCapture/dockerSolution/README.md)**: Containerized solution for local testing and development.
+- **Upgrade and Migration Support**: Provides tools for migrating between different versions of Elasticsearch and OpenSearch.
+  - **[Metadata Migration](MetadataMigration/README.md)**: Migrate essential cluster components such as configuration, settings, templates, and aliases.
+  - **Multi-Version Upgrade**: Easily migrate across major versions (e.g., from Elasticsearch 6.8 to OpenSearch 2.15), skipping intermediate upgrades and reducing time and risk.
+  - **Downgrade Support**: Downgrade to an earlier version if needed (e.g., from Elasticsearch 7.17 to 7.10.2).
+  - **Existing Data Migration with [Reindex-from-Snapshot](RFS/docs/DESIGN.md)**: Migrate indices and documents using snapshots, updating your data to the latest Lucene version quickly without impacting the target cluster.
+  - **Live Traffic Capture with [Capture-and-Replay](TrafficCaptureAndReplayDesign.md)**: Capture live traffic from the source cluster and replay it on the target cluster for validation. This ensures the target cluster can handle real-world traffic patterns before fully migrating.
+  
+- **Zero-Downtime Migration with [Live Traffic Routing](docs/ClientTrafficSwinging.md)**: Tools to seamlessly switch client traffic between clusters while keeping services fully operational.
+
+- **Migration Rollback**: Keep your source cluster synchronized during the migration, allowing you to monitor the target cluster's performance before fully committing to the switch. You can safely revert if needed.
+
+- **User-Friendly Interface via [Migration Console](https://github.com/opensearch-project/opensearch-migrations/blob/main/docs/migration-console.md)**: Command Line Interface (CLI) that guides you through each migration step.
+
+- **Flexible Deployment Options**:
+  - **[AWS Deployment](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/)**: Fully automated deployment to AWS.
+  - **[Local Docker Deployment](/TrafficCapture/dockerSolution/README.md)**: Run the solution locally in a container for testing and development.
 
 ## Supported Versions and Platforms
 
@@ -66,28 +74,28 @@ https://opensearch.atlassian.net/
 
 ## Project Structure
 
-- `CreateSnapshot`: Tools for creating cluster snapshots.
-- `DocumentsFromSnapshotMigration`: Utilities for migrating documents from snapshots.
-- `MetadataMigration`: Core functionality for migrating cluster metadata.
-- `RFS` (Reindex-From-Snapshot):
+- [`CreateSnapshot`](CreateSnapshot/README.md): Tools for creating cluster snapshots.
+- [`DocumentsFromSnapshotMigration`](DocumentsFromSnapshotMigration/README.md): Utilities for migrating documents from snapshots.
+- [`MetadataMigration`](MetadataMigration/README.md): Core functionality for migrating cluster metadata.
+- [`RFS`](RFS/README.md) (Reindex-From-Snapshot):
   - Migration utilities for document reindexing and metadata migration.
   - Includes tracing contexts for both document and metadata migrations.
-- `TrafficCapture`: Projects for proxying, capturing, and replaying HTTP traffic.
-- `migrationConsole`: A comprehensive CLI tool for executing the migration workflow.
-  - `console_api`: Django-based API for orchestrating migration tasks.
-  - `lib/console_link`: Core library for migration operations.
+- [`TrafficCapture`](TrafficCapture/README.md): Projects for proxying, capturing, and replaying HTTP traffic.
+- [`migrationConsole`](TrafficCapture/dockerSolution/src/main/docker/migrationConsole/README.md): A comprehensive CLI tool for executing the migration workflow.
+  - [`console_api`](TrafficCapture/dockerSolution/src/main/docker/migrationConsole/console_api/README.md) (experimental): Django-based API for orchestrating migration tasks.
+  - [`lib/console_link`](TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/README.md): Core library for migration operations.
     - Provides CLI interface (`cli.py`) for user interactions.
     - Implements various middleware components for error handling, metadata management, metrics collection, and more.
     - Includes models for clusters, backfill operations, replay functionality, and other migration-related tasks.
   - Supports various migration scenarios including backfill, replay, and metrics collection.
   - Integrates with AWS services like ECS and CloudWatch for deployment and monitoring.
-- `deployment`: AWS deployment scripts and configurations.
+- [`deployment`](deployment/README.md): AWS deployment scripts and configurations.
 - `dev-tools`: Development utilities and API request templates.
 - `docs`: Project documentation and architecture diagrams.
 - `libraries`: Shared libraries used across the project.
-- `test`: End-to-end testing scripts and configurations.
+- [`test`](test/README.md): End-to-end testing scripts and configurations.
 - `transformation`: Data transformation utilities for migration processes.
-- `dashboardsSanitizer`: CLI tool for sanitizing dashboard configurations.
+- [`dashboardsSanitizer`](dashboardsSanitizer/README.md): CLI tool for sanitizing dashboard configurations.
 - `testHelperFixtures`: Test utilities including HTTP client for testing.
 
 The migration console CLI provides users with a centralized interface to execute and manage the entire migration workflow, including:
@@ -126,8 +134,11 @@ To deploy the solution on AWS, follow the steps outlined in [Migration Assistant
 
 - Java Development Kit (JDK)
 - Gradle
+- Python
 - Docker and Docker Compose (for local deployment)
 - AWS CLI (for AWS deployment)
+- CDK (for AWS deployment)
+- Node (for AWS deployment)
 
 ### Building the Project
 
@@ -140,6 +151,12 @@ To deploy the solution on AWS, follow the steps outlined in [Migration Assistant
 ```bash
 ./gradlew test
 ```
+
+### Continuous Integration/ Continuous Deployment
+We use a combination of github actions and jenkins so that we can publish released on a weekly basis and allow users to provide attestation for users interested in migration tooling.
+
+Jenkins pipelines are available [here](https://migrations.ci.opensearch.org/)
+
 
 ### Code Style
 
