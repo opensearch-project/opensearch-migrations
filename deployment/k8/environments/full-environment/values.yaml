@@ -1,0 +1,4 @@
+replayer:
+  sharedLogVolume:
+    createPvc: false # Only want one service to create volume
+

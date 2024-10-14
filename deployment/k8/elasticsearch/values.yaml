@@ -11,7 +11,7 @@ image:
 
 service:
   type: LoadBalancer
-  port: 19200 # Port exposed to external
+  port: 9200 # Port exposed to external
   targetPort: 9200 # Container port
 
 resources:

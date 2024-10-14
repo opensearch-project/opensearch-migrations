@@ -18,8 +18,6 @@ spec:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports:
-            - containerPort: {{ .Values.service.port }}
           command:
             - "/bin/sh"
             - "-c"
@@ -30,3 +28,29 @@ spec:
             - name: {{ $key }}
               value: {{ $value | quote }}
             {{- end }}
+          volumeMounts:
+            - name: {{ .Values.sharedLogVolume.volumeName }}
+              mountPath: {{ .Values.sharedLogVolume.mountPath }}
+      {{- if .Values.otelCollectorSidecar.enabled }}
+      initContainers:
+        - name: {{ .Values.otelCollectorSidecar.name}}
+          image: "{{ .Values.otelCollectorSidecar.image.repository }}:{{ .Values.otelCollectorSidecar.image.tag }}"
+          imagePullPolicy: {{ .Values.otelCollectorSidecar.image.pullPolicy }}
+          ports:
+            {{- range .Values.otelCollectorSidecar.ports }}
+            - name: {{ .name }}
+              containerPort: {{ .containerPort }}
+              protocol: {{ .protocol | default "TCP" }}
+            {{- end }}
+          restartPolicy: {{ .Values.otelCollectorSidecar.restartPolicy }}
+          {{- if .Values.otelCollectorSidecar.command }}
+          command:
+            - "/bin/sh"
+            - "-c"
+            - "{{ .Values.otelCollectorSidecar.command }}"
+          {{- end }}
+      {{- end }}
+      volumes:
+        - name: {{ .Values.sharedLogVolume.volumeName }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.sharedLogVolume.pvcClaimName }}

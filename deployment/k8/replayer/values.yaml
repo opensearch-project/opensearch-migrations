@@ -2,20 +2,15 @@
 # This is a YAML-formatted file.
 # Declare variables to be passed into your templates.
 
-replicaCount: 0
+replicaCount: 1
 
 image:
   repository: migrations/traffic_replayer
   pullPolicy: IfNotPresent
   tag: "latest"
 
-service:
-  # This makes the service available only within the cluster
-  type: ClusterIP
-  port: 80
-
 container:
-  command: "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer --speedup-factor 2 https://opensearchtarget:9200 --auth-header-value Basic\\\\ YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE= --insecure --kafka-traffic-brokers kafka:9092 --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id logging-group-default --otelCollectorEndpoint http://otel-collector:4317"
+  command: "/runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer --speedup-factor 2 https://opensearch-cluster-master:9200 --auth-header-value Basic\\\\ YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE= --insecure --kafka-traffic-brokers kafka:9092 --kafka-traffic-topic logging-traffic-topic --kafka-traffic-group-id logging-group-default --otelCollectorEndpoint http://localhost:4317"
 
 resources:
   limits:
@@ -28,21 +23,36 @@ resources:
 env:
   SHARED_LOGS_DIR_PATH: /shared-logs-output/traffic-replayer-default
 
-# Additional volumes on the output Deployment definition.
-volumes: []
-# - name: foo
-#   secret:
-#     secretName: mysecret
-#     optional: false
+otelCollectorSidecar:
+  name: otel-collector
+  enabled: true
+  restartPolicy: "Always"
+  #command: "--config=/etc/otel-config-debug-only.yaml"
+  #command: "--config=/etc/otel-config-aws.yaml"
+  image:
+    repository: migrations/otel_collector
+    pullPolicy: IfNotPresent
+    tag: "latest"
+  ports:
+    - name: pprof
+      containerPort: 1888
+      protocol: TCP
+    - name: health-check
+      containerPort: 13133
+      protocol: TCP
+    - name: zpages
+      containerPort: 55679
+      protocol: TCP
+    - name: otlp-receiver
+      containerPort: 4317
+      protocol: TCP
 
-# Additional volumeMounts on the output Deployment definition.
-volumeMounts: []
-# - name: foo
-#   mountPath: "/etc/foo"
-#   readOnly: true
-
-nodeSelector: {}
-
-tolerations: []
-
-affinity: {}
+sharedLogVolume:
+  volumeName: shared-logs
+  mountPath: /shared-logs-output # Path inside the container where the volume should be mounted
+  # Persistent volume claim settings
+  createPvc: true # This should only be created once and shared between services
+  pvcClaimName: shared-logs-pvc
+  storageClass: ""
+  accessMode: ReadWriteOnce
+  size: 10Gi

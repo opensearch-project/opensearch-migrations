@@ -1,0 +1,15 @@
+{{- if .Values.sharedLogVolume.createPvc }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.sharedLogVolume.pvcClaimName }}
+spec:
+  accessModes:
+    - {{ .Values.sharedLogVolume.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.sharedLogVolume.size }}
+  {{- if .Values.sharedLogVolume.storageClass }}
+  storageClassName: {{ .Values.sharedLogVolume.storageClass }}
+  {{- end }}
+{{- end }}

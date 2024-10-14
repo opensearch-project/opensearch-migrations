@@ -14,5 +14,8 @@ dependencies:
 - name: replayer
   repository: file://../../replayer
   version: 0.1.0
-digest: sha256:43ce1396b019dcf63e55b87d0d0580fc4483a56d6a2eece10f356456c2d7a635
-generated: "2024-10-11T21:40:26.248116-05:00"
+- name: capture-proxy
+  repository: file://../../capture-proxy
+  version: 0.1.0
+digest: sha256:ba4897cb6b540a897d96e6af4dd497f9448940f16c29dcbefffb00b2db965682
+generated: "2024-10-14T14:41:22.84168-05:00"
