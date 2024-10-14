@@ -30,9 +30,6 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly cpuArchitecture: CpuArchitecture,
     readonly dockerImageRegistryName: string,
     readonly dockerImageCommand?: string[],
-    readonly dockerBuildArgs?: {
-        [key: string]: string
-    },
     readonly taskRolePolicies?: PolicyStatement[],
     readonly mountPoints?: MountPoint[],
     readonly volumes?: Volume[],
