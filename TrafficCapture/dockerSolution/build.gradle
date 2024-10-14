@@ -32,7 +32,6 @@ dockerFilesForExternalServices.each { projectName, dockerImageName ->
     def escapedProjectName = projectName;
     task("buildDockerImage_${escapedProjectName}", type: DockerBuildImage) {
         if (escapedProjectName == "migrationConsole") {
-            // Define lists of libraries and applications
             def libraries = [
                 project(":libraries:kafkaCommandLineFormatter")
             ]
@@ -41,66 +40,56 @@ dockerFilesForExternalServices.each { projectName, dockerImageName ->
                 project(":CreateSnapshot"),
                 project(":MetadataMigration")
             ]
-
-            // Create a single sync task to copy the required files
-            def destDir = "build/docker/${dockerImageName}_${escapedProjectName}"
-            def syncTask = project.tasks.create("syncArtifact_${dockerImageName}_${escapedProjectName}", Sync) {
-                into destDir
-                duplicatesStrategy = DuplicatesStrategy.EXCLUDE
-
-                // Copy libraries
-                libraries.each { libProject ->
-                    def applicationDestDir = "staging/${libProject.name}/"
-                    from (libProject.configurations.findByName("runtimeClasspath").files) {
-                        into "${applicationDestDir}/lib"
-                    }
-                    from (libProject.tasks.getByName('jar')) {
-                        into "${applicationDestDir}/lib"
-                    }
-                }
-
-                // Copy applications
-                applications.each { appProject ->
-                    def applicationDestDir = "staging/${appProject.name}/"
-                    from (appProject.configurations.findByName("runtimeClasspath").files) {
-                        into "${applicationDestDir}/lib"
-                    }
-                    from (appProject.tasks.getByName('jar')) {
-                        into "${applicationDestDir}/lib"
-                    }
-                    from (appProject.tasks.getByName('startScripts').outputs.files) {
-                        into "${applicationDestDir}/bin"
-                    }
-                }
-
-                from "src/main/docker/${projectName}"
-            }
-
-            // Collect assemble tasks from libraries and applications
-            def assembleTasks = (libraries + applications).collect { it.tasks.named("assemble") }
-            // Ensure the sync task depends on the assemble tasks
-            syncTask.dependsOn(assembleTasks)
-
+            def syncTask = getMigrationConsoleSyncTask(project, dockerImageName, escapedProjectName, libraries, applications)
             dependsOn syncTask
-            dependsOn assembleTasks
-            // Migration Console base image is the test console
-            dependsOn "buildDockerImage_elasticsearchTestConsole"
+            inputDir = syncTask.destinationDir
         } else {
-            // Sync the src into the build folder
-            def syncTask = project.tasks.create("syncArtifact_${dockerImageName}_${escapedProjectName}", Sync) {
-                from "src/main/docker/${projectName}"
-                into "build/docker/${dockerImageName}_${escapedProjectName}"
-                duplicatesStrategy = DuplicatesStrategy.FAIL
-            }
-
-            // Ensure the sync task depends on the build task
-            dependsOn syncTask
+            inputDir = project.file("src/main/docker/${escapedProjectName}")
         }
-        def hash = calculateDockerHash(projectName)
-        images.add("migrations/${dockerImageName}:$hash")
+        def hashNonce = CommonUtils.calculateDockerHash(project.fileTree(inputDir))
+        images.add("migrations/${dockerImageName}:$hashNonce")
         images.add("migrations/${dockerImageName}:latest")
-        inputDir = project.file("build/docker/${dockerImageName}_${projectName}")
     }
+}
+
+static def Sync getMigrationConsoleSyncTask(Project project, String dockerImageName, String escapedProjectName, List<Project> libraries, List<Project> applications) {
+     // Create a single sync task to copy the required files
+    def destDir = "build/docker/${dockerImageName}_${escapedProjectName}"
+    def syncTask = project.tasks.create("syncArtifact_${dockerImageName}_${escapedProjectName}", Sync) {
+        into destDir
+        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+
+        // Copy libraries
+        (libraries + applications).each { libProject ->
+            def applicationDestDir = "staging/${libProject.name}/"
+            from (libProject.configurations.findByName("runtimeClasspath").files) {
+                into "${applicationDestDir}/lib"
+            }
+            from (libProject.tasks.getByName('jar')) {
+                into "${applicationDestDir}/lib"
+            }
+        }
+
+        // Copy applications
+        applications.each { appProject ->
+            def applicationDestDir = "staging/${appProject.name}/"
+            from (appProject.tasks.getByName('startScripts').outputs.files) {
+                into "${applicationDestDir}/bin"
+            }
+        }
+
+        from "src/main/docker/${escapedProjectName}"
+    }
+
+    // Collect assemble tasks from libraries and applications
+    def assembleTasks = (libraries + applications).collect { it.tasks.named("assemble") }
+    // Ensure the sync task depends on the assemble tasks
+    syncTask.dependsOn assembleTasks
+
+    // Migration Console base image is the test console
+    syncTask.dependsOn "buildDockerImage_elasticsearchTestConsole"
+
+    return syncTask
 }
 
 def javaContainerServices = [

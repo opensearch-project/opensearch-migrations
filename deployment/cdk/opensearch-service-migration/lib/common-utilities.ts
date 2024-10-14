@@ -15,9 +15,9 @@ export function getSecretAccessPolicy(secretArn: string): PolicyStatement {
         ]
     })
 }
-import * as fs from 'fs';
-import * as path from 'path';
-import * as os from 'os';
+import { mkdtempSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
 import { DockerImageAsset } from "aws-cdk-lib/aws-ecr-assets";
 
 export function appendArgIfNotInExtraArgs(
@@ -451,12 +451,12 @@ export function isRegionGovCloud(region: string): boolean {
  */
 export function makeDockerImageAsset(scope: Construct, serviceName: string, imageName: string): ContainerImage {
     const sanitizedImageName = imageName.replace(/[^a-zA-Z0-9-_]/g, '_');
-    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'docker-build-' + sanitizedImageName));
-    const dockerfilePath = path.join(tempDir, 'Dockerfile');
+    const tempDir = mkdtempSync(join(tmpdir(), 'docker-build-' + sanitizedImageName));
+    const dockerfilePath = join(tempDir, 'Dockerfile');
     const dockerfileContent = `
         FROM ${imageName}
     `;
-    fs.writeFileSync(dockerfilePath, dockerfileContent);
+    writeFileSync(dockerfilePath, dockerfileContent);
     const asset = new DockerImageAsset(scope, serviceName + 'Image', {
         directory: tempDir,
     });

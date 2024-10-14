@@ -72,7 +72,7 @@ def createContainerTasks = { dockerImageName, projectName ->
 javaContainerServices.each(createContainerTasks)
 
 (javaContainerServices).forEach { dockerImageName, projectName ->
-def escapedProjectName = project(projectName).name;
+    def escapedProjectName = project(projectName).name;
     def dockerBuildDir = "build/docker/${dockerImageName}_${escapedProjectName}"
     task "buildDockerImage_${dockerImageName}"(type: DockerBuildImage) {
         dependsOn "createDockerfile_${dockerImageName}"
