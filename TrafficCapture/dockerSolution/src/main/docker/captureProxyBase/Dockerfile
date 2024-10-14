@@ -39,8 +39,7 @@ COPY --from=cert-builder /certs/esnode-key.pem $ES_HOME/config/esnode-key.pem
 RUN chown -R root:root $ES_HOME/
 
 # Update the default Java truststore to trust the root-ca
-RUN keytool -import -alias root-ca -keystore $JAVA_HOME/lib/security/cacerts -file $ES_HOME/config/root-ca.pem -storepass changeit -noprompt
-
+RUN keytool -import -alias root-ca -cacerts -file $ES_HOME/config/root-ca.pem -storepass changeit -noprompt
 # Set environment variables for Search Guard
 ENV SEARCHGUARD_CONFIG_DIR=$ES_HOME/config
 ENV SEARCHGUARD_CERTS_DIR=$ES_HOME/config
