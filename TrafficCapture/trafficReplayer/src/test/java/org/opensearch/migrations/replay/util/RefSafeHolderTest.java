@@ -1,8 +1,7 @@
 package org.opensearch.migrations.replay.util;
 
-import org.junit.jupiter.api.Test;
-
 import io.netty.util.ReferenceCountUtil;
+import org.junit.jupiter.api.Test;
 import org.mockito.MockedStatic;
 
 import static org.junit.jupiter.api.Assertions.*;

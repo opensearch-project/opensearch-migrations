@@ -1,7 +1,5 @@
 package org.opensearch.migrations.replay.datahandlers.http;
 
-import io.netty.buffer.Unpooled;
-import io.netty.util.ReferenceCountUtil;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -28,6 +26,8 @@ import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.util.ReferenceCountUtil;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
