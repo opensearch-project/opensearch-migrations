@@ -1,5 +1,5 @@
 source_cluster:
-  endpoint: "https://elasticsearch:19200"
+  endpoint: "https://capture-proxy:9200"
   allow_insecure: true
   basic_auth:
     username: "admin"
