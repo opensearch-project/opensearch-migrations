@@ -18,7 +18,9 @@ public class RemoteWriter_OS_2_11 implements RemoteCluster, ClusterWriter {
 
     @Override
     public boolean compatibleWith(Version version) {
-        return VersionMatchers.isOS_2_X.test(version);
+        return VersionMatchers.isOS_2_X.or
+            (VersionMatchers.isOS_1_X)
+            .test(version);
     }
 
     @Override

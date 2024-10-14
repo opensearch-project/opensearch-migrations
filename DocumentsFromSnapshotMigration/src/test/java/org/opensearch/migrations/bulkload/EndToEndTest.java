@@ -4,6 +4,7 @@ import java.io.File;
 import java.util.List;
 import java.util.Random;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
@@ -20,7 +21,8 @@ import lombok.SneakyThrows;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.ArgumentsSource;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
@@ -30,52 +32,33 @@ public class EndToEndTest extends SourceTestBase {
     @TempDir
     private File localDirectory;
 
-    @ParameterizedTest(name = "Target {0}")
-    @ArgumentsSource(SupportedTargetCluster.class)
-    public void migrateFrom_ES_v6_8(final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
-        try (
-            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23);
-            final var targetCluster = new SearchClusterContainer(targetVersion)
-        ) {
-            migrateFrom_ES(sourceCluster, targetCluster);
+    private static Stream<Arguments> scenarios() {
+        var scenarios = Stream.<Arguments>builder();
+
+        for (var sourceCluster : SupportedClusters.sources()) {
+            for (var targetCluster : SupportedClusters.targets()) {
+                scenarios.add(Arguments.of(sourceCluster, targetCluster));
+            }
         }
+
+        return scenarios.build();
     }
 
-    @ParameterizedTest(name = "Target {0}")
-    @ArgumentsSource(SupportedTargetCluster.class)
-    public void migrateFrom_ES_v7_10(final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
+    @ParameterizedTest(name = "Source {0} to Target {1}")
+    @MethodSource(value = "scenarios")
+    public void migrationDocuments(
+        final SearchClusterContainer.ContainerVersion sourceVersion,
+        final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
         try (
-            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
+            final var sourceCluster = new SearchClusterContainer(sourceVersion);
             final var targetCluster = new SearchClusterContainer(targetVersion)
         ) {
-            migrateFrom_ES(sourceCluster, targetCluster);
-        }
-    }
-
-    @ParameterizedTest(name = "Target {0}")
-    @ArgumentsSource(SupportedTargetCluster.class)
-    public void migrateFrom_ES_v7_17(final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
-        try (
-            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_17);
-            final var targetCluster = new SearchClusterContainer(targetVersion)
-        ) {
-            migrateFrom_ES(sourceCluster, targetCluster);
-        }
-    }
-
-    @ParameterizedTest(name = "Target {0}")
-    @ArgumentsSource(SupportedTargetCluster.class)
-    public void migrateFrom_OS_v1_3(final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
-        try (
-            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.OS_V1_3_16);
-            final var targetCluster = new SearchClusterContainer(targetVersion)
-        ) {
-            migrateFrom_ES(sourceCluster, targetCluster);
+            migrationDocumentsWithClusters(sourceCluster, targetCluster);
         }
     }
 
     @SneakyThrows
-    private void migrateFrom_ES(
+    private void migrationDocumentsWithClusters(
         final SearchClusterContainer sourceCluster,
         final SearchClusterContainer targetCluster
     ) {

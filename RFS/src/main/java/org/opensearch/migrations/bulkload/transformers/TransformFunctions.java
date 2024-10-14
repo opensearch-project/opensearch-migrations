@@ -22,7 +22,7 @@ public class TransformFunctions {
         Version targetVersion,
         int dimensionality
     ) {
-        if (VersionMatchers.isOS_2_X.test(targetVersion)) {
+        if (VersionMatchers.isOS_2_X.or(VersionMatchers.isOS_1_X).test(targetVersion)) {
             if (VersionMatchers.isES_6_8.test(sourceVersion)) {
                 return new Transformer_ES_6_8_to_OS_2_11(dimensionality);
             }
