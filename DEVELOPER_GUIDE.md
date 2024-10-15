@@ -32,11 +32,6 @@
 - [`migrationConsole`](TrafficCapture/dockerSolution/src/main/docker/migrationConsole/README.md): A comprehensive CLI tool for executing the migration workflow.
   - [`console_api`](TrafficCapture/dockerSolution/src/main/docker/migrationConsole/console_api/README.md) (experimental): Django-based API for orchestrating migration tasks.
   - [`lib/console_link`](TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/README.md): Core library for migration operations.
-    - Provides CLI interface (`cli.py`) for user interactions.
-    - Implements various middleware components for error handling, metadata management, metrics collection, and more.
-    - Includes models for clusters, backfill operations, replay functionality, and other migration-related tasks.
-  - Supports various migration scenarios including backfill, replay, and metrics collection.
-  - Integrates with AWS services like ECS and CloudWatch for deployment and monitoring.
 - [`deployment`](deployment/README.md): AWS deployment scripts and configurations.
 - `dev-tools`: Development utilities and API request templates.
 - `docs`: Project documentation and architecture diagrams.
@@ -92,7 +87,7 @@ This project can be published to a local Maven repository with:
 ./gradlew publishToMavenLocal
 ```
 
-And subsequently imported into a separate Gradle project with (replacing `name` with any subProject name)
+And subsequently imported into a separate Gradle project with (replacing `name` with any subProject name):
 ```groovy
 repositories {
     mavenCentral()
@@ -105,13 +100,13 @@ dependencies {
 }
 ```
 
-The entire list of published subprojects can be viewed with     
+The entire list of published subprojects can be viewed as follows:     
 ```sh
 ./gradlew listPublishedArtifacts
 ```
 
 
-To include a test Fixture dependency, define the import like
+To include a test Fixture dependency, define the import similar to the following:
 
 ```groovy
 testImplementation testFixtures('org.opensearch.migrations.trafficcapture:trafficReplayer:0.1.0-SNAPSHOT')

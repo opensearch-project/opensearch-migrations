@@ -20,10 +20,6 @@
 
 The OpenSearch Migrations Engine is a comprehensive set of tools designed to facilitate upgrades, migrations, and comparisons for OpenSearch and Elasticsearch clusters. This project aims to simplify the process of moving between different versions and platforms while ensuring data integrity and performance.
 
-Here's an updated and simplified version of the **Key Features** section to improve clarity and readability:
-
----
-
 ## Key Features
 
 - **Upgrade and Migration Support**: Provides tools for migrating between different versions of Elasticsearch and OpenSearch.
