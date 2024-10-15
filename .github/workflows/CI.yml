@@ -200,6 +200,16 @@ jobs:
           node-version: ${{ env.node-version }}
       - name: Install NPM dependencies
         run: npm ci
+      - name: Mock Docker Images for CDK Tests
+        run: docker images &&  docker pull alpine && \
+          docker tag alpine migrations/capture_proxy:latest && \
+          docker tag alpine migrations/capture_proxy_es:latest && \
+          docker tag alpine opensearchproject/opensearch:2 && \
+          docker tag alpine migrations/elasticsearch_searchguard:latest && \
+          docker tag alpine docker.io/apache/kafka:3.7.0 && \
+          docker tag alpine migrations/migration_console:latest && \
+          docker tag alpine migrations/reindex_from_snapshot:latest && \
+          docker tag alpine migrations/traffic_replayer:latest
       - name: Run CDK Jest Tests
         run: npm test
 

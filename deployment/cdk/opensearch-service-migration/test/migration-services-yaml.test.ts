@@ -7,7 +7,6 @@ import {createStackComposer} from "./test-utils";
 import * as yaml from 'yaml';
 import {describe, afterEach, beforeEach, test, expect, jest} from '@jest/globals';
 
-jest.mock('aws-cdk-lib/aws-ecr-assets');
 describe('Migration Services YAML Tests', () => {
     beforeEach(() => {
         jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => ContainerImage.fromRegistry("ServiceImage"));

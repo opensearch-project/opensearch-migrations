@@ -140,7 +140,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: serviceName,
-            dockerImageRegistryName: "migrations/capture_proxy:latest",
+            dockerImageName: "migrations/capture_proxy:latest",
             dockerImageCommand: ['/bin/sh', '-c', command],
             securityGroups: securityGroups,
             taskRolePolicies: servicePolicies,

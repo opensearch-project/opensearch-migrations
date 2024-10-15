@@ -48,11 +48,7 @@ ENV SEARCHGUARD_CERTS_DIR=$ES_HOME/config
 # The elasticsearch.yml and proxy_tls.yml files are configured to work seamlessly with the Search Guard plugin and TLS settings.
 
 # Add base elasticsearch.yml content
-RUN echo 'searchguard.ssl.transport.pemcert_filepath: esnode.pem' >> $ELASTIC_SEARCH_CONFIG_FILE && \
-    echo 'searchguard.ssl.transport.pemkey_filepath: esnode-key.pem' >> $ELASTIC_SEARCH_CONFIG_FILE && \
-    echo 'searchguard.ssl.transport.pemtrustedcas_filepath: root-ca.pem' >> $ELASTIC_SEARCH_CONFIG_FILE && \
-    echo 'searchguard.ssl.transport.enforce_hostname_verification: false' >> $ELASTIC_SEARCH_CONFIG_FILE && \
-    echo 'searchguard.ssl.http.enabled: true' >> $ELASTIC_SEARCH_CONFIG_FILE && \
+RUN echo 'searchguard.ssl.http.enabled: true' >> $ELASTIC_SEARCH_CONFIG_FILE && \
     echo 'searchguard.ssl.http.pemcert_filepath: esnode.pem' >> $ELASTIC_SEARCH_CONFIG_FILE && \
     echo 'searchguard.ssl.http.pemkey_filepath: esnode-key.pem' >> $ELASTIC_SEARCH_CONFIG_FILE && \
     echo 'searchguard.ssl.http.pemtrustedcas_filepath: root-ca.pem' >> $ELASTIC_SEARCH_CONFIG_FILE

@@ -7,10 +7,6 @@ plugins {
 import org.opensearch.migrations.common.CommonUtils
 import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
 
-def calculateDockerHash = { projectName ->
-    CommonUtils.calculateDockerHash(project.fileTree("src/main/docker/${projectName}"))
-}
-
 dependencies {
     constraints {
         implementation('software.amazon.awssdk:secretsmanager:2.25.19') {
@@ -20,17 +16,16 @@ dependencies {
 }
 
 def dockerFilesForExternalServices = [
-        "elasticsearchWithSearchGuard": "elasticsearch_searchguard",
-        "captureProxyBase": "capture_proxy_base",
-        "elasticsearchTestConsole": "elasticsearch_client_test_console",
-        "migrationConsole": "migration_console",
-        "otelCollector": "otel_collector",
+        "elasticsearch_searchguard": "elasticsearchWithSearchGuard",
+        "capture_proxy_base": "captureProxyBase",
+        "elasticsearch_client_test_console": "elasticsearchTestConsole",
+        "migration_console": "migrationConsole",
+        "otel_collector": "otelCollector",
         "grafana": "grafana"
 ]
-
-dockerFilesForExternalServices.each { projectName, dockerImageName ->
+dockerFilesForExternalServices.each { dockerImageName, projectName ->
     def escapedProjectName = projectName;
-    task("buildDockerImage_${escapedProjectName}", type: DockerBuildImage) {
+    task("buildDockerImage_${dockerImageName}", type: DockerBuildImage) {
         if (escapedProjectName == "migrationConsole") {
             def libraries = [
                 project(":libraries:kafkaCommandLineFormatter")
@@ -52,28 +47,28 @@ dockerFilesForExternalServices.each { projectName, dockerImageName ->
     }
 }
 
-static def Sync getMigrationConsoleSyncTask(Project project, String dockerImageName, String escapedProjectName, List<Project> libraries, List<Project> applications) {
+static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName, String escapedProjectName, List<Project> libraries, List<Project> applications) {
      // Create a single sync task to copy the required files
     def destDir = "build/docker/${dockerImageName}_${escapedProjectName}"
     def syncTask = project.tasks.create("syncArtifact_${dockerImageName}_${escapedProjectName}", Sync) {
         into destDir
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
-        // Copy libraries
-        (libraries + applications).each { libProject ->
-            def applicationDestDir = "staging/${libProject.name}/"
-            from (libProject.configurations.findByName("runtimeClasspath").files) {
+        // Applications and Standalone Libraries both have libraries
+        (libraries + applications).each { lib ->
+            def applicationDestDir = "staging/${lib.name}/"
+            from (lib.configurations.findByName("runtimeClasspath").files) {
                 into "${applicationDestDir}/lib"
             }
-            from (libProject.tasks.getByName('jar')) {
+            from (lib.tasks.getByName('jar')) {
                 into "${applicationDestDir}/lib"
             }
         }
 
         // Copy applications
-        applications.each { appProject ->
-            def applicationDestDir = "staging/${appProject.name}/"
-            from (appProject.tasks.getByName('startScripts').outputs.files) {
+        applications.each { app ->
+            def applicationDestDir = "staging/${app.name}/"
+            from (app.tasks.getByName('startScripts').outputs.files) {
                 into "${applicationDestDir}/bin"
             }
         }
@@ -87,7 +82,7 @@ static def Sync getMigrationConsoleSyncTask(Project project, String dockerImageN
     syncTask.dependsOn assembleTasks
 
     // Migration Console base image is the test console
-    syncTask.dependsOn "buildDockerImage_elasticsearchTestConsole"
+    syncTask.dependsOn "buildDockerImage_elasticsearch_client_test_console"
 
     return syncTask
 }
@@ -97,14 +92,14 @@ def javaContainerServices = [
         "capture_proxy_es": ":TrafficCapture:trafficCaptureProxyServer",
         "traffic_replayer": ":TrafficCapture:trafficReplayer"
 ]
-def baseImageProjectOverrides = [
-        "capture_proxy": "captureProxyBase",
-        "capture_proxy_es": "elasticsearchWithSearchGuard",
+def baseImageOverrides = [
+        "capture_proxy": "capture_proxy_base",
+        "capture_proxy_es": "elasticsearch_searchguard",
 ]
 javaContainerServices.each { dockerImageName, projectName ->
     def artifactProject = project(projectName);
     CommonUtils.copyArtifactFromProjectToProjectsDockerStaging(project as Project, artifactProject, dockerImageName)
-    CommonUtils.createDockerfile(project, artifactProject, baseImageProjectOverrides[dockerImageName], dockerFilesForExternalServices, dockerImageName)
+    CommonUtils.createDockerfile(project, artifactProject, baseImageOverrides[dockerImageName], dockerFilesForExternalServices, dockerImageName)
 }
 
 javaContainerServices.forEach { dockerImageName, projectName ->
@@ -130,9 +125,9 @@ dockerCompose {
 }
 
 task buildDockerImages {
-    dependsOn buildDockerImage_elasticsearchWithSearchGuard
-    dependsOn buildDockerImage_migrationConsole
-    dependsOn buildDockerImage_otelCollector
+    dependsOn buildDockerImage_elasticsearch_searchguard
+    dependsOn buildDockerImage_migration_console
+    dependsOn buildDockerImage_otel_collector
     dependsOn buildDockerImage_grafana
     dependsOn buildDockerImage_traffic_replayer
     dependsOn buildDockerImage_capture_proxy

@@ -5,7 +5,6 @@ import {ContainerImage} from "aws-cdk-lib/aws-ecs";
 import {describe, beforeEach, afterEach, test, expect, jest} from '@jest/globals';
 import {ReindexFromSnapshotStack} from "../lib";
 
-jest.mock('aws-cdk-lib/aws-ecr-assets');
 describe('Migration Console Stack Tests', () => {
     // Mock the implementation of fromDockerImageAsset before all tests
     beforeEach(() => {

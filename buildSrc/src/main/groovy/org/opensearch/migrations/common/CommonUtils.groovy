@@ -1,5 +1,6 @@
 package org.opensearch.migrations.common
 
+import org.gradle.api.GradleException
 import org.gradle.api.tasks.Sync
 import org.gradle.api.Project
 import com.bmuschko.gradle.docker.tasks.image.Dockerfile
@@ -54,10 +55,16 @@ class CommonUtils {
             destFile = dockerBuildProject.file("${dockerBuildDir}/Dockerfile")
             dependsOn "copyArtifact_${dockerImageName}"
             if (baseImageProjectOverride) {
-                def dependentDockerImageName = dockerFilesForExternalServices.get(baseImageProjectOverride)
-                def hashNonce = CommonUtils.calculateDockerHash(
-                        dockerBuildProject.fileTree("src/main/docker/${baseImageProjectOverride}"))
-                from "migrations/${dependentDockerImageName}:${hashNonce}"
+                def dependentDockerImageProjectName = dockerFilesForExternalServices.get(baseImageProjectOverride)
+                if (dependentDockerImageProjectName == null) {
+                    throw new GradleException("Unexpected baseImageOverride " + baseImageProjectOverride)
+                }
+                def dockerFileTree = dockerBuildProject.fileTree("src/main/docker/${dependentDockerImageProjectName}")
+                if (!dockerFileTree.files) {
+                    throw new GradleException("File tree for ${dependentDockerImageProjectName} does not exist or is empty")
+                }
+                def hashNonce = CommonUtils.calculateDockerHash(dockerFileTree)
+                from "migrations/${baseImageProjectOverride}:${hashNonce}"
                 def dependencyName = "buildDockerImage_${baseImageProjectOverride}";
                 dependsOn dependencyName
                 if (baseImageProjectOverride.startsWith("elasticsearch")) {

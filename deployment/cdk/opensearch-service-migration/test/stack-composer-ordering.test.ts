@@ -11,7 +11,6 @@ import {OpenSearchContainerStack} from "../lib/service-stacks/opensearch-contain
 import {ReindexFromSnapshotStack} from "../lib/service-stacks/reindex-from-snapshot-stack";
 import {describe, beforeEach, afterEach, test, expect, jest} from '@jest/globals';
 
-jest.mock('aws-cdk-lib/aws-ecr-assets');
 describe('Stack Composer Ordering Tests', () => {
     beforeEach(() => {
         jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => ContainerImage.fromRegistry("ServiceImage"));

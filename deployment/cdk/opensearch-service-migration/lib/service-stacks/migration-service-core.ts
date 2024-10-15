@@ -18,7 +18,7 @@ import {
 import {Duration, RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {PolicyStatement, Role} from "aws-cdk-lib/aws-iam";
-import {createDefaultECSTaskRole, makeDockerImageAsset} from "../common-utilities";
+import {createDefaultECSTaskRole, makeLocalAssetContainerImage} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { IApplicationTargetGroup, INetworkTargetGroup } from "aws-cdk-lib/aws-elasticloadbalancingv2";
 
@@ -28,7 +28,7 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly securityGroups: ISecurityGroup[],
     readonly cpuArchitecture: CpuArchitecture,
-    readonly dockerImageRegistryName: string,
+    readonly dockerImageName: string,
     readonly dockerImageCommand?: string[],
     readonly taskRolePolicies?: PolicyStatement[],
     readonly mountPoints?: MountPoint[],
@@ -76,7 +76,7 @@ export class MigrationServiceCore extends Stack {
             props.volumes.forEach(vol => serviceTaskDef.addVolume(vol))
         }
 
-        const serviceImage = makeDockerImageAsset(this, props.serviceName, props.dockerImageRegistryName)
+        const serviceImage = makeLocalAssetContainerImage(this, props.dockerImageName)
 
         const serviceLogGroup = new LogGroup(this, 'ServiceLogGroup',  {
             retention: RetentionDays.ONE_MONTH,

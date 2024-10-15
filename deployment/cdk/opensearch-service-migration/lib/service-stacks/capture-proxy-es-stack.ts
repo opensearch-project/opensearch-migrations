@@ -81,7 +81,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: "capture-proxy-es",
-            dockerImageRegistryName: "migrations/capture_proxy_es:latest",
+            dockerImageName: "migrations/capture_proxy_es:latest",
             dockerImageCommand: ['/bin/sh', '-c', command.concat(" & wait -n 1")],
             securityGroups: securityGroups,
             taskRolePolicies: servicePolicies,

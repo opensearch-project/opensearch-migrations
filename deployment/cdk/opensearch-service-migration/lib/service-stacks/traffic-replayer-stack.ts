@@ -128,7 +128,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         this.createService({
             serviceName: `traffic-replayer-${deployId}`,
             taskInstanceCount: 0,
-            dockerImageRegistryName: "migrations/traffic_replayer:latest",
+            dockerImageName: "migrations/traffic_replayer:latest",
             dockerImageCommand: ['/bin/sh', '-c', command],
             securityGroups: securityGroups,
             volumes: [sharedLogFileSystem.asVolume()],

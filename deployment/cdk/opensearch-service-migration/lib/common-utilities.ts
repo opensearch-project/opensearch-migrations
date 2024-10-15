@@ -440,16 +440,20 @@ export function isRegionGovCloud(region: string): boolean {
     return region.startsWith('us-gov-');
 }
 
+
 /**
- * Creates a Docker image asset from the specified image name.
+ * Creates a Local Docker image asset from the specified image name.
  *
- * This function creates a Docker image asset from the specified image name.
- * It can use a local or remote image.
+ * This allows us to create a private ECR repo for any image allowing us to have a consistent
+ * experience across VPCs and regions (e.g. running within VPC in gov-cloud with no internet access)
+ * 
+ * This works by creating a temp Dockerfile with only the FROM with the param imageName and
+ * using that Dockerfile with cdk.assets to create a local Docker image asset.
  *
- * @param {string} imageName - The name of the Docker image to use as the base image.
+ * @param {string} imageName - The name of the Docker image to save as a tarball and use in CDK.
  * @returns {ContainerImage} - A `ContainerImage` object representing the Docker image asset.
  */
-export function makeDockerImageAsset(scope: Construct, serviceName: string, imageName: string): ContainerImage {
+export function makeLocalAssetContainerImage(scope: Construct, imageName: string): ContainerImage {
     const sanitizedImageName = imageName.replace(/[^a-zA-Z0-9-_]/g, '_');
     const tempDir = mkdtempSync(join(tmpdir(), 'docker-build-' + sanitizedImageName));
     const dockerfilePath = join(tempDir, 'Dockerfile');
@@ -457,9 +461,8 @@ export function makeDockerImageAsset(scope: Construct, serviceName: string, imag
         FROM ${imageName}
     `;
     writeFileSync(dockerfilePath, dockerfileContent);
-    const asset = new DockerImageAsset(scope, serviceName + 'Image', {
+    const asset = new DockerImageAsset(scope, 'ServiceImage', {
         directory: tempDir,
     });
     return ContainerImage.fromDockerImageAsset(asset);
 }
-

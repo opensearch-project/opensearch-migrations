@@ -39,7 +39,7 @@ export class ElasticsearchStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: "elasticsearch",
-            dockerImageRegistryName: "migrations/elasticsearch_searchguard:latest",
+            dockerImageName: "migrations/elasticsearch_searchguard:latest",
             securityGroups: securityGroups,
             portMappings: [servicePort],
             cpuArchitecture: props.fargateCpuArch,

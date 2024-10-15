@@ -43,12 +43,12 @@ configurations {
 
 
 def dockerFilesForExternalServices = [
-        "nginx": "nginx-perf-test-webserver"
+        "nginx_perf_test_webserver": "nginx"
 ]
 
 // Create the static docker files that aren't hosting migrations java code from this repo
-dockerFilesForExternalServices.each { projectName, dockerImageName ->
-    task("buildDockerImage_${projectName}", type: DockerBuildImage) {
+dockerFilesForExternalServices.each { dockerImageName, projectName ->
+    task("buildDockerImage_${dockerImageName}", type: DockerBuildImage) {
         def hash = calculateDockerHash(projectName)
         images.add("migrations/${dockerImageName}:$hash")
         images.add("migrations/${dockerImageName}:latest")
@@ -60,7 +60,7 @@ def javaContainerServices = [
         "jmeter": ":TrafficCapture:trafficCaptureProxyServerTest"
 ]
 def baseImageProjectOverrides = [
-        "nginx": "nginx-perf-test-webserver"
+        "nginx": "nginx_perf_test_webserver"
 ]
 
 def createContainerTasks = { dockerImageName, projectName ->
@@ -88,7 +88,7 @@ dockerCompose {
 
 task buildDockerImages {
     dependsOn ':TrafficCapture:dockerSolution:buildDockerImage_capture_proxy'
-    dependsOn buildDockerImage_nginx
+    dependsOn buildDockerImage_nginx_perf_test_webserver
     dependsOn buildDockerImage_jmeter
 }
 

@@ -313,7 +313,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: "migration-console",
-            dockerImageRegistryName: "migrations/migration_console:latest",
+            dockerImageName: "migrations/migration_console:latest",
             securityGroups: securityGroups,
             portMappings: servicePortMappings,
             dockerImageCommand: imageCommand,
