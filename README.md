@@ -38,23 +38,33 @@ The OpenSearch Migrations Engine is a comprehensive set of tools designed to fac
 - **Flexible Deployment Options**:
   - **[AWS Deployment](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/)**: Fully automated deployment to AWS.
   - **[Local Docker Deployment](/TrafficCapture/dockerSolution/README.md)**: Run the solution locally in a container for testing and development.
+  - Contribute to add more deployment options.
 
-## Supported Versions and Platforms
+## Supported Migration Paths and Platforms
 
-- **Tested Migration Paths**:
-  - Elasticsearch 6.8 to OpenSearch 1.3, 2.14
-  - Elasticsearch 7.10.2 to OpenSearch 1.3, 2.14
-  - Elasticsearch 7.17 to OpenSearch 1.3, 2.14
-  - OpenSearch 1.3 to OpenSearch 2.14
+### Migration Paths
+
+| **Source Version**          | **Target Version**               | Status|
+|-----------------------------|----------------------------------|---------|
+| Elasticsearch 6.8           | OpenSearch 1.3                   |Supported|
+| Elasticsearch 6.8           | OpenSearch 2.14                  |Supported|
+| Elasticsearch 7.10.2        | OpenSearch 1.3                   |Supported|
+| Elasticsearch 7.10.2        | OpenSearch 2.14                  |Supported|
+| Elasticsearch 7.17          | OpenSearch 1.3                   |Supported|
+| Elasticsearch 7.17          | OpenSearch 2.14                  |Supported|
+| OpenSearch 1.3              | OpenSearch 2.14                  |Supported|
+| Elasticsearch 8.x           | OpenSearch 2.x                   |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1071)|
+| Elasticsearch 5.6           | OpenSearch 2.x                   |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1067)|
+| Elasticsearch 2.3           | OpenSearch 2.<latest>            |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1069)|
+| Elasitcsearch 1.5           | OpenSearch 2.x .                 |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1070)|
+| OpenSearch 2.x              | OpenSearch 2.x .                  |[Requested](https://github.com/opensearch-project/opensearch-migrations/issues/1038)|
 
 Note that testing is done on specific minor versions, but any minor versions within a listed major version are expected to work.
 
-- **Platforms**:
+### Platforms
   - Self-managed (cloud provider hosted)
   - Self-managed (on-premises)
   - Managed cloud offerings (e.g., Amazon OpenSearch, Amazon OpenSearch Serverless)
-
-While untested, alternative cloud providers are expected to work.
 
 ## Issue Tracking
 
