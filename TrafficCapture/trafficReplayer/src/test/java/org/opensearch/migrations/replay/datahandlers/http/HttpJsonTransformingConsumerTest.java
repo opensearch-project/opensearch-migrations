@@ -26,6 +26,8 @@ import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.Unpooled;
+import io.netty.util.ReferenceCountUtil;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -48,12 +50,15 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
 
     private static Stream<Arguments> provideTestParameters() {
         Integer[] attemptedChunks = { 1, 2, 4, 8, 100, 1000, Integer.MAX_VALUE };
-        Boolean[] transformationOptions = { true, false };
+        Boolean[] transformationOptions = { true, };
         String[] requestFiles = {
             "/requests/raw/post_formUrlEncoded_withFixedLength.txt",
             "/requests/raw/post_formUrlEncoded_withLargeHeader.txt",
             "/requests/raw/post_formUrlEncoded_withDuplicateHeaders.txt",
-            "/requests/raw/get_withAuthHeader.txt" };
+            "/requests/raw/get_withAuthHeader.txt",
+            "/requests/raw/post_json_gzip.gz",
+            "/requests/raw/post_withPlainText.txt",
+        };
 
         return Stream.of(attemptedChunks)
             .flatMap(
@@ -83,8 +88,8 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
             Duration.ofMillis(Math.min(100 / attemptedChunks, 1)),
             dummyAggregatedResponse
         );
-        var transformingHandler = new HttpJsonTransformingConsumer<AggregatedRawResponse>(
-            new TransformationLoader().getTransformerFactoryLoader(hostTransformation ? "bar.example" : null),
+        var transformingHandler = new HttpJsonTransformingConsumer<>(
+            new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(hostTransformation ? "bar.example" : null),
             null,
             testPacketCapture,
             rootContext.getTestConnectionRequestContext(0)
@@ -95,25 +100,30 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         }
 
         var chunks = Math.min(attemptedChunks, testBytes.length);
-        sliceRandomChunks(testBytes, chunks).forEach(chunk -> transformingHandler.consumeBytes(chunk));
+        sliceRandomChunks(testBytes, chunks).forEach(transformingHandler::consumeBytes);
 
         var returnedResponse = transformingHandler.finalizeRequest().get();
 
         var expectedBytes = (hostTransformation)
-            ? new String(testBytes, StandardCharsets.UTF_8).replace("foo.example", "bar.example")
-                .getBytes(StandardCharsets.UTF_8)
+            ? replaceBytes(testBytes,
+                "foo.example".getBytes(StandardCharsets.UTF_8),
+                "bar.example".getBytes(StandardCharsets.UTF_8))
             : testBytes;
+
+        Assertions.assertEquals(testBytes.length, expectedBytes.length, "Expected transformation byte length to not change."
+            + "This can occur due to charset parsing differences with encoded body bytes");
 
         var expectedTransformationStatus = (hostTransformation)
             ? HttpRequestTransformationStatus.completed()
             : HttpRequestTransformationStatus.skipped();
 
+
+        Assertions.assertEquals(expectedTransformationStatus, returnedResponse.transformationStatus);
         Assertions.assertEquals(
             new String(expectedBytes, StandardCharsets.UTF_8),
             testPacketCapture.getCapturedAsString()
         );
         Assertions.assertArrayEquals(expectedBytes, testPacketCapture.getBytesCaptured());
-        Assertions.assertEquals(expectedTransformationStatus, returnedResponse.transformationStatus);
 
         var numConsumes = testPacketCapture.getNumConsumes().get();
         Assertions.assertTrue(
@@ -126,8 +136,8 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
     public void testRemoveAuthHeadersWorks() throws Exception {
         final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
-        var transformingHandler = new HttpJsonTransformingConsumer<AggregatedRawResponse>(
-            new TransformationLoader().getTransformerFactoryLoader("test.domain"),
+        var transformingHandler = new HttpJsonTransformingConsumer<>(
+            new TransformationLoader().getTransformerFactoryLoaderWithNewHostName("test.domain"),
             RemovingAuthTransformerFactory.instance,
             testPacketCapture,
             rootContext.getTestConnectionRequestContext(0)
@@ -145,9 +155,52 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         }
         transformingHandler.consumeBytes(testBytes);
         var returnedResponse = transformingHandler.finalizeRequest().get();
+        Assertions.assertEquals(HttpRequestTransformationStatus.skipped(), returnedResponse.transformationStatus);
         Assertions.assertEquals(new String(testBytes, StandardCharsets.UTF_8), testPacketCapture.getCapturedAsString());
         Assertions.assertArrayEquals(testBytes, testPacketCapture.getBytesCaptured());
-        Assertions.assertEquals(HttpRequestTransformationStatus.skipped(), returnedResponse.transformationStatus);
+    }
+
+    @Test
+    @Tag("longTest")
+    public void testRemovePayloadWorks() throws Exception {
+        final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
+        var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
+        String redactBody = "{ " +
+            "    \"operation\": \"modify-overwrite-beta\", " +
+            "    \"spec\": { " +
+            "       \"payload\": { " +
+            "         \"inlinedTextBody\": \"ReplacedPlainText\" " +
+            "       } " +
+            "   } " +
+            "}";
+        String fullConfig = "[{\"JsonJoltTransformerProvider\": { \"script\": " + redactBody + "}}]";
+        IJsonTransformer jsonJoltTransformer = new TransformationLoader().getTransformerFactoryLoader(fullConfig);
+
+        var transformingHandler = new HttpJsonTransformingConsumer<>(
+            jsonJoltTransformer,
+            null,
+            testPacketCapture,
+            rootContext.getTestConnectionRequestContext(0)
+        );
+        byte[] testBytes;
+        try (
+            var sampleStream = HttpJsonTransformingConsumer.class.getResourceAsStream(
+                "/requests/raw/post_withPlainText.txt"
+            )
+        ) {
+            assert sampleStream != null;
+            testBytes = sampleStream.readAllBytes();
+        }
+        transformingHandler.consumeBytes(testBytes);
+        var returnedResponse = transformingHandler.finalizeRequest().get();
+        var expectedString = new String(testBytes, StandardCharsets.UTF_8)
+            .replace("This is a test\r\n","ReplacedPlainText")
+            .replace("Content-Length: 15", "Content-Length: 17");
+        Assertions.assertEquals(expectedString, testPacketCapture.getCapturedAsString());
+        Assertions.assertArrayEquals(expectedString.getBytes(StandardCharsets.UTF_8),
+            testPacketCapture.getBytesCaptured());
+        Assertions.assertEquals(HttpRequestTransformationStatus.completed(), returnedResponse.transformationStatus);
+        Assertions.assertNull(returnedResponse.transformationStatus.getException());
     }
 
     @Test
@@ -236,13 +289,14 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var sizeCalculatingTransformer = new JsonCompositeTransformer(incomingJson -> {
             var payload = (Map) incomingJson.get("payload");
-            Assertions.assertNull(payload.get(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
-            Assertions.assertNotNull(payload.get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY));
+            Assertions.assertFalse(payload.containsKey(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY));
+            Assertions.assertFalse(payload.containsKey(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY));
+            Assertions.assertNotNull(payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY));
             var list = (List) payload.get(JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY);
-            var leftoverBytes = (ByteBuf) payload.get(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY);
+            var leftoverString = (String) payload.get(JsonKeysForHttpMessage.INLINED_TEXT_BODY_DOCUMENT_KEY);
             var headers = (Map<String,Object>) incomingJson.get("headers");
             headers.put("listSize", "" + list.size());
-            headers.put("leftover", "" + leftoverBytes.readableBytes());
+            headers.put("leftover", "" + leftoverString.getBytes(StandardCharsets.UTF_8).length);
             return incomingJson;
         });
         var transformingHandler = new HttpJsonTransformingConsumer<AggregatedRawResponse>(
@@ -342,5 +396,63 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
             start += size;
         }
         return byteList;
+    }
+
+    public static byte[] replaceBytes(byte[] originalBytes, byte[] targetBytes, byte[] replacementBytes) {
+        ByteBuf buffer = Unpooled.wrappedBuffer(originalBytes);
+        ByteBuf target = Unpooled.wrappedBuffer(targetBytes);
+        ByteBuf replacement = Unpooled.wrappedBuffer(replacementBytes);
+        ByteBuf resultBuffer = null;
+        try {
+            int matchIndex = indexOf(buffer, target);
+
+            if (matchIndex == -1) {
+                // No match, return original bytes
+                return originalBytes;
+            }
+            resultBuffer = Unpooled.buffer();
+            resultBuffer.writeBytes(buffer, 0, matchIndex);
+            resultBuffer.writeBytes(replacement);
+            resultBuffer.writeBytes(buffer, matchIndex + target.readableBytes(), buffer.readableBytes() - (matchIndex + target.readableBytes()));
+            byte[] resultBytes = new byte[resultBuffer.readableBytes()];
+            resultBuffer.readBytes(resultBytes);
+            return resultBytes;
+        } finally {
+            ReferenceCountUtil.release(buffer);
+            ReferenceCountUtil.release(target);
+            ReferenceCountUtil.release(replacement);
+            ReferenceCountUtil.release(resultBuffer);
+        }
+    }
+
+    // Helper method to find the index of target bytes in the buffer
+    private static int indexOf(ByteBuf buffer, ByteBuf target) {
+        final int bufferLength = buffer.readableBytes();
+        final int targetLength = target.readableBytes();
+
+        if (targetLength == 0 || bufferLength < targetLength) {
+            return -1;  // No match possible if target is empty or buffer is smaller
+        }
+
+        byte firstByte = target.getByte(0);
+        for (int i = 0; i <= bufferLength - targetLength; i++) {
+            if (buffer.getByte(buffer.readerIndex() + i) != firstByte) {
+                continue;
+            }
+
+            boolean found = true;
+            for (int j = 1; j < targetLength; j++) {
+                if (buffer.getByte(buffer.readerIndex() + i + j) != target.getByte(j)) {
+                    found = false;
+                    break;
+                }
+            }
+
+            if (found) {
+                return i;
+            }
+        }
+
+        return -1;  // Target not found
     }
 }

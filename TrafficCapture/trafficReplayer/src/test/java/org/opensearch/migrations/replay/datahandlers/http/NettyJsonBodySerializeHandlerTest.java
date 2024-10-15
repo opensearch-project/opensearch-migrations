@@ -28,7 +28,7 @@ public class NettyJsonBodySerializeHandlerTest {
         var randomJson = randomJsonGenerator.makeRandomJsonObject(new Random(2), 2, 1);
         var headers = new StrictCaseInsensitiveHttpHeadersMap();
         headers.put("content-type", List.of("application/json"));
-        var fullHttpMessageWithJsonBody = new HttpJsonMessageWithFaultingPayload(headers);
+        var fullHttpMessageWithJsonBody = new HttpJsonRequestWithFaultingPayload(headers);
         fullHttpMessageWithJsonBody.setPayloadFaultMap(new PayloadAccessFaultingMap(headers));
         fullHttpMessageWithJsonBody.payload().put(JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY, randomJson);
 

@@ -175,7 +175,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                         true,
                         1,
                         1,
-                        new TransformationLoader().getTransformerFactoryLoader("localhost"),
+                        new TransformationLoader().getTransformerFactoryLoaderWithNewHostName("localhost"),
                         threadPrefix
                     );
                 } catch (SSLException e) {
@@ -220,7 +220,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                         true,
                         1,
                         1,
-                        new TransformationLoader().getTransformerFactoryLoader("localhost"),
+                        new TransformationLoader().getTransformerFactoryLoaderWithNewHostName("localhost"),
                         threadPrefix
                     );
                 } catch (SSLException e) {
@@ -304,7 +304,7 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
                         true,
                         1,
                         1,
-                        new TransformationLoader().getTransformerFactoryLoader("localhost"),
+                        new TransformationLoader().getTransformerFactoryLoaderWithNewHostName("localhost"),
                         threadPrefix
                     );
                 } catch (SSLException e) {
