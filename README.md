@@ -5,22 +5,16 @@
 2. [Key Features](#key-features)
 3. [Supported Versions and Platforms](#supported-versions-and-platforms)
 4. [Issue Tracking](#issue-tracking)
-5. [Project Structure](#project-structure)
-6. [Documentation](#documentation)
-7. [Getting Started](#getting-started)
-    - [Local Deployment](#local-deployment)
-    - [AWS Deployment](#aws-deployment)
-8. [Development](#development)
-    - [Prerequisites](#prerequisites)
-    - [Building the Project](#building-the-project)
-    - [Running Tests](#running-tests)
-    - [Code Style](#code-style)
-    - [Pre-commit Hooks](#pre-commit-hooks)
-9. [Contributing](#contributing)
-10. [Publishing](#publishing)
-11. [Security](#security)
-12. [License](#license)
-13. [Acknowledgments](#acknowledgments)
+5. [User Guide Documentation](#user-guide-documentation)
+6. [Getting Started](#getting-started)
+   - [Local Deployment](#local-deployment)
+   - [AWS Deployment](#aws-deployment)
+7. [Continuous Integration and Deployment](#continuous-integration-and-deployment)
+8. [Contributing](#contributing)
+9. [Security](#security)
+10. [License](#license)
+11. [Acknowledgments](#acknowledgments)
+
 
 ## Overview
 
@@ -79,43 +73,7 @@ For issue prioritization and management, the migrations team uses Jira, but uses
 
 https://opensearch.atlassian.net/
 
-## Project Structure
-
-- [`CreateSnapshot`](CreateSnapshot/README.md): Tools for creating cluster snapshots.
-- [`DocumentsFromSnapshotMigration`](DocumentsFromSnapshotMigration/README.md): Utilities for migrating documents from snapshots.
-- [`MetadataMigration`](MetadataMigration/README.md): Core functionality for migrating cluster metadata.
-- [`RFS`](RFS/README.md) (Reindex-From-Snapshot):
-  - Migration utilities for document reindexing and metadata migration.
-  - Includes tracing contexts for both document and metadata migrations.
-- [`TrafficCapture`](TrafficCapture/README.md) (Capture-and-Replay): Projects for proxying, capturing, and replaying HTTP traffic.
-- [`migrationConsole`](TrafficCapture/dockerSolution/src/main/docker/migrationConsole/README.md): A comprehensive CLI tool for executing the migration workflow.
-  - [`console_api`](TrafficCapture/dockerSolution/src/main/docker/migrationConsole/console_api/README.md) (experimental): Django-based API for orchestrating migration tasks.
-  - [`lib/console_link`](TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link/README.md): Core library for migration operations.
-    - Provides CLI interface (`cli.py`) for user interactions.
-    - Implements various middleware components for error handling, metadata management, metrics collection, and more.
-    - Includes models for clusters, backfill operations, replay functionality, and other migration-related tasks.
-  - Supports various migration scenarios including backfill, replay, and metrics collection.
-  - Integrates with AWS services like ECS and CloudWatch for deployment and monitoring.
-- [`deployment`](deployment/README.md): AWS deployment scripts and configurations.
-- `dev-tools`: Development utilities and API request templates.
-- `docs`: Project documentation and architecture diagrams.
-- `libraries`: Shared libraries used across the project.
-- [`test`](test/README.md): End-to-end testing scripts and configurations.
-- `transformation`: Data transformation utilities for migration processes.
-- [`dashboardsSanitizer`](dashboardsSanitizer/README.md): CLI tool for sanitizing dashboard configurations.
-- `testHelperFixtures`: Test utilities including HTTP client for testing.
-
-The migration console CLI provides users with a centralized interface to execute and manage the entire migration workflow, including:
-- Configuring source and target clusters
-- Managing backfill operations
-- Controlling traffic replay
-- Monitoring migration progress through metrics
-- Handling snapshots and metadata
-- Integrating with various deployment environments (Docker locally and AWS ECS)
-
-Users can interact with the migration process through the CLI, which orchestrates the different components of the migration toolkit to perform a seamless migration between Elasticsearch and OpenSearch clusters.
-
-## Documentation
+## User Guide Documentation
 
 User guide documentation is available in the [OpenSearch Migrations Wiki](https://github.com/opensearch-project/opensearch-migrations/wiki).
 
@@ -123,100 +81,24 @@ User guide documentation is available in the [OpenSearch Migrations Wiki](https:
 
 ### Local Deployment
 
-For local development and testing, use the Docker solution:
-
- ```
- cd TrafficCapture/dockerSolution
- # Follow instructions in the README.md file
- ```
+ Refer to the [Development Guide](DEVELOPER_GUIDE.md) for more details.
 
 ### AWS Deployment
 
 To deploy the solution on AWS, follow the steps outlined in [Migration Assistant for Amazon OpenSearch Service](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/), specifically [deploying the solution](https://docs.aws.amazon.com/solutions/latest/migration-assistant-for-amazon-opensearch-service/deploy-the-solution.html).
 
 
-## Development
-
-### Prerequisites
-
-- Java Development Kit (JDK)
-- Gradle
-- Python
-- Docker and Docker Compose (for local deployment)
-- AWS CLI (for AWS deployment)
-- CDK (for AWS deployment)
-- Node (for AWS deployment)
-
-### Building the Project
-
-```bash
-./gradlew build
-```
-
-### Running Tests
-
-```bash
-./gradlew test
-```
-
-### Continuous Integration/ Continuous Deployment
-We use a combination of github actions and jenkins so that we can publish released on a weekly basis and allow users to provide attestation for users interested in migration tooling.
+## Continuous Integration and Deployment
+We use a combination of GitHub actions and Jenkins so that we can publish releases on a weekly basis and allow users to provide attestation for migration tooling.
 
 Jenkins pipelines are available [here](https://migrations.ci.opensearch.org/)
-
-
-### Code Style
-
-We use Spotless for code formatting. To check and apply the code style:
-
-```bash
-./gradlew spotlessCheck
-./gradlew spotlessApply
-```
-
-### Pre-commit Hooks
-
-Install the pre-commit hooks:
-
-```bash
-./install_githooks.sh
-```
 
 ## Contributing
 
 Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
 
-## Publishing
+Please refer to the [Development Guide](DEVELOPER_GUIDE.md) for details on building and deploying.
 
-This project can be published to a local Maven repository with:
-```sh
-./gradlew publishToMavenLocal
-```
-
-And subsequently imported into a separate Gradle project with (replacing name with any subProject name)
-```groovy
-repositories {
-    mavenCentral()
-    mavenLocal()
-}
-
-dependencies {
-    implementation group: "org.opensearch.migrations.trafficcapture", name: "captureKafkaOffloader", version: "0.1.0-SNAPSHOT"
-    //... other dependencies
-}
-```
-
-The entire list of published subprojects can be viewed with     
-```sh
-./gradlew listPublishedArtifacts
-```
-
-
-To include a test Fixture dependency, define the import like
-
-```groovy
-testImplementation testFixtures('org.opensearch.migrations.trafficcapture:trafficReplayer:0.1.0-SNAPSHOT')
-```
 ## Security
 
 See [SECURITY.md](SECURITY.md) for information about reporting security vulnerabilities.
