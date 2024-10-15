@@ -122,7 +122,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--destinationUri", destinationEndpoint)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--insecureDestination")
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--listenPort", "9200")
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--sslConfigFile", "/usr/share/elasticsearch/config/proxy_tls.yml")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--sslConfigFile", "/usr/share/captureProxy/config/proxy_tls.yml")
         if (props.streamingSourceType !== StreamingSourceType.DISABLED) {
             const brokerEndpoints = getMigrationStringParameterValue(this, {
                 ...props,

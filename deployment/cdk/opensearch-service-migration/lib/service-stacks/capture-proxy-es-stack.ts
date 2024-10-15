@@ -67,7 +67,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
         const extraArgsDict = parseArgsToDict(props.extraArgs)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--destinationUri", "https://localhost:19200")
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--insecureDestination")
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--sslConfigFile", "/usr/share/elasticsearch/config/proxy_tls.yml")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--sslConfigFile", "/usr/share/captureProxy/config/proxy_tls.yml")
         if (props.streamingSourceType !== StreamingSourceType.DISABLED) {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafkaConnection", brokerEndpoints)
         }
