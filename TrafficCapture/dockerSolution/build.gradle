@@ -54,7 +54,7 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
         into destDir
         duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 
-        // Applications and Standalone Libraries both have libraries
+        // Applications and Standalone Libraries both have libraries, sync them
         (libraries + applications).each { lib ->
             def applicationDestDir = "staging/${lib.name}/"
             from (lib.configurations.findByName("runtimeClasspath").files) {
@@ -65,7 +65,7 @@ static Sync getMigrationConsoleSyncTask(Project project, String dockerImageName,
             }
         }
 
-        // Copy applications
+        // Sync application start scripts
         applications.each { app ->
             def applicationDestDir = "staging/${app.name}/"
             from (app.tasks.getByName('startScripts').outputs.files) {
