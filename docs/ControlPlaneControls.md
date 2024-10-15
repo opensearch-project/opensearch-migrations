@@ -16,6 +16,28 @@ Migration Assistant (MA) has several distinct workflows that affect how the diff
 * It is not obvious what settings need to be treated differently by the CX
 * Deployment takes time, pushing customer out of iterative workflow
 
+
+#### Update parameter in cdk.context.json, then deploy
+```mermaid
+graph TD
+   cx[Customer] --> | A1. Edit Parameters | cfn[Cloud Formation]
+   cfn --> | A2. Update Env Vars/CLI from parameters | ecs[Elastic Compute Service]
+   cfn --> | A3. Update SSM Document| ssm[System Manager Parameters]
+   cfn --> | A4. Redeploy Console| ma 
+   ma[Migration Console] --> | A5. Refresh services.yml | ssm
+```
+
+#### In console pass extra command line args
+```mermaid
+graph TD
+   cx[Customer] --> | B1. Pass extra args | ma[Migration Console]
+   ma --> | B2. Directly called tool accepts extra args | sc[Snapshot Create]
+   ma --x | BX. Cannot update | cfn[Cloud Formation]
+   ma --x | BX. Cannot update | ecs[Elastic Compute Service]
+   ma --x | BX. Cannot update | ssm[System Manager Parameters]
+```
+
+
 ### Recommendation: All tools read from a single file
 Within the MA Console the services.yaml contains nearly all of the details that are of interest to the different tools.  
 
