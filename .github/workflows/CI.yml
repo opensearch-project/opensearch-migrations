@@ -212,8 +212,8 @@ jobs:
           docker tag $image migrations/migration_console:latest
           docker tag $image migrations/reindex_from_snapshot:latest
           docker tag $image migrations/traffic_replayer:latest
-      - name: Run CDK Jest Tests
-        run: npm test
+      - name: Run CDK Jest Tests (using mocked images)
+        run: npm run test:withoutBuildImages
 
   link-checker:
     runs-on: ubuntu-latest

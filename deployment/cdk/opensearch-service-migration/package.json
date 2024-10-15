@@ -36,7 +36,8 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
-    "test": "jest  --coverage",
+    "test": "./buildDockerImages.sh && npm run test:withoutBuildImages",
+    "test:withoutBuildImages": "jest  --coverage",
     "clean": "rm -rf dist",
     "release": "npm run build",
     "cdk": "cdk",
