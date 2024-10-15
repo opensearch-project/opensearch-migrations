@@ -115,194 +115,192 @@ Note: This may expose sensitive security details as the tuples may contain raw d
 
 ```sh
 $ cat /shared-logs-output/traffic-replayer-default/*/tuples/tuples.log | jq
-[
-  {
-    "sourceRequest": {
-      "Host": [
-        "localhost:9200"
-      ],
-      "Authorization": [
-        "Basic YWRtaW46YWRtaW4="
-      ],
-      "User-Agent": [
-        "curl/8.7.1"
-      ],
-      "Accept": [
-        "*/*"
-      ],
-      "Request-URI": "/",
-      "Method": "GET",
-      "HTTP-Version": "HTTP/1.1",
-      "payload": {
-        "inlinedBase64Body": ""
+{
+  "sourceRequest": {
+    "Host": [
+      "localhost:9200"
+    ],
+    "Authorization": [
+      "Basic YWRtaW46YWRtaW4="
+    ],
+    "User-Agent": [
+      "curl/8.7.1"
+    ],
+    "Accept": [
+      "*/*"
+    ],
+    "Request-URI": "/",
+    "Method": "GET",
+    "HTTP-Version": "HTTP/1.1",
+    "payload": {
+      "inlinedBase64Body": ""
+    }
+  },
+  "sourceResponse": {
+    "content-type": [
+      "application/json; charset=UTF-8"
+    ],
+    "content-length": [
+      "538"
+    ],
+    "HTTP-Version": "HTTP/1.1",
+    "Status-Code": 200,
+    "Reason-Phrase": "OK",
+    "response_time_ms": 10,
+    "payload": {
+      "inlinedJsonBody": {
+        "name": "2383a194365a",
+        "cluster_name": "docker-cluster",
+        "cluster_uuid": "fhZZvFEiS92srLRLvGXKrA",
+        "version": {
+          "number": "7.10.2",
+          "build_flavor": "oss",
+          "build_type": "docker",
+          "build_hash": "747e1cc71def077253878a59143c1f785afa92b9",
+          "build_date": "2021-01-13T00:42:12.435326Z",
+          "build_snapshot": false,
+          "lucene_version": "8.7.0",
+          "minimum_wire_compatibility_version": "6.8.0",
+          "minimum_index_compatibility_version": "6.0.0-beta1"
+        },
+        "tagline": "You Know, for Search"
       }
-    },
-    "sourceResponse": {
+    }
+  },
+  "targetRequest": {
+    "Host": [
+      "opensearchtarget"
+    ],
+    "Authorization": [
+      "Basic YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE="
+    ],
+    "User-Agent": [
+      "curl/8.7.1"
+    ],
+    "Accept": [
+      "*/*"
+    ],
+    "Request-URI": "/",
+    "Method": "GET",
+    "HTTP-Version": "HTTP/1.1",
+    "payload": {
+      "inlinedBase64Body": ""
+    }
+  },
+  "targetResponses": [
+    {
       "content-type": [
         "application/json; charset=UTF-8"
       ],
       "content-length": [
-        "538"
+        "568"
       ],
       "HTTP-Version": "HTTP/1.1",
       "Status-Code": 200,
       "Reason-Phrase": "OK",
-      "response_time_ms": 10,
+      "response_time_ms": 112,
       "payload": {
         "inlinedJsonBody": {
-          "name": "2383a194365a",
+          "name": "758b4454da60",
           "cluster_name": "docker-cluster",
-          "cluster_uuid": "fhZZvFEiS92srLRLvGXKrA",
+          "cluster_uuid": "Uu3orSZ-Tie1Jnq7p-GrVw",
           "version": {
-            "number": "7.10.2",
-            "build_flavor": "oss",
-            "build_type": "docker",
-            "build_hash": "747e1cc71def077253878a59143c1f785afa92b9",
-            "build_date": "2021-01-13T00:42:12.435326Z",
+            "distribution": "opensearch",
+            "number": "2.15.0",
+            "build_type": "tar",
+            "build_hash": "61dbcd0795c9bfe9b81e5762175414bc38bbcadf",
+            "build_date": "2024-06-20T03:27:32.562036890Z",
             "build_snapshot": false,
-            "lucene_version": "8.7.0",
-            "minimum_wire_compatibility_version": "6.8.0",
-            "minimum_index_compatibility_version": "6.0.0-beta1"
+            "lucene_version": "9.10.0",
+            "minimum_wire_compatibility_version": "7.10.0",
+            "minimum_index_compatibility_version": "7.0.0"
           },
-          "tagline": "You Know, for Search"
+          "tagline": "The OpenSearch Project: https://opensearch.org/"
         }
       }
-    },
-    "targetRequest": {
-      "Host": [
-        "opensearchtarget"
-      ],
-      "Authorization": [
-        "Basic YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE="
-      ],
-      "User-Agent": [
-        "curl/8.7.1"
-      ],
-      "Accept": [
-        "*/*"
-      ],
-      "Request-URI": "/",
-      "Method": "GET",
-      "HTTP-Version": "HTTP/1.1",
-      "payload": {
-        "inlinedBase64Body": ""
-      }
-    },
-    "targetResponses": [
-      {
-        "content-type": [
-          "application/json; charset=UTF-8"
-        ],
-        "content-length": [
-          "568"
-        ],
-        "HTTP-Version": "HTTP/1.1",
-        "Status-Code": 200,
-        "Reason-Phrase": "OK",
-        "response_time_ms": 112,
-        "payload": {
-          "inlinedJsonBody": {
-            "name": "758b4454da60",
-            "cluster_name": "docker-cluster",
-            "cluster_uuid": "Uu3orSZ-Tie1Jnq7p-GrVw",
-            "version": {
-              "distribution": "opensearch",
-              "number": "2.15.0",
-              "build_type": "tar",
-              "build_hash": "61dbcd0795c9bfe9b81e5762175414bc38bbcadf",
-              "build_date": "2024-06-20T03:27:32.562036890Z",
-              "build_snapshot": false,
-              "lucene_version": "9.10.0",
-              "minimum_wire_compatibility_version": "7.10.0",
-              "minimum_index_compatibility_version": "7.0.0"
-            },
-            "tagline": "The OpenSearch Project: https://opensearch.org/"
-          }
-        }
-      }
+    }
+  ],
+  "connectionId": "0242acfffe12000b-0000000a-0000000f-d1aa22e30e1211a4-eba39e55.0",
+  "numRequests": 1,
+  "numErrors": 0
+}
+{
+  "sourceRequest": {
+    "Host": [
+      "localhost:9200"
     ],
-    "connectionId": "0242acfffe12000b-0000000a-0000000f-d1aa22e30e1211a4-eba39e55.0",
-    "numRequests": 1,
-    "numErrors": 0
+    "Authorization": [
+      "Basic YWRtaW46YWRtaW4="
+    ],
+    "User-Agent": [
+      "curl/8.7.1"
+    ],
+    "Accept": [
+      "*/*"
+    ],
+    "Request-URI": "/_cat/indices",
+    "Method": "GET",
+    "HTTP-Version": "HTTP/1.1",
+    "payload": {
+      "inlinedBase64Body": ""
+    }
   },
-  {
-    "sourceRequest": {
-      "Host": [
-        "localhost:9200"
-      ],
-      "Authorization": [
-        "Basic YWRtaW46YWRtaW4="
-      ],
-      "User-Agent": [
-        "curl/8.7.1"
-      ],
-      "Accept": [
-        "*/*"
-      ],
-      "Request-URI": "/_cat/indices",
-      "Method": "GET",
-      "HTTP-Version": "HTTP/1.1",
-      "payload": {
-        "inlinedBase64Body": ""
-      }
-    },
-    "sourceResponse": {
+  "sourceResponse": {
+    "content-type": [
+      "text/plain; charset=UTF-8"
+    ],
+    "content-length": [
+      "162"
+    ],
+    "HTTP-Version": "HTTP/1.1",
+    "Status-Code": 200,
+    "Reason-Phrase": "OK",
+    "response_time_ms": 12,
+    "payload": {
+      "inlinedTextBody": "green  open searchguard             KRWtFn0nQwi6BdObOAsCYQ 1 0 8 0 45.4kb 45.4kb\nyellow open sg7-auditlog-2024.10.04 F2PV5IeTT0aVxP_BmuJSaQ 1 1 4 0 57.8kb 57.8kb\n"
+    }
+  },
+  "targetRequest": {
+    "Host": [
+      "opensearchtarget"
+    ],
+    "Authorization": [
+      "Basic YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE="
+    ],
+    "User-Agent": [
+      "curl/8.7.1"
+    ],
+    "Accept": [
+      "*/*"
+    ],
+    "Request-URI": "/_cat/indices",
+    "Method": "GET",
+    "HTTP-Version": "HTTP/1.1",
+    "payload": {
+      "inlinedBase64Body": ""
+    }
+  },
+  "targetResponses": [
+    {
       "content-type": [
         "text/plain; charset=UTF-8"
       ],
       "content-length": [
-        "162"
+        "249"
       ],
       "HTTP-Version": "HTTP/1.1",
       "Status-Code": 200,
       "Reason-Phrase": "OK",
-      "response_time_ms": 12,
+      "response_time_ms": 39,
       "payload": {
-        "inlinedTextBody": "green  open searchguard             KRWtFn0nQwi6BdObOAsCYQ 1 0 8 0 45.4kb 45.4kb\nyellow open sg7-auditlog-2024.10.04 F2PV5IeTT0aVxP_BmuJSaQ 1 1 4 0 57.8kb 57.8kb\n"
+        "inlinedTextBody": "green open .plugins-ml-config        hfn4ZxQCQvOe0BN5TejuJA 1 0  1 0  3.9kb  3.9kb\ngreen open .opensearch-observability 7LKST3UWQDiNZyG3rnSqxg 1 0  0 0   208b   208b\ngreen open .opendistro_security      AvLAB1yDR4uk8PEQ212Yvg 1 0 10 0 78.3kb 78.3kb\n"
       }
-    },
-    "targetRequest": {
-      "Host": [
-        "opensearchtarget"
-      ],
-      "Authorization": [
-        "Basic YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE="
-      ],
-      "User-Agent": [
-        "curl/8.7.1"
-      ],
-      "Accept": [
-        "*/*"
-      ],
-      "Request-URI": "/_cat/indices",
-      "Method": "GET",
-      "HTTP-Version": "HTTP/1.1",
-      "payload": {
-        "inlinedBase64Body": ""
-      }
-    },
-    "targetResponses": [
-      {
-        "content-type": [
-          "text/plain; charset=UTF-8"
-        ],
-        "content-length": [
-          "249"
-        ],
-        "HTTP-Version": "HTTP/1.1",
-        "Status-Code": 200,
-        "Reason-Phrase": "OK",
-        "response_time_ms": 39,
-        "payload": {
-          "inlinedTextBody": "green open .plugins-ml-config        hfn4ZxQCQvOe0BN5TejuJA 1 0  1 0  3.9kb  3.9kb\ngreen open .opensearch-observability 7LKST3UWQDiNZyG3rnSqxg 1 0  0 0   208b   208b\ngreen open .opendistro_security      AvLAB1yDR4uk8PEQ212Yvg 1 0 10 0 78.3kb 78.3kb\n"
-        }
-      }
-    ],
-    "connectionId": "0242acfffe12000b-0000000a-00000011-657b97d8be126192-72df00be.0",
-    "numRequests": 1,
-    "numErrors": 0
-  }
-]
+    }
+  ],
+  "connectionId": "0242acfffe12000b-0000000a-00000011-657b97d8be126192-72df00be.0",
+  "numRequests": 1,
+  "numErrors": 0
+}
 ```
 
 </details>
