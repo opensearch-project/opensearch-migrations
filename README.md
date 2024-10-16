@@ -1,122 +1,121 @@
-## OpenSearch upgrades, migrations, and comparison tooling
-
-OpenSearch upgrade, migration, and comparison tooling facilitates OpenSearch migrations and upgrades. With these tools, you can set up a proof-of-concept environment locally using Docker containers or deploy to AWS using a one-click deployment script. Once set up and deployed, users can redirect their production traffic from a source cluster to a provisioned target cluster, enabling a comparison of results between the two clusters. All traffic directed to the source cluster is stored for future replay. Meanwhile, traffic to the target cluster is replayed at an identical rate to ensure a direct "apple-to-apple" comparison. This toolset empowers users to fine-tune cluster configurations and manage workloads more effectively.
+# OpenSearch Migrations Engine
 
 ## Table of Contents
+1. [Overview](#overview)
+2. [Key Features](#key-features)
+3. [Supported Versions and Platforms](#supported-versions-and-platforms)
+4. [Issue Tracking](#issue-tracking)
+5. [User Guide Documentation](#user-guide-documentation)
+6. [Getting Started](#getting-started)
+   - [Local Deployment](#local-deployment)
+   - [AWS Deployment](#aws-deployment)
+7. [Continuous Integration and Deployment](#continuous-integration-and-deployment)
+8. [Contributing](#contributing)
+9. [Security](#security)
+10. [License](#license)
+11. [Acknowledgments](#acknowledgments)
 
-- [OpenSearch upgrades, migrations, and comparison tooling](#opensearch-upgrades-migrations-and-comparison-tooling)
-- [Table of Contents](#table-of-contents)
-- [Supported cluster versions and platforms](#supported-cluster-versions-and-platforms)
-  - [Supported Source and Target Versions](#supported-source-and-target-versions)
-  - [Supported Source and Target Platforms](#supported-source-and-target-platforms)
-- [Build and deploy](#build-and-deploy)
-  - [Local deployment](#local-deployment)
-  - [AWS deployment](#aws-deployment)
-- [Developer contributions](#developer-contributions)
-  - [Code Style](#code-style)
-  - [Pre-commit hooks](#pre-commit-hooks)
-  - [Traffic Capture Proxy and Replayer](#traffic-capture-proxy-and-replayer)
-  - [Running Tests](#running-tests)
-- [Security](#security)
-- [License](#license)
-- [Releasing](#releasing)
-- [Publishing](#publishing)
 
-## Supported cluster versions and platforms
+## Overview
 
-There are numerous combinations of source clusters, target clusters, and platforms. While the tools provided in this repository might work with various combinations, they might not support breaking changes between different source and target versions. Below is a list of supported source and target versions and platforms.
+The OpenSearch Migrations Engine is a comprehensive set of tools designed to facilitate upgrades, migrations, and comparisons for OpenSearch and Elasticsearch clusters. This project aims to simplify the process of moving between different versions and platforms while ensuring data integrity and performance.
 
-### Supported Source and Target Versions
-* Elasticsearch 6.x (Coming soon...)
-* Elasticsearch 7.0 - 7.17.x
-* OpenSearch 1.x
-* OpenSearch 2.x
+## Key Features
 
-### Supported Source and Target Platforms
-* Self-managed (hosted by cloud provider)
-* Self-managed (on-premises)
-* Managed cloud offerings (e.g., Amazon OpenSearch, Amazon OpenSearch Serverless)
+- **Upgrade and Migration Support**: Provides tools for migrating between different versions of Elasticsearch and OpenSearch.
+  - **[Metadata Migration](MetadataMigration/README.md)**: Migrate essential cluster components such as configuration, settings, templates, and aliases.
+  - **Multi-Version Upgrade**: Easily migrate across major versions (e.g., from Elasticsearch 6.8 to OpenSearch 2.15), skipping intermediate upgrades and reducing time and risk.
+  - **Downgrade Support**: Downgrade to an earlier version if needed (e.g., from Elasticsearch 7.17 to 7.10.2).
+  - **Existing Data Migration with [Reindex-from-Snapshot](RFS/docs/DESIGN.md)**: Migrate indices and documents using snapshots, updating your data to the latest Lucene version quickly without impacting the target cluster.
+  - **Live Traffic Capture with [Capture-and-Replay](docs/TrafficCaptureAndReplayDesign.md)**: Capture live traffic from the source cluster and replay it on the target cluster for validation. This ensures the target cluster can handle real-world traffic patterns before fully migrating.
+  
+- **Zero-Downtime Migration with [Live Traffic Routing](docs/ClientTrafficSwinging.md)**: Tools to seamlessly switch client traffic between clusters while keeping services fully operational.
 
-## Build and deploy
+- **Migration Rollback**: Keep your source cluster synchronized during the migration, allowing you to monitor the target cluster's performance before fully committing to the switch. You can safely revert if needed.
 
-### Local deployment
+- **User-Friendly Interface via [Migration Console](https://github.com/opensearch-project/opensearch-migrations/blob/main/docs/migration-console.md)**: Command Line Interface (CLI) that guides you through each migration step.
 
-A containerized end-to-end solution can be deployed locally using the 
-[Docker Solution](TrafficCapture/dockerSolution/README.md).
+- **Flexible Deployment Options**:
+  - **[AWS Deployment](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/)**: Fully automated deployment to AWS.
+  - **[Local Docker Deployment](/TrafficCapture/dockerSolution/README.md)**: Run the solution locally in a container for testing and development.
+  - Contribute to add more deployment options.
 
-### AWS deployment
+## Supported Migration Paths and Platforms
 
-Refer to [AWS Deployment](deployment/README.md) to deploy this solution to AWS.
+### Migration Paths
 
-## Developer contributions
+| **Source Version**          | **Target Version**               | Status|
+|-----------------------------|----------------------------------|---------|
+| Elasticsearch 6.8           | OpenSearch 1.3                   |Supported|
+| Elasticsearch 6.8           | OpenSearch 2.14                  |Supported|
+| Elasticsearch 7.10.2        | OpenSearch 1.3                   |Supported|
+| Elasticsearch 7.10.2        | OpenSearch 2.14                  |Supported|
+| Elasticsearch 7.17          | OpenSearch 1.3                   |Supported|
+| Elasticsearch 7.17          | OpenSearch 2.14                  |Supported|
+| OpenSearch 1.3              | OpenSearch 2.14                  |Supported|
+| Elasticsearch 8.x           | OpenSearch 2.x                   |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1071)|
+| Elasticsearch 5.6           | OpenSearch 2.x                   |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1067)|
+| Elasticsearch 2.3           | OpenSearch 2.<latest>            |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1069)|
+| Elasitcsearch 1.5           | OpenSearch 2.x .                 |[Prioritized](https://github.com/opensearch-project/opensearch-migrations/issues/1070)|
+| OpenSearch 2.x              | OpenSearch 2.x .                  |[Requested](https://github.com/opensearch-project/opensearch-migrations/issues/1038)|
 
-### Code Style
+Note that testing is done on specific minor versions, but any minor versions within a listed major version are expected to work.
 
-There are many different source type under this project, the overall style is enforced via `./gradlew spotlessCheck` and is verified on all pull requests.  Spotless can resolve these issues automatically with `./gradlew spotlessApply`.  An recommended eclipse formatter [formatter.xml](./formatter.xml) is available at the root of the project, consult your IDE extensions/plugins for how to use this formatter during development.
+### Platforms
+  - Self-managed (cloud provider hosted)
+  - Self-managed (on-premises)
+  - Managed cloud offerings (e.g., Amazon OpenSearch, Amazon OpenSearch Serverless)
 
-### Pre-commit hooks
+## Issue Tracking
 
-Developers must run the "install_githooks.sh" script in order to add any pre-commit hooks.  Developers should run these hooks before opening a pull request to ensure checks pass and prevent potential rejection of the pull request."
+We encourage users to open bugs and feature requests in this GitHub repository. 
 
-### Traffic Capture Proxy and Replayer
+**Encountering a compatibility issue or missing feature?**
 
-The TrafficCapture directory hosts a set of projects designed to facilitate the proxying and capturing of HTTP traffic, which can then be offloaded and replayed to other HTTP(S) server(s).
+- [Search existing issues](https://github.com/opensearch-project/opensearch-migrations/issues) to see if it’s already reported. If it is, feel free to **upvote** and **comment**.
+- Can’t find it? [Create a new issue](https://github.com/opensearch-project/opensearch-migrations/issues/new/choose) to let us know.
 
-More documentation on this directory including the projects within it can be found here: [Traffic Capture](TrafficCapture/README.md).
+For issue prioritization and management, the migrations team uses Jira, but uses GitHub issues for community intake:
 
-### Running Tests
+https://opensearch.atlassian.net/
 
-Developers can run a test script which will verify the end-to-end Local Docker Solution.
+## User Guide Documentation
 
-More documentation on this test script can be found here:
-[End-to-End Testing](test/README.md)
+User guide documentation is available in the [OpenSearch Migrations Wiki](https://github.com/opensearch-project/opensearch-migrations/wiki).
+
+## Getting Started
+
+### Local Deployment
+
+ Refer to the [Development Guide](DEVELOPER_GUIDE.md) for more details.
+
+### AWS Deployment
+
+To deploy the solution on AWS, follow the steps outlined in [Migration Assistant for Amazon OpenSearch Service](https://aws.amazon.com/solutions/implementations/migration-assistant-for-amazon-opensearch-service/), specifically [deploying the solution](https://docs.aws.amazon.com/solutions/latest/migration-assistant-for-amazon-opensearch-service/deploy-the-solution.html).
+
+
+## Continuous Integration and Deployment
+We use a combination of GitHub actions and Jenkins so that we can publish releases on a weekly basis and allow users to provide attestation for migration tooling.
+
+Jenkins pipelines are available [here](https://migrations.ci.opensearch.org/)
+
+## Contributing
+
+Please read [CONTRIBUTING.md](CONTRIBUTING.md) for details on our code of conduct and the process for submitting pull requests.
+
+Please refer to the [Development Guide](DEVELOPER_GUIDE.md) for details on building and deploying.
 
 ## Security
 
-See [CONTRIBUTING](CONTRIBUTING.md#security-issue-notifications) for more information.
+See [SECURITY.md](SECURITY.md) for information about reporting security vulnerabilities.
 
 ## License
 
-This project is licensed under the Apache-2.0 License.
+This project is licensed under the Apache-2.0 License - see the [LICENSE](LICENSE) file for details.
 
+## Acknowledgments
 
-## Releasing
+- OpenSearch Community
+- Contributors and maintainers
 
-The release process is standard across repositories in this org and is run by a release manager volunteering from amongst [maintainers](MAINTAINERS.md).
-
-1. Create a tag, e.g. 0.1.0, and push it to this GitHub repository.
-2. The [release-drafter.yml](.github/workflows/release-drafter.yml) will be automatically kicked off and a draft release will be created.
-3. This draft release triggers the [jenkins release workflow](https://build.ci.opensearch.org/job/opensearch-migrations-release) as a result of which the opensearch-migrations toolset is released and published on artifacts.opensearch.org example as https://artifacts.opensearch.org/migrations/0.1.0/opensearch-migrations-0.1.0.tar.gz. 
-4. Once the above release workflow is successful, the drafted release on GitHub is published automatically.
-
-## Publishing
-
-This project can be published to a local maven repository with:
-```sh
-./gradlew publishToMavenLocal
-```
-
-And subsequently imported into a separate gradle project with (replacing name with any subProject name)
-```groovy
-repositories {
-    mavenCentral()
-    mavenLocal()
-}
-
-dependencies {
-    implementation group: "org.opensearch.migrations.trafficcapture", name: "captureKafkaOffloader", version: "0.1.0-SNAPSHOT"
-    //... other dependencies
-}
-```
-
-The entire list of published subprojects can be viewed with     
-```sh
-./gradlew listPublishedArtifacts
-```
-
-
-To include a testFixture dependency, define the import like
-
-```groovy
-testImplementation testFixtures('org.opensearch.migrations.trafficcapture:trafficReplayer:0.1.0-SNAPSHOT')
-```
+For more detailed information about specific components, please refer to the README files in the respective directories.
