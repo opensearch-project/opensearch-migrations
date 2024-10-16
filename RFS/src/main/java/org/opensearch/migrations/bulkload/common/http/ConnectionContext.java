@@ -4,9 +4,6 @@ import java.net.URI;
 import java.net.URISyntaxException;
 import java.time.Clock;
 
-import org.opensearch.migrations.Version;
-import org.opensearch.migrations.VersionConverter;
-
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
 import lombok.EqualsAndHashCode;
@@ -143,9 +140,6 @@ public class ConnectionContext {
         @Parameter(names = {
             "--target-compression" }, description = "**Advanced**. Allow request compression to target", required = false)
         public boolean compressionEnabled = false;
-
-        @Parameter(names = { "--target-version-override" }, description = "**Advanced**. Allow overriding the version handling for the target cluster.", converter = VersionConverter.class)
-        public Version versionOverride;
     }
 
     @Getter

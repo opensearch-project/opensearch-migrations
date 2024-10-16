@@ -82,4 +82,3 @@ These arguments should be carefully considered before setting, can include exper
 | --documents-per-bulk-request      | The number of documents to be included within each bulk request sent. Default: no max (controlled by documents size)   |
 | --max-connections                 | The maximum number of connections to simultaneously used to communicate to the target. Default: 10                     |
 | --target-insecure                 | Flag to allow untrusted SSL certificates for target cluster. Default: false                                            |
-| --target-version-override         | Allow overriding the version handling for the target cluster. Default: unset, Expects a version number like 'OS_2_14'  | 
