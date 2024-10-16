@@ -1,23 +1,27 @@
-apiVersion: apps/v1
-kind: Deployment
+apiVersion: batch/v1
+kind: Job
 metadata:
   name: {{ .Chart.Name }}
   labels:
     app: {{ .Chart.Name }}
 spec:
-  replicas: {{ .Values.replicaCount }}
-  selector:
-    matchLabels:
-      app: {{ .Chart.Name }}
+  parallelism: 0
+  completions: 1000 # Temporary until direction decided here
+  ttlSecondsAfterFinished: 30 # Clean up finished Jobs (either Complete or Failed) automatically after this time
   template:
     metadata:
       labels:
         app: {{ .Chart.Name }}
     spec:
+      restartPolicy: Never
       containers:
         - name: {{ .Chart.Name }}
           image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: {{ .Values.image.pullPolicy }}
+          command:
+            - "/bin/sh"
+            - "-c"
+            - "{{ .Values.container.command }}"
           # Load all env variables
           env:
             {{- range $key, $value := .Values.env }}
@@ -27,8 +31,6 @@ spec:
           volumeMounts:
             - name: {{ .Values.sharedLogVolume.volumeName }}
               mountPath: {{ .Values.sharedLogVolume.mountPath }}
-            - name: services-yaml-file
-              mountPath: {{ .Values.servicesYamlVolume.mountPath }}
             - name: {{ .Values.snapshotVolume.volumeName }}
               mountPath: {{ .Values.snapshotVolume.mountPath }}
       {{- if .Values.otelCollectorSidecar.enabled }}
@@ -54,10 +56,6 @@ spec:
         - name: {{ .Values.sharedLogVolume.volumeName }}
           persistentVolumeClaim:
             claimName: {{ .Values.sharedLogVolume.pvcClaimName }}
-        - name: services-yaml-file
-          hostPath:
-            path: {{ .Values.servicesYamlVolume.path }}
-            type: File
         - name: {{ .Values.snapshotVolume.volumeName }}
           persistentVolumeClaim:
             claimName: {{ .Values.snapshotVolume.pvcClaimName }}

@@ -1,0 +1,15 @@
+{{- if .Values.snapshotVolume.createPvc }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ .Values.snapshotVolume.pvcClaimName }}
+spec:
+  accessModes:
+    - {{ .Values.snapshotVolume.accessMode }}
+  resources:
+    requests:
+      storage: {{ .Values.snapshotVolume.size }}
+  {{- if .Values.snapshotVolume.storageClass }}
+  storageClassName: {{ .Values.snapshotVolume.storageClass }}
+  {{- end }}
+{{- end }}

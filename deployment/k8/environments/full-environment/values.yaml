@@ -1,4 +1,13 @@
 replayer:
   sharedLogVolume:
-    createPvc: false # Only want one service to create volume
+    createPvc: false # Only want one service to create volume, allowing Migration Console to do this
 
+reindex-from-snapshot:
+  sharedLogVolume:
+    createPvc: false # Only want one service to create volume, allowing Migration Console to do this
+  snapshotVolume:
+    createPvc: false # Only want one service to create volume, allowing Migration Console to do this
+
+elasticsearch:
+  snapshotVolume:
+    createPvc: false # Only want one service to create volume, allowing Migration Console to do this

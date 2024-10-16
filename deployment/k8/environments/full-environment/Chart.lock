@@ -17,5 +17,8 @@ dependencies:
 - name: capture-proxy
   repository: file://../../capture-proxy
   version: 0.1.0
-digest: sha256:ba4897cb6b540a897d96e6af4dd497f9448940f16c29dcbefffb00b2db965682
-generated: "2024-10-14T14:41:22.84168-05:00"
+- name: reindex-from-snapshot
+  repository: file://../../reindex-from-snapshot
+  version: 0.1.0
+digest: sha256:22e6f3906cac197c24acb27654f38c6e4e2abef6ae70077058093166c9f29264
+generated: "2024-10-15T13:08:09.729613-05:00"
