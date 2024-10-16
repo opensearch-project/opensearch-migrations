@@ -59,7 +59,8 @@ describe('OpenSearch Domain Stack Tests', () => {
       domainRemovalPolicy: "DESTROY",
       sourceCluster: {
         "endpoint": "https://test-cluster",
-        "auth": {"type": "none"}
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
       }
     }
 
@@ -115,7 +116,8 @@ describe('OpenSearch Domain Stack Tests', () => {
       domainRemovalPolicy: "DESTROY",
       sourceCluster: {
         "endpoint": "https://test-cluster",
-        "auth": {"type": "none"}
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
       }
     }
 
@@ -151,7 +153,8 @@ describe('OpenSearch Domain Stack Tests', () => {
       nodeToNodeEncryptionEnabled: true,
       sourceCluster: {
         "endpoint": "https://test-cluster",
-        "auth": {"type": "none"}
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
       }
     }
 
@@ -174,7 +177,8 @@ describe('OpenSearch Domain Stack Tests', () => {
       nodeToNodeEncryptionEnabled: "true",
       sourceCluster: {
         "endpoint": "https://test-cluster",
-        "auth": {"type": "none"}
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
       }
     }
 

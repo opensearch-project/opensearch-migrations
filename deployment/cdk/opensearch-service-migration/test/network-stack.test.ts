@@ -63,7 +63,8 @@ describe('NetworkStack Tests', () => {
             vpcAZCount: 2,
             sourceCluster: {
                 "endpoint": "https://test-cluster",
-                "auth": {"type": "none"}
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
             }
         }
 
@@ -89,7 +90,8 @@ describe('NetworkStack Tests', () => {
             vpcAZCount: 2,
             sourceCluster: {
                 "endpoint": "https://test-cluster",
-                "auth": {"type": "none"}
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
             }
         }
 
@@ -108,7 +110,8 @@ describe('NetworkStack Tests', () => {
             vpcAZCount: 2,
             sourceCluster: {
                 "endpoint": "https://test-cluster",
-                "auth": {"type": "none"}
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
             }
         }
 

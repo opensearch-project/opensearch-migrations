@@ -126,7 +126,8 @@ describe('Migration Services YAML Tests', () => {
             migrationConsoleServiceEnabled: true,
             sourceCluster: {
                 "endpoint": "https://test-cluster",
-                "auth": {"type": "none"}
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
             },
             reindexFromSnapshotServiceEnabled: true,
             trafficReplayerServiceEnabled: true,
@@ -178,7 +179,8 @@ describe('Migration Services YAML Tests', () => {
             migrationConsoleServiceEnabled: true,
             sourceCluster: {
                 "endpoint": "https://test-cluster",
-                "auth": {"type": "none"}
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
             },
             targetCluster: {
                 "endpoint": "https://target-cluster",
@@ -231,7 +233,8 @@ describe('Migration Services YAML Tests', () => {
             migrationConsoleServiceEnabled: true,
             sourceCluster: {
                 "endpoint": "https://test-cluster",
-                "auth": {"type": "none"}
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
             },
             targetCluster: {
                 "endpoint": "https://target-cluster",

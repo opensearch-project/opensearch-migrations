@@ -245,7 +245,7 @@ describe('validateFargateCpuArch', () => {
     test('parseClusterDefinition with basic auth parameters', () => {
         const clusterDefinition = {
             endpoint: 'https://target-cluster',
-            version: 'ES 7.10',
+            version: 'ES_7.10',
             auth: {
               type: 'basic',
               username: 'admin',
