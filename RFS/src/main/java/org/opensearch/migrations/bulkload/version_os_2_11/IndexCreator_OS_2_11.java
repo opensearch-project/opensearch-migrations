@@ -74,7 +74,7 @@ public class IndexCreator_OS_2_11 implements IndexCreator {
                 }
 
                 log.info("Reattempting creation of index '" + index.getName() + "' after removing illegal arguments; " + illegalArguments);
-                client.createIndex(index.getName(), body, context).isPresent();
+                client.createIndex(index.getName(), body, context);
             }
         } catch (Exception e) {
             result.failureType(CreationFailureType.TARGET_CLUSTER_FAILURE);
