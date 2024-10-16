@@ -8,6 +8,10 @@ import java.util.stream.Stream;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import static org.opensearch.migrations.data.FieldBuilders.DATE;
+import static org.opensearch.migrations.data.FieldBuilders.GEO_POINT;
+import static org.opensearch.migrations.data.FieldBuilders.INTEGER;
+import static org.opensearch.migrations.data.FieldBuilders.KEYWORD;
 import static org.opensearch.migrations.data.FieldBuilders.createField;
 import static org.opensearch.migrations.data.FieldBuilders.createFieldTextRawKeyword;
 import static org.opensearch.migrations.data.RandomDataBuilders.randomElement;
@@ -46,10 +50,10 @@ public class HttpLogs implements Workload {
     @Override
     public ObjectNode createIndex(ObjectNode defaultSettings) {
         var properties = mapper.createObjectNode();
-        var timestamp = createField("date");
+        var timestamp = createField(DATE);
         timestamp.put("format", "strict_date_optional_time||epoch_second");
         properties.set("@timestamp", timestamp);
-        var message = createField("keyword");
+        var message = createField(KEYWORD);
         message.put("index", false);
         message.put("doc_values", false);
         properties.set("message", message);
@@ -58,14 +62,14 @@ public class HttpLogs implements Workload {
         var requestRaw = (ObjectNode) request.get("fields").get("raw");
         requestRaw.put("ignore_above", 256);
         properties.set("request", request);
-        properties.set("status", createField("integer"));
-        properties.set("size", createField("integer"));
+        properties.set("status", createField(INTEGER));
+        properties.set("size", createField(INTEGER));
         var geoip = mapper.createObjectNode();
         var geoipProps = mapper.createObjectNode();
         geoip.set("properties", geoipProps);
-        geoipProps.set("country_name", createField("keyword"));
-        geoipProps.set("city_name", createField("keyword"));
-        geoipProps.set("location", createField("geo_point"));
+        geoipProps.set("country_name", createField(KEYWORD));
+        geoipProps.set("city_name", createField(KEYWORD));
+        geoipProps.set("location", createField(GEO_POINT));
         properties.set("geoip", geoip);
 
         var mappings = mapper.createObjectNode();

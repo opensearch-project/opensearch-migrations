@@ -9,6 +9,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import static org.opensearch.migrations.data.FieldBuilders.GEO_POINT;
+import static org.opensearch.migrations.data.FieldBuilders.INTEGER;
+import static org.opensearch.migrations.data.FieldBuilders.LONG;
 import static org.opensearch.migrations.data.FieldBuilders.createField;
 import static org.opensearch.migrations.data.FieldBuilders.createFieldTextRawKeyword;
 import static org.opensearch.migrations.data.RandomDataBuilders.randomDouble;
@@ -35,7 +38,7 @@ public class Geonames implements Workload {
     @Override
     public ObjectNode createIndex(ObjectNode defaultSettings) {
         var properties = mapper.createObjectNode();
-        properties.set("geonameid", createField("long"));
+        properties.set("geonameid", createField(LONG));
         properties.set("name", createFieldTextRawKeyword());
         properties.set("asciiname", createFieldTextRawKeyword());
         properties.set("alternatenames", createFieldTextRawKeyword());
@@ -46,11 +49,11 @@ public class Geonames implements Workload {
         properties.set("admin2_code", createFieldTextRawKeyword());
         properties.set("admin3_code", createFieldTextRawKeyword());
         properties.set("admin4_code", createFieldTextRawKeyword());
-        properties.set("elevation", createField("integer"));
-        properties.set("population", createField("long"));
+        properties.set("elevation", createField(INTEGER));
+        properties.set("population", createField(LONG));
         properties.set("dem", createFieldTextRawKeyword());
         properties.set("timezone", createFieldTextRawKeyword());
-        properties.set("location", createField("geo_point"));
+        properties.set("location", createField(GEO_POINT));
 
         var countryCodeField = createFieldTextRawKeyword();
         countryCodeField.put("fielddata", true);
