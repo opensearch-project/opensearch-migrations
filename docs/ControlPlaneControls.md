@@ -83,6 +83,16 @@ graph TD
     console --> | load service.yaml | sy
 ```
 
+#### Service Upload Flow
+
+For the services that are short lived, such as create snapshot or curl.  The configuration would be loaded during application startup and never re-checked.
+
+> [!Note] 
+> There are services that are long running, this creates some user experience questions.
+> * For RFS config changes can alter the shape of the migration which is defined once, should that run to completion or be stopped?
+> * For Replayer the transformation would be passed via this mechanism, should they be reloaded as they come in?    
+
+
 ### Read from AWS Parameter store
 Parameter store is a centralized system within AWS and it build for parameter management.  It is not recommended as it creates vendor lock-in on AWS.
 
