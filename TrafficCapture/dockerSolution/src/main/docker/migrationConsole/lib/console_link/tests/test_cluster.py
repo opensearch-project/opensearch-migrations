@@ -1,14 +1,19 @@
-from base64 import b64encode
-import os
-
-import pytest
-from moto import mock_aws
 import boto3
-
 import console_link.middleware.clusters as clusters_
+import hashlib
+import os
+import pytest
+import re
+import json
+
+from base64 import b64encode
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
 from console_link.models.client_options import ClientOptions
-from console_link.models.cluster import AuthMethod, Cluster
+from console_link.models.cluster import AuthMethod, Cluster, HttpMethod
+from moto import mock_aws
 from tests.utils import create_valid_cluster
+import requests
 
 
 @pytest.fixture(scope="function")
@@ -383,3 +388,115 @@ def test_run_benchmark_executes_correctly_basic_auth_and_https(mocker):
                                  "--client-options=verify_certs:false,use_ssl:true,"
                                  f"basic_auth_user:{auth_details['username']},"
                                  f"basic_auth_password:{auth_details['password']}", shell=True)
+
+
+@pytest.mark.parametrize("method, endpoint, data, has_body", [
+    (HttpMethod.GET, "/_cluster/health", None, False),
+    (HttpMethod.POST, "/_search", {"query": {"match_all": {}}}, True)
+])
+def test_sigv4_authentication_signature(requests_mock, method, endpoint, data, has_body):
+    # Set up a valid cluster configuration with SIGV4 authentication
+    sigv4_cluster_config = {
+        "endpoint": "https://opensearchtarget:9200",
+        "allow_insecure": True,
+        "sigv4": {
+            "region": "us-east-1",
+            "service": "es"
+        }
+    }
+    cluster = Cluster(sigv4_cluster_config)
+
+    # Prepare the mocked API response
+    url = f"{cluster.endpoint}{endpoint}"
+    if method == HttpMethod.GET:
+        requests_mock.get(url, json={'status': 'green'})
+    elif method == HttpMethod.POST:
+        requests_mock.post(url, json={'hits': {'total': 0, 'hits': []}})
+
+    with mock_aws():
+        # Add default headers to the request
+        headers = {
+            # These headers are excluded from signing since they are in default request headers
+            'User-Agent': 'my-test-agent',
+            'Accept': 'application/json',
+            'Accept-Encoding': 'gzip, deflate',
+            'Connection': 'keep-alive',
+            # Custom headers to be included in the request
+            'X-Custom-Header-1': 'CustomValue1',
+            'X-Custom-Header-2': 'CustomValue2'
+        }
+        if data is not None:
+            response = cluster.call_api(endpoint, method=method, data=json.dumps(data), headers=headers)
+        else:
+            response = cluster.call_api(endpoint, method=method, headers=headers)
+        assert response.status_code == 200
+
+        # Retrieve the last request made
+        last_request = requests_mock.last_request
+
+        # Verify the default headers are present in the request headers
+        for header_name, header_value in headers.items():
+            assert last_request.headers.get(header_name) == header_value
+
+        # Verify the Authorization header
+        auth_header = last_request.headers.get('Authorization')
+        assert auth_header is not None, "Authorization header is missing"
+        assert auth_header.startswith("AWS4-HMAC-SHA256"), "Incorrect Authorization header format"
+
+        # Extract SignedHeaders and Signature from the Authorization header
+        signed_headers_match = re.search(r"SignedHeaders=([^,]+)", auth_header)
+        signature_match = re.search(r"Signature=([a-f0-9]+)", auth_header)
+        assert signed_headers_match is not None, "SignedHeaders not found in Authorization header"
+        assert signature_match is not None, "Signature not found in Authorization header"
+
+        # Verify that default headers are not included in SignedHeaders
+        signed_headers = signed_headers_match.group(1).split(';')
+        default_headers = [header.lower() for header in headers.keys() if header.lower()
+                           in requests.utils.default_headers().keys()]
+        assert len(default_headers) > 0, "Default headers should contain at least one header"
+        for header in default_headers:
+            assert header not in signed_headers, f"Default header '{header}' should not be included in SignedHeaders"
+
+        # Verify that essential headers are included in SignedHeaders
+        required_headers = ['host', 'x-amz-date', 'x-custom-header-1', 'x-custom-header-2']
+        for header in required_headers:
+            assert header in signed_headers, f"Header '{header}' not found in SignedHeaders, actual headers: {signed_headers}"
+
+        # Check that the x-amz-date header is present
+        amz_date_header = last_request.headers.get('x-amz-date')
+        assert amz_date_header is not None, "x-amz-date header is missing"
+
+        if has_body:
+            # Verify that the 'x-amz-content-sha256' header is present
+            content_sha256 = last_request.headers.get('x-amz-content-sha256')
+            assert content_sha256 is not None, 'x-amz-content-sha256 header is missing'
+            # Compute the SHA256 hash of the body
+            body_hash = hashlib.sha256(last_request.body.encode('utf-8')).hexdigest()
+            assert content_sha256 == body_hash, "x-amz-content-sha256 does not match body hash"
+
+        # Re-sign the request using botocore to verify the signature
+        session = boto3.Session()
+        credentials = session.get_credentials()
+        service_name = cluster.auth_details.get("service", "es")
+        region_name = cluster.auth_details.get("region", "us-east-1")
+        # Create a new AWSRequest
+        aws_request = AWSRequest(
+            method=last_request.method,
+            url=last_request.url,
+            data=last_request.body,
+            headers={k: v for k, v in last_request.headers.items() if k.lower() not in requests.utils.default_headers().keys()}
+        )
+        # Sign the request
+        SigV4Auth(credentials, service_name, region_name).add_auth(aws_request)
+
+        # Extract the new signature
+        new_auth_header = aws_request.headers.get('Authorization')
+        assert new_auth_header is not None, "Failed to generate new Authorization header"
+
+        # Compare signatures
+        original_signature = signature_match.group(1)
+        new_signature_match = re.search(r"Signature=([a-f0-9]+)", new_auth_header)
+        assert new_signature_match is not None, "New signature not found in Authorization header"
+        new_signature = new_signature_match.group(1)
+
+        assert original_signature == new_signature, "Signatures do not match"
