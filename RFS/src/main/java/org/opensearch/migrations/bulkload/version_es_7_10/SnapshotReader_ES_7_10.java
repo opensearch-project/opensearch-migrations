@@ -22,8 +22,9 @@ public class SnapshotReader_ES_7_10 implements ClusterSnapshotReader {
     }
 
     @Override
-    public void initialize(SourceRepo sourceRepo) {
+    public ClusterSnapshotReader initialize(SourceRepo sourceRepo) {
         this.sourceRepo = sourceRepo;
+        return this;
     }
 
     @Override
@@ -62,8 +63,9 @@ public class SnapshotReader_ES_7_10 implements ClusterSnapshotReader {
     }
 
     @Override
-    public void initialize(Version version) {
+    public ClusterSnapshotReader initialize(Version version) {
         this.version = version;
+        return this;
     }
 
     public String toString() {

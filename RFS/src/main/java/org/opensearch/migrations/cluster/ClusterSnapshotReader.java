@@ -8,10 +8,10 @@ import org.opensearch.migrations.bulkload.models.ShardMetadata;
 public interface ClusterSnapshotReader extends ClusterReader {
 
     /** Snapshots are read differently based on their versions */
-    void initialize(Version version);
+    ClusterSnapshotReader initialize(Version version);
 
     /** Where to read the snapshot from */
-    void initialize(SourceRepo sourceRepo);
+    ClusterSnapshotReader initialize(SourceRepo sourceRepo);
 
     /** Reads information about index shards */
     ShardMetadata.Factory getShardMetadata();
