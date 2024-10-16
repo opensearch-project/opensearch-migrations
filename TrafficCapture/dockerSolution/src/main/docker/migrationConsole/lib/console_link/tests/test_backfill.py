@@ -173,16 +173,16 @@ def test_cant_instantiate_with_multiple_rfs_deployment_types():
 
 
 def test_ecs_rfs_backfill_start_sets_ecs_desired_count(ecs_rfs_backfill, mocker):
-    assert ecs_rfs_backfill.default_scale == 1
+    assert ecs_rfs_backfill.default_scale == 5
     mock = mocker.patch.object(ECSService, 'set_desired_count', autospec=True)
     ecs_rfs_backfill.start()
 
     assert isinstance(ecs_rfs_backfill, ECSRFSBackfill)
-    mock.assert_called_once_with(ecs_rfs_backfill.ecs_client, 1)
+    mock.assert_called_once_with(ecs_rfs_backfill.ecs_client, 5)
 
 
 def test_ecs_rfs_backfill_stop_sets_ecs_desired_count(ecs_rfs_backfill, mocker):
-    assert ecs_rfs_backfill.default_scale == 1
+    assert ecs_rfs_backfill.default_scale == 5
     mock = mocker.patch.object(ECSService, 'set_desired_count', autospec=True)
     ecs_rfs_backfill.stop()
 

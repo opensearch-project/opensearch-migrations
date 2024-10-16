@@ -5,7 +5,7 @@ import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.metadata.tracing.IMetadataMigrationContexts.ICreateIndexContext;
 
 public interface IndexCreator {
-    public boolean create(
+    public CreationResult create(
         IndexMetadata index,
         MigrationMode mode,
         ICreateIndexContext context

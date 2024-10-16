@@ -118,7 +118,9 @@ public class TransformFunctions {
      * it regardless of what it is named.
      */
     public static ObjectNode getMappingsFromBeneathIntermediate(ObjectNode mappingsRoot) {
-        if (mappingsRoot.has(PROPERTIES_KEY_STR)) {
+        if (mappingsRoot.size() == 0) {
+            return mappingsRoot;
+        } else if (mappingsRoot.has(PROPERTIES_KEY_STR)) {
             return mappingsRoot;
         } else if (!mappingsRoot.has(PROPERTIES_KEY_STR)) {
             return (ObjectNode) mappingsRoot.get(mappingsRoot.fieldNames().next()).deepCopy();

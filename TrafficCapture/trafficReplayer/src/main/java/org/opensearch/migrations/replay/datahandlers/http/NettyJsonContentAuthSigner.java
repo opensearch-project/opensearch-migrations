@@ -14,7 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
     IAuthTransformer.StreamingFullMessageTransformer signer;
-    HttpJsonMessageWithFaultingPayload httpMessage;
+    HttpJsonRequestWithFaultingPayload httpMessage;
     List<HttpContent> httpContentsBuffer;
 
     public NettyJsonContentAuthSigner(IAuthTransformer.StreamingFullMessageTransformer signer) {
@@ -25,8 +25,8 @@ public class NettyJsonContentAuthSigner extends ChannelInboundHandlerAdapter {
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        if (msg instanceof HttpJsonMessageWithFaultingPayload) {
-            httpMessage = (HttpJsonMessageWithFaultingPayload) msg;
+        if (msg instanceof HttpJsonRequestWithFaultingPayload) {
+            httpMessage = (HttpJsonRequestWithFaultingPayload) msg;
         } else if (msg instanceof HttpContent) {
             var httpContent = (HttpContent) msg;
             httpContentsBuffer.add(httpContent);

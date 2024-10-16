@@ -45,7 +45,6 @@ public class PayloadRepackingTest extends InstrumentationTest {
     @MethodSource("makeCombinations")
     public void testSimplePayloadTransform(boolean doGzip, boolean doChunked) throws Exception {
         var transformerBuilder = JsonJoltTransformer.newBuilder();
-
         if (doGzip) {
             transformerBuilder.addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.ADD_GZIP);
         }
@@ -62,11 +61,12 @@ public class PayloadRepackingTest extends InstrumentationTest {
         DefaultHttpHeaders expectedRequestHeaders = new DefaultHttpHeaders();
         // netty's decompressor and aggregator remove some header values (& add others)
         expectedRequestHeaders.add("Host", "localhost");
-        if (!doGzip && !doChunked) {
-            expectedRequestHeaders.add("Content-Length", "46");
-        } else {
-            // Content-Length added with different casing with netty
+        if (doGzip || doChunked) {
             expectedRequestHeaders.add("content-length", "46");
+
+        } else {
+            expectedRequestHeaders.add("Content-Length", "46");
+
         }
 
         TestUtils.runPipelineAndValidate(
@@ -75,8 +75,7 @@ public class PayloadRepackingTest extends InstrumentationTest {
             null,
             null,
             stringParts,
-            expectedRequestHeaders,
-            referenceStringBuilder -> TestUtils.resolveReferenceString(referenceStringBuilder)
+            expectedRequestHeaders, TestUtils::resolveReferenceString
         );
     }
 

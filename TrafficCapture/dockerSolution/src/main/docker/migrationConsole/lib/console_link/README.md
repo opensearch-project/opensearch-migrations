@@ -1,23 +1,24 @@
 # Console_link Library
 
-- [Services.yaml spec](#servicesyaml-spec)
+- [Console\_link Library](#console_link-library)
+  - [Services.yaml spec](#servicesyaml-spec)
     - [Cluster](#cluster)
     - [Metrics Source](#metrics-source)
     - [Backfill](#backfill)
-        - [Reindex From Snapshot](#reindex-from-snapshot)
-        - [OpenSearch Ingestion](#opensearch-ingestion)
+      - [Reindex From Snapshot](#reindex-from-snapshot)
+      - [OpenSearch Ingestion](#opensearch-ingestion)
     - [Snapshot](#snapshot)
     - [Metadata Migration](#metadata-migration)
     - [Replay](#replay)
     - [Kafka](#kafka)
     - [Client Options](#client-options)
-- [Usage](#usage)
+  - [Usage](#usage)
     - [Library](#library)
     - [CLI](#cli)
-        - [Global Options](#global-options)
-        - [Objects](#objects)
-        - [Commands \& options](#commands--options)
-- [Development](#development)
+      - [Global Options](#global-options)
+      - [Objects](#objects)
+      - [Commands \& options](#commands--options)
+  - [Development](#development)
     - [Unit Tests](#unit-tests)
     - [Coverage](#coverage)
 
@@ -135,7 +136,7 @@ Most of the parameters for these two are the same, with some additional ones spe
 - `reindex_from_snapshot`
     - `snapshot_repo`: optional, path to the snapshot repo. If not provided, ???
     - `snapshot_name`: optional, name of the snapshot to use as the source. If not provided, ???
-    - `scale`: optional int, number of instances to enable when `backfill start` is run. While running, this is modifiable with `backfill scale X`. Default is 1.
+    - `scale`: optional int, number of instances to enable when `backfill start` is run. While running, this is modifiable with `backfill scale X`. Default is 5.
 
 There is also a block that specifies the deployment type. Exactly one of the following blocks must be present:
 
