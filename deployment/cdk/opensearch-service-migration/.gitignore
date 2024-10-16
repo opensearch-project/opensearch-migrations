@@ -9,3 +9,4 @@ dist
 .cdk.staging
 cdk.out
 certs
+cdk-synth-output

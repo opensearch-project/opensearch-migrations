@@ -16,7 +16,7 @@ public class ContainsStringCount extends TypeSafeMatcher<String> {
 
     @Override
     protected void describeMismatchSafely(String item, Description mismatchDescription) {
-        mismatchDescription.appendText("was found " + containsStringCount(item) + " times");
+        mismatchDescription.appendText("was found " + containsStringCount(item) + " times in '" + item + "'");
     }
 
     @Override

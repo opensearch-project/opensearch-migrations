@@ -40,6 +40,7 @@ export class ECSService {
 
 export class RFSBackfillYaml {
     ecs: ECSService;
+    scale: number = 5;
     constructor() {
         this.ecs = new ECSService();
     }

@@ -192,7 +192,8 @@ public class OpenSearchClient {
     ) {
         var objectDoesNotExist = !hasObjectCheck(objectPath, context);
         if (objectDoesNotExist) {
-            client.putAsync(objectPath, settings.toString(), context.createCheckRequestContext()).flatMap(resp -> {
+            var putRequestContext = context == null ? null : context.createCheckRequestContext();
+            client.putAsync(objectPath, settings.toString(), putRequestContext).flatMap(resp -> {
                 if (resp.statusCode == HttpURLConnection.HTTP_OK) {
                     return Mono.just(resp);
                 } else if (resp.statusCode == HttpURLConnection.HTTP_BAD_REQUEST) {

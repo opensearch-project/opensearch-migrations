@@ -44,12 +44,12 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
     MODE streamMode = MODE.CHUNKED;
     int contentBytesReceived;
     CompositeByteBuf bufferedContents;
-    HttpJsonMessageWithFaultingPayload bufferedJsonMessage;
+    HttpJsonRequestWithFaultingPayload bufferedJsonMessage;
 
     @Override
     public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
-        if (msg instanceof HttpJsonMessageWithFaultingPayload) {
-            handleReadJsonMessageObject(ctx, (HttpJsonMessageWithFaultingPayload) msg);
+        if (msg instanceof HttpJsonRequestWithFaultingPayload) {
+            handleReadJsonMessageObject(ctx, (HttpJsonRequestWithFaultingPayload) msg);
         } else if (msg instanceof HttpContent) {
             handleReadBody(ctx, (HttpContent) msg);
         } else {
@@ -81,7 +81,7 @@ public class NettyJsonContentStreamToByteBufHandler extends ChannelInboundHandle
         }
     }
 
-    private void handleReadJsonMessageObject(ChannelHandlerContext ctx, HttpJsonMessageWithFaultingPayload msg) {
+    private void handleReadJsonMessageObject(ChannelHandlerContext ctx, HttpJsonRequestWithFaultingPayload msg) {
         bufferedJsonMessage = msg;
         var transferEncoding = bufferedJsonMessage.headers().asStrictMap().get("transfer-encoding");
         streamMode = (transferEncoding != null && transferEncoding.contains(TRANSFER_ENCODING_CHUNKED_VALUE))

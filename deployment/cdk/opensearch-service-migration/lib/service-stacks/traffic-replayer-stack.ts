@@ -19,6 +19,7 @@ import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { ECSReplayerYaml } from "../migration-services-yaml";
 import { SharedLogFileSystem } from "../components/shared-log-file-system";
 import {Secret} from "aws-cdk-lib/aws-secretsmanager";
+import { CdkLogger } from "../cdk-logger";
 
 
 export interface TrafficReplayerProps extends StackPropsExt {
@@ -92,7 +93,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
         if (props.clusterAuthDetails.basicAuth) {
             let secret;
             if (props.clusterAuthDetails.basicAuth.password) {
-                console.warn("Password passed in plain text, this is insecure and will leave" +
+                CdkLogger.warn("Password passed in plain text, this is insecure and will leave" +
                     "your password exposed.")
                 secret = new Secret(this,"ReplayerClusterPasswordSecret", {
                     secretName: `replayer-user-secret-${props.stage}-${deployId}`,

@@ -49,12 +49,18 @@ public class ByteBufList extends AbstractReferenceCounted {
     }
 
     public CompositeByteBuf asCompositeByteBufRetained() {
-        return asCompositeByteBufRetained(data.stream().map(ByteBuf::retainedDuplicate));
+        return asCompositeByteBufRetained(data.stream());
+    }
+
+    public static CompositeByteBuf asCompositeByteBuf(Stream<ByteBuf> byteBufs) {
+        var compositeByteBuf = Unpooled.compositeBuffer(1024);
+        byteBufs.forEach(byteBuf -> compositeByteBuf.addComponent(true, byteBuf.duplicate()));
+        return compositeByteBuf;
     }
 
     public static CompositeByteBuf asCompositeByteBufRetained(Stream<ByteBuf> byteBufs) {
-        var compositeByteBuf = Unpooled.compositeBuffer();
-        byteBufs.forEach(byteBuf -> compositeByteBuf.addComponent(true, byteBuf));
+        var compositeByteBuf = Unpooled.compositeBuffer(1024);
+        byteBufs.forEach(byteBuf -> compositeByteBuf.addComponent(true, byteBuf.retainedDuplicate()));
         return compositeByteBuf;
     }
 

@@ -1,5 +1,5 @@
 {
-  "transformerMessageVersion": "1.0",
+  "transformerMessageVersion": 2,
   "method": "GET",
   "protocol": "HTTP/1.1",
   "URI": "/testindex/_search",

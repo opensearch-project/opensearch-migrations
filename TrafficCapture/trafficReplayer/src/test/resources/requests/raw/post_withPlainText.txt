@@ -1,0 +1,7 @@
+POST /test HTTP/1.1
+Host: foo.example
+Authorization: Basic YWRtaW46YWRtaW4=
+Content-Type: text/plain
+Content-Length: 15
+
+This is a test
