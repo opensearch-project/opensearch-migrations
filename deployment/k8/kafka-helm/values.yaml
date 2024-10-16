@@ -1,5 +1,0 @@
-kafka-local:
-  fullnameOverride: "kafka"
-  image:
-    tag: "3.7.0"
-  replicaCount: 1

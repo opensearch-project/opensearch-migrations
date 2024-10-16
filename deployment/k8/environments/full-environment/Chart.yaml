@@ -8,9 +8,9 @@ dependencies:
   - name: opensearch-helm
     version: "0.1.0"
     repository: "file://../../opensearch-helm"
-  - name: kafka-helm
+  - name: kafka-op
     version: "0.1.0"
-    repository: "file://../../kafka-helm"
+    repository: "file://../../kafka-op"
   - name: migration-console
     version: "0.1.0"
     repository: "file://../../migration-console"

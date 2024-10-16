@@ -28,5 +28,5 @@ metadata_migration:
   min_replicas: 0
   otel_endpoint: "http://localhost:4317"
 kafka:
-  broker_endpoints: "kafka:9092"
+  broker_endpoints: "kafka-cluster-kafka-bootstrap:9092"
   standard: ""

@@ -1,8 +1,0 @@
-apiVersion: v2
-name: kafka-helm
-version: 0.1.0
-dependencies:
-  - name: kafka
-    version: "22.0.3"
-    repository: https://charts.bitnami.com/bitnami
-    alias: kafka-local

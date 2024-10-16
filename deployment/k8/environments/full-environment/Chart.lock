@@ -5,8 +5,8 @@ dependencies:
 - name: opensearch-helm
   repository: file://../../opensearch-helm
   version: 0.1.0
-- name: kafka-helm
-  repository: file://../../kafka-helm
+- name: kafka-op
+  repository: file://../../kafka-op
   version: 0.1.0
 - name: migration-console
   repository: file://../../migration-console
@@ -20,5 +20,5 @@ dependencies:
 - name: reindex-from-snapshot
   repository: file://../../reindex-from-snapshot
   version: 0.1.0
-digest: sha256:22e6f3906cac197c24acb27654f38c6e4e2abef6ae70077058093166c9f29264
-generated: "2024-10-15T13:08:09.729613-05:00"
+digest: sha256:f150a39fb9de82b31d6dcf1c56c6469e206dd24412de5a12d8183c365f7c2738
+generated: "2024-10-16T17:08:42.54601-05:00"
