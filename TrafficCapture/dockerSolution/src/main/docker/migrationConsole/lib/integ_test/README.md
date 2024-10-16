@@ -34,7 +34,7 @@ This script accepts various parameters to customize its behavior. Below is a lis
 - `--unique_id`: The unique identifier to apply to created indices/documents.
     - Default: Generated uuid
 - `--config_file_path`: The services yaml config file path for the console library.
-    - Default: `/etc/migration_services.yaml`
+    - Default: `/shared-logs-output/migration_services.yaml`
 
 
 #### Clean Up
