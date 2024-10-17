@@ -2,11 +2,12 @@ package org.opensearch.migrations.data;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import lombok.experimental.UtilityClass;
 
 /** Shared ways to build fields for index mappings */
-@UtilityClass
 public class FieldBuilders {
+
+    private FieldBuilders() {}
+
     public static final String DATE = "date";
     public static final String GEO_POINT = "geo_point";
     public static final String INTEGER = "integer";
