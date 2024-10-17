@@ -245,6 +245,7 @@ describe('validateFargateCpuArch', () => {
     test('parseClusterDefinition with basic auth parameters', () => {
         const clusterDefinition = {
             endpoint: 'https://target-cluster',
+            version: 'ES_7.10',
             auth: {
               type: 'basic',
               username: 'admin',
@@ -254,6 +255,7 @@ describe('validateFargateCpuArch', () => {
         const parsed = parseClusterDefinition(clusterDefinition);
         expect(parsed).toBeDefined();
         expect(parsed.endpoint).toBe(clusterDefinition.endpoint);
+        expect(parsed.version).toBe(clusterDefinition.version);
         expect(parsed.auth.basicAuth).toBeDefined();
         expect(parsed.auth.basicAuth?.username).toBe(clusterDefinition.auth.username);
         expect(parsed.auth.basicAuth?.password_from_secret_arn).toBe(clusterDefinition.auth.passwordFromSecretArn);

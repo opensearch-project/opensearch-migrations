@@ -5,6 +5,7 @@ import java.util.AbstractSet;
 import java.util.Iterator;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 
 import lombok.EqualsAndHashCode;
@@ -21,6 +22,12 @@ public class StrictCaseInsensitiveHttpHeadersMap extends AbstractMap<String, Lis
 
     public StrictCaseInsensitiveHttpHeadersMap() {
         lowerCaseToUpperCaseAndValueMap = new LinkedHashMap<>();
+    }
+
+    public static StrictCaseInsensitiveHttpHeadersMap fromMap(Map<String, List<String>> map) {
+        var caseInsensitiveHttpHeadersMap = new StrictCaseInsensitiveHttpHeadersMap();
+        caseInsensitiveHttpHeadersMap.putAll(map);
+        return caseInsensitiveHttpHeadersMap;
     }
 
     @Override

@@ -92,7 +92,7 @@ class EndToEndTest {
         bothClustersStarted.join();
 
         Version sourceVersion = sourceCluster.getContainerVersion().getVersion();
-        var sourceIsES6_8 = VersionMatchers.isES_6_8.test(sourceVersion);
+        var sourceIsES6_8 = VersionMatchers.isES_6_X.test(sourceVersion);
         var sourceIsES7_X = VersionMatchers.isES_7_X.test(sourceVersion) || VersionMatchers.isOS_1_X.test(sourceVersion);
 
         if (!(sourceIsES6_8 || sourceIsES7_X)) {

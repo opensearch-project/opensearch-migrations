@@ -25,4 +25,9 @@ public class RefSafeHolder<T> implements AutoCloseable {
     public void close() {
         ReferenceCountUtil.release(resource);
     }
+
+    @Override
+    public String toString() {
+        return "RefSafeHolder{" + resource + "}";
+    }
 }

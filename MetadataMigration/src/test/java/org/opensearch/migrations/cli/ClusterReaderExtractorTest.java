@@ -55,6 +55,16 @@ public class ClusterReaderExtractorTest {
     }
 
     @Test
+    void testExtractClusterReader_validLocalSnapshot_missingVersion() {
+        var args = new MigrateOrEvaluateArgs();
+        args.fileSystemRepoPath = "foo.bar";
+        var extractor = spy(new ClusterReaderExtractor(args));
+
+        var exception = assertThrows(ParameterException.class, () -> extractor.extractClusterReader());
+        assertThat(exception.getMessage(), equalTo("Unable to read from snapshot without --source-version parameter"));
+    }
+
+    @Test
     void testExtractClusterReader_validLocalSnapshot() {
         var args = new MigrateOrEvaluateArgs();
         args.fileSystemRepoPath = "foo.bar";
