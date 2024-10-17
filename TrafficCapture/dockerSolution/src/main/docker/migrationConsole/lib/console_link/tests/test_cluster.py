@@ -460,7 +460,8 @@ def test_sigv4_authentication_signature(requests_mock, method, endpoint, data, h
         # Verify that essential headers are included in SignedHeaders
         required_headers = ['host', 'x-amz-date', 'x-custom-header-1', 'x-custom-header-2']
         for header in required_headers:
-            assert header in signed_headers, f"Header '{header}' not found in SignedHeaders, actual headers: {signed_headers}"
+            assert header in signed_headers, f"Header '{header}' not found in SignedHeaders," + \
+                f" actual headers: {signed_headers}"
 
         # Check that the x-amz-date header is present
         amz_date_header = last_request.headers.get('x-amz-date')
@@ -484,7 +485,8 @@ def test_sigv4_authentication_signature(requests_mock, method, endpoint, data, h
             method=last_request.method,
             url=last_request.url,
             data=last_request.body,
-            headers={k: v for k, v in last_request.headers.items() if k.lower() not in requests.utils.default_headers().keys()}
+            headers={k: v for k, v in last_request.headers.items() if
+                     k.lower() not in requests.utils.default_headers().keys()}
         )
         # Sign the request
         SigV4Auth(credentials, service_name, region_name).add_auth(aws_request)
