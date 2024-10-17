@@ -9,5 +9,8 @@ cd "$script_dir_abs_path" || exit
 
 cd ../.. || exit
 
+helm repo add opensearch-operator https://opensearch-project.github.io/opensearch-k8s-operator/
+helm repo add strimzi https://strimzi.io/charts/
+
 minikube mount .:/opensearch-migrations > /dev/null 2>&1 &
 minikube tunnel > /dev/null 2>&1 &
