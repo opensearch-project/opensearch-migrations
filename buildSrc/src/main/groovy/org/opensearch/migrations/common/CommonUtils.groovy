@@ -1,5 +1,6 @@
 package org.opensearch.migrations.common
 
+import org.gradle.api.GradleException
 import org.gradle.api.tasks.Sync
 import org.gradle.api.Project
 import com.bmuschko.gradle.docker.tasks.image.Dockerfile
@@ -20,10 +21,11 @@ class CommonUtils {
         return digest.digest().encodeHex().toString()
     }
 
-    static def copyArtifactFromProjectToProjectsDockerStaging(Project dockerBuildProject, Project project) {
-        def destBuildDir = "build/docker/${project.name}"
+    static def copyArtifactFromProjectToProjectsDockerStaging(Project dockerBuildProject, Project project,
+                                                              String dockerImageName) {
+        def destBuildDir = "build/docker/${dockerImageName}_${project.name}"
         def destDir = "${destBuildDir}/jars"
-        copyArtifactFromProjectToProjectsDockerStaging(dockerBuildProject, project, project.name, destDir)
+        copyArtifactFromProjectToProjectsDockerStaging(dockerBuildProject, project, dockerImageName, destDir)
     }
     static def copyArtifactFromProjectToProjectsDockerStaging(Project dockerBuildProject, Project sourceArtifactProject,
                                                               String destProjectName, String destDir) {
@@ -44,22 +46,30 @@ class CommonUtils {
     }
 
     static def createDockerfile(Project dockerBuildProject, Project sourceArtifactProject,
-                                Map<String, String> baseImageProjectOverrides,
-                                Map<String, String> dockerFilesForExternalServices) {
+                                String baseImageProjectOverride,
+                                Map<String, String> dockerFilesForExternalServices,
+                                String dockerImageName) {
         def projectName = sourceArtifactProject.name;
-        def dockerBuildDir = "build/docker/${projectName}"
-        dockerBuildProject.task("createDockerfile_${projectName}", type: Dockerfile) {
+        def dockerBuildDir = "build/docker/${dockerImageName}_${projectName}"
+        dockerBuildProject.task("createDockerfile_${dockerImageName}", type: Dockerfile) {
             destFile = dockerBuildProject.file("${dockerBuildDir}/Dockerfile")
-            dependsOn "copyArtifact_${projectName}"
-            def baseImageOverrideProjectName = baseImageProjectOverrides.get(projectName)
-            if (baseImageOverrideProjectName) {
-                def dependentDockerImageName = dockerFilesForExternalServices.get(baseImageOverrideProjectName)
-                def hashNonce = CommonUtils.calculateDockerHash(
-                        dockerBuildProject.fileTree("src/main/docker/${baseImageOverrideProjectName}"))
-                from "migrations/${dependentDockerImageName}:${hashNonce}"
-                def dependencyName = "buildDockerImage_${baseImageOverrideProjectName}";
+            dependsOn "copyArtifact_${dockerImageName}"
+            if (baseImageProjectOverride) {
+                def dependentDockerImageProjectName = dockerFilesForExternalServices.get(baseImageProjectOverride)
+                if (dependentDockerImageProjectName == null) {
+                    throw new GradleException("Unexpected baseImageOverride " + baseImageProjectOverride)
+                }
+                def dockerFileTree = dockerBuildProject.fileTree("src/main/docker/${dependentDockerImageProjectName}")
+                if (!dockerFileTree.files) {
+                    throw new GradleException("File tree for ${dependentDockerImageProjectName} does not exist or is empty")
+                }
+                def hashNonce = CommonUtils.calculateDockerHash(dockerFileTree)
+                from "migrations/${baseImageProjectOverride}:${hashNonce}"
+                def dependencyName = "buildDockerImage_${baseImageProjectOverride}";
                 dependsOn dependencyName
-                runCommand("sed -i -e \"s|mirrorlist=|#mirrorlist=|g\" /etc/yum.repos.d/CentOS-* ;  sed -i -e \"s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g\" /etc/yum.repos.d/CentOS-*")
+                if (baseImageProjectOverride.startsWith("elasticsearch")) {
+                    runCommand("sed -i -e \"s|mirrorlist=|#mirrorlist=|g\" /etc/yum.repos.d/CentOS-* ;  sed -i -e \"s|#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g\" /etc/yum.repos.d/CentOS-*")
+                }
             } else {
                 from 'amazoncorretto:11-al2023-headless'
             }

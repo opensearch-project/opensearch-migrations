@@ -1,6 +1,6 @@
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {Construct} from "constructs";
-import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
+import {ContainerImage, CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
 import * as forge from 'node-forge';
@@ -15,6 +15,10 @@ export function getSecretAccessPolicy(secretArn: string): PolicyStatement {
         ]
     })
 }
+import { mkdtempSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { DockerImageAsset } from "aws-cdk-lib/aws-ecr-assets";
 
 export function appendArgIfNotInExtraArgs(
     baseCommand: string,
@@ -434,4 +438,31 @@ export function isStackInGovCloud(stack: Stack): boolean {
 
 export function isRegionGovCloud(region: string): boolean {
     return region.startsWith('us-gov-');
+}
+
+
+/**
+ * Creates a Local Docker image asset from the specified image name.
+ *
+ * This allows us to create a private ECR repo for any image allowing us to have a consistent
+ * experience across VPCs and regions (e.g. running within VPC in gov-cloud with no internet access)
+ * 
+ * This works by creating a temp Dockerfile with only the FROM with the param imageName and
+ * using that Dockerfile with cdk.assets to create a local Docker image asset.
+ *
+ * @param {string} imageName - The name of the Docker image to save as a tarball and use in CDK.
+ * @returns {ContainerImage} - A `ContainerImage` object representing the Docker image asset.
+ */
+export function makeLocalAssetContainerImage(scope: Construct, imageName: string): ContainerImage {
+    const sanitizedImageName = imageName.replace(/[^a-zA-Z0-9-_]/g, '_');
+    const tempDir = mkdtempSync(join(tmpdir(), 'docker-build-' + sanitizedImageName));
+    const dockerfilePath = join(tempDir, 'Dockerfile');
+    const dockerfileContent = `
+        FROM ${imageName}
+    `;
+    writeFileSync(dockerfilePath, dockerfileContent);
+    const asset = new DockerImageAsset(scope, 'ServiceImage', {
+        directory: tempDir,
+    });
+    return ContainerImage.fromDockerImageAsset(asset);
 }

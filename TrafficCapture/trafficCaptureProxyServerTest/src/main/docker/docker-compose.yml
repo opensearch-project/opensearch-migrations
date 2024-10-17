@@ -1,7 +1,7 @@
 version: '3.7'
 services:
   webserver:
-    image: 'migrations/nginx-perf-test-webserver:latest'
+    image: 'migrations/nginx_perf_test_webserver:latest'
     networks:
       - testing
     ports:

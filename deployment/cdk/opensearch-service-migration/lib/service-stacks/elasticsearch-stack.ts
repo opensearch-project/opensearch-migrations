@@ -39,7 +39,7 @@ export class ElasticsearchStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: "elasticsearch",
-            dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/src/main/docker/elasticsearchWithSearchGuard"),
+            dockerImageName: "migrations/elasticsearch_searchguard:latest",
             securityGroups: securityGroups,
             portMappings: [servicePort],
             cpuArchitecture: props.fargateCpuArch,

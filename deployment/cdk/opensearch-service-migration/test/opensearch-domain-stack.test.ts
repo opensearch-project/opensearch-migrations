@@ -6,7 +6,6 @@ import { ClusterYaml } from '../lib/migration-services-yaml';
 import { ContainerImage } from "aws-cdk-lib/aws-ecs";
 import { describe, beforeEach, afterEach, test, expect, jest} from '@jest/globals';
 
-jest.mock('aws-cdk-lib/aws-ecr-assets');
 describe('OpenSearch Domain Stack Tests', () => {
   beforeEach(() => {
     jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => ContainerImage.fromRegistry("ServiceImage"));

@@ -7,7 +7,6 @@ import { describe, beforeEach, afterEach, test, expect, jest } from '@jest/globa
 import { GatewayVpcEndpointAwsService, InterfaceVpcEndpointAwsService } from "aws-cdk-lib/aws-ec2";
 import { Stack } from "aws-cdk-lib";
 
-jest.mock('aws-cdk-lib/aws-ecr-assets');
 
 function getExpectedEndpoints(networkStack: NetworkStack): (InterfaceVpcEndpointAwsService | GatewayVpcEndpointAwsService)[] {
     return [

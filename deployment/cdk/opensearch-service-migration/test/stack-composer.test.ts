@@ -7,7 +7,6 @@ import { KafkaStack } from "../lib";
 import { describe, beforeEach, afterEach, test, expect, jest } from '@jest/globals';
 import { ContainerImage } from "aws-cdk-lib/aws-ecs";
 
-jest.mock('aws-cdk-lib/aws-ecr-assets');
 describe('Stack Composer Tests', () => {
   beforeEach(() => {
     jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => ContainerImage.fromRegistry("ServiceImage"));

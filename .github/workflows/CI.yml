@@ -200,8 +200,20 @@ jobs:
           node-version: ${{ env.node-version }}
       - name: Install NPM dependencies
         run: npm ci
-      - name: Run CDK Jest Tests
-        run: npm test
+      - name: Mock Docker Images for CDK Tests
+        run: |
+          image=$(docker images --format '{{.Repository}}:{{.Tag}}' | head -n 1)
+          echo "Using image for mocked tags: $image"
+          docker tag $image migrations/capture_proxy:latest
+          docker tag $image migrations/capture_proxy_es:latest
+          docker tag $image opensearchproject/opensearch:2
+          docker tag $image migrations/elasticsearch_searchguard:latest
+          docker tag $image docker.io/apache/kafka:3.7.0
+          docker tag $image migrations/migration_console:latest
+          docker tag $image migrations/reindex_from_snapshot:latest
+          docker tag $image migrations/traffic_replayer:latest
+      - name: Run CDK Jest Tests (using mocked images)
+        run: npm run test:withoutBuildImages
 
   link-checker:
     runs-on: ubuntu-latest

@@ -5,7 +5,6 @@ import { ReindexFromSnapshotStack } from '../lib/service-stacks/reindex-from-sna
 import { createStackComposer } from './test-utils';
 import { describe, beforeEach, afterEach, test, expect, jest } from '@jest/globals';
 
-jest.mock('aws-cdk-lib/aws-ecr-assets');
 
 describe('ReindexFromSnapshotStack Tests', () => {
   beforeEach(() => {
