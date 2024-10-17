@@ -9,7 +9,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.CreateSnapshot;
@@ -37,28 +36,17 @@ import org.junit.jupiter.params.provider.MethodSource;
 @Slf4j
 public class ParallelDocumentMigrationsTest extends SourceTestBase {
 
-    static final List<SearchClusterContainer.ContainerVersion> SOURCE_IMAGES = List.of(
-        SearchClusterContainer.ES_V7_10_2
-    );
-    static final List<SearchClusterContainer.ContainerVersion> TARGET_IMAGES = List.of(SearchClusterContainer.OS_V2_14_0);
-
     public static Stream<Arguments> makeDocumentMigrationArgs() {
-        var targetImageNames = TARGET_IMAGES.stream()
-            .collect(Collectors.toList());
         var numWorkersList = List.of(1, 3, 40);
         var compressionEnabledList = List.of(true, false);
-        return SOURCE_IMAGES.stream()
+        return SupportedClusters.targets().stream()
             .flatMap(
-                sourceImage -> targetImageNames.stream()
-                    .flatMap(
-                        targetImage -> numWorkersList.stream()
-                            .flatMap(numWorkers -> compressionEnabledList.stream().map(compression -> Arguments.of(
-                                    numWorkers,
-                                    targetImage,
-                                    sourceImage,
-                                    compression
-                                ))
-                            )
+                targetImage -> numWorkersList.stream()
+                    .flatMap(numWorkers -> compressionEnabledList.stream().map(compression -> Arguments.of(
+                            numWorkers,
+                            targetImage,
+                            compression
+                        ))
                     )
             );
     }
@@ -68,7 +56,6 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
     public void testDocumentMigration(
         int numWorkers,
         SearchClusterContainer.ContainerVersion targetVersion,
-        SearchClusterContainer.ContainerVersion sourceVersion,
         boolean compressionEnabled
     ) throws Exception {
         var executorService = Executors.newFixedThreadPool(numWorkers);
@@ -76,6 +63,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         final var testDocMigrationContext = DocumentMigrationTestContext.factory()
             .withAllTracking();
 
+        // The source container version doesn't impact the test focus to stress work coordination store with many worker instances.
+        final var sourceVersion = SearchClusterContainer.ES_V7_10_2;
         try (
             var esSourceContainer = new SearchClusterContainer(sourceVersion);
             var osTargetContainer = new SearchClusterContainer(targetVersion);
