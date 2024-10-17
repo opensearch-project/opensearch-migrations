@@ -5,6 +5,7 @@ import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
 import * as forge from 'node-forge';
 import { ClusterYaml } from "./migration-services-yaml";
+import { CdkLogger } from "./cdk-logger";
 
 export function getSecretAccessPolicy(secretArn: string): PolicyStatement {
     return new PolicyStatement({

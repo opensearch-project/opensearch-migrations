@@ -15,7 +15,7 @@
     },
     "sourceCluster": {
       "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
-      "version": "<SOURCE_CLUSTER_VERSION, ES_7_10 or OS_1_3>",
+      "version": "<SOURCE_CLUSTER_VERSION, ES_7.10 or OS_1.3>",
       "auth": {
         "type": "none | basic | sigv4",
         "// basic auth documentation": "The next two lines are releavant for basic auth only",

@@ -7,7 +7,7 @@
     "otelCollectorEnabled": false,
     "sourceCluster": {
       "endpoint": "https://test-cluster",
-      "version": "ES 7.10",
+      "version": "ES_7.10",
       "auth": { "type": "none" }
     }
   }
