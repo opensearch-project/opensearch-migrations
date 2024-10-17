@@ -5,8 +5,7 @@ setup(
     version="1.0.0",
     description="A Python module to create a console application from a Python script",
     packages=find_packages(exclude=("tests")),
-    install_requires=["requests", "boto3", "pyyaml", "Click", "cerberus",
-                      "requests-auth-aws-sigv4"],
+    install_requires=["requests", "boto3", "pyyaml", "Click", "cerberus"],
     entry_points={
         "console_scripts": [
             "console = console_link.cli:cli",

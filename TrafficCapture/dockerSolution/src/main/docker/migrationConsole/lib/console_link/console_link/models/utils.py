@@ -4,6 +4,10 @@ from typing import Dict, Optional
 from datetime import datetime
 import boto3
 import requests.utils
+from botocore.auth import SigV4Auth
+from botocore.awsrequest import AWSRequest
+from requests.models import PreparedRequest
+
 
 from console_link.models.client_options import ClientOptions
 
@@ -15,8 +19,8 @@ class AWSAPIError(Exception):
 
 def raise_for_aws_api_error(response: Dict) -> None:
     if (
-        "ResponseMetadata" in response
-        and "HTTPStatusCode" in response["ResponseMetadata"]  # noqa: W503
+        "ResponseMetadata" in response and
+        "HTTPStatusCode" in response["ResponseMetadata"]  # noqa: W503
     ):
         status_code = response["ResponseMetadata"]["HTTPStatusCode"]
     else:
@@ -54,3 +58,28 @@ def append_user_agent_header_for_requests(headers: Optional[dict], user_agent_ex
     else:
         adjusted_headers["User-Agent"] = f"{requests.utils.default_user_agent()} {user_agent_extra}"
     return adjusted_headers
+
+# The SigV4AuthPlugin allows us to use boto3 with the requests library by integrating
+# AWS Signature Version 4 signing. This enables the requests library to authenticate
+# requests to AWS services using SigV4.
+
+
+class SigV4AuthPlugin(requests.auth.AuthBase):
+    def __init__(self, service, region):
+        self.service = service
+        self.region = region
+        session = boto3.Session()
+        self.credentials = session.get_credentials()
+
+    def __call__(self, r: PreparedRequest) -> PreparedRequest:
+        # Exclude signing headers that may change after signing
+        default_headers = requests.utils.default_headers()
+        excluded_headers = default_headers.keys()
+        filtered_headers = {k: v for k, v in r.headers.items() if k.lower() not in excluded_headers}
+        aws_request = AWSRequest(method=r.method, url=r.url, data=r.body, headers=filtered_headers)
+        signer = SigV4Auth(self.credentials, self.service, self.region)
+        if aws_request.body is not None:
+            aws_request.headers['x-amz-content-sha256'] = signer.payload(aws_request)
+        signer.add_auth(aws_request)
+        r.headers.update(dict(aws_request.headers))
+        return r
