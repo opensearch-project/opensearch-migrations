@@ -42,15 +42,12 @@ If no source cluster is being configured, the source cluster object should be `{
 In all other cases, the required components of each cluster object are:
 
 - `endpoint` -- the fully specified endpoint for the cluster
+- `version` -- the Elasticsearch or OpenSearch version of the cluster, in the format of `OS_x.y` or `ES_x.y` This will be passed to the ReindexFromSnapshot service, if enabled, and provided for the metadata migration on the Migration Console.
 - `auth` -- what authorization strategy the cluster has. The supported options are:
     1. No auth: `{"type": "none"}`
     2. Sigv4 Signing: `{"type": "sigv4", "region": "us-east-1", "serviceSigningName": "es"}` The serviceSigningName is `es` for Elasticsearch and OpenSearch managed service domains, and `aoss` for Amazon OpenSearch Serverless
     3. Basic auth with plaintext password (only supported for the source cluster and not recommended): `{"type": "basic", "username": "admin", "password": "admin123"}`
     4. Basic auth with password in secrets manager (recommended): `{"type": "basic", "username": "admin", "passwordFromSecretArn": "arn:aws:secretsmanager:us-east-1:12345678912:secret:master-user-os-pass-123abc"}`
-
-The optional component is:
-
-- `version` -- the Elasticsearch or OpenSearch version of the cluster, in the format of `OS_x.y` or `ES_x.y` This will be passed to the ReindexFromSnapshot service, if enabled, and provided for the metadata migration on the Migration Console. It defaults to `ES_7.10.2`.
 
 ### Reindex from Snapshot (RFS) Service Options
 

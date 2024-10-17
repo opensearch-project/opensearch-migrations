@@ -222,14 +222,21 @@ export class StackComposer {
         if (!sourceClusterDefinition && (sourceClusterEndpointField || sourceClusterDisabledField)) {
             CdkLogger.warn("`sourceClusterDisabled` and `sourceClusterEndpoint` are being deprecated in favor of a `sourceCluster` object.")
             CdkLogger.warn("Please update your CDK context block to use the `sourceCluster` object.")
+            CdkLogger.warn("Defaulting to source cluster version: ES_7.10")
             sourceClusterDefinition = {
                 "disabled": sourceClusterDisabledField,
                 "endpoint": sourceClusterEndpointField,
-                "auth": {"type": "none"}
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
             }
         }
         const sourceClusterDisabled = !!sourceClusterDefinition?.disabled
         const sourceCluster = (sourceClusterDefinition && !sourceClusterDisabled) ? parseClusterDefinition(sourceClusterDefinition) : undefined
+        if (sourceCluster) {
+            if (!sourceCluster.version) {
+                throw new Error("The `sourceCluster` object requires a `version` field.")
+            }
+        }
         const sourceClusterEndpoint = sourceCluster?.endpoint
 
         if (managedServiceSourceSnapshotEnabled && !sourceCluster?.auth.sigv4) {

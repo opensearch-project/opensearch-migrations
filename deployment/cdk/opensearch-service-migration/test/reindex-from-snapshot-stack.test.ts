@@ -39,7 +39,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
       vpcEnabled: true,
       sourceCluster: {
         "endpoint": "https://test-cluster",
-        "auth": {"type": "none"}
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
       },
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
@@ -79,7 +80,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
       vpcEnabled: true,
       sourceCluster: {
         "endpoint": "https://test-cluster",
-        "auth": {"type": "none"}
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
       },
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
@@ -118,7 +120,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 85899345920"
+              " --max-shard-size-bytes 85899345920 --source-version \"ES_7.10\""
             ],
           ],
         }
@@ -149,7 +151,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
       stage: 'unit-test',
       sourceCluster: {
         "endpoint": "https://test-cluster",
-        "auth": {"type": "none"}
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
       },
       targetCluster: {
         "endpoint": "https://target-cluster",
@@ -186,7 +189,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 85899345920 --target-aws-service-signing-name aoss --target-aws-region eu-west-1",
+              " --max-shard-size-bytes 85899345920 --target-aws-service-signing-name aoss --target-aws-region eu-west-1 --source-version \"ES_7.10\"",
             ],
           ],
         }
@@ -217,7 +220,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
       stage: 'unit-test',
       sourceCluster: {
         "endpoint": "https://test-cluster",
-        "auth": {"type": "none"}
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
       },
       migrationAssistanceEnabled: true,
     };
@@ -242,7 +246,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
       stage: 'unit-test',
       sourceCluster: {
         "endpoint": "https://test-cluster",
-        "auth": {"type": "none"}
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
       },
       reindexFromSnapshotExtraArgs: '--custom-arg value --flag --snapshot-name \"custom-snapshot\"',
       migrationAssistanceEnabled: true,
@@ -275,7 +280,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --max-shard-size-bytes 85899345920 --custom-arg value --flag --snapshot-name \"custom-snapshot\""
+              " --max-shard-size-bytes 85899345920 --source-version \"ES_7.10\" --custom-arg value --flag --snapshot-name \"custom-snapshot\""
             ]
           ]
         }

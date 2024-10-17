@@ -117,7 +117,8 @@ describe('Stack Composer Ordering Tests', () => {
             "reindexFromSnapshotServiceEnabled": false,
             "sourceCluster": {
                 "endpoint": "https://test-cluster",
-                "auth": {"type": "none"}
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
             }
         }
 

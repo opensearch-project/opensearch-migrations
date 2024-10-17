@@ -5,6 +5,7 @@ import {RemovalPolicy, Stack} from "aws-cdk-lib";
 import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
 import * as forge from 'node-forge';
 import { ClusterYaml } from "./migration-services-yaml";
+import { CdkLogger } from "./cdk-logger";
 
 export function getSecretAccessPolicy(secretArn: string): PolicyStatement {
     return new PolicyStatement({
@@ -421,10 +422,10 @@ function parseAuth(json: any): ClusterAuth | null {
 
 export function parseClusterDefinition(json: any): ClusterYaml {
     const endpoint = json.endpoint
-    const version = json.version
     if (!endpoint) {
         throw new Error('Missing required field in cluster definition: endpoint')
     }
+    const version = json.version;
     const auth = parseAuth(json.auth)
     if (!auth) {
         throw new Error(`Invalid auth type when parsing cluster definition: ${json.auth.type}`)
