@@ -11,6 +11,7 @@ jest.mock('child_process', () => {
     'migrations/migration_console:latest',
     'migrations/reindex_from_snapshot:latest',
     'migrations/traffic_replayer:latest',
+    'migrations/otel_collector:latest',
     'opensearchproject/opensearch:2',
   ];
 

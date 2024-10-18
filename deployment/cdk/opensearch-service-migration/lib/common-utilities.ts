@@ -480,11 +480,14 @@ export function makeLocalAssetContainerImage(scope: Construct, imageName: string
         const dockerfileContent = `
             FROM ${imageName}
         `;
+
         writeFileSync(dockerfilePath, dockerfileContent);
-        const asset = new DockerImageAsset(scope, 'ServiceImage', {
+        const assetName = `${sanitizedImageName.charAt(0).toUpperCase() + sanitizedImageName.slice(1)}ImageAsset`;
+        const asset = new DockerImageAsset(scope, assetName, {
             directory: tempDir,
             // add the tag to the hash so that the asset is invalidated when the tag changes
             extraHash: imageHash,
+            assetName: assetName,
         });
         return ContainerImage.fromDockerImageAsset(asset);
     }
