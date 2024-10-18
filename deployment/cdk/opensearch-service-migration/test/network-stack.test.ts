@@ -40,7 +40,6 @@ describe('NetworkStack Tests', () => {
         jest.clearAllMocks();
         jest.resetModules();
         jest.restoreAllMocks();
-        jest.resetAllMocks();
     });
 
     test('Test vpcEnabled setting that is disabled does not create stack', () => {

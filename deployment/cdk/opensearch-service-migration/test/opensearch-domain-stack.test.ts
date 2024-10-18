@@ -15,7 +15,6 @@ describe('OpenSearch Domain Stack Tests', () => {
     jest.clearAllMocks();
     jest.resetModules();
     jest.restoreAllMocks();
-    jest.resetAllMocks();
   });
 
   test('Test primary context options are mapped with standard data type', () => {

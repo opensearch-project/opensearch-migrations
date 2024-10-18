@@ -16,7 +16,6 @@ describe('Stack Composer Tests', () => {
     jest.clearAllMocks();
     jest.resetModules();
     jest.restoreAllMocks();
-    jest.resetAllMocks();
   });
 
   test('Test empty string provided for a parameter which has a default value, uses the default value', () => {
