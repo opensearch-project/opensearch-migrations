@@ -1,0 +1,18 @@
+# Default values for captured-traffic-kafka-cluster.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+environment: dev  # Can be 'test' or 'prod'
+
+kafka-cluster:
+  replicas: 7
+  storageType: ephemeral
+  storageSize: 100Gi
+  storageDeleteClaim: true
+  dedicatedController:
+    replicas: 4
+    storageSize: 10Gi
+
+topicName: "logging-traffic-topic"
+numReplicas: 1
+numPartitions: 1
