@@ -1,7 +1,7 @@
 {
     "_meta": {
         "hash": {
-            "sha256": "78bd6c8b8764c6d11ab77832542313282b29d29bcc577a23167049253fcc0f54"
+            "sha256": "732106b5c0463690ea660a9021d614109dc94fb9882d1474fbfef5f892fe6a8a"
         },
         "pipfile-spec": 6,
         "requires": {
@@ -279,15 +279,6 @@
             "index": "pypi",
             "markers": "python_version >= '3.8'",
             "version": "==2.32.3"
-        },
-        "requests-auth-aws-sigv4": {
-            "hashes": [
-                "sha256:1f6c7f63a0696a8f131a2ff21a544380f43c11f54d72600f6f2a1d402bd41d41",
-                "sha256:3d2a475cccbf85d4c93b8bd052d072e5c3f8e77022fd621b69a5b11ac2c139c8"
-            ],
-            "index": "pypi",
-            "markers": "python_version >= '2.7'",
-            "version": "==0.7"
         },
         "rsa": {
             "hashes": [
