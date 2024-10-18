@@ -31,7 +31,6 @@ describe('ReindexFromSnapshotStack Tests', () => {
     jest.clearAllMocks();
     jest.resetModules();
     jest.restoreAllMocks();
-    jest.resetAllMocks();
   });
 
   test('ReindexFromSnapshotStack creates expected resources', () => {

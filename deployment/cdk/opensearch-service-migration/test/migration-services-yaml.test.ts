@@ -16,7 +16,6 @@ describe('Migration Services YAML Tests', () => {
         jest.clearAllMocks();
         jest.resetModules();
         jest.restoreAllMocks();
-        jest.resetAllMocks();
     });
 
     test('Test default servicesYaml can be stringified', () => {

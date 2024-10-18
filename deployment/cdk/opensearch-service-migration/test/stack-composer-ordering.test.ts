@@ -20,7 +20,6 @@ describe('Stack Composer Ordering Tests', () => {
         jest.clearAllMocks();
         jest.resetModules();
         jest.restoreAllMocks();
-        jest.resetAllMocks();
     });
 
     test('Test all migration services with MSK get created when enabled', () => {

@@ -6,7 +6,11 @@ import { IStringParameter, StringParameter } from "aws-cdk-lib/aws-ssm";
 import * as forge from 'node-forge';
 import { ClusterYaml } from "./migration-services-yaml";
 import { CdkLogger } from "./cdk-logger";
-
+import { mkdtempSync, writeFileSync } from 'fs';
+import { join } from 'path';
+import { tmpdir } from 'os';
+import { DockerImageAsset } from "aws-cdk-lib/aws-ecr-assets";
+import { execSync } from 'child_process';
 export function getSecretAccessPolicy(secretArn: string): PolicyStatement {
     return new PolicyStatement({
         effect: Effect.ALLOW,
@@ -16,10 +20,6 @@ export function getSecretAccessPolicy(secretArn: string): PolicyStatement {
         ]
     })
 }
-import { mkdtempSync, writeFileSync } from 'fs';
-import { join } from 'path';
-import { tmpdir } from 'os';
-import { DockerImageAsset } from "aws-cdk-lib/aws-ecr-assets";
 
 export function appendArgIfNotInExtraArgs(
     baseCommand: string,
@@ -453,17 +453,38 @@ export function isRegionGovCloud(region: string): boolean {
  *
  * @param {string} imageName - The name of the Docker image to save as a tarball and use in CDK.
  * @returns {ContainerImage} - A `ContainerImage` object representing the Docker image asset.
- */
+ */        
 export function makeLocalAssetContainerImage(scope: Construct, imageName: string): ContainerImage {
-    const sanitizedImageName = imageName.replace(/[^a-zA-Z0-9-_]/g, '_');
-    const tempDir = mkdtempSync(join(tmpdir(), 'docker-build-' + sanitizedImageName));
-    const dockerfilePath = join(tempDir, 'Dockerfile');
-    const dockerfileContent = `
-        FROM ${imageName}
-    `;
-    writeFileSync(dockerfilePath, dockerfileContent);
-    const asset = new DockerImageAsset(scope, 'ServiceImage', {
-        directory: tempDir,
-    });
-    return ContainerImage.fromDockerImageAsset(asset);
-}
+        const sanitizedImageName = imageName.replace(/[^a-zA-Z0-9-_]/g, '_');
+        const tempDir = mkdtempSync(join(tmpdir(), 'docker-build-' + sanitizedImageName));
+        const dockerfilePath = join(tempDir, 'Dockerfile');
+    
+        let imageHash = null;
+        try {
+            // Update the image if it is not a local image
+            if (!imageName.startsWith('migrations/')) {
+                execSync(`docker pull ${imageName}`);
+            }
+            // Get the actual hash for the image
+            const imageId = execSync(`docker inspect --format='{{.Id}}' ${imageName}`).toString().trim();
+            if (!imageId) {
+                throw new Error(`No RepoDigests found for image: ${imageName}`);
+            }
+            imageHash = imageId.split(':')[1];
+            CdkLogger.info('For image: ' + imageName + ' found hash: ' + imageHash);
+        } catch (error) {
+            CdkLogger.error('Error fetching the actual hash for the image: ' + imageName + ' Error: ' + error);
+            throw new Error('Error fetching the image hash for the image: ' + imageName + ' Error: ' + error);
+        }
+    
+        const dockerfileContent = `
+            FROM ${imageName}
+        `;
+        writeFileSync(dockerfilePath, dockerfileContent);
+        const asset = new DockerImageAsset(scope, 'ServiceImage', {
+            directory: tempDir,
+            // add the tag to the hash so that the asset is invalidated when the tag changes
+            extraHash: imageHash,
+        });
+        return ContainerImage.fromDockerImageAsset(asset);
+    }
