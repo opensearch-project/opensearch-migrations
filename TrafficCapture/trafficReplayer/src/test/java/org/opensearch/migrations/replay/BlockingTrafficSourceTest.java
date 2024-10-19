@@ -88,7 +88,7 @@ class BlockingTrafficSourceTest extends InstrumentationTest {
         public CompletableFuture<List<ITrafficStreamWithKey>> readNextTrafficStreamChunk(
             Supplier<ITrafficSourceContexts.IReadChunkContext> contextSupplier
         ) {
-            log.atTrace().setMessage(() -> "Test.readNextTrafficStreamChunk.counter=" + counter).log();
+            log.atTrace().setMessage("Test.readNextTrafficStreamChunk.counter={}").addArgument(counter).log();
             var i = counter.getAndIncrement();
             if (i >= nStreamsToCreate) {
                 return CompletableFuture.failedFuture(new EOFException());

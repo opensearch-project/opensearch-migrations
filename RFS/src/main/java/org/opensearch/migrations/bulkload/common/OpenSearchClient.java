@@ -355,10 +355,7 @@ public class OpenSearchClient {
         final var docsMap = docs.stream().collect(Collectors.toMap(d -> d.getDocId(), d -> d));
         return Mono.defer(() -> {
             final String targetPath = indexName + "/_bulk";
-            log.atTrace()
-                .setMessage("Creating bulk body with document ids {}")
-                .addArgument(() -> docsMap.keySet())
-                .log();
+            log.atTrace().setMessage("Creating bulk body with document ids {}").addArgument(docsMap::keySet).log();
             var body = DocumentReindexer.BulkDocSection.convertToBulkRequestBody(docsMap.values());
             var additionalHeaders = new HashMap<String, List<String>>();
             // Reduce network bandwidth by attempting request and response compression
@@ -395,11 +392,8 @@ public class OpenSearchClient {
                     error
                 );
             } else {
-                log.atError()
-                    .setMessage("Unexpected empty document map for bulk request on index {}")
-                    .addArgument(indexName)
-                    .setCause(error)
-                    .log();
+                log.atError().setCause(error).setMessage("Unexpected empty document map for bulk request on index {}")
+                    .addArgument(indexName).log();
             }
         });
     }

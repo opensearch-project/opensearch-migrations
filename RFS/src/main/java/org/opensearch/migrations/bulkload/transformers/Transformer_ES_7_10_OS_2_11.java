@@ -86,7 +86,7 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
 
     @Override
     public IndexMetadata transformIndexMetadata(IndexMetadata indexData) {
-        log.atDebug().setMessage("Original Object: {}").addArgument(indexData.getRawJson()).log();
+        log.atDebug().setMessage("Original Object: {}").addArgument(indexData::getRawJson).log();
         var copy = indexData.deepCopy();
         var newRoot = copy.getRawJson();
 

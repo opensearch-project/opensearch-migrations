@@ -55,9 +55,15 @@ public class DocumentReindexer {
 
     Mono<Void> sendBulkRequest(UUID batchId, List<BulkDocSection> docsBatch, String indexName, IDocumentReindexContext context, Scheduler scheduler) {
         return client.sendBulkRequest(indexName, docsBatch, context.createBulkRequest()) // Send the request
-            .doFirst(() -> log.atInfo().log("Batch Id:{}, {} documents in current bulk request.", batchId, docsBatch.size()))
-            .doOnSuccess(unused -> log.atDebug().log("Batch Id:{}, succeeded", batchId))
-            .doOnError(error -> log.atError().log("Batch Id:{}, failed {}", batchId, error.getMessage()))
+            .doFirst(() -> log.atInfo().setMessage("Batch Id:{}, {} documents in current bulk request.")
+                .addArgument(batchId)
+                .addArgument(docsBatch::size)
+                .log())
+            .doOnSuccess(unused -> log.atDebug().setMessage("Batch Id:{}, succeeded").addArgument(batchId).log())
+            .doOnError(error -> log.atError().setMessage("Batch Id:{}, failed {}")
+                .addArgument(batchId)
+                .addArgument(error::getMessage)
+                .log())
             // Prevent the error from stopping the entire stream, retries occurring within sendBulkRequest
             .onErrorResume(e -> Mono.empty())
             .then() // Discard the response object

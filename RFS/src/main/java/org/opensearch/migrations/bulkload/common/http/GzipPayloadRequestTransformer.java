@@ -93,10 +93,8 @@ public class GzipPayloadRequestTransformer implements RequestTransformer {
             }
         }
         if (inputBuffer.remaining() > 0) {
-            log.atDebug()
-                .setMessage("Gzip compression ratio: {}")
-                .addArgument(() -> String.format("%.2f%%", (double) baos.size() / inputBuffer.remaining() * 100))
-                .log();
+            log.atDebug().setMessage("Gzip compression ratio: {}")
+                .addArgument(() -> String.format("%.2f%%", (double) baos.size() / inputBuffer.remaining() * 100)).log();
         }
         return ByteBuffer.wrap(baos.toByteArray());
     }

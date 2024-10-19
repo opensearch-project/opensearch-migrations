@@ -95,13 +95,9 @@ public class RootOtelContext implements IRootOtelContext {
             .map(endpoint -> initializeOpenTelemetryForCollector(endpoint, serviceName, instanceName))
             .orElseGet(() -> {
                 if (serviceName != null) {
-                    log.atWarn()
-                        .setMessage(
-                            "Collector endpoint=null, so serviceName parameter '"
-                                + serviceName
-                                + "' is being ignored since a no-op OpenTelemetry object is being created"
-                        )
-                        .log();
+                    log.atWarn().setMessage("Collector endpoint=null, so serviceName parameter '{}'" +
+                            " is being ignored since a no-op OpenTelemetry object is being created")
+                        .addArgument(serviceName).log();
                 }
                 return initializeNoopOpenTelemetry();
             });

@@ -192,7 +192,7 @@ public class S3Repo implements SourceRepo {
                 + shardMetadata.getShardId()
                 + "/";
 
-            log.atInfo().setMessage("Downloading blob files from S3: s3://%s/%s to %s")
+            log.atInfo().setMessage("Downloading blob files from S3: s3://{}/{} to {}")
                 .addArgument(s3RepoUri.bucketName)
                 .addArgument(blobFilesS3Prefix)
                 .addArgument(shardDirPath).log();
@@ -207,7 +207,7 @@ public class S3Repo implements SourceRepo {
             // Wait for the transfer to complete
             CompletedDirectoryDownload completedDirectoryDownload = directoryDownload.completionFuture().join();
 
-            log.atInfo().setMessage(()->"Blob file download(s) complete").log();
+            log.atInfo().setMessage("Blob file download(s) complete").log();
 
             // Print out any failed downloads
             completedDirectoryDownload.failedTransfers().forEach(x->log.error("{}", x));

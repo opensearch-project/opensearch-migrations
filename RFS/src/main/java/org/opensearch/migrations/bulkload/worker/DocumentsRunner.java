@@ -101,13 +101,9 @@ public class DocumentsRunner {
         reindexer.reindex(shardMetadata.getIndexName(), documents, context)
             .doOnError(error -> log.error("Error during reindexing: " + error))
             .doOnSuccess(
-                done -> log.atInfo()
-                    .setMessage(
-                        () -> "Reindexing completed for Index "
-                            + shardMetadata.getIndexName()
-                            + ", Shard "
-                            + shardMetadata.getShardId()
-                    )
+                done -> log.atInfo().setMessage("{}")
+                    .addArgument(() -> "Reindexing completed for Index " + shardMetadata.getIndexName() +
+                        ", Shard " + shardMetadata.getShardId())
                     .log()
             )
             // Wait for the reindexing to complete before proceeding

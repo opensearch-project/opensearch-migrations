@@ -236,11 +236,8 @@ public class KafkaTrafficCaptureSource implements ISimpleTrafficCaptureSource {
                 try {
                     TrafficStream ts = TrafficStream.parseFrom(kafkaRecord.value());
                     var trafficStreamsSoFar = trafficStreamsRead.incrementAndGet();
-                    log.atTrace()
-                        .setMessage("{}")
-                        .addArgument(
-                            () -> "Parsed traffic stream #" + trafficStreamsSoFar + ": " + offsetData + " " + ts
-                        )
+                    log.atTrace().setMessage("{}").addArgument(() ->
+                            "Parsed traffic stream #" + trafficStreamsSoFar + ": " + offsetData + " " + ts)
                         .log();
                     var key = new TrafficStreamKeyWithKafkaRecordId(tsk -> {
                         var channelKeyCtx = channelContextManager.retainOrCreateContext(tsk);

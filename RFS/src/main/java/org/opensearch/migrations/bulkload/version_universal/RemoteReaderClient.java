@@ -43,10 +43,7 @@ public class RemoteReaderClient extends OpenSearchClient {
 
         assert responses != null;
         var globalMetadata = globalMetadataFromParts(responses);
-        log.atDebug()
-            .setMessage("Combined global metadata:\n{}")
-            .addArgument(globalMetadata::toString)
-            .log();
+        log.atDebug().setMessage("Combined global metadata:\n{}").addArgument(globalMetadata).log();
         return globalMetadata;
     }
     
@@ -81,10 +78,7 @@ public class RemoteReaderClient extends OpenSearchClient {
             .block();
 
         var indexData = combineIndexDetails(indexDetailsList);
-        log.atDebug()
-            .setMessage("Index data combined:\n{}")
-            .addArgument(indexData::toString)
-            .log();
+        log.atDebug().setMessage("Index data combined:\n{}").addArgument(indexData).log();
         return indexData;
     }
 
