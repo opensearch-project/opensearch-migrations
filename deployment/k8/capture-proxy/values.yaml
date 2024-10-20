@@ -29,8 +29,8 @@ otelCollectorSidecar:
   name: otel-collector
   enabled: true
   restartPolicy: "Always"
-  #command: "--config=/etc/otel-config-debug-only.yaml"
-  #command: "--config=/etc/otel-config-aws.yaml"
+  #args: "--config=/etc/otel-config-debug-only.yaml"
+  #args: ["--config=/etc/otel-config-prometheus-jaeger.yaml"]
   image:
     repository: migrations/otel_collector
     pullPolicy: IfNotPresent
@@ -48,3 +48,9 @@ otelCollectorSidecar:
     - name: otlp-receiver
       containerPort: 4317
       protocol: TCP
+#    - name: prom-metrics
+#      containerPort: 8888
+#      protocol: TCP
+#    - name: prom-exporter
+#      containerPort: 8889
+#      protocol: TCP

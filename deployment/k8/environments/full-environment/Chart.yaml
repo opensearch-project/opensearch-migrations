@@ -23,3 +23,18 @@ dependencies:
   - name: reindex-from-snapshot
     version: "0.1.0"
     repository: "file://../../reindex-from-snapshot"
+  - name: shared-logs-vol
+    version: "0.1.0"
+    repository: "file://../../shared/shared-logs-vol"
+  - name: snapshot-vol
+    version: "0.1.0"
+    repository: "file://../../shared/snapshot-vol"
+#  - name: jaeger
+#    version: "0.1.0"
+#    repository: "file://../../jaeger"
+#  - name: prometheus
+#    version: "0.1.0"
+#    repository: "file://../../prometheus"
+#  - name: grafana
+#    version: "0.1.0"
+#    repository: "file://../../grafana"

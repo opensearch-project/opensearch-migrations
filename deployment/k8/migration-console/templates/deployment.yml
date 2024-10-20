@@ -31,25 +31,7 @@ spec:
               mountPath: {{ .Values.servicesYamlVolume.mountPath }}
             - name: {{ .Values.snapshotVolume.volumeName }}
               mountPath: {{ .Values.snapshotVolume.mountPath }}
-      {{- if .Values.otelCollectorSidecar.enabled }}
-      initContainers:
-        - name: {{ .Values.otelCollectorSidecar.name}}
-          image: "{{ .Values.otelCollectorSidecar.image.repository }}:{{ .Values.otelCollectorSidecar.image.tag }}"
-          imagePullPolicy: {{ .Values.otelCollectorSidecar.image.pullPolicy }}
-          ports:
-            {{- range .Values.otelCollectorSidecar.ports }}
-            - name: {{ .name }}
-              containerPort: {{ .containerPort }}
-              protocol: {{ .protocol | default "TCP" }}
-            {{- end }}
-          restartPolicy: {{ .Values.otelCollectorSidecar.restartPolicy }}
-          {{- if .Values.otelCollectorSidecar.command }}
-          command:
-            - "/bin/sh"
-            - "-c"
-            - "{{ .Values.otelCollectorSidecar.command }}"
-          {{- end }}
-      {{- end }}
+        {{- include "migrations-lib.otel-sidecar" . | indent 8 }}
       volumes:
         - name: {{ .Values.sharedLogVolume.volumeName }}
           persistentVolumeClaim:

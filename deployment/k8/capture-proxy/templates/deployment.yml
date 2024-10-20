@@ -40,10 +40,7 @@ spec:
               protocol: {{ .protocol | default "TCP" }}
             {{- end }}
           restartPolicy: {{ .Values.otelCollectorSidecar.restartPolicy }}
-          {{- if .Values.otelCollectorSidecar.command }}
-          command:
-            - "/bin/sh"
-            - "-c"
-            - "{{ .Values.otelCollectorSidecar.command }}"
+          {{- if .Values.otelCollectorSidecar.args }}
+          args: {{ .Values.otelCollectorSidecar.args }}
           {{- end }}
       {{- end }}

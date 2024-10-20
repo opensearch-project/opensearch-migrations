@@ -20,5 +20,11 @@ dependencies:
 - name: reindex-from-snapshot
   repository: file://../../reindex-from-snapshot
   version: 0.1.0
-digest: sha256:f150a39fb9de82b31d6dcf1c56c6469e206dd24412de5a12d8183c365f7c2738
-generated: "2024-10-16T17:08:42.54601-05:00"
+- name: shared-logs-vol
+  repository: file://../../shared/shared-logs-vol
+  version: 0.1.0
+- name: snapshot-vol
+  repository: file://../../shared/snapshot-vol
+  version: 0.1.0
+digest: sha256:3e79f502ad2dd012fbd9b3428374a310f2106026e0ab7feb7fd1ab1e6fd0e3f5
+generated: "2024-10-18T22:56:42.045426-05:00"

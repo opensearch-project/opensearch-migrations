@@ -1,0 +1,15 @@
+{{- define "migrations-lib.otel-sidecar" -}}
+- name: {{ .Values.otelCollector.name}}
+  image: "{{ .Values.otelCollector.image.repository }}:{{ .Values.otelCollector.image.tag }}"
+  imagePullPolicy: {{ .Values.otelCollector.image.pullPolicy }}
+  ports:
+    {{- range .Values.otelCollector.ports }}
+    - name: {{ .name }}
+      containerPort: {{ .containerPort }}
+      protocol: {{ .protocol | default "TCP" }}
+    {{- end }}
+  restartPolicy: {{ .Values.otelCollector.restartPolicy }}
+  {{- if .Values.otelCollector.args }}
+  args: {{ .Values.otelCollector.args }}
+  {{- end }}
+{{- end }}
