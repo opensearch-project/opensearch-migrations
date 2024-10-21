@@ -6,10 +6,12 @@ import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.bulkload.SupportedClusters;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
@@ -44,54 +46,29 @@ class EndToEndTest {
     private File localDirectory;
 
     private static Stream<Arguments> scenarios() {
-        return Stream.of(
-            Arguments.of(TransferMedium.Http, MetadataCommands.EVALUATE)
-            // Arguments.of(TransferMedium.SnapshotImage, MetadataCommands.MIGRATE),
-            // Arguments.of(TransferMedium.Http, MetadataCommands.MIGRATE)
-        );
-    }
+        var scenarios = Stream.<Arguments>builder();
 
-    @ParameterizedTest(name = "Command {1}, Medium of transfer {0}")
-    @MethodSource(value = "scenarios")
-    void metadataMigrateFrom_ES_v6_8(TransferMedium medium, MetadataCommands command) throws Exception {
-        try (
-            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23);
-            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
-        ) {
-            migrateFrom_ES(sourceCluster, targetCluster, medium, command);
+        for (var sourceCluster : SupportedClusters.sources()) {
+            for (var targetCluster : SupportedClusters.targets()) {
+                for (var command : MetadataCommands.values()) {
+                    scenarios.add(Arguments.of(sourceCluster, targetCluster, TransferMedium.Http, command));
+                }
+                // Only test snapshot for migrate case
+                scenarios.add(Arguments.of(sourceCluster, targetCluster, TransferMedium.SnapshotImage, MetadataCommands.MIGRATE));
+            }
         }
+
+        return scenarios.build();
     }
 
-    @ParameterizedTest(name = "Command {1}, Medium of transfer {0}")
+    @ParameterizedTest(name = "From version {0} to version {1}, Command {2}, Medium of transfer {3}")
     @MethodSource(value = "scenarios")
-    void metadataMigrateFrom_ES_v7_17(TransferMedium medium, MetadataCommands command) throws Exception {
+    void metadataCommand(ContainerVersion sourceVersion, ContainerVersion targetVersion, TransferMedium medium, MetadataCommands command) throws Exception {
         try (
-            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_17);
-            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
+            final var sourceCluster = new SearchClusterContainer(sourceVersion);
+            final var targetCluster = new SearchClusterContainer(targetVersion)
         ) {
-            migrateFrom_ES(sourceCluster, targetCluster, medium, command);
-        }
-    }
-
-    @ParameterizedTest(name = "Command {1}, Medium of transfer {0}")
-    @MethodSource(value = "scenarios")
-    void metadataMigrateFrom_ES_v7_10(TransferMedium medium, MetadataCommands command) throws Exception {
-        try (
-            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
-            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
-        ) {
-            migrateFrom_ES(sourceCluster, targetCluster, medium, command);
-        }
-    }
-
-    @ParameterizedTest(name = "Command {1}, Medium of transfer {0}")
-    @MethodSource(value = "scenarios")
-    void metadataMigrateFrom_OS_v1_3(TransferMedium medium, MetadataCommands command) throws Exception {
-        try (
-            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.OS_V1_3_16);
-            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
-        ) {
-            migrateFrom_ES(sourceCluster, targetCluster, medium, command);
+            metadataCommandOnClusters(sourceCluster, targetCluster, medium, command);
         }
     }
 
@@ -101,7 +78,7 @@ class EndToEndTest {
     }
 
     @SneakyThrows
-    private void migrateFrom_ES(
+    private void metadataCommandOnClusters(
         final SearchClusterContainer sourceCluster,
         final SearchClusterContainer targetCluster,
         final TransferMedium medium,

@@ -8,11 +8,9 @@ from cerberus import Validator
 import requests
 import requests.auth
 from requests.auth import HTTPBasicAuth
-from requests_auth_aws_sigv4 import AWSSigV4
-
 from console_link.models.client_options import ClientOptions
 from console_link.models.schema_tools import contains_one_of
-from console_link.models.utils import create_boto3_client, append_user_agent_header_for_requests
+from console_link.models.utils import SigV4AuthPlugin, create_boto3_client, append_user_agent_header_for_requests
 
 requests.packages.urllib3.disable_warnings()  # ignore: type
 
@@ -136,8 +134,8 @@ class Cluster:
                 password
             )
         elif self.auth_type == AuthMethod.SIGV4:
-            sigv4_details = self._get_sigv4_details()
-            return AWSSigV4(sigv4_details[0], region=sigv4_details[1])
+            service_name, region_name = self._get_sigv4_details(force_region=True)
+            return SigV4AuthPlugin(service_name, region_name)
         elif self.auth_type is AuthMethod.NO_AUTH:
             return None
         raise NotImplementedError(f"Auth type {self.auth_type} not implemented")

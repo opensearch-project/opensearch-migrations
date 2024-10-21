@@ -7,7 +7,6 @@ import { KafkaStack } from "../lib";
 import { describe, beforeEach, afterEach, test, expect, jest } from '@jest/globals';
 import { ContainerImage } from "aws-cdk-lib/aws-ecs";
 
-jest.mock('aws-cdk-lib/aws-ecr-assets');
 describe('Stack Composer Tests', () => {
   beforeEach(() => {
     jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => ContainerImage.fromRegistry("ServiceImage"));
@@ -17,7 +16,6 @@ describe('Stack Composer Tests', () => {
     jest.clearAllMocks();
     jest.resetModules();
     jest.restoreAllMocks();
-    jest.resetAllMocks();
   });
 
   test('Test empty string provided for a parameter which has a default value, uses the default value', () => {
@@ -43,7 +41,7 @@ describe('Stack Composer Tests', () => {
     expect(createStackFunc).toThrow()
   })
 
-  test('Test ES 7.10 engine version format is parsed', () => {
+  test('Test ES_7.10 engine version format is parsed', () => {
     const contextOptions = {
       engineVersion: "ES_7.10"
     }
@@ -219,7 +217,8 @@ describe('Stack Composer Tests', () => {
       migrationConsoleServiceEnabled: true,
       sourceCluster: {
         "endpoint": "https://test-cluster",
-        "auth": {"type": "none"}
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
       }
     }
 

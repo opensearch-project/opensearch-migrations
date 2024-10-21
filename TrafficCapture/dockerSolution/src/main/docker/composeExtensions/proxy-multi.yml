@@ -2,7 +2,7 @@ version: '3.7'
 services:
 
   capture-proxy-es1:
-     image: 'migrations/capture_proxy:latest'
+     image: 'migrations/capture_proxy_es:latest'
      networks:
       - migrations
      ports:
@@ -22,7 +22,7 @@ services:
       - kafka
 
   capture-proxy-es2:
-    image: 'migrations/capture_proxy:latest'
+    image: 'migrations/capture_proxy_es:latest'
     networks:
       - migrations
     ports:

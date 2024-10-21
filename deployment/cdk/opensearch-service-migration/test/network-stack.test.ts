@@ -7,7 +7,6 @@ import { describe, beforeEach, afterEach, test, expect, jest } from '@jest/globa
 import { GatewayVpcEndpointAwsService, InterfaceVpcEndpointAwsService } from "aws-cdk-lib/aws-ec2";
 import { Stack } from "aws-cdk-lib";
 
-jest.mock('aws-cdk-lib/aws-ecr-assets');
 
 function getExpectedEndpoints(networkStack: NetworkStack): (InterfaceVpcEndpointAwsService | GatewayVpcEndpointAwsService)[] {
     return [
@@ -41,7 +40,6 @@ describe('NetworkStack Tests', () => {
         jest.clearAllMocks();
         jest.resetModules();
         jest.restoreAllMocks();
-        jest.resetAllMocks();
     });
 
     test('Test vpcEnabled setting that is disabled does not create stack', () => {
@@ -63,7 +61,8 @@ describe('NetworkStack Tests', () => {
             vpcAZCount: 2,
             sourceCluster: {
                 "endpoint": "https://test-cluster",
-                "auth": {"type": "none"}
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
             }
         }
 
@@ -89,7 +88,8 @@ describe('NetworkStack Tests', () => {
             vpcAZCount: 2,
             sourceCluster: {
                 "endpoint": "https://test-cluster",
-                "auth": {"type": "none"}
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
             }
         }
 
@@ -108,7 +108,8 @@ describe('NetworkStack Tests', () => {
             vpcAZCount: 2,
             sourceCluster: {
                 "endpoint": "https://test-cluster",
-                "auth": {"type": "none"}
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
             }
         }
 

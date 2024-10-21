@@ -31,7 +31,8 @@ export interface ReindexFromSnapshotProps extends StackPropsExt {
     readonly otelCollectorEnabled: boolean,
     readonly clusterAuthDetails: ClusterAuth
     readonly sourceClusterVersion?: string,
-    readonly maxShardSizeGiB?: number
+    readonly maxShardSizeGiB?: number,
+    readonly reindexFromSnapshotWorkerSize: "default" | "maximum",
 
 }
 
@@ -80,14 +81,18 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         const extraArgsDict = parseArgsToDict(props.extraArgs)
         const storagePath = "/storage"
         const planningSize = props.maxShardSizeGiB ?? 80;
-        const maxShardSizeBytes = `${planningSize * 1024 * 1024 * 1024}`
+        const maxShardSizeBytes = planningSize * 1024 * 1024 * 1024 * 1.10 // Add 10% buffer
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-local-dir", `"${storagePath}/s3_files"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-repo-uri", `"${s3Uri}"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--s3-region", this.region)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--snapshot-name", "rfs-snapshot")
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--lucene-dir", `"${storagePath}/lucene"`)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-host", osClusterEndpoint)
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-shard-size-bytes", maxShardSizeBytes)
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-shard-size-bytes", `${maxShardSizeBytes}`)
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--max-connections", props.reindexFromSnapshotWorkerSize === "maximum" ? "100" : "10")
+        if (props.reindexFromSnapshotWorkerSize === "maximum") {
+            command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-compression")
+        }
         if (props.clusterAuthDetails.sigv4) {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-aws-service-signing-name", props.clusterAuthDetails.sigv4.serviceSigningName)
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--target-aws-region", props.clusterAuthDetails.sigv4.region)
@@ -130,12 +135,12 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
 
         // Calculate the volume size based on the max shard size
         // Have space for the snapshot and an unpacked copy, with buffer
-        const volumeSize = Math.max(
-            Math.ceil(planningSize * 2 * 1.15),
+        const volumeSizeGB = Math.max(
+            Math.ceil(maxShardSizeBytes/(1000**3) * 2 * 1.15),
             1
         )
 
-        if (volumeSize > 16000) {
+        if (volumeSizeGB > 16000) {
             // 16 TiB is the maximum volume size for GP3
             throw new Error(`"Your max shard size of ${props.maxShardSizeGiB} GiB is too large to migrate."`)
         }
@@ -144,9 +149,10 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         const snapshotVolume = new ServiceManagedVolume(this, 'SnapshotVolume', {
             name: 'snapshot-volume',
             managedEBSVolume: {
-                size: Size.gibibytes(volumeSize),
+                size: Size.gibibytes(volumeSizeGB),
                 volumeType: EbsDeviceVolumeType.GP3,
                 fileSystemType: FileSystemType.XFS,
+                throughput: props.reindexFromSnapshotWorkerSize === "maximum" ? 450 : 125,
                 tagSpecifications: [{
                     tags: {
                         Name: `rfs-snapshot-volume-${props.stage}`,
@@ -167,15 +173,15 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         this.createService({
             serviceName: 'reindex-from-snapshot',
             taskInstanceCount: 0,
-            dockerDirectoryPath: join(__dirname, "../../../../../", "DocumentsFromSnapshotMigration/docker"),
+            dockerImageName: "migrations/reindex_from_snapshot:latest",
             dockerImageCommand: ['/bin/sh', '-c', "/rfs-app/entrypoint.sh"],
             securityGroups: securityGroups,
             volumes: volumes,
             mountPoints: mountPoints,
             taskRolePolicies: servicePolicies,
             cpuArchitecture: props.fargateCpuArch,
-            taskCpuUnits: 2048,
-            taskMemoryLimitMiB: 4096,
+            taskCpuUnits: props.reindexFromSnapshotWorkerSize === "maximum" ? 16 * 1024 : 2 * 1024,
+            taskMemoryLimitMiB: props.reindexFromSnapshotWorkerSize === "maximum" ? 32 * 1024 : 4 * 1024,
             environment: {
                 "RFS_COMMAND": command,
                 "RFS_TARGET_USER": targetUser,

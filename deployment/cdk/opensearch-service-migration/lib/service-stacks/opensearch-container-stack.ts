@@ -83,7 +83,7 @@ export class OpenSearchContainerStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: dnsNameForContainer,
-            dockerImageRegistryName: "opensearchproject/opensearch:2",
+            dockerImageName: "opensearchproject/opensearch:2",
             securityGroups: securityGroups,
             environment: {
                 "cluster.name": "os-docker-cluster",

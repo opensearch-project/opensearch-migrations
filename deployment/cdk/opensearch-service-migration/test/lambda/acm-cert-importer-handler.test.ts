@@ -44,7 +44,9 @@ describe('ACM Certificate Importer Handler', () => {
   });
 
   afterEach(() => {
-    jest.resetAllMocks();
+    jest.clearAllMocks();
+    jest.resetModules();
+    jest.restoreAllMocks();
   });
 
   test('Create: should generate and import a self-signed certificate', async () => {
