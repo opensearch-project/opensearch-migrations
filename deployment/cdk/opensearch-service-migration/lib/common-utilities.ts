@@ -470,8 +470,8 @@ export function makeLocalAssetContainerImage(scope: Construct, imageName: string
             if (!imageId) {
                 throw new Error(`No RepoDigests found for image: ${imageName}`);
             }
-            imageHash = imageId.split(':')[1];
-            CdkLogger.info('For image: ' + imageName + ' found hash: ' + imageHash);
+            imageHash = imageId.replace(/[^a-zA-Z0-9-_]/g, '_');
+            CdkLogger.info('For image: ' + imageName + ' found imageHash: ' + imageHash);
         } catch (error) {
             CdkLogger.error('Error fetching the actual hash for the image: ' + imageName + ' Error: ' + error);
             throw new Error('Error fetching the image hash for the image: ' + imageName + ' Error: ' + error);

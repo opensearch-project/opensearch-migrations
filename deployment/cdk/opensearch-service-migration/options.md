@@ -58,6 +58,7 @@ In all other cases, the required components of each cluster object are:
 | sourceClusterEndpoint               | string  | `"https://source-cluster.elb.us-east-1.endpoint.com"`                | The endpoint for the source cluster from which RFS will take a snapshot                                                                                                    |
 | managedServiceSourceSnapshotEnabled | boolean | true                                                                 | Create the necessary roles and trust relationships to take a snapshot of a managed service source cluster. This is only compatible with SigV4 auth.                        |
 | reindexFromSnapshotMaxShardSizeGiB                     | integer | 80                                                                   | OPTIONAL: The size, in whole GiB, of the largest shard you want to migrate across all indices; used to ensure we have enough disk space reserved to perform the migration.  Default: 80 GiB                                   |
+| reindexFromSnapshotWorkerSize                       | enum | default | maximum                                                                   | OPTIONAL: default provisions a 2vCPU worker balancing speed with cost efficiency designed for most migrations with horizontal scaling, maximum provisions a 16vCPU worker for high throughput migrations when parallelization is limited (low source shard count).  Default: default                                   |
 
 ### VPC Options
 

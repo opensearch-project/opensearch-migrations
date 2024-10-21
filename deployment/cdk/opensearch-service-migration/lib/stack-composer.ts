@@ -210,6 +210,7 @@ export class StackComposer {
         const reindexFromSnapshotServiceEnabled = this.getContextForType('reindexFromSnapshotServiceEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotExtraArgs = this.getContextForType('reindexFromSnapshotExtraArgs', 'string', defaultValues, contextJSON)
         const reindexFromSnapshotMaxShardSizeGiB = this.getContextForType('reindexFromSnapshotMaxShardSizeGiB', 'number', defaultValues, contextJSON)
+        const reindexFromSnapshotWorkerSize = this.getContextForType('reindexFromSnapshotWorkerSize', 'string', defaultValues, contextJSON)
         const albAcmCertArn = this.getContextForType('albAcmCertArn', 'string', defaultValues, contextJSON);
         const managedServiceSourceSnapshotEnabled = this.getContextForType('managedServiceSourceSnapshotEnabled', 'boolean', defaultValues, contextJSON)
 
@@ -281,6 +282,10 @@ export class StackComposer {
         const targetClusterAuth = targetCluster?.auth
         const targetVersion = targetCluster?.version ? this.getEngineVersion(targetCluster?.version) : null
         const engineVersionValue = engineVersion ? this.getEngineVersion(engineVersion) : this.getEngineVersion('OS_2.15')
+
+        if (reindexFromSnapshotWorkerSize !== "default" && reindexFromSnapshotWorkerSize !== "maximum") {
+            throw new Error("Invalid value for reindexFromSnapshotWorkerSize, must be either 'default' or 'maximum'")
+        }
 
         const requiredFields: { [key: string]: any; } = {"stage":stage}
         for (let key in requiredFields) {
@@ -490,7 +495,8 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 env: props.env,
-                maxShardSizeGiB: reindexFromSnapshotMaxShardSizeGiB
+                maxShardSizeGiB: reindexFromSnapshotMaxShardSizeGiB,
+                reindexFromSnapshotWorkerSize
             })
             this.addDependentStacks(reindexFromSnapshotStack, [migrationStack, openSearchStack, osContainerStack])
             this.stacks.push(reindexFromSnapshotStack)
