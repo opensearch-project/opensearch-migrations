@@ -19,7 +19,7 @@ dependencies {
     implementation project(':TrafficCapture:captureProtobufs')
     implementation project(':coreUtilities')
     implementation project(':awsUtilities')
-
+    implementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
     implementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     runtimeOnly project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
     runtimeOnly project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
@@ -60,6 +60,7 @@ dependencies {
     testImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
     testImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     testImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
+    testImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformer')
 
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
     testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
