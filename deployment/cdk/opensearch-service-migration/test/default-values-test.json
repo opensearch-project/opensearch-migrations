@@ -1,5 +1,6 @@
 {
   "engineVersion": "OS_1.0",
   "domainName": "sample-cdk-unit-test-domain",
-  "defaultFargateCpuArch": "X86_64"
+  "defaultFargateCpuArch": "X86_64",
+  "reindexFromSnapshotWorkerSize": "default"
 }
