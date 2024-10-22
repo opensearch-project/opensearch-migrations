@@ -159,7 +159,7 @@ def call(Map config = [:]) {
                                     def command = "pipenv run pytest --log-file=${testDir}/reports/${uniqueId}/pytest.log " +
                                             "--junitxml=${test_result_file} ${integTestCommand} " +
                                             "--unique_id ${uniqueId} " +
-                                            "--stage ${stage}" +
+                                            "--stage ${stage} " +
                                             "-s"
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                         withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
