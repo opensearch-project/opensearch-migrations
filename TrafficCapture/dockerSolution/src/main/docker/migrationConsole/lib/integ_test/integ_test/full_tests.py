@@ -1,4 +1,5 @@
 import logging
+import os
 import pytest
 import unittest
 from http import HTTPStatus
@@ -25,6 +26,11 @@ def initialize(request):
     pytest.unique_id = unique_id
     source_cluster = pytest.console_env.source_cluster
     target_cluster = pytest.console_env.target_cluster
+    # If in AWS, modify source and target objects here to route requests through the created ALB to verify its operation
+    if 'AWS_EXECUTION_ENV' in os.environ:
+        logger.info("Detected an AWS environment")
+        stage = request.config.getoption("--stage")
+        source_cluster.endpoint = f"https://alb.migration.{stage}.local:9201"
     backfill: Backfill = pytest.console_env.backfill
     assert backfill is not None
     metadata: Metadata = pytest.console_env.metadata
@@ -90,7 +96,7 @@ class E2ETests(unittest.TestCase):
         snapshot.create(wait=True)
         metadata.migrate()
         backfill.start()
-        backfill.scale(units=10)
+        backfill.scale(units=2)
         # This document was created after snapshot and should not be included in Backfill but expected in Replay
         create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id_base + "_2",
                         expected_status_code=HTTPStatus.CREATED, test_case=self)
