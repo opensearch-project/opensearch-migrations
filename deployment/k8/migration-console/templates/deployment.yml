@@ -13,6 +13,8 @@ spec:
     metadata:
       labels:
         app: {{ .Chart.Name }}
+      annotations:
+        sidecar.opentelemetry.io/inject: "true" # CORRECT
     spec:
       containers:
         - name: {{ .Chart.Name }}
@@ -31,7 +33,6 @@ spec:
               mountPath: {{ .Values.servicesYamlVolume.mountPath }}
             - name: {{ .Values.snapshotVolume.volumeName }}
               mountPath: {{ .Values.snapshotVolume.mountPath }}
-        {{- include "migrations-lib.otel-sidecar" . | indent 8 }}
       volumes:
         - name: {{ .Values.sharedLogVolume.volumeName }}
           persistentVolumeClaim:
