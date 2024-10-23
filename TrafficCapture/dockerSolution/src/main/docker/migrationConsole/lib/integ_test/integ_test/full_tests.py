@@ -29,7 +29,14 @@ def initialize(request):
     if 'AWS_EXECUTION_ENV' in os.environ:
         logger.info("Detected an AWS environment")
         stage = request.config.getoption("--stage")
-        source_cluster.endpoint = f"https://alb.migration.{stage}.local:9200"
+        logger.info("Checking original source and target endpoints can be reached, before using ALB endpoints for test")
+        direct_source_con_result: ConnectionResult = connection_check(source_cluster)
+        assert direct_source_con_result.connection_established is True
+        direct_target_con_result: ConnectionResult = connection_check(target_cluster)
+        assert direct_target_con_result.connection_established is True
+        source_cluster.endpoint = f"https://alb.migration.{stage}.local:9201"
+        target_cluster.endpoint = f"https://alb.migration.{stage}.local:9202"
+        target_cluster.allow_insecure = True
     backfill: Backfill = pytest.console_env.backfill
     assert backfill is not None
     metadata: Metadata = pytest.console_env.metadata
