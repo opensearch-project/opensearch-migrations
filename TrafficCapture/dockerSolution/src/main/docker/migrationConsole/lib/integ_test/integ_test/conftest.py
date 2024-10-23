@@ -21,4 +21,3 @@ def pytest_addoption(parser):
 @pytest.fixture
 def unique_id(pytestconfig):
     return pytestconfig.getoption("unique_id")
-
