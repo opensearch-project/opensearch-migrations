@@ -3,7 +3,7 @@ import os
 import pytest
 import unittest
 from http import HTTPStatus
-from console_link.middleware.clusters import run_test_benchmarks, connection_check, clear_indices, ConnectionResult
+from console_link.middleware.clusters import connection_check, clear_indices, ConnectionResult
 from console_link.models.cluster import Cluster
 from console_link.models.backfill_base import Backfill
 from console_link.models.replayer_base import Replayer
@@ -13,8 +13,7 @@ from console_link.models.snapshot import Snapshot
 from console_link.middleware.kafka import delete_topic
 from console_link.models.metadata import Metadata
 from console_link.cli import Context
-from common_operations import (create_index, create_document, check_doc_counts_match, wait_for_running_replayer,
-                               EXPECTED_BENCHMARK_DOCS)
+from common_operations import (create_index, create_document, check_doc_counts_match, wait_for_running_replayer)
 logger = logging.getLogger(__name__)
 
 
@@ -30,7 +29,7 @@ def initialize(request):
     if 'AWS_EXECUTION_ENV' in os.environ:
         logger.info("Detected an AWS environment")
         stage = request.config.getoption("--stage")
-        source_cluster.endpoint = f"https://alb.migration.{stage}.local:9201"
+        source_cluster.endpoint = f"https://alb.migration.{stage}.local:9200"
     backfill: Backfill = pytest.console_env.backfill
     assert backfill is not None
     metadata: Metadata = pytest.console_env.metadata
@@ -80,7 +79,6 @@ class E2ETests(unittest.TestCase):
         replayer: Replayer = pytest.console_env.replay
 
         # Load initial data
-        run_test_benchmarks(source_cluster)
         index_name = f"test_e2e_0001_{pytest.unique_id}"
         doc_id_base = "e2e_0001_doc"
         create_index(cluster=source_cluster, index_name=index_name, test_case=self)
@@ -102,15 +100,15 @@ class E2ETests(unittest.TestCase):
                         expected_status_code=HTTPStatus.CREATED, test_case=self)
 
         ignore_list = [".", "searchguard", "sg7", "security-auditlog", "reindexed-logs"]
-        expected_docs = dict(EXPECTED_BENCHMARK_DOCS)
+        expected_docs = {}
         # Source should have both documents
-        expected_docs[index_name] = {"docs.count": "2"}
+        expected_docs[index_name] = {"count": 2}
         check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_docs,
                                index_prefix_ignore_list=ignore_list, test_case=self)
         # Target should have one document from snapshot
-        expected_docs[index_name] = {"docs.count": "1"}
+        expected_docs[index_name] = {"count": 1}
         check_doc_counts_match(cluster=target_cluster, expected_index_details=expected_docs,
-                               index_prefix_ignore_list=ignore_list, max_attempts=40, delay=30.0, test_case=self)
+                               index_prefix_ignore_list=ignore_list, max_attempts=20, delay=30.0, test_case=self)
 
         backfill.stop()
 
@@ -120,7 +118,7 @@ class E2ETests(unittest.TestCase):
         replayer.start()
         wait_for_running_replayer(replayer=replayer)
 
-        expected_docs[index_name] = {"docs.count": "3"}
+        expected_docs[index_name] = {"count": 3}
         check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_docs,
                                index_prefix_ignore_list=ignore_list, test_case=self)
 

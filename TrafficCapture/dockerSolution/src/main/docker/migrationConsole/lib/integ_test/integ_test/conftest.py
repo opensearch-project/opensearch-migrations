@@ -13,6 +13,7 @@ def pytest_configure(config):
 
 def pytest_addoption(parser):
     parser.addoption("--unique_id", action="store", default=uuid.uuid4().hex)
+    parser.addoption("--stage", action="store", default="dev")
     parser.addoption("--config_file_path", action="store", default="/etc/migration_services.yaml",
                      help="Path to config file for console library")
 
@@ -20,8 +21,4 @@ def pytest_addoption(parser):
 @pytest.fixture
 def unique_id(pytestconfig):
     return pytestconfig.getoption("unique_id")
-
-@pytest.fixture
-def stage(pytestconfig):
-    return pytestconfig.getoption("stage")
 
