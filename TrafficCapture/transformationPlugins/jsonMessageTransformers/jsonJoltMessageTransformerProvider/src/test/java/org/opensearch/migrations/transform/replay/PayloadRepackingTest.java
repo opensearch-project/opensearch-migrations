@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.transform;
+package org.opensearch.migrations.transform.replay;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;

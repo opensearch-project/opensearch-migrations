@@ -9,7 +9,7 @@ import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.opensearch.migrations.transform.JsonCompositePrecondition.CompositeOperation;
+import org.opensearch.migrations.transform.JsonCompositePredicate.CompositeOperation;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -18,27 +18,27 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
-public class PreconditionLoader {
+public class PredicateLoader {
     public static final String WRONG_JSON_STRUCTURE_MESSAGE =
         "Must specify the top-level configuration list with a sequence of "
             + "maps that have only one key each, where the key is the name of the transformer to be configured.";
     public static final Pattern CLASS_NAME_PATTERN = Pattern.compile("^[^{}]*$");
-    private final List<IJsonPreconditionProvider> providers;
+    private final List<IJsonPredicateProvider> providers;
     ObjectMapper objMapper = new ObjectMapper();
 
-    public PreconditionLoader() {
-        ServiceLoader<IJsonPreconditionProvider> transformerProviders = ServiceLoader.load(
-            IJsonPreconditionProvider.class
+    public PredicateLoader() {
+        ServiceLoader<IJsonPredicateProvider> transformerProviders = ServiceLoader.load(
+            IJsonPredicateProvider.class
         );
-        var inProgressProviders = new ArrayList<IJsonPreconditionProvider>();
+        var inProgressProviders = new ArrayList<IJsonPredicateProvider>();
         for (var provider : transformerProviders) {
-            log.info("Adding IJsonPreconditionProvider: " + provider);
+            log.info("Adding IJsonPredicateProvider: " + provider);
             inProgressProviders.add(provider);
         }
         providers = Collections.unmodifiableList(inProgressProviders);
         log.atInfo()
             .setMessage(
-                () -> "IJsonPreconditionProvider loaded: "
+                () -> "IJsonPredicateProvider loaded: "
                     + providers.stream().map(p -> p.getClass().toString()).collect(Collectors.joining("; "))
             )
             .log();
@@ -53,7 +53,7 @@ public class PreconditionLoader {
         }
     }
 
-    protected Stream<IJsonPrecondition> getTransformerFactoryFromServiceLoader(String fullConfig)
+    protected Stream<IJsonPredicate> getTransformerFactoryFromServiceLoader(String fullConfig)
         throws JsonProcessingException {
         var configList = fullConfig == null ? List.of() : parseFullConfig(fullConfig);
         if (configList.isEmpty() || providers.isEmpty()) {
@@ -64,7 +64,7 @@ public class PreconditionLoader {
         }
     }
 
-    public Stream<IJsonPrecondition> getTransformerFactoryFromServiceLoaderParsed(List<Object> configList) {
+    public Stream<IJsonPredicate> getTransformerFactoryFromServiceLoaderParsed(List<Object> configList) {
         if (configList.isEmpty() || providers.isEmpty()) {
             log.warn("No transformer configuration specified.  No custom transformations will be performed");
             return Stream.of();
@@ -75,7 +75,7 @@ public class PreconditionLoader {
 
 
     @SneakyThrows // JsonProcessingException should be impossible since the contents are those that were just parsed
-    private IJsonPrecondition configureTransformerFromConfig(Map<String, Object> c) {
+    private IJsonPredicate configureTransformerFromConfig(Map<String, Object> c) {
         var keys = c.keySet();
         if (keys.size() != 1) {
             throw new IllegalArgumentException(WRONG_JSON_STRUCTURE_MESSAGE);
@@ -92,18 +92,18 @@ public class PreconditionLoader {
                         () -> "Creating a transformer through provider=" + p + " with configuration=" + configuration
                     )
                     .log();
-                return p.createPrecondition(configuration);
+                return p.createPredicate(configuration);
             }
         }
         throw new IllegalArgumentException("Could not find a provider named: " + key);
     }
 
-    public IJsonPrecondition getTransformerFactoryLoader(String fullConfig) {
+    public IJsonPredicate getTransformerFactoryLoader(String fullConfig) {
         try {
             var loadedTransformers = getTransformerFactoryFromServiceLoader(fullConfig);
-            return new JsonCompositePrecondition(
+            return new JsonCompositePredicate(
                 CompositeOperation.ALL,
-                loadedTransformers.toArray(IJsonPrecondition[]::new)
+                loadedTransformers.toArray(IJsonPredicate[]::new)
             );
         } catch (JsonProcessingException e) {
             throw new IllegalArgumentException("Could not parse the transformer configuration as a json list", e);

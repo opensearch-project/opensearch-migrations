@@ -2,19 +2,19 @@ package org.opensearch.migrations.transform;
 
 import lombok.NonNull;
 
-public interface IJsonPreconditionProvider {
+public interface IJsonPredicateProvider {
     /**
-     * Create a new precondition from the given configuration.  This precondition
+     * Create a new Predicate from the given configuration.  This Predicate
      * will be used repeatedly and concurrently from different threads against
      * messages.
      * @param jsonConfig is a List, Map, String, or null that should be used to configure the
-     *                   IJsonPrecondition that is being created
+     *                   IJsonPredicate that is being created
      * @return
      */
-    IJsonPrecondition createPrecondition(Object jsonConfig);
+    IJsonPredicate createPredicate(Object jsonConfig);
 
     /**
-     * Friendly name that can be used as a key to identify precondition providers.
+     * Friendly name that can be used as a key to identify Predicate providers.
      * @return
      */
     default @NonNull String getName() {

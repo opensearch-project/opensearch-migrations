@@ -38,7 +38,7 @@ public class MultipleJoltScriptsTest {
     public void testAddGzipAndCustom() throws Exception {
         final var addGzip = "["
             + "{\"JsonConditionalTransformerProvider\": ["
-            + "   [{\"JsonJMESPathPreconditionProvider\": { \"script\": \"" + "URI == '/testindex/_search'" + "\"}}],"
+            + "   [{\"JsonJMESPathPredicateProvider\": { \"script\": \"" + "URI == '/testindex/_search'" + "\"}}],"
             + "   [{\"JsonJoltTransformerProvider\": { \"canned\": \"ADD_GZIP\" }}]"
             + "]},"
             + "{ \"JsonJoltTransformerProvider\":"

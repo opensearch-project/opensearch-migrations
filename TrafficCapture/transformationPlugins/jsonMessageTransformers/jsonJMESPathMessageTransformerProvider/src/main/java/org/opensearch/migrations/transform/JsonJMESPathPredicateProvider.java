@@ -4,23 +4,23 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import org.opensearch.migrations.transform.JsonCompositePrecondition.CompositeOperation;
+import org.opensearch.migrations.transform.JsonCompositePredicate.CompositeOperation;
 
 import io.burt.jmespath.BaseRuntime;
 import io.burt.jmespath.jcf.JcfRuntime;
 
-public class JsonJMESPathPreconditionProvider implements IJsonPreconditionProvider {
+public class JsonJMESPathPredicateProvider implements IJsonPredicateProvider {
 
     public static final String SCRIPT_KEY = "script";
     private BaseRuntime<Object> adapterRuntime;
 
-    public JsonJMESPathPreconditionProvider() {
+    public JsonJMESPathPredicateProvider() {
         this.adapterRuntime = new JcfRuntime();
     }
 
     @Override
-    public IJsonPrecondition createPrecondition(Object jsonConfig) {
-        var transformers = new ArrayList<JsonJMESPathPrecondition>();
+    public IJsonPredicate createPredicate(Object jsonConfig) {
+        var transformers = new ArrayList<JsonJMESPathPredicate>();
         var configs = new ArrayList<Map<String, Object>>();
         try {
             if (jsonConfig instanceof Map) {
@@ -40,13 +40,13 @@ public class JsonJMESPathPreconditionProvider implements IJsonPreconditionProvid
                 if (!(scriptValue instanceof String)) {
                     throw new IllegalArgumentException(getConfigUsageStr());
                 }
-                transformers.add(new JsonJMESPathPrecondition(adapterRuntime, (String) scriptValue));
+                transformers.add(new JsonJMESPathPredicate(adapterRuntime, (String) scriptValue));
             }
         } catch (ClassCastException e) {
             throw new IllegalArgumentException(getConfigUsageStr(), e);
         }
-        return new JsonCompositePrecondition(CompositeOperation.ALL,
-            transformers.toArray(IJsonPrecondition[]::new));
+        return new JsonCompositePredicate(CompositeOperation.ALL,
+            transformers.toArray(IJsonPredicate[]::new));
     }
 
     private String getConfigUsageStr() {
@@ -55,6 +55,6 @@ public class JsonJMESPathPreconditionProvider implements IJsonPreconditionProvid
             + "to be a Map<String,Object> or a List<Map<String,Object>>.  "
             + "Each of the Maps should have one key-value of \"script\": \"...\".  "
             + "Script values should be a fully-formed inlined JsonPath queries encoded as a json value.  "
-            + "All of the values within a configuration will be concatenated into one chained precondition.";
+            + "All of the values within a configuration will be concatenated into one chained Predicate.";
     }
 }

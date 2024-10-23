@@ -3,7 +3,7 @@ package org.opensearch.migrations.transform;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.transform.JsonCompositePrecondition.CompositeOperation;
+import org.opensearch.migrations.transform.JsonCompositePredicate.CompositeOperation;
 
 import lombok.SneakyThrows;
 
@@ -21,11 +21,11 @@ public class JsonConditionalTransformerProvider implements IJsonTransformerProvi
             if (configs.size() != 2) {
                 throw new IllegalArgumentException(getConfigUsageStr());
             }
-            var preconditionConfig = configs.get(0);
+            var PredicateConfig = configs.get(0);
             var transformerConfig = configs.get(1);
             @SuppressWarnings("unchecked")
-            List<IJsonPrecondition> precondition = new PreconditionLoader()
-                .getTransformerFactoryFromServiceLoaderParsed((List<Object>) preconditionConfig)
+            List<IJsonPredicate> Predicate = new PredicateLoader()
+                .getTransformerFactoryFromServiceLoaderParsed((List<Object>) PredicateConfig)
                 .collect(Collectors.toList());
             @SuppressWarnings("unchecked")
             List<IJsonTransformer> transformer = new TransformationLoader()
@@ -33,8 +33,8 @@ public class JsonConditionalTransformerProvider implements IJsonTransformerProvi
                 .collect(Collectors.toList());
 
             return new JsonConditionalTransformer(
-                new JsonCompositePrecondition(CompositeOperation.ALL,
-                    precondition.toArray(IJsonPrecondition[]::new)),
+                new JsonCompositePredicate(CompositeOperation.ALL,
+                    Predicate.toArray(IJsonPredicate[]::new)),
                 new JsonCompositeTransformer(transformer.toArray(IJsonTransformer[]::new)));
         }
         throw new IllegalArgumentException(getConfigUsageStr());

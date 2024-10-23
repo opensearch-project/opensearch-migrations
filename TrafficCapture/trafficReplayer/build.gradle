@@ -60,7 +60,6 @@ dependencies {
     testImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
     testImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
     testImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
-    testImplementation project(':TrafficCapture:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformer')
 
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
     testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
