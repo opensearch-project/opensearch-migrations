@@ -8,8 +8,8 @@ import * as https from 'https';
 import * as forge from 'node-forge';
 
 export const handler = async (event: CloudFormationCustomResourceEvent, context: Context): Promise<CloudFormationCustomResourceResponse> => {
-  console.LOG_TO_CHECK('Received event:', JSON.stringify(event, null, 2));
-  console.LOG_TO_CHECK('Received context:', JSON.stringify(context, null, 2));
+  console.log('Received event:', JSON.stringify(event, null, 2));
+  console.log('Received context:', JSON.stringify(context, null, 2));
   let responseData: { [key: string]: any } = {};
   let physicalResourceId: string = '';
 
@@ -18,7 +18,7 @@ export const handler = async (event: CloudFormationCustomResourceEvent, context:
       case 'Create': {
         const { certificate, privateKey, certificateChain } = await generateSelfSignedCertificate();
         const certificateArn = await importCertificate(certificate, privateKey, certificateChain);
-        console.LOG_TO_CHECK(`Certificate imported with ARN: ${certificateArn}`);
+        console.log(`Certificate imported with ARN: ${certificateArn}`);
         responseData = { CertificateArn: certificateArn };
         physicalResourceId = certificateArn;
         break;
@@ -126,10 +126,10 @@ async function sendResponse(event: CloudFormationCustomResourceEvent, context: C
     Data: responseData
   });
 
-  console.LOG_TO_CHECK('Response body:', responseBody);
+  console.log('Response body:', responseBody);
 
   if (event.ResponseURL === "Local") {
-    console.LOG_TO_CHECK('Running locally, simulating response success.');
+    console.log('Running locally, simulating response success.');
     return {
       Status: 'SUCCESS',
       Reason: 'Running locally, response simulated.',
@@ -155,8 +155,8 @@ async function sendResponse(event: CloudFormationCustomResourceEvent, context: C
 
   return new Promise<CloudFormationCustomResourceResponse>((resolve, reject) => {
     const request = https.request(options, (response) => {
-      console.LOG_TO_CHECK(`Status code: ${response.statusCode}`);
-      console.LOG_TO_CHECK(`Status message: ${response.statusMessage}`);
+      console.log(`Status code: ${response.statusCode}`);
+      console.log(`Status message: ${response.statusMessage}`);
       resolve({
         Status: responseStatus === 'SUCCESS' || responseStatus === 'FAILED' ? responseStatus : 'FAILED',
         Reason: `See the details in CloudWatch Log Stream: ${context.logStreamName}`,

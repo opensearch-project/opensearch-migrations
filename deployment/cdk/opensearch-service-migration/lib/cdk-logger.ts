@@ -6,15 +6,15 @@ export class CdkLogger {
 
     static info(message: string) {
       if (process.env.CDK_CLI_COMMAND === 'deploy') {
-        console.LOG_TO_CHECK(message);
+        console.log(message);
       }
     }
 
     static warn(message: string) {
-      console.LOG_TO_CHECK(message);
+      console.log(message);
     }
 
     static error(message: string) {
-      console.LOG_TO_CHECK(message);
+      console.log(message);
     }
   }
