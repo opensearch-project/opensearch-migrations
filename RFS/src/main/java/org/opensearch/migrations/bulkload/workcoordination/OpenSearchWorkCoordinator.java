@@ -435,7 +435,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                         + " instead of 200"
                 );
             }
-            return resultHitsUpper.path("hits").size();
+            return resultHitsUpper.path("total").path("value").asInt();
         }
     }
 
