@@ -397,14 +397,11 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    private int numWorkItemsArePending(
-        int maxItemsToCheckFor,
+    private int numWorkItemsArePendingInternal(
         Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException {
         try (var context = contextSupplier.get()) {
             refresh(context::getRefreshContext);
-            // TODO: Switch this to use _count
-            log.warn("Switch this to use _count");
             final var queryBody = "{\n"
                 + "\"query\": {"
                 + "  \"bool\": {"
@@ -422,33 +419,31 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 + "}"
                 + "}";
 
-            var path = INDEX_NAME + "/_search" + (maxItemsToCheckFor <= 0 ? "" : "?size=" + maxItemsToCheckFor);
+            var path = INDEX_NAME + "/_count";
             var response = httpClient.makeJsonRequest(AbstractedHttpClient.POST_METHOD, path, null, queryBody);
-
-            final var resultHitsUpper = objectMapper.readTree(response.getPayloadBytes()).path("hits");
             var statusCode = response.getStatusCode();
             if (statusCode != 200) {
                 throw new IllegalStateException(
-                    "Querying for pending (expired or not) work, "
-                        + "returned an unexpected status code "
-                        + statusCode
-                        + " instead of 200"
+                        "Querying for pending (expired or not) work, "
+                                + "returned an unexpected status code "
+                                + statusCode
+                                + " instead of 200"
                 );
             }
-            return resultHitsUpper.path("total").path("value").asInt();
+            return objectMapper.readTree(response.getPayloadBytes()).path("count").asInt();
         }
     }
 
     @Override
     public int numWorkItemsArePending(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
         throws IOException, InterruptedException {
-        return numWorkItemsArePending(-1, contextSupplier);
+        return numWorkItemsArePendingInternal(contextSupplier);
     }
 
     @Override
     public boolean workItemsArePending(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
         throws IOException, InterruptedException {
-        return numWorkItemsArePending(1, contextSupplier) >= 1;
+        return numWorkItemsArePendingInternal(contextSupplier) >= 1;
     }
 
     enum UpdateResult {
