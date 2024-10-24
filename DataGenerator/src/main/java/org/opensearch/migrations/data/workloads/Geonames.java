@@ -5,23 +5,18 @@ import java.util.Random;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.data.IFieldCreator;
+import org.opensearch.migrations.data.IRandomDataBuilders;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-
-import static org.opensearch.migrations.data.FieldBuilders.GEO_POINT;
-import static org.opensearch.migrations.data.FieldBuilders.INTEGER;
-import static org.opensearch.migrations.data.FieldBuilders.LONG;
-import static org.opensearch.migrations.data.FieldBuilders.createField;
-import static org.opensearch.migrations.data.FieldBuilders.createFieldTextRawKeyword;
-import static org.opensearch.migrations.data.RandomDataBuilders.randomDouble;
-import static org.opensearch.migrations.data.RandomDataBuilders.randomElement;
 
 /**
  * Workload based off of Geonames
  * https://github.com/opensearch-project/opensearch-benchmark-workloads/tree/main/geonames
  */
-public class Geonames implements Workload {
+public class Geonames implements Workload, IFieldCreator, IRandomDataBuilders {
 
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final String[] COUNTRY_CODES = { "US", "DE", "FR", "GB", "CN", "IN", "BR" };
@@ -37,36 +32,29 @@ public class Geonames implements Workload {
      */
     @Override
     public ObjectNode createIndex(ObjectNode defaultSettings) {
-        var properties = mapper.createObjectNode();
-        properties.set("geonameid", createField(LONG));
-        properties.set("name", createFieldTextRawKeyword());
-        properties.set("asciiname", createFieldTextRawKeyword());
-        properties.set("alternatenames", createFieldTextRawKeyword());
-        properties.set("feature_class", createFieldTextRawKeyword());
-        properties.set("feature_code", createFieldTextRawKeyword());
-        properties.set("cc2", createFieldTextRawKeyword());
-        properties.set("admin1_code", createFieldTextRawKeyword());
-        properties.set("admin2_code", createFieldTextRawKeyword());
-        properties.set("admin3_code", createFieldTextRawKeyword());
-        properties.set("admin4_code", createFieldTextRawKeyword());
-        properties.set("elevation", createField(INTEGER));
-        properties.set("population", createField(LONG));
-        properties.set("dem", createFieldTextRawKeyword());
-        properties.set("timezone", createFieldTextRawKeyword());
-        properties.set("location", createField(GEO_POINT));
-
-        var countryCodeField = createFieldTextRawKeyword();
-        countryCodeField.put("fielddata", true);
-        properties.set("country_code", countryCodeField);
-
-        var mappings = mapper.createObjectNode();
-        mappings.put("dynamic", "strict");
-        mappings.set("properties", properties);
-
-        var index = mapper.createObjectNode();
-        index.set("mappings", mappings);
-        index.set("settings", defaultSettings);
-        return index;
+        return mapper.createObjectNode()
+            .<ObjectNode>set("mappings", mapper.createObjectNode()
+                .<ObjectNode>put("dynamic", "strict")
+                .<ObjectNode>set("properties",  mapper.createObjectNode()
+                    .<ObjectNode>set("geonameid", fieldLong())
+                    .<ObjectNode>set("name", fieldRawTextKeyword())
+                    .<ObjectNode>set("asciiname", fieldRawTextKeyword())
+                    .<ObjectNode>set("alternatenames", fieldRawTextKeyword())
+                    .<ObjectNode>set("feature_class", fieldRawTextKeyword())
+                    .<ObjectNode>set("feature_code", fieldRawTextKeyword())
+                    .<ObjectNode>set("cc2", fieldRawTextKeyword())
+                    .<ObjectNode>set("admin1_code", fieldRawTextKeyword())
+                    .<ObjectNode>set("admin2_code", fieldRawTextKeyword())
+                    .<ObjectNode>set("admin3_code", fieldRawTextKeyword())
+                    .<ObjectNode>set("admin4_code", fieldRawTextKeyword())
+                    .<ObjectNode>set("elevation", fieldInt())
+                    .<ObjectNode>set("population", fieldLong())
+                    .<ObjectNode>set("dem", fieldRawTextKeyword())
+                    .<ObjectNode>set("timezone", fieldRawTextKeyword())
+                    .<ObjectNode>set("location", fieldGeoPoint())
+                    .<ObjectNode>set("country_code", fieldRawTextKeyword()
+                        .put("fielddata", true))))
+            .<ObjectNode>set("settings", defaultSettings);
     }
 
     /**
@@ -97,33 +85,32 @@ public class Geonames implements Workload {
                 // These documents are have a low degree of uniqueness,
                 // there is an opportunity to augment them by using Random more.
                 var random = new Random(i);
-                var doc = mapper.createObjectNode();
-                doc.put("geonameid", i + 1000);
-                doc.put("name", "City" + (i + 1));
-                doc.put("asciiname", "City" + (i + 1));
-                doc.put("alternatenames", "City" + (i + 1));
-                doc.put("feature_class", "FCl" + (i + 1));
-                doc.put("feature_code", "FCo" + (i + 1));
-                doc.put("country_code", randomCountryCode(random));
-                doc.put("cc2", "cc2" + (i + 1));
-                doc.put("admin1_code", "admin" + (i + 1));
-                doc.put("population", random.nextInt(1000));
-                doc.put("dem", random.nextInt(1000) + "");
-                doc.put("timezone", "TZ" + (i + 1));
-                doc.set("location", randomLocation(random));
-                return doc;
+                return mapper.createObjectNode()
+                    .<ObjectNode>put("geonameid", i + 1000)
+                    .<ObjectNode>put("name", "City" + (i + 1))
+                    .<ObjectNode>put("asciiname", "City" + (i + 1))
+                    .<ObjectNode>put("alternatenames", "City" + (i + 1))
+                    .<ObjectNode>put("feature_class", "FCl" + (i + 1))
+                    .<ObjectNode>put("feature_code", "FCo" + (i + 1))
+                    .<ObjectNode>put("country_code", randomCountryCode(random))
+                    .<ObjectNode>put("cc2", "cc2" + (i + 1))
+                    .<ObjectNode>put("admin1_code", "admin" + (i + 1))
+                    .<ObjectNode>put("population", random.nextInt(1000))
+                    .<ObjectNode>put("dem", random.nextInt(1000) + "")
+                    .<ObjectNode>put("timezone", "TZ" + (i + 1))
+                    .<ObjectNode>set("location", randomLocation(random));
             }
         );
     }
 
-    private static ArrayNode randomLocation(Random random) {
+    private ArrayNode randomLocation(Random random) {
         var location = mapper.createArrayNode();
         location.add(randomDouble(random, -180, 180)); // Longitude
         location.add(randomDouble(random, -90, 90));   // Latitude
         return location;
     }
 
-    private static String randomCountryCode(Random random) {
+    private String randomCountryCode(Random random) {
         return randomElement(COUNTRY_CODES, random);
     }
 }
