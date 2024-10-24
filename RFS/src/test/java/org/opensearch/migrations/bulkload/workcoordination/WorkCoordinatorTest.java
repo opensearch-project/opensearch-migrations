@@ -276,7 +276,6 @@ public class WorkCoordinatorTest {
             // Add tbe list of successors to the work item
             var body = "{\"doc\": {\"successor_items\": \"" + String.join(",", successorItems) + "\"}}";
             var response = client.makeJsonRequest("POST", ".migrations_working_state/_update/" + docId, null, body);
-            var responseBody = (new ObjectMapper()).readTree(response.getPayloadBytes());
             Assertions.assertEquals(200, response.getStatusCode());
             // Create a successor item and then claim it with a long lease.
             workCoordinator.createUnassignedWorkItem(successorItems.get(0), testContext::createUnassignedWorkContext);
@@ -303,6 +302,41 @@ public class WorkCoordinatorTest {
             Assertions.assertThrows(IllegalStateException.class, () -> {
                 getWorkItemAndVerify(testContext, "finalClaimItem", new ConcurrentHashMap<>(), originalWorkItemExpiration, false, false);
             });
+        }
+    }
+
+
+    @Test
+    public void testAddSuccessorItemsFailsIfAlreadyDifferentSuccessorItems() throws Exception {
+        // A partially completed successor item will have a `successor_items` field and _some_ of the successor work items will be created
+        // but not all.  This tests that the coordinator handles this case correctly by continuing to make the originally specific successor items.
+        var testContext = WorkCoordinationTestContext.factory().withAllTracking();
+        var docId = "R0";
+        var N_SUCCESSOR_ITEMS = 3;
+        var successorItems = new ArrayList<String>();
+        for (int i = 0; i < N_SUCCESSOR_ITEMS; i++) {
+            successorItems.add(docId + "_successor_" + i);
+        }
+
+
+        var originalWorkItemExpiration = Duration.ofSeconds(5);
+        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "successorTest")) {
+            Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
+            workCoordinator.createUnassignedWorkItem(docId, testContext::createUnassignedWorkContext);
+            Assertions.assertTrue(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
+            // Claim the work item
+            getWorkItemAndVerify(testContext, "successorTest", new ConcurrentHashMap<>(), originalWorkItemExpiration, false, false);
+            var client = httpClientSupplier.get();
+            // Add an INCORRECT list of successors to the work item
+            var incorrectSuccessors = "successor_99,successor_98,successor_97";
+            var body = "{\"doc\": {\"successor_items\": \"" + incorrectSuccessors + "\"}}";
+            var response = client.makeJsonRequest("POST", ".migrations_working_state/_update/" + docId, null, body);
+            var responseBody = (new ObjectMapper()).readTree(response.getPayloadBytes());
+            Assertions.assertEquals(200, response.getStatusCode());
+
+            // Now attempt to go through with the correct successor item list
+            Assertions.assertThrows(IllegalArgumentException.class,
+                    () -> workCoordinator.createSuccessorWorkItemsAndMarkComplete(docId, successorItems, testContext::createSuccessorWorkItemsContext));
         }
     }
 
