@@ -11,6 +11,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import static org.opensearch.migrations.data.FieldBuilders.DATE;
+import static org.opensearch.migrations.data.FieldBuilders.INTEGER;
+import static org.opensearch.migrations.data.FieldBuilders.KEYWORD;
+import static org.opensearch.migrations.data.FieldBuilders.TEXT;
 import static org.opensearch.migrations.data.FieldBuilders.createField;
 import static org.opensearch.migrations.data.RandomDataBuilders.randomElement;
 import static org.opensearch.migrations.data.RandomDataBuilders.randomTime;
@@ -46,17 +50,17 @@ public class Nested implements Workload {
     @Override
     public ObjectNode createIndex(ObjectNode defaultSettings) {
         var properties = mapper.createObjectNode();
-        properties.set("user", createField("keyword"));
-        properties.set("creationDate", createField("date"));
-        properties.set("title", createField("text"));
-        properties.set("qid", createField("keyword"));
-        properties.set("tag", createField("keyword"));
-        properties.set("answer_count", createField("integer"));
+        properties.set("user", createField(KEYWORD));
+        properties.set("creationDate", createField(DATE));
+        properties.set("title", createField(TEXT));
+        properties.set("qid", createField(KEYWORD));
+        properties.set("tag", createField(KEYWORD));
+        properties.set("answer_count", createField(INTEGER));
         var answers = createField("nested");
         var answersProps = mapper.createObjectNode();
         answers.set("properties", answersProps);
-        answersProps.set("user", createField("keyword"));
-        answersProps.set("date", createField("date"));
+        answersProps.set("user", createField(KEYWORD));
+        answersProps.set("date", createField(DATE));
         properties.set("answers", answers);
 
         var mappings = mapper.createObjectNode();

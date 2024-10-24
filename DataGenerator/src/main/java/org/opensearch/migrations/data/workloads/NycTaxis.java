@@ -9,6 +9,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
+import static org.opensearch.migrations.data.FieldBuilders.GEO_POINT;
+import static org.opensearch.migrations.data.FieldBuilders.INTEGER;
+import static org.opensearch.migrations.data.FieldBuilders.KEYWORD;
+import static org.opensearch.migrations.data.FieldBuilders.TEXT;
 import static org.opensearch.migrations.data.FieldBuilders.createField;
 import static org.opensearch.migrations.data.RandomDataBuilders.randomDouble;
 import static org.opensearch.migrations.data.RandomDataBuilders.randomElement;
@@ -38,28 +42,28 @@ public class NycTaxis implements Workload {
     @Override
     public ObjectNode createIndex(ObjectNode defaultSettings) {
         var properties = mapper.createObjectNode();
-        properties.set("cab_color", createField("keyword"));
+        properties.set("cab_color", createField(KEYWORD));
         properties.set("dropoff_datetime", createDateField());
-        properties.set("dropoff_location", createField("geo_point"));
+        properties.set("dropoff_location", createField(GEO_POINT));
         properties.set("ehail_fee", createScaledFloatField());
         properties.set("extra", createScaledFloatField());
         properties.set("fare_amount", createScaledFloatField());
         properties.set("improvement_surcharge", createScaledFloatField());
         properties.set("mta_tax", createScaledFloatField());
-        properties.set("passenger_count", createField("integer"));
-        properties.set("payment_type", createField("keyword"));
+        properties.set("passenger_count", createField(INTEGER));
+        properties.set("payment_type", createField(KEYWORD));
         properties.set("pickup_datetime", createDateField());
-        properties.set("pickup_location", createField("geo_point"));
-        properties.set("rate_code_id", createField("keyword"));
-        properties.set("store_and_fwd_flag", createField("keyword"));
+        properties.set("pickup_location", createField(GEO_POINT));
+        properties.set("rate_code_id", createField(KEYWORD));
+        properties.set("store_and_fwd_flag", createField(KEYWORD));
         properties.set("surcharge", createScaledFloatField());
         properties.set("tip_amount", createScaledFloatField());
         properties.set("tolls_amount", createScaledFloatField());
         properties.set("total_amount", createScaledFloatField());
         properties.set("trip_distance", createScaledFloatField());
-        properties.set("trip_type", createField("keyword"));
-        properties.set("vendor_id", createField("keyword"));
-        properties.set("vendor_name", createField("text"));
+        properties.set("trip_type", createField(KEYWORD));
+        properties.set("vendor_id", createField(KEYWORD));
+        properties.set("vendor_name", createField(TEXT));
        
 
         var mappings = mapper.createObjectNode();

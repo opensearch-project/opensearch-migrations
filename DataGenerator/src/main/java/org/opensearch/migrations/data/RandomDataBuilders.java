@@ -5,14 +5,14 @@ import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.Random;
 
-import lombok.experimental.UtilityClass;
-
 /** Shared ways to build random data */
-@UtilityClass
 public class RandomDataBuilders {
+
     private static final ZoneId UTC_ZONE = ZoneId.of("UTC");
     private static final DateTimeFormatter SIMPLE_DATE_PATTERN = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
     private static final int ONE_DAY_IN_MILLIS = 24 * 60 * 60 * 1000;
+
+    private RandomDataBuilders() {}
 
     public static long randomTime(long timeFrom, Random random) {
         return timeFrom - random.nextInt(ONE_DAY_IN_MILLIS);

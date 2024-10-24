@@ -17,5 +17,5 @@ public class WorkloadOptions {
     @Parameter(names = { "--max-bulk-request-batch-count" }, description = "The maximum batch count for bulk requests")
     public int maxBulkBatchSize = 50;
 
-    public IndexOptions index = new IndexOptions();
+    public final IndexOptions index = new IndexOptions();
 }
