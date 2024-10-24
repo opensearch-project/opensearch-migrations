@@ -188,11 +188,17 @@ jobs:
           docker stop $(docker ps -q) && docker system prune --volumes -f
           docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^migrations/' | xargs -I {} docker image rm {}
 
-  cdk-tests:
+  node-tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        npm-project:
+          - ./deployment/cdk/opensearch-service-migration
+          - ./deployment/migration-assistant-solution
     defaults:
       run:
-        working-directory: ./deployment/cdk/opensearch-service-migration
+        working-directory: ${{ matrix.npm-project }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -227,7 +233,7 @@ jobs:
   all-ci-checks-pass:
     needs:
       - style-check
-      - cdk-tests
+      - node-tests
       - gradle-tests
       - link-checker
       - python-e2e-tests
