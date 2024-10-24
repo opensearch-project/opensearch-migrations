@@ -7,5 +7,8 @@ export default tseslint.config(
     ...tseslint.configs.stylistic,
     {
         ignores: ['**/*.js'],
+        "env": {
+            "jest": true
+        }
     }
 );

@@ -11,7 +11,8 @@
     "build": "tsc",
     "watch": "tsc -w",
     "lint": "eslint .",
-    "cdk": "cdk"
+    "snyth": "cdk synthesize",
+    "test": "jest"
   },
   "devDependencies": {
     "@aws-cdk/assert": "2.68.0",
@@ -23,12 +24,15 @@
     "aws-cdk-lib": "2.105.0",
     "constructs": "10.3.0",
     "eslint": "^9.13.0",
+    "jest": "^29.7.0",
+    "ts-jest": "^29.2.5",
     "ts-node": "^10.9.1",
     "typescript": "~5.2.2",
     "typescript-eslint": "^8.11.0"
   },
   "dependencies": {
     "@aws-cdk/aws-servicecatalogappregistry-alpha": "2.105.0-alpha.0",
+    "@jest/globals": "^29.7.0",
     "source-map-support": "^0.5.21"
   }
 }

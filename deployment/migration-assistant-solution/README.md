@@ -27,3 +27,17 @@ sequenceDiagram
     User ->> MA: Log into Migration Assistant Console
     User ->> MA: Migration Actions
 ```
+
+### Migration Assistant
+
+The full range of functionality offered by the migration assistant deployed through the opensearch-service-migration project, see its [README.MD](../cdk/opensearch-service-migration/README.md) for additon details.
+
+## Development
+
+This project is writen in TypeScript and uses the cloud developer tookit (CDK) to produce its build artifacts, cloud formation templates that can be used to deploy onto Amazon Web Services.
+
+### Quick Start Guide
+
+* Install Node 18+ & Npm 10+ https://docs.npmjs.com/downloading-and-installing-node-js-and-npm
+* Build the project `npm run build`
+* Creat the deployment artifacts `npm run snyth`
