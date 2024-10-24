@@ -1,6 +1,11 @@
+# Define all enabled/disabled migration services
+migration-console-enabled: false
+capture-proxy-enabled: false
+kafka-op-enabled: true
+opensearch-helm-enabled: false
 
+# Define migration service configuration
 migration-console:
-  enabled: true
   replicaCount: 1
   image:
     repository: migrations/migration_console
@@ -36,7 +41,6 @@ migration-console:
       mountPath: /storage
 
 capture-proxy:
-  enabled: true
   replicaCount: 1
   image:
     repository: migrations/capture_proxy
@@ -63,3 +67,26 @@ capture-proxy:
       cpu: 100m
       memory: 128Mi
 
+kafka-op:
+  clusterName: kafka-cluster
+  kafkaVersion: 3.8.0
+  kafkaMetadataVersion: 3.8-IV0
+  nodePool:
+    replicas: 1
+    volume:
+      size: 10Gi
+      deleteClaim: true
+
+opensearch-helm:
+  fullnameOverride: "opensearch"
+  image:
+    tag: "2.17.0"
+  replicas: 1
+  singleNode: true
+  config:
+    discovery.type: single-node
+  extraEnvs:
+    - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+      value: myStrongPassword123!
+  service:
+    type: LoadBalancer

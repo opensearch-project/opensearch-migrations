@@ -4,9 +4,9 @@ kind: KafkaNodePool
 metadata:
   name: dual-role
   labels:
-    strimzi.io/cluster: kafka-cluster
+    strimzi.io/cluster: {{ .Values.clusterName}}
 spec:
-  replicas: 1
+  replicas: {{ .Values.nodePool.replicas}}
   roles:
     - controller
     - broker
@@ -15,22 +15,22 @@ spec:
     volumes:
       - id: 0
         type: persistent-claim
-        size: 10Gi
-        deleteClaim: true
+        size: {{ .Values.nodePool.volume.size}}
+        deleteClaim: {{ .Values.nodePool.volume.deleteClaim}}
         kraftMetadata: shared
 ---
 
 apiVersion: kafka.strimzi.io/v1beta2
 kind: Kafka
 metadata:
-  name: kafka-cluster
+  name: {{ .Values.clusterName}}
   annotations:
     strimzi.io/node-pools: enabled
     strimzi.io/kraft: enabled
 spec:
   kafka:
-    version: 3.8.0
-    metadataVersion: 3.8-IV0
+    version: {{ .Values.kafkaVersion}}
+    metadataVersion: {{ .Values.kafkaMetadataVersion}}
     listeners:
       - name: plain
         port: 9092

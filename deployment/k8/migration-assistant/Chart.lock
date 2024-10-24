@@ -1,9 +1,15 @@
 dependencies:
+- name: opensearch
+  repository: https://opensearch-project.github.io/helm-charts/
+  version: 2.23.1
+- name: kafka-op
+  repository: file://../services/kafka-op
+  version: 0.1.0
 - name: migration-console
   repository: file://../services/migration-console
   version: 0.1.0
 - name: capture-proxy
   repository: file://../services/capture-proxy
   version: 0.1.0
-digest: sha256:7897ada3193d874398b7fdc67a8f45eeb650302c190fe07ef9b29494d678e2f2
-generated: "2024-10-23T20:35:14.098691-05:00"
+digest: sha256:3dcd125d6e968ddfc212318128d5f4222822bf33d0593f061f3c2eed40cea144
+generated: "2024-10-24T15:36:04.42393-05:00"

@@ -1,5 +1,4 @@
 {{- define "common-lib.deployment.yml" -}}
-{{- if .Values.enabled }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -61,4 +60,3 @@ spec:
           {{- end }}
         {{- end }}
 {{- end }}
-{{- end -}}
