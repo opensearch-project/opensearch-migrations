@@ -68,6 +68,6 @@ def call(Map config = [:]) {
             defaultStageId: 'full-integ',
             skipCaptureProxyOnNodeSetup: true,
             jobName: 'full-default-e2e-test',
-            integTestCommand: '/root/lib/integ_test/integ_test/full_tests.py'
+            integTestCommand: '/root/lib/integ_test/integ_test/full_tests.py --source_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9201 --target_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9202'
     )
 }

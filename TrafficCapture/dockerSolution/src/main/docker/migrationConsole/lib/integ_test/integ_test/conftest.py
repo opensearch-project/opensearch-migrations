@@ -16,7 +16,10 @@ def pytest_addoption(parser):
     parser.addoption("--stage", action="store", default="dev")
     parser.addoption("--config_file_path", action="store", default="/etc/migration_services.yaml",
                      help="Path to config file for console library")
-
+    parser.addoption("--source_proxy_alb_endpoint", action="store", default=None,
+                     help="Specify the Migration ALB endpoint for the source capture proxy")
+    parser.addoption("--target_proxy_alb_endpoint", action="store", default=None,
+                     help="Specify the Migration ALB endpoint for the target proxy")
 
 @pytest.fixture
 def unique_id(pytestconfig):
