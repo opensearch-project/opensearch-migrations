@@ -32,7 +32,7 @@ public class FailedRequestsLogger {
                 )
                 .addArgument(indexName)
                 .addArgument(failedItemCounter::getAsInt)
-                .addArgument(rootCause.getMessage())
+                .addArgument(rootCause::getMessage)
                 .addArgument(bulkRequestBodySupplier)
                 .addArgument(responseBody::get)
                 .log();

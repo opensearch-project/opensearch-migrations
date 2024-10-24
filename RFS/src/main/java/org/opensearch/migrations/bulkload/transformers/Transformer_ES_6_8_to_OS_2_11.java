@@ -67,7 +67,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     }
 
     private void transformIndex(Index index, IndexType type) {
-        log.atDebug().setMessage(()->"Original Object: {}").addArgument(index.getRawJson().toString()).log();
+        log.atDebug().setMessage("Original Object: {}").addArgument(index::getRawJson).log();
         var newRoot = index.getRawJson();
 
         switch (type) {
@@ -85,7 +85,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
         TransformFunctions.removeIntermediateIndexSettingsLevel(newRoot); // run before fixNumberOfReplicas
         TransformFunctions.fixReplicasForDimensionality(newRoot, awarenessAttributeDimensionality);
 
-        log.atDebug().setMessage(()->"Transformed Object: {}").addArgument(newRoot.toString()).log();
+        log.atDebug().setMessage("Transformed Object: {}").addArgument(newRoot).log();
     }
 
     private enum IndexType {

@@ -171,7 +171,7 @@ public class HttpRetryTest {
 
             var e = Assertions.assertThrows(Exception.class, f::get);
             var shutdownResult = ccpShutdownFuture.get();
-            log.atInfo().setCause(e).setMessage(() -> "exception: ").log();
+            log.atInfo().setCause(e).setMessage("exception: ").log();
             // doubly-nested ExecutionException.  Once for the get() call here and once for the work done in submit,
             // which wraps the scheduled request's future
             Assertions.assertInstanceOf(IllegalStateException.class, e.getCause().getCause());
@@ -227,7 +227,7 @@ public class HttpRetryTest {
             var lastResponse = responseList.get(responseList.size()-1).getRawResponse();
             Assertions.assertNotNull(lastResponse);
             Assertions.assertEquals(200, lastResponse.status().code());
-            log.atInfo().setMessage(()->"responses: " + responses).log();
+            log.atInfo().setMessage("responses: {}").addArgument(responses).log();
             var retries = checkHttpRetryConsistency(rootContext);
             Assertions.assertTrue(retries > 0);
             var metrics = rootContext.inMemoryInstrumentationBundle.getFinishedMetrics();

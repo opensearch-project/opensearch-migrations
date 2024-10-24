@@ -61,11 +61,15 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
             return new TextTrackedFuture<>(CompletableFuture.supplyAsync(() -> {
                 try {
                     lastCheckIsReady.release();
-                    log.atDebug()
-                        .setMessage(() -> "trying to acquire semaphore for packet #" + index + " and id=" + id)
+                    log.atDebug().setMessage("trying to acquire semaphore for packet #{} and id={}")
+                        .addArgument(index)
+                        .addArgument(id)
                         .log();
                     consumeIsReady.acquire();
-                    log.atDebug().setMessage(() -> "Acquired semaphore for packet #" + index + " and id=" + id).log();
+                    log.atDebug().setMessage("Acquired semaphore for packet #{} and id={}")
+                        .addArgument(index)
+                        .addArgument(id)
+                        .log();
                 } catch (InterruptedException e) {
                     throw Lombok.sneakyThrow(e);
                 }
@@ -79,7 +83,8 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
             return new TextTrackedFuture<>(CompletableFuture.supplyAsync(() -> {
                 try {
                     lastCheckIsReady.release();
-                    log.atDebug().setMessage(() -> "trying to acquire semaphore for finalize and id=" + id).log();
+                    log.atDebug().setMessage("trying to acquire semaphore for finalize and id={}")
+                        .addArgument(id).log();
                     consumeIsReady.acquire();
                 } catch (InterruptedException e) {
                     throw Lombok.sneakyThrow(e);
@@ -159,16 +164,12 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                 int finalI = i;
                 int finalJ = j;
                 log.atInfo()
-                    .setMessage(
-                        () -> "cf @ "
-                            + finalI
-                            + ","
-                            + finalJ
-                            + " =\n"
-                            + reversedScheduledRequests.stream()
-                                .map(sr -> getParentsDiagnosticString(sr, ""))
-                                .collect(Collectors.joining("\n---\n"))
-                    )
+                    .setMessage("cf @ {}, {} =\n{}")
+                    .addArgument(finalI)
+                    .addArgument(finalJ)
+                    .addArgument(() -> reversedScheduledRequests.stream()
+                        .map(sr -> getParentsDiagnosticString(sr, ""))
+                        .collect(Collectors.joining("\n---\n")))
                     .log();
                 pktConsumer.consumeIsReady.release();
             }
@@ -281,14 +282,14 @@ class RequestSenderOrchestratorTest extends InstrumentationTest {
                         body.toString(StandardCharsets.UTF_8)
                     );
                 } catch (Throwable e) {
-                    log.atError().setMessage(()->"caught exception(1)").setCause(e).log();
+                    log.atError().setCause(e).setMessage("caught exception(1)").log();
                     throw e;
                 }
             }
             closeFuture.get();
             log.error("Done running loop");
         } catch (Throwable e) {
-            log.atError().setMessage(()->"caught exception(2)").setCause(e).log();
+            log.atError().setCause(e).setMessage("caught exception(2)").log();
             throw e;
         }
     }

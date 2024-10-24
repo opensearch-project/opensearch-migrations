@@ -110,13 +110,12 @@ public class IndexMappingTypeRemovalTest {
         var index = mock(Index.class);
         Mockito.when(index.getRawJson()).thenReturn(indexJson);
 
-        log.atInfo().setMessage("Original\n{}").addArgument(indexJson.toPrettyString()).log();
+        log.atInfo().setMessage("Original\n{}").addArgument(() -> indexJson.toPrettyString()).log();
         var wasChanged = transformer.applyTransformation(index);
 
-        log.atInfo()
-            .setMessage("After{}\n{}")
+        log.atInfo().setMessage("After{}\n{}")
             .addArgument(wasChanged ? " *Changed* " : "")
-            .addArgument(indexJson.toPrettyString())
+            .addArgument(() -> indexJson.toPrettyString())
             .log();
         return wasChanged;
     }

@@ -141,27 +141,27 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
         keysReceived = new ArrayList<>();
 
         log.info("re-establish a client connection so that the following commit will work");
-        log.atInfo().setMessage(() -> "1 ..." + renderNextCommitsAsString()).log();
+        log.atInfo().setMessage("1 ...{}").addArgument(this::renderNextCommitsAsString).log();
         readNextNStreams(rootContext, trafficSource, keysReceived, 0, 1);
-        log.atInfo().setMessage(() -> "2 ..." + renderNextCommitsAsString()).log();
+        log.atInfo().setMessage("2 ...{}").addArgument(this::renderNextCommitsAsString).log();
 
         log.info("wait long enough to fall out of the group again");
         Thread.sleep(2 * MAX_POLL_INTERVAL_MS);
 
         var keysReceivedUntilDrop2 = keysReceived;
         keysReceived = new ArrayList<>();
-        log.atInfo().setMessage(() -> "re-establish... 3 ..." + renderNextCommitsAsString()).log();
+        log.atInfo().setMessage("re-establish... 3 ...{}").addArgument(this::renderNextCommitsAsString).log();
         readNextNStreams(rootContext, trafficSource, keysReceived, 0, 1);
         trafficSource.commitTrafficStream(keysReceivedUntilDrop1.get(1));
-        log.atInfo().setMessage(() -> "re-establish... 4 ..." + renderNextCommitsAsString()).log();
+        log.atInfo().setMessage("re-establish... 4 ...{}").addArgument(this::renderNextCommitsAsString).log();
         readNextNStreams(rootContext, trafficSource, keysReceived, 1, 1);
-        log.atInfo().setMessage(() -> "5 ..." + renderNextCommitsAsString()).log();
+        log.atInfo().setMessage("5 ...{}").addArgument(this::renderNextCommitsAsString).log();
 
         Thread.sleep(2 * MAX_POLL_INTERVAL_MS);
         var keysReceivedUntilDrop3 = keysReceived;
         keysReceived = new ArrayList<>();
         readNextNStreams(rootContext, trafficSource, keysReceived, 0, 3);
-        log.atInfo().setMessage(() -> "6 ..." + kafkaSource.trackingKafkaConsumer.nextCommitsToString()).log();
+        log.atInfo().setMessage("6 ...{}").addArgument(kafkaSource.trackingKafkaConsumer::nextCommitsToString).log();
         trafficSource.close();
     }
 
@@ -182,7 +182,7 @@ public class KafkaKeepAliveTests extends InstrumentationTest {
             var trafficStreams = kafkaSource.readNextTrafficStreamChunk(rootContext::createReadChunkContext).get();
             trafficStreams.forEach(ts -> {
                 var tsk = ts.getKey();
-                log.atInfo().setMessage(() -> "checking for " + tsk).log();
+                log.atInfo().setMessage("checking for {}").addArgument(tsk).log();
                 Assertions.assertFalse(keysReceived.contains(tsk));
                 keysReceived.add(tsk);
             });

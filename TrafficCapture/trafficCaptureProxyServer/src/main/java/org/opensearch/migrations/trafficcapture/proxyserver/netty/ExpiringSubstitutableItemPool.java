@@ -210,11 +210,16 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
         // make a copy on the original thread making changes, which will be up to date at the time of capture and
         // immutable for future accessors, making it thread-safe
         var copiedStats = eventLoop.submit(() -> {
-            log.atTrace().setMessage(() -> "copying stats (" + System.identityHashCode(stats) + ")=" + stats).log();
+            log.atTrace().setMessage("copying stats ({})={}")
+                .addArgument(() -> System.identityHashCode(stats))
+                .addArgument(stats)
+                .log();
             return new Stats(stats);
         }).get();
         log.atTrace()
-            .setMessage(() -> "Got copied value of (" + System.identityHashCode(copiedStats) + ")=" + copiedStats)
+            .setMessage("Got copied value of ({})={}")
+            .addArgument(() -> System.identityHashCode(copiedStats))
+            .addArgument(copiedStats)
             .log();
         return copiedStats;
     }
@@ -234,10 +239,10 @@ public class ExpiringSubstitutableItemPool<F extends Future<U>, U> {
             throw new PoolClosedException();
         }
         var startTime = Instant.now();
-        log.atTrace().setMessage("getAvailableOrNewItem: readyItems.size()={}").addArgument(readyItems.size()).log();
+        log.atTrace().setMessage("getAvailableOrNewItem: readyItems.size()={}").addArgument(readyItems::size).log();
         var item = readyItems.poll();
         log.atTrace().setMessage("getAvailableOrNewItem: item={} remaining readyItems.size()={}")
-            .addArgument(item).addArgument(readyItems.size()).log();
+            .addArgument(item).addArgument(readyItems::size).log();
         if (item != null) {
             stats.addHotGet();
             beginLoadingNewItemIfNecessary();

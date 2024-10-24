@@ -106,17 +106,12 @@ public class PreloadedDataContainerOrchestrator {
         var sourceImageId = getImageId(dockerClient, baseSourceVersion.imageName, pullIfUnavailable);
         var dataLoaderImageId = getImageId(dockerClient, dataLoaderImageName, pullIfUnavailable);
         var rval = Objects.hash(sourceImageId, dataLoaderImageId, Arrays.hashCode(generatorContainerArgs));
-        log.atInfo()
-            .setMessage(
-                "sourceImageId="
-                    + sourceImageId
-                    + " dataLoaderImageId="
-                    + dataLoaderImageId
-                    + " args="
-                    + Arrays.stream(generatorContainerArgs).collect(Collectors.joining())
-                    + " hash: "
-                    + rval
-            )
+        log.atInfo().setMessage("{}")
+            .addArgument(() ->
+                "sourceImageId=" + sourceImageId
+                    + " dataLoaderImageId=" + dataLoaderImageId
+                    + " args=" + Arrays.stream(generatorContainerArgs).collect(Collectors.joining())
+                    + " hash: " + rval)
             .log();
         return rval;
     }

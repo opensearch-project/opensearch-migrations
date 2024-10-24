@@ -44,20 +44,20 @@ public class TestCapturePacketToHttpHandler implements IPacketFinalizingConsumer
     @Override
     public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
         numConsumes.incrementAndGet();
-        log.atDebug().setMessage(()->"incoming buffer refcnt=" + nextRequestPacket.refCnt()).log();
+        log.atDebug().setMessage("incoming buffer refcnt={}").addArgument(nextRequestPacket::refCnt).log();
         var duplicatedPacket = nextRequestPacket.retainedDuplicate();
         return new TrackedFuture<>(CompletableFuture.runAsync(() -> {
             try {
-                log.atDebug().setMessage(()->"Running async future for " + nextRequestPacket).log();
+                log.atDebug().setMessage("Running async future for {}").addArgument(nextRequestPacket).log();
                 Thread.sleep(consumeDuration.toMillis());
-                log.atDebug().setMessage(()->"woke up from sleeping for " + nextRequestPacket).log();
+                log.atDebug().setMessage("woke up from sleeping for {}").addArgument(nextRequestPacket).log();
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
                 throw Lombok.sneakyThrow(e);
             }
             try {
-                log.atDebug()
-                    .setMessage(()->"At the time of committing the buffer, refcnt=" + duplicatedPacket.refCnt()).log();
+                log.atDebug().setMessage("At the time of committing the buffer, refcnt={}")
+                    .addArgument(duplicatedPacket::refCnt).log();
                 duplicatedPacket.readBytes(byteArrayOutputStream, nextRequestPacket.readableBytes());
                 duplicatedPacket.release();
             } catch (IOException e) {

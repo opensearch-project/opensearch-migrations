@@ -41,11 +41,9 @@ public class TransformationLoader {
             inProgressProviders.add(provider);
         }
         providers = Collections.unmodifiableList(inProgressProviders);
-        log.atInfo()
-            .setMessage(
-                () -> "IJsonTransformerProviders loaded: "
-                    + providers.stream().map(p -> p.getClass().toString()).collect(Collectors.joining("; "))
-            )
+        log.atInfo().setMessage("IJsonTransformerProviders loaded: {}")
+            .addArgument(() -> providers.stream().map(p -> p.getClass().toString())
+                .collect(Collectors.joining("; ")))
             .log();
     }
 
@@ -82,10 +80,9 @@ public class TransformationLoader {
             var transformerName = p.getName();
             if (transformerName.equals(key)) {
                 var configuration = c.get(key);
-                log.atInfo()
-                    .setMessage(
-                        () -> "Creating a transformer through provider=" + p + " with configuration=" + configuration
-                    )
+                log.atInfo().setMessage("Creating a transformer through provider={} with configuration={}")
+                    .addArgument(p)
+                    .addArgument(configuration)
                     .log();
                 return p.createTransformer(configuration);
             }

@@ -30,16 +30,11 @@ public class NettyDecodedHttpResponseConvertHandler extends ChannelInboundHandle
         if (msg instanceof HttpResponse) {
             httpTransactionContext.onHeaderParse();
             var response = (HttpResponse) msg;
-            log.atInfo()
-                .setMessage(
-                    () -> diagnosticLabel
-                        + " parsed response: "
-                        + response.status().code()
-                        + " "
-                        + response.status().reasonPhrase()
-                        + " "
-                        + response.protocolVersion().text()
-                )
+            log.atInfo().setMessage("{} parsed response: {} {} {}")
+                .addArgument(diagnosticLabel)
+                .addArgument(() -> response.status().code())
+                .addArgument(() -> response.status().reasonPhrase())
+                .addArgument(() -> response.protocolVersion().text())
                 .log();
             var httpJsonMessage = parseHeadersIntoMessage(response);
             ctx.fireChannelRead(httpJsonMessage);

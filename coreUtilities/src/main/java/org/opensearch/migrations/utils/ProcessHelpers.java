@@ -15,7 +15,7 @@ public class ProcessHelpers {
         var nodeId = Optional.of("ECS_TASK_ID").map(System::getenv)
             .or(() -> Optional.of("HOSTNAME").map(System::getenv))
             .orElse(DEFAULT_NODE_ID);
-        log.atInfo().setMessage(() -> "getNodeInstanceName()=" + nodeId).log();
+        log.atInfo().setMessage("getNodeInstanceName()={}").addArgument(nodeId).log();
         return nodeId;
     }
 }

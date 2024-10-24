@@ -165,7 +165,7 @@ public class CreateSnapshot {
                 SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
             }
         } catch (Exception e) {
-            log.atError().setMessage("Unexpected error running RfsWorker").setCause(e).log();
+            log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
             throw e;
         }
     }

@@ -123,9 +123,9 @@ public class InMemoryInstrumentationBundle implements AutoCloseable {
                 return true;
             } else {
                 try {
-                    log.atInfo().setMessage("{}").addArgument(() ->
-                            "Waiting " + sleepAmount + "ms because the last test for metrics from " + metricName +
-                                " on " + matchingMetrics.get() + " did not satisfy the predicate").log();
+                    log.atInfo().setMessage("{}")
+                        .addArgument(() -> "Waiting " + sleepAmount + "ms because the last test for metrics from " +
+                            metricName + " on " + matchingMetrics.get() + " did not satisfy the predicate").log();
                     Thread.sleep(sleepAmount);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();

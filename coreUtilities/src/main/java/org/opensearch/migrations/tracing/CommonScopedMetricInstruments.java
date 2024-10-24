@@ -71,10 +71,9 @@ public class CommonScopedMetricInstruments extends CommonMetricInstruments {
     private static List<Double> getBuckets(double firstBucketSize, double lastBucketCeiling) {
         var buckets = getExponentialBucketsBetween(firstBucketSize, lastBucketCeiling);
         log.atTrace()
-            .setMessage(
-                () -> "Setting buckets to "
-                    + buckets.stream().map(x -> "" + x).collect(Collectors.joining(",", "[", "]"))
-            )
+            .setMessage("Setting buckets to {}")
+            .addArgument(() -> buckets.stream().map(x -> "" + x)
+                .collect(Collectors.joining(",", "[", "]")))
             .log();
         return buckets;
     }

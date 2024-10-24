@@ -252,10 +252,9 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
             );
             var numExpectedRequests = streamAndSizes.numHttpTransactions;
             var trafficStreams = streamAndSizes.stream.collect(Collectors.toList());
-            log.atInfo()
-                .setMessage(
-                    () -> trafficStreams.stream()
-                        .map(ts -> TrafficStreamUtils.summarizeTrafficStream(ts))
+            log.atInfo().setMessage("{}")
+                .addArgument(() -> trafficStreams.stream()
+                        .map(TrafficStreamUtils::summarizeTrafficStream)
                         .collect(Collectors.joining("\n"))
                 )
                 .log();
@@ -376,10 +375,9 @@ public class FullTrafficReplayerTest extends InstrumentationTest {
             );
             var numExpectedRequests = streamAndSizes.numHttpTransactions;
             var trafficStreams = streamAndSizes.stream.collect(Collectors.toList());
-            log.atInfo()
-                .setMessage(
-                    () -> trafficStreams.stream()
-                        .map(ts -> TrafficStreamUtils.summarizeTrafficStream(ts))
+            log.atInfo().setMessage("{}")
+                .addArgument(() -> trafficStreams.stream()
+                        .map(TrafficStreamUtils::summarizeTrafficStream)
                         .collect(Collectors.joining("\n"))
                 )
                 .log();

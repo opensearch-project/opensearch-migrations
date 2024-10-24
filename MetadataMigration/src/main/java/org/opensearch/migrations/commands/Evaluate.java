@@ -29,13 +29,13 @@ public class Evaluate extends MigratorEvaluatorBase {
             var items = migrateAllItems(migrationMode, clusters, transformer, context);
             evaluateResult.items(items);
         } catch (ParameterException pe) {
-            log.atError().setMessage("Invalid parameter").setCause(pe).log();
+            log.atError().setCause(pe).setMessage("Invalid parameter").log();
             evaluateResult
                 .exitCode(INVALID_PARAMETER_CODE)
                 .errorMessage("Invalid parameter: " + pe.getMessage())
                 .build();
         } catch (Throwable e) {
-            log.atError().setMessage("Unexpected failure").setCause(e).log();
+            log.atError().setCause(e).setMessage("Unexpected failure").log();
             evaluateResult
                 .exitCode(UNEXPECTED_FAILURE_CODE)
                 .errorMessage("Unexpected failure: " + e.getMessage())

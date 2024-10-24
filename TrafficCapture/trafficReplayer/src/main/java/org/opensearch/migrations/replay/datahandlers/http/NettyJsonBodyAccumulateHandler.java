@@ -93,7 +93,7 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
                     }
                 }
             } catch (JacksonException e) {
-                log.atInfo().setCause(e).setMessage(() -> "Error parsing json body.  " +
+                log.atInfo().setCause(e).setMessage("Error parsing json body.  " +
                     "Will pass all payload bytes directly as a ByteBuf within the payload map").log();
                 jsonWasInvalid = true;
                 parsedJsonObjects.clear();
@@ -139,8 +139,7 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
                             context.onTextPayloadParseSucceeded();
                         } catch (CharacterCodingException e) {
                             context.onTextPayloadParseFailed();
-                            log.atDebug().setMessage("Payload not valid utf-8, fallback to binary")
-                                .setCause(e).log();
+                            log.atDebug().setCause(e).setMessage("Payload not valid utf-8, fallback to binary").log();
                             context.onPayloadSetBinary();
                             capturedHttpJsonMessage.payload()
                                 .put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,

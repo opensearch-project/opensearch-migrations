@@ -125,13 +125,8 @@ public class SourceTestBase {
                 );
                 throw new ExpectedMigrationWorkTerminationException(e, runNumber);
             } catch (Exception e) {
-                log.atError()
-                    .setCause(e)
-                    .setMessage(
-                        () -> "Caught an exception, "
-                            + "but just going to run again with this worker to simulate task/container recycling"
-                    )
-                    .log();
+                log.atError().setCause(e).setMessage("Caught an exception, " +
+                    "but just going to run again with this worker to simulate task/container recycling").log();
             }
         }
     }
@@ -166,7 +161,8 @@ public class SourceTestBase {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
         var shouldThrow = new AtomicBoolean();
         try (var processManager = new LeaseExpireTrigger(workItemId -> {
-            log.atDebug().setMessage("Lease expired for " + workItemId + " making next document get throw").log();
+            log.atDebug().setMessage("Lease expired for {} making next document get throw")
+                .addArgument(workItemId).log();
             shouldThrow.set(true);
         })) {
             UnaryOperator<RfsLuceneDocument> terminatingDocumentFilter = d -> {

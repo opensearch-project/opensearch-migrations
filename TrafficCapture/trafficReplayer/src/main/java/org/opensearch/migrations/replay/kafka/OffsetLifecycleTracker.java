@@ -56,12 +56,16 @@ class OffsetLifecycleTracker {
             if (offsetToRemove == topCursor) {
                 topCursor = Optional.ofNullable(pQueue.peek()).orElse(cursorHighWatermark + 1); // most recent cursor
                                                                                                 // was previously popped
-                log.atDebug()
-                    .setMessage("Commit called for " + offsetToRemove + ", and new topCursor=" + topCursor)
+                log.atDebug().setMessage("Commit called for {}, and new topCursor={}")
+                    .addArgument(offsetToRemove)
+                    .addArgument(topCursor)
                     .log();
                 return Optional.of(topCursor);
             } else {
-                log.atDebug().setMessage("Commit called for " + offsetToRemove + ", but topCursor=" + topCursor).log();
+                log.atDebug().setMessage("Commit called for {}, but topCursor={}")
+                    .addArgument(offsetToRemove)
+                    .addArgument(topCursor)
+                    .log();
                 return Optional.empty();
             }
         }

@@ -97,11 +97,10 @@ public class KafkaTestUtils {
                 );
                 log.info("sending record with trafficStream=" + tsKeyStr);
                 var sendFuture = kafkaProducer.send(record, (metadata, exception) -> {
-                    log.atInfo()
-                        .setCause(exception)
-                        .setMessage(
-                            () -> "completed send of TrafficStream with key=" + tsKeyStr + " metadata=" + metadata
-                        )
+                    log.atInfo().setCause(exception)
+                        .setMessage("completed send of TrafficStream with key={} metadata={}")
+                        .addArgument(tsKeyStr)
+                        .addArgument(metadata)
                         .log();
                 });
                 var recordMetadata = sendFuture.get();

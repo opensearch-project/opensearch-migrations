@@ -104,11 +104,10 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
                 randomize
             );
             var trafficStreams = streamAndConsumer.stream.collect(Collectors.toList());
-            log.atInfo()
-                .setMessage(
-                    () -> trafficStreams.stream()
-                        .map(TrafficStreamUtils::summarizeTrafficStream)
-                        .collect(Collectors.joining("\n"))
+            log.atInfo().setMessage("{}")
+                .addArgument(() -> trafficStreams.stream()
+                    .map(TrafficStreamUtils::summarizeTrafficStream)
+                    .collect(Collectors.joining("\n"))
                 )
                 .log();
 
@@ -145,7 +144,7 @@ public class KafkaRestartingTrafficReplayerTest extends InstrumentationTest {
         );
         kafkaConsumerProps.setProperty("max.poll.interval.ms", DEFAULT_POLL_INTERVAL_MS + "");
         var kafkaConsumer = new KafkaConsumer<String, byte[]>(kafkaConsumerProps);
-        log.atInfo().setMessage(() -> "Just built KafkaConsumer=" + kafkaConsumer).log();
+        log.atInfo().setMessage("Just built KafkaConsumer={}").addArgument(kafkaConsumer).log();
         return kafkaConsumer;
     }
 
