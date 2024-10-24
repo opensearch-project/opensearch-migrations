@@ -7,9 +7,6 @@ import java.util.Map;
 import java.util.ServiceLoader;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
-import java.util.stream.Stream;
-
-import org.opensearch.migrations.transform.JsonCompositePredicate.CompositeOperation;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -20,18 +17,18 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class PredicateLoader {
     public static final String WRONG_JSON_STRUCTURE_MESSAGE =
-        "Must specify the top-level configuration list with a sequence of "
-            + "maps that have only one key each, where the key is the name of the transformer to be configured.";
+        "Must specify the top-level configuration map"
+            + " that only has one key, where the key is the name of the Predicate to be configured.";
     public static final Pattern CLASS_NAME_PATTERN = Pattern.compile("^[^{}]*$");
     private final List<IJsonPredicateProvider> providers;
     ObjectMapper objMapper = new ObjectMapper();
 
     public PredicateLoader() {
-        ServiceLoader<IJsonPredicateProvider> transformerProviders = ServiceLoader.load(
+        ServiceLoader<IJsonPredicateProvider> predicateProviders = ServiceLoader.load(
             IJsonPredicateProvider.class
         );
         var inProgressProviders = new ArrayList<IJsonPredicateProvider>();
-        for (var provider : transformerProviders) {
+        for (var provider : predicateProviders) {
             log.info("Adding IJsonPredicateProvider: " + provider);
             inProgressProviders.add(provider);
         }
@@ -44,38 +41,34 @@ public class PredicateLoader {
             .log();
     }
 
-    List<Map<String, Object>> parseFullConfig(String fullConfig) throws JsonProcessingException {
+    Map<String, Object> parseFullConfig(String fullConfig) throws JsonProcessingException {
         if (CLASS_NAME_PATTERN.matcher(fullConfig).matches()) {
-            return List.of(Collections.singletonMap(fullConfig, null));
+            return Collections.singletonMap(fullConfig, null);
         } else {
-            return objMapper.readValue(fullConfig, new TypeReference<>() {
-            });
+            return objMapper.readValue(fullConfig, new TypeReference<>() {});
         }
     }
 
-    protected Stream<IJsonPredicate> getTransformerFactoryFromServiceLoader(String fullConfig)
+    protected IJsonPredicate getPredicateFactoryFromServiceLoader(String fullConfig)
         throws JsonProcessingException {
-        var configList = fullConfig == null ? List.of() : parseFullConfig(fullConfig);
-        if (configList.isEmpty() || providers.isEmpty()) {
-            log.warn("No transformer configuration specified.  No custom transformations will be performed");
-            return Stream.of();
-        } else {
-            return configList.stream().map(c -> configureTransformerFromConfig((Map<String, Object>) c));
-        }
+        Map<String, Object> configMap = fullConfig == null ? Map.of() : parseFullConfig(fullConfig);
+        return getPredicateFactoryFromServiceLoaderParsed(configMap);
     }
 
-    public Stream<IJsonPredicate> getTransformerFactoryFromServiceLoaderParsed(List<Object> configList) {
-        if (configList.isEmpty() || providers.isEmpty()) {
-            log.warn("No transformer configuration specified.  No custom transformations will be performed");
-            return Stream.of();
+    public IJsonPredicate getPredicateFactoryFromServiceLoaderParsed(Object config) {
+        @SuppressWarnings("unchecked")
+        var configMap = (Map<String, Object>) config;
+        if (configMap.isEmpty() || providers.isEmpty()) {
+            log.atError().setMessage("No predicate configuration found for configuration {}")
+                    .addArgument(config).log();
+            throw new IllegalArgumentException("No predicate configuration found for configuration " + config);
         } else {
-            return configList.stream().map(c -> configureTransformerFromConfig((Map<String, Object>) c));
+            return configurePredicateFromConfig(configMap);
         }
     }
-
 
     @SneakyThrows // JsonProcessingException should be impossible since the contents are those that were just parsed
-    private IJsonPredicate configureTransformerFromConfig(Map<String, Object> c) {
+    private IJsonPredicate configurePredicateFromConfig(Map<String, Object> c) {
         var keys = c.keySet();
         if (keys.size() != 1) {
             throw new IllegalArgumentException(WRONG_JSON_STRUCTURE_MESSAGE);
@@ -84,12 +77,12 @@ public class PredicateLoader {
             .findFirst()
             .orElseThrow(() -> new IllegalArgumentException(WRONG_JSON_STRUCTURE_MESSAGE));
         for (var p : providers) {
-            var transformerName = p.getName();
-            if (transformerName.equals(key)) {
+            var predicateName = p.getName();
+            if (predicateName.equals(key)) {
                 var configuration = c.get(key);
                 log.atInfo()
                     .setMessage(
-                        () -> "Creating a transformer through provider=" + p + " with configuration=" + configuration
+                        () -> "Creating a Predicate through provider=" + p + " with configuration=" + configuration
                     )
                     .log();
                 return p.createPredicate(configuration);
@@ -98,15 +91,11 @@ public class PredicateLoader {
         throw new IllegalArgumentException("Could not find a provider named: " + key);
     }
 
-    public IJsonPredicate getTransformerFactoryLoader(String fullConfig) {
+    public IJsonPredicate getPredicateFactoryLoader(String fullConfig) {
         try {
-            var loadedTransformers = getTransformerFactoryFromServiceLoader(fullConfig);
-            return new JsonCompositePredicate(
-                CompositeOperation.ALL,
-                loadedTransformers.toArray(IJsonPredicate[]::new)
-            );
+            return getPredicateFactoryFromServiceLoader(fullConfig);
         } catch (JsonProcessingException e) {
-            throw new IllegalArgumentException("Could not parse the transformer configuration as a json list", e);
+            throw new IllegalArgumentException("Could not parse the Predicate configuration as a json list", e);
         }
     }
 }
