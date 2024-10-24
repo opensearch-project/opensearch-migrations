@@ -431,13 +431,21 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                                 + " instead of 200"
                 );
             }
-            return objectMapper.readTree(response.getPayloadBytes()).path("hits").path("total").path("value").asInt();
+            var payload = objectMapper.readTree(response.getPayloadBytes());
+            var totalHits = payload.path("hits").path("total").path("value").asInt();
+            // In the case where totalHits is 0, we need to be particularly sure that we're not missing data. The `relation`
+            // for the total must be `eq` or we need to throw an error because it's not safe to rely on this data.
+            if (totalHits == 0 && !payload.path("hits").path("total").path("relation").textValue().equals("eq")) {
+                throw new IllegalStateException("Querying for notYetCompleted work returned 0 hits with an unexpected total relation.");
+            }
+            return totalHits;
         }
     }
 
     @Override
     public int numWorkItemsNotYetComplete(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
         throws IOException, InterruptedException {
+        // This result is not guaranteed to be accurate unless it is 0.  All numbers greater than 0 are a lower bound.
         return numWorkItemsNotYetCompleteInternal(contextSupplier);
     }
 
