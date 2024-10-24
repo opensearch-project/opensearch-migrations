@@ -156,9 +156,11 @@ def call(Map config = [:]) {
                                     def time = new Date().getTime()
                                     def uniqueId = "integ_min_${time}_${currentBuild.number}"
                                     def test_result_file = "${testDir}/reports/${uniqueId}/report.xml"
+                                    def populatedIntegTestCommand = integTestCommand.replaceAll("<STAGE>", stage)
                                     def command = "pipenv run pytest --log-file=${testDir}/reports/${uniqueId}/pytest.log " +
-                                            "--junitxml=${test_result_file} ${integTestCommand} " +
+                                            "--junitxml=${test_result_file} ${populatedIntegTestCommand} " +
                                             "--unique_id ${uniqueId} " +
+                                            "--stage ${stage} " +
                                             "-s"
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                         withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", duration: 3600, roleSessionName: 'jenkins-session') {
