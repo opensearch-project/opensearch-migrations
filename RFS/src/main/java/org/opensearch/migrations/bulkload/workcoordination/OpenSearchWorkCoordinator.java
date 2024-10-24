@@ -397,7 +397,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    private int numWorkItemsArePendingInternal(
+    private int numWorkItemsNotYetCompleteInternal(
         Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException {
         try (var context = contextSupplier.get()) {
@@ -436,15 +436,15 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     }
 
     @Override
-    public int numWorkItemsArePending(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
+    public int numWorkItemsNotYetComplete(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
         throws IOException, InterruptedException {
-        return numWorkItemsArePendingInternal(contextSupplier);
+        return numWorkItemsNotYetCompleteInternal(contextSupplier);
     }
 
     @Override
-    public boolean workItemsArePending(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
+    public boolean workItemsNotYetComplete(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
         throws IOException, InterruptedException {
-        return numWorkItemsArePendingInternal(contextSupplier) >= 1;
+        return numWorkItemsNotYetCompleteInternal(contextSupplier) >= 1;
     }
 
     enum UpdateResult {

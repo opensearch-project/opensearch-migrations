@@ -303,7 +303,7 @@ public class RfsMigrateDocuments {
             scopedWorkCoordinator,
             rootDocumentContext
         );
-        if (!workCoordinator.workItemsArePending(
+        if (!workCoordinator.workItemsNotYetComplete(
             rootDocumentContext.getWorkCoordinationContext()::createItemsPendingContext
         )) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
