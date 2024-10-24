@@ -25,7 +25,8 @@ ext {
 // Apply the version to all projects
 allprojects {
     version = finalVersion
-    group = 'org.opensearch.migrations.trafficcapture' // Ensure groupId is consistent
+    // This should eventually change, see https://opensearch.atlassian.net/browse/MIGRATIONS-2167
+    group = 'org.opensearch.migrations.trafficcapture'
 }
 
 subprojects { subproject ->
@@ -172,6 +173,9 @@ subprojects {
                 mavenJava(MavenPublication) {
                     versionMapping {
                         allVariants {
+                            // Test fixtures are published as a separate jar in maven
+                            // This ensures dependencies that are only declared in test
+                            // fixtures have a version number in the pom
                             if (project.plugins.hasPlugin('java-test-fixtures')) {
                                 fromResolutionOf('testFixturesRuntimeClasspath')
                             }
