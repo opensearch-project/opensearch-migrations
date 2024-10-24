@@ -3,27 +3,23 @@ package org.opensearch.migrations.data.workloads;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Random;
-import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
+
+import org.opensearch.migrations.data.IFieldCreator;
+import org.opensearch.migrations.data.IRandomDataBuilders;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-
-import static org.opensearch.migrations.data.FieldBuilders.DATE;
-import static org.opensearch.migrations.data.FieldBuilders.INTEGER;
-import static org.opensearch.migrations.data.FieldBuilders.KEYWORD;
-import static org.opensearch.migrations.data.FieldBuilders.TEXT;
-import static org.opensearch.migrations.data.FieldBuilders.createField;
-import static org.opensearch.migrations.data.RandomDataBuilders.randomElement;
-import static org.opensearch.migrations.data.RandomDataBuilders.randomTime;
+import lombok.extern.slf4j.Slf4j;
 
 /**
  * Workload based off of nested
  * https://github.com/opensearch-project/opensearch-benchmark-workloads/tree/main/nested
  */
-public class Nested implements Workload {
+@Slf4j
+public class Nested implements Workload, IFieldCreator, IRandomDataBuilders {
 
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final String[] USER_NAMES = {
@@ -49,29 +45,21 @@ public class Nested implements Workload {
      */
     @Override
     public ObjectNode createIndex(ObjectNode defaultSettings) {
-        var properties = mapper.createObjectNode();
-        properties.set("user", createField(KEYWORD));
-        properties.set("creationDate", createField(DATE));
-        properties.set("title", createField(TEXT));
-        properties.set("qid", createField(KEYWORD));
-        properties.set("tag", createField(KEYWORD));
-        properties.set("answer_count", createField(INTEGER));
-        var answers = createField("nested");
-        var answersProps = mapper.createObjectNode();
-        answers.set("properties", answersProps);
-        answersProps.set("user", createField(KEYWORD));
-        answersProps.set("date", createField(DATE));
-        properties.set("answers", answers);
-
-        var mappings = mapper.createObjectNode();
-        mappings.put("dynamic", "strict");
-        mappings.set("properties", properties);
-
-        var index = mapper.createObjectNode();
-        index.set("mappings", mappings);
-        index.set("settings", defaultSettings);
-
-        return index;
+        return mapper.createObjectNode()
+            .<ObjectNode>set("mappings", mapper.createObjectNode()
+                .<ObjectNode>put("dynamic", "strict")
+                .<ObjectNode>set("properties", mapper.createObjectNode()
+                    .<ObjectNode>set("user", fieldKeyword())
+                    .<ObjectNode>set("creationDate", fieldText())
+                    .<ObjectNode>set("title", fieldText())
+                    .<ObjectNode>set("qid", fieldKeyword())
+                    .<ObjectNode>set("tag", fieldKeyword())
+                    .<ObjectNode>set("answer_count", fieldInt())
+                    .<ObjectNode>set("answers",  fieldNested()
+                        .set("properties", mapper.createObjectNode()
+                            .<ObjectNode>set("user", fieldKeyword())
+                            .<ObjectNode>set("date", fieldDate())))))
+            .<ObjectNode>set("settings", defaultSettings);
     }
 
     /**
@@ -100,38 +88,36 @@ public class Nested implements Workload {
             .mapToObj(i -> {
                 var random = new Random(i);
                 var creationTime = randomTime(currentTime, random);
-                var doc = mapper.createObjectNode();
-                doc.put("title", randomTitle(random));
-                doc.put("qid", (i + 1000) + "");
-                doc.set("answers", randomAnswers(mapper, creationTime, random));
-                doc.set("tag", randomTags(random));
-                doc.put("user", randomUser(random));
-                doc.put("creationDate", creationTime);
-                return doc;
+                return mapper.createObjectNode()
+                    .<ObjectNode>put("title", randomTitle(random))
+                    .<ObjectNode>put("qid", (i + 1000) + "")
+                    .<ObjectNode>set("answers", randomAnswers(mapper, creationTime, random))
+                    .<ObjectNode>set("tag", randomTags(random))
+                    .<ObjectNode>put("user", randomUser(random))
+                    .<ObjectNode>put("creationDate", creationTime);
             }
         );
     }
 
-    private static ArrayNode randomAnswers(ObjectMapper mapper, long timeFrom, Random random) {
+    private ArrayNode randomAnswers(ObjectMapper mapper, long timeFrom, Random random) {
         var answers = mapper.createArrayNode();
         var numAnswers = random.nextInt(5) + 1;
 
         for (int i = 0; i < numAnswers; i++) {
-            var answer = mapper.createObjectNode();
-            answer.put("date", randomTime(timeFrom, random));
-            answer.put("user", randomUser(random));
-
+            var answer = mapper.createObjectNode()
+                .put("date", randomTime(timeFrom, random))
+                .put("user", randomUser(random));
             answers.add(answer);
         }
         return answers;
     }
 
-    private static String randomUser(Random random) {
+    private String randomUser(Random random) {
         // Extra random int simulates more users
         return randomElement(USER_NAMES, random) + " (" + (random.nextInt(10) + 1000) + ")";
     }
 
-    private static ArrayNode randomTags(Random random) {
+    private ArrayNode randomTags(Random random) {
         var tags = mapper.createArrayNode();
         var tagsToCreate = random.nextInt(3) + 1;
 
@@ -141,13 +127,13 @@ public class Nested implements Workload {
         return tags;
     }
 
-    private static String randomTitle(Random random) {
+    private String randomTitle(Random random) {
         var titleWordLength = random.nextInt(5);
         var words = new ArrayList<String>();
 
         for (int i = 0; i < titleWordLength; i++) {
             words.add(randomElement(WORDS, random) + "" + random.nextInt(10)); // Extra random int simulates more words
         }
-        return words.stream().collect(Collectors.joining(" "));
+        return String.join(" ", words);
     }
 }

@@ -373,6 +373,8 @@ public class OpenSearchClient {
                     if (!resp.hasBadStatusCode() && !resp.hasFailedOperations()) {
                         return Mono.just(resp);
                     }
+                    log.atDebug().setMessage("Response has some errors...: {}").addArgument(response.body).log();
+                    log.atDebug().setMessage("... for request: {}").addArgument(body).log();
                     // Remove all successful documents for the next bulk request attempt
                     var successfulDocs = resp.getSuccessfulDocs();
                     successfulDocs.forEach(docsMap::remove);
