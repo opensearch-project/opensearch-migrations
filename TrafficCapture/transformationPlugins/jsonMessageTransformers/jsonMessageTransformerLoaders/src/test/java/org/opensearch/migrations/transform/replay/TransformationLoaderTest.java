@@ -1,6 +1,8 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.transform.replay;
 
 import java.util.Map;
+
+import org.opensearch.migrations.transform.TransformationLoader;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;

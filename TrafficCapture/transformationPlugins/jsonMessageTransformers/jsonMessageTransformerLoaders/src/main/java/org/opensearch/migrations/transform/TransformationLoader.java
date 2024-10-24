@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.transform;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -9,11 +9,6 @@ import java.util.ServiceLoader;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
-
-import org.opensearch.migrations.transform.IJsonTransformer;
-import org.opensearch.migrations.transform.IJsonTransformerProvider;
-import org.opensearch.migrations.transform.JsonCompositeTransformer;
-import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -58,9 +53,18 @@ public class TransformationLoader {
         }
     }
 
-    protected Stream<IJsonTransformer> getTransformerFactoryFromServiceLoader(String fullConfig)
+    public Stream<IJsonTransformer> getTransformerFactoryFromServiceLoader(String fullConfig)
         throws JsonProcessingException {
         var configList = fullConfig == null ? List.of() : parseFullConfig(fullConfig);
+        if (configList.isEmpty() || providers.isEmpty()) {
+            log.warn("No transformer configuration specified.  No custom transformations will be performed");
+            return Stream.of();
+        } else {
+            return configList.stream().map(c -> configureTransformerFromConfig((Map<String, Object>) c));
+        }
+    }
+
+    public Stream<IJsonTransformer> getTransformerFactoryFromServiceLoaderParsed(List<Object> configList) {
         if (configList.isEmpty() || providers.isEmpty()) {
             log.warn("No transformer configuration specified.  No custom transformations will be performed");
             return Stream.of();
