@@ -5,6 +5,9 @@ import java.nio.charset.StandardCharsets;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
 import java.util.Optional;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
@@ -37,7 +40,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String CLIENT_TIMESTAMP_TEMPLATE = "{CLIENT_TIMESTAMP}";
     public static final String EXPIRATION_WINDOW_TEMPLATE = "{EXPIRATION_WINDOW}";
     public static final String CLOCK_DEVIATION_SECONDS_THRESHOLD_TEMPLATE = "{CLOCK_DEVIATION_SECONDS_THRESHOLD}";
-    public static final String OLD_EXPIRATION_THRESHOLD_TEMPLATE = "OLD_EXPIRATION_THRESHOLD";
+    public static final String OLD_EXPIRATION_THRESHOLD_TEMPLATE = "{OLD_EXPIRATION_THRESHOLD}";
+    public static final String SUCCESSOR_WORK_ITEM_IDS_TEMPLATE = "{SUCCESSOR_WORK_ITEM_IDS}";
 
     public static final String RESULT_OPENSSEARCH_FIELD_NAME = "result";
     public static final String EXPIRATION_FIELD_NAME = "expiration";
@@ -46,6 +50,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String VERSION_CONFLICTS_FIELD_NAME = "version_conflicts";
     public static final String COMPLETED_AT_FIELD_NAME = "completedAt";
     public static final String SOURCE_FIELD_NAME = "_source";
+    public static final String SUCCESSOR_ITEMS_FIELD_NAME = "successor_items";
 
     public static final String QUERY_INCOMPLETE_EXPIRED_ITEMS_STR = "    \"query\": {\n"
         + "      \"bool\": {"
@@ -138,6 +143,10 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "      \"status\": {\n"
             + "        \"type\": \"keyword\",\n"
             + "        \"norms\": false\n"
+            + "      },\n"
+            + "     \"" + SUCCESSOR_ITEMS_FIELD_NAME + "\": {\n"
+            + "       \"type\": \"keyword\",\n"
+            + "        \"norms\": false\n"
             + "      }\n"
             + "    }\n"
             + "  }\n"
@@ -227,14 +236,12 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");"
             + "      }"
             + "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);"
-            + "      if (params.expirationWindow > 0 && "
-            +                 // don't obtain a lease lock
-            "          ctx._source." + COMPLETED_AT_FIELD_NAME + " == null) {"
-            +              // already done
-            "        if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " == params.workerId && "
+            + "      if (params.expirationWindow > 0 && ctx._source." + COMPLETED_AT_FIELD_NAME + " == null) {"
+            +          // already done
+            "          if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " == params.workerId && "
             + "            ctx._source." + EXPIRATION_FIELD_NAME + " > serverTimeSeconds) {"
             + // count as an update to force the caller to lookup the expiration time, but no need to modify it
-            "          ctx.op = \\\"update\\\";"
+            "            ctx.op = \\\"update\\\";"
             + "        } else if (ctx._source." + EXPIRATION_FIELD_NAME + " < serverTimeSeconds && " + // is expired
             "                     ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +      // sanity check
             "            ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;"
@@ -321,7 +328,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             var resultFromUpdate = getResult(updateResponse);
 
             if (resultFromUpdate == DocumentModificationResult.CREATED) {
-                return new WorkItemAndDuration(workItemId, startTime.plus(leaseDuration));
+                return new WorkItemAndDuration(workItemId, startTime.plus(leaseDuration), new ArrayList<>()); // todo
             } else {
                 final var httpResponse = httpClient.makeJsonRequest(
                     AbstractedHttpClient.GET_METHOD,
@@ -333,7 +340,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 if (resultFromUpdate == DocumentModificationResult.UPDATED) {
                     return new WorkItemAndDuration(
                         workItemId,
-                        Instant.ofEpochMilli(1000 * responseDoc.path(EXPIRATION_FIELD_NAME).longValue())
+                        Instant.ofEpochMilli(1000 * responseDoc.path(EXPIRATION_FIELD_NAME).longValue()),
+                        new ArrayList<String>() // todo
                     );
                 } else if (!responseDoc.path(COMPLETED_AT_FIELD_NAME).isMissingNode()) {
                     return new AlreadyCompleted();
@@ -596,7 +604,9 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 "Expiration wasn't found or wasn't set to > 0 for response:" + response.toDiagnosticString()).log();
             throw new MalformedAssignedWorkDocumentException(response);
         }
-        var rval = new WorkItemAndDuration(resultHitInner.get("_id").asText(), Instant.ofEpochMilli(1000 * expiration));
+
+        var successorItems = resultHitInner.has(SUCCESSOR_ITEMS_FIELD_NAME) ? new ArrayList<>(Arrays.asList(resultHitInner.get(SUCCESSOR_ITEMS_FIELD_NAME).asText().split(","))) : new ArrayList<String>();
+        var rval = new WorkItemAndDuration(resultHitInner.get("_id").asText(), Instant.ofEpochMilli(1000 * expiration), successorItems);
         log.atInfo().setMessage(() -> "Returning work item and lease: " + rval).log();
         return rval;
     }
@@ -637,6 +647,103 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     + "Backing off " + sleepBeforeNextRetryDuration + "ms and trying again.").setCause(e).log();
                 Thread.sleep(sleepBeforeNextRetryDuration.toMillis());
             }
+        }
+    }
+
+    private void updateWorkItemWithSuccessors(String workItemId, ArrayList<String> successorWorkItemIds) throws IOException {
+        final var updateSuccessorWorkItemsTemplate = "{\n"
+                + "  \"script\": {\n"
+                + "    \"lang\": \"painless\",\n"
+                + "    \"params\": { \n"
+                + "      \"clientTimestamp\": " + CLIENT_TIMESTAMP_TEMPLATE + ",\n"
+                + "      \"workerId\": \"" + WORKER_ID_TEMPLATE + "\",\n"
+                + "      \"successorWorkItems\": \"" + SUCCESSOR_WORK_ITEM_IDS_TEMPLATE + "\"\n"
+                + "    },\n"
+                + "    \"source\": \""
+                + "      if (ctx._source.scriptVersion != \\\"" + SCRIPT_VERSION_TEMPLATE + "\\\") {"
+                + "        throw new IllegalArgumentException(\\\"scriptVersion mismatch.  Not all participants are using the same script: sourceVersion=\\\" + ctx.source.scriptVersion);"
+                + "      } "
+                + "      if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " != params.workerId) {"
+                + "        throw new IllegalArgumentException(\\\"work item was owned by \\\" + ctx._source."
+                +                        LEASE_HOLDER_ID_FIELD_NAME + " + \\\" not \\\" + params.workerId);"
+                + "      } else {"
+                + "        ctx._source." + SUCCESSOR_ITEMS_FIELD_NAME + " = params.successorWorkItems;"
+                + "     }"
+                + "\"\n"
+                + "  }\n"
+                + "}";
+
+        var body = updateSuccessorWorkItemsTemplate.replace(SCRIPT_VERSION_TEMPLATE, "poc")
+                .replace(WORKER_ID_TEMPLATE, workerId)
+                .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().toEpochMilli() / 1000))
+                .replace(SUCCESSOR_WORK_ITEM_IDS_TEMPLATE, String.join(",", successorWorkItemIds));
+
+        var response = httpClient.makeJsonRequest(
+                AbstractedHttpClient.POST_METHOD,
+                INDEX_NAME + "/_update/" + workItemId,
+                null,
+                body
+        );
+        if (DocumentModificationResult.UPDATED != getResult(response)) {
+            throw new IllegalStateException(
+                    "Unexpected response for workItemId: "
+                            + workItemId
+                            + ".  Response: "
+                            + response.toDiagnosticString()
+            );
+        }
+    }
+
+    // This is a idempotent function to create multiple unassigned work items. It uses the `create` function in the bulk API
+    // which creates a document only if the specified ID doesn't yet exist.
+    public void createUnassignedWorkItemsIfNonexistent(ArrayList<String> workItemIds) throws IOException, InterruptedException, ResponseException {
+        String workItemBodyTemplate = "{\"numAttempts\":0, \"scriptVersion\":\"" + SCRIPT_VERSION_TEMPLATE + "\", " +
+            "\"creatorId\":\"" + WORKER_ID_TEMPLATE + "\", \"" + EXPIRATION_FIELD_NAME + "\":0 }";
+        String workItemBody = workItemBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, "poc").replace(WORKER_ID_TEMPLATE, workerId);
+
+        StringBuilder body = new StringBuilder();
+        for (var workItemId : workItemIds) {
+            body.append("{\"create\":{\"_id\":\"").append(workItemId).append("\"}}\n");
+            body.append(workItemBody).append("\n");
+        }
+        var response = httpClient.makeJsonRequest(
+                AbstractedHttpClient.POST_METHOD,
+                INDEX_NAME + "/_bulk",
+                null,
+                body.toString()
+        );
+        var statusCode = response.getStatusCode();
+        if (statusCode != 200) {
+            throw new ResponseException(response); // todo
+        }
+        // parse the response body and if any of the writes failed with anything EXCEPT a version conflict, throw an exception
+        var resultTree = objectMapper.readTree(response.getPayloadBytes());
+        var errors = resultTree.path("errors").asBoolean();
+        if (!errors) {
+            return;
+        }
+        var acceptableErrorCodes = List.of(201, 409);
+
+        var createResults = new ArrayList<Boolean>();
+        resultTree.path("items").elements().forEachRemaining(
+                item -> createResults.add(acceptableErrorCodes.contains(item.path("create").path("status").asInt()))
+        );
+        if (createResults.contains(false)) {
+            throw new ResponseException(response);
+        }
+
+    }
+
+    public void createSuccessorWorkItemsAndMarkComplete(
+            String workItemId,
+            ArrayList<String> successorWorkItemIds,
+            Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
+    ) throws IOException, InterruptedException, ResponseException {
+        try (var ctx = contextSupplier.get()) {
+            updateWorkItemWithSuccessors(workItemId, successorWorkItemIds);
+            createUnassignedWorkItemsIfNonexistent(successorWorkItemIds);
+            completeWorkItem(workItemId, ctx::getCompleteWorkItemContext);
+            refresh(ctx::getRefreshContext);
         }
     }
 

@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
@@ -170,6 +171,7 @@ public interface IWorkCoordinator extends AutoCloseable {
     class WorkItemAndDuration implements WorkAcquisitionOutcome {
         final String workItemId;
         final Instant leaseExpirationTime;
+        final ArrayList<String> successorWorkItems;
 
         @Override
         public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException, InterruptedException {
