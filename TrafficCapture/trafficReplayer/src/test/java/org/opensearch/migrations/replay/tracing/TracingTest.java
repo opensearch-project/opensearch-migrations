@@ -7,18 +7,17 @@ import java.util.List;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import io.opentelemetry.sdk.metrics.data.MetricData;
-import io.opentelemetry.sdk.trace.data.SpanData;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.tracing.TestContext;
 
+import io.opentelemetry.sdk.metrics.data.MetricData;
+import io.opentelemetry.sdk.trace.data.SpanData;
 import lombok.Lombok;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 public class TracingTest extends InstrumentationTest {
 

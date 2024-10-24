@@ -5,6 +5,8 @@ import java.util.Optional;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.Utils;
+
 import io.opentelemetry.api.OpenTelemetry;
 import io.opentelemetry.api.metrics.MeterProvider;
 import io.opentelemetry.api.trace.Span;
@@ -19,9 +21,6 @@ import io.opentelemetry.sdk.resources.Resource;
 import io.opentelemetry.sdk.trace.SdkTracerProvider;
 import io.opentelemetry.sdk.trace.export.BatchSpanProcessor;
 import io.opentelemetry.semconv.ResourceAttributes;
-
-import org.opensearch.migrations.Utils;
-
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;

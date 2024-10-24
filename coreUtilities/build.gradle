@@ -27,8 +27,6 @@ java.sourceCompatibility = JavaVersion.VERSION_11
 java.targetCompatibility = JavaVersion.VERSION_11
 
 dependencies {
-    api project(":commonDependencyVersionConstraints")
-
     implementation group: "com.google.protobuf", name: "protobuf-java"
     implementation group: 'org.slf4j', name: 'slf4j-api'
 

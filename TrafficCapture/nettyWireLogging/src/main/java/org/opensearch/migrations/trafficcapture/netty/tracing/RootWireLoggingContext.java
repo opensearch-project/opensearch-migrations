@@ -1,10 +1,9 @@
 package org.opensearch.migrations.trafficcapture.netty.tracing;
 
-import io.opentelemetry.api.OpenTelemetry;
-
 import org.opensearch.migrations.tracing.IContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
 
+import io.opentelemetry.api.OpenTelemetry;
 import lombok.Getter;
 
 @Getter

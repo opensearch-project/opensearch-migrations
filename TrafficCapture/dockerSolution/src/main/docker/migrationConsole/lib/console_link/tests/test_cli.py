@@ -10,7 +10,7 @@ import console_link.middleware as middleware
 from console_link.cli import cli
 from console_link.environment import Environment
 from console_link.models.backfill_rfs import ECSRFSBackfill
-from console_link.models.cluster import Cluster
+from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
 from console_link.models.ecs_service import ECSService, InstanceStatuses
 from console_link.models.kafka import StandardKafka
@@ -221,6 +221,86 @@ def test_cli_cluster_run_test_benchmarks_without_source_raises_error(runner, moc
     middleware_mock.assert_not_called()
     model_mock.assert_not_called()
     assert result.exit_code == 2
+
+
+def test_cli_cluster_run_curl_source_cluster(runner, mocker):
+    middleware_mock = mocker.spy(middleware.clusters, 'call_api')
+    model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
+    json_body = '{"id": 3, "number": 5}'
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
+                                 'source_cluster', 'new_index/_doc', '-XPOST', '--json', json_body],
+                           catch_exceptions=True)
+    middleware_mock.assert_called_once()
+    model_mock.assert_called_once()
+    assert model_mock.call_args.kwargs == {'path': '/new_index/_doc', 'method': HttpMethod.POST,
+                                           'data': '{"id": 3, "number": 5}',
+                                           'headers': {'Content-Type': 'application/json'},
+                                           'timeout': None, 'session': None, 'raise_error': False}
+    assert result.exit_code == 0
+
+
+def test_cli_cluster_run_curl_target_cluster(runner, mocker):
+    middleware_mock = mocker.spy(middleware.clusters, 'call_api')
+    model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
+                                 'target_cluster', '/_cat/indices', '-XGET', '-H', 'user-agent:TestAgent'],
+                           catch_exceptions=True)
+    middleware_mock.assert_called_once()
+    model_mock.assert_called_once()
+    assert model_mock.call_args.kwargs == {'path': '/_cat/indices', 'method': HttpMethod.GET,
+                                           'data': None, 'headers': {'user-agent': 'TestAgent'}, 'timeout': None,
+                                           'session': None, 'raise_error': False}
+    assert result.exit_code == 0
+
+
+def test_cli_cluster_run_curl_undefined_cluster(runner, mocker, source_cluster_only_yaml_path):
+    middleware_mock = mocker.spy(middleware.clusters, 'call_api')
+    model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
+    result = runner.invoke(cli, ['--config-file', str(source_cluster_only_yaml_path), 'clusters', 'curl',
+                                 'target_cluster', '/_cat/indices'],
+                           catch_exceptions=True)
+    middleware_mock.assert_not_called()
+    model_mock.assert_not_called()
+    assert result.exit_code == 2
+
+
+def test_cli_cluster_run_curl_bad_json(runner, mocker):
+    middleware_mock = mocker.spy(middleware.clusters, 'call_api')
+    model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
+    malformed_json = '{"id": 3, "number": "5}'
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
+                                 'source_cluster', '/new-index', '-XPOST', '--json', malformed_json],
+                           catch_exceptions=True)
+    middleware_mock.assert_not_called()
+    model_mock.assert_not_called()
+    assert result.exit_code == 2
+
+
+def test_cli_cluster_run_curl_bad_headers(runner, mocker):
+    middleware_mock = mocker.spy(middleware.clusters, 'call_api')
+    model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
+                                 'source_cluster', '/new-index', '-H', 'key=value'],
+                           catch_exceptions=True)
+    middleware_mock.assert_not_called()
+    model_mock.assert_not_called()
+    assert result.exit_code == 2
+
+
+def test_cli_cluster_run_curl_multiple_headers(runner, mocker):
+    middleware_mock = mocker.spy(middleware.clusters, 'call_api')
+    model_mock = mocker.patch.object(Cluster, 'call_api', autospec=True)
+    headers = [('key1', 'value1'), ('key2', 'value2')]
+    result = runner.invoke(cli, ['--config-file', str(VALID_SERVICES_YAML), 'clusters', 'curl',
+                                 'target_cluster', '/', '-H', f"{headers[0][0]}:{headers[0][1]}",
+                                 "-H", f"{headers[1][0]}:{headers[1][1]}"],
+                           catch_exceptions=True)
+    middleware_mock.assert_called_once()
+    model_mock.assert_called_once()
+    assert model_mock.call_args.kwargs == {'path': '/', 'method': HttpMethod.GET,
+                                           'data': None, 'headers': {k: v for k, v in headers}, 'timeout': None,
+                                           'session': None, 'raise_error': False}
+    assert result.exit_code == 0
 
 
 def test_cli_cluster_clear_indices(runner, mocker):

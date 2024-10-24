@@ -20,8 +20,6 @@ def calculateDockerHash = { projectName ->
 }
 
 dependencies {
-    api project(":commonDependencyVersionConstraints")
-
     implementation project(':TrafficCapture:trafficCaptureProxyServer')
     compileOnly 'org.projectlombok:lombok:1.18.28'
     annotationProcessor 'org.projectlombok:lombok:1.18.28'
@@ -45,12 +43,12 @@ configurations {
 
 
 def dockerFilesForExternalServices = [
-        "nginx": "nginx-perf-test-webserver"
+        "nginx_perf_test_webserver": "nginx"
 ]
 
 // Create the static docker files that aren't hosting migrations java code from this repo
-dockerFilesForExternalServices.each { projectName, dockerImageName ->
-    task("buildDockerImage_${projectName}", type: DockerBuildImage) {
+dockerFilesForExternalServices.each { dockerImageName, projectName ->
+    task("buildDockerImage_${dockerImageName}", type: DockerBuildImage) {
         def hash = calculateDockerHash(projectName)
         images.add("migrations/${dockerImageName}:$hash")
         images.add("migrations/${dockerImageName}:latest")
@@ -59,41 +57,44 @@ dockerFilesForExternalServices.each { projectName, dockerImageName ->
 }
 
 def javaContainerServices = [
-        ":TrafficCapture:trafficCaptureProxyServerTest": "jmeter"
+        "jmeter": ":TrafficCapture:trafficCaptureProxyServerTest"
 ]
 def baseImageProjectOverrides = [
-        "nginx": "nginx-perf-test-webserver"
+        "nginx": "nginx_perf_test_webserver"
 ]
 
-def createContainerTasks = { projectName, dockerImageName ->
+def createContainerTasks = { dockerImageName, projectName ->
     def sourceArtifactProject = project(projectName);
-    CommonUtils.copyArtifactFromProjectToProjectsDockerStaging(project, sourceArtifactProject)
-    CommonUtils.createDockerfile(project, sourceArtifactProject, baseImageProjectOverrides, dockerFilesForExternalServices)
+    CommonUtils.copyArtifactFromProjectToProjectsDockerStaging(project, sourceArtifactProject, dockerImageName)
+    CommonUtils.createDockerfile(project, sourceArtifactProject, baseImageProjectOverrides[dockerImageName], dockerFilesForExternalServices, dockerImageName)
 }
 
 javaContainerServices.each(createContainerTasks)
 
-(javaContainerServices).forEach { projectName, dockerImageName ->
+(javaContainerServices).forEach { dockerImageName, projectName ->
     def escapedProjectName = project(projectName).name;
-    def dockerBuildDir = "build/docker/${escapedProjectName}"
-    task "buildDockerImage_${escapedProjectName}"(type: DockerBuildImage) {
-        dependsOn "createDockerfile_${escapedProjectName}"
+    def dockerBuildDir = "build/docker/${dockerImageName}_${escapedProjectName}"
+    task "buildDockerImage_${dockerImageName}"(type: DockerBuildImage) {
+        dependsOn "createDockerfile_${dockerImageName}"
         inputDir = project.file("${dockerBuildDir}")
         images.add("migrations/${dockerImageName}:${version}")
         images.add("migrations/${dockerImageName}:latest")
     }
 }
 
-
-
 dockerCompose {
     useComposeFiles.add("src/main/docker/docker-compose.yml")
 }
 
 task buildDockerImages {
-    dependsOn(':TrafficCapture:dockerSolution:buildDockerImage_trafficCaptureProxyServer')
-    dependsOn buildDockerImage_nginx
-    dependsOn buildDockerImage_trafficCaptureProxyServerTest
+    dependsOn ':TrafficCapture:dockerSolution:buildDockerImage_capture_proxy'
+    dependsOn buildDockerImage_nginx_perf_test_webserver
+    dependsOn buildDockerImage_jmeter
+}
+
+tasks.named('copyArtifact_jmeter') {
+    // Add dependency on inter-project dependencies from above dependencies
+    dependsOn ':TrafficCapture:trafficCaptureProxyServer:build'
 }
 
 tasks.getByName('composeUp')

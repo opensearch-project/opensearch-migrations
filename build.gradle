@@ -13,6 +13,20 @@ allprojects {
     }
 }
 
+subprojects { subproject ->
+    subproject.afterEvaluate {
+        if (subproject.plugins.hasPlugin('java') && subproject.name != 'commonDependencyVersionConstraints') {
+            subproject.dependencies {
+                implementation project(":commonDependencyVersionConstraints")
+                annotationProcessor project(":commonDependencyVersionConstraints")
+                if (subproject.plugins.hasPlugin('java-test-fixtures')) {
+                    testFixturesImplementation project(":commonDependencyVersionConstraints")
+                }
+            }
+        }
+    }
+}
+
 task buildDockerImages() {
     dependsOn(':TrafficCapture:dockerSolution:buildDockerImages')
     dependsOn(':DocumentsFromSnapshotMigration:buildDockerImages')
@@ -34,6 +48,11 @@ spotless {
         indentWithSpaces()
         endWithNewline()
     }
+    json {
+        target 'deployment/cdk/opensearch-service-migration/*.json'
+        prettier()
+        endWithNewline()
+    }
 }
 
 subprojects {
@@ -42,17 +61,18 @@ subprojects {
     apply plugin: 'maven-publish'
     apply plugin: "com.diffplug.spotless"
 
+    // See https://github.com/diffplug/spotless/tree/main/plugin-gradle#java for some documentation,
+    // though what '#' does is still undocumented from what I can tell
     spotless {
         java {
             target "**/*.java"
             targetExclude '**/build/**', ".gradle/**"
             importOrder(
-                'java|javax',
-                'io.opentelemetry|com.google|com.fasterxml|org.apache|org.hamcrest|org.junit',
-                'org.opensearch',
-                '',
-                '\\#java|\\#org.apache|\\#org.hamcrest|\\#org.opensearch|\\#'
-            )
+                    'javax',
+                    'java',
+                    'org.opensearch',
+                    '',
+                    '\\#')
             indentWithSpaces()
             endWithNewline()
             removeUnusedImports()
@@ -135,6 +155,12 @@ subprojects {
         publishing {
             publications {
                 mavenJava(MavenPublication) {
+                    versionMapping {
+                        allVariants {
+                            fromResolutionResult()
+                        }
+                    }
+
                     from components.java
                     artifact javadocJar
                     artifact sourcesJar

@@ -86,7 +86,7 @@ public class AggregatedRawResult {
 
     public ByteBuf getResponseAsByteBuf() {
         return packets == null ? Unpooled.EMPTY_BUFFER :
-            ByteBufList.asCompositeByteBufRetained(packets.stream()
+            ByteBufList.asCompositeByteBuf(packets.stream()
                     .map(Map.Entry::getValue).map(Unpooled::wrappedBuffer))
                 .asReadOnly();
     }

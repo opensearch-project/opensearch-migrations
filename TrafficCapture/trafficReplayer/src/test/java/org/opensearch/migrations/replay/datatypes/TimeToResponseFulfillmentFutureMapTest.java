@@ -3,10 +3,10 @@ package org.opensearch.migrations.replay.datatypes;
 import java.time.Duration;
 import java.time.Instant;
 
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-
-import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
 class TimeToResponseFulfillmentFutureMapTest {

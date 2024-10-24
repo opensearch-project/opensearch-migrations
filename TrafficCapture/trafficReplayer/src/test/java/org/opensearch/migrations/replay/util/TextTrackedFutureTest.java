@@ -4,12 +4,11 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 
 import lombok.SneakyThrows;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
 class TextTrackedFutureTest {

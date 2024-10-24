@@ -15,10 +15,6 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
 
-import org.hamcrest.MatcherAssert;
-import org.hamcrest.Matchers;
-import org.junit.jupiter.api.Assertions;
-
 import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
@@ -44,6 +40,9 @@ import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.hamcrest.MatcherAssert;
+import org.hamcrest.Matchers;
+import org.junit.jupiter.api.Assertions;
 import reactor.core.publisher.Flux;
 
 @Slf4j

@@ -25,6 +25,7 @@ import {
 } from "./common-utilities";
 import {ReindexFromSnapshotStack} from "./service-stacks/reindex-from-snapshot-stack";
 import {ClientOptions, ClusterYaml, ServicesYaml} from "./migration-services-yaml";
+import { CdkLogger } from "./cdk-logger";
 
 export interface StackPropsExt extends StackProps {
     readonly stage: string,
@@ -70,7 +71,7 @@ export class StackComposer {
                     return JSON.parse(option)
                 } catch (e) {
                     if (e instanceof SyntaxError) {
-                        console.error(`Unable to parse option: ${optionName} with expected type: ${expectedType}`)
+                        CdkLogger.error(`Unable to parse option: ${optionName} with expected type: ${expectedType}`)
                     }
                     throw e
                 }
@@ -144,9 +145,7 @@ export class StackComposer {
             throw new Error("Required context field 'contextId' not provided")
         }
         const contextJSON = this.parseContextBlock(scope, contextId)
-        console.log('Received following context block for deployment: ')
-        console.log(contextJSON)
-        console.log('End of context block.')
+        CdkLogger.info(`Context block for '${contextId}':\n---\n${JSON.stringify(contextJSON, null, 3)}\n---`);
 
         const stage = this.getContextForType('stage', 'string', defaultValues, contextJSON)
 
@@ -210,7 +209,10 @@ export class StackComposer {
         const otelCollectorEnabled = this.getContextForType('otelCollectorEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotServiceEnabled = this.getContextForType('reindexFromSnapshotServiceEnabled', 'boolean', defaultValues, contextJSON)
         const reindexFromSnapshotExtraArgs = this.getContextForType('reindexFromSnapshotExtraArgs', 'string', defaultValues, contextJSON)
+        const reindexFromSnapshotMaxShardSizeGiB = this.getContextForType('reindexFromSnapshotMaxShardSizeGiB', 'number', defaultValues, contextJSON)
+        const reindexFromSnapshotWorkerSize = this.getContextForType('reindexFromSnapshotWorkerSize', 'string', defaultValues, contextJSON)
         const albAcmCertArn = this.getContextForType('albAcmCertArn', 'string', defaultValues, contextJSON);
+        const managedServiceSourceSnapshotEnabled = this.getContextForType('managedServiceSourceSnapshotEnabled', 'boolean', defaultValues, contextJSON)
 
         // We're in a transition state from an older model with limited, individually defined fields and heading towards objects
         // that fully define the source and target cluster configurations. For the time being, we're supporting both.
@@ -219,27 +221,39 @@ export class StackComposer {
         let sourceClusterDefinition = this.getContextForType('sourceCluster', 'object', defaultValues, contextJSON)
 
         if (!sourceClusterDefinition && (sourceClusterEndpointField || sourceClusterDisabledField)) {
-            console.warn("`sourceClusterDisabled` and `sourceClusterEndpoint` are being deprecated in favor of a `sourceCluster` object.")
-            console.warn("Please update your CDK context block to use the `sourceCluster` object.")
+            CdkLogger.warn("`sourceClusterDisabled` and `sourceClusterEndpoint` are being deprecated in favor of a `sourceCluster` object.")
+            CdkLogger.warn("Please update your CDK context block to use the `sourceCluster` object.")
+            CdkLogger.warn("Defaulting to source cluster version: ES_7.10")
             sourceClusterDefinition = {
                 "disabled": sourceClusterDisabledField,
                 "endpoint": sourceClusterEndpointField,
-                "auth": {"type": "none"}
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
             }
         }
         const sourceClusterDisabled = !!sourceClusterDefinition?.disabled
         const sourceCluster = (sourceClusterDefinition && !sourceClusterDisabled) ? parseClusterDefinition(sourceClusterDefinition) : undefined
+        if (sourceCluster) {
+            if (!sourceCluster.version) {
+                throw new Error("The `sourceCluster` object requires a `version` field.")
+            }
+        }
         const sourceClusterEndpoint = sourceCluster?.endpoint
+
+        if (managedServiceSourceSnapshotEnabled && !sourceCluster?.auth.sigv4) {
+            throw new Error("A managed service source snapshot is only compatible with sigv4 authentication. If you would like to proceed" +
+                " please disable `managedServiceSourceSnapshotEnabled` and provide your own snapshot of the source cluster.")
+        }
 
         const targetClusterEndpointField = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
         let targetClusterDefinition = this.getContextForType('targetCluster', 'object', defaultValues, contextJSON)
         const usePreexistingTargetCluster = !!(targetClusterEndpointField || targetClusterDefinition)
         if (!targetClusterDefinition && usePreexistingTargetCluster) {
-            console.warn("`targetClusterEndpoint` is being deprecated in favor of a `targetCluster` object.")
-            console.warn("Please update your CDK context block to use the `targetCluster` object.")
+            CdkLogger.warn("`targetClusterEndpoint` is being deprecated in favor of a `targetCluster` object.")
+            CdkLogger.warn("Please update your CDK context block to use the `targetCluster` object.")
             let auth: any = {"type": "none"}
             if (fineGrainedManagerUserName || fineGrainedManagerUserSecretManagerKeyARN) {
-                console.warn(`Use of ${fineGrainedManagerUserName} and ${fineGrainedManagerUserSecretManagerKeyARN} with a preexisting target cluster
+                CdkLogger.warn(`Use of ${fineGrainedManagerUserName} and ${fineGrainedManagerUserSecretManagerKeyARN} with a preexisting target cluster
                     will be deprecated in favor of using a \`targetCluster\` object. Please update your CDK context block.`)
                 auth = {
                     "type": "basic",
@@ -260,13 +274,18 @@ export class StackComposer {
         // Ensure that target version is not defined in multiple places, but `engineVersion` is set as a default value, so this is
         // a warning instead of an error.
         if (usePreexistingTargetCluster && engineVersion) {
-            console.warn("The `engineVersion` value will be ignored because it's only used when a domain is being provisioned by this tooling" +
+            CdkLogger.warn("The `engineVersion` value will be ignored because it's only used when a domain is being provisioned by this tooling" +
                 "and in this case, `targetCluster` was provided to define an existing target cluster."
             )
         }
 
         const targetClusterAuth = targetCluster?.auth
-        const targetVersion = this.getEngineVersion(targetCluster?.version ?? engineVersion)
+        const targetVersion = targetCluster?.version ? this.getEngineVersion(targetCluster?.version) : null
+        const engineVersionValue = engineVersion ? this.getEngineVersion(engineVersion) : this.getEngineVersion('OS_2.15')
+
+        if (reindexFromSnapshotWorkerSize !== "default" && reindexFromSnapshotWorkerSize !== "maximum") {
+            throw new Error("Invalid value for reindexFromSnapshotWorkerSize, must be either 'default' or 'maximum'")
+        }
 
         const requiredFields: { [key: string]: any; } = {"stage":stage}
         for (let key in requiredFields) {
@@ -275,7 +294,7 @@ export class StackComposer {
             }
         }
         if (addOnMigrationDeployId && vpcId) {
-            console.warn("Addon deployments will use the original deployment 'vpcId' regardless of passed 'vpcId' values")
+            CdkLogger.warn("Add-on deployments will use the original deployment 'vpcId' regardless of passed 'vpcId' values")
         }
         if (stage.length > 15) {
             throw new Error(`Maximum allowed stage name length is 15 characters but received ${stage}`)
@@ -294,7 +313,6 @@ export class StackComposer {
         if (captureProxyServiceEnabled || captureProxyESServiceEnabled || trafficReplayerServiceEnabled || kafkaBrokerServiceEnabled) {
             streamingSourceType = determineStreamingSourceType(kafkaBrokerServiceEnabled)
         } else {
-            console.log("MSK is not enabled and will not be deployed.")
             streamingSourceType = StreamingSourceType.DISABLED
         }
 
@@ -359,7 +377,7 @@ export class StackComposer {
         let openSearchStack
         if (!preexistingOrContainerTargetEndpoint) {
             openSearchStack = new OpenSearchDomainStack(scope, `openSearchDomainStack-${deployId}`, {
-                version: targetVersion,
+                version: engineVersionValue,
                 domainName: clusterDomainName,
                 dataNodeInstanceType: dataNodeType,
                 dataNodes: dataNodeCount,
@@ -476,7 +494,9 @@ export class StackComposer {
                 otelCollectorEnabled: otelCollectorEnabled,
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
-                env: props.env
+                env: props.env,
+                maxShardSizeGiB: reindexFromSnapshotMaxShardSizeGiB,
+                reindexFromSnapshotWorkerSize
             })
             this.addDependentStacks(reindexFromSnapshotStack, [migrationStack, openSearchStack, osContainerStack])
             this.stacks.push(reindexFromSnapshotStack)
@@ -609,6 +629,7 @@ export class StackComposer {
                 defaultDeployId: defaultDeployId,
                 fargateCpuArch: fargateCpuArch,
                 otelCollectorEnabled,
+                managedServiceSourceSnapshotEnabled,
                 env: props.env
             })
             // To enable the Migration Console to make requests to other service endpoints with services,

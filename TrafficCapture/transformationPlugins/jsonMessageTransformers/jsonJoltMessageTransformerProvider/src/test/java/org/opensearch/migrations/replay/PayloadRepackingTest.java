@@ -8,20 +8,19 @@ import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import com.fasterxml.jackson.core.type.TypeReference;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
-
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.handler.codec.http.DefaultHttpHeaders;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 1)
@@ -46,7 +45,6 @@ public class PayloadRepackingTest extends InstrumentationTest {
     @MethodSource("makeCombinations")
     public void testSimplePayloadTransform(boolean doGzip, boolean doChunked) throws Exception {
         var transformerBuilder = JsonJoltTransformer.newBuilder();
-
         if (doGzip) {
             transformerBuilder.addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.ADD_GZIP);
         }
@@ -63,11 +61,12 @@ public class PayloadRepackingTest extends InstrumentationTest {
         DefaultHttpHeaders expectedRequestHeaders = new DefaultHttpHeaders();
         // netty's decompressor and aggregator remove some header values (& add others)
         expectedRequestHeaders.add("Host", "localhost");
-        if (!doGzip && !doChunked) {
-            expectedRequestHeaders.add("Content-Length", "46");
-        } else {
-            // Content-Length added with different casing with netty
+        if (doGzip || doChunked) {
             expectedRequestHeaders.add("content-length", "46");
+
+        } else {
+            expectedRequestHeaders.add("Content-Length", "46");
+
         }
 
         TestUtils.runPipelineAndValidate(
@@ -76,8 +75,7 @@ public class PayloadRepackingTest extends InstrumentationTest {
             null,
             null,
             stringParts,
-            expectedRequestHeaders,
-            referenceStringBuilder -> TestUtils.resolveReferenceString(referenceStringBuilder)
+            expectedRequestHeaders, TestUtils::resolveReferenceString
         );
     }
 

@@ -13,12 +13,12 @@ import {
     Volume,
     AwsLogDriverMode,
     ContainerDependencyCondition,
+    ServiceManagedVolume
 } from "aws-cdk-lib/aws-ecs";
-import {DockerImageAsset} from "aws-cdk-lib/aws-ecr-assets";
 import {Duration, RemovalPolicy, Stack} from "aws-cdk-lib";
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
-import {PolicyStatement} from "aws-cdk-lib/aws-iam";
-import {createDefaultECSTaskRole} from "../common-utilities";
+import {PolicyStatement, Role} from "aws-cdk-lib/aws-iam";
+import {createDefaultECSTaskRole, makeLocalAssetContainerImage} from "../common-utilities";
 import {OtelCollectorSidecar} from "./migration-otel-collector-sidecar";
 import { IApplicationTargetGroup, INetworkTargetGroup } from "aws-cdk-lib/aws-elasticloadbalancingv2";
 
@@ -28,13 +28,8 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly vpc: IVpc,
     readonly securityGroups: ISecurityGroup[],
     readonly cpuArchitecture: CpuArchitecture,
-    readonly dockerFilePath?: string,
-    readonly dockerDirectoryPath?: string,
-    readonly dockerImageRegistryName?: string,
+    readonly dockerImageName: string,
     readonly dockerImageCommand?: string[],
-    readonly dockerBuildArgs?: {
-        [key: string]: string
-    },
     readonly taskRolePolicies?: PolicyStatement[],
     readonly mountPoints?: MountPoint[],
     readonly volumes?: Volume[],
@@ -55,19 +50,16 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
 export type ELBTargetGroup = IApplicationTargetGroup | INetworkTargetGroup;
 
 export class MigrationServiceCore extends Stack {
+    serviceTaskRole: Role;
 
     createService(props: MigrationServiceCoreProps) {
-        if ((!props.dockerDirectoryPath && !props.dockerImageRegistryName) || (props.dockerDirectoryPath && props.dockerImageRegistryName)) {
-            throw new Error(`Exactly one option [dockerDirectoryPath, dockerImageRegistryName] is required to create the "${props.serviceName}" service`)
-        }
-
         const ecsCluster = Cluster.fromClusterAttributes(this, 'ecsCluster', {
             clusterName: `migration-${props.stage}-ecs-cluster`,
             vpc: props.vpc
         })
 
-        const serviceTaskRole = createDefaultECSTaskRole(this, props.serviceName)
-        props.taskRolePolicies?.forEach(policy => serviceTaskRole.addToPolicy(policy))
+        this.serviceTaskRole = createDefaultECSTaskRole(this, props.serviceName)
+        props.taskRolePolicies?.forEach(policy => this.serviceTaskRole.addToPolicy(policy))
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {
             ephemeralStorageGiB: props.ephemeralStorageGiB ? props.ephemeralStorageGiB : 75,
@@ -78,25 +70,13 @@ export class MigrationServiceCore extends Stack {
             family: `migration-${props.stage}-${props.serviceName}`,
             memoryLimitMiB: props.taskMemoryLimitMiB ? props.taskMemoryLimitMiB : 1024,
             cpu: props.taskCpuUnits ? props.taskCpuUnits : 256,
-            taskRole: serviceTaskRole
+            taskRole: this.serviceTaskRole
         });
         if (props.volumes) {
             props.volumes.forEach(vol => serviceTaskDef.addVolume(vol))
         }
 
-        let serviceImage
-        if (props.dockerDirectoryPath) {
-            serviceImage = ContainerImage.fromDockerImageAsset(new DockerImageAsset(this, "ServiceImage", {
-                directory: props.dockerDirectoryPath,
-                buildArgs: props.dockerBuildArgs,
-                // File path relative to above directory path
-                file: props.dockerFilePath
-            }))
-        }
-        else {
-            // @ts-ignore
-            serviceImage = ContainerImage.fromRegistry(props.dockerImageRegistryName)
-        }
+        const serviceImage = makeLocalAssetContainerImage(this, props.dockerImageName)
 
         const serviceLogGroup = new LogGroup(this, 'ServiceLogGroup',  {
             retention: RetentionDays.ONE_MONTH,
@@ -184,6 +164,11 @@ export class MigrationServiceCore extends Stack {
             securityGroups: props.securityGroups,
             vpcSubnets: props.vpc.selectSubnets({subnetType: SubnetType.PRIVATE_WITH_EGRESS}),
         });
+
+        // Add any ServiceManagedVolumes to the service, if they exist
+        if (props.volumes) {
+            props.volumes.filter(vol => vol instanceof ServiceManagedVolume).forEach(vol => fargateService.addVolume(vol as ServiceManagedVolume));
+        }
 
         if (props.targetGroups) {
             props.targetGroups.filter(tg => tg !== undefined).forEach(tg => tg.addTarget(fargateService));

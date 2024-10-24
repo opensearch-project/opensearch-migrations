@@ -5,6 +5,10 @@ import java.io.IOException;
 import java.util.Arrays;
 import java.util.Optional;
 
+import com.beust.jcommander.JCommander;
+import com.beust.jcommander.Parameter;
+import com.beust.jcommander.ParameterException;
+import lombok.AllArgsConstructor;
 import org.apache.jmeter.assertions.ResponseAssertion;
 import org.apache.jmeter.control.LoopController;
 import org.apache.jmeter.engine.StandardJMeterEngine;
@@ -19,11 +23,6 @@ import org.apache.jmeter.timers.ConstantTimer;
 import org.apache.jmeter.util.JMeterUtils;
 import org.apache.jorphan.collections.HashTree;
 import org.apache.jorphan.collections.ListedHashTree;
-
-import com.beust.jcommander.JCommander;
-import com.beust.jcommander.Parameter;
-import com.beust.jcommander.ParameterException;
-import lombok.AllArgsConstructor;
 import org.jetbrains.annotations.NotNull;
 
 public class JMeterLoadTest {

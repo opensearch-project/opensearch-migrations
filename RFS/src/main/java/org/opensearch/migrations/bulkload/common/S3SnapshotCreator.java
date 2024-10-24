@@ -1,9 +1,11 @@
 package org.opensearch.migrations.bulkload.common;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import java.util.List;
 
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class S3SnapshotCreator extends SnapshotCreator {
     private static final ObjectMapper mapper = new ObjectMapper();
@@ -18,9 +20,10 @@ public class S3SnapshotCreator extends SnapshotCreator {
         OpenSearchClient client,
         String s3Uri,
         String s3Region,
+        List<String> indexAllowlist,
         IRfsContexts.ICreateSnapshotContext context
     ) {
-        this(snapshotName, client, s3Uri, s3Region, null, null, context);
+        this(snapshotName, client, s3Uri, s3Region, indexAllowlist, null, null, context);
     }
 
     public S3SnapshotCreator(
@@ -28,11 +31,12 @@ public class S3SnapshotCreator extends SnapshotCreator {
         OpenSearchClient client,
         String s3Uri,
         String s3Region,
+        List<String> indexAllowlist,
         Integer maxSnapshotRateMBPerNode,
         String snapshotRoleArn,
         IRfsContexts.ICreateSnapshotContext context
     ) {
-        super(snapshotName, client, context);
+        super(snapshotName, indexAllowlist, client, context);
         this.s3Uri = s3Uri;
         this.s3Region = s3Region;
         this.maxSnapshotRateMBPerNode = maxSnapshotRateMBPerNode;

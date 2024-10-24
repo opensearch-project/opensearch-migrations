@@ -5,7 +5,6 @@ import { ReindexFromSnapshotStack } from '../lib/service-stacks/reindex-from-sna
 import { createStackComposer } from './test-utils';
 import { describe, beforeEach, afterEach, test, expect, jest } from '@jest/globals';
 
-jest.mock('aws-cdk-lib/aws-ecr-assets');
 
 describe('ReindexFromSnapshotStack Tests', () => {
   beforeEach(() => {
@@ -32,7 +31,6 @@ describe('ReindexFromSnapshotStack Tests', () => {
     jest.clearAllMocks();
     jest.resetModules();
     jest.restoreAllMocks();
-    jest.resetAllMocks();
   });
 
   test('ReindexFromSnapshotStack creates expected resources', () => {
@@ -40,7 +38,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
       vpcEnabled: true,
       sourceCluster: {
         "endpoint": "https://test-cluster",
-        "auth": {"type": "none"}
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
       },
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
@@ -73,6 +72,11 @@ describe('ReindexFromSnapshotStack Tests', () => {
         ],
       }
     });
+    // Assert CPU configuration
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      Cpu: "2048",
+      Memory: "4096",
+    });
   });
 
   test('ReindexFromSnapshotStack sets correct RFS command', () => {
@@ -80,7 +84,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
       vpcEnabled: true,
       sourceCluster: {
         "endpoint": "https://test-cluster",
-        "auth": {"type": "none"}
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
       },
       reindexFromSnapshotServiceEnabled: true,
       stage: 'unit-test',
@@ -115,10 +120,11 @@ describe('ReindexFromSnapshotStack Tests', () => {
         Value: {
           "Fn::Join": [
             "",
-            [ "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri \"s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo\" --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir /lucene --target-host ",
+            [ "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --s3-local-dir \"/storage/s3_files\" --s3-repo-uri \"s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo\" --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir \"/storage/lucene\" --target-host ",
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
+              " --max-shard-size-bytes 94489280512 --max-connections 10 --source-version \"ES_7.10\""
             ],
           ],
         }
@@ -149,7 +155,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
       stage: 'unit-test',
       sourceCluster: {
         "endpoint": "https://test-cluster",
-        "auth": {"type": "none"}
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
       },
       targetCluster: {
         "endpoint": "https://target-cluster",
@@ -182,11 +189,11 @@ describe('ReindexFromSnapshotStack Tests', () => {
         Value: {
           "Fn::Join": [
             "",
-            [ "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri \"s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo\" --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir /lucene --target-host ",
+            [ "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --s3-local-dir \"/storage/s3_files\" --s3-repo-uri \"s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo\" --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir \"/storage/lucene\" --target-host ",
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --target-aws-service-signing-name aoss --target-aws-region eu-west-1",
+              " --max-shard-size-bytes 94489280512 --max-connections 10 --target-aws-service-signing-name aoss --target-aws-region eu-west-1 --source-version \"ES_7.10\"",
             ],
           ],
         }
@@ -217,7 +224,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
       stage: 'unit-test',
       sourceCluster: {
         "endpoint": "https://test-cluster",
-        "auth": {"type": "none"}
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
       },
       migrationAssistanceEnabled: true,
     };
@@ -242,7 +250,8 @@ describe('ReindexFromSnapshotStack Tests', () => {
       stage: 'unit-test',
       sourceCluster: {
         "endpoint": "https://test-cluster",
-        "auth": {"type": "none"}
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
       },
       reindexFromSnapshotExtraArgs: '--custom-arg value --flag --snapshot-name \"custom-snapshot\"',
       migrationAssistanceEnabled: true,
@@ -271,11 +280,11 @@ describe('ReindexFromSnapshotStack Tests', () => {
         Value: {
           "Fn::Join": [
             "",
-            [ "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --s3-local-dir /tmp/s3_files --s3-repo-uri \"s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo\" --s3-region us-east-1 --lucene-dir /lucene --target-host ",
+            [ "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --s3-local-dir \"/storage/s3_files\" --s3-repo-uri \"s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo\" --s3-region us-east-1 --lucene-dir \"/storage/lucene\" --target-host ",
               {
                 "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
               },
-              " --custom-arg value --flag --snapshot-name \"custom-snapshot\""
+              " --max-shard-size-bytes 94489280512 --max-connections 10 --source-version \"ES_7.10\" --custom-arg value --flag --snapshot-name \"custom-snapshot\""
             ]
           ]
         }
@@ -298,4 +307,91 @@ describe('ReindexFromSnapshotStack Tests', () => {
       }
     ]);
   });
+
+  test('ReindexFromSnapshotStack with maximum worker size', () => {
+    const contextOptions = {
+      vpcEnabled: true,
+      reindexFromSnapshotServiceEnabled: true,
+      stage: 'unit-test',
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
+      },
+      reindexFromSnapshotWorkerSize: "maximum",
+      migrationAssistanceEnabled: true,
+    };
+
+    const stacks = createStackComposer(contextOptions);
+    const reindexStack = stacks.stacks.find(s => s instanceof ReindexFromSnapshotStack) as ReindexFromSnapshotStack;
+    expect(reindexStack).toBeDefined();
+    const template = Template.fromStack(reindexStack);
+
+    const taskDefinitionCapture = new Capture();
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: taskDefinitionCapture,
+    });
+
+    const containerDefinitions = taskDefinitionCapture.asArray();
+    expect(containerDefinitions.length).toBe(1);
+    expect(containerDefinitions[0].Command).toEqual([
+      '/bin/sh',
+      '-c',
+      '/rfs-app/entrypoint.sh'
+    ]);
+    expect(containerDefinitions[0].Environment).toEqual([
+      {
+        Name: 'RFS_COMMAND',
+        Value: {
+          "Fn::Join": [
+            "",
+            [ "/rfs-app/runJavaWithClasspath.sh org.opensearch.migrations.RfsMigrateDocuments --s3-local-dir \"/storage/s3_files\" --s3-repo-uri \"s3://migration-artifacts-test-account-unit-test-us-east-1/rfs-snapshot-repo\" --s3-region us-east-1 --snapshot-name rfs-snapshot --lucene-dir \"/storage/lucene\" --target-host ",
+              {
+                "Ref": "SsmParameterValuemigrationunittestdefaultosClusterEndpointC96584B6F00A464EAD1953AFF4B05118Parameter",
+              },
+              " --max-shard-size-bytes 94489280512 --max-connections 100 --target-compression --source-version \"ES_7.10\"",
+            ],
+          ],
+        }
+      },
+      {
+        Name: 'RFS_TARGET_USER',
+        Value: ''
+      },
+      {
+        Name: 'RFS_TARGET_PASSWORD',
+        Value: ''
+      },
+      {
+        Name: 'RFS_TARGET_PASSWORD_ARN',
+        Value: ''
+      },
+      {
+        Name: 'SHARED_LOGS_DIR_PATH',
+        Value: '/shared-logs-output/reindex-from-snapshot-default'
+      }
+    ]);
+
+    // Assert CPU configuration
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      Cpu: "16384",
+      Memory: "32768",
+    });
+      const volumesCapture = new Capture();
+      template.hasResourceProperties('AWS::ECS::Service', {
+        VolumeConfigurations: volumesCapture,
+      });
+      const volumes = volumesCapture.asArray();
+        expect(volumes).toEqual(
+          expect.arrayContaining([
+            expect.objectContaining({
+              ManagedEBSVolume: expect.objectContaining({
+                Encrypted: true,
+                SizeInGiB: 218,
+                Throughput: 450,
+              }),
+            }),
+          ])
+        );
+    });
 });

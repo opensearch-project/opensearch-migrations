@@ -9,8 +9,19 @@ import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.replay.datatypes.ByteBufList;
+import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
+import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
+import org.opensearch.migrations.testutils.CloseableLogSetup;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.tracing.InstrumentationTest;
+import org.opensearch.migrations.tracing.TestContext;
+import org.opensearch.migrations.transform.IJsonTransformer;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.netty.buffer.Unpooled;
+import lombok.extern.slf4j.Slf4j;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.impl.Log4jContextFactory;
 import org.apache.logging.log4j.core.selector.ClassLoaderContextSelector;
@@ -19,22 +30,11 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.parallel.ResourceLock;
 
-import org.opensearch.migrations.replay.datatypes.ByteBufList;
-import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
-import org.opensearch.migrations.replay.datatypes.PojoTrafficStreamKeyAndContext;
-import org.opensearch.migrations.testutils.CloseableLogSetup;
-import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-import org.opensearch.migrations.tracing.InstrumentationTest;
-import org.opensearch.migrations.tracing.TestContext;
-
-import io.netty.buffer.Unpooled;
-import lombok.extern.slf4j.Slf4j;
-
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 4)
 class ResultsToLogsConsumerTest extends InstrumentationTest {
     static {
-        // Synchronize logging to for assertions
+        // Synchronize logging for assertions
         LogManager.setFactory(new Log4jContextFactory(new ClassLoaderContextSelector()));
     }
     private static final String NODE_ID = "n";
@@ -44,8 +44,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     public static final String EXPECTED_RESPONSE_STRING = "HTTP/1.1 200 OK\r\n"
         + "Content-transfer-encoding: chunked\r\n"
         + "Date: Thu, 08 Jun 2023 23:06:23 GMT\r\n"
-        + // This should be OK since it's always the same length
-        "Transfer-encoding: chunked\r\n"
+        + "Transfer-encoding: chunked\r\n"
         + "Content-type: text/plain\r\n"
         + "Funtime: checkIt!\r\n"
         + "\r\n"
@@ -82,7 +81,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         var responses = new TransformedTargetRequestAndResponseList(null, HttpRequestTransformationStatus.skipped());
         var emptyTuple = new SourceTargetCaptureTuple(rootContext.getTestTupleContext(), null, responses, null);
         try (var closeableLogSetup = new CloseableLogSetup(calculateLoggerName(this.getClass()))) {
-            var resultsToLogsConsumer = new ResultsToLogsConsumer(closeableLogSetup.getTestLogger(), null);
+            var resultsToLogsConsumer = new ResultsToLogsConsumer(closeableLogSetup.getTestLogger(), null, null);
             var consumer = new TupleParserChainConsumer(resultsToLogsConsumer);
             consumer.accept(emptyTuple);
             Assertions.assertEquals(1, closeableLogSetup.getLogEvents().size());
@@ -99,7 +98,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         var exception = new Exception(TEST_EXCEPTION_MESSAGE);
         var emptyTuple = new SourceTargetCaptureTuple(rootContext.getTestTupleContext(), null, responses, exception);
         try (var closeableLogSetup = new CloseableLogSetup(calculateLoggerName(this.getClass()))) {
-            var resultsToLogsConsumer = new ResultsToLogsConsumer(closeableLogSetup.getTestLogger(), null);
+            var resultsToLogsConsumer = new ResultsToLogsConsumer(closeableLogSetup.getTestLogger(), null, null);
             var consumer = new TupleParserChainConsumer(resultsToLogsConsumer);
             consumer.accept(emptyTuple);
             Assertions.assertEquals(1, closeableLogSetup.getLogEvents().size());
@@ -120,121 +119,195 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
     @Tag("longTest")
     @ResourceLock("TestContext")
     public void testOutputterForGet() throws IOException {
-        final String EXPECTED_LOGGED_OUTPUT = ""
-            + "{\r\n"
-            + "    \"sourceRequest\": {\r\n"
-            + "        \"Request-URI\": \"/test\",\r\n"
-            + "        \"Method\": \"GET\",\r\n"
-            + "        \"HTTP-Version\": \"HTTP/1.1\",\r\n"
-            + "        \"Host\": \"foo.example\",\r\n"
-            + "        \"auTHorization\": \"Basic YWRtaW46YWRtaW4=\",\r\n"
-            + "        \"Content-Type\": \"application/json\",\r\n"
-            + "        \"body\": \"\"\r\n"
-            + "    },\r\n"
-            + "    \"sourceResponse\": {\r\n"
-            + "        \"HTTP-Version\": {\r\n"
-            + "            \"keepAliveDefault\": true\r\n"
-            + "        },\r\n"
-            + "        \"Status-Code\": 200,\r\n"
-            + "        \"Reason-Phrase\": \"OK\",\r\n"
-            + "        \"response_time_ms\": 0,\r\n"
-            + "        \"Content-transfer-encoding\": \"chunked\",\r\n"
-            + "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\r\n"
-            + "        \"Transfer-encoding\":\"chunked\",\r\n"
-            + "        \"Content-type\": \"text/plain\",\r\n"
-            + "        \"Funtime\": \"checkIt!\",\r\n"
-            + "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\"\r\n"
-            + "    },\r\n"
-            + "    \"targetRequest\": {\r\n"
-            + "        \"Request-URI\": \"/test\",\r\n"
-            + "        \"Method\": \"GET\",\r\n"
-            + "        \"HTTP-Version\": \"HTTP/1.1\",\r\n"
-            + "        \"Host\": \"foo.example\",\r\n"
-            + "        \"auTHorization\": \"Basic YWRtaW46YWRtaW4=\",\r\n"
-            + "        \"Content-Type\": \"application/json\",\r\n"
-            + "        \"body\": \"\"\r\n"
-            + "    },\r\n"
-            + "    \"targetResponses\": [{\r\n"
-            + "        \"HTTP-Version\": {\r\n"
-            + "            \"keepAliveDefault\": true\r\n"
-            + "        },\r\n"
-            + "        \"Status-Code\": 200,\r\n"
-            + "        \"Reason-Phrase\": \"OK\",\r\n"
-            + "        \"response_time_ms\": 267,\r\n"
-            + "        \"Content-transfer-encoding\": \"chunked\",\r\n"
-            + "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\r\n"
-            + "        \"Transfer-encoding\": \"chunked\",\r\n"
-            + "        \"Content-type\": \"text/plain\",\r\n"
-            + "        \"Funtime\": \"checkIt!\",\r\n"
-            + "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\"\r\n"
-            + "    }],\r\n"
-            + "    \"connectionId\": \"testConnection.1\"," +
-            "      \"numRequests\":1," +
-            "      \"numErrors\":0\r\n"
-            + "}";
-        testOutputterForRequest("get_withAuthHeader.txt", EXPECTED_LOGGED_OUTPUT);
+        final String EXPECTED_LOGGED_OUTPUT = "{" +
+            "\"sourceRequest\": { " +
+            "    \"Host\": [ \"foo.example\" ], " +
+            "    \"auTHorization\": [ \"Basic YWRtaW46YWRtaW4=\" ], " +
+            "    \"Request-URI\": \"/test\", " +
+            "    \"Method\": \"GET\", " +
+            "    \"HTTP-Version\": \"HTTP/1.1\", " +
+            "    \"payload\": { " +
+            "        \"inlinedTextBody\": \"\" " +
+            "    } " +
+            "}, " +
+            "\"sourceResponse\": { " +
+            "    \"Content-transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Date\": [ \"Thu, 08 Jun 2023 23:06:23 GMT\" ], " +
+            "    \"Transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Content-type\": [ \"text/plain\" ], " +
+            "    \"Funtime\": [ \"checkIt!\" ], " +
+            "    \"HTTP-Version\": \"HTTP/1.1\", " +
+            "    \"Status-Code\": 200, " +
+            "    \"Reason-Phrase\": \"OK\", " +
+            "    \"response_time_ms\": 0, " +
+            "    \"payload\": { " +
+            "        \"inlinedTextBody\": \"I should be decrypted tester!\\r\" " +
+            "    } " +
+            "}, " +
+            "\"targetRequest\": { " +
+            "    \"Host\": [ \"foo.example\" ], " +
+            "    \"auTHorization\": [ \"Basic YWRtaW46YWRtaW4=\" ], " +
+            "    \"Request-URI\": \"/test\", " +
+            "    \"Method\": \"GET\", " +
+            "    \"HTTP-Version\": \"HTTP/1.1\", " +
+            "    \"payload\": { " +
+            "        \"inlinedTextBody\": \"\" " +
+            "    } " +
+            "}, " +
+            "\"targetResponses\": [ { " +
+            "    \"Content-transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Date\": [ \"Thu, 08 Jun 2023 23:06:23 GMT\" ], " +
+            "    \"Transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Content-type\": [ \"text/plain\" ], " +
+            "    \"Funtime\": [ \"checkIt!\" ], " +
+            "    \"HTTP-Version\": \"HTTP/1.1\", " +
+            "    \"Status-Code\": 200, " +
+            "    \"Reason-Phrase\": \"OK\", " +
+            "    \"response_time_ms\": 267, " +
+            "    \"payload\": { " +
+            "        \"inlinedTextBody\": \"I should be decrypted tester!\\r\" " +
+            "    } " +
+            "} ], " +
+            "\"connectionId\": \"testConnection.1\", " +
+            "\"numRequests\": 1, " +
+            "\"numErrors\": 0 " +
+            "}";
+        testOutputterForRequest("get_withAuthHeader.txt", EXPECTED_LOGGED_OUTPUT, null);
     }
 
     @Test
     @Tag("longTest")
     @ResourceLock("TestContext")
     public void testOutputterForPost() throws IOException {
-        final String EXPECTED_LOGGED_OUTPUT = ""
-            + "{\r\n"
-            + "    \"sourceRequest\": {\r\n"
-            + "        \"Request-URI\": \"/test\",\r\n"
-            + "        \"Method\": \"POST\",\r\n"
-            + "        \"HTTP-Version\": \"HTTP/1.1\",\r\n"
-            + "        \"Host\": \"foo.example\",\r\n"
-            + "        \"Content-Type\": \"application/json\",\r\n"
-            + "        \"Content-Length\": \"652\",\r\n"
-            + "        \"body\": \"ew0KICAic2V0dGluZ3MiOiB7DQogICAgImluZGV4Ijogew0KICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LA0KICAgICAgIm51bWJlcl9vZl9yZXBsaWNhcyI6IDMNCiAgICB9LA0KICAgICJhbmFseXNpcyI6IHsNCiAgICAgICJhbmFseXplciI6IHsNCiAgICAgICAgIm5hbWVBbmFseXplciI6IHsNCiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLA0KICAgICAgICAgICJ0b2tlbml6ZXIiOiAia2V5d29yZCIsDQogICAgICAgICAgImZpbHRlciI6ICJ1cHBlcmNhc2UiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0sDQogICJtYXBwaW5ncyI6IHsNCiAgICAiZW1wbG95ZWUiOiB7DQogICAgICAicHJvcGVydGllcyI6IHsNCiAgICAgICAgImFnZSI6IHsNCiAgICAgICAgICAidHlwZSI6ICJsb25nIg0KICAgICAgICB9LA0KICAgICAgICAibGV2ZWwiOiB7DQogICAgICAgICAgInR5cGUiOiAibG9uZyINCiAgICAgICAgfSwNCiAgICAgICAgInRpdGxlIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiDQogICAgICAgIH0sDQogICAgICAgICJuYW1lIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiLA0KICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0NCn0NCg==\"\r\n"
-            + "    },\r\n"
-            + "    \"sourceResponse\": {\r\n"
-            + "        \"HTTP-Version\": {\r\n"
-            + "            \"keepAliveDefault\": true\r\n"
-            + "        },\r\n"
-            + "        \"Status-Code\": 200,\r\n"
-            + "        \"Reason-Phrase\": \"OK\",\r\n"
-            + "        \"response_time_ms\": 0,\r\n"
-            + "        \"Content-transfer-encoding\": \"chunked\",\r\n"
-            + "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\r\n"
-            + "        \"Transfer-encoding\": \"chunked\",\r\n"
-            + "        \"Content-type\": \"text/plain\",\r\n"
-            + "        \"Funtime\": \"checkIt!\",\r\n"
-            + "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\"\r\n"
-            + "    },\r\n"
-            + "    \"targetRequest\": {\r\n"
-            + "        \"Request-URI\": \"/test\",\r\n"
-            + "        \"Method\": \"POST\",\r\n"
-            + "        \"HTTP-Version\": \"HTTP/1.1\",\r\n"
-            + "        \"Host\": \"foo.example\",\r\n"
-            + "        \"Content-Type\": \"application/json\",\r\n"
-            + "        \"Content-Length\": \"652\",\r\n"
-            + "        \"body\": \"ew0KICAic2V0dGluZ3MiOiB7DQogICAgImluZGV4Ijogew0KICAgICAgIm51bWJlcl9vZl9zaGFyZHMiOiA3LA0KICAgICAgIm51bWJlcl9vZl9yZXBsaWNhcyI6IDMNCiAgICB9LA0KICAgICJhbmFseXNpcyI6IHsNCiAgICAgICJhbmFseXplciI6IHsNCiAgICAgICAgIm5hbWVBbmFseXplciI6IHsNCiAgICAgICAgICAidHlwZSI6ICJjdXN0b20iLA0KICAgICAgICAgICJ0b2tlbml6ZXIiOiAia2V5d29yZCIsDQogICAgICAgICAgImZpbHRlciI6ICJ1cHBlcmNhc2UiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0sDQogICJtYXBwaW5ncyI6IHsNCiAgICAiZW1wbG95ZWUiOiB7DQogICAgICAicHJvcGVydGllcyI6IHsNCiAgICAgICAgImFnZSI6IHsNCiAgICAgICAgICAidHlwZSI6ICJsb25nIg0KICAgICAgICB9LA0KICAgICAgICAibGV2ZWwiOiB7DQogICAgICAgICAgInR5cGUiOiAibG9uZyINCiAgICAgICAgfSwNCiAgICAgICAgInRpdGxlIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiDQogICAgICAgIH0sDQogICAgICAgICJuYW1lIjogew0KICAgICAgICAgICJ0eXBlIjogInRleHQiLA0KICAgICAgICAgICJhbmFseXplciI6ICJuYW1lQW5hbHl6ZXIiDQogICAgICAgIH0NCiAgICAgIH0NCiAgICB9DQogIH0NCn0NCg==\"\r\n"
-            + "    },\r\n"
-            + "    \"targetResponses\": [{\r\n"
-            + "        \"HTTP-Version\": {\r\n"
-            + "            \"keepAliveDefault\": true\r\n"
-            + "        },\r\n"
-            + "        \"Status-Code\": 200,\r\n"
-            + "        \"Reason-Phrase\": \"OK\",\r\n"
-            + "        \"response_time_ms\": 267,\r\n"
-            + "        \"Content-transfer-encoding\": \"chunked\",\r\n"
-            + "        \"Date\": \"Thu, 08 Jun 2023 23:06:23 GMT\",\r\n"
-            + "        \"Transfer-encoding\": \"chunked\",\r\n"
-            + "        \"Content-type\": \"text/plain\",\r\n"
-            + "        \"Funtime\": \"checkIt!\",\r\n"
-            + "        \"body\": \"SSBzaG91bGQgYmUgZGVjcnlwdGVkIHRlc3RlciEN\"\r\n"
-            + "    }],\r\n"
-            + "    \"connectionId\": \"testConnection.1\"," +
-            "      \"numRequests\":1," +
-            "      \"numErrors\":0\r\n"
-            + "}";
-        testOutputterForRequest("post_formUrlEncoded_withFixedLength.txt", EXPECTED_LOGGED_OUTPUT);
+        final String EXPECTED_LOGGED_OUTPUT = "{ " +
+            "\"sourceRequest\": { " +
+            "    \"Host\": [ \"foo.example\" ], " +
+            "    \"Content-Type\": [ \"application/json\" ], " +
+            "    \"Content-Length\": [ \"652\" ], " +
+            "    \"Request-URI\": \"/test\", " +
+            "    \"Method\": \"POST\", " +
+            "    \"HTTP-Version\": \"HTTP/1.1\", " +
+            "    \"payload\": { " +
+            "        \"inlinedJsonBody\": { " +
+            "            \"settings\": { " +
+            "                \"index\": { " +
+            "                    \"number_of_shards\": 7, " +
+            "                    \"number_of_replicas\": 3 " +
+            "                }, " +
+            "                \"analysis\": { " +
+            "                    \"analyzer\": { " +
+            "                        \"nameAnalyzer\": { " +
+            "                            \"type\": \"custom\", " +
+            "                            \"tokenizer\": \"keyword\", " +
+            "                            \"filter\": \"uppercase\" " +
+            "                        } " +
+            "                    } " +
+            "                } " +
+            "            }, " +
+            "            \"mappings\": { " +
+            "                \"employee\": { " +
+            "                    \"properties\": { " +
+            "                        \"age\": { " +
+            "                            \"type\": \"long\" " +
+            "                        }, " +
+            "                        \"level\": { " +
+            "                            \"type\": \"long\" " +
+            "                        }, " +
+            "                        \"title\": { " +
+            "                            \"type\": \"text\" " +
+            "                        }, " +
+            "                        \"name\": { " +
+            "                            \"type\": \"text\", " +
+            "                            \"analyzer\": \"nameAnalyzer\" " +
+            "                        } " +
+            "                    } " +
+            "                } " +
+            "            } " +
+            "        } " +
+            "    } " +
+            "}, " +
+            "\"sourceResponse\": { " +
+            "    \"Content-transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Date\": [ \"Thu, 08 Jun 2023 23:06:23 GMT\" ], " +
+            "    \"Transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Content-type\": [ \"text/plain\" ], " +
+            "    \"Funtime\": [ \"checkIt!\" ], " +
+            "    \"HTTP-Version\": \"HTTP/1.1\", " +
+            "    \"Status-Code\": 200, " +
+            "    \"Reason-Phrase\": \"OK\", " +
+            "    \"response_time_ms\": 0, " +
+            "    \"payload\": { " +
+            "        \"inlinedTextBody\": \"I should be decrypted tester!\\r\" " +
+            "    } " +
+            "}, " +
+            "\"targetRequest\": { " +
+            "    \"Host\": [ \"foo.example\" ], " +
+            "    \"Content-Type\": [ \"application/json\" ], " +
+            "    \"Content-Length\": [ \"652\" ], " +
+            "    \"Request-URI\": \"/test\", " +
+            "    \"Method\": \"POST\", " +
+            "    \"HTTP-Version\": \"HTTP/1.1\", " +
+            "    \"payload\": { " +
+            "        \"inlinedJsonBody\": { " +
+            "            \"settings\": { " +
+            "                \"index\": { " +
+            "                    \"number_of_shards\": 7, " +
+            "                    \"number_of_replicas\": 3 " +
+            "                }, " +
+            "                \"analysis\": { " +
+            "                    \"analyzer\": { " +
+            "                        \"nameAnalyzer\": { " +
+            "                            \"type\": \"custom\", " +
+            "                            \"tokenizer\": \"keyword\", " +
+            "                            \"filter\": \"uppercase\" " +
+            "                        } " +
+            "                    } " +
+            "                } " +
+            "            }, " +
+            "            \"mappings\": { " +
+            "                \"employee\": { " +
+            "                    \"properties\": { " +
+            "                        \"age\": { " +
+            "                            \"type\": \"long\" " +
+            "                        }, " +
+            "                        \"level\": { " +
+            "                            \"type\": \"long\" " +
+            "                        }, " +
+            "                        \"title\": { " +
+            "                            \"type\": \"text\" " +
+            "                        }, " +
+            "                        \"name\": { " +
+            "                            \"type\": \"text\", " +
+            "                            \"analyzer\": \"nameAnalyzer\" " +
+            "                        } " +
+            "                    } " +
+            "                } " +
+            "            } " +
+            "        } " +
+            "    } " +
+            "}, " +
+            "\"targetResponses\": [ { " +
+            "    \"Content-transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Date\": [ \"Thu, 08 Jun 2023 23:06:23 GMT\" ], " +
+            "    \"Transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Content-type\": [ \"text/plain\" ], " +
+            "    \"Funtime\": [ \"checkIt!\" ], " +
+            "    \"HTTP-Version\": \"HTTP/1.1\", " +
+            "    \"Status-Code\": 200, " +
+            "    \"Reason-Phrase\": \"OK\", " +
+            "    \"response_time_ms\": 267, " +
+            "    \"payload\": { " +
+            "        \"inlinedTextBody\": \"I should be decrypted tester!\\r\" " +
+            "    } " +
+            "} ], " +
+            "\"connectionId\": \"testConnection.1\", " +
+            "\"numRequests\": 1, " +
+            "\"numErrors\": 0 " +
+            "}";
+        testOutputterForRequest("post_formUrlEncoded_withFixedLength.txt", EXPECTED_LOGGED_OUTPUT, null);
     }
 
-    private void testOutputterForRequest(String requestResourceName, String expected) throws IOException {
+    private void testOutputterForRequest(String requestResourceName, String expected, IJsonTransformer transformer) throws IOException {
         var trafficStreamKey = PojoTrafficStreamKeyAndContext.build(
             NODE_ID,
             "c",
@@ -264,7 +337,7 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
                 targetResponses,
                 null
             );
-            var streamConsumer = new ResultsToLogsConsumer(closeableLogSetup.getTestLogger(), null);
+            var streamConsumer = new ResultsToLogsConsumer(closeableLogSetup.getTestLogger(), null, transformer);
             var consumer = new TupleParserChainConsumer(streamConsumer);
             consumer.accept(tuple);
             Assertions.assertEquals(1, closeableLogSetup.getLogEvents().size());
@@ -285,10 +358,200 @@ class ResultsToLogsConsumerTest extends InstrumentationTest {
         log.error("TODO - find out how to verify these metrics");
         // Assertions.assertEquals("REQUEST_ID:testConnection.1|SOURCE_HTTP_STATUS:200|TARGET_HTTP_STATUS:200|HTTP_STATUS_MATCH:1",
         // filteredMetrics.stream().map(md->md.getName()+":"+md.getData()).collect(Collectors.joining("|")));
-
+        targetRequest.release();
     }
 
     static String normalizeJson(String input) throws JsonProcessingException {
         return mapper.writeValueAsString(mapper.readTree(input));
     }
+
+    @Test
+    @ResourceLock("TestContext")
+    public void testTransformerWithJsonJoltTransformer() throws IOException {
+        final String EXPECTED_LOGGED_OUTPUT = "{" +
+            "\"sourceRequest\": { " +
+            "    \"Host\": [ \"foo.example\" ], " +
+            "    \"auTHorization\": \"REDACTED\", " +
+            "    \"Request-URI\": \"/test\", " +
+            "    \"Method\": \"GET\", " +
+            "    \"HTTP-Version\": \"HTTP/1.1\", " +
+            "    \"payload\": { " +
+            "        \"inlinedTextBody\": \"\" " +
+            "    } " +
+            "}, " +
+            "\"sourceResponse\": { " +
+            "    \"Content-transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Date\": [ \"Thu, 08 Jun 2023 23:06:23 GMT\" ], " +
+            "    \"Transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Content-type\": [ \"text/plain\" ], " +
+            "    \"Funtime\": [ \"checkIt!\" ], " +
+            "    \"HTTP-Version\": \"HTTP/1.1\", " +
+            "    \"Status-Code\": 200, " +
+            "    \"Reason-Phrase\": \"OK\", " +
+            "    \"response_time_ms\": 0, " +
+            "    \"payload\": { " +
+            "        \"inlinedTextBody\": \"REDACTED\" " +
+            "    } " +
+            "}, " +
+            "\"targetRequest\": { " +
+            "    \"Host\": [ \"foo.example\" ], " +
+            "    \"auTHorization\": \"REDACTED\", " +
+            "    \"Request-URI\": \"/test\", " +
+            "    \"Method\": \"GET\", " +
+            "    \"HTTP-Version\": \"HTTP/1.1\", " +
+            "    \"payload\": { " +
+            "        \"inlinedTextBody\": \"\" " +
+            "    } " +
+            "}, " +
+            "\"targetResponses\": [ { " +
+            "    \"Content-transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Date\": [ \"Thu, 08 Jun 2023 23:06:23 GMT\" ], " +
+            "    \"Transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Content-type\": [ \"text/plain\" ], " +
+            "    \"Funtime\": [ \"checkIt!\" ], " +
+            "    \"HTTP-Version\": \"HTTP/1.1\", " +
+            "    \"Status-Code\": 200, " +
+            "    \"Reason-Phrase\": \"OK\", " +
+            "    \"response_time_ms\": 267, " +
+            "    \"payload\": { " +
+            "        \"inlinedTextBody\": \"REDACTED\" " +
+            "    } " +
+            "} ], " +
+            "\"connectionId\": \"testConnection.1\", " +
+            "\"numRequests\": 1, " +
+            "\"numErrors\": 0 " +
+            "}";
+
+        String joltSpec = "{ " +
+            "    \"operation\": \"modify-overwrite-beta\", " +
+            "    \"spec\": { " +
+            "      \"sourceRequest\": { " +
+            "        \"auTHorization\": \"REDACTED\" " +
+            "      }, " +
+            "      \"sourceResponse\": { " +
+            "        \"payload\": { " +
+            "          \"inlinedTextBody\": \"REDACTED\" " +
+            "        } " +
+            "      }, " +
+            "      \"targetRequest\": { " +
+            "        \"auTHorization\": \"REDACTED\" " +
+            "      }, " +
+            "      \"targetResponses\": { " +
+            "        \"*\": { " +
+            "          \"payload\": { " +
+            "            \"inlinedTextBody\": \"REDACTED\" " +
+            "          } " +
+            "        } " +
+            "      } " +
+            "   } " +
+            "}";
+        String fullConfig = "[{\"JsonJoltTransformerProvider\": { \"script\": " + joltSpec + "}}]";
+        IJsonTransformer jsonJoltTransformer = new TransformationLoader().getTransformerFactoryLoader(fullConfig);
+        testOutputterForRequest("get_withAuthHeader.txt", EXPECTED_LOGGED_OUTPUT, jsonJoltTransformer);
+    }
+
+    @Test
+    @Tag("longTest")
+    @ResourceLock("TestContext")
+    public void testOutputterForGzip() throws IOException {
+        final String EXPECTED_LOGGED_OUTPUT = "{" +
+            "\"sourceRequest\": { " +
+            "    \"Host\": [ \"foo.example\" ], " +
+            "    \"Authorization\": [ \"Basic YWRtaW46YWRtaW4=\" ], " +
+            "    \"Content-Type\": [ \"application/json\" ], " +
+            "    \"transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Request-URI\": \"/test\", " +
+            "    \"Method\": \"POST\", " +
+            "    \"HTTP-Version\": \"HTTP/1.1\", " +
+            "    \"payload\": { " +
+            "        \"inlinedJsonBody\": { " +
+            "            \"name\": \"John\", " +
+            "            \"age\": 30, " +
+            "            \"city\": \"Austin\" " +
+            "        } " +
+            "    } " +
+            "}, " +
+            "\"sourceResponse\": { " +
+            "    \"Content-transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Date\": [ \"Thu, 08 Jun 2023 23:06:23 GMT\" ], " +
+            "    \"Transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Content-type\": [ \"text/plain\" ], " +
+            "    \"Funtime\": [ \"checkIt!\" ], " +
+            "    \"HTTP-Version\": \"HTTP/1.1\", " +
+            "    \"Status-Code\": 200, " +
+            "    \"Reason-Phrase\": \"OK\", " +
+            "    \"response_time_ms\": 0, " +
+            "    \"payload\": { " +
+            "        \"inlinedTextBody\": \"I should be decrypted tester!\\r\" " +
+            "    } " +
+            "}, " +
+            "\"targetRequest\": { " +
+            "    \"Host\": [ \"foo.example\" ], " +
+            "    \"Authorization\": [ \"Basic YWRtaW46YWRtaW4=\" ], " +
+            "    \"Content-Type\": [ \"application/json\" ], " +
+            "    \"transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Request-URI\": \"/test\", " +
+            "    \"Method\": \"POST\", " +
+            "    \"HTTP-Version\": \"HTTP/1.1\", " +
+            "    \"payload\": { " +
+            "        \"inlinedJsonBody\": { " +
+            "            \"name\": \"John\", " +
+            "            \"age\": 30, " +
+            "            \"city\": \"Austin\" " +
+            "        } " +
+            "    } " +
+            "}, " +
+            "\"targetResponses\": [ { " +
+            "    \"Content-transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Date\": [ \"Thu, 08 Jun 2023 23:06:23 GMT\" ], " +
+            "    \"Transfer-encoding\": [ \"chunked\" ], " +
+            "    \"Content-type\": [ \"text/plain\" ], " +
+            "    \"Funtime\": [ \"checkIt!\" ], " +
+            "    \"HTTP-Version\": \"HTTP/1.1\", " +
+            "    \"Status-Code\": 200, " +
+            "    \"Reason-Phrase\": \"OK\", " +
+            "    \"response_time_ms\": 267, " +
+            "    \"payload\": { " +
+            "        \"inlinedTextBody\": \"I should be decrypted tester!\\r\" " +
+            "    } " +
+            "} ], " +
+            "\"connectionId\": \"testConnection.1\", " +
+            "\"numRequests\": 1, " +
+            "\"numErrors\": 0 " +
+            "}";
+        testOutputterForRequest("post_json_gzip.gz", EXPECTED_LOGGED_OUTPUT, null);
+    }
+
+    @Test
+    @Tag("longTest")
+    @ResourceLock("TestContext")
+    public void testOutputterForGzipWithTransformer() throws IOException {
+        final String EXPECTED_LOGGED_OUTPUT = "{" +
+            "\"sourceRequestName\": \"John\", " +
+            "\"targetRequestName\": \"John\" " +
+            "}";
+            String joltSpec = "{ " +
+            "    \"operation\": \"shift\", " +
+            "    \"spec\": { " +
+            "      \"sourceRequest\": { " +
+            "        \"payload\": { " +
+            "          \"inlinedJsonBody\": { " +
+            "            \"name\": \"sourceRequestName\" " +
+            "          } " +
+            "        } " +
+            "      }, " +
+            "      \"targetRequest\": { " +
+            "        \"payload\": { " +
+            "          \"inlinedJsonBody\": { " +
+            "            \"name\": \"targetRequestName\" " +
+            "          } " +
+            "        } " +
+            "      } " +
+            "   } " +
+            "}";
+        String fullConfig = "[{\"JsonJoltTransformerProvider\": { \"script\": " + joltSpec + "}}]";
+        IJsonTransformer jsonJoltTransformer = new TransformationLoader().getTransformerFactoryLoader(fullConfig);
+        testOutputterForRequest("post_json_gzip.gz", EXPECTED_LOGGED_OUTPUT, jsonJoltTransformer);
+    }
+
 }

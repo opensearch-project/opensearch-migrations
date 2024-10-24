@@ -114,11 +114,6 @@ export class CaptureProxyStack extends MigrationServiceCore {
 
         const servicePolicies = props.streamingSourceType === StreamingSourceType.AWS_MSK ? createMSKProducerIAMPolicies(this, this.partition, this.region, this.account, props.stage, props.defaultDeployId) : []
 
-        const brokerEndpoints = getMigrationStringParameterValue(this, {
-            ...props,
-            parameter: MigrationSSMParameter.KAFKA_BROKERS,
-        });
-
         const destinationEndpoint = getDestinationEndpoint(this, props.destinationConfig, props);
 
         let command = "/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy"
@@ -127,8 +122,12 @@ export class CaptureProxyStack extends MigrationServiceCore {
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--destinationUri", destinationEndpoint)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--insecureDestination")
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--listenPort", "9200")
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--sslConfigFile", "/usr/share/elasticsearch/config/proxy_tls.yml")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--sslConfigFile", "/usr/share/captureProxy/config/proxy_tls.yml")
         if (props.streamingSourceType !== StreamingSourceType.DISABLED) {
+            const brokerEndpoints = getMigrationStringParameterValue(this, {
+                ...props,
+                parameter: MigrationSSMParameter.KAFKA_BROKERS,
+            });
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafkaConnection", brokerEndpoints)
         }
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
@@ -141,7 +140,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: serviceName,
-            dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),
+            dockerImageName: "migrations/capture_proxy:latest",
             dockerImageCommand: ['/bin/sh', '-c', command],
             securityGroups: securityGroups,
             taskRolePolicies: servicePolicies,

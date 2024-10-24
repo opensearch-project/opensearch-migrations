@@ -1,14 +1,14 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.util.List;
 import java.util.Optional;
+
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-
-import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
-
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
@@ -23,9 +23,12 @@ public abstract class SnapshotCreator {
     private final IRfsContexts.ICreateSnapshotContext context;
     @Getter
     private final String snapshotName;
+    private final List<String> indexAllowlist;
 
-    protected SnapshotCreator(String snapshotName, OpenSearchClient client, IRfsContexts.ICreateSnapshotContext context) {
+    protected SnapshotCreator(String snapshotName, List<String> indexAllowlist, OpenSearchClient client,
+            IRfsContexts.ICreateSnapshotContext context) {
         this.snapshotName = snapshotName;
+        this.indexAllowlist = indexAllowlist;
         this.client = client;
         this.context = context;
     }
@@ -34,6 +37,14 @@ public abstract class SnapshotCreator {
 
     public String getRepoName() {
         return "migration_assistant_repo";
+    }
+
+    public String getIndexAllowlist() {
+        if (this.indexAllowlist == null || this.indexAllowlist.isEmpty()) {
+            return "_all";
+        } else {
+            return String.join(",", this.indexAllowlist);
+        }
     }
 
     public void registerRepo() {
@@ -52,7 +63,7 @@ public abstract class SnapshotCreator {
     public void createSnapshot() {
         // Assemble the settings
         ObjectNode body = mapper.createObjectNode();
-        body.put("indices", "_all");
+        body.put("indices", this.getIndexAllowlist());
         body.put("ignore_unavailable", true);
         body.put("include_global_state", true);
 
@@ -91,8 +102,8 @@ public abstract class SnapshotCreator {
             return false;
         } else {
             log.atError().setMessage("Snapshot {} has failed with state {}")
-                .addArgument(snapshotName)
-                .addArgument(state).log();
+                    .addArgument(snapshotName)
+                    .addArgument(state).log();
             throw new SnapshotCreationFailed(snapshotName);
         }
     }

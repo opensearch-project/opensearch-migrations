@@ -1,11 +1,11 @@
 package org.opensearch.migrations.bulkload.transformers;
 
+import org.opensearch.migrations.Version;
+import org.opensearch.migrations.VersionMatchers;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-
-import org.opensearch.migrations.Version;
-import org.opensearch.migrations.VersionMatchers;
 
 public class TransformFunctions {
     private static final ObjectMapper mapper = new ObjectMapper();
@@ -22,8 +22,8 @@ public class TransformFunctions {
         Version targetVersion,
         int dimensionality
     ) {
-        if (VersionMatchers.isOS_2_X.test(targetVersion)) {
-            if (VersionMatchers.isES_6_8.test(sourceVersion)) {
+        if (VersionMatchers.isOS_2_X.or(VersionMatchers.isOS_1_X).test(targetVersion)) {
+            if (VersionMatchers.isES_6_X.test(sourceVersion)) {
                 return new Transformer_ES_6_8_to_OS_2_11(dimensionality);
             }
             if (VersionMatchers.equalOrGreaterThanES_7_10.test(sourceVersion)) {
@@ -118,7 +118,9 @@ public class TransformFunctions {
      * it regardless of what it is named.
      */
     public static ObjectNode getMappingsFromBeneathIntermediate(ObjectNode mappingsRoot) {
-        if (mappingsRoot.has(PROPERTIES_KEY_STR)) {
+        if (mappingsRoot.size() == 0) {
+            return mappingsRoot;
+        } else if (mappingsRoot.has(PROPERTIES_KEY_STR)) {
             return mappingsRoot;
         } else if (!mappingsRoot.has(PROPERTIES_KEY_STR)) {
             return (ObjectNode) mappingsRoot.get(mappingsRoot.fieldNames().next()).deepCopy();

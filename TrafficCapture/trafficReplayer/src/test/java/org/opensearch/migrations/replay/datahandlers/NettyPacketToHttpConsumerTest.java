@@ -16,13 +16,6 @@ import java.util.concurrent.locks.LockSupport;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
-import org.junit.jupiter.params.provider.ValueSource;
-
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.ClientConnectionPool;
 import org.opensearch.migrations.replay.PacketToTransformingHttpHandlerFactory;
@@ -52,6 +45,12 @@ import io.netty.handler.timeout.ReadTimeoutException;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
+import org.junit.jupiter.params.provider.ValueSource;
 
 @Slf4j
 @WrapWithNettyLeakDetection
@@ -211,7 +210,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
     @Tag("longTest")
     @WrapWithNettyLeakDetection(repetitions = 1)
     public void testThatWithBigResponseReadTimeoutResponseWouldHang(boolean useTls) throws Exception {
-        testPeerResets(useTls, false, Duration.ofSeconds(30), Duration.ofMillis(1250));
+        testPeerResets(useTls, false, Duration.ofSeconds(30), Duration.ofSeconds(5));
     }
 
     private void testPeerResets(
@@ -299,7 +298,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 ? null
                 : SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
             var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
-                new TransformationLoader().getTransformerFactoryLoader(null),
+                new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(null),
                 null
             );
             var timeShifter = new TimeShifter();
@@ -410,7 +409,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 ? null
                 : SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
             var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
-                new TransformationLoader().getTransformerFactoryLoader(null),
+                new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(null),
                 null
             );
 
@@ -471,7 +470,7 @@ public class NettyPacketToHttpConsumerTest extends InstrumentationTest {
                 ? null
                 : SslContextBuilder.forClient().trustManager(InsecureTrustManagerFactory.INSTANCE).build();
             var transformingHttpHandlerFactory = new PacketToTransformingHttpHandlerFactory(
-                new TransformationLoader().getTransformerFactoryLoader(null),
+                new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(null),
                 null
             );
 

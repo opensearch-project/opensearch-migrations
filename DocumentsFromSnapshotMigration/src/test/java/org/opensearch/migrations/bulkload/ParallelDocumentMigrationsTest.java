@@ -9,58 +9,44 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 import java.util.stream.Stream;
+
+import org.opensearch.migrations.CreateSnapshot;
+import org.opensearch.migrations.bulkload.common.FileSystemRepo;
+import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
+import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.data.WorkloadGenerator;
+import org.opensearch.migrations.data.WorkloadOptions;
+import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
+import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import io.opentelemetry.sdk.metrics.data.LongPointData;
 import io.opentelemetry.sdk.metrics.data.MetricData;
+import lombok.Lombok;
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import org.opensearch.migrations.CreateSnapshot;
-import org.opensearch.migrations.bulkload.common.FileSystemRepo;
-import org.opensearch.migrations.bulkload.framework.PreloadedSearchClusterContainer;
-import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
-import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
-import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
-
-import lombok.Lombok;
-import lombok.extern.slf4j.Slf4j;
 
 @Tag("isolatedTest")
 @Slf4j
 public class ParallelDocumentMigrationsTest extends SourceTestBase {
 
-    static final List<SearchClusterContainer.ContainerVersion> SOURCE_IMAGES = List.of(
-        SearchClusterContainer.ES_V7_10_2
-    );
-    static final List<SearchClusterContainer.ContainerVersion> TARGET_IMAGES = List.of(SearchClusterContainer.OS_V2_14_0);
-
     public static Stream<Arguments> makeDocumentMigrationArgs() {
-        List<Object[]> sourceImageArgs = SOURCE_IMAGES.stream()
-            .map(SourceTestBase::makeParamsForBase)
-            .collect(Collectors.toList());
-        var targetImageNames = TARGET_IMAGES.stream()
-            .collect(Collectors.toList());
         var numWorkersList = List.of(1, 3, 40);
         var compressionEnabledList = List.of(true, false);
-        return sourceImageArgs.stream()
+        return SupportedClusters.targets().stream()
             .flatMap(
-                sourceParams -> targetImageNames.stream()
-                    .flatMap(
-                        targetImage -> numWorkersList.stream()
-                            .flatMap(numWorkers -> compressionEnabledList.stream().map(compression -> Arguments.of(
-                                    numWorkers,
-                                    targetImage,
-                                    sourceParams[0],
-                                    sourceParams[1],
-                                    sourceParams[2],
-                                    compression
-                                ))
-                            )
+                targetImage -> numWorkersList.stream()
+                    .flatMap(numWorkers -> compressionEnabledList.stream().map(compression -> Arguments.of(
+                            numWorkers,
+                            targetImage,
+                            compression
+                        ))
                     )
             );
     }
@@ -70,9 +56,6 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
     public void testDocumentMigration(
         int numWorkers,
         SearchClusterContainer.ContainerVersion targetVersion,
-        SearchClusterContainer.ContainerVersion baseSourceImageVersion,
-        String generatorImage,
-        String[] generatorArgs,
         boolean compressionEnabled
     ) throws Exception {
         var executorService = Executors.newFixedThreadPool(numWorkers);
@@ -80,23 +63,27 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
         final var testDocMigrationContext = DocumentMigrationTestContext.factory()
             .withAllTracking();
 
+        // The source container version doesn't impact the test focus to stress work coordination store with many worker instances.
+        final var sourceVersion = SearchClusterContainer.ES_V7_10_2;
         try (
-            var esSourceContainer = new PreloadedSearchClusterContainer(
-                baseSourceImageVersion,
-                SOURCE_SERVER_ALIAS,
-                generatorImage,
-                generatorArgs
-            );
-            SearchClusterContainer osTargetContainer = new SearchClusterContainer(targetVersion);
+            var esSourceContainer = new SearchClusterContainer(sourceVersion);
+            var osTargetContainer = new SearchClusterContainer(targetVersion);
         ) {
-            CompletableFuture.allOf(CompletableFuture.supplyAsync(() -> {
-                esSourceContainer.start();
-                return null;
-            }, executorService), CompletableFuture.supplyAsync(() -> {
-                osTargetContainer.start();
-                return null;
-            }, executorService)).join();
+            CompletableFuture.allOf(
+                CompletableFuture.runAsync(() ->  esSourceContainer.start(), executorService),
+                CompletableFuture.runAsync(() ->  osTargetContainer.start(), executorService)
+            ).join();
 
+            // Populate the source cluster with data
+            var client = new OpenSearchClient(ConnectionContextTestParams.builder()
+                .host(esSourceContainer.getUrl())
+                .build()
+                .toConnectionContext()
+            );
+            var generator = new WorkloadGenerator(client);
+            generator.generate(new WorkloadOptions());
+
+            // Create the snapshot from the source cluster
             var args = new CreateSnapshot.Args();
             args.snapshotName = "test_snapshot";
             args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
@@ -104,7 +91,6 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
 
             var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
             snapshotCreator.run();
-
 
             final List<String> INDEX_ALLOWLIST = List.of();
             var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
@@ -126,7 +112,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                                 runCounter,
                                 clockJitter,
                                 testDocMigrationContext,
-                                baseSourceImageVersion.getVersion(),
+                                sourceVersion.getVersion(),
                                 compressionEnabled
                             ),
                             executorService

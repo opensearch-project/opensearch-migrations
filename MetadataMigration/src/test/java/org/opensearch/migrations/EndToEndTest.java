@@ -3,27 +3,30 @@ package org.opensearch.migrations;
 import java.io.File;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.io.TempDir;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.Arguments;
-import org.junit.jupiter.params.provider.MethodSource;
-
+import org.opensearch.migrations.bulkload.SupportedClusters;
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.commands.MigrationItemResult;
+import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.io.TempDir;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 
 import static org.hamcrest.CoreMatchers.allOf;
 import static org.hamcrest.CoreMatchers.containsString;
@@ -43,54 +46,29 @@ class EndToEndTest {
     private File localDirectory;
 
     private static Stream<Arguments> scenarios() {
-        return Stream.of(
-            Arguments.of(TransferMedium.Http, MetadataCommands.EVALUATE),
-            Arguments.of(TransferMedium.SnapshotImage, MetadataCommands.MIGRATE),
-            Arguments.of(TransferMedium.Http, MetadataCommands.MIGRATE)
-        );
-    }
+        var scenarios = Stream.<Arguments>builder();
 
-    @ParameterizedTest(name = "Command {1}, Medium of transfer {0}")
-    @MethodSource(value = "scenarios")
-    void metadataMigrateFrom_ES_v6_8(TransferMedium medium, MetadataCommands command) throws Exception {
-        try (
-            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V6_8_23);
-            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
-        ) {
-            migrateFrom_ES(sourceCluster, targetCluster, medium, command);
+        for (var sourceCluster : SupportedClusters.sources()) {
+            for (var targetCluster : SupportedClusters.targets()) {
+                for (var command : MetadataCommands.values()) {
+                    scenarios.add(Arguments.of(sourceCluster, targetCluster, TransferMedium.Http, command));
+                }
+                // Only test snapshot for migrate case
+                scenarios.add(Arguments.of(sourceCluster, targetCluster, TransferMedium.SnapshotImage, MetadataCommands.MIGRATE));
+            }
         }
+
+        return scenarios.build();
     }
 
-    @ParameterizedTest(name = "Command {1}, Medium of transfer {0}")
+    @ParameterizedTest(name = "From version {0} to version {1}, Command {2}, Medium of transfer {3}")
     @MethodSource(value = "scenarios")
-    void metadataMigrateFrom_ES_v7_17(TransferMedium medium, MetadataCommands command) throws Exception {
+    void metadataCommand(ContainerVersion sourceVersion, ContainerVersion targetVersion, TransferMedium medium, MetadataCommands command) throws Exception {
         try (
-            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_17);
-            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
+            final var sourceCluster = new SearchClusterContainer(sourceVersion);
+            final var targetCluster = new SearchClusterContainer(targetVersion)
         ) {
-            migrateFrom_ES(sourceCluster, targetCluster, medium, command);
-        }
-    }
-
-    @ParameterizedTest(name = "Command {1}, Medium of transfer {0}")
-    @MethodSource(value = "scenarios")
-    void metadataMigrateFrom_ES_v7_10(TransferMedium medium, MetadataCommands command) throws Exception {
-        try (
-            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2);
-            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
-        ) {
-            migrateFrom_ES(sourceCluster, targetCluster, medium, command);
-        }
-    }
-
-    @ParameterizedTest(name = "Command {1}, Medium of transfer {0}")
-    @MethodSource(value = "scenarios")
-    void metadataMigrateFrom_OS_v1_3(TransferMedium medium, MetadataCommands command) throws Exception {
-        try (
-            final var sourceCluster = new SearchClusterContainer(SearchClusterContainer.OS_V1_3_16);
-            final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
-        ) {
-            migrateFrom_ES(sourceCluster, targetCluster, medium, command);
+            metadataCommandOnClusters(sourceCluster, targetCluster, medium, command);
         }
     }
 
@@ -100,7 +78,7 @@ class EndToEndTest {
     }
 
     @SneakyThrows
-    private void migrateFrom_ES(
+    private void metadataCommandOnClusters(
         final SearchClusterContainer sourceCluster,
         final SearchClusterContainer targetCluster,
         final TransferMedium medium,
@@ -114,7 +92,7 @@ class EndToEndTest {
         bothClustersStarted.join();
 
         Version sourceVersion = sourceCluster.getContainerVersion().getVersion();
-        var sourceIsES6_8 = VersionMatchers.isES_6_8.test(sourceVersion);
+        var sourceIsES6_8 = VersionMatchers.isES_6_X.test(sourceVersion);
         var sourceIsES7_X = VersionMatchers.isES_7_X.test(sourceVersion) || VersionMatchers.isOS_1_X.test(sourceVersion);
 
         if (!(sourceIsES6_8 || sourceIsES7_X)) {
@@ -133,6 +111,7 @@ class EndToEndTest {
         // Creates a document that uses the template
         sourceClusterOperations.createDocument(testData.blogIndexName, "222", "{\"author\":\"Tobias Funke\"}");
         sourceClusterOperations.createDocument(testData.movieIndexName,"123", "{\"title\":\"This is spinal tap\"}");
+        sourceClusterOperations.createDocument(testData.indexThatAlreadyExists, "doc66", "{}");
 
         sourceClusterOperations.createAlias(testData.aliasName, "movies*");
 
@@ -155,6 +134,7 @@ class EndToEndTest {
                     snapshotName,
                     sourceClient,
                     SearchClusterContainer.CLUSTER_SNAPSHOT_DIR,
+                    List.of(),
                     snapshotContext.createSnapshotCreateContext()
                 );
                 SnapshotRunner.runAndWaitForCompletion(snapshotCreator);
@@ -172,11 +152,13 @@ class EndToEndTest {
         arguments.targetArgs.host = targetCluster.getUrl();
 
         var dataFilterArgs = new DataFilterArgs();
-        dataFilterArgs.indexAllowlist = List.of(testData.blogIndexName, testData.movieIndexName);
+        dataFilterArgs.indexAllowlist = List.of();
         dataFilterArgs.componentTemplateAllowlist = List.of(testData.compoTemplateName);
         dataFilterArgs.indexTemplateAllowlist = List.of(testData.indexTemplateName);
         arguments.dataFilterArgs = dataFilterArgs;
 
+        var targetClusterOperations = new ClusterOperations(targetCluster.getUrl());
+        targetClusterOperations.createDocument(testData.indexThatAlreadyExists, "doc77", "{}");
 
         // ACTION: Migrate the templates
         var metadataContext = MetadataMigrationTestContext.factory().noOtelTracking();
@@ -191,7 +173,7 @@ class EndToEndTest {
 
         verifyCommandResults(result, sourceIsES6_8, testData);
 
-        verifyTargetCluster(targetCluster, command, sourceIsES6_8, testData);
+        verifyTargetCluster(targetClusterOperations, command, sourceIsES6_8, testData);
     }
 
     private static class TestData {
@@ -201,24 +183,29 @@ class EndToEndTest {
         final String blogIndexName = "blog_2023";
         final String movieIndexName = "movies_2023";
         final String aliasName = "movies-alias";
+        final String indexThatAlreadyExists = "already-exists";
     }
 
     private void verifyCommandResults(
         MigrationItemResult result,
         boolean sourceIsES6_8,
         TestData testData) {
-        log.info(result.toString());
+        log.info(result.asCliOutput());
         assertThat(result.getExitCode(), equalTo(0));
 
         var migratedItems = result.getItems();
-        assertThat(migratedItems.getIndexTemplates(), containsInAnyOrder(testData.indexTemplateName));
-        assertThat(migratedItems.getComponentTemplates(), equalTo(sourceIsES6_8 ? List.of() : List.of(testData.compoTemplateName)));
-        assertThat(migratedItems.getIndexes(), containsInAnyOrder(testData.blogIndexName, testData.movieIndexName));
-        assertThat(migratedItems.getAliases(), containsInAnyOrder(testData.aliasInTemplate, testData.aliasName));
+        assertThat(getNames(migratedItems.getIndexTemplates()), containsInAnyOrder(testData.indexTemplateName));
+        assertThat(getNames(migratedItems.getComponentTemplates()), equalTo(sourceIsES6_8 ? List.of() : List.of(testData.compoTemplateName)));
+        assertThat(getNames(migratedItems.getIndexes()), containsInAnyOrder(testData.blogIndexName, testData.movieIndexName, testData.indexThatAlreadyExists));
+        assertThat(getNames(migratedItems.getAliases()), containsInAnyOrder(testData.aliasInTemplate, testData.aliasName));
+    }
+
+    private List<String> getNames(List<CreationResult> items) {
+        return items.stream().map(r -> r.getName()).collect(Collectors.toList());
     }
 
     private void verifyTargetCluster(
-        SearchClusterContainer targetCluster,
+        ClusterOperations targetClusterOperations,
         MetadataCommands command,
         boolean sourceIsES6_8,
         TestData testData
@@ -228,7 +215,6 @@ class EndToEndTest {
         var verifyResponseCode = expectUpdatesOnTarget ? equalTo(200) : equalTo(404);
 
         // Check that the index was migrated
-        var targetClusterOperations = new ClusterOperations(targetCluster.getUrl());
         var res = targetClusterOperations.get("/" + testData.blogIndexName);
         assertThat(res.getValue(), res.getKey(), verifyResponseCode);
 

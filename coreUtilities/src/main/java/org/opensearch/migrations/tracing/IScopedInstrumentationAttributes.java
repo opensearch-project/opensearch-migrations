@@ -2,6 +2,8 @@ package org.opensearch.migrations.tracing;
 
 import java.util.ArrayDeque;
 
+import org.opensearch.migrations.Utils;
+
 import io.opentelemetry.api.common.AttributeKey;
 import io.opentelemetry.api.common.Attributes;
 import io.opentelemetry.api.common.AttributesBuilder;
@@ -11,9 +13,6 @@ import io.opentelemetry.api.metrics.LongHistogram;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
 import io.opentelemetry.api.trace.Span;
 import io.opentelemetry.semconv.SemanticAttributes;
-
-import org.opensearch.migrations.Utils;
-
 import lombok.NonNull;
 
 public interface IScopedInstrumentationAttributes extends IWithStartTimeAndAttributes, AutoCloseable {

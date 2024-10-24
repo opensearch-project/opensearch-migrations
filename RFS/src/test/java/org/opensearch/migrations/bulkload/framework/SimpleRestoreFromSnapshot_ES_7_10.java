@@ -4,10 +4,6 @@ import java.nio.file.Path;
 import java.util.List;
 import java.util.stream.Collectors;
 
-import org.apache.logging.log4j.LogManager;
-import org.apache.logging.log4j.Logger;
-import org.apache.lucene.util.IOUtils;
-
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
@@ -21,6 +17,10 @@ import org.opensearch.migrations.bulkload.version_es_7_10.IndexMetadataFactory_E
 import org.opensearch.migrations.bulkload.version_es_7_10.ShardMetadataFactory_ES_7_10;
 import org.opensearch.migrations.bulkload.version_es_7_10.SnapshotRepoProvider_ES_7_10;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
+
+import org.apache.logging.log4j.LogManager;
+import org.apache.logging.log4j.Logger;
+import org.apache.lucene.util.IOUtils;
 
 /**
  * Simplified version of RFS for use in testing - ES 7.10 version.

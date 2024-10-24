@@ -1,7 +1,5 @@
 package org.opensearch.migrations.cli;
 
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
@@ -10,6 +8,7 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.cluster.ClusterReader;
 
 import com.beust.jcommander.ParameterException;
+import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -53,6 +52,16 @@ public class ClusterReaderExtractorTest {
 
         var exception = assertThrows(ParameterException.class, () -> extractor.extractClusterReader());
         assertThat(exception.getMessage(), equalTo("If an s3 repo is being used, s3-region and s3-local-dir-path must be set"));
+    }
+
+    @Test
+    void testExtractClusterReader_validLocalSnapshot_missingVersion() {
+        var args = new MigrateOrEvaluateArgs();
+        args.fileSystemRepoPath = "foo.bar";
+        var extractor = spy(new ClusterReaderExtractor(args));
+
+        var exception = assertThrows(ParameterException.class, () -> extractor.extractClusterReader());
+        assertThat(exception.getMessage(), equalTo("Unable to read from snapshot without --source-version parameter"));
     }
 
     @Test

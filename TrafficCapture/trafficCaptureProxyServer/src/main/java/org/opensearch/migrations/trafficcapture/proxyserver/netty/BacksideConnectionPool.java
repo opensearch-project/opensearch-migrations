@@ -1,9 +1,10 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
+import javax.net.ssl.SSLEngine;
+
 import java.net.URI;
 import java.time.Duration;
 import java.util.concurrent.TimeUnit;
-import javax.net.ssl.SSLEngine;
 
 import io.netty.bootstrap.Bootstrap;
 import io.netty.channel.ChannelDuplexHandler;

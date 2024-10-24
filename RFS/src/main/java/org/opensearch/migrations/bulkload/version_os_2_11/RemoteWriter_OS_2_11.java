@@ -10,6 +10,9 @@ import org.opensearch.migrations.cluster.RemoteCluster;
 import org.opensearch.migrations.metadata.GlobalMetadataCreator;
 import org.opensearch.migrations.metadata.IndexCreator;
 
+import lombok.extern.slf4j.Slf4j;
+
+@Slf4j
 public class RemoteWriter_OS_2_11 implements RemoteCluster, ClusterWriter {
     private Version version;
     private OpenSearchClient client;
@@ -18,17 +21,30 @@ public class RemoteWriter_OS_2_11 implements RemoteCluster, ClusterWriter {
 
     @Override
     public boolean compatibleWith(Version version) {
-        return VersionMatchers.isOS_2_X.test(version);
+        return VersionMatchers.isOS_2_X.or
+            (VersionMatchers.isOS_1_X)
+            .test(version);
     }
 
     @Override
-    public void initialize(DataFilterArgs dataFilterArgs) {
+    public ClusterWriter initialize(Version versionOverride) {
+        if (versionOverride != null) {
+            log.warn("Overriding version for cluster, " + versionOverride);
+            this.version = versionOverride;
+        }
+        return this;
+    }
+
+    @Override
+    public ClusterWriter initialize(DataFilterArgs dataFilterArgs) {
         this.dataFilterArgs = dataFilterArgs;
+        return this;
     }
 
     @Override
-    public void initialize(ConnectionContext connection) {
+    public RemoteCluster initialize(ConnectionContext connection) {
         this.connection = connection;
+        return this;
     }
 
     @Override

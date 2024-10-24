@@ -3,7 +3,6 @@ package org.opensearch.migrations.replay.util;
 import javax.annotation.Nullable;
 
 import com.google.errorprone.annotations.MustBeClosed;
-
 import io.netty.util.ReferenceCountUtil;
 
 public class RefSafeHolder<T> implements AutoCloseable {
@@ -25,5 +24,10 @@ public class RefSafeHolder<T> implements AutoCloseable {
     @Override
     public void close() {
         ReferenceCountUtil.release(resource);
+    }
+
+    @Override
+    public String toString() {
+        return "RefSafeHolder{" + resource + "}";
     }
 }

@@ -7,13 +7,13 @@ import java.nio.charset.StandardCharsets;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import com.google.common.io.CharStreams;
+import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
+
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.google.common.io.CharStreams;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
-
-import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
 
 public class TypeMappingsExcisionTest {
 

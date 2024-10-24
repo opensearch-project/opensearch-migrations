@@ -1,8 +1,9 @@
 package org.opensearch.migrations.trafficcapture.proxyserver.netty;
 
+import javax.net.ssl.SSLEngine;
+
 import java.io.IOException;
 import java.util.function.Supplier;
-import javax.net.ssl.SSLEngine;
 
 import org.opensearch.migrations.trafficcapture.IConnectionCaptureFactory;
 import org.opensearch.migrations.trafficcapture.netty.ConditionallyReliableLoggingHttpHandler;

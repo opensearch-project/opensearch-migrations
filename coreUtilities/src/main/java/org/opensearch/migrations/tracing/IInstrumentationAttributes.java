@@ -8,7 +8,6 @@ import io.opentelemetry.api.metrics.DoubleHistogram;
 import io.opentelemetry.api.metrics.LongCounter;
 import io.opentelemetry.api.metrics.LongHistogram;
 import io.opentelemetry.api.metrics.LongUpDownCounter;
-
 import lombok.NonNull;
 
 public interface IInstrumentationAttributes {

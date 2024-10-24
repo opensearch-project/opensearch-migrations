@@ -2,14 +2,14 @@ package org.opensearch.migrations.replay.tracing;
 
 import java.time.Instant;
 
-import io.opentelemetry.api.common.AttributeKey;
-import io.opentelemetry.api.common.AttributesBuilder;
-
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 import org.opensearch.migrations.tracing.IWithTypedEnclosingScope;
+
+import io.opentelemetry.api.common.AttributeKey;
+import io.opentelemetry.api.common.AttributesBuilder;
 
 public interface IReplayContexts {
 
@@ -44,6 +44,9 @@ public interface IReplayContexts {
         public static final String TRANSFORM_PAYLOAD_PARSE_SUCCESS = "parsedPayloadSuccess";
         public static final String TRANSFORM_JSON_REQUIRED = "transformedJsonRequired";
         public static final String TRANSFORM_JSON_SUCCEEDED = "transformedJsonSucceeded";
+        public static final String TRANSFORM_TEXT_SUCCEEDED = "transformedTextSucceeded";
+        public static final String TRANSFORM_TEXT_FAILED = "transformedTextFailed";
+        public static final String TRANSFORM_PAYLOAD_BINARY = "transformedPayloadBinary";
         public static final String TRANSFORM_PAYLOAD_BYTES_IN = "originalPayloadBytesIn";
         public static final String TRANSFORM_UNCOMPRESSED_BYTES_IN = "uncompressedBytesIn";
         public static final String TRANSFORM_UNCOMPRESSED_BYTES_OUT = "uncompressedBytesOut";
@@ -256,6 +259,12 @@ public interface IReplayContexts {
         void onJsonPayloadParseRequired();
 
         void onJsonPayloadParseSucceeded();
+
+        void onTextPayloadParseSucceeded();
+
+        void onTextPayloadParseFailed();
+
+        void onPayloadSetBinary();
 
         void onPayloadBytesIn(int inputSize);
 

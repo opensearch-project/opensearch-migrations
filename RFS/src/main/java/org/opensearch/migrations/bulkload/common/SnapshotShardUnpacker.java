@@ -5,17 +5,16 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 
-import org.apache.lucene.store.FSDirectory;
-import org.apache.lucene.store.IOContext;
-import org.apache.lucene.store.IndexOutput;
-import org.apache.lucene.store.NativeFSLockFactory;
-import org.apache.lucene.util.BytesRef;
-
 import org.opensearch.migrations.bulkload.models.ShardFileInfo;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.lucene.store.FSDirectory;
+import org.apache.lucene.store.IOContext;
+import org.apache.lucene.store.IndexOutput;
+import org.apache.lucene.store.NativeFSLockFactory;
+import org.apache.lucene.util.BytesRef;
 
 @RequiredArgsConstructor
 @Slf4j

@@ -14,14 +14,13 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Supplier;
 
-import com.google.protobuf.Timestamp;
-
 import org.opensearch.migrations.replay.Utils;
 import org.opensearch.migrations.replay.datatypes.ITrafficStreamKey;
 import org.opensearch.migrations.replay.tracing.ITrafficSourceContexts;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 
+import com.google.protobuf.Timestamp;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;

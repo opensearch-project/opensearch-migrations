@@ -10,22 +10,29 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
+import java.util.function.Function;
 
 import org.opensearch.migrations.CreateSnapshot;
-import org.opensearch.migrations.bulkload.framework.PreloadedSearchClusterContainer;
+import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.data.WorkloadGenerator;
+import org.opensearch.migrations.data.WorkloadOptions;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.testcontainers.OpensearchContainer;
 
 import eu.rekawek.toxiproxy.model.ToxicDirection;
+import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.testcontainers.containers.Network;
 
 /**
@@ -47,6 +54,36 @@ public class ProcessLifecycleTest extends SourceTestBase {
         WITH_DELAYS
     }
 
+    @AllArgsConstructor
+    @Getter
+    private static class RunData {
+        Path tempDirSnapshot;
+        Path tempDirLucene;
+        ToxiProxyWrapper proxyContainer;
+    }
+
+    @Test
+    public void testExitsZeroThenThreeForSimpleSetup() throws Exception {
+        testProcess(3,
+            d -> {
+                var firstExitCode =
+                    runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, FailHow.NEVER);
+                Assertions.assertEquals(0, firstExitCode);
+                for (int i=0; i<10; ++i) {
+                    var secondExitCode =
+                        runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, FailHow.NEVER);
+                    if (secondExitCode != 0) {
+                        var lastErrorCode =
+                            runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, FailHow.NEVER);
+                        Assertions.assertEquals(secondExitCode, lastErrorCode);
+                        return lastErrorCode;
+                    }
+                }
+                Assertions.fail("Ran for many test iterations and didn't get a No Work Available exit code");
+                return -1; // won't be evaluated
+            });
+    }
+
     @ParameterizedTest
     @CsvSource(value = {
         // This test will go through a proxy that doesn't add any defects and the process will use defaults
@@ -59,15 +96,18 @@ public class ProcessLifecycleTest extends SourceTestBase {
         // to such a short value (1s) that no document migration will exit in that amount of time. For good
         // measure though, the toxiproxy also adds latency to the requests to make it impossible for the
         // migration to complete w/in that 1s.
-        "WITH_DELAYS, 2" })
+        "WITH_DELAYS, 2"
+    })
     public void testProcessExitsAsExpected(String failAfterString, int expectedExitCode) throws Exception {
         final var failHow = FailHow.valueOf(failAfterString);
+        testProcess(expectedExitCode,
+            d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, failHow));
+    }
+
+    @SneakyThrows
+    private void testProcess(int expectedExitCode, Function<RunData, Integer> processRunner) {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
 
-        var sourceImageArgs = makeParamsForBase(SearchClusterContainer.ES_V7_10_2);
-        var baseSourceImageVersion = (SearchClusterContainer.ContainerVersion) sourceImageArgs[0];
-        var generatorImage = (String) sourceImageArgs[1];
-        var generatorArgs = (String[]) sourceImageArgs[2];
         var targetImageName = SearchClusterContainer.OS_V2_14_0.getImageName();
 
         var tempDirSnapshot = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
@@ -75,29 +115,30 @@ public class ProcessLifecycleTest extends SourceTestBase {
 
         try (
             var network = Network.newNetwork();
-            var esSourceContainer = new PreloadedSearchClusterContainer(
-                baseSourceImageVersion,
-                SOURCE_SERVER_ALIAS,
-                generatorImage,
-                generatorArgs
-            );
+            var esSourceContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2)
+                .withNetwork(network)
+                .withNetworkAliases(SOURCE_SERVER_ALIAS);
             var osTargetContainer = new OpensearchContainer<>(targetImageName).withExposedPorts(OPENSEARCH_PORT)
                 .withNetwork(network)
                 .withNetworkAliases(TARGET_DOCKER_HOSTNAME);
             var proxyContainer = new ToxiProxyWrapper(network)
         ) {
+            CompletableFuture.allOf(
+                CompletableFuture.runAsync(() -> esSourceContainer.start()),
+                CompletableFuture.runAsync(() -> osTargetContainer.start()),
+                CompletableFuture.runAsync(() -> proxyContainer.start(TARGET_DOCKER_HOSTNAME, OPENSEARCH_PORT))
+            ).join();
 
-            CompletableFuture.allOf(CompletableFuture.supplyAsync(() -> {
-                esSourceContainer.start();
-                return null;
-            }), CompletableFuture.supplyAsync(() -> {
-                osTargetContainer.start();
-                return null;
-            }), CompletableFuture.supplyAsync(() -> {
-                proxyContainer.start(TARGET_DOCKER_HOSTNAME, OPENSEARCH_PORT);
-                return null;
-            })).join();
+            // Populate the source cluster with data
+            var client = new OpenSearchClient(ConnectionContextTestParams.builder()
+                .host(esSourceContainer.getUrl())
+                .build()
+                .toConnectionContext()
+            );
+            var generator = new WorkloadGenerator(client);
+            generator.generate(new WorkloadOptions());
 
+            // Create the snapshot from the source cluster
             var args = new CreateSnapshot.Args();
             args.snapshotName = SNAPSHOT_NAME;
             args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
@@ -108,7 +149,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
 
             esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
-            int actualExitCode = runProcessAgainstToxicTarget(tempDirSnapshot, tempDirLucene, proxyContainer, failHow);
+            int actualExitCode = processRunner.apply(new RunData(tempDirSnapshot, tempDirLucene, proxyContainer));
             log.atInfo().setMessage("Process exited with code: " + actualExitCode).log();
 
             // Check if the exit code is as expected
@@ -123,12 +164,13 @@ public class ProcessLifecycleTest extends SourceTestBase {
         }
     }
 
+    @SneakyThrows
     private static int runProcessAgainstToxicTarget(
         Path tempDirSnapshot,
         Path tempDirLucene,
         ToxiProxyWrapper proxyContainer,
-        FailHow failHow
-    ) throws IOException, InterruptedException {
+        FailHow failHow)
+    {
         String targetAddress = proxyContainer.getProxyUriAsString();
         var tp = proxyContainer.getProxy();
         if (failHow == FailHow.AT_STARTUP) {
@@ -182,6 +224,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
             "10",
             "--max-connections",
             "1",
+            "--source-version",
+            "ES_7_10",
             "--initial-lease-duration",
             failHow == FailHow.NEVER ? "PT10M" : "PT1S" };
 

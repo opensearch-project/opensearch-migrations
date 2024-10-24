@@ -312,14 +312,6 @@
             "markers": "python_version >= '3.8'",
             "version": "==2.32.3"
         },
-        "requests-auth-aws-sigv4": {
-            "hashes": [
-                "sha256:1f6c7f63a0696a8f131a2ff21a544380f43c11f54d72600f6f2a1d402bd41d41",
-                "sha256:3d2a475cccbf85d4c93b8bd052d072e5c3f8e77022fd621b69a5b11ac2c139c8"
-            ],
-            "markers": "python_version >= '2.7'",
-            "version": "==0.7"
-        },
         "requests-aws4auth": {
             "hashes": [
                 "sha256:2969b5379ae6e60ee666638caf6cb94a32d67033f6bfcf0d50c95cd5474f2419",

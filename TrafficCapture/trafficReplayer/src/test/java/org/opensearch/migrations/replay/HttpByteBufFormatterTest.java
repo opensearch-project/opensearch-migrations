@@ -6,6 +6,12 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.replay.util.RefSafeStreamUtils;
+import org.opensearch.migrations.testutils.CountingNettyResourceLeakDetector;
+import org.opensearch.migrations.testutils.TestUtilities;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+
+import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
@@ -13,13 +19,6 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
-
-import org.opensearch.migrations.replay.util.RefSafeStreamUtils;
-import org.opensearch.migrations.testutils.CountingNettyResourceLeakDetector;
-import org.opensearch.migrations.testutils.TestUtilities;
-import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-
-import io.netty.buffer.Unpooled;
 
 @WrapWithNettyLeakDetection
 public class HttpByteBufFormatterTest {

@@ -7,7 +7,6 @@ import {createStackComposer} from "./test-utils";
 import * as yaml from 'yaml';
 import {describe, afterEach, beforeEach, test, expect, jest} from '@jest/globals';
 
-jest.mock('aws-cdk-lib/aws-ecr-assets');
 describe('Migration Services YAML Tests', () => {
     beforeEach(() => {
         jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => ContainerImage.fromRegistry("ServiceImage"));
@@ -17,7 +16,6 @@ describe('Migration Services YAML Tests', () => {
         jest.clearAllMocks();
         jest.resetModules();
         jest.restoreAllMocks();
-        jest.resetAllMocks();
     });
 
     test('Test default servicesYaml can be stringified', () => {
@@ -126,7 +124,8 @@ describe('Migration Services YAML Tests', () => {
             migrationConsoleServiceEnabled: true,
             sourceCluster: {
                 "endpoint": "https://test-cluster",
-                "auth": {"type": "none"}
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
             },
             reindexFromSnapshotServiceEnabled: true,
             trafficReplayerServiceEnabled: true,
@@ -178,7 +177,8 @@ describe('Migration Services YAML Tests', () => {
             migrationConsoleServiceEnabled: true,
             sourceCluster: {
                 "endpoint": "https://test-cluster",
-                "auth": {"type": "none"}
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
             },
             targetCluster: {
                 "endpoint": "https://target-cluster",
@@ -231,7 +231,8 @@ describe('Migration Services YAML Tests', () => {
             migrationConsoleServiceEnabled: true,
             sourceCluster: {
                 "endpoint": "https://test-cluster",
-                "auth": {"type": "none"}
+                "auth": {"type": "none"},
+                "version": "ES_7.10"
             },
             targetCluster: {
                 "endpoint": "https://target-cluster",

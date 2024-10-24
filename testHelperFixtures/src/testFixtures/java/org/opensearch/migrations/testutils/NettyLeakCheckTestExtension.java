@@ -4,12 +4,11 @@ import java.lang.reflect.Method;
 import java.util.Optional;
 import java.util.concurrent.Callable;
 
+import lombok.Lombok;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.extension.ExtensionContext;
 import org.junit.jupiter.api.extension.InvocationInterceptor;
 import org.junit.jupiter.api.extension.ReflectiveInvocationContext;
-
-import lombok.Lombok;
 
 public class NettyLeakCheckTestExtension implements InvocationInterceptor {
     public static final int DEFAULT_NUM_REPETITIONS = 16;
@@ -69,7 +68,8 @@ public class NettyLeakCheckTestExtension implements InvocationInterceptor {
                 }
             }
 
-            Assertions.assertEquals(0, CountingNettyResourceLeakDetector.getNumLeaks());
+            Assertions.assertEquals(0, CountingNettyResourceLeakDetector.getNumLeaks(),
+                "Expected 0 leaks but got " + CountingNettyResourceLeakDetector.getNumLeaks());
         }
     }
 

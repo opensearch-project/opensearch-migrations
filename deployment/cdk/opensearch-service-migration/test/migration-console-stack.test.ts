@@ -5,10 +5,10 @@ import {ContainerImage} from "aws-cdk-lib/aws-ecs";
 import {describe, beforeEach, afterEach, test, expect, jest} from '@jest/globals';
 import {ReindexFromSnapshotStack} from "../lib";
 
-jest.mock('aws-cdk-lib/aws-ecr-assets');
+
 describe('Migration Console Stack Tests', () => {
-    // Mock the implementation of fromDockerImageAsset before all tests
     beforeEach(() => {
+        // Mock the implementation of fromDockerImageAsset before all tests
         jest.spyOn(ContainerImage, 'fromDockerImageAsset').mockImplementation(() => ContainerImage.fromRegistry("ServiceImage"));
     });
 
@@ -17,7 +17,6 @@ describe('Migration Console Stack Tests', () => {
         jest.clearAllMocks();
         jest.resetModules();
         jest.restoreAllMocks();
-        jest.resetAllMocks();
     });
 
     test('Migration Console task definition is updated when services.yaml inputs change', () => {

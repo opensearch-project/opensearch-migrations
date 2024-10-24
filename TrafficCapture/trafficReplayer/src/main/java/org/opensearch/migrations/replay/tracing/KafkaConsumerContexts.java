@@ -2,20 +2,19 @@ package org.opensearch.migrations.replay.tracing;
 
 import java.util.Collection;
 
-import io.opentelemetry.api.metrics.LongCounter;
-import io.opentelemetry.api.metrics.LongUpDownCounter;
-import io.opentelemetry.api.metrics.Meter;
-import org.apache.kafka.common.TopicPartition;
-
 import org.opensearch.migrations.tracing.BaseNestedSpanContext;
 import org.opensearch.migrations.tracing.CommonMetricInstruments;
 import org.opensearch.migrations.tracing.CommonScopedMetricInstruments;
 import org.opensearch.migrations.tracing.DirectNestedSpanContext;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
 
+import io.opentelemetry.api.metrics.LongCounter;
+import io.opentelemetry.api.metrics.LongUpDownCounter;
+import io.opentelemetry.api.metrics.Meter;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.Setter;
+import org.apache.kafka.common.TopicPartition;
 
 public class KafkaConsumerContexts {
 

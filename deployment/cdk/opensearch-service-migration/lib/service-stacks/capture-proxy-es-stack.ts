@@ -67,7 +67,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
         const extraArgsDict = parseArgsToDict(props.extraArgs)
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--destinationUri", "https://localhost:19200")
         command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--insecureDestination")
-        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--sslConfigFile", "/usr/share/elasticsearch/config/proxy_tls.yml")
+        command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--sslConfigFile", "/usr/share/captureProxy/config/proxy_tls.yml")
         if (props.streamingSourceType !== StreamingSourceType.DISABLED) {
             command = appendArgIfNotInExtraArgs(command, extraArgsDict, "--kafkaConnection", brokerEndpoints)
         }
@@ -81,7 +81,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
 
         this.createService({
             serviceName: "capture-proxy-es",
-            dockerDirectoryPath: join(__dirname, "../../../../../", "TrafficCapture/dockerSolution/build/docker/trafficCaptureProxyServer"),
+            dockerImageName: "migrations/capture_proxy_es:latest",
             dockerImageCommand: ['/bin/sh', '-c', command.concat(" & wait -n 1")],
             securityGroups: securityGroups,
             taskRolePolicies: servicePolicies,

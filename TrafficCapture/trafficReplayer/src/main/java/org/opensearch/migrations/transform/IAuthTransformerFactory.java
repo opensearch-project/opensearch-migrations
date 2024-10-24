@@ -2,10 +2,10 @@ package org.opensearch.migrations.transform;
 
 import java.io.IOException;
 
-import org.opensearch.migrations.replay.datahandlers.http.HttpJsonMessageWithFaultingPayload;
+import org.opensearch.migrations.replay.datahandlers.http.HttpJsonRequestWithFaultingPayload;
 
 public interface IAuthTransformerFactory extends AutoCloseable {
-    IAuthTransformer getAuthTransformer(HttpJsonMessageWithFaultingPayload httpMessage);
+    IAuthTransformer getAuthTransformer(HttpJsonRequestWithFaultingPayload httpMessage);
 
     default void close() throws IOException {}
 
@@ -13,7 +13,7 @@ public interface IAuthTransformerFactory extends AutoCloseable {
         public static final NullAuthTransformerFactory instance = new NullAuthTransformerFactory();
 
         @Override
-        public IAuthTransformer getAuthTransformer(HttpJsonMessageWithFaultingPayload httpMessage) {
+        public IAuthTransformer getAuthTransformer(HttpJsonRequestWithFaultingPayload httpMessage) {
             return null;
         }
     }

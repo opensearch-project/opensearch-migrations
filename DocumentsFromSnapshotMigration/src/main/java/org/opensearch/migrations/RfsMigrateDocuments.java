@@ -45,7 +45,8 @@ import org.slf4j.MDC;
 
 @Slf4j
 public class RfsMigrateDocuments {
-    public static final int PROCESS_TIMED_OUT = 2;
+    public static final int PROCESS_TIMED_OUT_EXIT_CODE = 2;
+    public static final int NO_WORK_LEFT_EXIT_CODE = 3;
     public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
     public static final String LOGGING_MDC_WORKER_ID = "workerId";
 
@@ -57,62 +58,84 @@ public class RfsMigrateDocuments {
     }
 
     public static class Args {
-        @Parameter(names = {"--help", "-h"}, help = true, description = "Displays information about how to use this tool")
+        @Parameter(
+            names = {"--help", "-h"},
+            help = true,
+            description = "Displays information about how to use this tool")
         private boolean help;
 
-        @Parameter(names = { "--snapshot-name" }, required = true, description = "The name of the snapshot to migrate")
+        @Parameter(required = true,
+            names = { "--snapshot-name" },
+            description = "The name of the snapshot to migrate")
         public String snapshotName;
 
-        @Parameter(names = {
-            "--snapshot-local-dir" }, required = false, description = ("The absolute path to the directory on local disk where the snapshot exists.  Use this parameter"
-                + " if have a copy of the snapshot disk.  Mutually exclusive with --s3-local-dir, --s3-repo-uri, and --s3-region."))
+        @Parameter(required = false,
+            names = { "--snapshot-local-dir" },
+            description = ("The absolute path to the directory on local disk where the snapshot exists.  " +
+                "Use this parameter if have a copy of the snapshot disk.  Mutually exclusive with " +
+                "--s3-local-dir, --s3-repo-uri, and --s3-region."))
         public String snapshotLocalDir = null;
 
-        @Parameter(names = {
-            "--s3-local-dir" }, required = false, description = ("The absolute path to the directory on local disk to download S3 files to.  If you supply this, you must"
-                + " also supply --s3-repo-uri and --s3-region.  Mutually exclusive with --snapshot-local-dir."))
+        @Parameter(required = false,
+            names = { "--s3-local-dir" },
+            description = ("The absolute path to the directory on local disk to download S3 files to.  " +
+                "If you supply this, you must also supply --s3-repo-uri and --s3-region.  " +
+                "Mutually exclusive with --snapshot-local-dir."))
         public String s3LocalDir = null;
 
-        @Parameter(names = {
-            "--s3-repo-uri" }, required = false, description = ("The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2.  If you supply this, you must"
-                + " also supply --s3-local-dir and --s3-region.  Mutually exclusive with --snapshot-local-dir."))
+        @Parameter(required = false,
+            names = {"--s3-repo-uri" },
+            description = ("The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2.  " +
+                "If you supply this, you must also supply --s3-local-dir and --s3-region.  " +
+                "Mutually exclusive with --snapshot-local-dir."))
         public String s3RepoUri = null;
 
-        @Parameter(names = {
-            "--s3-region" }, required = false, description = ("The AWS Region the S3 bucket is in, like: us-east-2.  If you supply this, you must"
+        @Parameter(required = false,
+            names = { "--s3-region" },
+            description = ("The AWS Region the S3 bucket is in, like: us-east-2.  If you supply this, you must"
                 + " also supply --s3-local-dir and --s3-repo-uri.  Mutually exclusive with --snapshot-local-dir."))
         public String s3Region = null;
 
-        @Parameter(names = {
-            "--lucene-dir" }, required = true, description = "The absolute path to the directory where we'll put the Lucene docs")
+        @Parameter(required = true,
+            names = { "--lucene-dir" },
+            description = "The absolute path to the directory where we'll put the Lucene docs")
         public String luceneDir;
 
         @ParametersDelegate
         public ConnectionContext.TargetArgs targetArgs = new ConnectionContext.TargetArgs();
 
-        @Parameter(names = { "--index-allowlist" }, description = ("Optional.  List of index names to migrate"
-            + " (e.g. 'logs_2024_01, logs_2024_02').  Default: all non-system indices (e.g. those not starting with '.')"), required = false)
+        @Parameter(required = false,
+            names = { "--index-allowlist" },
+            description = ("Optional.  List of index names to migrate (e.g. 'logs_2024_01, logs_2024_02').  " +
+                "Default: all non-system indices (e.g. those not starting with '.')"))
         public List<String> indexAllowlist = List.of();
 
-        @Parameter(names = {
-            "--max-shard-size-bytes" }, description = ("Optional. The maximum shard size, in bytes, to allow when"
-                + " performing the document migration.  Useful for preventing disk overflow.  Default: 80 * 1024 * 1024 * 1024 (80 GB)"), required = false)
+        @Parameter(required = false,
+            names = { "--max-shard-size-bytes" },
+            description = ("Optional. The maximum shard size, in bytes, to allow when " +
+                "performing the document migration.  " +
+                "Useful for preventing disk overflow.  Default: 80 * 1024 * 1024 * 1024 (80 GB)"))
         public long maxShardSizeBytes = 80 * 1024 * 1024 * 1024L;
 
-        @Parameter(names = { "--initial-lease-duration" }, description = ("Optional. The time that the "
-            + "first attempt to migrate a shard's documents should take.  If a process takes longer than this "
-            + "the process will terminate, allowing another process to attempt the migration, but with double the "
-            + "amount of time than the last time.  Default: PT10M"), required = false, converter = DurationConverter.class)
+        @Parameter(required = false,
+            names = { "--initial-lease-duration" },
+            converter = DurationConverter.class,
+            description = "Optional. The time that the first attempt to migrate a shard's documents should take.  " +
+                "If a process takes longer than this the process will terminate, allowing another process to " +
+                "attempt the migration, but with double the amount of time than the last time.  Default: PT10M")
         public Duration initialLeaseDuration = Duration.ofMinutes(10);
 
-        @Parameter(required = false, names = {
-            "--otel-collector-endpoint" }, arity = 1, description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
+        @Parameter(required = false,
+            names = { "--otel-collector-endpoint" },
+            arity = 1,
+            description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
                 + "forwarded. If no value is provided, metrics will not be forwarded.")
         String otelCollectorEndpoint;
 
         @Parameter(required = false,
         names = "--documents-per-bulk-request",
-        description = "Optional.  The number of documents to be included within each bulk request sent. Default no max (controlled by documents size)")
+        description = "Optional.  The number of documents to be included within each bulk request sent. " +
+            "Default no max (controlled by documents size)")
         int numDocsPerBulkRequest = Integer.MAX_VALUE;
 
         @Parameter(required = false,
@@ -127,8 +150,10 @@ public class RfsMigrateDocuments {
                 "used to communicate to the target, default 10")
         int maxConnections = 10;
 
-        @Parameter(names = { "--source-version" }, description = ("Optional. Version of the source cluster.  Default: ES_7.10"), required = false,
-            converter = VersionConverter.class)
+        @Parameter(required = true,
+            names = { "--source-version" },
+            converter = VersionConverter.class,
+            description = ("Version of the source cluster."))
         public Version sourceVersion = Version.fromString("ES 7.10");
     }
 
@@ -184,15 +209,12 @@ public class RfsMigrateDocuments {
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
         var connectionContext = arguments.targetArgs.toConnectionContext();
-        try (var processManager = new LeaseExpireTrigger(workItemId -> {
-            log.error("Terminating RfsMigrateDocuments because the lease has expired for " + workItemId);
-            System.exit(PROCESS_TIMED_OUT);
-        }, Clock.systemUTC());
-            var workCoordinator = new OpenSearchWorkCoordinator(
-                new CoordinateWorkHttpClient(connectionContext),
-                TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                workerId
-            )) {
+        try (var processManager = new LeaseExpireTrigger(RfsMigrateDocuments::exitOnLeaseTimeout, Clock.systemUTC());
+             var workCoordinator = new OpenSearchWorkCoordinator(
+                 new CoordinateWorkHttpClient(connectionContext),
+                 TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
+                 workerId)
+        ) {
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
             OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
             DocumentReindexer reindexer = new DocumentReindexer(targetClient,
@@ -233,10 +255,18 @@ public class RfsMigrateDocuments {
                 unpackerFactory,
                 arguments.maxShardSizeBytes,
                 context);
+        } catch (NoWorkLeftException e) {
+            log.atWarn().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
+            System.exit(NO_WORK_LEFT_EXIT_CODE);
         } catch (Exception e) {
             log.atError().setMessage("Unexpected error running RfsWorker").setCause(e).log();
             throw e;
         }
+    }
+
+    private static void exitOnLeaseTimeout(String workItemId) {
+        log.error("Terminating RfsMigrateDocuments because the lease has expired for " + workItemId);
+        System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
     }
 
     private static RootDocumentMigrationContext makeRootContext(Args arguments, String workerId) {

@@ -12,10 +12,8 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.zip.GZIPInputStream;
 
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
+import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.transform.JsonJoltTransformBuilder;
 import org.opensearch.migrations.transform.JsonJoltTransformer;
@@ -26,13 +24,18 @@ import io.netty.handler.codec.http.FullHttpRequest;
 import io.netty.handler.codec.http.HttpObjectAggregator;
 import io.netty.handler.codec.http.HttpServerCodec;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Tag;
+import org.junit.jupiter.api.Test;
 
 @Slf4j
+@WrapWithNettyLeakDetection(repetitions = 1)
 public class AddCompressionEncodingTest extends InstrumentationTest {
 
     public static final byte BYTE_FILL_VALUE = (byte) '7';
 
     @Test
+    @Tag("longTest")
     public void addingCompressionRequestHeaderCompressesPayload() throws ExecutionException, InterruptedException,
         IOException {
         final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);

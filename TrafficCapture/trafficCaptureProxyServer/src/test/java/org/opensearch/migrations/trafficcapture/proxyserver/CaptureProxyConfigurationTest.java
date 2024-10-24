@@ -6,17 +6,16 @@ import java.time.Duration;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
-import org.junit.jupiter.api.AfterAll;
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.BeforeAll;
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.testutils.SimpleHttpClientForTesting;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.CaptureProxyContainer;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.HttpdContainerTestBase;
 import org.opensearch.migrations.trafficcapture.proxyserver.testcontainers.annotations.HttpdContainerTest;
 
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.AfterAll;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Test;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 

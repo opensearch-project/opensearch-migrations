@@ -10,9 +10,6 @@ import java.util.function.IntFunction;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
-import org.junit.jupiter.api.Assertions;
-import org.junit.jupiter.api.Test;
-
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.util.TrackedFuture;
@@ -21,6 +18,8 @@ import org.opensearch.migrations.tracing.InstrumentationTest;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Assertions;
+import org.junit.jupiter.api.Test;
 
 @Slf4j
 @WrapWithNettyLeakDetection(repetitions = 2)
@@ -34,7 +33,7 @@ public class HeaderTransformerTest extends InstrumentationTest {
         // mock object. values don't matter at all - not what we're testing
         final var dummyAggregatedResponse = new AggregatedRawResponse(null, 17, Duration.ZERO, List.of(), null);
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
-        var transformer = new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME);
+        var transformer = new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(SILLY_TARGET_CLUSTER_NAME);
         var transformingHandler = new HttpJsonTransformingConsumer(
             transformer,
             null,
@@ -107,7 +106,7 @@ public class HeaderTransformerTest extends InstrumentationTest {
         var testPacketCapture = new TestCapturePacketToHttpHandler(Duration.ofMillis(100), dummyAggregatedResponse);
         var httpBasicAuthTransformer = new StaticAuthTransformerFactory("Basic YWRtaW46YWRtaW4=");
         var transformingHandler = new HttpJsonTransformingConsumer(
-            new TransformationLoader().getTransformerFactoryLoader(SILLY_TARGET_CLUSTER_NAME),
+            new TransformationLoader().getTransformerFactoryLoaderWithNewHostName(SILLY_TARGET_CLUSTER_NAME),
             httpBasicAuthTransformer,
             testPacketCapture,
             rootContext.getTestConnectionRequestContext(0)

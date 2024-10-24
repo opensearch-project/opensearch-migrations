@@ -23,3 +23,9 @@ If you are concerned about this scenario, we recommend fully mitigating it by pu
 The output tuples, available on the shared EFS volume via the Migration Console, contain the exact requests and responses received from both the source and target clusters with the headers and the body of the messages. The Authorization header is present on SigV4 signed requests and those using basic authorization, and with basic authorization credentials can be extracted from the header value. These values are often essential for debugging and so are not censored from the output.
 
 If you use basic authorization credentials, ensure that access to your output tuples is protected similarly to the credentials themselves.
+
+### Customer Managed Keys are not supported by the migration infrastructure
+Each of the AWS services that are interacting with data will encrypt all data being stored at rest. While the services themselves can support performing the encryption via a KMS Key, the CDK deployment option of Migration Assistant doesn't have the ability to set a customer key for any of those services. That will leave all of the data at rest encrypted, but not under the control of a customer's KMS Key. See the links below for more details on forthcoming support:
+
+https://docs.aws.amazon.com/kms/latest/developerguide/concepts.html
+[Issue #1026](https://github.com/opensearch-project/opensearch-migrations/issues/1026)

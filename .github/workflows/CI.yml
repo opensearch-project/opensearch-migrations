@@ -200,8 +200,8 @@ jobs:
           node-version: ${{ env.node-version }}
       - name: Install NPM dependencies
         run: npm ci
-      - name: Run CDK Jest Tests
-        run: npm test
+      - name: Run CDK Jest Tests (using mocked images)
+        run: npm run test
 
   link-checker:
     runs-on: ubuntu-latest
