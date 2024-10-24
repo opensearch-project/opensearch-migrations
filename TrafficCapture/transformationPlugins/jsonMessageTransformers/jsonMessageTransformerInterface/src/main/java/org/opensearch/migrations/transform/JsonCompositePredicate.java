@@ -23,9 +23,9 @@ public class JsonCompositePredicate implements IJsonPredicate {
     }
 
     @Override
-    public boolean evaluatePredicate(Map<String, Object> incomingJson) {
+    public boolean test(Map<String, Object> incomingJson) {
         var Predicates = jsonPredicateList.stream();
-        Predicate<IJsonPredicate> predicate = p -> p.evaluatePredicate(incomingJson);
+        Predicate<IJsonPredicate> predicate = p -> p.test(incomingJson);
         switch (operation) {
             case ALL:
                 return Predicates.allMatch(predicate);

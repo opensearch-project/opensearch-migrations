@@ -16,7 +16,7 @@ public class JsonJMESPathPredicate implements IJsonPredicate {
     }
 
     @Override
-    public boolean evaluatePredicate(Map<String, Object> incomingJson) {
+    public boolean test(Map<String, Object> incomingJson) {
         var output = expression.search(incomingJson);
         log.atDebug().setMessage("output={}").addArgument(output).log();
         return (Boolean) output;

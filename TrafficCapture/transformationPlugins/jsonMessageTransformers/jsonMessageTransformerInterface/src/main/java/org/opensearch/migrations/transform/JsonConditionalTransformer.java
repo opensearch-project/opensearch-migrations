@@ -13,7 +13,7 @@ public class JsonConditionalTransformer implements IJsonTransformer {
 
     @Override
     public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
-        if (jsonPredicate.evaluatePredicate(incomingJson)) {
+        if (jsonPredicate.test(incomingJson)) {
             return jsonTransformer.transformJson(incomingJson);
         }
         return incomingJson;

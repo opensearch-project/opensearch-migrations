@@ -1,8 +1,7 @@
 package org.opensearch.migrations.transform;
 
 import java.util.Map;
+import java.util.function.Predicate;
 
-
-public interface IJsonPredicate {
-    boolean evaluatePredicate(Map<String, Object> incomingJson);
+public interface IJsonPredicate extends Predicate<Map<String, Object>> {
 }
