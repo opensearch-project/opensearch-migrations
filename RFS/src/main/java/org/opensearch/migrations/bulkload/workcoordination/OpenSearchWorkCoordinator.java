@@ -416,10 +416,11 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 + "      }"
                 + "    ]"
                 + "  }"
-                + "}"
+                + "},"
+                + "\"size\": 1"
                 + "}";
 
-            var path = INDEX_NAME + "/_count";
+            var path = INDEX_NAME + "/_search";
             var response = httpClient.makeJsonRequest(AbstractedHttpClient.POST_METHOD, path, null, queryBody);
             var statusCode = response.getStatusCode();
             if (statusCode != 200) {
@@ -430,7 +431,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                                 + " instead of 200"
                 );
             }
-            return objectMapper.readTree(response.getPayloadBytes()).path("count").asInt();
+            return objectMapper.readTree(response.getPayloadBytes()).path("hits").path("total").path("value").asInt();
         }
     }
 
