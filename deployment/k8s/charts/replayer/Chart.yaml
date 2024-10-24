@@ -1,0 +1,6 @@
+apiVersion: v2
+name: replayer
+description: A Helm chart to install the Traffic Replayer
+type: application
+version: 0.1.0
+appVersion: "1.16.0"
