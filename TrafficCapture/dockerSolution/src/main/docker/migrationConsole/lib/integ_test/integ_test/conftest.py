@@ -21,6 +21,7 @@ def pytest_addoption(parser):
     parser.addoption("--target_proxy_alb_endpoint", action="store", default=None,
                      help="Specify the Migration ALB endpoint for the target proxy")
 
+
 @pytest.fixture
 def unique_id(pytestconfig):
     return pytestconfig.getoption("unique_id")
