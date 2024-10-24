@@ -1,0 +1,9 @@
+dependencies:
+- name: migration-console
+  repository: file://../services/migration-console
+  version: 0.1.0
+- name: capture-proxy
+  repository: file://../services/capture-proxy
+  version: 0.1.0
+digest: sha256:7897ada3193d874398b7fdc67a8f45eeb650302c190fe07ef9b29494d678e2f2
+generated: "2024-10-23T20:35:14.098691-05:00"

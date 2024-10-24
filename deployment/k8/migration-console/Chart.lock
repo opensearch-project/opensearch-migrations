@@ -1,6 +1,0 @@
-dependencies:
-- name: migrations-lib
-  repository: file://../migrations-lib
-  version: 0.1.0
-digest: sha256:7d5c25e2ed7da25adb550d420edcd8fbb2793d966da650dfbb68265aea5ca41e
-generated: "2024-10-21T14:49:22.624024-05:00"

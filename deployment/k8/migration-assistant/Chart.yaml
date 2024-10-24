@@ -1,0 +1,40 @@
+apiVersion: v2
+name: migration-assistant
+version: 0.1.0
+dependencies:
+#  - name: elasticsearch
+#    version: "0.1.0"
+#    repository: "file://../services/elasticsearch"
+#  - name: opensearch-helm
+#    version: "0.1.0"
+#    repository: "file://../services/opensearch-helm"
+#  - name: kafka-op
+#    version: "0.1.0"
+#    repository: "file://../services/kafka-op"
+  - name: migration-console
+    version: "0.1.0"
+    repository: "file://../services/migration-console"
+#  - name: replayer
+#    version: "0.1.0"
+#    repository: "file://../services/replayer"
+  - name: capture-proxy
+    version: "0.1.0"
+    repository: "file://../services/capture-proxy"
+#  - name: reindex-from-snapshot
+#    version: "0.1.0"
+#    repository: "file://../services/reindex-from-snapshot"
+#  - name: shared-logs-vol
+#    version: "0.1.0"
+#    repository: "file://../services/shared/shared-logs-vol"
+#  - name: snapshot-vol
+#    version: "0.1.0"
+#    repository: "file://../services/shared/snapshot-vol"
+#  - name: jaeger
+#    version: "0.1.0"
+#    repository: "file://../services/jaeger"
+#  - name: prometheus
+#    version: "0.1.0"
+#    repository: "file://../services/prometheus"
+#  - name: grafana
+#    version: "0.1.0"
+#    repository: "file://../services/grafana"
