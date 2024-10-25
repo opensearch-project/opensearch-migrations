@@ -147,7 +147,6 @@ export class SolutionsInfrastructureStack extends Stack {
             init: CloudFormationInit.fromElements(...cfnInitConfig),
             initOptions: {
                 printLog: true,
-                ignoreFailures: true,
             },
         });
 

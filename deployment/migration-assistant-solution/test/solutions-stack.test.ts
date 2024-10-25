@@ -1,4 +1,4 @@
-import { describe, expect, test } from '@jest/globals';
+import { describe, test } from '@jest/globals';
 import { Template } from 'aws-cdk-lib/assertions';
 import { App } from 'aws-cdk-lib';
 import { SolutionsInfrastructureStack } from '../lib/solutions-stack';

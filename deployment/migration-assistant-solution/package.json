@@ -10,9 +10,10 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
-    "lint": "eslint .",
-    "snyth": "cdk synthesize",
-    "test": "jest"
+    "test": "npm run test:lint & npm run test:jest",
+    "test:lint": "eslint .",
+    "test:jest": "jest",
+    "snyth": "cdk synthesize"
   },
   "devDependencies": {
     "@aws-cdk/assert": "2.68.0",
@@ -33,6 +34,7 @@
   "dependencies": {
     "@aws-cdk/aws-servicecatalogappregistry-alpha": "2.105.0-alpha.0",
     "@jest/globals": "^29.7.0",
+    "globals": "^15.11.0",
     "source-map-support": "^0.5.21"
   }
 }
