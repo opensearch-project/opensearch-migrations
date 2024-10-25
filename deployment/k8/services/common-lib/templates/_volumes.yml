@@ -1,0 +1,23 @@
+{{- define "common-lib.volumes" -}}
+volumes:
+  {{- range .Values.volumes }}
+  - name: {{ .name }}
+    {{- if .configMap }}
+    configMap:
+      name: {{ .configMap.name }}
+    {{- end }}
+    {{- if .secret }}
+    secret:
+      secretName: {{ .secret.secretName }}
+    {{- end }}
+    {{- if .persistentVolumeClaim }}
+    persistentVolumeClaim:
+      claimName: {{ .persistentVolumeClaim.claimName }}
+    {{- end }}
+    {{- if .hostPath }}
+    hostPath:
+      path: {{ .hostPath.path }}
+      type: {{ .hostPath.type | default "DirectoryOrCreate" }}
+    {{- end }}
+  {{- end }}
+{{- end }}

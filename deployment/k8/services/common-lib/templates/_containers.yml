@@ -1,0 +1,31 @@
+{{- define "common-lib.containers" -}}
+containers:
+  - name: {{ .Chart.Name }}
+    image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
+    imagePullPolicy: {{ .Values.image.pullPolicy }}
+    {{- if and .Values.container .Values.container.command }}
+    command:
+      - "/bin/sh"
+      - "-c"
+      - "{{ .Values.container.command }}"
+    {{- end }}
+    # Load all env variables
+    env:
+      {{- range .Values.env }}
+      - name: {{ .name }}
+        {{- if .value }}
+        value: {{ .value }}
+        {{- end }}
+        {{- if .configMapKeyRef }}
+        valueFrom:
+          configMapKeyRef:
+            name: {{ .configMapKeyRef.name }}
+            key: {{ .configMapKeyRef.key }}
+        {{- end }}
+        {{- end }}
+    volumeMounts:
+      {{- range .Values.volumeMounts }}
+      - name: {{ .name }}
+        mountPath: {{ .mountPath }}
+      {{- end }}
+{{- end }}

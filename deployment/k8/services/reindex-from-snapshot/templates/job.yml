@@ -14,45 +14,5 @@ spec:
         app: {{ .Chart.Name }}
     spec:
       restartPolicy: Never
-      containers:
-        - name: {{ .Chart.Name }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          command:
-            - "/bin/sh"
-            - "-c"
-            - "{{ .Values.container.command }}"
-          # Load all env variables
-          env:
-            {{- range $key, $value := .Values.env }}
-            - name: {{ $key }}
-              value: {{ $value | quote }}
-            {{- end }}
-          volumeMounts:
-            - name: {{ .Values.sharedLogVolume.volumeName }}
-              mountPath: {{ .Values.sharedLogVolume.mountPath }}
-            - name: {{ .Values.snapshotVolume.volumeName }}
-              mountPath: {{ .Values.snapshotVolume.mountPath }}
-      {{- if .Values.otelCollectorSidecar.enabled }}
-      initContainers:
-        - name: {{ .Values.otelCollectorSidecar.name}}
-          image: "{{ .Values.otelCollectorSidecar.image.repository }}:{{ .Values.otelCollectorSidecar.image.tag }}"
-          imagePullPolicy: {{ .Values.otelCollectorSidecar.image.pullPolicy }}
-          ports:
-            {{- range .Values.otelCollectorSidecar.ports }}
-            - name: {{ .name }}
-              containerPort: {{ .containerPort }}
-              protocol: {{ .protocol | default "TCP" }}
-            {{- end }}
-          restartPolicy: {{ .Values.otelCollectorSidecar.restartPolicy }}
-          {{- if .Values.otelCollectorSidecar.args }}
-          args: {{ .Values.otelCollectorSidecar.args }}
-          {{- end }}
-      {{- end }}
-      volumes:
-        - name: {{ .Values.sharedLogVolume.volumeName }}
-          persistentVolumeClaim:
-            claimName: {{ .Values.sharedLogVolume.pvcClaimName }}
-        - name: {{ .Values.snapshotVolume.volumeName }}
-          persistentVolumeClaim:
-            claimName: {{ .Values.snapshotVolume.pvcClaimName }}
+      {{- include "common-lib.containers" . | nindent 6 }}
+      {{- include "common-lib.volumes" . | nindent 6 }}

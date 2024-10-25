@@ -2,9 +2,10 @@ apiVersion: v2
 name: migration-assistant
 version: 0.1.0
 dependencies:
-#  - name: elasticsearch
-#    version: "0.1.0"
-#    repository: "file://../services/elasticsearch"
+  - name: elasticsearch-searchguard
+    version: "0.1.0"
+    repository: "file://../services/elasticsearch-searchguard"
+    condition: elasticsearch-searchguard-enabled
   - name: opensearch
     version: "2.23.1"
     repository: "https://opensearch-project.github.io/helm-charts/"
@@ -26,6 +27,7 @@ dependencies:
     version: "0.1.0"
     repository: "file://../services/capture-proxy"
     condition: capture-proxy-enabled
-#  - name: reindex-from-snapshot
-#    version: "0.1.0"
-#    repository: "file://../services/reindex-from-snapshot"
+  - name: reindex-from-snapshot
+    version: "0.1.0"
+    repository: "file://../services/reindex-from-snapshot"
+    condition: reindex-from-snapshot-enabled

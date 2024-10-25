@@ -16,7 +16,7 @@ container:
     --insecureDestination
     --listenPort 9200
     --sslConfigFile /usr/share/elasticsearch/config/proxy_tls.yml
-    --otelCollectorEndpoint http://localhost:4317
+#--otelCollectorEndpoint http://localhost:4317
 resources:
   limits:
     cpu: 100m

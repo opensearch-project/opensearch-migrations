@@ -1,9 +1,11 @@
 # Define all enabled/disabled migration services
 migration-console-enabled: true
-capture-proxy-enabled: false
-replayer-enabled: false
-kafka-op-enabled: false
-opensearch-helm-enabled: false
+capture-proxy-enabled: true
+replayer-enabled: true
+kafka-op-enabled: true
+reindex-from-snapshot-enabled: true
+elasticsearch-searchguard-enabled: true
+opensearch-helm-enabled: true
 
 # Define specific dependency configuration
 opensearch-helm:

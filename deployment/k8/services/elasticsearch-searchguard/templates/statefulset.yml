@@ -14,23 +14,5 @@ spec:
       labels:
         app: {{ .Chart.Name }}
     spec:
-      containers:
-        - name: {{ .Chart.Name }}
-          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
-          imagePullPolicy: {{ .Values.image.pullPolicy }}
-          ports:
-            - containerPort: {{ .Values.service.targetPort }}
-          # Load all env variables
-          env:
-            {{- range $key, $value := .Values.env }}
-            - name: {{ $key }}
-              value: {{ $value | quote }}
-            {{- end }}
-          volumeMounts:
-            - name: {{ .Values.snapshotVolume.volumeName }}
-              mountPath: {{ .Values.snapshotVolume.mountPath }}
-      volumes:
-        - name: {{ .Values.snapshotVolume.volumeName }}
-          persistentVolumeClaim:
-            claimName: {{ .Values.snapshotVolume.pvcClaimName }}
-# TODO Add PVC
+      {{- include "common-lib.containers" . | nindent 6 }}
+      {{- include "common-lib.volumes" . | nindent 6 }}
