@@ -7,6 +7,7 @@ import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
+import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
 
 @Slf4j
 public class ScopedWorkCoordinator {
@@ -27,7 +28,8 @@ public class ScopedWorkCoordinator {
     public <T> T ensurePhaseCompletion(
         WorkItemGetter workItemIdSupplier,
         IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T> visitor,
-        Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
+        Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier,
+        Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> successorContextSupplier
     ) throws IOException, InterruptedException {
         var acquisitionResult = workItemIdSupplier.tryAcquire(workCoordinator);
         return acquisitionResult.visit(new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T>() {
@@ -46,6 +48,11 @@ public class ScopedWorkCoordinator {
                 InterruptedException {
                 var workItemId = workItem.getWorkItemId();
                 leaseExpireTrigger.registerExpiration(workItem.workItemId, workItem.leaseExpirationTime);
+                if (!workItem.successorWorkItems.isEmpty()) {
+                    workCoordinator.createSuccessorWorkItemsAndMarkComplete(workItemId, workItem.successorWorkItems, successorContextSupplier);
+                    leaseExpireTrigger.markWorkAsCompleted(workItemId);
+                    return visitor.onAlreadyCompleted();
+                }
                 var rval = visitor.onAcquiredWork(workItem);
                 workCoordinator.completeWorkItem(workItemId, contextSupplier);
                 leaseExpireTrigger.markWorkAsCompleted(workItemId);

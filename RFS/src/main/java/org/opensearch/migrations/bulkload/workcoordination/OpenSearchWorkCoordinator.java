@@ -14,6 +14,7 @@ import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -315,6 +316,13 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
+    private ArrayList<String> getSuccessorItemsIfPresent(JsonNode responseDoc) {
+        if (responseDoc.has(SUCCESSOR_ITEMS_FIELD_NAME)) {
+            return new ArrayList<>(Arrays.asList(responseDoc.get(SUCCESSOR_ITEMS_FIELD_NAME).asText().split(",")));
+        }
+        return new ArrayList<>();
+    }
+
     @Override
     @NonNull
     public WorkAcquisitionOutcome createOrUpdateLeaseForWorkItem(
@@ -328,7 +336,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             var resultFromUpdate = getResult(updateResponse);
 
             if (resultFromUpdate == DocumentModificationResult.CREATED) {
-                return new WorkItemAndDuration(workItemId, startTime.plus(leaseDuration), new ArrayList<>()); // todo
+                return new WorkItemAndDuration(workItemId, startTime.plus(leaseDuration), new ArrayList<>());
             } else {
                 final var httpResponse = httpClient.makeJsonRequest(
                     AbstractedHttpClient.GET_METHOD,
@@ -341,7 +349,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     return new WorkItemAndDuration(
                         workItemId,
                         Instant.ofEpochMilli(1000 * responseDoc.path(EXPIRATION_FIELD_NAME).longValue()),
-                        new ArrayList<String>() // todo
+                        getSuccessorItemsIfPresent(responseDoc)
                     );
                 } else if (!responseDoc.path(COMPLETED_AT_FIELD_NAME).isMissingNode()) {
                     return new AlreadyCompleted();
@@ -605,7 +613,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             throw new MalformedAssignedWorkDocumentException(response);
         }
 
-        var successorItems = resultHitInner.has(SUCCESSOR_ITEMS_FIELD_NAME) ? new ArrayList<>(Arrays.asList(resultHitInner.get(SUCCESSOR_ITEMS_FIELD_NAME).asText().split(","))) : new ArrayList<String>();
+        var successorItems = getSuccessorItemsIfPresent(resultHitInner);
         var rval = new WorkItemAndDuration(resultHitInner.get("_id").asText(), Instant.ofEpochMilli(1000 * expiration), successorItems);
         log.atInfo().setMessage(() -> "Returning work item and lease: " + rval).log();
         return rval;
@@ -667,7 +675,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 + "        throw new IllegalArgumentException(\\\"work item was owned by \\\" + ctx._source."
                 +                        LEASE_HOLDER_ID_FIELD_NAME + " + \\\" not \\\" + params.workerId);"
                 + "      }"
-                + "      if (ctx._source." + SUCCESSOR_ITEMS_FIELD_NAME + " != null && ctx._source" + SUCCESSOR_ITEMS_FIELD_NAME + "!= params.successorWorkItems) {"
+                + "      if (ctx._source." + SUCCESSOR_ITEMS_FIELD_NAME + " != null && ctx._source." + SUCCESSOR_ITEMS_FIELD_NAME + " != params.successorWorkItems) {"
                 + "        throw new IllegalArgumentException(\\\"The " + SUCCESSOR_ITEMS_FIELD_NAME + " field cannot be updated with a different value.\\\")"
                 + "      }"
                 + "      ctx._source." + SUCCESSOR_ITEMS_FIELD_NAME + " = params.successorWorkItems;"
@@ -698,7 +706,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
     // This is a idempotent function to create multiple unassigned work items. It uses the `create` function in the bulk API
     // which creates a document only if the specified ID doesn't yet exist.
-    public void createUnassignedWorkItemsIfNonexistent(ArrayList<String> workItemIds) throws IOException, InterruptedException, ResponseException {
+    private void createUnassignedWorkItemsIfNonexistent(ArrayList<String> workItemIds) throws IOException, IllegalStateException {
         String workItemBodyTemplate = "{\"numAttempts\":0, \"scriptVersion\":\"" + SCRIPT_VERSION_TEMPLATE + "\", " +
             "\"creatorId\":\"" + WORKER_ID_TEMPLATE + "\", \"" + EXPIRATION_FIELD_NAME + "\":0 }";
         String workItemBody = workItemBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, "poc").replace(WORKER_ID_TEMPLATE, workerId);
@@ -716,7 +724,13 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         );
         var statusCode = response.getStatusCode();
         if (statusCode != 200) {
-            throw new ResponseException(response); // todo
+            throw new IllegalStateException(
+                    "A bulk request to create successor work item(s), "
+                            + String.join(", ", workItemIds)
+                            + "returned an unexpected status code "
+                            + statusCode
+                            + " instead of 200"
+            );
         }
         // parse the response body and if any of the writes failed with anything EXCEPT a version conflict, throw an exception
         var resultTree = objectMapper.readTree(response.getPayloadBytes());
@@ -724,23 +738,29 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         if (!errors) {
             return;
         }
-        var acceptableErrorCodes = List.of(201, 409);
+        var acceptableStatusCodes = List.of(201, 409);
 
         var createResults = new ArrayList<Boolean>();
         resultTree.path("items").elements().forEachRemaining(
-                item -> createResults.add(acceptableErrorCodes.contains(item.path("create").path("status").asInt()))
+                item -> createResults.add(acceptableStatusCodes.contains(item.path("create").path("status").asInt()))
         );
         if (createResults.contains(false)) {
-            throw new ResponseException(response);
+            throw new IllegalStateException(
+                    "One or more of the successor work item(s) could not be created: "
+                            + String.join(", ", workItemIds)
+                            + ".  Response: "
+                            + response.toDiagnosticString()
+            );
         }
 
     }
 
+    @Override
     public void createSuccessorWorkItemsAndMarkComplete(
             String workItemId,
             ArrayList<String> successorWorkItemIds,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
-    ) throws IOException, InterruptedException, ResponseException {
+    ) throws IOException, InterruptedException, IllegalStateException {
         try (var ctx = contextSupplier.get()) {
             updateWorkItemWithSuccessors(workItemId, successorWorkItemIds);
             createUnassignedWorkItemsIfNonexistent(successorWorkItemIds);

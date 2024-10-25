@@ -69,7 +69,7 @@ public interface IWorkCoordinator extends AutoCloseable {
         Duration leaseDuration,
         Supplier<IWorkCoordinationContexts.IAcquireSpecificWorkContext> contextSupplier
     ) throws IOException;
-
+    
     /**
      * Scan the created work items that have not yet had leases acquired and have not yet finished.
      * One of those work items will be returned along with a lease for how long this process may continue
@@ -97,6 +97,20 @@ public interface IWorkCoordinator extends AutoCloseable {
     void completeWorkItem(
         String workItemId,
         Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
+    ) throws IOException, InterruptedException;
+
+    /**
+     * Add the list of successor items to the work item, create new work items for each of the successors, and mark the
+     * original work item as completed.
+     * @param workItemId the work item that is being completed
+     * @param successorWorkItemIds the list of successor work items that will be created
+     * @throws IOException
+     * @throws InterruptedException
+     */
+    void createSuccessorWorkItemsAndMarkComplete(
+        String workItemId,
+        ArrayList<String> successorWorkItemIds,
+        Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException;
 
     /**

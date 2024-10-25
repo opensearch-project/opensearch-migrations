@@ -85,7 +85,7 @@ public class ShardWorkPreparer {
             public Void onNoAvailableWorkToBeDone() throws IOException {
                 return null;
             }
-        }, context::createWorkCompletionContext);
+        }, context::createWorkCompletionContext, context::createSuccessorWorkItemsContext);
     }
 
     @SneakyThrows
