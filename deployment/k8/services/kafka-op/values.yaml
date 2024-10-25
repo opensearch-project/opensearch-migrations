@@ -1,1 +1,9 @@
 # Configuration for Strimzi Kafka Operator
+clusterName: kafka-cluster
+kafkaVersion: 3.8.0
+kafkaMetadataVersion: 3.8-IV0
+nodePool:
+  replicas: 1
+  volume:
+    size: 10Gi
+    deleteClaim: true

@@ -1,13 +1,17 @@
+# Only create PVC, if PVC with same name does not already exist
+{{- $pvc := lookup "v1" "PersistentVolumeClaim" .Release.Namespace .Values.volume.pvcClaimName -}}
+{{- if not $pvc }}
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
-  name: {{ .Values.sharedLogVolume.pvcClaimName }}
+  name: {{ .Values.volume.pvcClaimName }}
 spec:
   accessModes:
-    - {{ .Values.sharedLogVolume.accessMode }}
+    - {{ .Values.volume.accessMode }}
   resources:
     requests:
-      storage: {{ .Values.sharedLogVolume.size }}
-  {{- if .Values.sharedLogVolume.storageClass }}
-  storageClassName: {{ .Values.sharedLogVolume.storageClass }}
+      storage: {{ .Values.volume.size }}
+  {{- if .Values.volume.storageClass }}
+  storageClassName: {{ .Values.volume.storageClass }}
   {{- end }}
+{{- end }}

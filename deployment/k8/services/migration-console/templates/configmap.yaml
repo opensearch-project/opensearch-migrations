@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: services-yaml-config-map
+data:
+  {{- (.Files.Glob "migration_services.yaml").AsConfig | nindent 2 }}
+
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-env
+data:
+  STAGE: 'dev'

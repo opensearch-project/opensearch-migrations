@@ -18,9 +18,10 @@ dependencies:
     version: "0.1.0"
     repository: "file://../services/migration-console"
     condition: migration-console-enabled
-#  - name: replayer
-#    version: "0.1.0"
-#    repository: "file://../services/replayer"
+  - name: replayer
+    version: "0.1.0"
+    repository: "file://../services/replayer"
+    condition: replayer-enabled
   - name: capture-proxy
     version: "0.1.0"
     repository: "file://../services/capture-proxy"
@@ -28,9 +29,3 @@ dependencies:
 #  - name: reindex-from-snapshot
 #    version: "0.1.0"
 #    repository: "file://../services/reindex-from-snapshot"
-#  - name: shared-logs-vol
-#    version: "0.1.0"
-#    repository: "file://../services/shared/shared-logs-vol"
-#  - name: snapshot-vol
-#    version: "0.1.0"
-#    repository: "file://../services/shared/snapshot-vol"
