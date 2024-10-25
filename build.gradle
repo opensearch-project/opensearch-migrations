@@ -13,6 +13,22 @@ allprojects {
     }
 }
 
+// Define version properties
+ext {
+    // support -Dbuild.version, but include default
+    buildVersion = System.getProperty("build.version", "0.1.0")
+    // support -Dbuild.snapshot=false, but default to true
+    buildSnapshot = System.getProperty("build.snapshot", "true") == "true"
+    finalVersion = buildSnapshot ? "${buildVersion}-SNAPSHOT" : buildVersion
+}
+
+// Apply the version to all projects
+allprojects {
+    version = finalVersion
+    // This should eventually change, see https://opensearch.atlassian.net/browse/MIGRATIONS-2167
+    group = 'org.opensearch.migrations.trafficcapture'
+}
+
 subprojects { subproject ->
     subproject.afterEvaluate {
         if (subproject.plugins.hasPlugin('java') && subproject.name != 'commonDependencyVersionConstraints') {
@@ -157,6 +173,12 @@ subprojects {
                 mavenJava(MavenPublication) {
                     versionMapping {
                         allVariants {
+                            // Test fixtures are published as a separate jar in maven
+                            // This ensures dependencies that are only declared in test
+                            // fixtures have a version number in the pom
+                            if (project.plugins.hasPlugin('java-test-fixtures')) {
+                                fromResolutionOf('testFixturesRuntimeClasspath')
+                            }
                             fromResolutionResult()
                         }
                     }
@@ -164,16 +186,6 @@ subprojects {
                     from components.java
                     artifact javadocJar
                     artifact sourcesJar
-
-                    group = 'org.opensearch.migrations.trafficcapture'
-
-                    // support -Dbuild.version, but include default
-                    version = System.getProperty("build.version", "0.1.0")
-
-                    // support -Dbuild.snapshot=false, but default to true
-                    if (System.getProperty("build.snapshot", "true") == "true") {
-                        version += "-SNAPSHOT"
-                    }
 
                     pom {
                         name = project.name
@@ -196,6 +208,24 @@ subprojects {
                             connection = "scm:git@github.com:opensearch-project/opensearch-migrations.git"
                             developerConnection = "scm:git@github.com:opensearch-project/opensearch-migrations.git"
                             url = "git@github.com:opensearch-project/opensearch-migrations.git"
+                        }
+                    }
+
+                    pom.withXml {
+                        def pomFile = asNode()
+
+                        // Find all dependencies in the POM file
+                        def dependencies = pomFile.dependencies.dependency
+
+                        // Iterate over each dependency and check if the version is missing
+                        dependencies.each { dependency ->
+                            def version = dependency.version.text()
+
+                            if (version == null || version.trim().isEmpty() || version.trim() == 'unspecified') {
+                                def groupId = dependency.groupId.text()
+                                def artifactId = dependency.artifactId.text()
+                                throw new GradleException("Dependency ${groupId}:${artifactId} is missing a version in the pom.xml")
+                            }
                         }
                     }
 

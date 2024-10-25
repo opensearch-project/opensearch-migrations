@@ -433,8 +433,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 + "    ]"
                 + "  }"
                 + "},"
-                + "\"size\": 1"
-                + "}";
+                + "\"size\": 0" // This sets the number of items to include in the `hits.hits` array, but doesn't affect
+                + "}";          // the integer value in `hits.total.value`
 
             var path = INDEX_NAME + "/_search";
             var response = httpClient.makeJsonRequest(AbstractedHttpClient.POST_METHOD, path, null, queryBody);
