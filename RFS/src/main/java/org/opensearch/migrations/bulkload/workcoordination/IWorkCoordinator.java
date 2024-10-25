@@ -103,7 +103,7 @@ public interface IWorkCoordinator extends AutoCloseable {
      * @throws IOException
      * @throws InterruptedException
      */
-    int numWorkItemsArePending(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
+    int numWorkItemsNotYetComplete(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
         throws IOException, InterruptedException;
 
     /**
@@ -111,7 +111,7 @@ public interface IWorkCoordinator extends AutoCloseable {
      * @throws IOException
      * @throws InterruptedException
      */
-    boolean workItemsArePending(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
+    boolean workItemsNotYetComplete(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
         throws IOException, InterruptedException;
 
     /**
