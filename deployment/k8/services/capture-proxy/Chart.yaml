@@ -1,0 +1,10 @@
+apiVersion: v2
+name: capture-proxy
+description: A Helm chart to install the Capture Proxy
+type: application
+version: 0.1.0
+appVersion: "1.16.0"
+dependencies:
+  - name: common-lib
+    version: "0.1.0"
+    repository: "file://../common-lib"

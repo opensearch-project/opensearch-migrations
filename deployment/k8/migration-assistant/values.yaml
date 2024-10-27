@@ -1,0 +1,34 @@
+# Define all enabled/disabled migration services
+migration-console-enabled: true
+capture-proxy-enabled: true
+replayer-enabled: true
+kafka-op-enabled: true
+reindex-from-snapshot-enabled: true
+elasticsearch-searchguard-enabled: true
+opensearch-helm-enabled: true
+
+# Define specific dependency configuration
+opensearch-helm:
+  fullnameOverride: "opensearch"
+  image:
+    tag: "2.17.0"
+  replicas: 1
+  singleNode: true
+  config:
+    discovery.type: single-node
+  extraEnvs:
+    - name: OPENSEARCH_INITIAL_ADMIN_PASSWORD
+      value: myStrongPassword123!
+  service:
+    type: LoadBalancer
+
+#kafka-op:
+#  clusterName: kafka-cluster
+#  kafkaVersion: 3.8.0
+#  kafkaMetadataVersion: 3.8-IV0
+#  nodePool:
+#    replicas: 1
+#    volume:
+#      size: 10Gi
+#      deleteClaim: true
+

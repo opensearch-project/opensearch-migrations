@@ -1,0 +1,37 @@
+# Default values for migration-console.
+replicaCount: 1
+image:
+  repository: migrations/migration_console
+  pullPolicy: IfNotPresent
+  tag: "latest"
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+env:
+  - name: SHARED_LOGS_DIR_PATH
+    value: /shared-logs-output/traffic-replayer-default
+  - name: STAGE
+    configMapKeyRef:
+      name: test-env
+      key: STAGE
+volumes:
+  - name: services-yaml
+    configMap:
+      name: services-yaml-config-map
+  - name: shared-logs
+    persistentVolumeClaim:
+      claimName: shared-logs-pvc
+  - name: snapshot-vol
+    persistentVolumeClaim:
+      claimName: snapshot-vol-pvc
+volumeMounts:
+  - name: services-yaml
+    mountPath: /etc/migration-config
+  - name: shared-logs
+    mountPath: /shared-logs-output
+  - name: snapshot-vol
+    mountPath: /storage

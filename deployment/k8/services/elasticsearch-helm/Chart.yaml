@@ -1,0 +1,8 @@
+apiVersion: v2
+name: elasticsearch-helm
+version: 0.1.0
+dependencies:
+  - name: elasticsearch
+    version: "8.5.1"
+    repository: https://helm.elastic.co
+    alias: elasticsearch-local

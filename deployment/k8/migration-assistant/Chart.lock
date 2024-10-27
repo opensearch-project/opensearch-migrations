@@ -1,0 +1,24 @@
+dependencies:
+- name: elasticsearch-searchguard
+  repository: file://../services/elasticsearch-searchguard
+  version: 0.1.0
+- name: opensearch
+  repository: https://opensearch-project.github.io/helm-charts/
+  version: 2.23.1
+- name: kafka-op
+  repository: file://../services/kafka-op
+  version: 0.1.0
+- name: migration-console
+  repository: file://../services/migration-console
+  version: 0.1.0
+- name: replayer
+  repository: file://../services/replayer
+  version: 0.1.0
+- name: capture-proxy
+  repository: file://../services/capture-proxy
+  version: 0.1.0
+- name: reindex-from-snapshot
+  repository: file://../services/reindex-from-snapshot
+  version: 0.1.0
+digest: sha256:75708d0e2a26a754d107a29d373a76664ac19d8660fd7534088e30a6448424d2
+generated: "2024-10-25T15:58:15.451913-05:00"

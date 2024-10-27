@@ -1,0 +1,28 @@
+#otelCollector:
+#  name: otel-collector
+#  restartPolicy: "Always"
+#  #args: "--config=/etc/otel-config-debug-only.yaml"
+#  #args: ["--config=/etc/otel-config-prometheus-jaeger.yaml"]
+#  image:
+#    repository: migrations/otel_collector
+#    pullPolicy: IfNotPresent
+#    tag: "latest"
+#  ports:
+#    - name: pprof
+#      containerPort: 1888
+#      protocol: TCP
+#    - name: health-check
+#      containerPort: 13133
+#      protocol: TCP
+#    - name: zpages
+#      containerPort: 55679
+#      protocol: TCP
+#    - name: otlp-receiver
+#      containerPort: 4317
+#      protocol: TCP
+##    - name: prom-metrics
+##      containerPort: 8888
+##      protocol: TCP
+##    - name: prom-exporter
+##      containerPort: 8889
+##      protocol: TCP

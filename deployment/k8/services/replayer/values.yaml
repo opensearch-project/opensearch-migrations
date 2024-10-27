@@ -1,0 +1,32 @@
+# Default values for traffic replayer.
+
+replicaCount: 0
+
+image:
+  repository: migrations/traffic_replayer
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+container:
+  command: >
+    /runJavaWithClasspath.sh org.opensearch.migrations.replay.TrafficReplayer
+    --speedup-factor 2
+    https://opensearch-cluster-master:9200
+    --auth-header-value Basic\\\\ YWRtaW46bXlTdHJvbmdQYXNzd29yZDEyMyE=
+    --insecure
+    --kafka-traffic-brokers kafka:9092
+    --kafka-traffic-topic logging-traffic-topic
+    --kafka-traffic-group-id logging-group-default
+    --otelCollectorEndpoint http://localhost:4317
+
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+
+env:
+  - name: SHARED_LOGS_DIR_PATH
+    value: /shared-logs-output/traffic-replayer-default

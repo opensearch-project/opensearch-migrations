@@ -1,0 +1,16 @@
+apiVersion: v2
+name: migration-console
+description: A Helm chart to install the Migration Console
+type: application
+version: 0.1.0
+appVersion: "1.16.0"
+dependencies:
+  - name: common-lib
+    version: "0.1.0"
+    repository: "file://../common-lib"
+  - name: snapshot-vol
+    version: "0.1.0"
+    repository: "file://../../shared/snapshot-vol"
+  - name: shared-logs-vol
+    version: "0.1.0"
+    repository: "file://../../shared/shared-logs-vol"
