@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.transform.replay;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;

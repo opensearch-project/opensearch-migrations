@@ -1,8 +1,9 @@
-package org.opensearch.migrations.replay;
+package org.opensearch.migrations.transform.replay;
 
 import java.util.Map;
 
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
+import org.opensearch.migrations.transform.TransformationLoader;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -36,7 +37,10 @@ public class MultipleJoltScriptsTest {
     @Test
     public void testAddGzipAndCustom() throws Exception {
         final var addGzip = "["
-            + "{\"JsonJoltTransformerProvider\": { \"canned\": \"ADD_GZIP\" }},"
+            + "{\"JsonConditionalTransformerProvider\": ["
+            + "   {\"JsonJMESPathPredicateProvider\": { \"script\": \"" + "URI == '/testindex/_search'" + "\"}},"
+            + "   [{\"JsonJoltTransformerProvider\": { \"canned\": \"ADD_GZIP\" }}]"
+            + "]},"
             + "{ \"JsonJoltTransformerProvider\":"
             + "  {\"script\": \n"
             + "    { \"operation\": \"modify-overwrite-beta\", \"spec\": "

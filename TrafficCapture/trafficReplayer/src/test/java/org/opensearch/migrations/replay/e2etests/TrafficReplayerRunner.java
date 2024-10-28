@@ -22,13 +22,13 @@ import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
-import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
+import org.opensearch.migrations.transform.TransformationLoader;
 
 import com.google.common.base.Strings;
 import lombok.AllArgsConstructor;
