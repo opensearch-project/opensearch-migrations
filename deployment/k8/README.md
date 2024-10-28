@@ -41,8 +41,8 @@ A convenience script `minikubeLocal.sh` is located in this directory which wraps
 
 ## Deploying
 
-### Full environment
-Guide for deploying a complete environment helm chart comprised of many Migration service helm charts
+### Migration Assistant environment
+Guide for deploying a complete Migration Assistant environment helm chart, with the ability to enabled/disable different Migration services and clusters as needed
 
 The full environment helm charts consists of:
 * Source cluster
@@ -51,26 +51,20 @@ The full environment helm charts consists of:
 
 **Note**: For first-time deployments and deployments after changes have been made to a dependent helm package, such as the `migration-console` chart, the following command is needed to update dependent charts
 ```shell
-helm dependency update environments/full-environment
+helm dependency update migration-assistant
 ```
 
 The full environment helm chart can be deployed with the helm command
 ```shell
-helm install local environments/full-environment
+helm install ma migration-assistant
 ```
 
 ### Specific services
 Guide for deploying an individual Migration service helm chart
 
-Most migration services have a dependency on Persistent Volumes that can be installed to the Kubernetes cluster using the following commands
-```shell
-helm install shared-logs shared/shared-logs-vol
-helm install snapshot-vol shared/snapshot-vol
-```
-
 A particular service could then be deployed with a command similar to the below.
 ```shell
-helm install migration-console migration-console
+helm install migration-console services/migration-console
 ```
 
 ## Uninstalling
