@@ -84,14 +84,14 @@ export class SolutionsInfrastructureStack extends Stack {
             type: 'String',
             description: 'Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1',
             default: 'dev',
-            noEcho: false
         });
 
-        const appRegistryAppARN = applyAppRegistry(this, stageParameter.valueAsString, props)
+        const stackMarker = `${stageParameter.valueAsString}-${Aws.REGION}`;
+        const appRegistryAppARN = applyAppRegistry(this, stackMarker, props)
         const vpc = new Vpc(this, 'Vpc', {});
 
         new CfnDocument(this, "BootstrapShellDoc", {
-            name: `SSM-${stageParameter.valueAsString}-BootstrapShell`,
+            name: `BootstrapShellDoc-${stackMarker}`,
             documentType: "Session",
             content: {
                 "schemaVersion": "1.0",
@@ -128,13 +128,13 @@ export class SolutionsInfrastructureStack extends Stack {
         bootstrapRole.addManagedPolicy(ManagedPolicy.fromAwsManagedPolicyName('AdministratorAccess'))
 
         new InstanceProfile(this, 'BootstrapInstanceProfile', {
-            instanceProfileName: `bootstrap-${stageParameter.valueAsString}-instance-profile`,
+            instanceProfileName: `bootstrap-instance-profile-${stackMarker}`,
             role: bootstrapRole
         })
 
         new Instance(this, 'BootstrapEC2Instance', {
             vpc: vpc,
-            instanceName: `bootstrap-${stageParameter.valueAsString}-instance`,
+            instanceName: `bootstrap-instance-${stackMarker}`,
             instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
             machineImage: MachineImage.latestAmazonLinux2023(),
             role: bootstrapRole,
@@ -155,8 +155,9 @@ export class SolutionsInfrastructureStack extends Stack {
             .filter(c => (c as CfnParameter).type === "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>")
             .pop() as CfnParameter;
         if (dynamicEc2ImageParameter) {
-            dynamicEc2ImageParameter.description = "Latest Amazon Linux Image Id for the build machine"
+            dynamicEc2ImageParameter.description = "Latest Amazon Linux Image Id for the build machine";
             dynamicEc2ImageParameter.overrideLogicalId("LastedAmazonLinuxImageId");
+            dynamicEc2ImageParameter.noEcho = true;
         }
 
         const parameterGroups = [];

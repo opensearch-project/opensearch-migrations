@@ -10,17 +10,18 @@
   "scripts": {
     "build": "tsc",
     "watch": "tsc -w",
-    "test": "npm run test:lint & npm run test:jest",
+    "test": "npm run test:lint && npm run test:jest",
     "test:lint": "eslint .",
     "test:jest": "jest",
-    "snyth": "cdk synthesize"
+    "synth": "cdk synthesize --asset-metadata false --path-metadata false",
+    "deploy": "cdk deploy --require-approval never"
   },
   "devDependencies": {
     "@aws-cdk/assert": "2.68.0",
     "@eslint/js": "^9.13.0",
     "@types/eslint__js": "^8.42.3",
     "@types/jest": "^29.5.5",
-    "@types/node": "20.9.0",
+    "@types/node": "^20.9.0",
     "aws-cdk": "2.105.0",
     "aws-cdk-lib": "2.105.0",
     "constructs": "10.3.0",
@@ -34,6 +35,7 @@
   "dependencies": {
     "@aws-cdk/aws-servicecatalogappregistry-alpha": "2.105.0-alpha.0",
     "@jest/globals": "^29.7.0",
+    "cdk": "^2.164.1",
     "globals": "^15.11.0",
     "source-map-support": "^0.5.21"
   }
