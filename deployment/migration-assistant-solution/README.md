@@ -40,4 +40,6 @@ This project is writen in TypeScript and uses the cloud developer tookit (CDK) t
 
 * Install Node 18+ & Npm 10+ https://docs.npmjs.com/downloading-and-installing-node-js-and-npm
 * Build the project `npm run build`
-* Creat the deployment artifacts `npm run snyth`
+* Test the project `npm run build`
+* Create the deployment artifacts `npm run synth`
+* Deploy with the default AWS credentials to the default region `npm run deploy`
