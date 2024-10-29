@@ -1,7 +1,6 @@
 import {
     PortMapping,
     Protocol,
-    ContainerImage,
     LogDrivers,
     AwsLogDriverMode,
     TaskDefinition
@@ -9,9 +8,8 @@ import {
 import {LogGroup, RetentionDays} from "aws-cdk-lib/aws-logs";
 import {createAwsDistroForOtelPushInstrumentationPolicy, makeLocalAssetContainerImage} from "../common-utilities";
 import {Duration, RemovalPolicy} from "aws-cdk-lib";
-import { DockerImageAsset } from "aws-cdk-lib/aws-ecr-assets";
-import { join } from "path";
 
+// eslint-disable-next-line @typescript-eslint/no-extraneous-class
 export class OtelCollectorSidecar {
     public static readonly OTEL_CONTAINER_PORT = 4317;
     public static readonly OTEL_CONTAINER_HEALTHCHECK_PORT = 13133;

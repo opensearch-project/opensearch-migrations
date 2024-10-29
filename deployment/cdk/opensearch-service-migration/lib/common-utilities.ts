@@ -305,6 +305,7 @@ export enum MigrationSSMParameter {
 }
 
 
+// eslint-disable-next-line @typescript-eslint/no-extraneous-class
 export class ClusterNoAuth {}
 
 export class ClusterSigV4Auth {
@@ -380,7 +381,8 @@ export class ClusterAuth {
     }
 }
 
-function getBasicClusterAuth(basicAuthObject: { [key: string]: any }): ClusterBasicAuth {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getBasicClusterAuth(basicAuthObject: Record<string, any>): ClusterBasicAuth {
     // Destructure and validate the input object
     const { username, password, passwordFromSecretArn } = basicAuthObject;
     // Ensure the required 'username' field is present
@@ -400,7 +402,8 @@ function getBasicClusterAuth(basicAuthObject: { [key: string]: any }): ClusterBa
     });
 }
 
-function getSigV4ClusterAuth(sigv4AuthObject: { [key: string]: any }): ClusterSigV4Auth {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getSigV4ClusterAuth(sigv4AuthObject: Record<string, any>): ClusterSigV4Auth {
     // Destructure and validate the input object
     const { serviceSigningName, region } = sigv4AuthObject;
 
@@ -409,6 +412,7 @@ function getSigV4ClusterAuth(sigv4AuthObject: { [key: string]: any }): ClusterSi
 }
 
 // Function to parse and validate auth object
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function parseAuth(json: any): ClusterAuth | null {
     if (json.type === 'basic' && typeof json.username === 'string' && (typeof json.password === 'string' || typeof json.passwordFromSecretArn === 'string') && !(typeof json.password === 'string' && typeof json.passwordFromSecretArn === 'string')) {
         return new ClusterAuth({basicAuth: getBasicClusterAuth(json)});
@@ -420,6 +424,7 @@ function parseAuth(json: any): ClusterAuth | null {
     return null; // Invalid auth type
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function parseClusterDefinition(json: any): ClusterYaml {
     const endpoint = json.endpoint
     if (!endpoint) {
