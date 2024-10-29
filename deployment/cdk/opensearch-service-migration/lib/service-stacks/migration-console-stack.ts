@@ -2,7 +2,6 @@ import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
-import {join} from "path";
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {
     createMigrationStringParameter,
@@ -133,7 +132,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: MigrationConsoleProps) {
         super(scope, id, props)
 
-        let securityGroups = [
+        const securityGroups = [
             { id: "serviceSG", param: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID },
             { id: "trafficStreamSourceAccessSG", param: MigrationSSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID },
             { id: "defaultDomainAccessSG", param: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID },
@@ -240,7 +239,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             getSecretAccessPolicy(props.sourceCluster?.auth.basicAuth?.password_from_secret_arn) : null;
 
         // Upload the services.yaml file to Parameter Store
-        let servicesYaml = props.servicesYaml
+        const servicesYaml = props.servicesYaml
         servicesYaml.source_cluster = props.sourceCluster
         servicesYaml.metadata_migration = new MetadataMigrationYaml();
         servicesYaml.metadata_migration.source_cluster_version = props.sourceCluster?.version
@@ -258,7 +257,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ...props,
             parameter: MigrationSSMParameter.SERVICES_YAML_FILE,
         });
-        const environment: { [key: string]: string; } = {
+        const environment: Record<string, string> = {
             "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
             "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints,
             "MIGRATION_STAGE": props.stage,
@@ -328,7 +327,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
         });
 
         if (props.managedServiceSourceSnapshotEnabled) {
-            const snapshotRole = createSnapshotOnAOSRole(this, artifactS3Arn, this.serviceTaskRole.roleArn, this.region, props.stage, props.defaultDeployId);
+            createSnapshotOnAOSRole(this, artifactS3Arn, this.serviceTaskRole.roleArn, this.region, props.stage, props.defaultDeployId);
         }
     }
 

@@ -2,7 +2,7 @@ import { ClusterAuth } from './common-utilities';
 import * as yaml from 'yaml';
 
 export class ClusterYaml {
-    endpoint: string = '';
+    endpoint = '';
     version?: string;
     auth: ClusterAuth;
 
@@ -40,7 +40,7 @@ export class ECSService {
 
 export class RFSBackfillYaml {
     ecs: ECSService;
-    scale: number = 5;
+    scale = 5;
     constructor() {
         this.ecs = new ECSService();
     }
@@ -62,7 +62,7 @@ export class OSIBackfillYaml {
 
 export class ECSReplayerYaml {
     ecs: ECSService;
-    scale: number = 1;
+    scale = 1;
 
     constructor() {
         this.ecs = new ECSService();
@@ -77,17 +77,17 @@ export class ECSReplayerYaml {
 }
 
 export class FileSystemSnapshotYaml {
-    repo_path: string = '';
+    repo_path = '';
 }
 
 export class S3SnapshotYaml {
-    repo_uri: string = '';
-    aws_region: string = '';
+    repo_uri = '';
+    aws_region = '';
 }
 
 export class SnapshotYaml {
-    snapshot_name: string = '';
-    otel_endpoint: string = '';
+    snapshot_name = '';
+    otel_endpoint = '';
     s3?: S3SnapshotYaml;
     fs?: FileSystemSnapshotYaml;
 
@@ -106,13 +106,13 @@ export class SnapshotYaml {
 // This component can be much more complicated (specified snapshot details, index/component/template allowlists, etc.)
 // but for the time being, we are assuming that the snapshot is the one specified in SnapshotYaml.
 export class MetadataMigrationYaml {
-    from_snapshot: null = null;
-    min_replicas: number = 1;
-    otel_endpoint: string = '';
+    from_snapshot = null;
+    min_replicas = 1;
+    otel_endpoint = '';
     source_cluster_version?: string;
 }
 export class KafkaYaml {
-    broker_endpoints: string = '';
+    broker_endpoints = '';
     msk?: string | null;
     standard?: string | null;
 }

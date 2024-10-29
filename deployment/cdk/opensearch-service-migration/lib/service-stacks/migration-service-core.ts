@@ -34,9 +34,7 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly mountPoints?: MountPoint[],
     readonly volumes?: Volume[],
     readonly portMappings?: PortMapping[],
-    readonly environment?: {
-        [key: string]: string;
-    },
+    readonly environment?: Record<string, string>,
     readonly taskCpuUnits?: number,
     readonly taskMemoryLimitMiB?: number,
     readonly taskInstanceCount?: number,
@@ -108,7 +106,7 @@ export class MigrationServiceCore extends Stack {
         }
 
         if (props.maxUptime) {
-            let maxUptimeSeconds = Math.max(props.maxUptime.toSeconds(), Duration.minutes(5).toSeconds());
+            const maxUptimeSeconds = Math.max(props.maxUptime.toSeconds(), Duration.minutes(5).toSeconds());
 
             // This sets the minimum time that a task should be running before considering it healthy.
             // This is needed because we don't have health checks configured for our service containers.
@@ -116,7 +114,7 @@ export class MigrationServiceCore extends Stack {
             // between the current task being shutdown and the new task being ready to take work. This means
             // health checks for this container will fail initially and startPeriod will stop ECS from treating
             // failing health checks as unhealthy during this period.
-            let startupPeriodSeconds = 30;
+            const startupPeriodSeconds = 30;
             // Add a separate container to monitor and fail healthcheck after a given maxUptime
             const maxUptimeContainer = serviceTaskDef.addContainer("MaxUptimeContainer", {
                 image: ContainerImage.fromRegistry("public.ecr.aws/amazonlinux/amazonlinux:2023-minimal"),
