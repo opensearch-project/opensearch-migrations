@@ -1,0 +1,31 @@
+nameOverride: ""
+fullnameOverride: ""
+protectedParameterNamespace: "baseline"
+# Set to true if you want the chart to create the namespace
+createNamespace: true
+# Optional: specify namespace name (defaults to .Release.Namespace)
+namespace: "capture-proxy"
+# Optional: annotations for the namespace
+namespaceAnnotations: {}
+# Optional: labels for the namespace
+namespaceLabels: {}
+parameters:
+  destinationUri:
+    value: "http://destination:9200"
+    allowRuntimeOverride: false
+  listenPort:
+    value: 9200
+    allowRuntimeOverride: false
+  noCapture:
+    present: false
+    allowRuntimeOverride: true
+  insecureDestination:
+    present: true
+    allowRuntimeOverride: false
+# TODO - setup cert management
+#  sslConfigFile:
+#    value: "/usr/share/elasticsearch/config/proxy_tls.yml"
+#    allowRuntimeOverride: false
+#  otelCollectorEndpoint:
+#    value: "http://otel-collector:4317"
+#    allowRuntimeOverride: false

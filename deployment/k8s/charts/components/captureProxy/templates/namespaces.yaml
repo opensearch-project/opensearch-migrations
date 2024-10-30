@@ -1,0 +1,15 @@
+{{- $baseParams := dict
+    "create" .Values.createNamespace
+    "namespace" .Values.namespace
+    "annotation" .Values.namespaceAnnotations
+    "labels" .Values.namespaceLabels
+-}}
+{{ include "generic.createNamespace" $baseParams | indent 0 }}
+---
+{{- $overrideParams := dict
+    "create" .Values.createNamespace
+    "namespace" (printf "%s-overrides" .Values.namespace)
+    "annotation" .Values.namespaceAnnotations
+    "labels" .Values.namespaceLabels
+-}}
+{{ include "generic.createNamespace" $overrideParams | indent 0 }}

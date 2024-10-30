@@ -1,0 +1,1 @@
+{{ include "generic.createConfigMaps" (dict "PackageName" (include "generic.fullname" .) "NameSpace" .Values.namespace "Values" .Values "include" .Template.Include "Template" .Template) | indent 0 }}
