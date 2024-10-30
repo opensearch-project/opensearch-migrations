@@ -55,6 +55,12 @@ public class RfsMigrateDocuments {
     public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
     public static final String LOGGING_MDC_WORKER_ID = "workerId";
 
+    private static final String DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG = "[" +
+            "  {" +
+            "    \"JsonTransformerForDocumentTypeRemovalProvider\":\"\"" +
+            "  }" +
+            "]";
+
     public static class DurationConverter implements IStringConverter<Duration> {
         @Override
         public Duration convert(String value) {
@@ -254,12 +260,15 @@ public class RfsMigrateDocuments {
 
 
         String docTransformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams);
-        IJsonTransformer docTransformer = null;
         if (docTransformerConfig != null) {
             log.atInfo().setMessage("Doc Transformations config string: {}")
                     .addArgument(docTransformerConfig).log();
-            docTransformer = new TransformationLoader().getTransformerFactoryLoader(docTransformerConfig);
+        } else {
+            log.atInfo().setMessage("Using default transformation config: {}")
+                    .addArgument(DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG).log();
+            docTransformerConfig = DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG;
         }
+        IJsonTransformer docTransformer = new TransformationLoader().getTransformerFactoryLoader(docTransformerConfig);
 
         try (var processManager = new LeaseExpireTrigger(RfsMigrateDocuments::exitOnLeaseTimeout, Clock.systemUTC());
              var workCoordinator = new OpenSearchWorkCoordinator(

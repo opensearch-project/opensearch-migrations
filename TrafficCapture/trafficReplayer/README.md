@@ -77,12 +77,12 @@ target URI.
 ## Transformations
 
 Transformations are performed via a simple interface defined by
-[IJsonTransformer](../transformationPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/IJsonTransformer.java) ('transformer').  They are loaded dynamically and are designed to allow for easy extension
+[IJsonTransformer](../../transformation/transformationPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/IJsonTransformer.java) ('transformer').  They are loaded dynamically and are designed to allow for easy extension
 of the TrafficReplayer to support a diverse set of needs.
 
 The input to the transformer is an HTTP message represented as a json-like `Map<String,Object>` with
 top-level key-value pairs defined in
-[JsonKeysForHttpMessage.java](../transformationPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/JsonKeysForHttpMessage.java).
+[JsonKeysForHttpMessage.java](../../transformation/transformationPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/JsonKeysForHttpMessage.java).
 Bodies that are json-formatted will be accessible via the path `payload.inlinedJsonBody` and they will be accessible 
 as a fully-parsed Map.  Newline-delimited json (ndjson) sequences will be accessible via 
 `payload.inlinedJsonSequenceBodies` as a List of json Maps.  These two payload entries are mutually exclusive.
@@ -98,7 +98,7 @@ Transformers may be used simultaneously from concurrent threads over the lifetim
 a message will only be processed by one transformer at a time.
 
 Transformer implementations are loaded via [Java's ServiceLoader](https://docs.oracle.com/javase/8/docs/api/java/util/ServiceLoader.html)
-by loading a jarfile that implements the [IJsonTransformerProvider](../transformationPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/IJsonTransformerProvider.java).
+by loading a jarfile that implements the [IJsonTransformerProvider](../../transformation/transformationPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/IJsonTransformerProvider.java).
 That jarfile will be loaded by specifying the provider jarfile (and any of its dependencies) in the classpath.
 For the ServiceLoader to load the IJsonTransformerProvider, the provided jarfile needs
 to supply a _provider-configuration_ file (`META-INF/services/org.opensearch.migrations.transform.IJsonTransformerProvider`)
@@ -117,7 +117,7 @@ The name is defined by the `IJsonTransformerProvider::getName()`, which unless o
 IJsonTransformer object.
 
 The jsonMessageTransformerInterface package includes [JsonCompositeTransformer.java]
-(../transformationPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/JsonCompositeTransformer.java),
+(../../transformation/transformationPlugins/jsonMessageTransformers/jsonMessageTransformerInterface/src/main/java/org/opensearch/migrations/transform/JsonCompositeTransformer.java),
 which runs configured transformers in serial.  
 That composite transformer is also utilized by the TrafficReplayer to combine the 
 list of loaded transformations with a transformer to rewrite the 'Host' header.  That host transformation changes the 
@@ -125,9 +125,9 @@ host header of every HTTP message to use the target domain-name rather than the 
 all loaded/specified transformations.
 
 Currently, there are multiple, nascent implementations included in the repository.  The 
-[JsonJMESPathTransformerProvider](../transformationPlugins/jsonMessageTransformers/jsonJMESPathMessageTransformerProvider) 
+[JsonJMESPathTransformerProvider](../../transformation/transformationPlugins/jsonMessageTransformers/jsonJMESPathMessageTransformerProvider) 
 package uses JMESPath expressions to transform requests and the
-[jsonJoltMessageTransformerProvider](../transformationPlugins/jsonMessageTransformers/jsonJoltMessageTransformerProvider)
+[jsonJoltMessageTransformerProvider](../../transformation/transformationPlugins/jsonMessageTransformers/jsonJoltMessageTransformerProvider)
 package uses [JOLT](https://github.com/bazaarvoice/jolt) to perform transforms.  The JMESPathTransformer takes an inlined script as shown below.
 The Jolt transformer can be configured to apply a full script or to use a "canned" transform whose script is 
 already included with the library.  
@@ -153,7 +153,7 @@ also pass the script as an argument via `--transformer-config-base64`.  Each of 
 is mutually exclusive.
 
 Some simple transformations are included to change headers to add compression or to force an HTTP message payload to 
-be chunked.  Another transformer, [JsonTypeMappingTransformer.java](../transformationPlugins/jsonMessageTransformers/openSearch23PlusTargetTransformerProvider/src/main/java/org/opensearch/migrations/transform/JsonTypeMappingTransformer.java),
+be chunked.  Another transformer, [JsonTypeMappingTransformer.java](../../transformation/transformationPlugins/jsonMessageTransformers/openSearch23PlusTargetTransformerProvider/src/main/java/org/opensearch/migrations/transform/JsonTypeMappingTransformer.java),
 is a work-in-progress to excise type mapping references from URIs and message payloads since versions of OpenSource
 greater than 2.3 do not support them.
 

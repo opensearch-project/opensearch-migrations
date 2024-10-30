@@ -166,7 +166,7 @@ class DocumentReindexerTest {
 
         var capturedBulkRequests = bulkRequestCaptor.getValue();
         assertEquals(1, capturedBulkRequests.size(), "Should contain 1 document");
-        assertEquals("{\"index\":{\"_id\":\"MQAA\", \"_type\":\"_doc\", \"_index\":\"test-index\"}}\n{\"field\":\"value\"}", capturedBulkRequests.get(0).asString());    }
+        assertEquals("{\"index\":{\"_id\":\"MQAA\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", capturedBulkRequests.get(0).asString());    }
 
     private RfsLuceneDocument createTestDocument(String id) {
         return new RfsLuceneDocument(id, null, "{\"field\":\"value\"}");
@@ -215,27 +215,7 @@ class DocumentReindexerTest {
         // Define the transformation configuration
         final String CONFIG = "[" +
                 "  {" +
-                "    \"JsonConditionalTransformerProvider\": [" +
-                "      {" +
-                "        \"JsonJMESPathPredicateProvider\": {" +
-                "          \"script\": \"index._type != '_doc'\"" +
-                "        }" +
-                "      }," +
-                "      [" +
-                "        {" +
-                "          \"JsonJoltTransformerProvider\": {" +
-                "            \"script\": {" +
-                "              \"operation\": \"modify-overwrite-beta\"," +
-                "              \"spec\": {" +
-                "                \"index\": {" +
-                "                  \"\\\\_type\": \"_doc\"" +
-                "                }" +
-                "              }" +
-                "            }" +
-                "          }" +
-                "        }" +
-                "      ]" +
-                "    ]" +
+                "    \"JsonTransformerForDocumentTypeRemovalProvider\":\"\"" +
                 "  }" +
                 "]";
 
@@ -248,7 +228,7 @@ class DocumentReindexerTest {
         // Create a stream of documents, some requiring transformation and some not
         Flux<RfsLuceneDocument> documentStream = Flux.just(
                 createTestDocumentWithType("1", "_type1"),
-                createTestDocumentWithType("2", "_doc"),
+                createTestDocumentWithType("2", null),
                 createTestDocumentWithType("3", "_type3")
         );
 
@@ -278,12 +258,12 @@ class DocumentReindexerTest {
         BulkDocSection transformedDoc2 = capturedBulkRequests.get(1);
         BulkDocSection transformedDoc3 = capturedBulkRequests.get(2);
 
-        assertEquals("{\"index\":{\"_index\":\"test-index\",\"_type\":\"_doc\",\"_id\":\"1\"}}\n{\"field\":\"value\"}", transformedDoc1.asString(),
-                "Document 1 should have _type transformed to '_doc'");
-        assertEquals("{\"index\":{\"_index\":\"test-index\",\"_type\":\"_doc\",\"_id\":\"2\"}}\n{\"field\":\"value\"}", transformedDoc2.asString(),
-                "Document 2 should remain unchanged as _type is already '_doc'");
-        assertEquals("{\"index\":{\"_index\":\"test-index\",\"_type\":\"_doc\",\"_id\":\"3\"}}\n{\"field\":\"value\"}", transformedDoc3.asString(),
-                "Document 3 should have _type transformed to '_doc'");
+        assertEquals("{\"index\":{\"_index\":\"test-index\",\"_id\":\"1\"}}\n{\"field\":\"value\"}", transformedDoc1.asString(),
+                "Document 1 should have _type removed");
+        assertEquals("{\"index\":{\"_index\":\"test-index\",\"_id\":\"2\"}}\n{\"field\":\"value\"}", transformedDoc2.asString(),
+                "Document 2 should remain unchanged as _type is not defined");
+        assertEquals("{\"index\":{\"_index\":\"test-index\",\"_id\":\"3\"}}\n{\"field\":\"value\"}", transformedDoc3.asString(),
+                "Document 3 should have _type removed");
     }
 
     /**

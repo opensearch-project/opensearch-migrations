@@ -36,6 +36,8 @@ public class BulkDocSection {
     private final ObjectNode indexCommand;
     private final ObjectNode source;
 
+    private StringBuilder bulkDocSectionStringCache = null;
+
     public BulkDocSection(String id, String indexName, String type, String docBody) {
         this.docId = id;
         this.indexCommand = createIndexCommand(id, indexName, type);
@@ -47,7 +49,9 @@ public class BulkDocSection {
         ObjectNode indexNode = OBJECT_MAPPER.createObjectNode();
         ObjectNode metadataNode = OBJECT_MAPPER.createObjectNode();
         metadataNode.put(FIELD_INDEX, indexName);
-        metadataNode.put(FIELD_TYPE, type);
+        if(type != null) {
+            metadataNode.put(FIELD_TYPE, type);
+        }
         metadataNode.put(FIELD_ID, docId);
         indexNode.set(COMMAND_INDEX, metadataNode);
         return indexNode;
@@ -66,12 +70,17 @@ public class BulkDocSection {
         return builder.toString();
     }
 
-    public StringBuilder asStringBuilder() {
+    private StringBuilder asStringBuilder() {
+        if (this.bulkDocSectionStringCache != null) {
+            return this.bulkDocSectionStringCache;
+        }
+
         StringBuilder builder = new StringBuilder();
         try {
-            String indexCommand = asBulkIndex();
-            String sourceJson = asBulkSource();
+            String indexCommand = asBulkIndexString();
+            String sourceJson = asBulkSourceString();
             builder.append(indexCommand).append(NEWLINE).append(sourceJson);
+            bulkDocSectionStringCache = builder;
             return builder;
         } catch (JsonProcessingException e) {
             throw new RuntimeException(SERIALIZATION_ERROR_MESSAGE, e);
@@ -82,16 +91,16 @@ public class BulkDocSection {
         return asStringBuilder().toString();
     }
 
-    private String asString(ObjectNode node) throws JsonProcessingException {
-        return OBJECT_MAPPER.writeValueAsString(node);
-    }
-
-    private String asBulkIndex() throws JsonProcessingException {
+    private String asBulkIndexString() throws JsonProcessingException {
         return asString(this.indexCommand);
     }
 
-    private String asBulkSource() throws JsonProcessingException {
+    private String asBulkSourceString() throws JsonProcessingException {
         return asString(this.source);
+    }
+
+    private String asString(ObjectNode node) throws JsonProcessingException {
+        return OBJECT_MAPPER.writeValueAsString(node);
     }
 
     @SuppressWarnings("unchecked")
