@@ -15,7 +15,7 @@ permissions:
   contents: read # to fetch code (actions/checkout)
 
 jobs:
-  rfs-e2e-aws-test:
+  full-es68-e2e-aws-test:
     runs-on: ubuntu-latest
     steps:
       - name: Sanitize branch and repo names

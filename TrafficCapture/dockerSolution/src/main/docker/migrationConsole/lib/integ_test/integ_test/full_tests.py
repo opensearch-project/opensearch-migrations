@@ -99,10 +99,15 @@ class E2ETests(unittest.TestCase):
         status_result: CommandResult = snapshot.status()
         if status_result.success:
             snapshot.delete()
-        snapshot.create(wait=True)
-        metadata.migrate()
-        backfill.start()
-        backfill.scale(units=2)
+        snapshot_result: CommandResult = snapshot.create(wait=True)
+        assert snapshot_result.success
+        metadata_result: CommandResult = metadata.migrate()
+        assert metadata_result.success
+        backfill_start_result: CommandResult = backfill.start()
+        assert backfill_start_result.success
+        # small enough to allow containers to be reused, big enough to test scaling out
+        backfill_scale_result: CommandResult = backfill.scale(units=2)
+        assert backfill_scale_result.success
         # This document was created after snapshot and should not be included in Backfill but expected in Replay
         create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id_base + "_2",
                         expected_status_code=HTTPStatus.CREATED, test_case=self)
