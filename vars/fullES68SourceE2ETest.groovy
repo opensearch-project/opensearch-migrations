@@ -19,7 +19,8 @@ def call(Map config = [:]) {
             "dataNodeCount": 1,
             "managerNodeCount": 0,
             "serverAccessType": "ipv4",
-            "restrictServerAccessTo": "0.0.0.0/0"
+            "restrictServerAccessTo": "0.0.0.0/0",
+            "requireImdsv2": false
           }
         }
     """
