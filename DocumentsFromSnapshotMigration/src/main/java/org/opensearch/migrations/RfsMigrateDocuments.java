@@ -33,6 +33,10 @@ import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
 import org.opensearch.migrations.tracing.RootOtelContext;
+import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.TransformationLoader;
+import org.opensearch.migrations.transform.TransformerConfigUtils;
+import org.opensearch.migrations.transform.TransformerParams;
 import org.opensearch.migrations.utils.ProcessHelpers;
 
 import com.beust.jcommander.IStringConverter;
@@ -40,6 +44,7 @@ import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 
@@ -155,6 +160,43 @@ public class RfsMigrateDocuments {
             converter = VersionConverter.class,
             description = ("Version of the source cluster."))
         public Version sourceVersion = Version.fromString("ES 7.10");
+
+        @ParametersDelegate
+        private DocParams docTransformationParams = new DocParams();
+    }
+
+    @Getter
+    public static class DocParams implements TransformerParams {
+        public String getTransformerConfigParameterArgPrefix() {
+            return DOC_CONFIG_PARAMETER_ARG_PREFIX;
+        }
+        final static String DOC_CONFIG_PARAMETER_ARG_PREFIX = "doc-";
+
+        @Parameter(
+                required = false,
+                names = "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config-base64",
+                arity = 1,
+                description = "Configuration of tuple transformers.  The same contents as --tuple-transformer-config but " +
+                        "Base64 encoded so that the configuration is easier to pass as a command line parameter.")
+        private String transformerConfigEncoded;
+
+        @Parameter(
+                required = false,
+                names = "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config",
+                arity = 1,
+                description = "Configuration of tuple transformers.  Either as a string that identifies the "
+                        + "transformer that should be run (with default settings) or as json to specify options "
+                        + "as well as multiple transformers to run in sequence.  "
+                        + "For json, keys are the (simple) names of the loaded transformers and values are the "
+                        + "configuration passed to each of the transformers.")
+        private String transformerConfig;
+
+        @Parameter(
+                required = false,
+                names = "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config-file",
+                arity = 1,
+                description = "Path to the JSON configuration file of tuple transformers.")
+        private String transformerConfigFile;
     }
 
     public static class NoWorkLeftException extends Exception {
@@ -209,6 +251,16 @@ public class RfsMigrateDocuments {
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
         var connectionContext = arguments.targetArgs.toConnectionContext();
+
+
+        String docTransformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams);
+        IJsonTransformer docTransformer = null;
+        if (docTransformerConfig != null) {
+            log.atInfo().setMessage("Doc Transformations config string: {}")
+                    .addArgument(docTransformerConfig).log();
+            docTransformer = new TransformationLoader().getTransformerFactoryLoader(docTransformerConfig);
+        }
+
         try (var processManager = new LeaseExpireTrigger(RfsMigrateDocuments::exitOnLeaseTimeout, Clock.systemUTC());
              var workCoordinator = new OpenSearchWorkCoordinator(
                  new CoordinateWorkHttpClient(connectionContext),
@@ -220,7 +272,8 @@ public class RfsMigrateDocuments {
             DocumentReindexer reindexer = new DocumentReindexer(targetClient,
                 arguments.numDocsPerBulkRequest,
                 arguments.numBytesPerBulkRequest,
-                arguments.maxConnections);
+                arguments.maxConnections,
+                docTransformer);
 
             SourceRepo sourceRepo;
             if (snapshotLocalDirPath == null) {

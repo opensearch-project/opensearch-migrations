@@ -207,7 +207,7 @@ public class SourceTestBase {
                         .host(targetAddress)
                         .compressionEnabled(compressionEnabled)
                         .build()
-                        .toConnectionContext()), 1000, Long.MAX_VALUE, 1),
+                        .toConnectionContext()), 1000, Long.MAX_VALUE, 1, null),
                     new OpenSearchWorkCoordinator(
                         new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                             .host(targetAddress)

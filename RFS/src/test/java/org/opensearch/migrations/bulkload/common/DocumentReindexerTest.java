@@ -7,6 +7,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
+import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.TransformationLoader;
 
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.BeforeEach;
@@ -31,7 +33,7 @@ import static org.mockito.Mockito.when;
 class DocumentReindexerTest {
 
     private static final int MAX_DOCS_PER_BULK = 3;
-    private static final int MAX_BULK_SIZE = 1000;
+    private static final int MAX_BYTES_PER_BULK_REQUEST = 1024*1024;
     private static final int MAX_CONCURRENT_REQUESTS = 1;
 
     @Mock
@@ -45,7 +47,7 @@ class DocumentReindexerTest {
     @BeforeEach
     void setUp() {
         MockitoAnnotations.openMocks(this);
-        documentReindexer = new DocumentReindexer(mockClient, MAX_DOCS_PER_BULK, MAX_BULK_SIZE, MAX_CONCURRENT_REQUESTS);
+        documentReindexer = new DocumentReindexer(mockClient, MAX_DOCS_PER_BULK, MAX_BYTES_PER_BULK_REQUEST, MAX_CONCURRENT_REQUESTS, null);
         when(mockContext.createBulkRequest()).thenReturn(mock(IRfsContexts.IRequestContext.class));
     }
 
@@ -69,7 +71,7 @@ class DocumentReindexerTest {
         verify(mockClient, times(expectedBulkRequests)).sendBulkRequest(eq("test-index"), any(), any());
 
         @SuppressWarnings("unchecked")
-        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<DocumentReindexer.BulkDocSection>>)(Class<?>) List.class);
+        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<BulkDocSection>>)(Class<?>) List.class);
         verify(mockClient, times(expectedBulkRequests)).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
 
         var capturedBulkRequests = bulkRequestCaptor.getAllValues();
@@ -88,7 +90,7 @@ class DocumentReindexerTest {
     void reindex_shouldBufferBySize() {
         int numDocs = 5;
         Flux<RfsLuceneDocument> documentStream = Flux.range(1, numDocs)
-            .map(i -> createLargeTestDocument(String.valueOf(i), MAX_BULK_SIZE / 2 + 1));
+            .map(i -> createLargeTestDocument(String.valueOf(i), MAX_BYTES_PER_BULK_REQUEST / 2 + 1));
 
         when(mockClient.sendBulkRequest(eq("test-index"), any(), any()))
             .thenAnswer(invocation -> {
@@ -104,7 +106,7 @@ class DocumentReindexerTest {
         verify(mockClient, times(numDocs)).sendBulkRequest(eq("test-index"), any(), any());
 
         @SuppressWarnings("unchecked")
-        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<DocumentReindexer.BulkDocSection>>)(Class<?>) List.class);
+        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<BulkDocSection>>)(Class<?>) List.class);
         verify(mockClient, times(numDocs)).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
 
         var capturedBulkRequests = bulkRequestCaptor.getAllValues();
@@ -117,7 +119,7 @@ class DocumentReindexerTest {
 
     @Test
     void reindex_shouldSendDocumentsLargerThanMaxBulkSize() {
-        Flux<RfsLuceneDocument> documentStream = Flux.just(createLargeTestDocument("1", MAX_BULK_SIZE * 3 / 2));
+        Flux<RfsLuceneDocument> documentStream = Flux.just(createLargeTestDocument("1", MAX_BYTES_PER_BULK_REQUEST * 3 / 2));
 
         when(mockClient.sendBulkRequest(eq("test-index"), any(), any()))
             .thenAnswer(invocation -> {
@@ -133,17 +135,17 @@ class DocumentReindexerTest {
         verify(mockClient, times(1)).sendBulkRequest(eq("test-index"), any(), any());
 
         @SuppressWarnings("unchecked")
-        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<DocumentReindexer.BulkDocSection>>)(Class<?>) List.class);
+        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<BulkDocSection>>)(Class<?>) List.class);
         verify(mockClient).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
 
         var capturedBulkRequests = bulkRequestCaptor.getValue();
-        assertTrue(capturedBulkRequests.get(0).asBulkIndex().getBytes(StandardCharsets.UTF_8).length > MAX_BULK_SIZE, "Bulk request should be larger than max bulk size");
+        assertTrue(capturedBulkRequests.get(0).asString().getBytes(StandardCharsets.UTF_8).length > MAX_BYTES_PER_BULK_REQUEST, "Bulk request should be larger than max bulk size");
         assertEquals(1, capturedBulkRequests.size(), "Should contain 1 document");
     }
 
     @Test
     void reindex_shouldTrimAndRemoveNewlineFromSource() {
-        Flux<RfsLuceneDocument> documentStream = Flux.just(createTestDocumenWithWhitespace("MQAA"));
+        Flux<RfsLuceneDocument> documentStream = Flux.just(createTestDocumentWithWhitespace("MQAA"));
 
         when(mockClient.sendBulkRequest(eq("test-index"), any(), any()))
             .thenAnswer(invocation -> {
@@ -159,32 +161,31 @@ class DocumentReindexerTest {
         verify(mockClient, times(1)).sendBulkRequest(eq("test-index"), any(), any());
 
         @SuppressWarnings("unchecked")
-        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<DocumentReindexer.BulkDocSection>>)(Class<?>) List.class);
+        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<BulkDocSection>>)(Class<?>) List.class);
         verify(mockClient).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
 
         var capturedBulkRequests = bulkRequestCaptor.getValue();
         assertEquals(1, capturedBulkRequests.size(), "Should contain 1 document");
-        assertEquals("{\"index\":{\"_id\":\"MQAA\"}}\n{\"field\":\"value\"}", capturedBulkRequests.get(0).asBulkIndex());
-    }
+        assertEquals("{\"index\":{\"_id\":\"MQAA\", \"_type\":\"_doc\", \"_index\":\"test-index\"}}\n{\"field\":\"value\"}", capturedBulkRequests.get(0).asString());    }
 
     private RfsLuceneDocument createTestDocument(String id) {
-        return new RfsLuceneDocument(id, "{\"field\":\"value\"}");
+        return new RfsLuceneDocument(id, null, "{\"field\":\"value\"}");
     }
 
-    private RfsLuceneDocument createTestDocumenWithWhitespace(String id) {
-        return new RfsLuceneDocument(id, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ");
+    private RfsLuceneDocument createTestDocumentWithWhitespace(String id) {
+        return new RfsLuceneDocument(id, null, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ");
     }
 
     private RfsLuceneDocument createLargeTestDocument(String id, int size) {
         String largeField = "x".repeat(size);
-        return new RfsLuceneDocument(id, "{\"field\":\"" + largeField + "\"}");
+        return new RfsLuceneDocument(id, null, "{\"field\":\"" + largeField + "\"}");
     }
 
     @Test
     void reindex_shouldRespectMaxConcurrentRequests() {
         int numDocs = 100;
         int maxConcurrentRequests = 5;
-        DocumentReindexer concurrentReindexer = new DocumentReindexer(mockClient, 1, MAX_BULK_SIZE, maxConcurrentRequests);
+        DocumentReindexer concurrentReindexer = new DocumentReindexer(mockClient, 1, MAX_BYTES_PER_BULK_REQUEST, maxConcurrentRequests, null);
 
         Flux<RfsLuceneDocument> documentStream = Flux.range(1, numDocs).map(i -> createTestDocument(String.valueOf(i)));
 
@@ -208,4 +209,94 @@ class DocumentReindexerTest {
             "Max observed concurrency (" + maxObservedConcurrency.get() +
             ") should not exceed max concurrent requests (" + maxConcurrentRequests + ")");
     }
+
+    @Test
+    void reindex_shouldTransformDocuments() {
+        // Define the transformation configuration
+        final String CONFIG = "[" +
+                "  {" +
+                "    \"JsonConditionalTransformerProvider\": [" +
+                "      {" +
+                "        \"JsonJMESPathPredicateProvider\": {" +
+                "          \"script\": \"index._type != '_doc'\"" +
+                "        }" +
+                "      }," +
+                "      [" +
+                "        {" +
+                "          \"JsonJoltTransformerProvider\": {" +
+                "            \"script\": {" +
+                "              \"operation\": \"modify-overwrite-beta\"," +
+                "              \"spec\": {" +
+                "                \"index\": {" +
+                "                  \"\\\\_type\": \"_doc\"" +
+                "                }" +
+                "              }" +
+                "            }" +
+                "          }" +
+                "        }" +
+                "      ]" +
+                "    ]" +
+                "  }" +
+                "]";
+
+        // Initialize the transformer using the provided configuration
+        IJsonTransformer transformer = new TransformationLoader().getTransformerFactoryLoader(CONFIG);
+
+        // Initialize DocumentReindexer with the transformer
+        documentReindexer = new DocumentReindexer(mockClient, MAX_DOCS_PER_BULK, MAX_BYTES_PER_BULK_REQUEST, MAX_CONCURRENT_REQUESTS, transformer);
+
+        // Create a stream of documents, some requiring transformation and some not
+        Flux<RfsLuceneDocument> documentStream = Flux.just(
+                createTestDocumentWithType("1", "_type1"),
+                createTestDocumentWithType("2", "_doc"),
+                createTestDocumentWithType("3", "_type3")
+        );
+
+        // Mock the client to capture the bulk requests
+        when(mockClient.sendBulkRequest(eq("test-index"), any(), any()))
+                .thenAnswer(invocation -> {
+                    List<?> bulkBody = invocation.getArgument(1);
+                    return Mono.just(new OpenSearchClient.BulkResponse(200, "OK", null,
+                            String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}",
+                                    "{}".repeat(bulkBody.size()))));
+                });
+
+        // Execute the reindexing process
+        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
+                .verifyComplete();
+
+        // Capture the bulk requests sent to the mock client
+        @SuppressWarnings("unchecked")
+        var bulkRequestCaptor = ArgumentCaptor.forClass((Class<List<BulkDocSection>>)(Class<?>) List.class);
+        verify(mockClient, times(1)).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
+
+        var capturedBulkRequests = bulkRequestCaptor.getValue();
+        assertEquals(3, capturedBulkRequests.size(), "Should contain 3 transformed documents");
+
+        // Verify that the transformation was applied correctly
+        BulkDocSection transformedDoc1 = capturedBulkRequests.get(0);
+        BulkDocSection transformedDoc2 = capturedBulkRequests.get(1);
+        BulkDocSection transformedDoc3 = capturedBulkRequests.get(2);
+
+        assertEquals("{\"index\":{\"_index\":\"test-index\",\"_type\":\"_doc\",\"_id\":\"1\"}}\n{\"field\":\"value\"}", transformedDoc1.asString(),
+                "Document 1 should have _type transformed to '_doc'");
+        assertEquals("{\"index\":{\"_index\":\"test-index\",\"_type\":\"_doc\",\"_id\":\"2\"}}\n{\"field\":\"value\"}", transformedDoc2.asString(),
+                "Document 2 should remain unchanged as _type is already '_doc'");
+        assertEquals("{\"index\":{\"_index\":\"test-index\",\"_type\":\"_doc\",\"_id\":\"3\"}}\n{\"field\":\"value\"}", transformedDoc3.asString(),
+                "Document 3 should have _type transformed to '_doc'");
+    }
+
+    /**
+     * Helper method to create a test document with a specific _type.
+     *
+     * @param id The document ID.
+     * @param type The _type of the document.
+     * @return A new instance of RfsLuceneDocument with the specified _type.
+     */
+    private RfsLuceneDocument createTestDocumentWithType(String id, String type) {
+        String source = "{\"field\":\"value\"}";
+        return new RfsLuceneDocument(id, type, source);
+    }
+
+    
 }

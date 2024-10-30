@@ -26,7 +26,7 @@ dependencies {
     implementation group: 'org.slf4j', name: 'slf4j-api'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
 
-    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    api project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')

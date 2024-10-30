@@ -6,7 +6,6 @@ import java.util.Map;
 import java.util.Optional;
 
 import org.opensearch.migrations.Version;
-import org.opensearch.migrations.bulkload.common.DocumentReindexer.BulkDocSection;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator.BulkItemResponseEntry;
@@ -234,7 +233,7 @@ class OpenSearchClientTest {
     private BulkDocSection createBulkDoc(String docId) {
         var bulkDoc = mock(BulkDocSection.class);
         when(bulkDoc.getDocId()).thenReturn(docId);
-        when(bulkDoc.asBulkIndex()).thenReturn("BULK-INDEX\nBULK_BODY");
+        when(bulkDoc.asString()).thenReturn("BULK-INDEX\nBULK_BODY");
         return bulkDoc;
     }
 
