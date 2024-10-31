@@ -1,0 +1,5 @@
+conditionalPackageInstalls:
+  kafka: true
+  jaeger: true
+  prometheus: true
+  grafana: true
