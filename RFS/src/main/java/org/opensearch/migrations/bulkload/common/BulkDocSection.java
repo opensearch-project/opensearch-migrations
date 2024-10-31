@@ -1,129 +1,143 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.io.IOException;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.Map;
 
-import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.annotation.JsonInclude;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.core.JsonGenerator;
+import com.fasterxml.jackson.core.io.SerializedString;
+import com.fasterxml.jackson.databind.JsonSerializer;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.fasterxml.jackson.databind.SerializerProvider;
+import com.fasterxml.jackson.databind.module.SimpleModule;
+import lombok.AllArgsConstructor;
 import lombok.EqualsAndHashCode;
 import lombok.Getter;
-import lombok.SneakyThrows;
+import lombok.NoArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
+@Slf4j
 public class BulkDocSection {
-
     private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
-
-    // Static constants for field names
-    private static final String FIELD_INDEX = "_index";
-    private static final String FIELD_TYPE = "_type";
-    private static final String FIELD_ID = "_id";
-    private static final String COMMAND_INDEX = "index";
-    private static final String FIELD_SOURCE = "source";
-    
-    // Static constants for exception messages
-    private static final String SERIALIZATION_ERROR_MESSAGE = "Failed to serialize BulkDocSection to JSON";
-    private static final String DESERIALIZATION_ERROR_MESSAGE = "Failed to deserialize BulkDocSection from map";
-    
-    // Static constant for newline character
+    @SuppressWarnings("unchecked")
+    private static final ObjectMapper BULK_DOC_COLLECTION_MAPPER = OBJECT_MAPPER.copy()
+            .registerModule(new SimpleModule()
+                    .addSerializer((Class<Collection<BulkDocSection>>) (Class<?>) Collection.class,
+                            new BulkIndexRequestBulkDocSectionCollectionSerializer()));
+    private static final ObjectMapper BULK_INDEX_MAPPER = OBJECT_MAPPER.copy()
+            .registerModule(new SimpleModule()
+                    .addSerializer(BulkIndex.class, new BulkIndex.BulkIndexRequestSerializer()));
     private static final String NEWLINE = "\n";
 
     @EqualsAndHashCode.Include
     @Getter
     private final String docId;
-    private final ObjectNode indexCommand;
-    private final ObjectNode source;
-
-    private StringBuilder bulkDocSectionStringCache = null;
+    private final BulkIndex bulkIndex;
 
     public BulkDocSection(String id, String indexName, String type, String docBody) {
         this.docId = id;
-        this.indexCommand = createIndexCommand(id, indexName, type);
-        this.source = parseSource(docBody);
+        this.bulkIndex = new BulkIndex(
+            new BulkIndex.Metadata(id, type, indexName),
+            parseSource(docBody)
+        );
     }
 
-    @SneakyThrows
-    private static ObjectNode createIndexCommand(final String docId, final String indexName, final String type) {
-        ObjectNode indexNode = OBJECT_MAPPER.createObjectNode();
-        ObjectNode metadataNode = OBJECT_MAPPER.createObjectNode();
-        metadataNode.put(FIELD_INDEX, indexName);
-        if(type != null) {
-            metadataNode.put(FIELD_TYPE, type);
+    private BulkDocSection(BulkIndex bulkIndex) {
+        this.docId = bulkIndex.metadata.id;
+        this.bulkIndex = bulkIndex;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static Map<String, Object> parseSource(final String doc) {
+        try {
+            return OBJECT_MAPPER.readValue(doc, Map.class);
+        } catch (IOException e) {
+            throw new DeserializationException("Failed to parse source doc:  " + e.getMessage());
         }
-        metadataNode.put(FIELD_ID, docId);
-        indexNode.set(COMMAND_INDEX, metadataNode);
-        return indexNode;
-    }
-
-    @SneakyThrows
-    private static ObjectNode parseSource(final String doc) {
-        return (ObjectNode) OBJECT_MAPPER.readTree(doc);
     }
 
     public static String convertToBulkRequestBody(Collection<BulkDocSection> bulkSections) {
-        StringBuilder builder = new StringBuilder();
-        for (var section : bulkSections) {
-            builder.append(section.asStringBuilder()).append(NEWLINE);
-        }
-        return builder.toString();
-    }
-
-    private StringBuilder asStringBuilder() {
-        if (this.bulkDocSectionStringCache != null) {
-            return this.bulkDocSectionStringCache;
-        }
-
-        StringBuilder builder = new StringBuilder();
         try {
-            String indexCommand = asBulkIndexString();
-            String sourceJson = asBulkSourceString();
-            builder.append(indexCommand).append(NEWLINE).append(sourceJson);
-            bulkDocSectionStringCache = builder;
-            return builder;
-        } catch (JsonProcessingException e) {
-            throw new RuntimeException(SERIALIZATION_ERROR_MESSAGE, e);
+            return BULK_DOC_COLLECTION_MAPPER.writeValueAsString(bulkSections);
+        } catch (IOException e) {
+            throw new SerializationException("Failed to serialize ingestion request: "+ e.getMessage());
         }
     }
 
     public String asString() {
-        return asStringBuilder().toString();
+        try {
+            return BULK_INDEX_MAPPER.writeValueAsString(this.bulkIndex);
+        } catch (IOException e) {
+            throw new SerializationException("Failed to write bulk index from string: " + e.getMessage());
+        }
     }
 
-    private String asBulkIndexString() throws JsonProcessingException {
-        return asString(this.indexCommand);
-    }
-
-    private String asBulkSourceString() throws JsonProcessingException {
-        return asString(this.source);
-    }
-
-    private String asString(ObjectNode node) throws JsonProcessingException {
-        return OBJECT_MAPPER.writeValueAsString(node);
+    public static BulkDocSection fromMap(Map<String, Object> map) {
+        BulkIndex bulkIndex = OBJECT_MAPPER.convertValue(map, BulkIndex.class);
+        return new BulkDocSection(bulkIndex);
     }
 
     @SuppressWarnings("unchecked")
     public Map<String, Object> toMap() {
-        var indexMap = OBJECT_MAPPER.convertValue(this.indexCommand, HashMap.class);
-        var sourceMap = OBJECT_MAPPER.convertValue(this.source, Map.class);
-        var mergedMap = indexMap;
-        mergedMap.put(FIELD_SOURCE, sourceMap);
-        return mergedMap;
+        return (Map<String, Object>) OBJECT_MAPPER.convertValue(bulkIndex, Map.class);
     }
 
+    @NoArgsConstructor(force = true) // For Jackson
+    @AllArgsConstructor
+    @JsonInclude(JsonInclude.Include.NON_NULL)
+    private static class BulkIndex {
+        @JsonProperty("index")
+        private final Metadata metadata;
+        @JsonProperty("source")
+        private final Map<String, Object> sourceDoc;
 
-    @SuppressWarnings("unchecked")
-    public static BulkDocSection fromMap(Map<String, Object> map) {
-        try {
-            Map<String, Object> indexMap = (Map<String, Object>) map.get(COMMAND_INDEX);
-            String docId = (String) indexMap.get(FIELD_ID);
-            String indexName = (String) indexMap.get(FIELD_INDEX);
-            String type = (String) indexMap.get(FIELD_TYPE);
-            String source = OBJECT_MAPPER.writeValueAsString(map.get(FIELD_SOURCE));
-            return new BulkDocSection(docId, indexName, type, source);
-        } catch (Exception e) {
-            throw new RuntimeException(DESERIALIZATION_ERROR_MESSAGE, e);
+        @NoArgsConstructor(force = true) // For Jackson
+        @AllArgsConstructor
+        @JsonInclude(JsonInclude.Include.NON_NULL)
+        private static class Metadata {
+            @JsonProperty("_id")
+            private final String id;
+            @JsonProperty("_type")
+            private final String type;
+            @JsonProperty("_index")
+            private final String index;
+        }
+
+        public static class BulkIndexRequestSerializer extends JsonSerializer<BulkIndex> {
+            public static final String BULK_INDEX_COMMAND = "index";
+            @Override
+            public void serialize(BulkIndex value, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+                gen.setRootValueSeparator(new SerializedString(NEWLINE));
+                gen.writeStartObject();
+                gen.writeObjectField(BULK_INDEX_COMMAND, value.metadata);
+                gen.writeEndObject();
+                gen.writeObject(value.sourceDoc);
+            }
+        }
+    }
+
+    public static class BulkIndexRequestBulkDocSectionCollectionSerializer extends JsonSerializer<Collection<BulkDocSection>> {
+        @Override
+        public void serialize(Collection<BulkDocSection> collection, JsonGenerator gen, SerializerProvider serializers) throws IOException {
+            gen.setRootValueSeparator(new SerializedString(NEWLINE));
+            for (BulkDocSection item : collection) {
+                gen.writeObject(item.asString());
+            }
+        }
+    }
+
+    public static class DeserializationException extends RuntimeException {
+        public DeserializationException(String message) {
+            super(message);
+        }
+    }
+
+    public static class SerializationException extends RuntimeException {
+        public SerializationException(String message) {
+            super(message);
         }
     }
 }

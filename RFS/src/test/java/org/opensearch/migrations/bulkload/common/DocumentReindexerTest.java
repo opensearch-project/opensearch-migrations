@@ -258,11 +258,11 @@ class DocumentReindexerTest {
         BulkDocSection transformedDoc2 = capturedBulkRequests.get(1);
         BulkDocSection transformedDoc3 = capturedBulkRequests.get(2);
 
-        assertEquals("{\"index\":{\"_index\":\"test-index\",\"_id\":\"1\"}}\n{\"field\":\"value\"}", transformedDoc1.asString(),
+        assertEquals("{\"index\":{\"_id\":\"1\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", transformedDoc1.asString(),
                 "Document 1 should have _type removed");
-        assertEquals("{\"index\":{\"_index\":\"test-index\",\"_id\":\"2\"}}\n{\"field\":\"value\"}", transformedDoc2.asString(),
+        assertEquals("{\"index\":{\"_id\":\"2\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", transformedDoc2.asString(),
                 "Document 2 should remain unchanged as _type is not defined");
-        assertEquals("{\"index\":{\"_index\":\"test-index\",\"_id\":\"3\"}}\n{\"field\":\"value\"}", transformedDoc3.asString(),
+        assertEquals("{\"index\":{\"_id\":\"3\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", transformedDoc3.asString(),
                 "Document 3 should have _type removed");
     }
 

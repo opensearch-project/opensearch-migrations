@@ -55,7 +55,7 @@ public class RfsMigrateDocuments {
     public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
     public static final String LOGGING_MDC_WORKER_ID = "workerId";
 
-    private static final String DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG = "[" +
+    public static final String DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG = "[" +
             "  {" +
             "    \"JsonTransformerForDocumentTypeRemovalProvider\":\"\"" +
             "  }" +
@@ -182,7 +182,7 @@ public class RfsMigrateDocuments {
                 required = false,
                 names = "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config-base64",
                 arity = 1,
-                description = "Configuration of tuple transformers.  The same contents as --tuple-transformer-config but " +
+                description = "Configuration of doc transformers.  The same contents as --doc-transformer-config but " +
                         "Base64 encoded so that the configuration is easier to pass as a command line parameter.")
         private String transformerConfigEncoded;
 
@@ -190,7 +190,7 @@ public class RfsMigrateDocuments {
                 required = false,
                 names = "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config",
                 arity = 1,
-                description = "Configuration of tuple transformers.  Either as a string that identifies the "
+                description = "Configuration of doc transformers.  Either as a string that identifies the "
                         + "transformer that should be run (with default settings) or as json to specify options "
                         + "as well as multiple transformers to run in sequence.  "
                         + "For json, keys are the (simple) names of the loaded transformers and values are the "
@@ -201,7 +201,7 @@ public class RfsMigrateDocuments {
                 required = false,
                 names = "--" + DOC_CONFIG_PARAMETER_ARG_PREFIX + "transformer-config-file",
                 arity = 1,
-                description = "Path to the JSON configuration file of tuple transformers.")
+                description = "Path to the JSON configuration file of doc transformers.")
         private String transformerConfigFile;
     }
 

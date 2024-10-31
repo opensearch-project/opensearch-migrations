@@ -1,6 +1,9 @@
-package org.opensearch.migrations.transform;
+package org.opensearch.migrations.transformation;
 
 import java.util.Map;
+
+import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.IJsonTransformerProvider;
 
 /**
  * This is a JsonTransformer for doc transforms to remove type. Used for ES7+ and OS

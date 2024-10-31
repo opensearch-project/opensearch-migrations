@@ -57,8 +57,8 @@ public class DocumentReindexer {
     BulkDocSection transformDocument(RfsLuceneDocument doc, String indexName) {
         var original = new BulkDocSection(doc.id, indexName, doc.type, doc.source);
         if (transformer != null) {
-            final Map<String,Object> transfomredDoc = transformer.transformJson(original.toMap());
-            return BulkDocSection.fromMap(transfomredDoc);
+            final Map<String,Object> transformedDoc = transformer.transformJson(original.toMap());
+            return BulkDocSection.fromMap(transformedDoc);
         }
         return BulkDocSection.fromMap(original.toMap());
     }
