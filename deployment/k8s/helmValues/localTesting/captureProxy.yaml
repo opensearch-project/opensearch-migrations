@@ -1,2 +1,3 @@
-proxy:
-  destinationUrl: "http://elasticsearch:9200"
+parameters:
+  destinationUri:
+    value: "http://elasticsearch:9200"

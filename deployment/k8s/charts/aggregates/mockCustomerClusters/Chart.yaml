@@ -8,7 +8,7 @@ dependencies:
     alias: source
   - name: capture-proxy
     version: "0.1.0"
-    repository: file://../captureProxy
+    repository: file://../../components/captureProxy
     alias: proxy
   - name: opensearch
     version: "2.23.1"

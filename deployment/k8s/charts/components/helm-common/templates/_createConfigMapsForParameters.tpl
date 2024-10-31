@@ -6,7 +6,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ $packageName }}-{{ $key | lower }}-default
+  name: {{ $key | lower }}-default
   namespace: {{ $namespace }}
   labels:
     type: default
@@ -26,7 +26,7 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ $packageName }}-{{ $key | lower }}
+  name: {{ $key | lower }}
   namespace: {{ $namespace }}
   labels:
     type: override

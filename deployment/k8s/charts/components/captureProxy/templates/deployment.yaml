@@ -1,0 +1,29 @@
+# Main Deployment
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "generic.fullname" . }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: {{ include "generic.fullname" . }}
+  template:
+    metadata:
+      labels:
+        app: {{ include "generic.fullname" . }}
+        env: v1
+    spec:
+      containers:
+        - name: captureproxy
+          image: migrations/capture_proxy:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            {{- include "generic.pullEnvVarsFromConfigMaps" (dict "NameSpace" (include "generic.fullname" .) "Parameters" .Values.parameters "include" .Template.Include "Template" .Template) | indent 10 }}
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              {{- include "generic.buildCommandBuilderScript" (dict "Command" "/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy" "PackageName" (include "generic.fullname" .) "Parameters" .Values.parameters "include" .Template.Include "Template" .Template) | nindent 14 }}
+          ports:
+            - containerPort: 9200

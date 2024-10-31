@@ -1,6 +1,5 @@
 nameOverride: ""
 fullnameOverride: ""
-protectedParameterNamespace: "baseline"
 # Set to true if you want the chart to create the namespace
 createNamespace: true
 # Optional: specify namespace name (defaults to .Release.Namespace)
@@ -19,9 +18,18 @@ parameters:
   noCapture:
     present: false
     allowRuntimeOverride: true
+  kafkaBrokersList:
+    list:
+      - kafka1
+      - kafka2
   insecureDestination:
     present: true
     allowRuntimeOverride: false
+
+    # Proxy... --destinationUri  "http://destination:9200" --listenPort 9200 --noCapture --kafkaBrokersList kafka1 kafka2 --insecureDestination
+
+
+
 # TODO - setup cert management
 #  sslConfigFile:
 #    value: "/usr/share/elasticsearch/config/proxy_tls.yml"

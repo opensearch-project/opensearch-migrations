@@ -3,7 +3,7 @@ set -e
 CMD="{{ .Command }}"
 
 {{- /* Default environment variables if not set */}}
-{{- range $key, $param := .Values.parameters }}
+{{- range $key, $param := .Parameters }}
 {{- $envVarName := include "toSnakeCase" $key }}
 if [ -z "${{ $envVarName }}" ]; then
   export {{ $envVarName }}="${{ $envVarName }}_DEFAULT"
@@ -11,7 +11,7 @@ fi
 {{- end }}
 
 {{- /* Construct the command based on parameter types */}}
-{{- range $key, $param := .Values.parameters }}
+{{- range $key, $param := .Parameters }}
 {{- $envVarName := include "toSnakeCase" $key }}
 {{- if hasKey $param "value" }}
 if [ -n "${{ $envVarName }}" ]; then
