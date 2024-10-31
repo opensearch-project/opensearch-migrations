@@ -32,7 +32,14 @@ const getProps = () => {
 
 const app = new App();
 const infraProps = getProps()
-new SolutionsInfrastructureStack(app, 'OSMigrations-Bootstrap', {
+
+new SolutionsInfrastructureStack(app, 'OSMigrations-Bootstrap-Import-VPC', {
   synthesizer: new DefaultStackSynthesizer(),
+  createVPC: false,
+  ...infraProps
+});
+new SolutionsInfrastructureStack(app, 'OSMigrations-Bootstrap-Create-VPC', {
+  synthesizer: new DefaultStackSynthesizer(),
+  createVPC: true,
   ...infraProps
 });

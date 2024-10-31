@@ -1,4 +1,4 @@
-import { Aws, CfnMapping, CfnParameter, Fn, Stack, StackProps, Tags } from 'aws-cdk-lib';
+import {Aws, CfnMapping, CfnParameter, Fn, Stack, StackProps, Tags} from 'aws-cdk-lib';
 import { Construct } from 'constructs';
 import {
     BlockDeviceVolume,
@@ -22,6 +22,7 @@ export interface SolutionsInfrastructureStackProps extends StackProps {
     readonly solutionName: string;
     readonly solutionVersion: string;
     readonly codeBucket: string;
+    readonly createVPC: boolean;
 }
 
 export function applyAppRegistry(stack: Stack, stage: string, infraProps: SolutionsInfrastructureStackProps): string {
@@ -62,6 +63,40 @@ export function applyAppRegistry(stack: Stack, stage: string, infraProps: Soluti
     return application.applicationArn
 }
 
+export function importVPCResources(stack: Stack, additionalParameters: String[], parameterLabels: {[id: string] : {}}) {
+    const vpcIdParameter = new CfnParameter(stack, 'VPCId', {
+        type: 'AWS::EC2::VPC::Id',
+        description: 'Specify the VPC id to place Migration resources into'
+    });
+    parameterLabels[vpcIdParameter.logicalId] = {"default": "VPC Id"}
+
+    // Bootstrap Parameters
+    const availabilityZoneBootstrapParameter = new CfnParameter(stack, 'BootstrapInstanceAvailabilityZone', {
+        type: 'AWS::EC2::AvailabilityZone::Name',
+        description: 'Availability Zone name in the selected VPC for the Bootstrap Instance. Must match the Bootstrap Private Subnet Id.'
+    });
+    parameterLabels[availabilityZoneBootstrapParameter.logicalId] = {"default": "Bootstrap Instance Availability Zone"}
+    const privateSubnetIdBootstrapParameter = new CfnParameter(stack, 'BootstrapInstancePrivateSubnetId', {
+        type: 'AWS::EC2::Subnet::Id',
+        description: 'Private Subnet ID in the selected VPC for the Bootstrap Instance. Must match the Bootstrap Instance Availability Zone. This subnet must have a route to a NAT gateway.'
+    });
+    parameterLabels[privateSubnetIdBootstrapParameter.logicalId] = {"default": "Bootstrap Instance Private Subnet Id"}
+
+    // Migration Parameters
+    const privateSubnetIdsParameter = new CfnParameter(stack, 'MigrationPrivateSubnetIds', {
+        type: 'List<AWS::EC2::Subnet::Id>',
+        description: 'Private Subnet IDs in the selected VPC to place Migration resources. Please provide exactly 2 or 3 subnets EACH in their own AZ. The subnets must have routes to a NAT gateway.'
+    });
+    parameterLabels[privateSubnetIdsParameter.logicalId] = {"default": "Migration Private Subnet Ids"}
+    additionalParameters.push(vpcIdParameter.logicalId, availabilityZoneBootstrapParameter.logicalId, privateSubnetIdBootstrapParameter.logicalId, privateSubnetIdsParameter.logicalId)
+
+    return Vpc.fromVpcAttributes(stack, 'ImportedVPC', {
+        vpcId: vpcIdParameter.valueAsString,
+        availabilityZones: [availabilityZoneBootstrapParameter.valueAsString],
+        privateSubnetIds: [privateSubnetIdBootstrapParameter.valueAsString]
+    });
+}
+
 export class SolutionsInfrastructureStack extends Stack {
 
     constructor(scope: Construct, id: string, props: SolutionsInfrastructureStackProps) {
@@ -80,15 +115,17 @@ export class SolutionsInfrastructureStack extends Stack {
             lazy: false,
         });
 
+        const additionalParameters: String[] = []
+        const parameterLabels: {[id: string] : {}} = {}
         const stageParameter = new CfnParameter(this, 'Stage', {
             type: 'String',
             description: 'Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1',
             default: 'dev',
         });
+        additionalParameters.push(stageParameter.logicalId)
 
         const stackMarker = `${stageParameter.valueAsString}-${Aws.REGION}`;
         const appRegistryAppARN = applyAppRegistry(this, stackMarker, props)
-        const vpc = new Vpc(this, 'Vpc', {});
 
         new CfnDocument(this, "BootstrapShellDoc", {
             name: `BootstrapShellDoc-${stackMarker}`,
@@ -132,8 +169,19 @@ export class SolutionsInfrastructureStack extends Stack {
             role: bootstrapRole
         })
 
+        let vpc;
+        if (props.createVPC) {
+            vpc = new Vpc(this, 'Vpc', {});
+        }
+        else {
+            vpc = importVPCResources(this, additionalParameters, parameterLabels);
+        }
+
         new Instance(this, 'BootstrapEC2Instance', {
             vpc: vpc,
+            vpcSubnets: {
+                subnets: vpc.privateSubnets,
+            },
             instanceName: `bootstrap-instance-${stackMarker}`,
             instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
             machineImage: MachineImage.latestAmazonLinux2023(),
@@ -163,7 +211,7 @@ export class SolutionsInfrastructureStack extends Stack {
         const parameterGroups = [];
         parameterGroups.push({
             Label: { default: "Additional parameters" },
-            Parameters: [stageParameter.logicalId]
+            Parameters: additionalParameters
         });
         parameterGroups.push({
             Label: { default: "System parameters" },
@@ -172,7 +220,8 @@ export class SolutionsInfrastructureStack extends Stack {
 
         this.templateOptions.metadata = {
             'AWS::CloudFormation::Interface': {
-                ParameterGroups: parameterGroups
+                ParameterGroups: parameterGroups,
+                ParameterLabels: parameterLabels
             }
         }
     }
