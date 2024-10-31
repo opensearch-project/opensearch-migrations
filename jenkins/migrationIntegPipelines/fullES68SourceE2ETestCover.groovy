@@ -5,5 +5,5 @@ library identifier: "migrations-lib@${gitBranch}", retriever: modernSCM(
         [$class: 'GitSCMSource',
          remote: "${gitUrl}"])
 
-// Shared library function (location from root: vars/rfsES68SourceE2ETest.groovy)
-rfsES68SourceE2ETest()
+// Shared library function (location from root: vars/fullES68SourceE2ETest.groovy)
+fullES68SourceE2ETest()

@@ -15,7 +15,7 @@ permissions:
   contents: read # to fetch code (actions/checkout)
 
 jobs:
-  rfs-e2e-aws-test:
+  full-es68-e2e-aws-test:
     runs-on: ubuntu-latest
     steps:
       - name: Sanitize branch and repo names
@@ -34,6 +34,6 @@ jobs:
         uses: lewijacn/jenkins-trigger@1.0.4
         with:
           jenkins_url: "https://migrations.ci.opensearch.org"
-          job_name: "rfs-default-e2e-test"
+          job_name: "full-es68source-e2e-test"
           api_token: "${{ secrets.JENKINS_MIGRATIONS_GENERIC_WEBHOOK_TOKEN }}"
           job_params: "GIT_REPO_URL=${{ steps.sanitize-input.outputs.pr_repo_url }},GIT_BRANCH=${{ steps.sanitize-input.outputs.branch_name }}"
