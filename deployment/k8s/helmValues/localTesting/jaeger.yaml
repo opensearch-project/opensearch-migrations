@@ -1,14 +1,13 @@
-jaeger:
-  allInOne:
-    enabled: true
-  provisionDataStore:
-    cassandra: false
-  storage:
-    type: memory
-  agent:
-    enabled: false
-  collector:
-    enabled: false
-  query:
-    enabled: false
+allInOne:
+  enabled: true
+provisionDataStore:
+  cassandra: false
+storage:
+  type: memory
+agent:
+  enabled: false
+collector:
+  enabled: false
+query:
+  enabled: false
 
