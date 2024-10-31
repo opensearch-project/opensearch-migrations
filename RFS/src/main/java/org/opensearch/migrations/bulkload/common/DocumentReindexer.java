@@ -82,7 +82,7 @@ public class DocumentReindexer {
             @Override
             public boolean test(BulkDocSection next) {
                 // Add one for newline between bulk sections
-                var nextSize = next.asString().length() + 1L;
+                var nextSize = next.getSerializedLength() + 1L;
                 currentSize += nextSize;
                 currentItemCount++;
 
