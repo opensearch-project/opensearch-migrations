@@ -1,7 +1,7 @@
 
 def call(Map config = [:]) {
     def sourceContextId = 'source-single-node-ec2'
-    def migrationContextId = 'migration-rfs'
+    def migrationContextId = 'full-migration'
     def source_cdk_context = """
         {
           "source-single-node-ec2": {
@@ -19,13 +19,14 @@ def call(Map config = [:]) {
             "dataNodeCount": 1,
             "managerNodeCount": 0,
             "serverAccessType": "ipv4",
-            "restrictServerAccessTo": "0.0.0.0/0"
+            "restrictServerAccessTo": "0.0.0.0/0",
+            "requireImdsv2": false
           }
         }
     """
     def migration_cdk_context = """
         {
-          "migration-rfs": {
+          "full-migration": {
             "stage": "<STAGE>",
             "vpcId": "<VPC_ID>",
             "engineVersion": "OS_2.11",
@@ -34,9 +35,11 @@ def call(Map config = [:]) {
             "openAccessPolicyEnabled": true,
             "domainRemovalPolicy": "DESTROY",
             "artifactBucketRemovalPolicy": "DESTROY",
-            "trafficReplayerServiceEnabled": false,
+            "captureProxyServiceEnabled": true,
+            "targetClusterProxyServiceEnabled": true,
+            "trafficReplayerServiceEnabled": true,
+            "trafficReplayerExtraArgs": "--speedup-factor 10.0",
             "reindexFromSnapshotServiceEnabled": true,
-            "sourceClusterEndpoint": "<SOURCE_CLUSTER_ENDPOINT>",
             "sourceCluster": {
                 "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
                 "auth": {"type": "none"},
@@ -63,9 +66,9 @@ def call(Map config = [:]) {
             migrationContext: migration_cdk_context,
             sourceContextId: sourceContextId,
             migrationContextId: migrationContextId,
-            defaultStageId: 'rfs-integ-es68',
+            defaultStageId: 'full-es68',
             skipCaptureProxyOnNodeSetup: true,
-            jobName: 'rfs-es68source-e2e-test',
-            integTestCommand: '/root/lib/integ_test/integ_test/backfill_tests_es68.py'
+            jobName: 'full-es68source-e2e-test',
+            integTestCommand: '/root/lib/integ_test/integ_test/full_tests.py --source_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9201 --target_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9202'
     )
 }

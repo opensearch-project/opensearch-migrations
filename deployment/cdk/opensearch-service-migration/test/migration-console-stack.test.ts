@@ -75,7 +75,9 @@ describe('Migration Console Stack Tests', () => {
         expect(initialEnv).not.toEqual(updatedEnv);
 
         // Specifically check if the MIGRATION_SERVICES_YAML_HASH has changed
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const initialYamlHash = initialEnv.find((env: any) => env.Name === "MIGRATION_SERVICES_YAML_HASH").Value;
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         const updatedYamlHash = updatedEnv.find((env: any) => env.Name === "MIGRATION_SERVICES_YAML_HASH").Value;
 
         expect(initialYamlHash).not.toEqual(updatedYamlHash);

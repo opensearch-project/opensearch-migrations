@@ -2,7 +2,6 @@ import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
-import {join} from "path";
 import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
 import {StreamingSourceType} from "../streaming-source-type";
 import {
@@ -33,7 +32,7 @@ export class CaptureProxyESStack extends MigrationServiceCore {
 
     constructor(scope: Construct, id: string, props: CaptureProxyESProps) {
         super(scope, id, props)
-        let securityGroups = [
+        const securityGroups = [
             { id: "serviceSG", param: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID },
             { id: "trafficStreamSourceAccessSG", param: MigrationSSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID }
         ].map(({ id, param }) =>
