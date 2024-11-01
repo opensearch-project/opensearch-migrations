@@ -1,0 +1,185 @@
+package org.opensearch.migrations.bulkload.common;
+
+
+import java.util.Arrays;
+import java.util.Collection;
+import java.util.HashMap;
+import java.util.Map;
+
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Test;
+
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+class BulkDocSectionTest {
+
+    @Test
+    void testConstructorAndGetters() {
+        String id = "test-id";
+        String indexName = "test-index";
+        String type = "_doc";
+        String docBody = "{\"field1\":\"value1\",\"field2\":2}";
+
+        BulkDocSection bulkDocSection = new BulkDocSection(id, indexName, type, docBody);
+
+        assertEquals(id, bulkDocSection.getDocId());
+    }
+
+    @Test
+    void testConvertToBulkRequestBody() {
+        String id1 = "id1";
+        String indexName1 = "index1";
+        String type1 = "_doc";
+        String docBody1 = "{\"field\":\"value1\"}";
+
+        String id2 = "id2";
+        String indexName2 = "index2";
+        String type2 = "_doc";
+        String docBody2 = "{\"field\":\"value2\"}";
+
+        BulkDocSection section1 = new BulkDocSection(id1, indexName1, type1, docBody1);
+        BulkDocSection section2 = new BulkDocSection(id2, indexName2, type2, docBody2);
+
+        Collection<BulkDocSection> bulkSections = Arrays.asList(section1, section2);
+
+        String bulkRequestBody = BulkDocSection.convertToBulkRequestBody(bulkSections);
+
+        assertNotNull(bulkRequestBody);
+        assertTrue(bulkRequestBody.contains(id1));
+        assertTrue(bulkRequestBody.contains(id2));
+    }
+
+    @Test
+    void testFromMap() {
+        Map<String, Object> metadata = new HashMap<>();
+        metadata.put("_id", "test-id");
+        metadata.put("_index", "test-index");
+        metadata.put("_type", "_doc");
+
+        Map<String, Object> sourceDoc = new HashMap<>();
+        sourceDoc.put("field", "value");
+
+        Map<String, Object> indexMap = new HashMap<>();
+        indexMap.put("index", metadata);
+        indexMap.put("source", sourceDoc);
+
+        BulkDocSection bulkDocSection = BulkDocSection.fromMap(indexMap);
+
+        assertNotNull(bulkDocSection);
+        assertEquals("test-id", bulkDocSection.getDocId());
+    }
+
+    @Test
+    void testGetSerializedLength() {
+        String id = "test-id";
+        String indexName = "test-index";
+        String type = "_doc";
+        String docBody = "{\"field\":\"value\"}";
+
+        BulkDocSection bulkDocSection = new BulkDocSection(id, indexName, type, docBody);
+
+        long length = bulkDocSection.getSerializedLength();
+
+        assertTrue(length > 0);
+    }
+
+    @Test
+    void testAsString() {
+        String id = "test-id";
+        String indexName = "test-index";
+        String type = "_doc";
+        String docBody = "{\"field\":\"value\"}";
+
+        BulkDocSection bulkDocSection = new BulkDocSection(id, indexName, type, docBody);
+
+        String asString = bulkDocSection.asString();
+
+        assertNotNull(asString);
+        assertTrue(asString.contains(id));
+        assertTrue(asString.contains("field"));
+        assertTrue(asString.contains("value"));
+    }
+
+    @Test
+    void testToMap() {
+        String id = "test-id";
+        String indexName = "test-index";
+        String type = "_doc";
+        String docBody = "{\"field\":\"value\"}";
+
+        BulkDocSection bulkDocSection = new BulkDocSection(id, indexName, type, docBody);
+
+        Map<String, Object> map = bulkDocSection.toMap();
+
+        assertNotNull(map);
+        assertTrue(map.containsKey("index"));
+        assertTrue(map.containsKey("source"));
+    }
+
+    @Test
+    void testDeserializationException() {
+        // Create a BulkDocSection with invalid data to cause deserialization failure
+        Exception exception = assertThrows(BulkDocSection.DeserializationException.class, () -> {
+            new BulkDocSection(null, null, null, "{\"field_value");
+        });
+
+        assertTrue(exception.getMessage().contains("Failed to parse source doc"));
+    }
+
+    @Test
+    void testLargeSourceDoc() throws JsonProcessingException {
+        var writer = new ObjectMapper();
+        // Generate a 25MB source document
+        int targetSize = 25 * 1024 * 1024;
+        StringBuilder docBuilder = new StringBuilder(targetSize);
+        String key = "field_";
+        String value = "value_";
+
+        int i = 0;
+        while (docBuilder.length() < targetSize) {
+            docBuilder.append("\"").append(key).append(i).append("\":\"").append(value).append(i).append("\",");
+            i++;
+        }
+
+        // Remove the trailing comma and wrap in braces
+        docBuilder.setLength(docBuilder.length() - 1);
+        String docBody = "{" + docBuilder + "}";
+
+        String id = "test-large-doc-id";
+        String indexName = "test-large-index";
+        String type = "_doc";
+
+        BulkDocSection bulkDocSection = new BulkDocSection(id, indexName, type, docBody);
+
+        // Test asString
+        String asString = bulkDocSection.asString();
+        assertNotNull(asString);
+        assertTrue(asString.contains(id));
+        assertTrue(asString.contains(indexName));
+        assertTrue(asString.contains(type));
+        assertTrue(asString.contains(docBody));
+        assertEquals(docBody.length() + 81, asString.length()); // add length of index command
+
+        // Test toMap
+        Map<String, Object> map = bulkDocSection.toMap();
+        assertNotNull(map);
+        assertTrue(map.containsKey("index"));
+        assertTrue(map.containsKey("source"));
+        assertEquals(docBody, writer.writeValueAsString(map.get("source")));
+
+        // Test fromMap
+        BulkDocSection fromMapSection = BulkDocSection.fromMap(map);
+        assertNotNull(fromMapSection);
+        @SuppressWarnings("unchecked")
+        Map<String, Object> indexCommand = (Map<String, Object>) fromMapSection.toMap().get("index");
+        assertEquals(id, fromMapSection.getDocId());
+        assertEquals(indexName, indexCommand.get("_index"));
+        assertEquals(type, indexCommand.get("_type"));
+        assertEquals(id, indexCommand.get("_id"));
+        assertEquals(docBody, writer.writeValueAsString(fromMapSection.toMap().get("source")));
+    }
+}

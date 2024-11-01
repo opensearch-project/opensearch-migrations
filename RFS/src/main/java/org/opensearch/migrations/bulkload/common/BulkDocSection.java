@@ -28,11 +28,7 @@ import lombok.extern.slf4j.Slf4j;
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
 @Slf4j
 public class BulkDocSection {
-    // Allow 100 MB source docs
-    private static final JsonFactory JSON_FACTORY = JsonFactory.builder().streamReadConstraints(StreamReadConstraints
-            .builder().maxStringLength(100_000_000).build()).build();
-
-    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper(JSON_FACTORY);
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static final ObjectMapper BULK_INDEX_REQUEST_MAPPER = OBJECT_MAPPER.copy()
             .registerModule(new SimpleModule()
                     .addSerializer(BulkIndex.class, new BulkIndex.BulkIndexRequestSerializer()));
