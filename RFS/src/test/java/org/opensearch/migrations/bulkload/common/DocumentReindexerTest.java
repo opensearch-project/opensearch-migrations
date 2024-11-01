@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.common;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
@@ -10,6 +11,8 @@ import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.TransformationLoader;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -115,6 +118,55 @@ class DocumentReindexerTest {
         for (var bulkDocSections : capturedBulkRequests) {
             assertEquals(1, bulkDocSections.size());
         }
+    }
+
+    @Test
+    void reindex_shouldBufferByTransformedSize() throws JsonProcessingException {
+        // Set up the transformer that replaces the sourceDoc from the document
+        var repalcedSourceDoc = Map.of("simpleKey", "simpleValue");
+        IJsonTransformer transformer = originalJson -> {
+            originalJson.put("source", repalcedSourceDoc);
+            return originalJson;
+        };
+        int numDocs = 5;
+
+        // Initialize DocumentReindexer with the transformer
+        documentReindexer = new DocumentReindexer(
+            mockClient, numDocs, MAX_BYTES_PER_BULK_REQUEST, MAX_CONCURRENT_REQUESTS, transformer
+        );
+
+        Flux<RfsLuceneDocument> documentStream = Flux.range(1, numDocs)
+            .map(i -> createLargeTestDocument(String.valueOf(i),
+                    MAX_BYTES_PER_BULK_REQUEST / 2 + 1
+            ));
+
+        when(mockClient.sendBulkRequest(eq("test-index"), any(), any()))
+            .thenAnswer(invocation -> {
+                List<?> bulkBody = invocation.getArgument(1);
+                long docCount = bulkBody.size();
+                return Mono.just(new OpenSearchClient.BulkResponse(200, "OK", null,
+                    String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
+            });
+
+        StepVerifier.create(
+            documentReindexer.reindex("test-index", documentStream, mockContext)
+        ).verifyComplete();
+
+        // Verify that only one bulk request was sent
+        verify(mockClient, times(1)).sendBulkRequest(eq("test-index"), any(), any());
+
+        // Capture the bulk request to verify its contents
+        @SuppressWarnings("unchecked")
+        var bulkRequestCaptor = ArgumentCaptor.forClass(
+            (Class<List<BulkDocSection>>)(Class<?>) List.class
+        );
+        verify(mockClient).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
+
+        var capturedBulkRequests = bulkRequestCaptor.getValue();
+        assertEquals(numDocs, capturedBulkRequests.size(),
+            "All documents should be in a single bulk request after transformation");
+        assertTrue(BulkDocSection.convertToBulkRequestBody(capturedBulkRequests).contains(
+                new ObjectMapper().writeValueAsString(repalcedSourceDoc)));
     }
 
     @Test
@@ -277,6 +329,4 @@ class DocumentReindexerTest {
         String source = "{\"field\":\"value\"}";
         return new RfsLuceneDocument(id, type, source);
     }
-
-    
 }
