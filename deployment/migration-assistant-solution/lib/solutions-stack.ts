@@ -25,6 +25,10 @@ export interface SolutionsInfrastructureStackProps extends StackProps {
     readonly createVPC: boolean;
 }
 
+export interface ParameterLabel {
+    default: string;
+}
+
 export function applyAppRegistry(stack: Stack, stage: string, infraProps: SolutionsInfrastructureStackProps): string {
     const application = new Application(stack, "AppRegistry", {
         applicationName: Fn.join("-", [
@@ -63,7 +67,7 @@ export function applyAppRegistry(stack: Stack, stage: string, infraProps: Soluti
     return application.applicationArn
 }
 
-export function importVPCResources(stack: Stack, additionalParameters: String[], parameterLabels: {[id: string] : {}}) {
+export function importVPCResources(stack: Stack, additionalParameters: string[], parameterLabels: Record<string, ParameterLabel>) {
     const vpcIdParameter = new CfnParameter(stack, 'VPCId', {
         type: 'AWS::EC2::VPC::Id',
         description: 'Specify the VPC id to place Migration resources into'
@@ -115,8 +119,8 @@ export class SolutionsInfrastructureStack extends Stack {
             lazy: false,
         });
 
-        const additionalParameters: String[] = []
-        const parameterLabels: {[id: string] : {}} = {}
+        const additionalParameters: string[] = [];
+        const parameterLabels: Record<string, ParameterLabel> = {};
         const stageParameter = new CfnParameter(this, 'Stage', {
             type: 'String',
             description: 'Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1',

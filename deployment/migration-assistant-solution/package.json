@@ -12,7 +12,7 @@
     "watch": "tsc -w",
     "test": "npm run test:lint && npm run test:jest",
     "test:lint": "eslint .",
-    "test:jest": "jest",
+    "test:jest": "jest --coverage",
     "synth": "cdk synthesize --asset-metadata false --path-metadata false",
     "deploy": "cdk deploy --require-approval never"
   },
