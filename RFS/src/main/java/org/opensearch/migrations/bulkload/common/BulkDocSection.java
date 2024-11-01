@@ -66,7 +66,7 @@ public class BulkDocSection {
 
         try (SegmentedStringWriter writer = new SegmentedStringWriter(new BufferRecycler())) {
             for (BulkDocSection section : bulkSections) {
-                BULK_INDEX_REQUEST_MAPPER.writeValue(writer, section);
+                BULK_INDEX_REQUEST_MAPPER.writeValue(writer, section.bulkIndex);
                 writer.append(NEWLINE);
             }
             return writer.getAndClear();
