@@ -57,7 +57,7 @@ public class BulkDocSection {
     }
 
     public static String convertToBulkRequestBody(Collection<BulkDocSection> bulkSections) {
-
+        // Using a single SegmentedStringWriter across all object serializations
         try (SegmentedStringWriter writer = new SegmentedStringWriter(new BufferRecycler())) {
             for (BulkDocSection section : bulkSections) {
                 BULK_INDEX_REQUEST_MAPPER.writeValue(writer, section.bulkIndex);
@@ -86,9 +86,8 @@ public class BulkDocSection {
     }
 
     public String asBulkIndexString() {
-        try (SegmentedStringWriter writer = new SegmentedStringWriter(new BufferRecycler())) {
-            BULK_INDEX_REQUEST_MAPPER.writeValue(writer, this.bulkIndex);
-            return writer.getAndClear();
+        try {
+            return BULK_INDEX_REQUEST_MAPPER.writeValueAsString(this.bulkIndex);
         } catch (IOException e) {
             throw new SerializationException("Failed to write bulk index " + this.bulkIndex
                     + " from string: " + e.getMessage());
