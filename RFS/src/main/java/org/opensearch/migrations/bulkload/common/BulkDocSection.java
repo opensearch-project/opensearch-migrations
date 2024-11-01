@@ -8,9 +8,7 @@ import java.util.Objects;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
 import com.fasterxml.jackson.annotation.JsonProperty;
-import com.fasterxml.jackson.core.JsonFactory;
 import com.fasterxml.jackson.core.JsonGenerator;
-import com.fasterxml.jackson.core.StreamReadConstraints;
 import com.fasterxml.jackson.core.io.SegmentedStringWriter;
 import com.fasterxml.jackson.core.io.SerializedString;
 import com.fasterxml.jackson.core.util.BufferRecycler;
@@ -87,7 +85,7 @@ public class BulkDocSection {
         }
     }
 
-    public String asString() {
+    public String asBulkIndexString() {
         try (SegmentedStringWriter writer = new SegmentedStringWriter(new BufferRecycler())) {
             BULK_INDEX_REQUEST_MAPPER.writeValue(writer, this.bulkIndex);
             return writer.getAndClear();

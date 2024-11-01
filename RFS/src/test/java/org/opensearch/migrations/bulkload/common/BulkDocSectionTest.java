@@ -88,7 +88,7 @@ class BulkDocSectionTest {
     }
 
     @Test
-    void testAsString() {
+    void testAsBulkIndexString() {
         String id = "test-id";
         String indexName = "test-index";
         String type = "_doc";
@@ -96,7 +96,7 @@ class BulkDocSectionTest {
 
         BulkDocSection bulkDocSection = new BulkDocSection(id, indexName, type, docBody);
 
-        String asString = bulkDocSection.asString();
+        String asString = bulkDocSection.asBulkIndexString();
 
         assertNotNull(asString);
         assertTrue(asString.contains(id));
@@ -156,7 +156,7 @@ class BulkDocSectionTest {
         BulkDocSection bulkDocSection = new BulkDocSection(id, indexName, type, docBody);
 
         // Test asString
-        String asString = bulkDocSection.asString();
+        String asString = bulkDocSection.asBulkIndexString();
         assertNotNull(asString);
         assertTrue(asString.contains(id));
         assertTrue(asString.contains(indexName));

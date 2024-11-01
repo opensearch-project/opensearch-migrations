@@ -139,7 +139,7 @@ class DocumentReindexerTest {
         verify(mockClient).sendBulkRequest(eq("test-index"), bulkRequestCaptor.capture(), any());
 
         var capturedBulkRequests = bulkRequestCaptor.getValue();
-        assertTrue(capturedBulkRequests.get(0).asString().getBytes(StandardCharsets.UTF_8).length > MAX_BYTES_PER_BULK_REQUEST, "Bulk request should be larger than max bulk size");
+        assertTrue(capturedBulkRequests.get(0).asBulkIndexString().getBytes(StandardCharsets.UTF_8).length > MAX_BYTES_PER_BULK_REQUEST, "Bulk request should be larger than max bulk size");
         assertEquals(1, capturedBulkRequests.size(), "Should contain 1 document");
     }
 
@@ -166,7 +166,7 @@ class DocumentReindexerTest {
 
         var capturedBulkRequests = bulkRequestCaptor.getValue();
         assertEquals(1, capturedBulkRequests.size(), "Should contain 1 document");
-        assertEquals("{\"index\":{\"_id\":\"MQAA\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", capturedBulkRequests.get(0).asString());    }
+        assertEquals("{\"index\":{\"_id\":\"MQAA\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", capturedBulkRequests.get(0).asBulkIndexString());    }
 
     private RfsLuceneDocument createTestDocument(String id) {
         return new RfsLuceneDocument(id, null, "{\"field\":\"value\"}");
@@ -258,11 +258,11 @@ class DocumentReindexerTest {
         BulkDocSection transformedDoc2 = capturedBulkRequests.get(1);
         BulkDocSection transformedDoc3 = capturedBulkRequests.get(2);
 
-        assertEquals("{\"index\":{\"_id\":\"1\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", transformedDoc1.asString(),
+        assertEquals("{\"index\":{\"_id\":\"1\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", transformedDoc1.asBulkIndexString(),
                 "Document 1 should have _type removed");
-        assertEquals("{\"index\":{\"_id\":\"2\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", transformedDoc2.asString(),
+        assertEquals("{\"index\":{\"_id\":\"2\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", transformedDoc2.asBulkIndexString(),
                 "Document 2 should remain unchanged as _type is not defined");
-        assertEquals("{\"index\":{\"_id\":\"3\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", transformedDoc3.asString(),
+        assertEquals("{\"index\":{\"_id\":\"3\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", transformedDoc3.asBulkIndexString(),
                 "Document 3 should have _type removed");
     }
 

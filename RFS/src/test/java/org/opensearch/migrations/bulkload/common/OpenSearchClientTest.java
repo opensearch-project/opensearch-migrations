@@ -233,7 +233,7 @@ class OpenSearchClientTest {
     private BulkDocSection createBulkDoc(String docId) {
         var bulkDoc = mock(BulkDocSection.class);
         when(bulkDoc.getDocId()).thenReturn(docId);
-        when(bulkDoc.asString()).thenReturn("BULK-INDEX\nBULK_BODY");
+        when(bulkDoc.asBulkIndexString()).thenReturn("BULK-INDEX\nBULK_BODY");
         return bulkDoc;
     }
 
