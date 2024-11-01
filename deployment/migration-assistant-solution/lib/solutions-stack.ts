@@ -1,5 +1,13 @@
-import {Aws, CfnMapping, CfnParameter, Fn, Stack, StackProps, Tags} from 'aws-cdk-lib';
-import { Construct } from 'constructs';
+import {
+    Aws,
+    CfnMapping,
+    CfnParameter,
+    Fn,
+    Stack,
+    StackProps,
+    Tags
+} from 'aws-cdk-lib';
+import {Construct} from 'constructs';
 import {
     BlockDeviceVolume,
     CloudFormationInit,
@@ -13,9 +21,9 @@ import {
     MachineImage,
     Vpc
 } from "aws-cdk-lib/aws-ec2";
-import { InstanceProfile, ManagedPolicy, Role, ServicePrincipal } from "aws-cdk-lib/aws-iam";
-import { CfnDocument } from "aws-cdk-lib/aws-ssm";
-import { Application, AttributeGroup } from "@aws-cdk/aws-servicecatalogappregistry-alpha";
+import {InstanceProfile, ManagedPolicy, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
+import {CfnDocument} from "aws-cdk-lib/aws-ssm";
+import {Application, AttributeGroup} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 
 export interface SolutionsInfrastructureStackProps extends StackProps {
     readonly solutionId: string;
@@ -25,11 +33,11 @@ export interface SolutionsInfrastructureStackProps extends StackProps {
     readonly createVPC: boolean;
 }
 
-export interface ParameterLabel {
+interface ParameterLabel {
     default: string;
 }
 
-export function applyAppRegistry(stack: Stack, stage: string, infraProps: SolutionsInfrastructureStackProps): string {
+function applyAppRegistry(stack: Stack, stage: string, infraProps: SolutionsInfrastructureStackProps): string {
     const application = new Application(stack, "AppRegistry", {
         applicationName: Fn.join("-", [
             infraProps.solutionName,
@@ -67,37 +75,17 @@ export function applyAppRegistry(stack: Stack, stage: string, infraProps: Soluti
     return application.applicationArn
 }
 
-export function importVPCResources(stack: Stack, additionalParameters: string[], parameterLabels: Record<string, ParameterLabel>) {
-    const vpcIdParameter = new CfnParameter(stack, 'VPCId', {
-        type: 'AWS::EC2::VPC::Id',
-        description: 'Specify the VPC id to place Migration resources into'
-    });
-    parameterLabels[vpcIdParameter.logicalId] = {"default": "VPC Id"}
+function addParameterLabel(labels: Record<string, ParameterLabel>, parameter: CfnParameter, labelName: string) {
+    labels[parameter.logicalId] = {"default": labelName}
+}
 
-    // Bootstrap Parameters
-    const availabilityZoneBootstrapParameter = new CfnParameter(stack, 'BootstrapInstanceAvailabilityZone', {
-        type: 'AWS::EC2::AvailabilityZone::Name',
-        description: 'Availability Zone name in the selected VPC for the Bootstrap Instance. Must match the Bootstrap Private Subnet Id.'
-    });
-    parameterLabels[availabilityZoneBootstrapParameter.logicalId] = {"default": "Bootstrap Instance Availability Zone"}
-    const privateSubnetIdBootstrapParameter = new CfnParameter(stack, 'BootstrapInstancePrivateSubnetId', {
-        type: 'AWS::EC2::Subnet::Id',
-        description: 'Private Subnet ID in the selected VPC for the Bootstrap Instance. Must match the Bootstrap Instance Availability Zone. This subnet must have a route to a NAT gateway.'
-    });
-    parameterLabels[privateSubnetIdBootstrapParameter.logicalId] = {"default": "Bootstrap Instance Private Subnet Id"}
-
-    // Migration Parameters
-    const privateSubnetIdsParameter = new CfnParameter(stack, 'MigrationPrivateSubnetIds', {
-        type: 'List<AWS::EC2::Subnet::Id>',
-        description: 'Private Subnet IDs in the selected VPC to place Migration resources. Please provide exactly 2 or 3 subnets EACH in their own AZ. The subnets must have routes to a NAT gateway.'
-    });
-    parameterLabels[privateSubnetIdsParameter.logicalId] = {"default": "Migration Private Subnet Ids"}
-    additionalParameters.push(vpcIdParameter.logicalId, availabilityZoneBootstrapParameter.logicalId, privateSubnetIdBootstrapParameter.logicalId, privateSubnetIdsParameter.logicalId)
-
+function importVPC(stack: Stack, vpdIdParameter: CfnParameter, availabilityZonesParameter: CfnParameter, privateSubnetIdsParameter: CfnParameter) {
+    const availabilityZones = availabilityZonesParameter.valueAsList
+    const privateSubnetIds = privateSubnetIdsParameter.valueAsList
     return Vpc.fromVpcAttributes(stack, 'ImportedVPC', {
-        vpcId: vpcIdParameter.valueAsString,
-        availabilityZones: [availabilityZoneBootstrapParameter.valueAsString],
-        privateSubnetIds: [privateSubnetIdBootstrapParameter.valueAsString]
+        vpcId: vpdIdParameter.valueAsString,
+        availabilityZones: [Fn.select(0, availabilityZones)],
+        privateSubnetIds: [Fn.select(0, privateSubnetIds)]
     });
 }
 
@@ -178,7 +166,25 @@ export class SolutionsInfrastructureStack extends Stack {
             vpc = new Vpc(this, 'Vpc', {});
         }
         else {
-            vpc = importVPCResources(this, additionalParameters, parameterLabels);
+            const vpcIdParameter = new CfnParameter(this, 'VPCId', {
+                type: 'AWS::EC2::VPC::Id',
+                description: 'Specify the VPC id to place Migration resources into'
+            });
+            addParameterLabel(parameterLabels, vpcIdParameter, "VPC Id")
+
+            const availabilityZonesParameter = new CfnParameter(this, 'VPCAvailabilityZones', {
+                type: 'List<AWS::EC2::AvailabilityZone::Name>',
+                description: 'Availability Zone names in the selected VPC to use. Must be the same NUMBER and ORDER of the selected Private Subnet Ids.'
+            });
+            addParameterLabel(parameterLabels, availabilityZonesParameter, "Availability Zones")
+
+            const privateSubnetIdsParameter = new CfnParameter(this, 'VPCPrivateSubnetIds', {
+                type: 'List<AWS::EC2::Subnet::Id>',
+                description: 'Private Subnet IDs in the selected VPC to use. Please provide exactly 2 or 3 subnets EACH in their own AZ. The subnets must have routes to a NAT gateway.'
+            });
+            addParameterLabel(parameterLabels, privateSubnetIdsParameter, "Private Subnet Ids")
+            additionalParameters.push(vpcIdParameter.logicalId, availabilityZonesParameter.logicalId, privateSubnetIdsParameter.logicalId)
+            vpc = importVPC(this, vpcIdParameter, availabilityZonesParameter, privateSubnetIdsParameter);
         }
 
         new Instance(this, 'BootstrapEC2Instance', {

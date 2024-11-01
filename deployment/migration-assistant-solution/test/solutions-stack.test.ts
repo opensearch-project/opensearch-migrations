@@ -4,9 +4,9 @@ import { App } from 'aws-cdk-lib';
 import { SolutionsInfrastructureStack } from '../lib/solutions-stack';
 
 describe('Solutions stack', () => {
-    test('Generate bootstrap stack with create VPC', () => {
+    test('Generate migration assistant stack with create VPC', () => {
         const app = new App();
-        const stack = new SolutionsInfrastructureStack(app, 'TestBootstrapStack', {
+        const stack = new SolutionsInfrastructureStack(app, 'TestMigrationAssistantStack', {
             solutionId: 'SO0000',
             solutionName: 'test-solution',
             solutionVersion: '0.0.1',
@@ -20,9 +20,9 @@ describe('Solutions stack', () => {
             InstanceType: "t3.large"
         });
     });
-    test('Generate bootstrap stack with imported VPC', () => {
+    test('Generate migration assistant stack with imported VPC', () => {
         const app = new App();
-        const stack = new SolutionsInfrastructureStack(app, 'TestBootstrapStack', {
+        const stack = new SolutionsInfrastructureStack(app, 'TestMigrationAssistantStack', {
             solutionId: 'SO0000',
             solutionName: 'test-solution',
             solutionVersion: '0.0.1',
