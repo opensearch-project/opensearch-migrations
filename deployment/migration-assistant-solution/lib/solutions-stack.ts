@@ -182,7 +182,7 @@ export class SolutionsInfrastructureStack extends Stack {
                 type: 'List<AWS::EC2::Subnet::Id>',
                 description: 'Private Subnet IDs in the selected VPC to use. Please provide exactly 2 or 3 subnets EACH in their own AZ. The subnets must have routes to a NAT gateway.'
             });
-            addParameterLabel(parameterLabels, privateSubnetIdsParameter, "Private Subnet Ids")
+            addParameterLabel(parameterLabels, privateSubnetIdsParameter, "Private Subnets")
             additionalParameters.push(vpcIdParameter.logicalId, availabilityZonesParameter.logicalId, privateSubnetIdsParameter.logicalId)
             vpc = importVPC(this, vpcIdParameter, availabilityZonesParameter, privateSubnetIdsParameter);
         }
