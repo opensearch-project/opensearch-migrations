@@ -107,6 +107,7 @@ export class SolutionsInfrastructureStack extends Stack {
             lazy: false,
         });
 
+        const importedVPCParameters: string[] = [];
         const additionalParameters: string[] = [];
         const parameterLabels: Record<string, ParameterLabel> = {};
         const stageParameter = new CfnParameter(this, 'Stage', {
@@ -168,22 +169,22 @@ export class SolutionsInfrastructureStack extends Stack {
         else {
             const vpcIdParameter = new CfnParameter(this, 'VPCId', {
                 type: 'AWS::EC2::VPC::Id',
-                description: 'Specify the VPC id to place Migration resources into'
+                description: 'Select a VPC, we recommend choosing the VPC of the target cluster.'
             });
             addParameterLabel(parameterLabels, vpcIdParameter, "VPC")
 
             const availabilityZonesParameter = new CfnParameter(this, 'VPCAvailabilityZones', {
                 type: 'List<AWS::EC2::AvailabilityZone::Name>',
-                description: 'Availability Zone names in the selected VPC to use. Must be the same NUMBER and ORDER of the selected Private Subnet Ids.'
+                description: 'Select Availability Zones in the selected VPC. Please provide two zones at least, corresponding with the private subnets selected next.'
             });
             addParameterLabel(parameterLabels, availabilityZonesParameter, "Availability Zones")
 
             const privateSubnetIdsParameter = new CfnParameter(this, 'VPCPrivateSubnetIds', {
                 type: 'List<AWS::EC2::Subnet::Id>',
-                description: 'Private Subnet IDs in the selected VPC to use. Please provide exactly 2 or 3 subnets EACH in their own AZ. The subnets must have routes to a NAT gateway.'
+                description: 'Select Private Subnets in the selected VPC. Please provide two subnets at least, corresponding with the availability zones selected previously.'
             });
             addParameterLabel(parameterLabels, privateSubnetIdsParameter, "Private Subnets")
-            additionalParameters.push(vpcIdParameter.logicalId, availabilityZonesParameter.logicalId, privateSubnetIdsParameter.logicalId)
+            importedVPCParameters.push(vpcIdParameter.logicalId, availabilityZonesParameter.logicalId, privateSubnetIdsParameter.logicalId)
             vpc = importVPC(this, vpcIdParameter, availabilityZonesParameter, privateSubnetIdsParameter);
         }
 
@@ -219,6 +220,12 @@ export class SolutionsInfrastructureStack extends Stack {
         }
 
         const parameterGroups = [];
+        if (importedVPCParameters) {
+            parameterGroups.push({
+                Label: { default: "Imported VPC parameters" },
+                Parameters: importedVPCParameters
+            });
+        }
         parameterGroups.push({
             Label: { default: "Additional parameters" },
             Parameters: additionalParameters
