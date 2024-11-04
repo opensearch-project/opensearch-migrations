@@ -220,7 +220,7 @@ export class SolutionsInfrastructureStack extends Stack {
         }
 
         const parameterGroups = [];
-        if (importedVPCParameters) {
+        if (importedVPCParameters.length > 0) {
             parameterGroups.push({
                 Label: { default: "Imported VPC parameters" },
                 Parameters: importedVPCParameters
