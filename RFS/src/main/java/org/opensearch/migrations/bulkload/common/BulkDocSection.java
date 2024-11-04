@@ -50,9 +50,11 @@ public class BulkDocSection {
     @SuppressWarnings("unchecked")
     private static Map<String, Object> parseSource(final String doc) {
         try {
+            // This is the string sourceDoc as stored in the Lucene Document
+            // This will always be a map based on how lucene works
             return OBJECT_MAPPER.readValue(doc, Map.class);
         } catch (IOException e) {
-            throw new DeserializationException("Failed to parse source doc:  " + e.getMessage());
+            throw new DeserializationException("Failed to parse source doc:  " + e.getMessage(), e);
         }
     }
 
@@ -65,7 +67,7 @@ public class BulkDocSection {
             }
             return writer.getAndClear();
         } catch (IOException e) {
-            throw new SerializationException("Failed to serialize ingestion request: " + e.getMessage());
+            throw new SerializationException("Failed to serialize ingestion request: " + e.getMessage(), e);
         }
     }
 
@@ -81,7 +83,7 @@ public class BulkDocSection {
         } catch (IOException e) {
             log.atError().setMessage("Failed to get bulk index length").setCause(e).log();
             throw new SerializationException("Failed to get bulk index length " + this.bulkIndex +
-                    " from string: " + e.getMessage());
+                    " from string: " + e.getMessage(), e);
         }
     }
 
@@ -90,7 +92,7 @@ public class BulkDocSection {
             return BULK_INDEX_REQUEST_MAPPER.writeValueAsString(this.bulkIndex);
         } catch (IOException e) {
             throw new SerializationException("Failed to write bulk index " + this.bulkIndex
-                    + " from string: " + e.getMessage());
+                    + " from string: " + e.getMessage(), e);
         }
     }
 
@@ -152,14 +154,14 @@ public class BulkDocSection {
     }
 
     public static class DeserializationException extends RuntimeException {
-        public DeserializationException(String message) {
-            super(message);
+        public DeserializationException(String message, Exception cause) {
+            super(message, cause);
         }
     }
 
     public static class SerializationException extends RuntimeException {
-        public SerializationException(String message) {
-            super(message);
+        public SerializationException(String message, Exception cause) {
+            super(message, cause);
         }
     }
 }

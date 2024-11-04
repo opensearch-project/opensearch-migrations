@@ -18,18 +18,6 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BulkDocSectionTest {
 
     @Test
-    void testConstructorAndGetters() {
-        String id = "test-id";
-        String indexName = "test-index";
-        String type = "_doc";
-        String docBody = "{\"field1\":\"value1\",\"field2\":2}";
-
-        BulkDocSection bulkDocSection = new BulkDocSection(id, indexName, type, docBody);
-
-        assertEquals(id, bulkDocSection.getDocId());
-    }
-
-    @Test
     void testConvertToBulkRequestBody() {
         String id1 = "id1";
         String indexName1 = "index1";
@@ -48,9 +36,10 @@ class BulkDocSectionTest {
 
         String bulkRequestBody = BulkDocSection.convertToBulkRequestBody(bulkSections);
 
-        assertNotNull(bulkRequestBody);
-        assertTrue(bulkRequestBody.contains(id1));
-        assertTrue(bulkRequestBody.contains(id2));
+        assertEquals("{\"index\":{\"_id\":\"id1\",\"_type\":\"_doc\",\"_index\":\"index1\"}}\n" +
+                "{\"field\":\"value1\"}\n" +
+                "{\"index\":{\"_id\":\"id2\",\"_type\":\"_doc\",\"_index\":\"index2\"}}\n" +
+                "{\"field\":\"value2\"}\n", bulkRequestBody);
     }
 
     @Test
@@ -71,6 +60,8 @@ class BulkDocSectionTest {
 
         assertNotNull(bulkDocSection);
         assertEquals("test-id", bulkDocSection.getDocId());
+        assertEquals(metadata, bulkDocSection.toMap().get("index"));
+        assertEquals(sourceDoc, bulkDocSection.toMap().get("source"));
     }
 
     @Test
@@ -81,10 +72,7 @@ class BulkDocSectionTest {
         String docBody = "{\"field\":\"value\"}";
 
         BulkDocSection bulkDocSection = new BulkDocSection(id, indexName, type, docBody);
-
-        long length = bulkDocSection.getSerializedLength();
-
-        assertTrue(length > 0);
+        assertEquals(bulkDocSection.asBulkIndexString().length(), bulkDocSection.getSerializedLength());
     }
 
     @Test
@@ -98,10 +86,8 @@ class BulkDocSectionTest {
 
         String asString = bulkDocSection.asBulkIndexString();
 
-        assertNotNull(asString);
-        assertTrue(asString.contains(id));
-        assertTrue(asString.contains("field"));
-        assertTrue(asString.contains("value"));
+        assertEquals("{\"index\":{\"_id\":\"test-id\",\"_type\":\"_doc\",\"_index\":\"test-index\"}}\n" +
+                "{\"field\":\"value\"}", asString);
     }
 
     @Test
@@ -116,8 +102,10 @@ class BulkDocSectionTest {
         Map<String, Object> map = bulkDocSection.toMap();
 
         assertNotNull(map);
-        assertTrue(map.containsKey("index"));
-        assertTrue(map.containsKey("source"));
+        assertEquals(Map.of("_index",indexName,
+                "_type", type,
+               "_id", id ), map.get("index"));
+        assertEquals(Map.of("field","value"), map.get("source"));
     }
 
     @Test
