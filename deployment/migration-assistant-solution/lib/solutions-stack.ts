@@ -170,7 +170,7 @@ export class SolutionsInfrastructureStack extends Stack {
                 type: 'AWS::EC2::VPC::Id',
                 description: 'Specify the VPC id to place Migration resources into'
             });
-            addParameterLabel(parameterLabels, vpcIdParameter, "VPC Id")
+            addParameterLabel(parameterLabels, vpcIdParameter, "VPC")
 
             const availabilityZonesParameter = new CfnParameter(this, 'VPCAvailabilityZones', {
                 type: 'List<AWS::EC2::AvailabilityZone::Name>',
