@@ -1,5 +1,13 @@
-import { Aws, CfnMapping, CfnParameter, Fn, Stack, StackProps, Tags } from 'aws-cdk-lib';
-import { Construct } from 'constructs';
+import {
+    Aws,
+    CfnMapping,
+    CfnParameter,
+    Fn,
+    Stack,
+    StackProps,
+    Tags
+} from 'aws-cdk-lib';
+import {Construct} from 'constructs';
 import {
     BlockDeviceVolume,
     CloudFormationInit,
@@ -13,18 +21,23 @@ import {
     MachineImage,
     Vpc
 } from "aws-cdk-lib/aws-ec2";
-import { InstanceProfile, ManagedPolicy, Role, ServicePrincipal } from "aws-cdk-lib/aws-iam";
-import { CfnDocument } from "aws-cdk-lib/aws-ssm";
-import { Application, AttributeGroup } from "@aws-cdk/aws-servicecatalogappregistry-alpha";
+import {InstanceProfile, ManagedPolicy, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
+import {CfnDocument} from "aws-cdk-lib/aws-ssm";
+import {Application, AttributeGroup} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
 
 export interface SolutionsInfrastructureStackProps extends StackProps {
     readonly solutionId: string;
     readonly solutionName: string;
     readonly solutionVersion: string;
     readonly codeBucket: string;
+    readonly createVPC: boolean;
 }
 
-export function applyAppRegistry(stack: Stack, stage: string, infraProps: SolutionsInfrastructureStackProps): string {
+interface ParameterLabel {
+    default: string;
+}
+
+function applyAppRegistry(stack: Stack, stage: string, infraProps: SolutionsInfrastructureStackProps): string {
     const application = new Application(stack, "AppRegistry", {
         applicationName: Fn.join("-", [
             infraProps.solutionName,
@@ -62,6 +75,20 @@ export function applyAppRegistry(stack: Stack, stage: string, infraProps: Soluti
     return application.applicationArn
 }
 
+function addParameterLabel(labels: Record<string, ParameterLabel>, parameter: CfnParameter, labelName: string) {
+    labels[parameter.logicalId] = {"default": labelName}
+}
+
+function importVPC(stack: Stack, vpdIdParameter: CfnParameter, availabilityZonesParameter: CfnParameter, privateSubnetIdsParameter: CfnParameter) {
+    const availabilityZones = availabilityZonesParameter.valueAsList
+    const privateSubnetIds = privateSubnetIdsParameter.valueAsList
+    return Vpc.fromVpcAttributes(stack, 'ImportedVPC', {
+        vpcId: vpdIdParameter.valueAsString,
+        availabilityZones: [Fn.select(0, availabilityZones)],
+        privateSubnetIds: [Fn.select(0, privateSubnetIds)]
+    });
+}
+
 export class SolutionsInfrastructureStack extends Stack {
 
     constructor(scope: Construct, id: string, props: SolutionsInfrastructureStackProps) {
@@ -80,15 +107,18 @@ export class SolutionsInfrastructureStack extends Stack {
             lazy: false,
         });
 
+        const importedVPCParameters: string[] = [];
+        const additionalParameters: string[] = [];
+        const parameterLabels: Record<string, ParameterLabel> = {};
         const stageParameter = new CfnParameter(this, 'Stage', {
             type: 'String',
             description: 'Specify the stage identifier which will be used in naming resources, e.g. dev,gamma,wave1',
             default: 'dev',
         });
+        additionalParameters.push(stageParameter.logicalId)
 
         const stackMarker = `${stageParameter.valueAsString}-${Aws.REGION}`;
         const appRegistryAppARN = applyAppRegistry(this, stackMarker, props)
-        const vpc = new Vpc(this, 'Vpc', {});
 
         new CfnDocument(this, "BootstrapShellDoc", {
             name: `BootstrapShellDoc-${stackMarker}`,
@@ -132,8 +162,37 @@ export class SolutionsInfrastructureStack extends Stack {
             role: bootstrapRole
         })
 
+        let vpc;
+        if (props.createVPC) {
+            vpc = new Vpc(this, 'Vpc', {});
+        }
+        else {
+            const vpcIdParameter = new CfnParameter(this, 'VPCId', {
+                type: 'AWS::EC2::VPC::Id',
+                description: 'Select a VPC, we recommend choosing the VPC of the target cluster.'
+            });
+            addParameterLabel(parameterLabels, vpcIdParameter, "VPC")
+
+            const availabilityZonesParameter = new CfnParameter(this, 'VPCAvailabilityZones', {
+                type: 'List<AWS::EC2::AvailabilityZone::Name>',
+                description: 'Select Availability Zones in the selected VPC. Please provide two zones at least, corresponding with the private subnets selected next.'
+            });
+            addParameterLabel(parameterLabels, availabilityZonesParameter, "Availability Zones")
+
+            const privateSubnetIdsParameter = new CfnParameter(this, 'VPCPrivateSubnetIds', {
+                type: 'List<AWS::EC2::Subnet::Id>',
+                description: 'Select Private Subnets in the selected VPC. Please provide two subnets at least, corresponding with the availability zones selected previously.'
+            });
+            addParameterLabel(parameterLabels, privateSubnetIdsParameter, "Private Subnets")
+            importedVPCParameters.push(vpcIdParameter.logicalId, availabilityZonesParameter.logicalId, privateSubnetIdsParameter.logicalId)
+            vpc = importVPC(this, vpcIdParameter, availabilityZonesParameter, privateSubnetIdsParameter);
+        }
+
         new Instance(this, 'BootstrapEC2Instance', {
             vpc: vpc,
+            vpcSubnets: {
+                subnets: vpc.privateSubnets,
+            },
             instanceName: `bootstrap-instance-${stackMarker}`,
             instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
             machineImage: MachineImage.latestAmazonLinux2023(),
@@ -161,9 +220,15 @@ export class SolutionsInfrastructureStack extends Stack {
         }
 
         const parameterGroups = [];
+        if (importedVPCParameters.length > 0) {
+            parameterGroups.push({
+                Label: { default: "Imported VPC parameters" },
+                Parameters: importedVPCParameters
+            });
+        }
         parameterGroups.push({
             Label: { default: "Additional parameters" },
-            Parameters: [stageParameter.logicalId]
+            Parameters: additionalParameters
         });
         parameterGroups.push({
             Label: { default: "System parameters" },
@@ -172,7 +237,8 @@ export class SolutionsInfrastructureStack extends Stack {
 
         this.templateOptions.metadata = {
             'AWS::CloudFormation::Interface': {
-                ParameterGroups: parameterGroups
+                ParameterGroups: parameterGroups,
+                ParameterLabels: parameterLabels
             }
         }
     }
