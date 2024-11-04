@@ -13,6 +13,7 @@ import java.util.stream.Collectors;
 
 import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.Version;
+import org.opensearch.migrations.VersionMatchers;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
@@ -20,7 +21,9 @@ import org.opensearch.migrations.parsing.BulkResponseParser;
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
@@ -30,6 +33,13 @@ import reactor.util.retry.Retry;
 public class OpenSearchClient {
 
     protected static final ObjectMapper objectMapper = new ObjectMapper();
+
+    /** Amazon OpenSearch Serverless cluster don't have a version number, but
+     * its closely aligned with the latest open-source OpenSearch 2.X */
+    private static Version AMAZON_SERVERLESS_VERSION = Version.builder()
+        .flavor(Flavor.AMAZON_SERVERLESS_OPENSEARCH)
+        .major(2)
+        .build();
 
     private static final int DEFAULT_MAX_RETRY_ATTEMPTS = 3;
     private static final Duration DEFAULT_BACKOFF = Duration.ofSeconds(1);
@@ -69,23 +79,43 @@ public class OpenSearchClient {
     }
 
     public Version getClusterVersion() {
-        return client.getAsync("", null)
+        var versionFromRootApi = client.getAsync("", null)
             .flatMap(resp -> {
-                try {
-                    return Mono.just(versionFromResponse(resp));
-                } catch (Exception e) {
-                    return Mono.error(new OperationFailed(e.getMessage(), resp));
+                if (resp.statusCode == 200) {
+                    return versionFromResponse(resp);
                 }
+                // If the root API doesn't exist, the cluster is OpenSearch Serverless
+                if (resp.statusCode == 404) {
+                    return Mono.just(AMAZON_SERVERLESS_VERSION);
+                }
+                return Mono.error(new OperationFailed("Unexpected status code " + resp.statusCode, resp));
             })
             .doOnError(e -> log.error(e.getMessage()))
             .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
             .block();
+
+        // Compatibility mode is only enabled on OpenSearch clusters responding with the version of 7.10.2 
+        if (!VersionMatchers.isES_7_10.test(versionFromRootApi)) {
+            return versionFromRootApi;
+        }
+        return client.getAsync("_cluster/settings", null)
+            .flatMap(this::checkCompatibilityModeFromResponse)
+            .doOnError(e -> log.error(e.getMessage()))
+            .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
+            .flatMap(hasCompatibilityModeEnabled -> {
+                log.atInfo().setMessage("Checking CompatibilityMode, was enabled? {}").addArgument(hasCompatibilityModeEnabled).log();
+                if (!hasCompatibilityModeEnabled) {
+                    return Mono.just(versionFromRootApi);
+                }
+                return client.getAsync("_cat/plugins?format=json", null)
+                    .flatMap(this::getVersionFromPlugins)
+                    .doOnError(e -> log.error(e.getMessage()))
+                    .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY);
+            })
+            .block();        
     }
 
-    private Version versionFromResponse(HttpResponse resp) {
-        if (resp.statusCode != 200) {
-            throw new OperationFailed("Unexpected status code " + resp.statusCode, resp);
-        }
+    private Mono<Version> versionFromResponse(HttpResponse resp) {
         try {
             var body = objectMapper.readTree(resp.body);
             var versionNode = body.get("version");
@@ -99,15 +129,74 @@ public class OpenSearchClient {
 
             var distroNode = versionNode.get("distribution");
             if (distroNode != null && distroNode.asText().equalsIgnoreCase("opensearch")) {
-                versionBuilder.flavor(Flavor.OPENSEARCH);
+                versionBuilder.flavor(getLikelyOpenSearchFlavor());
             } else {
                 versionBuilder.flavor(Flavor.ELASTICSEARCH);
             }
-            return versionBuilder.build();
+            return Mono.just(versionBuilder.build());
         } catch (Exception e) {
             log.error("Unable to parse version from response", e);
-            throw new OperationFailed("Unable to parse version from response: " + e.getMessage(), resp);
+            return Mono.error(new OperationFailed("Unable to parse version from response: " + e.getMessage(), resp));
         }
+    }
+
+    Mono<Boolean> checkCompatibilityModeFromResponse(HttpResponse resp) {
+        if (resp.statusCode != 200) {
+            return Mono.error(new OperationFailed("Unexpected status code " + resp.statusCode, resp));
+        }
+        try {
+            var body = Optional.of(objectMapper.readTree(resp.body));
+            var persistentlyInCompatibilityMode = inCompatibilityMode(body.map(n -> n.get("persistent")));
+            var transientlyInCompatibilityMode = inCompatibilityMode(body.map(n -> n.get("transient")));
+            return Mono.just(persistentlyInCompatibilityMode || transientlyInCompatibilityMode);
+        } catch (Exception e) {
+            log.error("Unable to determine if the cluster is in compatibility mode", e);
+            return Mono.error(new OperationFailed("Unable to determine if the cluster is in compatibility mode from response: " + e.getMessage(), resp));
+        }
+    }
+    
+    private boolean inCompatibilityMode(Optional<JsonNode> node) {
+        return node.filter(n -> !n.isNull())
+            .map(n -> n.get("compatibility"))
+            .filter(n -> !n.isNull())
+            .map(n -> n.get("override_main_response_version"))
+            .filter(n -> !n.isNull())
+            .map(n -> n.asBoolean())
+            .orElse(false);
+    }
+
+    private Mono<Version> getVersionFromPlugins(HttpResponse resp) {
+        if (resp.statusCode != 200) {
+            return Mono.error(new OperationFailed("Unexpected status code " + resp.statusCode, resp));
+        }
+        try {
+            var body = (ArrayNode) objectMapper.readTree(resp.body);
+            var elemIterator = body.elements();
+            while (elemIterator.hasNext()) {
+                var current = elemIterator.next();
+                var isRepositoryS3 = Optional.ofNullable(current.get("component"))
+                    .filter(n -> !n.isNull())
+                    .map(n -> n.asText())
+                    .map(text -> "repository-s3".equals(text))
+                    .orElse(false);
+                if (isRepositoryS3) {
+                    return Optional.ofNullable(current.get("version"))
+                        .filter(n -> !n.isNull())
+                        .map(n -> n.asText())
+                        .map(text -> Version.fromString(getLikelyOpenSearchFlavor() + " " + text))
+                        .map(Mono::just)
+                        .orElseGet(() -> Mono.error(new OperationFailed("No version number found", resp)));
+                }
+            }
+        } catch (Exception e) {
+            log.error("Unable to determine if the cluster is in compatibility mode", e);
+            return Mono.error(new OperationFailed("Unable to determine if the cluster is in compatibility mode from response: " + e.getMessage(), resp));
+        }
+        return Mono.error(new OperationFailed("No version number found after scanning all installed plugins", resp));
+    }
+
+    private Flavor getLikelyOpenSearchFlavor() {
+        return client.getConnectionContext().isAwsSpecificAuthentication() ? Flavor.AMAZON_MANAGED_OPENSEARCH : Flavor.OPENSEARCH;
     }
 
     /*

@@ -4,6 +4,8 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
@@ -14,6 +16,7 @@ import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempoten
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 
 import com.fasterxml.jackson.core.StreamReadFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -30,7 +33,6 @@ import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -44,6 +46,11 @@ import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemE
 import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntryFailure;
 
 class OpenSearchClientTest {
+    private static final String PLUGINS_RESPONSE_OS_2_13_0 = "[{\"name\":\"74c8fa743d5e3626e3903c3b1d5450e0\",\"component\":\"performance-analyzer\",\"version\":\"x.x.x.x\"},{\"name\":\"74c8fa743d5e3626e3903c3b1d5450e0\",\"component\":\"repository-s3\",\"version\":\"2.13.0\"}]";
+    private static final String CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_ENABLED = "{\"persistent\":{\"compatibility\":{\"override_main_response_version\":\"true\"}}}";
+    private static final String CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED = "{\"persistent\":{\"compatibility\":{\"override_main_response_version\":\"false\"}}}";
+    private static final String ROOT_RESPONSE_OS_1_0_0 = "{\"version\":{\"distribution\":\"opensearch\",\"number\":\"1.0.0\"}}";
+    private static final String ROOT_RESPONSE_ES_7_10_2 = "{\"version\": {\"number\": \"7.10.2\"}}";
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder()
         .enable(StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION)
         .build();
@@ -125,27 +132,75 @@ class OpenSearchClientTest {
     }
 
     @Test
-    void testGetClusterVersion() {
+    void testGetClusterVersion_ES_7_10() {
         var restClient = mock(RestClient.class);
         var failedRequestLogger = mock(FailedRequestsLogger.class);
         var openSearchClient = new OpenSearchClient(restClient, failedRequestLogger);
 
-        var versionJson = "{\"version\": {\"number\": \"7.10.2\"}}";
-        var successResponse = new HttpResponse(200, "OK", Map.of(), versionJson);
+        setupOkResponse(restClient, "", ROOT_RESPONSE_ES_7_10_2);
+        setupOkResponse(restClient, "_cluster/settings", CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED);
 
-        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
-
-        when(restClient.getAsync(pathCaptor.capture(), any()))
-            .thenReturn(Mono.just(successResponse));
-
-        Version version = openSearchClient.getClusterVersion();
+        var version = openSearchClient.getClusterVersion();
 
         assertThat(version, equalTo(Version.fromString("ES 7.10.2")));
+        verify(restClient, times(1)).getAsync("", null);
+        verify(restClient, times(1)).getAsync("_cluster/settings", null);
+        verifyNoMoreInteractions(restClient);
+    }
 
-        String capturedPath = pathCaptor.getValue();
-        assertThat(capturedPath, equalTo(""));
+    @Test
+    void testGetClusterVersion_OS_CompatibilityModeEnabled() {
+        var restClient = mock(RestClient.class);
+        var failedRequestLogger = mock(FailedRequestsLogger.class);
+        var openSearchClient = new OpenSearchClient(restClient, failedRequestLogger);
 
-        verify(restClient, times(1)).getAsync(anyString(), any());
+        setupOkResponse(restClient, "", ROOT_RESPONSE_ES_7_10_2);
+        setupOkResponse(restClient, "_cluster/settings", CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_ENABLED);
+        setupOkResponse(restClient, "_cat/plugins?format=json", PLUGINS_RESPONSE_OS_2_13_0);
+
+        var version = openSearchClient.getClusterVersion();
+
+        assertThat(version, equalTo(Version.fromString("AOS 2.13.0")));
+        verify(restClient, times(1)).getAsync("", null);
+        verify(restClient, times(1)).getAsync("_cluster/settings", null);
+        verify(restClient, times(1)).getAsync("_cat/plugins?format=json", null);
+    }
+
+    @Test
+    void testGetClusterVersion_OS_CompatibilityModeDisableEnabled() {
+        var restClient = mock(RestClient.class);
+        var failedRequestLogger = mock(FailedRequestsLogger.class);
+        var openSearchClient = new OpenSearchClient(restClient, failedRequestLogger);
+
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
+        setupOkResponse(restClient, "_cluster/settings", CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED);
+
+        var version = openSearchClient.getClusterVersion();
+
+        assertThat(version, equalTo(Version.fromString("OS 1.0.0")));
+        verify(restClient, times(1)).getAsync("", null);
+        verifyNoMoreInteractions(restClient);
+    }
+
+    private void setupOkResponse(RestClient restClient, String url, String body) {
+        var versionResponse = new HttpResponse(200, "OK", Map.of(), body);
+        when(restClient.getAsync(url, null)).thenReturn(Mono.just(versionResponse));
+    }
+
+    @Test
+    void testGetClusterVersion_OS_Serverless() {
+        var restClient = mock(RestClient.class);
+        var failedRequestLogger = mock(FailedRequestsLogger.class);
+        var openSearchClient = new OpenSearchClient(restClient, failedRequestLogger);
+
+        var versionResponse = new HttpResponse(404, "Not Found", Map.of(), "");
+        when(restClient.getAsync("", null)).thenReturn(Mono.just(versionResponse));
+
+        var version = openSearchClient.getClusterVersion();
+
+        assertThat(version, equalTo(Version.fromString("AOSS 2.x.x")));
+        verify(restClient, times(1)).getAsync("", null);
+        verifyNoMoreInteractions(restClient);
     }
 
     @Test
@@ -324,5 +379,34 @@ class OpenSearchClientTest {
         verify(restClient).getAsync(any(), any());
         verify(restClient).putAsync(any(), any(), any());
         verifyNoMoreInteractions(restClient);
+    }
+
+    @Test
+    void testCheckCompatibilityModeFromResponse() {
+        var restClient = Mockito.mock(RestClient.class);
+        var failedRequestLogger = mock(FailedRequestsLogger.class);
+        var openSearchClient = new OpenSearchClient(restClient, failedRequestLogger);
+
+        Function<Boolean, JsonNode> createCompatibilitySection = (Boolean value) ->
+            OBJECT_MAPPER.createObjectNode()
+                .<ObjectNode>set("compatibility", OBJECT_MAPPER.createObjectNode()
+                    .put("override_main_response_version", value));
+        
+        BiFunction<Boolean, Boolean, HttpResponse> createSettingsResponse = (Boolean persistentVal, Boolean transientVal) -> {
+            var body = OBJECT_MAPPER.createObjectNode()
+                .<ObjectNode>set("persistent", createCompatibilitySection.apply(persistentVal))
+                .set("transient", createCompatibilitySection.apply(transientVal))
+                .toPrettyString();
+            return new HttpResponse(200, "OK", null, body);
+        };
+
+        var bothTrue = openSearchClient.checkCompatibilityModeFromResponse(createSettingsResponse.apply(true, true));
+        assertThat(bothTrue.block(), equalTo(true));
+        var persistentTrue = openSearchClient.checkCompatibilityModeFromResponse(createSettingsResponse.apply(true, false));
+        assertThat(persistentTrue.block(), equalTo(true));
+        var transientTrue = openSearchClient.checkCompatibilityModeFromResponse(createSettingsResponse.apply(false, true));
+        assertThat(transientTrue.block(), equalTo(true));
+        var neitherTrue = openSearchClient.checkCompatibilityModeFromResponse(createSettingsResponse.apply(false, false));
+        assertThat(neitherTrue.block(), equalTo(false));
     }
 }
