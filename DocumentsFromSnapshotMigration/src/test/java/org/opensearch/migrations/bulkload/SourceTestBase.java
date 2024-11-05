@@ -35,6 +35,7 @@ import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordin
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
+import org.opensearch.migrations.transform.TransformationLoader;
 
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
@@ -188,6 +189,8 @@ public class SourceTestBase {
             Function<Path, LuceneDocumentsReader> readerFactory = path -> new FilteredLuceneDocumentsReader(path, sourceResourceProvider.getSoftDeletesPossible(),
                 sourceResourceProvider.getSoftDeletesFieldData(), terminatingDocumentFilter);
 
+            var defaultDocTransformer = new TransformationLoader().getTransformerFactoryLoader(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
+
             try (var workCoordinator = new OpenSearchWorkCoordinator(
                 new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                     .host(targetAddress)
@@ -203,7 +206,7 @@ public class SourceTestBase {
                         .host(targetAddress)
                         .compressionEnabled(compressionEnabled)
                         .build()
-                        .toConnectionContext()), 1000, Long.MAX_VALUE, 1),
+                        .toConnectionContext()), 1000, Long.MAX_VALUE, 1, defaultDocTransformer),
                     new OpenSearchWorkCoordinator(
                         new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                             .host(targetAddress)

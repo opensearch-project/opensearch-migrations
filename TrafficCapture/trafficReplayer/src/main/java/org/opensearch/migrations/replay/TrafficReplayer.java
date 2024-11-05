@@ -1,15 +1,10 @@
 package org.opensearch.migrations.replay;
 
-import java.io.IOException;
 import java.lang.ref.WeakReference;
 import java.net.URI;
-import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
 import java.util.concurrent.Executors;
@@ -30,6 +25,8 @@ import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 import org.opensearch.migrations.transform.SigV4AuthTransformerFactory;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
 import org.opensearch.migrations.transform.TransformationLoader;
+import org.opensearch.migrations.transform.TransformerConfigUtils;
+import org.opensearch.migrations.transform.TransformerParams;
 import org.opensearch.migrations.utils.ProcessHelpers;
 
 import com.beust.jcommander.JCommander;
@@ -241,13 +238,6 @@ public class TrafficReplayer {
         String otelCollectorEndpoint;
     }
 
-    public interface TransformerParams {
-        String getTransformerConfigParameterArgPrefix();
-        String getTransformerConfigEncoded();
-        String getTransformerConfig();
-        String getTransformerConfigFile();
-    }
-
     @Getter
     public static class RequestTransformationParams implements TransformerParams {
         @Override
@@ -333,42 +323,6 @@ public class TrafficReplayer {
         }
     }
 
-    private static int isConfigured(String s) {
-        return (s == null || s.isBlank()) ? 0 : 1;
-    }
-
-    private static String getTransformerConfig(TransformerParams params) {
-        var configuredCount = isConfigured(params.getTransformerConfigFile()) +
-                isConfigured(params.getTransformerConfigEncoded()) +
-                isConfigured(params.getTransformerConfig());
-        if (configuredCount > 1) {
-            System.err.println("Specify only one of " +
-                "--" + params.getTransformerConfigParameterArgPrefix() + "transformer-config-base64" + ", " +
-                "--" + params.getTransformerConfigParameterArgPrefix() + "transformer-config" + ", or " +
-                "--" + params.getTransformerConfigParameterArgPrefix() + "transformer-config-file" + ".");
-            System.exit(4);
-        }
-
-        if (params.getTransformerConfigFile() != null && !params.getTransformerConfigFile().isBlank()) {
-            try {
-                return Files.readString(Paths.get(params.getTransformerConfigFile()), StandardCharsets.UTF_8);
-            } catch (IOException e) {
-                System.err.println("Error reading transformer configuration file: " + e.getMessage());
-                System.exit(5);
-            }
-        }
-
-        if (params.getTransformerConfig() != null && !params.getTransformerConfig().isBlank()) {
-            return params.getTransformerConfig();
-        }
-
-        if (params.getTransformerConfigEncoded() != null && !params.getTransformerConfigEncoded().isBlank()) {
-            return new String(Base64.getDecoder().decode(params.getTransformerConfigEncoded()));
-        }
-
-        return null;
-    }
-
     public static void main(String[] args) throws Exception {
         System.err.println("Got args: " + String.join("; ", args));
         final var workerId = ProcessHelpers.getNodeInstanceName();
@@ -428,13 +382,13 @@ public class TrafficReplayer {
             var timeShifter = new TimeShifter(params.speedupFactor);
             var serverTimeout = Duration.ofSeconds(params.targetServerResponseTimeoutSeconds);
 
-            String requestTransformerConfig = getTransformerConfig(params.requestTransformationParams);
+            String requestTransformerConfig = TransformerConfigUtils.getTransformerConfig(params.requestTransformationParams);
             if (requestTransformerConfig != null) {
                 log.atInfo().setMessage("Request Transformations config string: {}")
                     .addArgument(requestTransformerConfig).log();
             }
 
-            String tupleTransformerConfig = getTransformerConfig(params.tupleTransformationParams);
+            String tupleTransformerConfig = TransformerConfigUtils.getTransformerConfig(params.tupleTransformationParams);
             if (requestTransformerConfig != null) {
                 log.atInfo().setMessage("Tuple Transformations config string: {}")
                     .addArgument(tupleTransformerConfig).log();

@@ -60,8 +60,7 @@ include 'TrafficCapture:trafficCaptureProxyServer'
 include 'TrafficCapture:trafficCaptureProxyServerTest'
 include 'TrafficCapture:trafficReplayer'
 
-
-addSubProjects(':TrafficCapture', Paths.get(rootProject.projectDir.getPath(), 'TrafficCapture', 'transformationPlugins').toFile())
+addSubProjects(':transformation', Paths.get(rootProject.projectDir.getPath(), 'transformation', 'transformationPlugins').toFile())
 
 if (System.getenv().containsKey("OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED")) {
     develocity {

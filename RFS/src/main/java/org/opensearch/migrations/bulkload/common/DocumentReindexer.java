@@ -1,14 +1,13 @@
 package org.opensearch.migrations.bulkload.common;
 
-import java.util.Collection;
 import java.util.List;
+import java.util.Map;
 import java.util.UUID;
 import java.util.function.Predicate;
 
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts.IDocumentReindexContext;
+import org.opensearch.migrations.transform.IJsonTransformer;
 
-import lombok.EqualsAndHashCode;
-import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -25,12 +24,13 @@ public class DocumentReindexer {
     private final int maxDocsPerBulkRequest;
     private final long maxBytesPerBulkRequest;
     private final int maxConcurrentWorkItems;
+    private final IJsonTransformer transformer;
 
     public Mono<Void> reindex(String indexName, Flux<RfsLuceneDocument> documentStream, IDocumentReindexContext context) {
         var scheduler = Schedulers.newParallel("DocumentBulkAggregator");
         var bulkDocs = documentStream
             .publishOn(scheduler, 1)
-            .map(BulkDocSection::new);
+            .map(doc -> transformDocument(doc,indexName));
 
         return this.reindexDocsInParallelBatches(bulkDocs, indexName, context)
             .doOnSuccess(unused -> log.debug("All batches processed"))
@@ -51,6 +51,16 @@ public class DocumentReindexer {
                 maxConcurrentWorkItems)
             .doOnTerminate(scheduler::dispose)
             .then();
+    }
+
+    @SneakyThrows
+    BulkDocSection transformDocument(RfsLuceneDocument doc, String indexName) {
+        var original = new BulkDocSection(doc.id, indexName, doc.type, doc.source);
+        if (transformer != null) {
+            final Map<String,Object> transformedDoc = transformer.transformJson(original.toMap());
+            return BulkDocSection.fromMap(transformedDoc);
+        }
+        return BulkDocSection.fromMap(original.toMap());
     }
 
     Mono<Void> sendBulkRequest(UUID batchId, List<BulkDocSection> docsBatch, String indexName, IDocumentReindexContext context, Scheduler scheduler) {
@@ -78,7 +88,7 @@ public class DocumentReindexer {
             @Override
             public boolean test(BulkDocSection next) {
                 // Add one for newline between bulk sections
-                var nextSize = next.asBulkIndex().length() + 1L;
+                var nextSize = next.getSerializedLength() + 1L;
                 currentSize += nextSize;
                 currentItemCount++;
 
@@ -94,42 +104,4 @@ public class DocumentReindexer {
         }, true);
     }
 
-    @EqualsAndHashCode(onlyExplicitlyIncluded = true)
-    public static class BulkDocSection {
-
-        @EqualsAndHashCode.Include
-        @Getter
-        private final String docId;
-        private final String bulkIndex;
-
-        public BulkDocSection(String id, String docBody) {
-            this.docId = id;
-            this.bulkIndex = createBulkIndex(docId, docBody);
-        }
-
-        public BulkDocSection(RfsLuceneDocument doc) {
-            this.docId = doc.id;
-            this.bulkIndex = createBulkIndex(docId, doc.source);
-        }
-
-        @SneakyThrows
-        private static String createBulkIndex(final String docId, final String doc) {
-            // For a successful bulk ingestion, we cannot have any leading or trailing whitespace, and  must be on a single line.
-            String trimmedSource = doc.trim().replace("\n", "");
-            return "{\"index\":{\"_id\":\"" + docId + "\"}}" + "\n" + trimmedSource;
-        }
-
-        public static String convertToBulkRequestBody(Collection<BulkDocSection> bulkSections) {
-            StringBuilder builder = new StringBuilder();
-            for (var section : bulkSections) {
-                var indexCommand = section.asBulkIndex();
-                builder.append(indexCommand).append("\n");
-            }
-            return builder.toString();
-        }
-
-        public String asBulkIndex() {
-            return this.bulkIndex;
-        }
-    }
 }
