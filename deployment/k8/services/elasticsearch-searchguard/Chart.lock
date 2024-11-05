@@ -1,0 +1,9 @@
+dependencies:
+- name: common-lib
+  repository: file://../common-lib
+  version: 0.1.0
+- name: snapshot-vol
+  repository: file://../../shared/snapshot-vol
+  version: 0.1.0
+digest: sha256:746aa94f95f49db2c8b4bda1f8fdfb75cf6d8e9e74a45fa8fa9111a44d85685a
+generated: "2024-10-25T15:54:59.384586-05:00"

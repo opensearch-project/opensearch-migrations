@@ -1,0 +1,9 @@
+dependencies:
+- name: common-lib
+  repository: file://../common-lib
+  version: 0.1.0
+- name: shared-logs-vol
+  repository: file://../../shared/shared-logs-vol
+  version: 0.1.0
+digest: sha256:7fb78a73c001450e79c0be9b6bd5ee1a5b3ff537357f99149362aef956724820
+generated: "2024-10-25T14:40:47.977713-05:00"
