@@ -323,8 +323,11 @@ public class RequestSenderOrchestrator {
         Instant atTime,
         ChannelTask<T> task
     ) {
-        log.atInfo().setMessage("{}")
-            .addArgument(() -> channelInteraction + " scheduling " + task.kind + " at " + atTime).log();
+        log.atInfo().setMessage("{} scheduling {} at {}")
+            .addArgument(channelInteraction)
+            .addArgument(task.kind)
+            .addArgument(atTime)
+            .log();
 
         var schedule = channelFutureAndRequestSchedule.schedule;
         var eventLoop = channelFutureAndRequestSchedule.eventLoop;
@@ -334,8 +337,11 @@ public class RequestSenderOrchestrator {
             : "Per-connection TrafficStream ordering should force a time ordering on incoming requests";
         var workPointTrigger = schedule.appendTaskTrigger(atTime, task.kind).scheduleFuture;
         var workFuture = task.getRunnable().apply(workPointTrigger);
-        log.atTrace().setMessage("{}")
-            .addArgument(() -> channelInteraction + " added a scheduled event at " + atTime + "... " + schedule).log();
+        log.atTrace().setMessage("{} added a scheduled event at {}... {}")
+            .addArgument(channelInteraction)
+            .addArgument(atTime)
+            .addArgument(schedule)
+            .log();
         if (wasEmpty) {
             bindNettyScheduleToCompletableFuture(eventLoop, atTime, workPointTrigger.future);
         }
@@ -344,10 +350,9 @@ public class RequestSenderOrchestrator {
             var itemStartTimeOfPopped = schedule.removeFirstItem();
             assert atTime.equals(itemStartTimeOfPopped)
                 : "Expected to have popped the item to match the start time for the responseFuture that finished";
-            log.atDebug().setMessage("{}")
-                .addArgument(() ->
-                    channelInteraction.toString() + " responseFuture completed - " +
-                        "checking " + schedule + " for the next item to schedule")
+            log.atDebug().setMessage("{} responseFuture completed - checking {} for the next item to schedule")
+                .addArgument(channelInteraction::toString)
+                .addArgument(schedule)
                 .log();
             Optional.ofNullable(schedule.peekFirstItem())
                 .ifPresent(kvp -> bindNettyScheduleToCompletableFuture(eventLoop, kvp.startTime, kvp.scheduleFuture));

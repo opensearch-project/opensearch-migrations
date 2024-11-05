@@ -243,8 +243,10 @@ public class NettyPacketToHttpConsumer implements IPacketFinalizingConsumer<Aggr
                                  ChannelFuture outboundChannelFuture)
     {
         final var channel = outboundChannelFuture.channel();
-        log.atTrace().setMessage("{}").addArgument(() ->
-                channelKeyContext.getChannelKey() + " successfully one setting up client channel for " + channel).log();
+        log.atTrace().setMessage("{} successfully done setting up client channel for {}")
+            .addArgument(channelKeyContext::getChannelKey)
+            .addArgument(channel)
+            .log();
         var pipeline = channel.pipeline();
         if (sslContext != null) {
             var sslEngine = sslContext.newEngine(channel.alloc());

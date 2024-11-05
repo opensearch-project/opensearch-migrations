@@ -711,9 +711,10 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 if (test.test(suppliedVal, transformedVal)) {
                     return transformedVal;
                 } else {
-                    log.atWarn().setMessage("{}").addArgument(() ->
-                            "Retrying " + labelThatShouldBeAContext + " because the predicate failed for: ("
-                                + suppliedVal + "," + transformedVal + ")")
+                    log.atWarn().setMessage("Retrying {} because the predicate failed for: ({},{})")
+                        .addArgument(labelThatShouldBeAContext)
+                        .addArgument(suppliedVal)
+                        .addArgument(transformedVal)
                         .log();
                     if (attempt >= maxTries) {
                         context.recordFailure();

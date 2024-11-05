@@ -341,12 +341,10 @@ public class RfsMigrateDocuments {
                 );
                 return;
             } catch (IWorkCoordinator.LeaseLockHeldElsewhereException e) {
-                long finalLockRenegotiationMillis = lockRenegotiationMillis;
-                int finalShardSetupAttemptNumber = shardSetupAttemptNumber;
-                log.atInfo().setMessage("{}")
-                    .addArgument(() -> "After " + finalShardSetupAttemptNumber + "another process holds the lock"
-                            + " for setting up the shard work items.  " + "Waiting " + finalLockRenegotiationMillis
-                            + "ms before trying again.")
+                log.atInfo().setMessage("After {} another process holds the lock for setting up the shard work items." +
+                        "  Waiting {} ms before trying again.")
+                    .addArgument(shardSetupAttemptNumber)
+                    .addArgument(lockRenegotiationMillis)
                     .log();
                 Thread.sleep(lockRenegotiationMillis);
                 lockRenegotiationMillis *= 2;

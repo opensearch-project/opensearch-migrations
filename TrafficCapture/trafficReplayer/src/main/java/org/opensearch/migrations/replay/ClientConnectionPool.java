@@ -87,8 +87,10 @@ public class ClientConnectionPool {
             () -> buildConnectionReplaySession(channelKeyCtx)
         );
         log.atTrace()
-            .setMessage("{}").addArgument(() ->
-                "returning ReplaySession=" + crs + " for " + channelKeyCtx.getConnectionId() + " from " + channelKeyCtx)
+            .setMessage("returning ReplaySession={} for {} from {}")
+            .addArgument(crs)
+            .addArgument(channelKeyCtx::getConnectionId)
+            .addArgument(channelKeyCtx)
             .log();
         return crs;
     }

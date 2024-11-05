@@ -147,8 +147,7 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
                 tupleLogger.atInfo().setMessage("{}").addArgument(tupleString).log();
             } catch (Exception e) {
                 log.atError().setCause(e).setMessage("Exception converting tuple to string").log();
-                tupleLogger.atInfo().setMessage("{}")
-                    .addArgument(() -> "{ \"error\":\"" + e.getMessage() + "\" }").log();
+                tupleLogger.atInfo().setMessage("{ \"error\":\"{}\" }").addArgument(e::getMessage).log();
                 throw Lombok.sneakyThrow(e);
             }
         }

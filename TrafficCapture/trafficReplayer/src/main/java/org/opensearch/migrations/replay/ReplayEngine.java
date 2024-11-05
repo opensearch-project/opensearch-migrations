@@ -121,16 +121,18 @@ public class ReplayEngine {
             f -> f.whenComplete((v, t) -> Utils.setIfLater(lastCompletedSourceTimeEpochMs, timestamp.toEpochMilli()))
                 .whenComplete((v, t) -> {
                     var newCount = totalCountOfScheduledTasksOutstanding.decrementAndGet();
-                    log.atInfo().setMessage("{}")
-                        .addArgument(() -> "Scheduled task '" + taskDescription + "' finished (" + stringableKey + ")" +
-                                " decremented tasksOutstanding to " + newCount)
+                    log.atInfo().setMessage("Scheduled task '{}' finished ({}) decremented tasksOutstanding to {}")
+                        .addArgument(taskDescription)
+                        .addArgument(stringableKey)
+                        .addArgument(newCount)
                         .log();
                 })
                 .whenComplete((v, t) -> contentTimeController.stopReadsPast(timestamp))
                 .whenComplete((v, t) -> log.atDebug()
-                    .setMessage("{}")
-                    .addArgument(() -> "work finished and used timestamp=" + timestamp + " to update " +
-                        "contentTimeController (tasksOutstanding=" + totalCountOfScheduledTasksOutstanding.get() + ")")
+                    .setMessage("work finished and used timestamp={} " +
+                        "to update contentTimeController (tasksOutstanding={})")
+                    .addArgument(timestamp)
+                    .addArgument(totalCountOfScheduledTasksOutstanding::get)
                     .log()
                 ),
             () -> "Updating fields for callers to poll progress and updating backpressure"
@@ -138,9 +140,11 @@ public class ReplayEngine {
     }
 
     private static void logStartOfWork(Object stringableKey, long newCount, Instant start, String label) {
-        log.atInfo().setMessage("{}").addArgument(() ->
-                "Scheduling '" + label + "' (" + stringableKey + ") " +
-                    "to run at " + start + " incremented tasksOutstanding to " + newCount)
+        log.atInfo().setMessage("Scheduling '{}' ({}) to run at {} incremented tasksOutstanding to {}")
+            .addArgument(label)
+            .addArgument(stringableKey)
+            .addArgument(start)
+            .addArgument(newCount)
             .log();
     }
 
@@ -177,9 +181,13 @@ public class ReplayEngine {
         var requestKey = ctx.getReplayerRequestKey();
         logStartOfWork(requestKey, newCount, start, label);
 
-        log.atDebug().setMessage("{}").addArgument(() ->
-            "Scheduling request for " + ctx + " to run from [" + start + ", " + end + " with an interval of "
-                + interval + " for " + numPackets + " packets").log();
+        log.atDebug().setMessage("Scheduling request for {} to run from [{}, {}] with an interval of {} for {} packets")
+            .addArgument(ctx)
+            .addArgument(start)
+            .addArgument(end)
+            .addArgument(interval)
+            .addArgument(numPackets)
+            .log();
         var result = networkSendOrchestrator.scheduleRequest(requestKey, ctx, start, interval, packets, retryVisitor);
         return hookWorkFinishingUpdates(result, originalStart, requestKey, label);
     }

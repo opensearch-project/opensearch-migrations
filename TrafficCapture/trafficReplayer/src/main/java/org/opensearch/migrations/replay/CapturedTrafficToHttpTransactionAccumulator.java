@@ -202,8 +202,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             var o = trafficStream.getSubStreamList().get(i);
             var connectionStatus = addObservationToAccumulation(accum, tsk, o);
             if (CONNECTION_STATUS.CLOSED == connectionStatus) {
-                log.atInfo().setMessage("{}").addArgument(() ->
-                        "Connection terminated: removing " + partitionId + ":" + connectionId + " from liveStreams map")
+                log.atInfo().setMessage("Connection terminated: removing {}:{} from liveStreams map")
+                    .addArgument(partitionId)
+                    .addArgument(connectionId)
                     .log();
                 liveStreams.remove(partitionId, connectionId);
                 break;
@@ -226,13 +227,14 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         if (key.getTrafficStreamIndex() == 0
             && (stream.getPriorRequestsReceived() > 0 || stream.getLastObservationWasUnterminatedRead())) {
             log.atWarn()
-                .setMessage("{}").addArgument(() ->
-                    "Encountered a TrafficStream object with inconsistent values between "
-                        + "the prior request count (" + stream.getPriorRequestsReceived() + ", "
-                        + "lastObservationWasUnterminatedRead (" + stream.getLastObservationWasUnterminatedRead() + ")" +
-                        " and the index (" + key.getTrafficStreamIndex()
-                        + ").  Traffic Observations will be ignored until Reads after the next EndOfMessage"
-                        + " are encountered.   Full stream object=" + stream)
+                .setMessage("Encountered a TrafficStream object with inconsistent values between " +
+                    "the prior request count ({}, lastObservationWasUnterminatedRead ({}) and the index ({}).  " +
+                    "Traffic Observations will be ignored until Reads after the next EndOfMessage" +
+                    " are encountered.   Full stream object={}")
+                .addArgument(stream::getPriorRequestsReceived)
+                .addArgument(stream::getLastObservationWasUnterminatedRead)
+                .addArgument(key::getTrafficStreamIndex)
+                .addArgument(stream)
                 .log();
         }
 
@@ -249,8 +251,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
         @NonNull ITrafficStreamKey trafficStreamKey,
         TrafficObservation observation
     ) {
-        log.atTrace().setMessage("{}")
-            .addArgument(() -> "Adding observation: " + observation + " with state=" + accum.state).log();
+        log.atTrace().setMessage("Adding observation: {} with state={}")
+            .addArgument(observation)
+            .addArgument(accum.state)
+            .log();
         var timestamp = TrafficStreamUtils.instantFromProtoTimestamp(observation.getTs());
         liveStreams.expireOldEntries(trafficStreamKey, accum, timestamp);
 
@@ -260,8 +264,10 @@ public class CapturedTrafficToHttpTransactionAccumulator {
             .or(() -> handleObservationForReadState(accum, observation, trafficStreamKey, timestamp))
             .or(() -> handleObservationForWriteState(accum, observation, trafficStreamKey, timestamp))
             .orElseGet(() -> {
-                log.atWarn().setMessage("{}").addArgument(() ->
-                    "unaccounted for observation type " + observation + " for " + accum.trafficChannelKey).log();
+                log.atWarn().setMessage("unaccounted for observation type {} for {}")
+                    .addArgument(observation)
+                    .addArgument(accum.trafficChannelKey)
+                    .log();
                 return CONNECTION_STATUS.ALIVE;
             });
     }
@@ -347,8 +353,9 @@ public class CapturedTrafficToHttpTransactionAccumulator {
                 requestCounter.incrementAndGet();
             }
             var rrPair = accum.getOrCreateTransactionPair(trafficStreamKey, originTimestamp);
-            log.atTrace().setMessage("{}").addArgument(() ->
-                "Adding request data for accum[" + connectionId + "]=" + accum).log();
+            log.atTrace().setMessage("Adding request data for accum[{}]={}")
+                .addArgument(connectionId)
+                .addArgument(accum).log();
             rrPair.addRequestData(timestamp, observation.getRead().getData().toByteArray());
             log.atTrace().setMessage("Added request data for accum[{}]={}")
                 .addArgument(connectionId)
