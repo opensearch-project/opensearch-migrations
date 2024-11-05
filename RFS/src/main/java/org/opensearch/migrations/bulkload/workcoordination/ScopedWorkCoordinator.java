@@ -7,7 +7,6 @@ import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
-import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
 
 @Slf4j
 public class ScopedWorkCoordinator {
