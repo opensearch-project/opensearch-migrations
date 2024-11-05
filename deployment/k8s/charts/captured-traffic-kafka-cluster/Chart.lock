@@ -1,6 +1,0 @@
-dependencies:
-- name: kafka-cluster
-  repository: file://./charts/kafka-cluster
-  version: 0.1.0
-digest: sha256:dc56a8ae669f6349dab17f83609f8ab9b41fb8baac3c84a565c253442f46338a
-generated: "2024-09-06T08:33:54.898455-04:00"

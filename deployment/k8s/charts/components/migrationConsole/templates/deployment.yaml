@@ -28,7 +28,7 @@ spec:
 {{/*        TODO - this would be different if we were doing */}}
 {{/*               a cluster local FS snapshot, cluster local obj-store snapshot, or an S3 snapshot */}}
         {{- if eq .Values.snapshotVolumeEnabled true -}}
-        - name: snapshot-vol
+        - name: snapshot-volume
           persistentVolumeClaim:
             claimName: {{ .Values.snapshotVolumePvc -}}
         {{- end }}
@@ -82,6 +82,6 @@ spec:
               mountPath: /shared-logs-output
             {{ end }}
             {{- if eq .Values.snapshotVolumeEnabled true -}}
-            - name: snapshot-vol
+            - name: snapshot-volume
               mountPath: /storage
             {{- end -}}

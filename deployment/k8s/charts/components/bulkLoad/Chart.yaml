@@ -7,9 +7,9 @@ dependencies:
   - name: helm-common
     repository: file://../helm-common
     version: 0.1.0
-  - name: snapshot-vol
+  - name: snapshot-volume
     version: "0.1.0"
-    repository: "file://../snapshot-vol"
-  - name: shared-logs-vol
+    repository: "file://../../sharedResources/snapshotVolume"
+  - name: logs-volume
     version: "0.1.0"
-    repository: "file://../shared-logs-vol"
+    repository: "file://../../sharedResources/logsVolume"

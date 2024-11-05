@@ -1,6 +1,9 @@
 dependencies:
-- name: bulkload
+- name: migration-console
+  repository: file://../../components/migrationConsole
+  version: 0.1.0
+- name: bulk-document-loader
   repository: file://../../components/bulkLoad
   version: 0.1.0
-digest: sha256:3513928ccb006c7189bceeb2ea27c4e12324ad20aadeebaec7a729471f69bd93
-generated: "2024-10-31T19:57:56.65178-04:00"
+digest: sha256:e5a7fc7f91017cb366925ca0fa29b74c3ca7755092e0a01cb364ba3578fd6595
+generated: "2024-11-05T10:52:12.29895-05:00"

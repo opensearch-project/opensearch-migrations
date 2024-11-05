@@ -47,7 +47,6 @@ process_chart() {
 
     done <<< "$deps"
 
-    # Run helm dependency build with --skip-refresh to avoid downloading
     echo "Running helm dependency build for $chart_dir..."
     helm dependency build "$chart_dir"
 

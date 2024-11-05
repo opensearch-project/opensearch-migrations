@@ -1,13 +1,14 @@
 nameOverride: ""
 fullnameOverride: ""
-namespace:
-  name: "opensearch-migration-assistant"
-  create: true
-  annotations: {}
-  labels: {}
+#namespace:
+#  name: "opensearch-migration-assistant"
+#  create: true
+#  annotations: {}
+#  labels: {}
+useSharedConfigs: false
 parameters:
   destinationUri:
-    value: "http://destination:9200"
+    value: "http://sourcecluster.example.com:9200"
     allowRuntimeOverride: false
   listenPort:
     value: 9200

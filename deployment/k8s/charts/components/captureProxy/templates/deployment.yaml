@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "generic.fullname" . }}
-  namespace: {{ get (get .Values "namespace" (dict)) "name" "default" }}
+  namespace: {{ dig "namespace" "name" "default" (.Values | merge (dict)) }}
 spec:
   replicas: 1
   selector:
@@ -11,6 +11,8 @@ spec:
       app: {{ include "generic.fullname" . }}
   template:
     metadata:
+      annotations:
+        rollme: {{ randAlphaNum 5 | quote }}
       labels:
         app: {{ include "generic.fullname" . }}
         env: v1

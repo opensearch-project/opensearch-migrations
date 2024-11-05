@@ -2,6 +2,12 @@ sharedLogsVolumeEnabled: false
 sharedLogsPvc: ""
 snapshotVolumeEnabled: false
 snapshotVolumePvc: ""
+#namespace:
+#  name: "opensearch-migration-assistant"
+#  create: true
+#  annotations: {}
+#  labels: {}
+useSharedConfigs: false
 parameters:
   migrationApiEnabled:
     value: false

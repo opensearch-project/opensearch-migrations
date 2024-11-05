@@ -32,12 +32,13 @@ fi
 {{- end -}}
 
 {{- define "generic.buildCommand" -}}
-{{- include "generic.buildCommand" (dict
+{{- include "generic.buildCommandBuilderScript" (dict
   "CmdVarName" "CMD"
-  "Command" "{{ .Command }}"
+  "Command" .Command
+  "Parameters" .Parameters
   "include" .Template.Include
   "Template" .Template) }}
 
-echo "Executing command: ${{ .VarName }}"
-exec ${{ .VarName }}
+echo "Executing command: $CMD"
+exec $CMD
 {{- end -}}

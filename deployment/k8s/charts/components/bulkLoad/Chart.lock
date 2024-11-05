@@ -2,11 +2,11 @@ dependencies:
 - name: helm-common
   repository: file://../helm-common
   version: 0.1.0
-- name: snapshot-vol
-  repository: file://../snapshot-vol
+- name: snapshot-volume
+  repository: file://../../sharedResources/snapshotVolume
   version: 0.1.0
-- name: shared-logs-vol
-  repository: file://../shared-logs-vol
+- name: logs-volume
+  repository: file://../../sharedResources/logsVolume
   version: 0.1.0
-digest: sha256:019e19d45fc3116aec162772e911295bfef166631dd42ca94d5ff75eb924e57d
-generated: "2024-10-31T19:34:54.022629-04:00"
+digest: sha256:cf5d93a1d72439ae56a98fa1fda701c906cea59cc7a37a886531f91470e95e0a
+generated: "2024-11-05T10:52:15.582522-05:00"

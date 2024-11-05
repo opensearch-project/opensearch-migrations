@@ -3,7 +3,13 @@ conditionalPackageInstalls:
   jaeger: true
   prometheus: true
   grafana: true
-parameters:
-  proxy:
+
+proxy:
+  enabled: true
+  parameters:
     destinationUri:
-      value: "http://elasticsearch:9200"
+      configMapName: "sourceClusterEndpoint" # this value will be used to pull the destination uri
+      yamlPath: "endpoint"
+    insecureDestination:
+      configMapName: "sourceClusterEndpoint" # this value will be used to pull the destination uri
+      yamlPath: "allow_insecure"

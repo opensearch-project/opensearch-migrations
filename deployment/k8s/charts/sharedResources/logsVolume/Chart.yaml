@@ -1,5 +1,5 @@
 apiVersion: v2
-name: shared-logs-vol
+name: logs-volume
 description: A utility Helm chart to create a shared logs volume
 type: application
 version: 0.1.0

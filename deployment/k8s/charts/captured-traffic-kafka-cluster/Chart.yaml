@@ -8,4 +8,4 @@ appVersion: "2.0.0"
 dependencies:
   - name: kafka-cluster
     version: "0.1.0"
-    repository: "file://./charts/kafka-cluster"
+    repository: "file://./kafka-cluster"

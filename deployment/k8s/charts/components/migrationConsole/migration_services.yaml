@@ -1,21 +1,16 @@
-source_cluster:
-  endpoint: "https://capture-proxy:9201"
-  allow_insecure: true
-  basic_auth:
-    username: "admin"
-    password: "admin"
-target_cluster:
-  endpoint: "https://opensearch-cluster-master:9200"
-  allow_insecure: true
-  basic_auth:
-    username: "admin"
-    password: "myStrongPassword123!"
-metrics_source:
-  prometheus:
-    endpoint: "http://prometheus:9090"
+source_cluster: ???
+target_cluster: ???
 backfill:
   reindex_from_snapshot:
-    docker:
+    snapshot_name: ???
+    snapshot_repo: ???
+clientOptions:
+  user_agent_extra: ???
+kafka:
+  broker_endpoints: ???
+  ??? if mode  ???
+metrics_source:
+  ??? implementation ???
 replay:
   docker:
 snapshot:
@@ -27,6 +22,3 @@ metadata_migration:
   from_snapshot:
   min_replicas: 0
   otel_endpoint: "http://localhost:4317"
-kafka:
-  broker_endpoints: "kafka-cluster-kafka-bootstrap:9092"
-  standard: ""
