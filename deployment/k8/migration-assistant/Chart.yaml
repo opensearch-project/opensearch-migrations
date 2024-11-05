@@ -5,6 +5,7 @@ dependencies:
   - name: elasticsearch-searchguard
     version: "0.1.0"
     repository: "file://../services/elasticsearch-searchguard"
+    alias: elasticsearch
     condition: elasticsearch-searchguard-enabled
   - name: opensearch
     version: "2.23.1"

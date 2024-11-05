@@ -77,3 +77,54 @@ To uninstall a particular helm deployment
 ```shell
 helm uninstall <deployment_name>
 ```
+
+### AWS Initial Setup
+#### Setting up EBS driver to dynamically provision PVs
+```shell
+# To check if any IAM OIDC provider is configured:
+aws iam list-open-id-connect-providers
+# If none exist, create one:
+eksctl utils associate-iam-oidc-provider --cluster <cluster_name> --approve
+# Create IAM role for service account in order to use EBS CSI driver in EKS
+# This currently creates a CFN stack and may 
+eksctl create iamserviceaccount \
+    --name ebs-csi-controller-sa \
+    --namespace kube-system \
+    --cluster <cluster_name> \
+    --role-name AmazonEKS_EBS_CSI_DriverRole \
+    --role-only \
+    --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy \
+    --approve
+# Install add-on to EKS cluster using the created IAM role for the service account
+eksctl create addon --cluster <cluster_name> --name aws-ebs-csi-driver --version latest --service-account-role-arn <role_arn> --force
+# Create StorageClass to dynamically provision persistent volumes (PV)
+kubectl apply -f aws/storage-class-ebs.yml
+```
+#### Setting up EFS driver to dynamically provision PVs
+```shell
+export cluster_name=<cluster_name>
+export role_name=AmazonEKS_EFS_CSI_DriverRole
+eksctl create iamserviceaccount \
+    --name efs-csi-controller-sa \
+    --namespace kube-system \
+    --cluster $cluster_name \
+    --role-name $role_name \
+    --role-only \
+    --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy \
+    --approve
+TRUST_POLICY=$(aws iam get-role --role-name $role_name --query 'Role.AssumeRolePolicyDocument' | \
+    sed -e 's/efs-csi-controller-sa/efs-csi-*/' -e 's/StringEquals/StringLike/')
+aws iam update-assume-role-policy --role-name $role_name --policy-document "$TRUST_POLICY"
+eksctl create addon --cluster $cluster_name --name aws-efs-csi-driver --version latest --service-account-role-arn <role_arn> --force
+kubectl apply -f aws/storage-class-efs.yml
+```
+
+Create an ECR to store images
+```shell
+./buildDockerImagesMini.sh --create-ecr
+```
+
+Build images and push to ECR
+```shell
+./buildDockerImagesMini.sh --sync-ecr
+```

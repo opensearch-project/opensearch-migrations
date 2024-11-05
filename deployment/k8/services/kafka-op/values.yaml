@@ -6,4 +6,5 @@ nodePool:
   replicas: 1
   volume:
     size: 10Gi
+    class: ""
     deleteClaim: true
