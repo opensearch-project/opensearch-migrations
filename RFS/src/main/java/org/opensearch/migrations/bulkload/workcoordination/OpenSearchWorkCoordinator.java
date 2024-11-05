@@ -401,14 +401,11 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    private int numWorkItemsArePending(
-        int maxItemsToCheckFor,
+    private int numWorkItemsNotYetCompleteInternal(
         Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException {
         try (var context = contextSupplier.get()) {
             refresh(context::getRefreshContext);
-            // TODO: Switch this to use _count
-            log.warn("Switch this to use _count");
             final var queryBody = "{\n"
                 + "\"query\": {"
                 + "  \"bool\": {"
@@ -423,36 +420,43 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 + "      }"
                 + "    ]"
                 + "  }"
-                + "}"
-                + "}";
+                + "},"
+                + "\"size\": 0" // This sets the number of items to include in the `hits.hits` array, but doesn't affect
+                + "}";          // the integer value in `hits.total.value`
 
-            var path = INDEX_NAME + "/_search" + (maxItemsToCheckFor <= 0 ? "" : "?size=" + maxItemsToCheckFor);
+            var path = INDEX_NAME + "/_search";
             var response = httpClient.makeJsonRequest(AbstractedHttpClient.POST_METHOD, path, null, queryBody);
-
-            final var resultHitsUpper = objectMapper.readTree(response.getPayloadBytes()).path("hits");
             var statusCode = response.getStatusCode();
             if (statusCode != 200) {
                 throw new IllegalStateException(
-                    "Querying for pending (expired or not) work, "
-                        + "returned an unexpected status code "
-                        + statusCode
-                        + " instead of 200"
+                        "Querying for pending (expired or not) work, "
+                                + "returned an unexpected status code "
+                                + statusCode
+                                + " instead of 200"
                 );
             }
-            return resultHitsUpper.path("hits").size();
+            var payload = objectMapper.readTree(response.getPayloadBytes());
+            var totalHits = payload.path("hits").path("total").path("value").asInt();
+            // In the case where totalHits is 0, we need to be particularly sure that we're not missing data. The `relation`
+            // for the total must be `eq` or we need to throw an error because it's not safe to rely on this data.
+            if (totalHits == 0 && !payload.path("hits").path("total").path("relation").textValue().equals("eq")) {
+                throw new IllegalStateException("Querying for notYetCompleted work returned 0 hits with an unexpected total relation.");
+            }
+            return totalHits;
         }
     }
 
     @Override
-    public int numWorkItemsArePending(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
+    public int numWorkItemsNotYetComplete(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
         throws IOException, InterruptedException {
-        return numWorkItemsArePending(-1, contextSupplier);
+        // This result is not guaranteed to be accurate unless it is 0.  All numbers greater than 0 are a lower bound.
+        return numWorkItemsNotYetCompleteInternal(contextSupplier);
     }
 
     @Override
-    public boolean workItemsArePending(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
+    public boolean workItemsNotYetComplete(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
         throws IOException, InterruptedException {
-        return numWorkItemsArePending(1, contextSupplier) >= 1;
+        return numWorkItemsNotYetCompleteInternal(contextSupplier) >= 1;
     }
 
     enum UpdateResult {

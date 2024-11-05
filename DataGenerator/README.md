@@ -7,31 +7,31 @@ This tool is used to generate data for testing a search cluster. The workloads a
 
 - [Data Generator](#data-generator)
   - [Workloads](#workloads)
-    - [HttpLogs](#httplogs)
-    - [Geonames](#geonames)
-    - [Nested](#nested)
-    - [NycTaxis](#nyctaxis)
+    - [HTTP_LOGS](#HTTP_LOGS)
+    - [GEONAMES](#GEONAMES)
+    - [NESTED](#NESTED)
+    - [NYC_TAXIS](#NYC_TAXIS)
   - [Run Data Generator](#run-data-generator)
     - [Run workloads programmatically](#run-workloads-programmatically)
     - [Generate data via Gradle](#generate-data-via-gradle)
 
 ## Workloads
 
-The following workloads are supported and can be controlled with the `--workloads [workload1] [workload2] [...]`: `HttpLogs`, `Geonames`, `Nested`, `NycTaxis`.
+The following workloads are supported and can be controlled with the `--workloads [workload1] [workload2] [...]`: `HTTP_LOGS`, `GEONAMES`, `NESTED`, `NYC_TAXIS`.
 
-### HttpLogs
+### HTTP_LOGS
 
 Multiple indices with HTTP request log file entries that include client IP, timestamp, and request details.
 
-### Geonames
+### GEONAMES
 
 A single index containing a list of geographic features from all over the world.
 
-### Nested
+### NESTED
 
 A single index of Stack Overflow questions with user IDs and timestamps, along with answers containing user IDs and timestamps, using the nested mapping type.
 
-### NycTaxis
+### NYC_TAXIS
 
 A single index of taxi trip record data from every time a taxi dropped off a fare in the area.
 

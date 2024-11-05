@@ -13,6 +13,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.TransformationLoader;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.buffer.ByteBuf;

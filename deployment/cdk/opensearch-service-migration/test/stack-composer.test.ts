@@ -303,7 +303,7 @@ describe('Stack Composer Tests', () => {
       vpcEnabled: true,
       migrationConsoleServiceEnabled: true
     }
-    let sourceClusterDisabledWithEndpointCreateStackFunc = () => createStackComposer(sourceClusterDisabledWithEndpointContextOptions)
+    const sourceClusterDisabledWithEndpointCreateStackFunc = () => createStackComposer(sourceClusterDisabledWithEndpointContextOptions)
     expect (sourceClusterDisabledWithEndpointCreateStackFunc).toThrow()
   })
 

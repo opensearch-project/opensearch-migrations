@@ -86,12 +86,12 @@ public class WorkCoordinatorTest {
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         final var NUM_DOCS = 100;
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
-            Assertions.assertFalse(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));
+            Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
             for (var i = 0; i < NUM_DOCS; ++i) {
                 final var docId = "R" + i;
                 workCoordinator.createUnassignedWorkItem(docId, testContext::createUnassignedWorkContext);
             }
-            Assertions.assertTrue(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));
+            Assertions.assertTrue(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
         }
 
         final var seenWorkerItems = new ConcurrentHashMap<String, String>();
@@ -123,12 +123,12 @@ public class WorkCoordinatorTest {
         final var MAX_RUNS = 2;
         var executorService = Executors.newFixedThreadPool(NUM_DOCS);
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
-            Assertions.assertFalse(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));
+            Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
             for (var i = 0; i < NUM_DOCS; ++i) {
                 final var docId = "R" + i;
                 workCoordinator.createUnassignedWorkItem(docId, testContext::createUnassignedWorkContext);
             }
-            Assertions.assertTrue(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));
+            Assertions.assertTrue(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
         }
 
         for (int run = 0; run < MAX_RUNS; ++run) {
@@ -173,7 +173,7 @@ public class WorkCoordinatorTest {
             Thread.sleep(expiration.multipliedBy(2).toMillis());
         }
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
-            Assertions.assertFalse(workCoordinator.workItemsArePending(testContext::createItemsPendingContext));
+            Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
         }
         var metrics = testContext.inMemoryInstrumentationBundle.getFinishedMetrics();
         Assertions.assertNotEquals(0,

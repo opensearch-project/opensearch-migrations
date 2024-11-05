@@ -5,19 +5,17 @@ import java.util.Random;
 import java.util.stream.IntStream;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.data.IFieldCreator;
+import org.opensearch.migrations.data.IRandomDataBuilders;
+
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-
-import static org.opensearch.migrations.data.FieldBuilders.createField;
-import static org.opensearch.migrations.data.FieldBuilders.createFieldTextRawKeyword;
-import static org.opensearch.migrations.data.RandomDataBuilders.randomElement;
-import static org.opensearch.migrations.data.RandomDataBuilders.randomTime;
 
 /**
  * Workload based off of http_logs
  * https://github.com/opensearch-project/opensearch-benchmark-workloads/tree/main/http_logs
  */
-public class HttpLogs implements Workload {
+public class HttpLogs implements Workload, IFieldCreator, IRandomDataBuilders {
 
     private static final ObjectMapper mapper = new ObjectMapper();
     private static final String[] HTTP_METHODS = { "GET", "POST", "PUT", "DELETE" };
@@ -45,37 +43,27 @@ public class HttpLogs implements Workload {
      */
     @Override
     public ObjectNode createIndex(ObjectNode defaultSettings) {
-        var properties = mapper.createObjectNode();
-        var timestamp = createField("date");
-        timestamp.put("format", "strict_date_optional_time||epoch_second");
-        properties.set("@timestamp", timestamp);
-        var message = createField("keyword");
-        message.put("index", false);
-        message.put("doc_values", false);
-        properties.set("message", message);
-        properties.set("clientip", createField("ip"));
-        var request = createFieldTextRawKeyword();
-        var requestRaw = (ObjectNode) request.get("fields").get("raw");
-        requestRaw.put("ignore_above", 256);
-        properties.set("request", request);
-        properties.set("status", createField("integer"));
-        properties.set("size", createField("integer"));
-        var geoip = mapper.createObjectNode();
-        var geoipProps = mapper.createObjectNode();
-        geoip.set("properties", geoipProps);
-        geoipProps.set("country_name", createField("keyword"));
-        geoipProps.set("city_name", createField("keyword"));
-        geoipProps.set("location", createField("geo_point"));
-        properties.set("geoip", geoip);
-
-        var mappings = mapper.createObjectNode();
-        mappings.put("dynamic", "strict");
-        mappings.set("properties", properties);
-
-        var index = mapper.createObjectNode();
-        index.set("mappings", mappings);
-        index.set("settings", defaultSettings);
-        return index;
+        return mapper.createObjectNode()
+            .<ObjectNode>set("mappings", mapper.createObjectNode()
+                .<ObjectNode>put("dynamic", "strict")
+                .<ObjectNode>set("properties",  mapper.createObjectNode()
+                    .<ObjectNode>set("@timestamp", fieldDate()
+                        .put("format", "strict_date_optional_time||epoch_second"))
+                    .<ObjectNode>set("message", fieldKeyword()
+                        .<ObjectNode>put("index", false)
+                        .<ObjectNode>put("doc_values", false))
+                    .<ObjectNode>set("clientip", fieldIP())
+                    .<ObjectNode>set("request",
+                        ((ObjectNode) fieldRawTextKeyword().get("fields").get("raw"))
+                            .put("ignore_above", 256))
+                    .<ObjectNode>set("status", fieldInt())
+                    .<ObjectNode>set("size", fieldInt())
+                    .<ObjectNode>set("geoip", mapper.createObjectNode()
+                        .set("properties", mapper.createObjectNode()
+                            .<ObjectNode>set("country_name", fieldKeyword())
+                            .<ObjectNode>set("city_name", fieldKeyword())
+                            .<ObjectNode>set("location", fieldGeoPoint())))))
+            .<ObjectNode>set("settings", defaultSettings);
     }
 
     /**
@@ -95,13 +83,12 @@ public class HttpLogs implements Workload {
         return IntStream.range(0, numDocs)
             .mapToObj(i -> {
                 var random = new Random(i);
-                ObjectNode doc = mapper.createObjectNode();
-                doc.put("@timestamp", randomTime(currentTime, random));
-                doc.put("clientip", randomIpAddress(random));
-                doc.put("request", randomRequest(random));
-                doc.put("status", randomStatus(random));
-                doc.put("size", randomResponseSize(random));
-                return doc;
+                return mapper.createObjectNode()
+                    .put("@timestamp", randomTime(currentTime, random))
+                    .put("clientip", randomIpAddress(random))
+                    .put("request", randomRequest(random))
+                    .put("status", randomStatus(random))
+                    .put("size", randomResponseSize(random));
             }
         );
     }
@@ -110,23 +97,23 @@ public class HttpLogs implements Workload {
         return random.nextInt(256) + "." + random.nextInt(256) + "." + random.nextInt(256) + "." + random.nextInt(256);
     }
 
-    private static String randomHttpMethod(Random random) {
+    private String randomHttpMethod(Random random) {
         return randomElement(HTTP_METHODS, random);
     }
 
-    private static String randomRequest(Random random) {
+    private String randomRequest(Random random) {
         return randomHttpMethod(random) + " " + randomUrl(random) + " HTTP/1.0";
     }
 
-    private static String randomUrl(Random random) {
+    private String randomUrl(Random random) {
         return randomElement(URLS, random);
     }
 
-    private static int randomStatus(Random random) {
+    private int randomStatus(Random random) {
         return randomElement(RESPONSE_CODES, random);
     }
 
-    private static int randomResponseSize(Random random) {
+    private int randomResponseSize(Random random) {
         return random.nextInt(50 * 1024 * 1024);
     }
 }
