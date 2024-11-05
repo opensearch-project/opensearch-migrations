@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.workcoordination;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
@@ -337,6 +338,27 @@ public class WorkCoordinatorTest {
     }
 
     // Create a test where a work item tries to create itself as a successor -- it should fail and NOT be marked as complete. Another worker should pick it up and double the lease time.
+    @Test
+    public void testCreatingSelfAsSuccessorWorkItemFails() throws Exception {
+//        throw new IllegalArgumentException();
+        // A partially completed successor item will have a `successor_items` field and _some_ of the successor work items will be created
+        // but not all.  This tests that the coordinator handles this case correctly by continuing to make the originally specific successor items.
+        var testContext = WorkCoordinationTestContext.factory().withAllTracking();
+        var docId = "R0";
+        var successorItems = new ArrayList<>(List.of("R0", "R1", "R2"));
+
+        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "successorTest")) {
+            Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
+            workCoordinator.createUnassignedWorkItem(docId, testContext::createUnassignedWorkContext);
+            Assertions.assertTrue(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
+            // Claim the work item
+            getWorkItemAndVerify(testContext, "successorTest", new ConcurrentHashMap<>(), Duration.ofSeconds(5), false, false);
+
+            // Now attempt to go through with the correct successor item list
+            Assertions.assertThrows(IllegalArgumentException.class,
+                    () -> workCoordinator.createSuccessorWorkItemsAndMarkComplete(docId, successorItems, testContext::createSuccessorWorkItemsContext));
+        }
+    }
 
     @SneakyThrows
     private String getWorkItemAndCompleteWithSuccessors(

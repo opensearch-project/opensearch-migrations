@@ -35,6 +35,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     static final int MAX_DRIFT_RETRIES = 13; // last delay before failure: 40 seconds
     static final int MAX_MALFORMED_ASSIGNED_WORK_DOC_RETRIES = 17; // last delay before failure: 655.36 seconds
     static final int MAX_ASSIGNED_DOCUMENT_NOT_FOUND_RETRY_INTERVAL = 60 * 1000;
+    static final int MAX_CREATE_SUCCESSOR_WORK_ITEMS_RETRIES = 5;
+    static final int CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS = 10; // last delay before failure: 320 seconds
 
     public static final String SCRIPT_VERSION_TEMPLATE = "{SCRIPT_VERSION}";
     public static final String WORKER_ID_TEMPLATE = "{WORKER_ID}";
@@ -766,8 +768,36 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             ArrayList<String> successorWorkItemIds,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException, IllegalStateException {
+        if (successorWorkItemIds.contains(workItemId)) {
+            log.atError().setMessage("successorWorkItemIds {} can not not contain the parent workItemId: {}").addArgument(successorWorkItemIds).addArgument(workItemId).log();
+            throw new IllegalArgumentException("successorWorkItemIds can not not contain the parent workItemId");
+        }
         try (var ctx = contextSupplier.get()) {
-            updateWorkItemWithSuccessors(workItemId, successorWorkItemIds);
+            int updateWorkItemRetries = 0;
+            while (true) {
+                try {
+                    updateWorkItemWithSuccessors(workItemId, successorWorkItemIds);
+                    break;
+                } catch (IllegalStateException e) {
+                    updateWorkItemRetries++;
+                    if (updateWorkItemRetries > MAX_CREATE_SUCCESSOR_WORK_ITEMS_RETRIES) {
+                        ctx.addTraceException(e, true);
+                        log.atError().setCause(e).setMessage(
+                                "Throwing exception because max tries (" + MAX_CREATE_SUCCESSOR_WORK_ITEMS_RETRIES + ")" +
+                                        " have been exhausted").log();
+                        throw new RetriesExceededException(e, updateWorkItemRetries);
+                    }
+                    ctx.addTraceException(e, true);
+                    var sleepBeforeNextRetryDuration = Duration.ofMillis(
+                                    (long) (Math.pow(2.0, (updateWorkItemRetries-1)) * CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS));
+                    ctx.addTraceException(e, false);
+                    log.atWarn().setCause(e)
+                            .setMessage("Couldn't complete work assignment due to exception. Backing off {} and trying again.")
+                            .addArgument(sleepBeforeNextRetryDuration).log();
+                    Thread.sleep(sleepBeforeNextRetryDuration.toMillis());
+                }
+            }
+
             createUnassignedWorkItemsIfNonexistent(successorWorkItemIds);
             completeWorkItem(workItemId, ctx::getCompleteWorkItemContext);
             refresh(ctx::getRefreshContext);
