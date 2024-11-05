@@ -53,7 +53,8 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
         @Override
         public void channelRead(@NonNull ChannelHandlerContext ctx, @NonNull Object msg) throws Exception {
             if (msg instanceof HttpContent && errorField == null) {
-                log.atDebug().setMessage(() -> "body contents: " + ((HttpContent) msg).content().duplicate().toString()).log();
+                log.atDebug().setMessage("body contents: {}")
+                    .addArgument(((HttpContent) msg).content().duplicate()).log();
                 feeder.feedInput(((HttpContent) msg).content().nioBuffer());
                 consumeInput();
                 if (msg instanceof LastHttpContent) {
@@ -74,7 +75,7 @@ public class OpenSearchDefaultRetry extends DefaultRetry {
                 token != JsonToken.NOT_AVAILABLE)
             {
                 JsonToken finalToken = token;
-                log.atTrace().setMessage(() -> "Got token: " + finalToken).log();
+                log.atTrace().setMessage("Got token: {}").addArgument(finalToken).log();
                 if (token == JsonToken.FIELD_NAME && "errors".equals(parser.getCurrentName())) {
                     parser.nextToken();
                     errorField = parser.getValueAsBoolean();

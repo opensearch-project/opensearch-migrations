@@ -255,13 +255,7 @@ subprojects {
     jacocoTestReport {
         dependsOn = project.tasks.withType(Test).matching { it.jacoco && it.jacoco.enabled }
         executionData.from = project.tasks.withType(Test).matching { it.jacoco && it.jacoco.enabled }.collect { it.jacoco.destinationFile }
-        // Exclude protos and load tests from test coverage
-        classDirectories.from = files(subprojects.collect { it.sourceSets.main.output.collect {
-            fileTree(dir: it) {
-                exclude '**/protos/**'
-                exclude '**/JMeterLoadTest**'
-            }
-        } })
+        classDirectories.from = files(subprojects.collect { it.sourceSets.main.output.classesDirs })
         reports {
             xml.required = true
             xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")

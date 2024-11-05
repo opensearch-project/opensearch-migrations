@@ -61,7 +61,7 @@ public class JsonAccumulator {
     }
 
     public void consumeByteBuffer(ByteBuffer byteBuffer) throws IOException {
-        log.atTrace().setMessage(() -> "Consuming bytes: {}").addArgument(() -> byteBuffer.toString()).log();
+        log.atTrace().setMessage("Consuming bytes: {}").addArgument(byteBuffer::toString).log();
         feeder.feedInput(byteBuffer);
     }
     
@@ -73,7 +73,7 @@ public class JsonAccumulator {
                 break;
             }
 
-            log.atTrace().setMessage(() -> "{} ... adding token={}").addArgument(this).addArgument(token).log();
+            log.atTrace().setMessage("{} ... adding token={}").addArgument(this).addArgument(token).log();
             switch (token) {
                 case FIELD_NAME:
                     jsonObjectStack.push(parser.getText());

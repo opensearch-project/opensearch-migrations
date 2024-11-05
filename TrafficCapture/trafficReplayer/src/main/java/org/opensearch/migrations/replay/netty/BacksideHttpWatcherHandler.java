@@ -61,9 +61,8 @@ public class BacksideHttpWatcherHandler extends SimpleChannelInboundHandler<Http
     }
 
     private void triggerResponseCallbackAndRemoveCallback() {
-        log.atTrace()
-            .setMessage(() -> "triggerResponseCallbackAndRemoveCallback, callback=" + this.responseCallback)
-            .log();
+        log.atTrace().setMessage("triggerResponseCallbackAndRemoveCallback, callback={}")
+            .addArgument(this.responseCallback).log();
         doneReadingRequest = true;
         if (this.responseCallback != null) {
             // this method may be re-entrant upon calling the callback, so make sure that we don't loop

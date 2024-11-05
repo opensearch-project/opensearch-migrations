@@ -32,7 +32,8 @@ export interface NetworkStackProps extends StackPropsExt {
     readonly targetClusterUsername?: string;
     readonly targetClusterPasswordSecretArn?: string;
     readonly albAcmCertArn?: string;
-    readonly env?: { [key: string]: any };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    readonly env?: Record<string, any>;
 }
 
 export class NetworkStack extends Stack {
@@ -45,7 +46,7 @@ export class NetworkStack extends Stack {
     // If a port is not provided, the default protocol port (e.g. 443, 80) will be explicitly added
     static validateAndReturnFormattedHttpURL(urlString: string) {
         // URL will throw error if the urlString is invalid
-        let url = new URL(urlString);
+        const url = new URL(urlString);
         if (url.protocol !== "http:" && url.protocol !== "https:") {
             throw new Error(`Invalid url protocol for target endpoint: ${urlString} was expecting 'http' or 'https'`)
         }

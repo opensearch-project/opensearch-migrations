@@ -65,9 +65,8 @@ public class ExhaustiveCapturedTrafficToHttpTransactionAccumulatorTest extends I
             .toArray(Arguments[]::new);
 
         // Assertions.assertTrue(possibilitiesLeftToTest.isEmpty());
-        log.atInfo()
-            .setMessage(() -> "Sufficient random seeds to generate a full cover of tests:{}")
-            .addArgument(seedsThatOfferUniqueTestCases.toString())
+        log.atInfo().setMessage("Sufficient random seeds to generate a full cover of tests:{}")
+            .addArgument(seedsThatOfferUniqueTestCases)
             .log();
         return argsArray;
     }

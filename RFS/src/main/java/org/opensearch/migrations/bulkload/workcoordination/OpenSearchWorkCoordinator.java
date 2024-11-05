@@ -166,8 +166,9 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                         log.info("Not creating " + INDEX_NAME + " because it already exists");
                         return indexCheckResponse;
                     }
-                    log.atInfo().setMessage(() ->
-                            "Creating " + INDEX_NAME + " because HEAD returned " + indexCheckResponse.getStatusCode())
+                    log.atInfo().setMessage("Creating {} because HEAD returned {}")
+                        .addArgument(INDEX_NAME)
+                        .addArgument(indexCheckResponse::getStatusCode)
                         .log();
                     return httpClient.makeJsonRequest(AbstractedHttpClient.PUT_METHOD, INDEX_NAME, null, body);
                 } catch (Exception e) {
@@ -285,18 +286,21 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         try {
             return DocumentModificationResult.parse(resultStr);
         } catch (Exception e) {
-            log.atWarn().setCause(e).setMessage(() -> "Caught exception while parsing the response").log();
-            log.atWarn().setMessage(() -> "status: " + response.getStatusCode() + " " + response.getStatusText()).log();
-            log.atWarn().setMessage(() -> "headers: " +
-                response.getHeaders()
-                    .map(kvp->kvp.getKey() + ":" + kvp.getValue())
-                    .collect(Collectors.joining("\n")))
+            log.atWarn().setCause(e).setMessage("Caught exception while parsing the response").log();
+            log.atWarn().setMessage("status: {} {}")
+                .addArgument(response::getStatusCode)
+                .addArgument(response::getStatusText)
                 .log();
-            log.atWarn().setMessage(() -> {
+            log.atWarn().setMessage("headers: {}")
+                .addArgument(() -> response.getHeaders()
+                    .map(kvp->kvp.getKey() + ":" + kvp.getValue()).collect(Collectors.joining("\n")))
+                .log();
+            log.atWarn().setMessage("Payload: {}")
+                .addArgument(() -> {
                         try {
-                            return "Payload: " + new String(response.getPayloadBytes(), StandardCharsets.UTF_8);
+                            return new String(response.getPayloadBytes(), StandardCharsets.UTF_8);
                         } catch (Exception e2) {
-                            return "while trying to display response bytes, caught exception: " + e2;
+                            return "EXCEPTION: while trying to display response bytes: " + e2;
                         }
                     }
                 )
@@ -608,14 +612,14 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         var resultHitInner = resultHitsUpper.path("hits").path(0);
         var expiration = resultHitInner.path(SOURCE_FIELD_NAME).path(EXPIRATION_FIELD_NAME).longValue();
         if (expiration == 0) {
-            log.atWarn().setMessage(() ->
-                "Expiration wasn't found or wasn't set to > 0 for response:" + response.toDiagnosticString()).log();
+            log.atWarn().setMessage("Expiration wasn't found or wasn't set to > 0 for response: {}")
+                .addArgument(response::toDiagnosticString).log();
             throw new MalformedAssignedWorkDocumentException(response);
         }
 
         var successorItems = getSuccessorItemsIfPresent(resultHitInner);
         var rval = new WorkItemAndDuration(resultHitInner.get("_id").asText(), Instant.ofEpochMilli(1000 * expiration), successorItems);
-        log.atInfo().setMessage(() -> "Returning work item and lease: " + rval).log();
+        log.atInfo().setMessage("Returning work item and lease: {}").addArgument(rval).log();
         return rval;
     }
 
@@ -635,7 +639,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     // there's no reason to not try at least a few times
                     if (malformedDocRetries > MAX_MALFORMED_ASSIGNED_WORK_DOC_RETRIES) {
                         ctx.addTraceException(e, true);
-                        log.atError().setCause(e).setMessage(() ->
+                        log.atError().setCause(e).setMessage(
                             "Throwing exception because max tries (" + MAX_MALFORMED_ASSIGNED_WORK_DOC_RETRIES + ")" +
                                 " have been exhausted").log();
                         throw new RetriesExceededException(e, malformedDocRetries);
@@ -651,8 +655,9 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                         (long) (Math.pow(2.0, (retries-1)) * ACQUIRE_WORK_RETRY_BASE_MS)));
                 leaseChecker.checkRetryWaitTimeOrThrow(e, retries-1, sleepBeforeNextRetryDuration);
 
-                log.atWarn().setMessage(() -> "Couldn't complete work assignment due to exception.  "
-                    + "Backing off " + sleepBeforeNextRetryDuration + "ms and trying again.").setCause(e).log();
+                log.atWarn().setCause(e)
+                    .setMessage("Couldn't complete work assignment due to exception. Backing off {} and trying again.")
+                    .addArgument(sleepBeforeNextRetryDuration).log();
                 Thread.sleep(sleepBeforeNextRetryDuration.toMillis());
             }
         }
@@ -835,16 +840,10 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 if (test.test(suppliedVal, transformedVal)) {
                     return transformedVal;
                 } else {
-                    log.atWarn()
-                        .setMessage(
-                            () -> "Retrying "
-                                + labelThatShouldBeAContext
-                                + " because the predicate failed for: ("
-                                + suppliedVal
-                                + ","
-                                + transformedVal
-                                + ")"
-                        )
+                    log.atWarn().setMessage("Retrying {} because the predicate failed for: ({},{})")
+                        .addArgument(labelThatShouldBeAContext)
+                        .addArgument(suppliedVal)
+                        .addArgument(transformedVal)
                         .log();
                     if (attempt >= maxTries) {
                         context.recordFailure();
@@ -931,8 +930,9 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                         leaseChecker.checkRetryWaitTimeOrThrow(e, driftRetries, sleepBeforeNextRetryDuration);
                     }
                     ++driftRetries;
-                    log.atInfo().setCause(e).setMessage(() -> "Couldn't complete work assignment due to exception.  "
-                        + "Backing off " + sleepBeforeNextRetryDuration + "ms and trying again.").log();
+                    log.atInfo().setCause(e)
+                        .setMessage("Couldn't complete work assignment due to exception. Backing off {} and retrying.")
+                        .addArgument(sleepBeforeNextRetryDuration).log();
                     Thread.sleep(sleepBeforeNextRetryDuration.toMillis());
                 }
             }

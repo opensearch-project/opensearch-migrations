@@ -68,7 +68,7 @@ public class WorkCoordinatorTest {
                 "" + expirationEpochSeconds
             )
             + "}";
-        log.atInfo().setMessage(() -> "Searching with... " + body).log();
+        log.atInfo().setMessage("Searching with... {}").addArgument(body).log();
         var response = httpClientSupplier.get()
             .makeJsonRequest(
                 AbstractedHttpClient.GET_METHOD,
@@ -162,15 +162,11 @@ public class WorkCoordinatorTest {
                     Duration.ofSeconds(2),
                     testContext::createAcquireNextItemContext
                 );
-                log.atInfo().setMessage(() -> "Next work item picked=" + nextWorkItem).log();
+                log.atInfo().setMessage("Next work item picked={}").addArgument(nextWorkItem).log();
                 Assertions.assertInstanceOf(IWorkCoordinator.NoAvailableWorkToBeDone.class, nextWorkItem);
             } catch (OpenSearchWorkCoordinator.PotentialClockDriftDetectedException e) {
-                log.atError()
-                    .setCause(e)
-                    .setMessage(
-                        () -> "Unexpected clock drift error.  Got response: "
-                            + searchForExpiredDocs(e.getTimestampEpochSeconds())
-                    )
+                log.atError().setCause(e).setMessage("Unexpected clock drift error.  Got response: {}")
+                    .addArgument(() -> searchForExpiredDocs(e.getTimestampEpochSeconds()))
                     .log();
             }
 
@@ -414,7 +410,7 @@ public class WorkCoordinatorTest {
                     @Override
                     public String onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) throws IOException,
                         InterruptedException {
-                        log.atInfo().setMessage(() -> "Next work item picked=" + workItem).log();
+                        log.atInfo().setMessage("Next work item picked={}").addArgument(workItem).log();
                         Assertions.assertNotNull(workItem);
                         Assertions.assertNotNull(workItem.workItemId);
                         Assertions.assertTrue(workItem.leaseExpirationTime.isAfter(oldNow));
@@ -433,10 +429,8 @@ public class WorkCoordinatorTest {
         } catch (OpenSearchWorkCoordinator.PotentialClockDriftDetectedException e) {
             log.atError()
                 .setCause(e)
-                .setMessage(
-                    () -> "Unexpected clock drift error.  Got response: "
-                        + searchForExpiredDocs(e.getTimestampEpochSeconds())
-                )
+                .setMessage("Unexpected clock drift error.  Got response: {}")
+                .addArgument(() -> searchForExpiredDocs(e.getTimestampEpochSeconds()))
                 .log();
             throw e;
         }

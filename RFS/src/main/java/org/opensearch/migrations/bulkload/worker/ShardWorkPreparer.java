@@ -70,7 +70,7 @@ public class ShardWorkPreparer {
 
             @Override
             public Void onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) {
-                log.atInfo().setMessage(() -> "Acquired work to set the shard workitems").log();
+                log.atInfo().setMessage("Acquired work to set the shard workitems").log();
                 prepareShardWorkItems(
                     scopedWorkCoordinator.workCoordinator,
                     metadataFactory,

@@ -37,7 +37,7 @@ describe('Migration Services YAML Tests', () => {
     })
 
     test('Test servicesYaml with target cluster can be stringified', () => {
-        let servicesYaml = new ServicesYaml();
+        const servicesYaml = new ServicesYaml();
 
         const cluster = new ClusterYaml({
             'endpoint': 'https://abc.com',
@@ -51,7 +51,7 @@ describe('Migration Services YAML Tests', () => {
     });
 
     test('Test servicesYaml with source and target cluster can be stringified', () => {
-        let servicesYaml = new ServicesYaml();
+        const servicesYaml = new ServicesYaml();
         const targetCluster = new ClusterYaml({
             'endpoint': 'https://abc.com',
             auth: new ClusterAuth({noAuth: new ClusterNoAuth()})
@@ -77,8 +77,8 @@ describe('Migration Services YAML Tests', () => {
         const clusterName = "migration-cluster-name";
         const serviceName = "rfs-service-name";
         const region = "us-east-1"
-        let servicesYaml = new ServicesYaml();
-        let rfsBackfillYaml = new RFSBackfillYaml();
+        const servicesYaml = new ServicesYaml();
+        const rfsBackfillYaml = new RFSBackfillYaml();
         rfsBackfillYaml.ecs.cluster_name = clusterName;
         rfsBackfillYaml.ecs.service_name = serviceName;
         rfsBackfillYaml.ecs.aws_region = region;
@@ -92,13 +92,13 @@ describe('Migration Services YAML Tests', () => {
     });
 
     test('Test servicesYaml without backfill does not include backend section', () => {
-        let servicesYaml = new ServicesYaml();
+        const servicesYaml = new ServicesYaml();
         const yaml = servicesYaml.stringify();
         expect(yaml).toBe(`metrics_source:\n  cloudwatch:\n`);
     });
 
     test('Test SnapshotYaml for filesystem only includes fs', () => {
-        let fsSnapshot = new SnapshotYaml();
+        const fsSnapshot = new SnapshotYaml();
         fsSnapshot.fs = {"repo_path": "/path/to/shared/volume"}
         const fsSnapshotDict = fsSnapshot.toDict()
         expect(fsSnapshotDict).toBeDefined();
@@ -108,7 +108,7 @@ describe('Migration Services YAML Tests', () => {
     });
 
     test('Test SnapshotYaml for s3 only includes s3', () => {
-        let s3Snapshot = new SnapshotYaml();
+        const s3Snapshot = new SnapshotYaml();
         s3Snapshot.s3 = {"repo_uri": "s3://repo/path", "aws_region": "us-east-1"}
         const s3SnapshotDict = s3Snapshot.toDict()
         expect(s3SnapshotDict).toBeDefined();

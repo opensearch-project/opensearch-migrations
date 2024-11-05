@@ -53,7 +53,7 @@ public class LuceneDocumentsReaderTest {
     @BeforeEach
     public void setUp() throws IOException {
         tempDirectory = Files.createTempDirectory("test-temp-dir");
-        log.atDebug().log("Temporary directory created at: " + tempDirectory);
+        log.atDebug().setMessage("Temporary directory created at: {}").addArgument(tempDirectory).log();
     }
 
     @AfterEach
@@ -64,7 +64,7 @@ public class LuceneDocumentsReaderTest {
                 try {
                     Files.delete(path);
                 } catch (IOException e) {
-                    log.atError().setMessage("Failed to delete: " + path).setCause(e).log();
+                    log.atError().setCause(e).setMessage("Failed to delete: {}").addArgument(path).log();
                 }
             });
         log.atDebug().log("Temporary directory deleted.");
@@ -106,25 +106,36 @@ public class LuceneDocumentsReaderTest {
             String expectedId = "complexdoc";
             String actualId = doc.id;
 
+            String expectedType = null;
+            String actualType = doc.type;
+
             String expectedSource = "{\"title\":\"This is a doc with complex history\",\"content\":\"Updated!\"}";
             String actualSource = doc.source;
-            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            assertDocsEqual(expectedId, actualId, expectedType, actualType, expectedSource, actualSource);
             return true;
         }).expectNextMatches(doc -> {
             String expectedId = "unchangeddoc";
             String actualId = doc.id;
 
+            String expectedType = null;
+            String actualType = doc.type;
+
             String expectedSource = "{\"title\":\"This doc will not be changed\\nIt has multiple lines of text\\nIts source doc has extra newlines.\",\"content\":\"bluh bluh\"}";
             String actualSource = doc.source;
-            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            assertDocsEqual(expectedId, actualId, expectedType, actualType,
+                    expectedSource, actualSource);
             return true;
         }).expectNextMatches(doc -> {
             String expectedId = "updateddoc";
             String actualId = doc.id;
 
+            String expectedType = null;
+            String actualType = doc.type;
+
             String expectedSource = "{\"title\":\"This is doc that will be updated\",\"content\":\"Updated!\"}";
             String actualSource = doc.source;
-            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            assertDocsEqual(expectedId, actualId, expectedType, actualType,
+                    expectedSource, actualSource);
             return true;
         }).expectComplete().verify();
     }
@@ -156,28 +167,39 @@ public class LuceneDocumentsReaderTest {
 
         // Verify that the results are as expected
         StepVerifier.create(documents).expectNextMatches(doc -> {
-            String expectedId = "type1#complexdoc";
+            String expectedId = "complexdoc";
             String actualId = doc.id;
+
+             String expectedType = "type1";
+             String actualType = doc.type;
 
             String expectedSource = "{\"title\":\"This is a doc with complex history. Updated!\"}";
             String actualSource = doc.source;
-            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            assertDocsEqual(expectedId, actualId, expectedType, actualType,
+                    expectedSource, actualSource);
             return true;
         }).expectNextMatches(doc -> {
-            String expectedId = "type2#unchangeddoc";
+            String expectedId = "unchangeddoc";
             String actualId = doc.id;
+
+             String expectedType = "type2";
+             String actualType = doc.type;
 
             String expectedSource = "{\"content\":\"This doc will not be changed\nIt has multiple lines of text\nIts source doc has extra newlines.\"}";
             String actualSource = doc.source;
-            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            assertDocsEqual(expectedId, actualId, expectedType, actualType, expectedSource, actualSource);
             return true;
         }).expectNextMatches(doc -> {
-            String expectedId = "type2#updateddoc";
+            String expectedId = "updateddoc";
             String actualId = doc.id;
+
+             String expectedType = "type2";
+             String actualType = doc.type;
 
             String expectedSource = "{\"content\":\"Updated!\"}";
             String actualSource = doc.source;
-            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            assertDocsEqual(expectedId, actualId, expectedType, actualType,
+                    expectedSource, actualSource);
             return true;
         }).expectComplete().verify();
     }
@@ -255,7 +277,8 @@ public class LuceneDocumentsReaderTest {
 
     }
 
-    protected void assertDocsEqual(String expectedId, String actualId, String expectedSource, String actualSource) {
+    protected void assertDocsEqual(String expectedId, String actualId, String expectedType,
+                                   String actualType, String expectedSource, String actualSource) {
         try {
             String sanitizedExpected = expectedSource.trim().replace("\n", "").replace("\\n", "");
             String sanitizedActual = actualSource.trim().replace("\n", "").replace("\\n", "");
@@ -264,6 +287,7 @@ public class LuceneDocumentsReaderTest {
             JsonNode expectedNode = objectMapper.readTree(sanitizedExpected);
             JsonNode actualNode = objectMapper.readTree(sanitizedActual);
             assertEquals(expectedId, actualId);
+            assertEquals(expectedType, actualType);
             assertEquals(expectedNode, actualNode);
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);
