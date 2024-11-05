@@ -1,0 +1,6 @@
+dependencies:
+- name: helm-common
+  repository: file://../helm-common
+  version: 0.1.0
+digest: sha256:832a04555d938e3cde69f620e3d96e7c51ff1eb209a282a3e7c30cad1aa35b3d
+generated: "2024-10-30T23:09:49.426423-04:00"

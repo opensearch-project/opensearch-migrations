@@ -1,7 +1,14 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: test-env
+data:
+  STAGE: 'dev'
+---
 {{- include "generic.createConfigMaps" (dict
     "Parameters" .Values.parameters
     "PackageName" (include "generic.fullname" .)
-    "NameSpace" .Values.namespace.name
+    "NameSpace" (dig "namespace" "name" "default" (.Values | merge (dict)) )
     "include" .Template.Include
     "Template" .Template
 ) | indent 0 }}

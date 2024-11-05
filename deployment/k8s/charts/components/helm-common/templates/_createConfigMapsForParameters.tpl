@@ -1,7 +1,7 @@
 {{- define "generic.createConfigMaps" }}
 {{- $packageName := .PackageName -}}
 {{- $namespace := .NameSpace -}}
-{{- range $key, $param := .Values.parameters }}
+{{- range $key, $param := .Parameters }}
 ---
 apiVersion: v1
 kind: ConfigMap

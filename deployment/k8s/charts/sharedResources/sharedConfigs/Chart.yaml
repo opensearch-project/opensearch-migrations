@@ -1,0 +1,6 @@
+apiVersion: v2
+name: source-cluster-config-map
+description: A utility Helm chart to hold the global configmap for the source cluster config
+type: application
+version: 0.1.0
+appVersion: "1.16.0"

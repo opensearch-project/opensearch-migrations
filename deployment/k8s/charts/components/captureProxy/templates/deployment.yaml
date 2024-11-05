@@ -3,7 +3,7 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "generic.fullname" . }}
-  namespace: {{ .Values.namespace.name }}
+  namespace: {{ get (get .Values "namespace" (dict)) "name" "default" }}
 spec:
   replicas: 1
   selector:
@@ -20,11 +20,19 @@ spec:
           image: migrations/capture_proxy:latest
           imagePullPolicy: IfNotPresent
           env:
-            {{- include "generic.pullEnvVarsFromConfigMaps" (dict "NameSpace" (include "generic.fullname" .) "Parameters" .Values.parameters "include" .Template.Include "Template" .Template) | indent 10 }}
+            {{- include "generic.pullEnvVarsFromConfigMaps" (dict
+             "Parameters" .Values.parameters
+             "include" .Template.Include
+             "Template" .Template) | indent 10 }}
           command:
             - "/bin/sh"
             - "-c"
             - |
-              {{- include "generic.buildCommandBuilderScript" (dict "Command" "/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy" "PackageName" (include "generic.fullname" .) "Parameters" .Values.parameters "include" .Template.Include "Template" .Template) | nindent 14 }}
+              {{- include "generic.buildCommand" (dict
+                  "Command" "/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy"
+                  "Parameters" .Values.parameters
+                  "PackageName" (include "generic.fullname" .)
+                  "include" .Template.Include
+                  "Template" .Template) | nindent 14 }}
           ports:
             - containerPort: 9200

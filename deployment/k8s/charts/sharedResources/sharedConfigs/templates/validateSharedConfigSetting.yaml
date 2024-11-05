@@ -1,0 +1,106 @@
+# console/templates/helpers.tpl
+{{- define "validateSharedGlobalConfigsIsntFalse" -}}
+{{- $existingFlag := lookup "v1" "ConfigMap" .Release.Namespace "use-shared-configs" }}
+{{- if $existingFlag }}
+  {{- if eq ($existingFlag.data.enabled) "false" }}
+    {{- fail "Error: Cannot install console when the solution is already configured direct service configurations.  Install the shared-config chart first, then update the individual services' useSharedConfig values as well as changing appropriate parameters to load from configMapName." }}
+  {{- end }}
+{{- else }}
+  {{- template "sharedConfigFlag" "true" }}
+{{- end }}
+{{- end }}
+
+# console/templates/validate.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: console-config-validation-{{ .Release.Name }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"  # Run after flag creation
+    "helm.sh/hook-delete-policy": hook-succeeded,hook-failed
+spec:
+  template:
+    spec:
+      serviceAccountName: config-validator
+      containers:
+        - name: validator
+          image: bitnami/kubectl:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+            {{- template "validateSharedGlobalConfigsIsntFalse" . }}
+      restartPolicy: Never
+
+# proxy/templates/validate.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: proxy-config-validation-{{ .Release.Name }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"  # Run after flag creation
+    "helm.sh/hook-delete-policy": hook-succeeded,hook-failed
+spec:
+  template:
+    spec:
+      serviceAccountName: config-validator
+      containers:
+        - name: validator
+          image: bitnami/kubectl:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              echo "Validating config mode..."
+              FLAG=$(kubectl get configmap use-shared-configs -o jsonpath='{.data.enabled}' 2>/dev/null || echo "false")
+              DESIRED="{{ .Values.sharedConfigEnabled }}"
+
+              if [ "$FLAG" != "$DESIRED" ]; then
+                echo "Error: Proxy sharedConfigEnabled ($DESIRED) does not match system setting ($FLAG)"
+                exit 1
+              fi
+
+              if [ -z "$FLAG" ]; then
+                kubectl create configmap use-shared-configs --from-literal=enabled=false
+              fi
+
+              echo "Config mode validation passed"
+      restartPolicy: Never
+
+# aggregate/templates/validation.yaml
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: aggregate-config-validation-{{ .Release.Name }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-15"  # Run first, before any flag creation
+    "helm.sh/hook-delete-policy": hook-succeeded,hook-failed
+spec:
+  template:
+    spec:
+      containers:
+        - name: validator
+          image: bitnami/kubectl:latest
+          command:
+            - /bin/bash
+            - -c
+            - |
+              # If flag exists, verify all components match
+              FLAG=$(kubectl get configmap use-shared-configs -o jsonpath='{.data.enabled}' 2>/dev/null || echo "")
+              if [ -n "$FLAG" ]; then
+              {{- if .Values.proxy.enabled }}
+                if [ "$FLAG" != "{{ .Values.proxy.sharedConfigEnabled }}" ]; then
+                  echo "Error: Proxy sharedConfigEnabled ({{ .Values.proxy.sharedConfigEnabled }}) does not match system setting ($FLAG)"
+                  exit 1
+                fi
+              {{- end }}
+                # Console is always shared=true, so validate that
+                if [ "$FLAG" == "false" ] && [ "{{ .Values.console.enabled }}" == "true" ]; then
+                  echo "Error: Cannot install console when system is configured for local mode"
+                  exit 1
+                fi
+              fi
+      restartPolicy: Never

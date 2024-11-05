@@ -1,18 +1,6 @@
 dependencies:
-- name: grafana
-  repository: https://grafana.github.io/helm-charts
-  version: 8.5.0
-- name: prometheus
-  repository: https://prometheus-community.github.io/helm-charts
-  version: 25.27.0
-- name: jaeger
-  repository: https://jaegertracing.github.io/helm-charts
-  version: 3.2.0
-- name: replayer
-  repository: file://../replayer
+- name: bulkload
+  repository: file://../../components/bulkLoad
   version: 0.1.0
-- name: migration-console
-  repository: file://../migrationConsole
-  version: 0.1.0
-digest: sha256:9c7ffd36325112bc6b488ae1ca0b502c8e16089f009b1d2ea844d7f02cf9aaae
-generated: "2024-10-21T18:07:52.595955-04:00"
+digest: sha256:3513928ccb006c7189bceeb2ea27c4e12324ad20aadeebaec7a729471f69bd93
+generated: "2024-10-31T19:57:56.65178-04:00"

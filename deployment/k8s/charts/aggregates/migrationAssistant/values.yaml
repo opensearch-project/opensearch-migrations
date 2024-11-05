@@ -3,3 +3,7 @@ conditionalPackageInstalls:
   jaeger: true
   prometheus: true
   grafana: true
+parameters:
+  proxy:
+    destinationUri:
+      value: "http://elasticsearch:9200"

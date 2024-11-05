@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: bulk-load
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: bulk-load
+  template:
+    metadata:
+      labels:
+        app: bulk-load
+        env: v1
+    spec:
+      containers:
+        - name: console
+          image: migrations/reindex_from_snapshot:latest
+          imagePullPolicy: IfNotPresent

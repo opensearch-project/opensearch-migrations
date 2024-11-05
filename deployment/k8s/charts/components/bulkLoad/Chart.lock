@@ -1,0 +1,12 @@
+dependencies:
+- name: helm-common
+  repository: file://../helm-common
+  version: 0.1.0
+- name: snapshot-vol
+  repository: file://../snapshot-vol
+  version: 0.1.0
+- name: shared-logs-vol
+  repository: file://../shared-logs-vol
+  version: 0.1.0
+digest: sha256:019e19d45fc3116aec162772e911295bfef166631dd42ca94d5ff75eb924e57d
+generated: "2024-10-31T19:34:54.022629-04:00"

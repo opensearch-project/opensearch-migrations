@@ -1,6 +1,6 @@
 {{- define "generic.createNamespace" }}
 {{- $create := .create }}
-{{- $namespace := .namespace }}
+{{- $namespace := .name }}
 {{- $annotations := .annotations }}
 {{- $labels := .labels }}
 {{- if $create }}

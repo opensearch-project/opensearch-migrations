@@ -1,0 +1,87 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "generic.fullname" . }}
+  namespace: {{ dig "namespace" "name" "default" (.Values | merge (dict)) }}
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: console
+  template:
+    metadata:
+      annotations:
+        rollme: {{ randAlphaNum 5 | quote }}
+      labels:
+        app: console
+        env: v1
+    spec:
+      serviceAccountName: configmap-watcher
+      volumes:
+        - name: merged-config
+          emptyDir: { }
+        {{- if eq .Values.sharedLogsVolumeEnabled true -}}
+        - name: shared-logs
+          persistentVolumeClaim:
+            claimName: {{ .Values.sharedLogsPvc }}
+        {{- end -}}
+{{/*        TODO - this would be different if we were doing */}}
+{{/*               a cluster local FS snapshot, cluster local obj-store snapshot, or an S3 snapshot */}}
+        {{- if eq .Values.snapshotVolumeEnabled true -}}
+        - name: snapshot-vol
+          persistentVolumeClaim:
+            claimName: {{ .Values.snapshotVolumePvc -}}
+        {{- end }}
+      initContainers:
+        - name: service-yaml-agent
+          image: migrations/service_yaml_from_config_maps:latest
+          imagePullPolicy: IfNotPresent
+          restartPolicy: Always
+          volumeMounts:
+            - name: merged-config
+              mountPath: /config
+          args:
+            - "--namespace=default"
+            - "--label-selector=app=myapp"
+            - "--outfile=/config/output.yaml"
+      containers:
+        - name: console
+          image: migrations/migration_console:latest
+          imagePullPolicy: IfNotPresent
+          env:
+            {{- include "generic.pullEnvVarsFromConfigMaps" (dict
+             "Parameters" .Values.parameters
+             "include" .Template.Include
+             "Template" .Template) | indent 10 }}
+          command:
+            - "/bin/sh"
+            - "-c"
+            - |
+              {{- include "generic.buildCommandBuilderScript" (dict
+                  "CmdVarName" "CMD"
+                  "Command" "echo arguments into container: "
+                  "Parameters" .Values.parameters
+                  "PackageName" (include "generic.fullname" .)
+                  "include" .Template.Include
+                  "Template" .Template) | nindent 14 }}
+
+              $CMD || exit $?
+
+              # we've just printed out the arguments received, now it's time to run the appropriate container command
+              if [ -z "MIGRATION_API_ENABLED" ]; then
+                pipenv run python /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt
+              else
+                tail -f /dev/null
+              fi
+          volumeMounts:
+            - name: merged-config
+              mountPath: /etc/migration_services.yaml
+              subPath: migration_services.yaml
+            {{ if eq .Values.sharedLogsVolumeEnabled true}}
+            - name: shared-logs
+              mountPath: /shared-logs-output
+            {{ end }}
+            {{- if eq .Values.snapshotVolumeEnabled true -}}
+            - name: snapshot-vol
+              mountPath: /storage
+            {{- end -}}

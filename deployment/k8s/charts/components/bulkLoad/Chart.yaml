@@ -1,0 +1,15 @@
+apiVersion: v2
+name: bulk-document-loader
+version: 0.1.0
+type: application
+appVersion: "1.16.0"
+dependencies:
+  - name: helm-common
+    repository: file://../helm-common
+    version: 0.1.0
+  - name: snapshot-vol
+    version: "0.1.0"
+    repository: "file://../snapshot-vol"
+  - name: shared-logs-vol
+    version: "0.1.0"
+    repository: "file://../shared-logs-vol"
