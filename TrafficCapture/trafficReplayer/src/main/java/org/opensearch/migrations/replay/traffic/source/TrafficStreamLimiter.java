@@ -45,20 +45,15 @@ public class TrafficStreamLimiter implements AutoCloseable {
         try {
             while (!stopped.get()) {
                 workItem = workQueue.take();
-                log.atDebug()
-                    .setMessage(() -> "liveTrafficStreamCostGate.permits: {} acquiring: {}")
-                    .addArgument(liveTrafficStreamCostGate.availablePermits())
+                log.atDebug().setMessage("liveTrafficStreamCostGate.permits: {} acquiring: {}")
+                    .addArgument(liveTrafficStreamCostGate::availablePermits)
                     .addArgument(workItem.cost)
                     .log();
                 liveTrafficStreamCostGate.acquire(workItem.cost);
                 WorkItem finalWorkItem = workItem;
-                log.atDebug()
-                    .setMessage(
-                        () -> "Acquired liveTrafficStreamCostGate (available="
-                            + liveTrafficStreamCostGate.availablePermits()
-                            + ") to process "
-                            + finalWorkItem.context
-                    )
+                log.atDebug().setMessage("Acquired liveTrafficStreamCostGate (available={}) to process {}")
+                    .addArgument(finalWorkItem.context)
+                    .addArgument(liveTrafficStreamCostGate::availablePermits)
                     .log();
                 workItem.task.accept(workItem);
                 workItem = null;
@@ -66,13 +61,9 @@ public class TrafficStreamLimiter implements AutoCloseable {
         } catch (InterruptedException e) {
             if (!stopped.get()) {
                 WorkItem finalWorkItem = workItem;
-                log.atError()
-                    .setMessage(
-                        () -> "consumeFromQueue() was interrupted with "
-                            + (finalWorkItem != null ? "an active task and " : "")
-                            + workQueue.size()
-                            + " enqueued items"
-                    )
+                log.atError().setMessage("consumeFromQueue() was interrupted with {} enqueued items")
+                    .addArgument(() -> (finalWorkItem != null ? "an active task and " : ""))
+                    .addArgument(workQueue::size)
                     .log();
             }
             throw e;
@@ -88,15 +79,10 @@ public class TrafficStreamLimiter implements AutoCloseable {
 
     public void doneProcessing(@NonNull WorkItem workItem) {
         liveTrafficStreamCostGate.release(workItem.cost);
-        log.atDebug()
-            .setMessage(
-                () -> "released "
-                    + workItem.cost
-                    + " liveTrafficStreamCostGate.availablePermits="
-                    + liveTrafficStreamCostGate.availablePermits()
-                    + " for "
-                    + workItem.context
-            )
+        log.atDebug().setMessage("released {} liveTrafficStreamCostGate.availablePermits={} for {}")
+            .addArgument(workItem.cost)
+            .addArgument(liveTrafficStreamCostGate::availablePermits)
+            .addArgument(workItem.context)
             .log();
     }
 

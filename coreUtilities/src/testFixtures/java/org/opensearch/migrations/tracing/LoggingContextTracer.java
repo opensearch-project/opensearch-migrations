@@ -10,14 +10,14 @@ public class LoggingContextTracer implements IContextTracker {
 
     @Override
     public void onContextCreated(final IScopedInstrumentationAttributes context) {
-        log.atDebug().setMessage(CREATED_MESSAGE).addArgument(context.getActivityName()).log();
+        log.atDebug().setMessage(CREATED_MESSAGE).addArgument(context::getActivityName).log();
     }
 
     @Override
     public void onContextClosed(IScopedInstrumentationAttributes context) {
         log.atDebug()
             .setMessage(CLOSED_MESSAGE)
-            .addArgument(context.getActivityName())
+            .addArgument(context::getActivityName)
             .addArgument(context::getPopulatedSpanAttributes)
             .log();
     }

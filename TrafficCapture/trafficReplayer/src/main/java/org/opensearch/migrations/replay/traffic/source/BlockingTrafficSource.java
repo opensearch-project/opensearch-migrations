@@ -77,25 +77,18 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         var newValue = Utils.setIfLater(stopReadingAtRef, prospectiveBarrier);
         if (newValue.equals(prospectiveBarrier)) {
             log.atLevel(Level.TRACE)
-                .setMessage(
-                    () -> "Releasing the block on readNextTrafficStreamChunk and set"
-                        + " the new stopReadingAtRef="
-                        + newValue
-                )
+                .setMessage("Releasing the block on readNextTrafficStreamChunk and set the new stopReadingAtRef={}")
+                .addArgument(newValue)
                 .log();
             // No reason to signal more than one reader. We don't support concurrent reads with the current contract
             readGate.drainPermits();
             readGate.release();
         } else {
             log.atTrace()
-                .setMessage(
-                    () -> "stopReadsPast: "
-                        + pointInTime
-                        + " [buffer="
-                        + prospectiveBarrier
-                        + "] didn't move the cursor because the value was already at "
-                        + newValue
-                )
+                .setMessage("stopReadsPast: {} [buffer={}] didn't move the cursor because the value was already at {}")
+                .addArgument(pointInTime)
+                .addArgument(prospectiveBarrier)
+                .addArgument(newValue)
                 .log();
         }
     }
@@ -127,11 +120,8 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                 .map(TrafficStreamUtils::instantFromProtoTimestamp)
                 .orElse(Instant.EPOCH);
             Utils.setIfLater(lastTimestampSecondsRef, maxLocallyObservedTimestamp);
-            log.atTrace()
-                .setMessage(
-                    () -> "end of readNextTrafficStreamChunk trigger...lastTimestampSecondsRef="
-                        + lastTimestampSecondsRef.get()
-                )
+            log.atTrace().setMessage("end of readNextTrafficStreamChunk trigger...lastTimestampSecondsRef={}")
+                .addArgument(lastTimestampSecondsRef::get)
                 .log();
         });
     }
@@ -147,10 +137,9 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
         if (stopReadingAtRef.get().equals(Instant.EPOCH)) {
             return null;
         }
-        log.atTrace()
-            .setMessage(
-                () -> "stopReadingAtRef=" + stopReadingAtRef + " lastTimestampSecondsRef=" + lastTimestampSecondsRef
-            )
+        log.atTrace().setMessage("stopReadingAtRef={} lastTimestampSecondsRef={}")
+            .addArgument(stopReadingAtRef)
+            .addArgument(lastTimestampSecondsRef)
             .log();
         ITrafficSourceContexts.IBackPressureBlockContext blockContext = null;
         while (stopReadingAtRef.get().isBefore(lastTimestampSecondsRef.get())) {
@@ -158,10 +147,9 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                 blockContext = readContext.createBackPressureContext();
             }
             try {
-                log.atTrace()
-                    .setMessage("blocking until signaled to read the next chunk last={} stop={}")
-                    .addArgument(lastTimestampSecondsRef.get())
-                    .addArgument(stopReadingAtRef.get())
+                log.atTrace().setMessage("blocking until signaled to read the next chunk last={} stop={}")
+                    .addArgument(lastTimestampSecondsRef::get)
+                    .addArgument(stopReadingAtRef::get)
                     .log();
                 var nextTouchOp = underlyingSource.getNextRequiredTouch();
                 if (nextTouchOp.isEmpty()) {
@@ -173,16 +161,10 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                     var nextInstant = nextTouchOp.get();
                     final var nowTime = Instant.now();
                     var waitIntervalMs = Duration.between(nowTime, nextInstant).toMillis();
-                    log.atDebug()
-                        .setMessage(
-                            () -> "Next touch at "
-                                + nextInstant
-                                + " ... in "
-                                + waitIntervalMs
-                                + "ms (now="
-                                + nowTime
-                                + ")"
-                        )
+                    log.atDebug().setMessage("Next touch at {} ... in {}ms (now={})")
+                        .addArgument(nextInstant)
+                        .addArgument(waitIntervalMs)
+                        .addArgument(nowTime)
                         .log();
                     if (waitIntervalMs <= 0) {
                         underlyingSource.touch(blockContext);
@@ -190,17 +172,17 @@ public class BlockingTrafficSource implements ITrafficCaptureSource, BufferedFlo
                         // if this doesn't succeed, we'll loop around & likely do a touch, then loop around again.
                         // if it DOES succeed, we'll loop around and make sure that there's not another reason to stop
                         log.atTrace()
-                            .setMessage(() -> "acquiring readGate semaphore with timeout=" + waitIntervalMs)
-                            .log();
+                            .setMessage("acquiring readGate semaphore with timeout={}")
+                            .addArgument(waitIntervalMs).log();
                         try (var waitContext = blockContext.createWaitForSignalContext()) {
                             var didAcquire = readGate.tryAcquire(waitIntervalMs, TimeUnit.MILLISECONDS);
-                            log.atTrace().setMessage("semaphore ")
+                            log.atTrace().setMessage("semaphore {}")
                                 .addArgument(() -> (didAcquire ? "" : "not ") + "acquired").log();
                         }
                     }
                 }
             } catch (InterruptedException e) {
-                log.atWarn().setCause(e).log("Interrupted while waiting to read more data");
+                log.atWarn().setCause(e).setMessage("Interrupted while waiting to read more data").log();
                 Thread.currentThread().interrupt();
                 break;
             }

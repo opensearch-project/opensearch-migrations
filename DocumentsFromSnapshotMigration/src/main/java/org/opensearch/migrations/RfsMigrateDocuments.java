@@ -321,7 +321,7 @@ public class RfsMigrateDocuments {
             log.atWarn().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
             System.exit(NO_WORK_LEFT_EXIT_CODE);
         } catch (Exception e) {
-            log.atError().setMessage("Unexpected error running RfsWorker").setCause(e).log();
+            log.atError().setCause(e).setMessage("Unexpected error running RfsWorker").log();
             throw e;
         }
     }
@@ -403,18 +403,10 @@ public class RfsMigrateDocuments {
                 );
                 return;
             } catch (IWorkCoordinator.LeaseLockHeldElsewhereException e) {
-                long finalLockRenegotiationMillis = lockRenegotiationMillis;
-                int finalShardSetupAttemptNumber = shardSetupAttemptNumber;
-                log.atInfo()
-                    .setMessage(
-                        () -> "After "
-                            + finalShardSetupAttemptNumber
-                            + "another process holds the lock"
-                            + " for setting up the shard work items.  "
-                            + "Waiting "
-                            + finalLockRenegotiationMillis
-                            + "ms before trying again."
-                    )
+                log.atInfo().setMessage("After {} another process holds the lock for setting up the shard work items." +
+                        "  Waiting {} ms before trying again.")
+                    .addArgument(shardSetupAttemptNumber)
+                    .addArgument(lockRenegotiationMillis)
                     .log();
                 Thread.sleep(lockRenegotiationMillis);
                 lockRenegotiationMillis *= 2;

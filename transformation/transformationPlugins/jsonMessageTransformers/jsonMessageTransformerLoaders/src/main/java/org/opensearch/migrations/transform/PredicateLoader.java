@@ -29,15 +29,13 @@ public class PredicateLoader {
         );
         var inProgressProviders = new ArrayList<IJsonPredicateProvider>();
         for (var provider : predicateProviders) {
-            log.info("Adding IJsonPredicateProvider: " + provider);
+            log.atInfo().setMessage("Adding IJsonPredicateProvider: {}").addArgument(provider).log();
             inProgressProviders.add(provider);
         }
         providers = Collections.unmodifiableList(inProgressProviders);
         log.atInfo()
-            .setMessage(
-                () -> "IJsonPredicateProvider loaded: "
-                    + providers.stream().map(p -> p.getClass().toString()).collect(Collectors.joining("; "))
-            )
+            .setMessage(() -> "IJsonPredicateProvider loaded: {}")
+            .addArgument(() -> providers.stream().map(p -> p.getClass().toString()).collect(Collectors.joining("; ")))
             .log();
     }
 
@@ -81,9 +79,9 @@ public class PredicateLoader {
             if (predicateName.equals(key)) {
                 var configuration = c.get(key);
                 log.atInfo()
-                    .setMessage(
-                        () -> "Creating a Predicate through provider=" + p + " with configuration=" + configuration
-                    )
+                    .setMessage("Creating a Predicate through provider={} with configuration={}")
+                    .addArgument(p)
+                    .addArgument(configuration)
                     .log();
                 return p.createPredicate(configuration);
             }

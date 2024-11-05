@@ -68,7 +68,7 @@ class JsonTransformerTest {
         var transformer = JsonJoltTransformer.newBuilder().addHostSwitchOperation(DUMMY_HOSTNAME_TEST_STRING).build();
         var transformedDocument = transformer.transformJson(documentJson);
         String transformedJsonOutputStr = emitJson(transformedDocument);
-        log.info("transformed json document: " + transformedJsonOutputStr);
+        log.atInfo().setMessage("transformed json document: {}").addArgument(transformedJsonOutputStr).log();
         Assertions.assertTrue(transformedJsonOutputStr.contains(DUMMY_HOSTNAME_TEST_STRING));
     }
 

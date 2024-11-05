@@ -53,7 +53,7 @@ public class LuceneDocumentsReaderTest {
     @BeforeEach
     public void setUp() throws IOException {
         tempDirectory = Files.createTempDirectory("test-temp-dir");
-        log.atDebug().log("Temporary directory created at: " + tempDirectory);
+        log.atDebug().setMessage("Temporary directory created at: {}").addArgument(tempDirectory).log();
     }
 
     @AfterEach
@@ -64,7 +64,7 @@ public class LuceneDocumentsReaderTest {
                 try {
                     Files.delete(path);
                 } catch (IOException e) {
-                    log.atError().setMessage("Failed to delete: " + path).setCause(e).log();
+                    log.atError().setCause(e).setMessage("Failed to delete: {}").addArgument(path).log();
                 }
             });
         log.atDebug().log("Temporary directory deleted.");

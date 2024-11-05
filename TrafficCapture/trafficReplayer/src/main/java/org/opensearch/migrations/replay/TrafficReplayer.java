@@ -337,7 +337,7 @@ public class TrafficReplayer {
             final var msg = "Exception parsing " + params.targetUriString;
             System.err.println(msg);
             System.err.println(e.getMessage());
-            log.atError().setMessage(msg).setCause(e).log();
+            log.atError().setCause(e).setMessage("{}").addArgument(msg).log();
             System.exit(3);
             return;
         }
@@ -420,10 +420,9 @@ public class TrafficReplayer {
             );
             ActiveContextMonitor finalActiveContextMonitor = activeContextMonitor;
             scheduledExecutorService.scheduleAtFixedRate(() -> {
-                activeContextLogger.atInfo()
-                    .setMessage(
-                        () -> "Total requests outstanding at " + Instant.now() + ": " + tr.requestWorkTracker.size()
-                    )
+                activeContextLogger.atInfo().setMessage("Total requests outstanding at {}: {}")
+                    .addArgument(Instant::now)
+                    .addArgument(tr.requestWorkTracker::size)
                     .log();
                 finalActiveContextMonitor.run();
             }, ACTIVE_WORK_MONITOR_CADENCE_MS, ACTIVE_WORK_MONITOR_CADENCE_MS, TimeUnit.MILLISECONDS);
@@ -445,9 +444,9 @@ public class TrafficReplayer {
                 var acmLevel = globalContextTracker.getActiveScopesByAge().findAny().isPresent()
                     ? Level.ERROR
                     : Level.INFO;
-                activeContextLogger.atLevel(acmLevel).setMessage(() -> "Outstanding work after shutdown...").log();
+                activeContextLogger.atLevel(acmLevel).setMessage("Outstanding work after shutdown...").log();
                 activeContextMonitor.run();
-                activeContextLogger.atLevel(acmLevel).setMessage(() -> "[end of run]]").log();
+                activeContextLogger.atLevel(acmLevel).setMessage("[end of run]]").log();
             }
         }
     }

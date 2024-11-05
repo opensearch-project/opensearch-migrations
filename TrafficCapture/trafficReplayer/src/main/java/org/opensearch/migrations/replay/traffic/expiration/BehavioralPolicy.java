@@ -60,18 +60,15 @@ public class BehavioralPolicy {
                 + extraGap
                 + (hintString == null ? "" : "  " + hintString)
         );
-        log.atInfo()
-            .setMessage(
-                () -> "New data has arrived for "
-                    + formatPartitionAndConnectionIds(trafficStreamKey)
-                    + ", but during the processing of this Accumulation object, the Accumulation was expired.  "
-                    + "The maximum timestamp that would NOT have triggered expirations of previously observed data is "
-                    + endOfLastWindow
-                    + " and the last timestamp of the reference packet was "
-                    + packetTimestamp
-                    + ".  To remedy this, set the minimumGuaranteedLifetime to at least "
-                    + extraGap
-            )
+        log.atInfo().setMessage("New data has arrived for {},"
+                + " but during the processing of this Accumulation object, the Accumulation was expired.  "
+                + "The maximum timestamp that would NOT have triggered expirations of previously observed data is {}"
+                + " and the last timestamp of the reference packet was {}. "
+                + " To remedy this, set the minimumGuaranteedLifetime to at least {}")
+            .addArgument(() -> formatPartitionAndConnectionIds(trafficStreamKey))
+            .addArgument(endOfLastWindow)
+            .addArgument(packetTimestamp)
+            .addArgument(extraGap)
             .log();
     }
 

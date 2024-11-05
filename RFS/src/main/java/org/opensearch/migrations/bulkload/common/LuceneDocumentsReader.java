@@ -119,7 +119,7 @@ public class LuceneDocumentsReader {
         var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
             .addArgument(reader::maxDoc)
-            .addArgument(reader.leaves()::size)
+            .addArgument(() -> reader.leaves().size())
             .log();
 
         // Create shared scheduler for i/o bound document reading
@@ -157,7 +157,8 @@ public class LuceneDocumentsReader {
         try {
             document = reader.document(docId);
         } catch (IOException e) {
-            log.atError().setMessage("Failed to read document at Lucene index location {}").addArgument(docId).setCause(e).log();
+            log.atError().setCause(e).setMessage("Failed to read document at Lucene index location {}")
+                .addArgument(docId).log();
             return null;
         }
 
@@ -191,12 +192,14 @@ public class LuceneDocumentsReader {
                 }
             }
             if (id == null) {
-                log.atError().setMessage("Document with index" + docId + " does not have an id. Skipping").log();
+                log.atError().setMessage("Document with index {} does not have an id. Skipping")
+                    .addArgument(docId).log();
                 return null;  // Skip documents with missing id
             }
 
             if (sourceBytes == null || sourceBytes.bytes.length == 0) {
-                log.atWarn().setMessage("Document {} doesn't have the _source field enabled").addArgument(id).log();
+                log.atWarn().setMessage("Document {} doesn't have the _source field enabled")
+                    .addArgument(id).log();
                 return null;  // Skip these
             }
 
@@ -205,7 +208,7 @@ public class LuceneDocumentsReader {
             StringBuilder errorMessage = new StringBuilder();
             errorMessage.append("Unable to parse Document id from Document.  The Document's Fields: ");
             document.getFields().forEach(f -> errorMessage.append(f.name()).append(", "));
-            log.atError().setMessage(errorMessage.toString()).setCause(e).log();
+            log.atError().setCause(e).setMessage("{}").addArgument(errorMessage).log();
             return null; // Skip documents with invalid id
         }
 
