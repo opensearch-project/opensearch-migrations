@@ -4,7 +4,7 @@ import java.io.File;
 import java.nio.file.Path;
 import java.util.List;
 
-import org.opensearch.migrations.bulkload.common.DocumentReindexer.BulkDocSection;
+import org.opensearch.migrations.bulkload.common.BulkDocSection;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.framework.SimpleRestoreFromSnapshot_ES_7_10;
@@ -95,7 +95,7 @@ public class SnapshotStateTest {
         verify(client, times(1)).sendBulkRequest(eq(indexName), docsCaptor.capture(), any());
         final var document = docsCaptor.getValue().get(0);
         assertThat(document.getDocId(), equalTo(document1Id));
-        assertThat(document.asBulkIndex(), allOf(containsString(document1Id), containsString("{\"fo$o\":\"bar\"}")));
+        assertThat(document.asBulkIndexString(), allOf(containsString(document1Id), containsString("{\"fo$o\":\"bar\"}")));
 
         verifyNoMoreInteractions(client);
     }
@@ -170,7 +170,7 @@ public class SnapshotStateTest {
         assertThat("Only one document, the one that was updated", docsCaptor.getValue().size(), equalTo(1));
         final var document = docsCaptor.getValue().get(0);
         assertThat(document.getDocId(), equalTo(document1Id));
-        assertThat(document.asBulkIndex(), not(containsString(document1BodyOriginal)));
+        assertThat(document.asBulkIndexString(), not(containsString(document1BodyOriginal)));
 
         verifyNoMoreInteractions(client);
     }

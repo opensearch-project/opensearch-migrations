@@ -349,7 +349,7 @@ public class OpenSearchClient {
         return BULK_RETRY_STRATEGY;
     }
 
-    public Mono<BulkResponse> sendBulkRequest(String indexName, List<DocumentReindexer.BulkDocSection> docs,
+    public Mono<BulkResponse> sendBulkRequest(String indexName, List<BulkDocSection> docs,
                                               IRfsContexts.IRequestContext context)
     {
         final var docsMap = docs.stream().collect(Collectors.toMap(d -> d.getDocId(), d -> d));
@@ -359,7 +359,7 @@ public class OpenSearchClient {
                 .setMessage("Creating bulk body with document ids {}")
                 .addArgument(() -> docsMap.keySet())
                 .log();
-            var body = DocumentReindexer.BulkDocSection.convertToBulkRequestBody(docsMap.values());
+            var body = BulkDocSection.convertToBulkRequestBody(docsMap.values());
             var additionalHeaders = new HashMap<String, List<String>>();
             // Reduce network bandwidth by attempting request and response compression
             if (client.supportsGzipCompression()) {
@@ -393,7 +393,7 @@ public class OpenSearchClient {
                 failedRequestsLogger.logBulkFailure(
                     indexName,
                     docsMap::size,
-                    () -> DocumentReindexer.BulkDocSection.convertToBulkRequestBody(docsMap.values()),
+                    () -> BulkDocSection.convertToBulkRequestBody(docsMap.values()),
                     error
                 );
             } else {

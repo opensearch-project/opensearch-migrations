@@ -162,6 +162,7 @@ public class LuceneDocumentsReader {
         }
 
         String id = null;
+        String type = null;
         BytesRef sourceBytes = null;
         try {
             for (var field : document.getFields()) {
@@ -174,8 +175,10 @@ public class LuceneDocumentsReader {
                         break;
                     }
                     case "_uid": {
-                        // ES 5
-                        id = field.stringValue();
+                        // ES <= 6
+                        var combinedTypeId = field.stringValue().split("#", 2);
+                        type = combinedTypeId[0];
+                        id = combinedTypeId[1];
                         break;
                     }
                     case "_source": {
@@ -212,6 +215,6 @@ public class LuceneDocumentsReader {
         }
 
         log.atDebug().setMessage("Document {} read successfully").addArgument(id).log();
-        return new RfsLuceneDocument(id, sourceBytes.utf8ToString());
+        return new RfsLuceneDocument(id, type, sourceBytes.utf8ToString());
     }
 }
