@@ -4,19 +4,15 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
-requests = ">=2.32.3"
-boto3 = "*"
-pyyaml = "*"
-Click = "*"
-cerberus = "*"
-awscli = "*"
+console-link = {file = "../lib/console_link"}
+cluster_tools = {editable = true, path = "."}
+argparse = "*"
+argcomplete = "*"
 
 [dev-packages]
 pytest = "*"
-pytest-mock = "*"
-requests-mock = "*"
 coverage = "*"
-moto = "*"
+testcontainers = {extras = ["opensearch"], version = "*"}
 
 [requires]
 python_version = "3.11"

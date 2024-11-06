@@ -291,7 +291,7 @@ Unit tests can be run from this current `console_link/` by first installing depe
 
 ```shell
 pipenv install --dev
-pipenv run coverage run -m pytest
+pipenv run test
 ```
 
 ### Coverage
