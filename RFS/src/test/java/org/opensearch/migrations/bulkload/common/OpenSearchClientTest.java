@@ -192,6 +192,21 @@ class OpenSearchClientTest {
         verifyNoMoreInteractions(restClient);
     }
 
+    @Test
+    void testGetClusterVersion_OS_CompatibilityModeFailure_UseFallback() {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_ES_7_10_2);
+
+        var versionResponse = new HttpResponse(403, "Forbidden", Map.of(), "");
+        when(restClient.getAsync("_cluster/settings", null)).thenReturn(Mono.just(versionResponse));
+
+        var version = openSearchClient.getClusterVersion();
+
+        assertThat(version, equalTo(Version.fromString("ES 7.10.2")));
+        verify(restClient).getAsync("", null);
+        verify(restClient).getAsync("_cluster/settings", null);
+        verifyNoMoreInteractions(restClient);
+    }
+
     private void setupOkResponse(RestClient restClient, String url, String body) {
         var versionResponse = new HttpResponse(200, "OK", Map.of(), body);
         when(restClient.getAsync(url, null)).thenReturn(Mono.just(versionResponse));
@@ -199,7 +214,6 @@ class OpenSearchClientTest {
 
     @Test
     void testGetClusterVersion_OS_Serverless() {
-
         var versionResponse = new HttpResponse(404, "Not Found", Map.of(), "");
         when(restClient.getAsync("", null)).thenReturn(Mono.just(versionResponse));
 

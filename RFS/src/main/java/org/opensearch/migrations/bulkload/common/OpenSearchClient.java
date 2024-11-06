@@ -112,6 +112,13 @@ public class OpenSearchClient {
                     .doOnError(e -> log.error(e.getMessage()))
                     .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY);
             })
+            .onErrorResume(e -> {
+                log.atWarn()
+                    .setCause(e)
+                    .setMessage("Unable to CompatibilityMode or determine the version from a plugin, falling back to version {}")
+                    .addArgument(versionFromRootApi).log();
+                return Mono.just(versionFromRootApi);
+            })
             .block();        
     }
 
@@ -169,6 +176,7 @@ public class OpenSearchClient {
         if (resp.statusCode != 200) {
             return Mono.error(new OperationFailed("Unexpected status code " + resp.statusCode, resp));
         }
+        var pluginToVersionCheck = "repository-s3";
         try {
             var body = (ArrayNode) objectMapper.readTree(resp.body);
             var elemIterator = body.elements();
@@ -177,7 +185,7 @@ public class OpenSearchClient {
                 var isRepositoryS3 = Optional.ofNullable(current.get("component"))
                     .filter(n -> !n.isNull())
                     .map(n -> n.asText())
-                    .map(text -> "repository-s3".equals(text))
+                    .map(text -> pluginToVersionCheck.equals(text))
                     .orElse(false);
                 if (isRepositoryS3) {
                     return Optional.ofNullable(current.get("version"))
@@ -192,7 +200,7 @@ public class OpenSearchClient {
             log.error("Unable to determine if the cluster is in compatibility mode", e);
             return Mono.error(new OperationFailed("Unable to determine if the cluster is in compatibility mode from response: " + e.getMessage(), resp));
         }
-        return Mono.error(new OperationFailed("No version number found after scanning all installed plugins", resp));
+        return Mono.error(new OperationFailed("Unable to find a version number for plugin '" + pluginToVersionCheck + "', install this plugin to prevent this error during version detection.", resp));
     }
 
     private Flavor getLikelyOpenSearchFlavor() {
