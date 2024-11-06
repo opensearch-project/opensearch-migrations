@@ -144,12 +144,6 @@ export class SolutionsInfrastructureStack extends Stack {
         })
 
         const solutionsUserAgent = `AwsSolution/${props.solutionId}/${props.solutionVersion}`
-        const cfnInitConfig: InitElement[] = [
-            InitCommand.shellCommand(`echo "export MIGRATIONS_APP_REGISTRY_ARN=${appRegistryAppARN}; export MIGRATIONS_USER_AGENT=${solutionsUserAgent}" > /etc/profile.d/solutionsEnv.sh`),
-            InitFile.fromFileInline("/opensearch-migrations/initBootstrap.sh", './initBootstrap.sh', {
-                mode: "000744"
-            }),
-        ]
 
         const bootstrapRole = new Role(this, 'BootstrapRole', {
             assumedBy: new ServicePrincipal('ec2.amazonaws.com'),
@@ -187,6 +181,13 @@ export class SolutionsInfrastructureStack extends Stack {
             importedVPCParameters.push(vpcIdParameter.logicalId, availabilityZonesParameter.logicalId, privateSubnetIdsParameter.logicalId)
             vpc = importVPC(this, vpcIdParameter, availabilityZonesParameter, privateSubnetIdsParameter);
         }
+
+        const cfnInitConfig: InitElement[] = [
+            InitCommand.shellCommand(`echo "export MIGRATIONS_APP_REGISTRY_ARN=${appRegistryAppARN}; export MIGRATIONS_USER_AGENT=${solutionsUserAgent}; export VPC_ID=${vpc.vpcId}; export STAGE=${stageParameter.valueAsString}" > /etc/profile.d/solutionsEnv.sh`),
+            InitFile.fromFileInline("/opensearch-migrations/initBootstrap.sh", './initBootstrap.sh', {
+                mode: "000744"
+            }),
+        ]
 
         new Instance(this, 'BootstrapEC2Instance', {
             vpc: vpc,
