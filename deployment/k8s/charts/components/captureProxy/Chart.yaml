@@ -3,5 +3,5 @@ name: capture-proxy
 version: 0.1.0
 dependencies:
   - name: helm-common
-    repository: file://../helm-common
+    repository: file://../../sharedResources/helmCommon
     version: 0.1.0
