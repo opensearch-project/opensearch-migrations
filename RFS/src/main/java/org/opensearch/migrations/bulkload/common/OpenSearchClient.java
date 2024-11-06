@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.time.Duration;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -14,6 +15,7 @@ import java.util.stream.Collectors;
 import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
+import org.opensearch.migrations.bulkload.common.OpenSearchClient.OperationFailed;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
@@ -23,7 +25,6 @@ import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
@@ -107,8 +108,8 @@ public class OpenSearchClient {
                 if (!hasCompatibilityModeEnabled) {
                     return Mono.just(versionFromRootApi);
                 }
-                return client.getAsync("_cat/plugins?format=json", null)
-                    .flatMap(this::getVersionFromPlugins)
+                return client.getAsync("_nodes/_all/nodes,version?format=json", null)
+                    .flatMap(this::getVersionFromNodes)
                     .doOnError(e -> log.error(e.getMessage()))
                     .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY);
             })
@@ -172,35 +173,35 @@ public class OpenSearchClient {
             .orElse(false);
     }
 
-    private Mono<Version> getVersionFromPlugins(HttpResponse resp) {
+    private Mono<Version> getVersionFromNodes(HttpResponse resp) {
         if (resp.statusCode != 200) {
             return Mono.error(new OperationFailed("Unexpected status code " + resp.statusCode, resp));
         }
-        var pluginToVersionCheck = "repository-s3";
+        var foundVersions = new HashSet<Version>();
         try {
-            var body = (ArrayNode) objectMapper.readTree(resp.body);
-            var elemIterator = body.elements();
-            while (elemIterator.hasNext()) {
-                var current = elemIterator.next();
-                var isRepositoryS3 = Optional.ofNullable(current.get("component"))
-                    .filter(n -> !n.isNull())
-                    .map(n -> n.asText())
-                    .map(text -> pluginToVersionCheck.equals(text))
-                    .orElse(false);
-                if (isRepositoryS3) {
-                    return Optional.ofNullable(current.get("version"))
-                        .filter(n -> !n.isNull())
-                        .map(n -> n.asText())
-                        .map(text -> Version.fromString(getLikelyOpenSearchFlavor() + " " + text))
-                        .map(Mono::just)
-                        .orElseGet(() -> Mono.error(new OperationFailed("No version number found", resp)));
-                }
+
+            var nodes = objectMapper.readTree(resp.body)
+                .get("nodes");
+            nodes.fields().forEachRemaining(node -> {
+                var versionNumber = node.getValue().get("version").asText();
+                var nodeVersion = Version.fromString(getLikelyOpenSearchFlavor() + " " + versionNumber);
+                foundVersions.add(nodeVersion);
+            });
+
+            if (foundVersions.size() == 0) {
+                return Mono.error(new OperationFailed("Unable to find any version numbers", resp));
             }
+
+            if (foundVersions.size() == 1) {
+                return Mono.just(foundVersions.stream().findFirst().get());
+            }
+
+            return Mono.error(new OperationFailed("Multiple version numbers discovered on nodes, " + foundVersions, resp));
+
         } catch (Exception e) {
-            log.error("Unable to determine if the cluster is in compatibility mode", e);
-            return Mono.error(new OperationFailed("Unable to determine if the cluster is in compatibility mode from response: " + e.getMessage(), resp));
+            log.error("Unable to check node versions", e);
+            return Mono.error(new OperationFailed("Unable to check node versions: " + e.getMessage(), resp));
         }
-        return Mono.error(new OperationFailed("Unable to find a version number for plugin '" + pluginToVersionCheck + "', install this plugin to prevent this error during version detection.", resp));
     }
 
     private Flavor getLikelyOpenSearchFlavor() {

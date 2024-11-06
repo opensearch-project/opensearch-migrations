@@ -53,7 +53,28 @@ import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemE
 
 @ExtendWith(MockitoExtension.class)
 class OpenSearchClientTest {
-    private static final String PLUGINS_RESPONSE_OS_2_13_0 = "[{\"name\":\"74c8fa743d5e3626e3903c3b1d5450e0\",\"component\":\"performance-analyzer\",\"version\":\"x.x.x.x\"},{\"name\":\"74c8fa743d5e3626e3903c3b1d5450e0\",\"component\":\"repository-s3\",\"version\":\"2.13.0\"}]";
+    private static final String NODES_RESPONSE_OS_2_13_0 = "{\r\n" + //
+                "    \"_nodes\": {\r\n" + //
+                "        \"total\": 1,\r\n" + //
+                "        \"successful\": 1,\r\n" + //
+                "        \"failed\": 0\r\n" + //
+                "    },\r\n" + //
+                "    \"cluster_name\": \"336984078605:target-domain\",\r\n" + //
+                "    \"nodes\": {\r\n" + //
+                "        \"HDzrwdO8TneRQaxzx94uKA\": {\r\n" + //
+                "            \"name\": \"74c8fa743d5e3626e3903c3b1d5450e0\",\r\n" + //
+                "            \"version\": \"2.13.0\",\r\n" + //
+                "            \"build_type\": \"tar\",\r\n" + //
+                "            \"build_hash\": \"unknown\",\r\n" + //
+                "            \"roles\": [\r\n" + //
+                "                \"data\",\r\n" + //
+                "                \"ingest\",\r\n" + //
+                "                \"master\",\r\n" + //
+                "                \"remote_cluster_client\"\r\n" + //
+                "            ]\r\n" + //
+                "        }\r\n" + //
+                "    }\r\n" + //
+                "}";
     private static final String CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_ENABLED = "{\"persistent\":{\"compatibility\":{\"override_main_response_version\":\"true\"}}}";
     private static final String CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED = "{\"persistent\":{\"compatibility\":{\"override_main_response_version\":\"false\"}}}";
     private static final String ROOT_RESPONSE_OS_1_0_0 = "{\"version\":{\"distribution\":\"opensearch\",\"number\":\"1.0.0\"}}";
@@ -169,14 +190,14 @@ class OpenSearchClientTest {
         when(connectionContext.isAwsSpecificAuthentication()).thenReturn(true);
         setupOkResponse(restClient, "", ROOT_RESPONSE_ES_7_10_2);
         setupOkResponse(restClient, "_cluster/settings", CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_ENABLED);
-        setupOkResponse(restClient, "_cat/plugins?format=json", PLUGINS_RESPONSE_OS_2_13_0);
+        setupOkResponse(restClient, "_nodes/_all/nodes,version?format=json", NODES_RESPONSE_OS_2_13_0);
 
         var version = openSearchClient.getClusterVersion();
 
         assertThat(version, equalTo(Version.fromString("AOS 2.13.0")));
         verify(restClient).getAsync("", null);
         verify(restClient).getAsync("_cluster/settings", null);
-        verify(restClient).getAsync("_cat/plugins?format=json", null);
+        verify(restClient).getAsync("_nodes/_all/nodes,version?format=json", null);
     }
 
     @Test
