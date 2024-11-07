@@ -47,7 +47,10 @@ WORKDIR /root
 
 # Console setup bash completion and venv for interactive access
 RUN echo '. /.venv/bin/activate' >> /etc/profile.d/venv.sh
-RUN dnf install -y bash-completion
+RUN dnf install -y bash-completion --setopt=install_weak_deps=False && \
+        dnf clean all && \
+        rm -rf /var/cache/dnf
+
 RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo '. /etc/profile.d/venv.sh' >> ~/.bashrc && \
     echo 'echo Welcome to the Migration Assistant Console' >> ~/.bashrc
