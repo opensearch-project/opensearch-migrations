@@ -89,7 +89,7 @@ function importVPC(stack: Stack, vpdIdParameter: CfnParameter, availabilityZones
     });
 }
 
-function generateExportString(exports: { [key: string]: string }): string {
+function generateExportString(exports:  Record<string, string>): string {
     return Object.entries(exports)
         .map(([key, value]) => `export ${key}=${value}`)
         .join("; ");
