@@ -41,7 +41,7 @@ def main(args=None):
         else:
             # Raise an exception if the 'define_arguments' function is missing
             raise Exception(
-                f"The tool '{tool_name}' does not have a 'define_arguments' function.
+                f"The tool '{tool_name}' does not have a 'define_arguments' function. \
                   Please add one to specify its arguments.")
 
         tool_parser.set_defaults(func=tool_module.main)  # Set the main function as the handler
