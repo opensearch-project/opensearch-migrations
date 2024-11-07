@@ -1,14 +1,16 @@
 import json
 from typing import Dict, Optional, Union, Any
-from console_link.cli import cli
-from click.testing import CliRunner
+from console_link.models.cluster import HttpMethod
+from console_link.environment import Environment
 
-def console_curl(path: str,
-                cluster: str = 'target_cluster',
-                method: str = 'GET',
-                headers: Optional[Dict[str, str]] = None,
-                data: Optional[str] = None,
-                json_data: Optional[Dict] = None) -> Union[Dict[str, Any], str]:
+def console_curl(
+    env: Environment,
+    path: str,
+    cluster: str = 'target_cluster',
+    method: str = 'GET',
+    headers: Optional[Dict[str, str]] = None,
+    json_data: Optional[Dict] = None
+) -> Union[Dict[str, Any], str]:
     """
     Utility function to call the 'console clusters curl' command programmatically.
 
@@ -16,33 +18,42 @@ def console_curl(path: str,
     :param path: API path to call
     :param method: HTTP method (e.g., 'GET', 'POST', etc.)
     :param headers: Dictionary of headers to include in the request
-    :param data: Data to send in the request body
     :param json_data: JSON data to send in the request body (as a dictionary)
     :return: Parsed JSON response as a dictionary or raw response string
     """
+    try:
+        http_method = HttpMethod[method.upper()]
+    except KeyError:
+        raise ValueError(f"Invalid HTTP method: {method}")
 
-    cmd_args = ['clusters', 'curl', cluster, path, '-X', method]
+    if cluster == 'source_cluster':
+        cluster_obj = env.source_cluster
+    elif cluster == 'target_cluster':
+        cluster_obj = env.target_cluster
+    else:
+        raise ValueError("`cluster` must be either 'source_cluster' or 'target_cluster'.")
 
-    if headers:
-        for key, value in headers.items():
-            cmd_args.extend(['-H', f'{key}:{value}'])
+    if cluster_obj is None:
+        raise ValueError(f"{cluster} is not defined in the environment.")
 
-    if data:
-        cmd_args.extend(['-d', data])
-
-    if json_data:
-        if not headers or 'Content-Type' not in headers:
-            cmd_args.extend(['-H', 'Content-Type: application/json'])
-        json_str = json.dumps(json_data)
-        cmd_args.extend(['--json', json_str])
-
-    runner = CliRunner()
-    result = runner.invoke(cli, cmd_args)
-
-    if result.exit_code != 0:
-        raise Exception(f"Command failed with exit code {result.exit_code}\n{result.output}")
+    if json_data is not None:
+        if headers is None:
+            headers = {}
+        headers.setdefault('Content-Type', 'application/json')
+        response = cluster_obj.call_api(
+            path=path,
+            method=http_method,
+            headers=headers,
+            data=json.dumps(json_data)
+        )
+    else:
+        response = cluster_obj.call_api(
+            path=path,
+            method=http_method,
+            headers=headers,
+        )
 
     try:
-        return json.loads(result.output)
+        return response.json()
     except json.JSONDecodeError:
-        return result.output
+        return response.text

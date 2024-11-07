@@ -1,19 +1,21 @@
-from src.tools.create_index import create_index
-import requests
-from tests.utils import opensearch_container
+from src.tools.create_index import main as create_index
+from tests.utils import env, get_target_index_info
+from src.cluster_tools.utils import console_curl
+import argparse
 
-def test_create_index(opensearch_container):
+def test_create_index(env):
     """Test the create_index function to ensure it creates an index in OpenSearch."""
-    base_url = opensearch_container["base_url"]
 
     index_name = "test-index"
-    primary_shards = 1
+    primary_shards = 10
 
-    # Call the create_index function
-    create_index(index_name, primary_shards)
+    # Call create_index
+    args = argparse.Namespace(index_name=index_name, primary_shards=primary_shards)
+    create_index(env, args)
+    # Verify that the index was created successfully with correct shards
+    index_info = get_target_index_info(env, index_name)
 
-    # Verify that the index was created successfully
-    verify_response = requests.get(f"{base_url}/{index_name}")
-    assert verify_response.status_code == 200, "Index was not created successfully."
-    index_info = verify_response.json()
-    assert int(index_info[index_name]["settings"]["index"]["number_of_shards"]) == primary_shards, "Primary shards count does not match."
+    assert isinstance(index_info, dict), "Index was not created successfully."
+    actual_shards = int(index_info[index_name]["settings"]["index"]["number_of_shards"])
+    print(f"Expected shards: {primary_shards}, Actual shards: {actual_shards}")
+    assert actual_shards == primary_shards, f"Expected shards: {primary_shards}, Actual shards: {actual_shards}"

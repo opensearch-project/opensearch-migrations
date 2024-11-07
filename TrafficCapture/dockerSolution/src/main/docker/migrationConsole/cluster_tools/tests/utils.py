@@ -4,9 +4,11 @@ from testcontainers.core.waiting_utils import wait_for_logs
 import tempfile
 import os
 import yaml
+from console_link.environment import Environment
+from src.cluster_tools.utils import console_curl
 
 @pytest.fixture(scope="module")
-def opensearch_container():
+def env():
     # Spin up the OpenSearch container and wait until it's healthy
     container = OpenSearchContainer()
     container.start()
@@ -31,11 +33,27 @@ def opensearch_container():
         yaml.dump(services_config, temp_config)
         temp_config_path = temp_config.name
     
-    # Set the CONFIG_FILE environment variable scoped to the pytest test
-    os.environ['CONFIG_FILE'] = temp_config_path
-    
-    yield {"base_url": base_url, "config_file": temp_config_path}  # Provide the connection details to tests
+    yield Environment(temp_config_path)
     
     # Stop the container and clean up the temporary services.yaml file after tests complete
     container.stop()
     os.remove(temp_config_path)
+
+def target_cluster_refresh(env: Environment) -> None:
+    """Refreshes the target cluster's indices."""
+    console_curl(
+        env=env,
+        path="/_refresh",
+        cluster='target_cluster',
+        method='POST'
+    )
+
+def get_target_index_info(env: Environment, index_name: str) -> dict:
+    """Retrieves information about the target index."""
+    response = console_curl(
+        env=env,
+        path=f"/{index_name}",
+        cluster='target_cluster',
+        method='GET'
+    )
+    return response

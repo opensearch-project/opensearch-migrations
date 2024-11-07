@@ -1,4 +1,5 @@
 import argparse
+from console_link.environment import Environment
 from cluster_tools.utils import console_curl
 
 def define_arguments(parser: argparse.ArgumentParser) -> None:
@@ -6,7 +7,7 @@ def define_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("index_name", type=str, help="Name of the Elasticsearch index to create")
     parser.add_argument("primary_shards", type=int, help="Number of primary shards for the index")
 
-def create_index(index_name: str, primary_shards: int) -> str:
+def create_index(env: Environment, index_name: str, primary_shards: int) -> str:
     """Creates an Elasticsearch index with the given name and primary shards."""
     settings: dict = {
         "settings": {
@@ -16,17 +17,19 @@ def create_index(index_name: str, primary_shards: int) -> str:
         }
     }
     output: str = console_curl(
+        env=env,
         path=f"/{index_name}",
         method='PUT',
-        json_data=settings
+        json_data=settings,
     )
     return output
 
-def main(args: argparse.Namespace) -> None:
+def main(env: Environment, args: argparse.Namespace) -> None:
     """Main function that executes the index creation."""
     try:
         print(f"Creating index: {args.index_name} with {args.primary_shards} primary shards")
-        output = create_index(args.index_name, args.primary_shards)
+        output = create_index(env, args.index_name, args.primary_shards)
         print(f"Response: {output}")
     except Exception as e:
         print(f"An error occurred while creating the index: {e}")
+        raise e
