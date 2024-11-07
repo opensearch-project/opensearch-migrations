@@ -89,6 +89,12 @@ function importVPC(stack: Stack, vpdIdParameter: CfnParameter, availabilityZones
     });
 }
 
+function generateExportString(exports: { [key: string]: string }): string {
+    return Object.entries(exports)
+        .map(([key, value]) => `export ${key}=${value}`)
+        .join("; ");
+}
+
 export class SolutionsInfrastructureStack extends Stack {
 
     constructor(scope: Construct, id: string, props: SolutionsInfrastructureStackProps) {
@@ -182,8 +188,14 @@ export class SolutionsInfrastructureStack extends Stack {
             vpc = importVPC(this, vpcIdParameter, availabilityZonesParameter, privateSubnetIdsParameter);
         }
 
+        const exportString = generateExportString({
+            "MIGRATIONS_APP_REGISTRY_ARN": appRegistryAppARN,
+            "MIGRATIONS_USER_AGENT": solutionsUserAgent,
+            "VPC_ID": vpc.vpcId,
+            "STAGE": stageParameter.valueAsString,
+        })
         const cfnInitConfig: InitElement[] = [
-            InitCommand.shellCommand(`echo "export MIGRATIONS_APP_REGISTRY_ARN=${appRegistryAppARN}; export MIGRATIONS_USER_AGENT=${solutionsUserAgent}; export VPC_ID=${vpc.vpcId}; export STAGE=${stageParameter.valueAsString}" > /etc/profile.d/solutionsEnv.sh`),
+            InitCommand.shellCommand(`echo "${exportString}" > /etc/profile.d/solutionsEnv.sh`),
             InitFile.fromFileInline("/opensearch-migrations/initBootstrap.sh", './initBootstrap.sh', {
                 mode: "000744"
             }),
