@@ -115,7 +115,7 @@ public class LuceneDocumentsReader {
     }
 
     Publisher<RfsLuceneDocument> readDocsByLeavesInParallel(DirectoryReader reader) {
-        var segmentsToReadAtOnce = 5; // Arbitrary value
+        var segmentsToReadAtOnce = 1; // Arbitrary value
         var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
             .addArgument(reader::maxDoc)
