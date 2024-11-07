@@ -111,5 +111,11 @@ Generate a coverage report to see how much of the code is tested.
 **Command Line Report:**
 
 ```bash
-pipenv run coverage
+pipenv run coverage report
+```
+
+** Generated HTML**
+
+```bash
+pipenv run coverage html
 ```

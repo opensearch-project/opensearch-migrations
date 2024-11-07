@@ -3,10 +3,12 @@ from typing import Any, Dict
 from cluster_tools.utils import console_curl
 from console_link.environment import Environment
 
+
 def define_arguments(parser: argparse.ArgumentParser) -> None:
     """Defines arguments for the Elasticsearch index shard settings management tool."""
     parser.add_argument("index_name", type=str, help="Name of the Elasticsearch index")
     parser.add_argument("target_shards", type=int, help="Target number of primary shards")
+
 
 def check_document_count(env: Environment, index_name: str) -> int:
     """Checks if the index contains 0 documents."""
@@ -17,6 +19,7 @@ def check_document_count(env: Environment, index_name: str) -> int:
     )
     doc_count = response.get("count", 0)
     return doc_count
+
 
 def fetch_and_filter_settings(env: Environment, index_name: str, target_shards: int) -> Dict[str, Any]:
     """Fetches and filters the index settings to prepare for index recreation."""
@@ -39,6 +42,7 @@ def fetch_and_filter_settings(env: Environment, index_name: str, target_shards: 
     updated_settings = source_settings[index_name]
     return updated_settings
 
+
 def delete_index(env: Environment, index_name: str) -> None:
     """Deletes the original index."""
     console_curl(
@@ -46,6 +50,7 @@ def delete_index(env: Environment, index_name: str) -> None:
         path=f"/{index_name}",
         method='DELETE'
     )
+
 
 def recreate_index(env: Environment, index_name: str, updated_settings: Dict[str, Any]) -> None:
     """Recreates the index with the updated settings."""
@@ -56,6 +61,7 @@ def recreate_index(env: Environment, index_name: str, updated_settings: Dict[str
         json_data=updated_settings
     )
 
+
 def target_cluster_refresh(env: Environment) -> None:
     """Refreshes the target cluster's indices."""
     console_curl(
@@ -63,6 +69,7 @@ def target_cluster_refresh(env: Environment) -> None:
         path="/_refresh",
         method='POST'
     )
+
 
 def main(env: Environment, args: argparse.Namespace) -> None:
     """Main function that executes the full workflow for managing index shard settings."""
@@ -82,8 +89,8 @@ def main(env: Environment, args: argparse.Namespace) -> None:
 
         print(f"Deleting index: {index_name}")
         delete_index(env, index_name)
-        
-        print(f"Refreshing target cluster")
+
+        print("Refreshing target cluster")
         target_cluster_refresh(env)
 
         print(f"Recreating index: {index_name} with updated settings")

@@ -2,10 +2,12 @@ import argparse
 from console_link.environment import Environment
 from cluster_tools.utils import console_curl
 
+
 def define_arguments(parser: argparse.ArgumentParser) -> None:
     """Defines arguments for disabling compatibility mode."""
     parser.description = "Disables compatibility mode on the OpenSearch cluster."
     pass
+
 
 def modify_compatibility_mode(env: Environment, enable: bool) -> dict:
     """Modifies compatibility mode on the OpenSearch cluster.
@@ -29,6 +31,7 @@ def modify_compatibility_mode(env: Environment, enable: bool) -> dict:
         json_data=settings
     )
     return response
+
 
 def main(env: Environment, _: argparse.Namespace) -> None:
     """Main function that disables compatibility mode."""

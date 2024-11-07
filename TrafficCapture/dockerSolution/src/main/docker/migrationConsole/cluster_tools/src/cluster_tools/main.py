@@ -1,9 +1,9 @@
 import os
 import importlib
 import argparse
-import sys
 import argcomplete
 from console_link.environment import Environment
+
 
 def list_tools():
     """Dynamically list all available tools by finding Python files in the tools directory."""
@@ -14,6 +14,7 @@ def list_tools():
         if filename.endswith(".py") and filename != "__init__.py"
     ]
     return tools
+
 
 def main(args=None):
     # Create the main parser
@@ -39,7 +40,9 @@ def main(args=None):
             )
         else:
             # Raise an exception if the 'define_arguments' function is missing
-            raise Exception(f"The tool '{tool_name}' does not have a 'define_arguments' function. Please add one to specify its arguments.")
+            raise Exception(
+                f"The tool '{tool_name}' does not have a 'define_arguments' function.
+                  Please add one to specify its arguments.")
 
         tool_parser.set_defaults(func=tool_module.main)  # Set the main function as the handler
 
@@ -56,6 +59,7 @@ def main(args=None):
     else:
         env = Environment(args.config_file)
         args.func(env, args)
+
 
 if __name__ == "__main__":
     main()

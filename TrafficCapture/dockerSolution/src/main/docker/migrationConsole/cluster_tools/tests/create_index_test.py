@@ -1,7 +1,7 @@
 from src.tools.create_index import main as create_index
-from tests.utils import env, get_target_index_info
-from src.cluster_tools.utils import console_curl
+from tests.utils import get_target_index_info
 import argparse
+
 
 def test_create_index(env):
     """Test the create_index function to ensure it creates an index in OpenSearch."""

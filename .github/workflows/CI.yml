@@ -61,7 +61,7 @@ jobs:
       - run: |
           python3 -m pip install --upgrade pipenv
           pipenv install --deploy --dev
-          pipenv run coverage run -m pytest
+          pipenv run test
           pipenv run coverage xml
       - name: Upload to Codecov
         uses: codecov/codecov-action@v4

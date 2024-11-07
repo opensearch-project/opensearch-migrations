@@ -3,6 +3,7 @@ from typing import Dict, Optional, Union, Any
 from console_link.models.cluster import HttpMethod
 from console_link.environment import Environment
 
+
 def console_curl(
     env: Environment,
     path: str,

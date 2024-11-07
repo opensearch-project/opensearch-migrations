@@ -19,4 +19,4 @@ python_version = "3.11"
 
 [scripts]
 test = "coverage run -m pytest"
-coverage = "coverage report"
+coverage = "coverage"
