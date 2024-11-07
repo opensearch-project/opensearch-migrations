@@ -89,6 +89,12 @@ function importVPC(stack: Stack, vpdIdParameter: CfnParameter, availabilityZones
     });
 }
 
+function generateExportString(exports:  Record<string, string>): string {
+    return Object.entries(exports)
+        .map(([key, value]) => `export ${key}=${value}`)
+        .join("; ");
+}
+
 export class SolutionsInfrastructureStack extends Stack {
 
     constructor(scope: Construct, id: string, props: SolutionsInfrastructureStackProps) {
@@ -144,12 +150,6 @@ export class SolutionsInfrastructureStack extends Stack {
         })
 
         const solutionsUserAgent = `AwsSolution/${props.solutionId}/${props.solutionVersion}`
-        const cfnInitConfig: InitElement[] = [
-            InitCommand.shellCommand(`echo "export MIGRATIONS_APP_REGISTRY_ARN=${appRegistryAppARN}; export MIGRATIONS_USER_AGENT=${solutionsUserAgent}" > /etc/profile.d/solutionsEnv.sh`),
-            InitFile.fromFileInline("/opensearch-migrations/initBootstrap.sh", './initBootstrap.sh', {
-                mode: "000744"
-            }),
-        ]
 
         const bootstrapRole = new Role(this, 'BootstrapRole', {
             assumedBy: new ServicePrincipal('ec2.amazonaws.com'),
@@ -187,6 +187,19 @@ export class SolutionsInfrastructureStack extends Stack {
             importedVPCParameters.push(vpcIdParameter.logicalId, availabilityZonesParameter.logicalId, privateSubnetIdsParameter.logicalId)
             vpc = importVPC(this, vpcIdParameter, availabilityZonesParameter, privateSubnetIdsParameter);
         }
+
+        const exportString = generateExportString({
+            "MIGRATIONS_APP_REGISTRY_ARN": appRegistryAppARN,
+            "MIGRATIONS_USER_AGENT": solutionsUserAgent,
+            "VPC_ID": vpc.vpcId,
+            "STAGE": stageParameter.valueAsString,
+        })
+        const cfnInitConfig: InitElement[] = [
+            InitCommand.shellCommand(`echo "${exportString}" > /etc/profile.d/solutionsEnv.sh`),
+            InitFile.fromFileInline("/opensearch-migrations/initBootstrap.sh", './initBootstrap.sh', {
+                mode: "000744"
+            }),
+        ]
 
         new Instance(this, 'BootstrapEC2Instance', {
             vpc: vpc,
