@@ -2,7 +2,6 @@ from src.tools.change_shards import main as change_shards
 from tests.utils import target_cluster_refresh, get_target_index_info
 from src.tools.create_index import main as create_index
 from src.cluster_tools.utils import console_curl
-from .utils import env as env  # noqa: F401 - used via pytest fixtures
 import argparse
 import logging
 import pytest
