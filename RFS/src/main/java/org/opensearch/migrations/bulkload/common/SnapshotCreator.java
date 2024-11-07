@@ -55,7 +55,7 @@ public abstract class SnapshotCreator {
             client.registerSnapshotRepo(getRepoName(), settings, context);
             log.atInfo().setMessage("Snapshot repo registration successful").log();
         } catch (Exception e) {
-            log.atError().setMessage("Snapshot repo registration failed").setCause(e).log();
+            log.atError().setCause(e).setMessage("Snapshot repo registration failed").log();
             throw new RepoRegistrationFailed(getRepoName());
         }
     }
@@ -72,7 +72,7 @@ public abstract class SnapshotCreator {
             client.createSnapshot(getRepoName(), snapshotName, body, context);
             log.atInfo().setMessage("Snapshot {} creation initiated").addArgument(snapshotName).log();
         } catch (Exception e) {
-            log.atError().setMessage("Snapshot {} creation failed").addArgument(snapshotName).setCause(e).log();
+            log.atError().setCause(e).setMessage("Snapshot {} creation failed").addArgument(snapshotName).log();
             throw new SnapshotCreationFailed(snapshotName);
         }
     }
@@ -82,7 +82,7 @@ public abstract class SnapshotCreator {
         try {
             response = client.getSnapshotStatus(getRepoName(), snapshotName, context);
         } catch (Exception e) {
-            log.atError().setMessage("Failed to get snapshot status").setCause(e).log();
+            log.atError().setCause(e).setMessage("Failed to get snapshot status").log();
             throw new SnapshotStatusCheckFailed(snapshotName);
         }
 

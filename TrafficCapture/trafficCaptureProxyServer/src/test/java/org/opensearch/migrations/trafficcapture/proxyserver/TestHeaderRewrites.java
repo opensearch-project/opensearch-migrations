@@ -97,7 +97,7 @@ public class TestHeaderRewrites {
             fullRequest -> {
                 var request = new SimpleNettyHttpServer.RequestToAdapter(fullRequest);
                 capturedRequestList.add(request);
-                log.atTrace().setMessage(() -> "headers: " +
+                log.atTrace().setMessage("headers: {}").addArgument(() ->
                     request.getHeaders().stream().map(kvp->kvp.getKey()+": "+kvp.getValue())
                         .collect(Collectors.joining())).log();
                  capturedBodies.add(fullRequest.content().toString(StandardCharsets.UTF_8));

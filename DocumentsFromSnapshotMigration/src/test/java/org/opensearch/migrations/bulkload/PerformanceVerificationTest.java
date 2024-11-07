@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
 
+import org.opensearch.migrations.bulkload.common.BulkDocSection;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
@@ -81,7 +82,7 @@ public class PerformanceVerificationTest {
         CountDownLatch pauseLatch = new CountDownLatch(1);
         OpenSearchClient mockClient = mock(OpenSearchClient.class);
         when(mockClient.sendBulkRequest(anyString(), anyList(), any())).thenAnswer(invocation -> {
-            List<DocumentReindexer.BulkDocSection> docs = invocation.getArgument(1);
+            List<BulkDocSection> docs = invocation.getArgument(1);
             sentDocuments.addAndGet(docs.size());
             var response = new BulkResponse(200, "OK", null, null);
             var blockingScheduler = Schedulers.newSingle("TestWaiting");
@@ -98,7 +99,7 @@ public class PerformanceVerificationTest {
         int maxDocsPerBulkRequest = 1000;
         long maxBytesPerBulkRequest = Long.MAX_VALUE; // No Limit on Size
         int maxConcurrentWorkItems = 10;
-        DocumentReindexer reindexer = new DocumentReindexer(mockClient, maxDocsPerBulkRequest, maxBytesPerBulkRequest, maxConcurrentWorkItems);
+        DocumentReindexer reindexer = new DocumentReindexer(mockClient, maxDocsPerBulkRequest, maxBytesPerBulkRequest, maxConcurrentWorkItems, null);
 
         // Create a mock IDocumentReindexContext
         IDocumentMigrationContexts.IDocumentReindexContext mockContext = mock(IDocumentMigrationContexts.IDocumentReindexContext.class);

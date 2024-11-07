@@ -101,7 +101,7 @@ class OpenSearchWorkCoodinatorTest {
              var closeableLogSetup = new CloseableLogSetup(workCoordinator.getClass().getName()))
         {
             Assertions.assertThrows(IllegalArgumentException.class, () -> workCoordinator.getResult(response));
-            log.atDebug().setMessage(()->"Logged events: " + closeableLogSetup.getLogEvents()).log();
+            log.atDebug().setMessage("Logged events: {}").addArgument(closeableLogSetup::getLogEvents).log();
             Assertions.assertTrue(closeableLogSetup.getLogEvents().stream().anyMatch(e -> e.contains(THROTTLE_RESULT_VALUE)));
         }
     }
@@ -124,7 +124,7 @@ class OpenSearchWorkCoodinatorTest {
              var closeableLogSetup = new CloseableLogSetup(workCoordinator.getClass().getName()))
         {
             worker.apply(workCoordinator);
-            log.atDebug().setMessage(() -> "Logged events: " + closeableLogSetup.getLogEvents()).log();
+            log.atDebug().setMessage("Logged events: {}").addArgument(()->closeableLogSetup.getLogEvents()).log();
             var logEvents = closeableLogSetup.getLogEvents();
             Assertions.assertTrue(logEvents.stream().anyMatch(e -> e.contains(THROTTLE_RESULT_VALUE)));
         }

@@ -43,10 +43,7 @@ public class RemoteReaderClient extends OpenSearchClient {
 
         assert responses != null;
         var globalMetadata = globalMetadataFromParts(responses);
-        log.atDebug()
-            .setMessage("Combined global metadata:\n{}")
-            .addArgument(globalMetadata::toString)
-            .log();
+        log.atDebug().setMessage("Combined global metadata:\n{}").addArgument(globalMetadata).log();
         return globalMetadata;
     }
     
@@ -81,10 +78,7 @@ public class RemoteReaderClient extends OpenSearchClient {
             .block();
 
         var indexData = combineIndexDetails(indexDetailsList);
-        log.atDebug()
-            .setMessage("Index data combined:\n{}")
-            .addArgument(indexData::toString)
-            .log();
+        log.atDebug().setMessage("Index data combined:\n{}").addArgument(indexData).log();
         return indexData;
     }
 
@@ -121,8 +115,8 @@ public class RemoteReaderClient extends OpenSearchClient {
         try {
             var tree = (ObjectNode) objectMapper.readTree(resp.body);
 
-            if (tree.size() == 1) {
-                return Mono.just(handleSingleItemTree(tree));
+            if (tree.size() == 1 && tree.fields().next().getValue().isArray()) {
+                return Mono.just(handleSingleItemArrayValueTree(tree));
             }
     
             return Mono.just(tree);
@@ -131,13 +125,17 @@ public class RemoteReaderClient extends OpenSearchClient {
         }
     }
     
-    private ObjectNode handleSingleItemTree(ObjectNode tree) {
+    private ObjectNode handleSingleItemArrayValueTree(ObjectNode tree) {
         var dearrayed = objectMapper.createObjectNode();
         var fieldName = tree.fieldNames().next();
         var arrayOfItems = tree.get(fieldName);
     
         for (var child : arrayOfItems) {
-            processChildNode((ObjectNode) child, dearrayed);
+            if (child.isObject()) {
+                processChildNode((ObjectNode) child, dearrayed);
+            } else {
+                throw new IllegalArgumentException("Expected ObjectNode, got: " + child.getNodeType());
+            }
         }
     
         return dearrayed;

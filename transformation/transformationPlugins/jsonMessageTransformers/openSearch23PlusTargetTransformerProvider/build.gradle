@@ -1,0 +1,19 @@
+plugins {
+    id 'io.freefair.lombok'
+}
+
+dependencies {
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+
+    testImplementation project(':TrafficCapture:trafficReplayer')
+    testImplementation testFixtures(project(path: ':testHelperFixtures'))
+    testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))
+
+    testImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    testImplementation group: 'com.google.guava', name: 'guava'
+    testImplementation group: 'io.netty', name: 'netty-all'
+    testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
+    testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-params'
+    testImplementation group: 'org.slf4j', name: 'slf4j-api'
+    testRuntimeOnly group:'org.junit.jupiter', name:'junit-jupiter-engine'
+}

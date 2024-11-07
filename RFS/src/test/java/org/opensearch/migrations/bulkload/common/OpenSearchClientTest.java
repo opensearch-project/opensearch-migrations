@@ -4,9 +4,11 @@ import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.function.BiFunction;
+import java.util.function.Function;
 
 import org.opensearch.migrations.Version;
-import org.opensearch.migrations.bulkload.common.DocumentReindexer.BulkDocSection;
+import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
 import org.opensearch.migrations.bulkload.http.BulkRequestGenerator.BulkItemResponseEntry;
@@ -15,13 +17,18 @@ import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempoten
 import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 
 import com.fasterxml.jackson.core.StreamReadFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.SneakyThrows;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
-import org.mockito.Mockito;
+import org.mockito.Mock;
+import org.mockito.Mock.Strictness;
+import org.mockito.junit.jupiter.MockitoExtension;
 import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
@@ -31,7 +38,6 @@ import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
@@ -41,13 +47,58 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.withSettings;
 import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntry;
 import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntryFailure;
 
+@ExtendWith(MockitoExtension.class)
 class OpenSearchClientTest {
+    private static final String NODES_RESPONSE_OS_2_13_0 = "{\r\n" + //
+                "    \"_nodes\": {\r\n" + //
+                "        \"total\": 1,\r\n" + //
+                "        \"successful\": 1,\r\n" + //
+                "        \"failed\": 0\r\n" + //
+                "    },\r\n" + //
+                "    \"cluster_name\": \"336984078605:target-domain\",\r\n" + //
+                "    \"nodes\": {\r\n" + //
+                "        \"HDzrwdO8TneRQaxzx94uKA\": {\r\n" + //
+                "            \"name\": \"74c8fa743d5e3626e3903c3b1d5450e0\",\r\n" + //
+                "            \"version\": \"2.13.0\",\r\n" + //
+                "            \"build_type\": \"tar\",\r\n" + //
+                "            \"build_hash\": \"unknown\",\r\n" + //
+                "            \"roles\": [\r\n" + //
+                "                \"data\",\r\n" + //
+                "                \"ingest\",\r\n" + //
+                "                \"master\",\r\n" + //
+                "                \"remote_cluster_client\"\r\n" + //
+                "            ]\r\n" + //
+                "        }\r\n" + //
+                "    }\r\n" + //
+                "}";
+    private static final String CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_ENABLED = "{\"persistent\":{\"compatibility\":{\"override_main_response_version\":\"true\"}}}";
+    private static final String CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED = "{\"persistent\":{\"compatibility\":{\"override_main_response_version\":\"false\"}}}";
+    private static final String ROOT_RESPONSE_OS_1_0_0 = "{\"version\":{\"distribution\":\"opensearch\",\"number\":\"1.0.0\"}}";
+    private static final String ROOT_RESPONSE_ES_7_10_2 = "{\"version\": {\"number\": \"7.10.2\"}}";
     private static final ObjectMapper OBJECT_MAPPER = JsonMapper.builder()
         .enable(StreamReadFeature.INCLUDE_SOURCE_IN_LOCATION)
         .build();
+
+    @Mock(strictness = Strictness.LENIENT)
+    RestClient restClient;
+
+    @Mock
+    ConnectionContext connectionContext;
+
+    @Mock
+    FailedRequestsLogger failedRequestLogger;
+
+    OpenSearchClient openSearchClient;
+
+    @BeforeEach
+    void beforeTest() {
+        doReturn(connectionContext).when(restClient).getConnectionContext();
+        openSearchClient = spy(new OpenSearchClient(restClient, failedRequestLogger));
+    }
 
     @Test
     void testCreateIndex() {
@@ -56,7 +107,6 @@ class OpenSearchClientTest {
         var createdItemRawJson = "{\"created\":\"yup!\"}";
         var createItemResponse = new HttpResponse(200, "", null, createdItemRawJson);
 
-        var restClient = Mockito.mock(RestClient.class);
         when(restClient.getAsync(any(), any())).thenReturn(Mono.just(checkIfExistsResponse));
         when(restClient.putAsync(any(), any(), any())).thenReturn(Mono.just(createItemResponse));
 
@@ -74,7 +124,6 @@ class OpenSearchClientTest {
     void testCreateIndex_alreadyExists() {
         var checkIfExistsResponse = new HttpResponse(200, "", null, "I exist!");
 
-        var restClient = Mockito.mock(RestClient.class);
         when(restClient.getAsync(any(), any())).thenReturn(Mono.just(checkIfExistsResponse));
 
         var rawJson = "{ }";
@@ -90,7 +139,6 @@ class OpenSearchClientTest {
         var createdItemRawJson = "{\"error\":\"unauthorized\"}";
         var createItemResponse = new HttpResponse(403, "", null, createdItemRawJson);
 
-        var restClient = Mockito.mock(RestClient.class);
         when(restClient.getAsync(any(), any())).thenReturn(Mono.just(checkIfExistsResponse));
         when(restClient.putAsync(any(), any(), any())).thenReturn(Mono.just(createItemResponse));
 
@@ -113,7 +161,6 @@ class OpenSearchClientTest {
         var createdItemRawJson = "{\"error\":\"illegal_argument_exception\"}";
         var createItemResponse = new HttpResponse(400, "", null, createdItemRawJson);
 
-        var restClient = Mockito.mock(RestClient.class);
         when(restClient.getAsync(any(), any())).thenReturn(Mono.just(checkIfExistsResponse));
         when(restClient.putAsync(any(), any(), any())).thenReturn(Mono.just(createItemResponse));
 
@@ -126,27 +173,76 @@ class OpenSearchClientTest {
     }
 
     @Test
-    void testGetClusterVersion() {
-        var restClient = mock(RestClient.class);
-        var failedRequestLogger = mock(FailedRequestsLogger.class);
-        var openSearchClient = new OpenSearchClient(restClient, failedRequestLogger);
+    void testGetClusterVersion_ES_7_10() {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_ES_7_10_2);
+        setupOkResponse(restClient, "_cluster/settings", CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED);
 
-        var versionJson = "{\"version\": {\"number\": \"7.10.2\"}}";
-        var successResponse = new HttpResponse(200, "OK", Map.of(), versionJson);
-
-        ArgumentCaptor<String> pathCaptor = ArgumentCaptor.forClass(String.class);
-
-        when(restClient.getAsync(pathCaptor.capture(), any()))
-            .thenReturn(Mono.just(successResponse));
-
-        Version version = openSearchClient.getClusterVersion();
+        var version = openSearchClient.getClusterVersion();
 
         assertThat(version, equalTo(Version.fromString("ES 7.10.2")));
+        verify(restClient).getAsync("", null);
+        verify(restClient).getAsync("_cluster/settings", null);
+        verifyNoMoreInteractions(restClient);
+    }
 
-        String capturedPath = pathCaptor.getValue();
-        assertThat(capturedPath, equalTo(""));
+    @Test
+    void testGetClusterVersion_OS_CompatibilityModeEnabled() {
+        when(connectionContext.isAwsSpecificAuthentication()).thenReturn(true);
+        setupOkResponse(restClient, "", ROOT_RESPONSE_ES_7_10_2);
+        setupOkResponse(restClient, "_cluster/settings", CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_ENABLED);
+        setupOkResponse(restClient, "_nodes/_all/nodes,version?format=json", NODES_RESPONSE_OS_2_13_0);
 
-        verify(restClient, times(1)).getAsync(anyString(), any());
+        var version = openSearchClient.getClusterVersion();
+
+        assertThat(version, equalTo(Version.fromString("AOS 2.13.0")));
+        verify(restClient).getAsync("", null);
+        verify(restClient).getAsync("_cluster/settings", null);
+        verify(restClient).getAsync("_nodes/_all/nodes,version?format=json", null);
+    }
+
+    @Test
+    void testGetClusterVersion_OS_CompatibilityModeDisableEnabled() {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_OS_1_0_0);
+        setupOkResponse(restClient, "_cluster/settings", CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED);
+
+        var version = openSearchClient.getClusterVersion();
+
+        assertThat(version, equalTo(Version.fromString("OS 1.0.0")));
+        verify(restClient).getConnectionContext();
+        verify(restClient).getAsync("", null);
+        verifyNoMoreInteractions(restClient);
+    }
+
+    @Test
+    void testGetClusterVersion_OS_CompatibilityModeFailure_UseFallback() {
+        setupOkResponse(restClient, "", ROOT_RESPONSE_ES_7_10_2);
+
+        var versionResponse = new HttpResponse(403, "Forbidden", Map.of(), "");
+        when(restClient.getAsync("_cluster/settings", null)).thenReturn(Mono.just(versionResponse));
+
+        var version = openSearchClient.getClusterVersion();
+
+        assertThat(version, equalTo(Version.fromString("ES 7.10.2")));
+        verify(restClient).getAsync("", null);
+        verify(restClient).getAsync("_cluster/settings", null);
+        verifyNoMoreInteractions(restClient);
+    }
+
+    private void setupOkResponse(RestClient restClient, String url, String body) {
+        var versionResponse = new HttpResponse(200, "OK", Map.of(), body);
+        when(restClient.getAsync(url, null)).thenReturn(Mono.just(versionResponse));
+    }
+
+    @Test
+    void testGetClusterVersion_OS_Serverless() {
+        var versionResponse = new HttpResponse(404, "Not Found", Map.of(), "");
+        when(restClient.getAsync("", null)).thenReturn(Mono.just(versionResponse));
+
+        var version = openSearchClient.getClusterVersion();
+
+        assertThat(version, equalTo(Version.fromString("AOSS 2.x.x")));
+        verify(restClient, times(1)).getAsync("", null);
+        verifyNoMoreInteractions(restClient);
     }
 
     @Test
@@ -165,16 +261,12 @@ class OpenSearchClientTest {
         var finalDocSuccess = bulkItemResponse(false, List.of(itemEntry(docId2)));
         var server500 = new HttpResponse(500, "", null, "{\"error\":\"Cannot Process Error!\"}");
 
-        var restClient = Mockito.mock(RestClient.class);
         when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(bothDocsFail))
             .thenReturn(Mono.just(oneFailure))
             .thenReturn(Mono.just(server500))
             .thenReturn(Mono.just(finalDocSuccess));
 
         var bulkDocs = List.of(createBulkDoc(docId1), createBulkDoc(docId2));
-
-        var failedRequestLogger = mock(FailedRequestsLogger.class);
-        var openSearchClient = spy(new OpenSearchClient(restClient, failedRequestLogger));
         doReturn(Retry.fixedDelay(6, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
 
         // Action
@@ -197,11 +289,7 @@ class OpenSearchClientTest {
         var docId1 = "tt1979320";
         var docFails = bulkItemResponse(true, List.of(itemEntryFailure(docId1)));
 
-        var restClient = Mockito.mock(RestClient.class);
         when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(docFails));
-
-        var failedRequestLogger = mock(FailedRequestsLogger.class);
-        var openSearchClient = spy(new OpenSearchClient(restClient, failedRequestLogger));
 
         var maxRetries = 6;
         doReturn(Retry.fixedDelay(maxRetries, Duration.ofMillis(10))).when(openSearchClient).getBulkRetryStrategy();
@@ -232,16 +320,14 @@ class OpenSearchClientTest {
     }
 
     private BulkDocSection createBulkDoc(String docId) {
-        var bulkDoc = mock(BulkDocSection.class);
+        var bulkDoc = mock(BulkDocSection.class, withSettings().strictness(org.mockito.quality.Strictness.LENIENT));
         when(bulkDoc.getDocId()).thenReturn(docId);
-        when(bulkDoc.asBulkIndex()).thenReturn("BULK-INDEX\nBULK_BODY");
+        when(bulkDoc.asBulkIndexString()).thenReturn("BULK-INDEX\nBULK_BODY");
         return bulkDoc;
     }
 
     @SneakyThrows
     private Optional<ObjectNode> createIndex(RestClient restClient, String rawJson) {
-        var openSearchClient = new OpenSearchClient(restClient, mock(FailedRequestsLogger.class));
-
         var body = (ObjectNode) OBJECT_MAPPER.readTree(rawJson);
         return openSearchClient.createIndex("indexName", body, mock(ICheckedIdempotentPutRequestContext.class));
     }
@@ -251,12 +337,8 @@ class OpenSearchClientTest {
         var docId = "tt1979320";
         var bulkSuccess = bulkItemResponse(false, List.of(itemEntry(docId)));
 
-        var restClient = Mockito.mock(RestClient.class);
         when(restClient.supportsGzipCompression()).thenReturn(true);
         when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(bulkSuccess));
-
-        var failedRequestLogger = mock(FailedRequestsLogger.class);
-        var openSearchClient = new OpenSearchClient(restClient, failedRequestLogger);
 
         var bulkDoc = createBulkDoc(docId);
         var indexName = "testIndex";
@@ -282,12 +364,8 @@ class OpenSearchClientTest {
         var docId = "tt1979320";
         var bulkSuccess = bulkItemResponse(false, List.of(itemEntry(docId)));
 
-        var restClient = Mockito.mock(RestClient.class);
         when(restClient.supportsGzipCompression()).thenReturn(false);
         when(restClient.postAsync(any(), any(), any(), any())).thenReturn(Mono.just(bulkSuccess));
-
-        var failedRequestLogger = mock(FailedRequestsLogger.class);
-        var openSearchClient = new OpenSearchClient(restClient, failedRequestLogger);
 
         var bulkDoc = createBulkDoc(docId);
         var indexName = "testIndex";
@@ -310,13 +388,8 @@ class OpenSearchClientTest {
 
     @Test
     void testNonBulkRequest_doesNotAddGzipHeaders() {
-        var restClient = Mockito.mock(RestClient.class);
-        when(restClient.supportsGzipCompression()).thenReturn(true);
         when(restClient.getAsync(any(), any())).thenReturn(Mono.just(new HttpResponse(404, "", null, "does not exist")));
         when(restClient.putAsync(any(), any(), any())).thenReturn(Mono.just(new HttpResponse(200, "", null, "{\"created\":\"yup!\"}")));
-
-        var failedRequestLogger = mock(FailedRequestsLogger.class);
-        var openSearchClient = new OpenSearchClient(restClient, failedRequestLogger);
 
         // Action
         openSearchClient.createIndex("testIndex", OBJECT_MAPPER.createObjectNode(), mock(IRfsContexts.ICheckedIdempotentPutRequestContext.class));
@@ -325,5 +398,30 @@ class OpenSearchClientTest {
         verify(restClient).getAsync(any(), any());
         verify(restClient).putAsync(any(), any(), any());
         verifyNoMoreInteractions(restClient);
+    }
+
+    @Test
+    void testCheckCompatibilityModeFromResponse() {
+        Function<Boolean, JsonNode> createCompatibilitySection = (Boolean value) ->
+            OBJECT_MAPPER.createObjectNode()
+                .<ObjectNode>set("compatibility", OBJECT_MAPPER.createObjectNode()
+                    .put("override_main_response_version", value));
+        
+        BiFunction<Boolean, Boolean, HttpResponse> createSettingsResponse = (Boolean persistentVal, Boolean transientVal) -> {
+            var body = OBJECT_MAPPER.createObjectNode()
+                .<ObjectNode>set("persistent", createCompatibilitySection.apply(persistentVal))
+                .set("transient", createCompatibilitySection.apply(transientVal))
+                .toPrettyString();
+            return new HttpResponse(200, "OK", null, body);
+        };
+
+        var bothTrue = openSearchClient.checkCompatibilityModeFromResponse(createSettingsResponse.apply(true, true));
+        assertThat(bothTrue.block(), equalTo(true));
+        var persistentTrue = openSearchClient.checkCompatibilityModeFromResponse(createSettingsResponse.apply(true, false));
+        assertThat(persistentTrue.block(), equalTo(true));
+        var transientTrue = openSearchClient.checkCompatibilityModeFromResponse(createSettingsResponse.apply(false, true));
+        assertThat(transientTrue.block(), equalTo(true));
+        var neitherTrue = openSearchClient.checkCompatibilityModeFromResponse(createSettingsResponse.apply(false, false));
+        assertThat(neitherTrue.block(), equalTo(false));
     }
 }

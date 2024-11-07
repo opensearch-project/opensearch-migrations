@@ -8,7 +8,6 @@ import {
     EbsPropagatedTagSource
 } from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
-import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {
@@ -43,7 +42,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: ReindexFromSnapshotProps) {
         super(scope, id, props)
 
-        let securityGroups = [
+        const securityGroups = [
             SecurityGroup.fromSecurityGroupId(this, "serviceSG", getMigrationStringParameterValue(this, {
                 ...props,
                 parameter: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID,
@@ -122,7 +121,7 @@ export class ReindexFromSnapshotStack extends MigrationServiceCore {
         const sharedLogFileSystem = new SharedLogFileSystem(this, props.stage, props.defaultDeployId);
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account);
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account);
-        let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), artifactS3PublishPolicy, openSearchPolicy, openSearchServerlessPolicy];
+        const servicePolicies = [sharedLogFileSystem.asPolicyStatement(), artifactS3PublishPolicy, openSearchPolicy, openSearchServerlessPolicy];
 
         const getSecretsPolicy = props.clusterAuthDetails.basicAuth?.password_from_secret_arn ?
             getSecretAccessPolicy(props.clusterAuthDetails.basicAuth.password_from_secret_arn) : null;

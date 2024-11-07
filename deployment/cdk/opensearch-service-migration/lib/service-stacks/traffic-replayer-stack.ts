@@ -2,7 +2,6 @@ import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
-import {join} from "path";
 import {MigrationServiceCore} from "./migration-service-core";
 import {Effect, PolicyStatement} from "aws-cdk-lib/aws-iam";
 import {
@@ -41,7 +40,7 @@ export class TrafficReplayerStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: TrafficReplayerProps) {
         super(scope, id, props)
 
-        let securityGroups = [
+        const securityGroups = [
             { id: "serviceSG", param: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID },
             { id: "trafficStreamSourceAccessSG", param: MigrationSSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID },
             { id: "defaultDomainAccessSG", param: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID },
