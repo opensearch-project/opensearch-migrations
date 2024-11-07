@@ -1,12 +1,15 @@
-from src.tools.disable_compatibility_mode import main
+from src.tools.disable_compatibility_mode import main as disable_compatibility_mode
 from src.cluster_tools.utils import console_curl
+from .utils import env as env
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def test_disable_compatibility_mode(env):
     """Test the disable_compatibility_mode function to ensure it disables compatibility mode."""
 
-    # Call disable_compatibility_mode
-    main(env, None)
+    disable_compatibility_mode(env, None)
 
     # Verify that the compatibility mode setting is now disabled
     cluster_settings = console_curl(

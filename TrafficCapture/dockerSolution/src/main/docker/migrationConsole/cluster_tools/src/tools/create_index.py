@@ -1,6 +1,9 @@
 import argparse
 from console_link.environment import Environment
 from cluster_tools.utils import console_curl
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def define_arguments(parser: argparse.ArgumentParser) -> None:
@@ -29,10 +32,6 @@ def create_index(env: Environment, index_name: str, primary_shards: int) -> str:
 
 def main(env: Environment, args: argparse.Namespace) -> None:
     """Main function that executes the index creation."""
-    try:
-        print(f"Creating index: {args.index_name} with {args.primary_shards} primary shards")
-        output = create_index(env, args.index_name, args.primary_shards)
-        print(f"Response: {output}")
-    except Exception as e:
-        print(f"An error occurred while creating the index: {e}")
-        raise e
+    logger.info(f"Creating index: {args.index_name} with {args.primary_shards} primary shards")
+    output = create_index(env, args.index_name, args.primary_shards)
+    logger.info(f"Response: {output}")

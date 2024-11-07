@@ -2,6 +2,9 @@ import argparse
 from typing import Any, Dict
 from cluster_tools.utils import console_curl
 from console_link.environment import Environment
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def define_arguments(parser: argparse.ArgumentParser) -> None:
@@ -73,30 +76,26 @@ def target_cluster_refresh(env: Environment) -> None:
 
 def main(env: Environment, args: argparse.Namespace) -> None:
     """Main function that executes the full workflow for managing index shard settings."""
-    try:
-        index_name = args.index_name
-        target_shards = args.target_shards
+    index_name = args.index_name
+    target_shards = args.target_shards
 
-        doc_count = check_document_count(env, index_name)
-        if doc_count != 0:
-            print(f"Index {index_name} contains documents. Aborting.")
-            raise RuntimeError(f"Index {index_name} contains documents. Aborting.")
-        print(f"Index {index_name} contains 0 documents. Proceeding.")
+    doc_count = check_document_count(env, index_name)
+    if doc_count != 0:
+        logger.info(f"Index {index_name} contains documents. Aborting.")
+        raise RuntimeError(f"Index {index_name} contains documents. Aborting.")
+    logger.info(f"Index {index_name} contains 0 documents. Proceeding.")
 
-        print(f"Fetching settings from the index: {index_name}")
-        updated_settings = fetch_and_filter_settings(env, index_name, target_shards)
-        print(f"Updated settings: {updated_settings}")
+    logger.info(f"Fetching settings from the index: {index_name}")
+    updated_settings = fetch_and_filter_settings(env, index_name, target_shards)
+    logger.info(f"Updated settings: {updated_settings}")
 
-        print(f"Deleting index: {index_name}")
-        delete_index(env, index_name)
+    logger.info(f"Deleting index: {index_name}")
+    delete_index(env, index_name)
 
-        print("Refreshing target cluster")
-        target_cluster_refresh(env)
+    logger.info("Refreshing target cluster")
+    target_cluster_refresh(env)
 
-        print(f"Recreating index: {index_name} with updated settings")
-        recreate_index(env, index_name, updated_settings)
+    logger.info(f"Recreating index: {index_name} with updated settings")
+    recreate_index(env, index_name, updated_settings)
 
-        print(f"Index {index_name} recreated successfully with updated settings.")
-    except Exception as e:
-        print(f"An error occurred while managing shard settings for index {index_name}: {e}")
-        raise e
+    logger.info(f"Index {index_name} recreated successfully with updated settings.")

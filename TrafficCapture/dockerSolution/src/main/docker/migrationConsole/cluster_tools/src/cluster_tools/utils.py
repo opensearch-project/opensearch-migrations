@@ -2,6 +2,9 @@ import json
 from typing import Dict, Optional, Union, Any
 from console_link.models.cluster import HttpMethod
 from console_link.environment import Environment
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def console_curl(
@@ -15,8 +18,9 @@ def console_curl(
     """
     Utility function to call the 'console clusters curl' command programmatically.
 
-    :param cluster: 'source_cluster' or 'target_cluster'
+    :param env: Environment object
     :param path: API path to call
+    :param cluster: 'source_cluster' or 'target_cluster'
     :param method: HTTP method (e.g., 'GET', 'POST', etc.)
     :param headers: Dictionary of headers to include in the request
     :param json_data: JSON data to send in the request body (as a dictionary)
@@ -25,17 +29,23 @@ def console_curl(
     try:
         http_method = HttpMethod[method.upper()]
     except KeyError:
-        raise ValueError(f"Invalid HTTP method: {method}")
+        message = f"Invalid HTTP method: {method}"
+        logger.error(message)
+        raise ValueError(message)
 
     if cluster == 'source_cluster':
         cluster_obj = env.source_cluster
     elif cluster == 'target_cluster':
         cluster_obj = env.target_cluster
     else:
-        raise ValueError("`cluster` must be either 'source_cluster' or 'target_cluster'.")
+        message = "`cluster` must be either 'source_cluster' or 'target_cluster'."
+        logger.error(message)
+        raise ValueError(message)
 
     if cluster_obj is None:
-        raise ValueError(f"{cluster} is not defined in the environment.")
+        message = f"{cluster} is not defined in the environment."
+        logger.error(message)
+        raise ValueError(message)
 
     if json_data is not None:
         if headers is None:

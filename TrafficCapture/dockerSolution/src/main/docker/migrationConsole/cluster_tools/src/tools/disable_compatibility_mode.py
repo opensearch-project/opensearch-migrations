@@ -1,6 +1,9 @@
 import argparse
 from console_link.environment import Environment
 from cluster_tools.utils import console_curl
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def define_arguments(parser: argparse.ArgumentParser) -> None:
@@ -35,9 +38,6 @@ def modify_compatibility_mode(env: Environment, enable: bool) -> dict:
 
 def main(env: Environment, _: argparse.Namespace) -> None:
     """Main function that disables compatibility mode."""
-    print("Disabling compatibility mode on the OpenSearch cluster.")
-    try:
-        response = modify_compatibility_mode(env, False)
-        print(f"Response: {response}")
-    except Exception as e:
-        print(f"An error occurred: {e}")
+    logger.info("Disabling compatibility mode on the OpenSearch cluster.")
+    response = modify_compatibility_mode(env, False)
+    logger.info(f"Response: {response}")

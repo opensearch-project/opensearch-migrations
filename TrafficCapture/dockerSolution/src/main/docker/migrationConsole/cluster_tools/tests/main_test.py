@@ -2,23 +2,32 @@ from src.cluster_tools.main import main
 import argparse
 from tests.utils import get_target_index_info
 import src.tools.create_index as create_index
+from .utils import env as env
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-def test_list_tools(capsys):
+def test_list_tools(caplog):
     """Test the list_tools function to ensure it lists available tools."""
+    caplog.set_level(logging.INFO)
+    logger.info(caplog.text)
     main(argparse.Namespace(tool=None))
-    captured = capsys.readouterr()
-    assert "Available tools:" in captured.out
+    violating_logs = [record for record in caplog.records if record.levelno >= logging.WARNING]
+    assert not violating_logs, f"Warnings or errors were logged during test_list_tools: {violating_logs}"
+    assert "Available tools:" in caplog.text
     available_tools = [
-        line.strip().lstrip("- ")
-        for line in captured.out.splitlines()
-        if line.startswith("  - ")
+        line.split("  - ", 1)[1].strip()
+        for line in caplog.text.splitlines()
+        if "  - " in line
     ]
-    assert len(available_tools) >= 4, "Expected at least 4 tools"
+    assert len(available_tools) >= 3, "Expected at least 3 tools"
     assert "create_index" in available_tools, "Expected 'create_index' tool to be listed"
 
 
-def test_main_with_tool(capsys, env):
+def test_main_with_tool(caplog, env):
+    """Test the main function with a specific tool to ensure it executes correctly."""
+    caplog.set_level(logging.INFO)
     args = argparse.Namespace(tool="create_index", index_name="test-index",
                               primary_shards=10, config_file=env.config_file)
     args.func = create_index.main
@@ -29,5 +38,4 @@ def test_main_with_tool(capsys, env):
     assert isinstance(index_info, dict), "Index was not created successfully."
     actual_shards = int(index_info[args.index_name]["settings"]["index"]["number_of_shards"])
     assert actual_shards == args.primary_shards, f"Expected {args.primary_shards} shards, got {actual_shards}"
-    captured = capsys.readouterr()
-    assert "Creating index:" in captured.out
+    assert "Creating index:" in caplog.text

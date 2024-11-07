@@ -18,11 +18,6 @@ def env():
     base_url = f"http://{container.get_container_host_ip()}:{container.get_exposed_port(9200)}"
     # Create a temporary services.yaml file based on the services.yaml spec
     services_config = {
-        'source_cluster': {
-            'endpoint': base_url,
-            'allow_insecure': True,
-            'no_auth': {}
-        },
         'target_cluster': {
             'endpoint': base_url,
             'allow_insecure': True,

@@ -1,6 +1,7 @@
 from src.tools.change_shards import main as change_shards
 from tests.utils import target_cluster_refresh, get_target_index_info
 from src.tools.create_index import main as create_index
+from .utils import env as env
 import argparse
 
 

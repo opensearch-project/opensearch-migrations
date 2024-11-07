@@ -1,6 +1,10 @@
 import argparse
+import logging
 from .disable_compatibility_mode import modify_compatibility_mode
 from console_link.environment import Environment
+
+
+logger = logging.getLogger(__name__)
 
 
 def define_arguments(parser: argparse.ArgumentParser) -> None:
@@ -10,9 +14,6 @@ def define_arguments(parser: argparse.ArgumentParser) -> None:
 
 def main(env: Environment, _: argparse.Namespace) -> None:
     """Main function that enables compatibility mode."""
-    print("Enabling compatibility mode on the OpenSearch cluster.")
-    try:
-        response = modify_compatibility_mode(env, True)
-        print(f"Response: {response}")
-    except Exception as e:
-        print(f"An error occurred: {e}")
+    logger.info("Enabling compatibility mode on the OpenSearch cluster.")
+    response = modify_compatibility_mode(env, True)
+    logger.info(f"Response: {response}")

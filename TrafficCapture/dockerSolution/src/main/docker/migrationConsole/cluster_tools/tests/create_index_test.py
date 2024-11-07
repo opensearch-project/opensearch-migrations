@@ -1,6 +1,7 @@
 from src.tools.create_index import main as create_index
 from tests.utils import get_target_index_info
 import argparse
+from .utils import env as env
 
 
 def test_create_index(env):
