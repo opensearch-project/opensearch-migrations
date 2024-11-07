@@ -63,13 +63,17 @@ jobs:
           pipenv install --deploy --dev
           pipenv run test
           pipenv run coverage xml
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@v4
+      - name: Upload Coverage with retry
+        uses: Wandalen/wretry.action@v3.7.2
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.xml
-          flags: python-test
-          fail_ci_if_error: true
+          attempt_limit: 5
+          attempt_delay: 2000
+          action: codecov/codecov-action@v4
+          with: |
+            token: ${{ secrets.CODECOV_TOKEN }}
+            files: ./coverage.xml
+            flags: python-test
+            fail_ci_if_error: true
 
   console-api-tests:
     runs-on: ubuntu-latest
@@ -86,12 +90,18 @@ jobs:
           pipenv install --deploy --dev
           pipenv run coverage run --source='.' manage.py test console_api
           pipenv run coverage xml
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@v4
+      - name: Upload Coverage with retry
+        uses: Wandalen/wretry.action@v3.7.2
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.xml
-          fail_ci_if_error: true
+          attempt_limit: 5
+          attempt_delay: 2000
+          action: codecov/codecov-action@v4
+          with: |
+            token: ${{ secrets.CODECOV_TOKEN }}
+            files: ./coverage.xml
+            flags: python-test
+            fail_ci_if_error: true
+
 
   gradle-tests:
     runs-on: ubuntu-latest
@@ -122,15 +132,20 @@ jobs:
           path: |
             **/build/reports/tests/
             **/reports/jacoco/mergedReport/
-
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@v4
+      - name: Upload Coverage with retry
+        uses: Wandalen/wretry.action@v3.7.2
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ${{ github.workspace }}/build/reports/jacoco/mergedReport/jacocoMergedReport.xml
-          flags: gradle-test
-          fail_ci_if_error: true
-          disable_search: true
+          attempt_limit: 5
+          attempt_delay: 2000
+          action: codecov/codecov-action@v4
+          with: |
+            token: ${{ secrets.CODECOV_TOKEN }}
+            files: ${{ github.workspace }}/build/reports/jacoco/mergedReport/jacocoMergedReport.xml
+            flags: gradle-test
+            fail_ci_if_error: true
+            disable_search: true
+
+
 
   python-e2e-tests:
     runs-on: ubuntu-latest
