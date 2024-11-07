@@ -6,9 +6,12 @@ import os
 import yaml
 from console_link.environment import Environment
 from src.cluster_tools.utils import console_curl
+import logging
+
+logger = logging.getLogger(__name__)
 
 
-@pytest.fixture(scope="module")
+@pytest.fixture(scope="function")
 def env():
     # Spin up the OpenSearch container and wait until it's healthy
     container = OpenSearchContainer()

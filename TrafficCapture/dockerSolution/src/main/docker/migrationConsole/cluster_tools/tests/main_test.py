@@ -2,7 +2,7 @@ from src.cluster_tools.main import main
 import argparse
 from tests.utils import get_target_index_info
 import src.tools.create_index as create_index
-from .utils import env as env
+from .utils import env as env  # noqa: F401 - used via pytest fixtures
 import logging
 
 logger = logging.getLogger(__name__)

@@ -1,7 +1,10 @@
 from src.tools.create_index import main as create_index
 from tests.utils import get_target_index_info
 import argparse
-from .utils import env as env
+from .utils import env as env  # noqa: F401 - used via pytest fixtures
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def test_create_index(env):

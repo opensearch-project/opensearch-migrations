@@ -1,6 +1,6 @@
 from src.tools.disable_compatibility_mode import main as disable_compatibility_mode
 from src.cluster_tools.utils import console_curl
-from .utils import env as env
+from .utils import env as env  # noqa: F401 - used via pytest fixtures
 import logging
 
 logger = logging.getLogger(__name__)

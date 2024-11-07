@@ -6,6 +6,9 @@ from console_link.environment import Environment
 import logging
 import sys
 
+logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
+
 
 class ClusterToolsFilter(logging.Filter):
     def filter(self, record):
@@ -14,8 +17,6 @@ class ClusterToolsFilter(logging.Filter):
 
 def setup_logging():
     """Sets up logging with a file handler for all logs and a stdout handler for 'cluster_tools' logs only."""
-    logger = logging.getLogger()
-    logger.setLevel(logging.INFO)
 
     from datetime import datetime
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -40,9 +41,6 @@ def setup_logging():
     return module_logger
 
 
-logger = setup_logging()
-
-
 def list_tools():
     """Dynamically list all available tools by finding Python files in the tools directory."""
     tools_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "../tools"))
@@ -52,6 +50,9 @@ def list_tools():
         if filename.endswith(".py") and filename != "__init__.py"
     ]
     return tools
+
+
+log_file_path = None
 
 
 def setup_parser(parser):
@@ -83,6 +84,7 @@ def setup_parser(parser):
 
 
 def main(args=None):
+    global logger
     # Create the main parser
     parser = argparse.ArgumentParser(
         description="CLI tool for managing and running different utilities."
@@ -101,12 +103,17 @@ def main(args=None):
             logger.info(f"  - {tool}")
         logger.info("\nRun `cluster_tools <tool>` to use a tool.")
     else:
+        # Setup logging for tool execution
+        logger = setup_logging()
         env = Environment(args.config_file)
         try:
             args.func(env, args)
         except Exception as e:
             logger.error(f"An error occurred while executing the tool: {e}")
-    logger.info(f"Logs saved to {log_file_path}")
+            raise e
+        finally:
+            if log_file_path is not None:
+                logger.info(f"Logs saved to {log_file_path}")
 
 
 if __name__ == "__main__":

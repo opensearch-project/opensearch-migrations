@@ -3,6 +3,7 @@ from typing import Any, Dict
 from cluster_tools.utils import console_curl
 from console_link.environment import Environment
 import logging
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +89,15 @@ def main(env: Environment, args: argparse.Namespace) -> None:
     logger.info(f"Fetching settings from the index: {index_name}")
     updated_settings = fetch_and_filter_settings(env, index_name, target_shards)
     logger.info(f"Updated settings: {updated_settings}")
+
+    test_index_name = f"test-{index_name}-{uuid.uuid4().hex}"
+    logger.info(f"Creating test index: {test_index_name} with updated settings")
+    recreate_index(env, test_index_name, updated_settings)
+    logger.info(f"Test index {test_index_name} created successfully")
+
+    logger.info(f"Deleting test index: {test_index_name}")
+    delete_index(env, test_index_name)
+    logger.info(f"Test index {test_index_name} deleted successfully. Proceeding with main index.")
 
     logger.info(f"Deleting index: {index_name}")
     delete_index(env, index_name)
