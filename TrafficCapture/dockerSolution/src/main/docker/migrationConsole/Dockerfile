@@ -43,6 +43,10 @@ COPY console_api /root/console_api
 WORKDIR /root/console_api
 RUN pipenv install --deploy
 
+COPY cluster_tools /root/cluster_tools
+WORKDIR /root/cluster_tools
+RUN pipenv install
+
 WORKDIR /root
 
 # Console setup bash completion and venv for interactive access
@@ -53,7 +57,9 @@ RUN dnf install -y bash-completion --setopt=install_weak_deps=False && \
 
 RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo '. /etc/profile.d/venv.sh' >> ~/.bashrc && \
-    echo 'echo Welcome to the Migration Assistant Console' >> ~/.bashrc
+    echo 'echo Welcome to the Migration Assistant Console' >> ~/.bashrc && \
+    echo 'eval "$(register-python-argcomplete cluster_tools)"' >> ~/.bashrc
+
 # Set ENV to control startup script in /bin/sh mode
 ENV ENV=/root/.bashrc
 
