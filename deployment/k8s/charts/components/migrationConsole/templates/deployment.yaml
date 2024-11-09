@@ -1,3 +1,7 @@
+{{ $mountName := "all-configs" }}
+{{ $envVarMountName := "env-vars" }}
+{{ $sharedLogsVolumeEnabled := false }}
+{{ $snapshotVolumeEnabled := false }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -7,81 +11,70 @@ spec:
   replicas: 1
   selector:
     matchLabels:
-      app: console
+      app: {{ include "generic.fullname" . }}
   template:
     metadata:
       annotations:
         rollme: {{ randAlphaNum 5 | quote }}
       labels:
-        app: console
+        app: {{ include "generic.fullname" . }}
         env: v1
     spec:
       serviceAccountName: configmap-watcher
-      volumes:
-        - name: merged-config
-          emptyDir: { }
-        {{- if eq .Values.sharedLogsVolumeEnabled true -}}
-        - name: shared-logs
-          persistentVolumeClaim:
-            claimName: {{ .Values.sharedLogsPvc }}
-        {{- end -}}
-{{/*        TODO - this would be different if we were doing */}}
-{{/*               a cluster local FS snapshot, cluster local obj-store snapshot, or an S3 snapshot */}}
-        {{- if eq .Values.snapshotVolumeEnabled true -}}
-        - name: snapshot-volume
-          persistentVolumeClaim:
-            claimName: {{ .Values.snapshotVolumePvc -}}
-        {{- end }}
       initContainers:
+        {{- include "generic.setupEnvLoadInitContainer" (merge . (dict
+           "MountName" $envVarMountName
+           "include" .Template.Include)) | nindent 8 }}
         - name: service-yaml-agent
-          image: migrations/service_yaml_from_config_maps:latest
+          image: migrations/service_yaml_from_config_maps
           imagePullPolicy: IfNotPresent
           restartPolicy: Always
           volumeMounts:
             - name: merged-config
               mountPath: /config
+              subPath: migration_services.yaml
           args:
             - "--namespace=default"
-            - "--label-selector=app=myapp"
-            - "--outfile=/config/output.yaml"
+            - "--outfile=/config/migration_services.yaml"
       containers:
         - name: console
           image: migrations/migration_console:latest
           imagePullPolicy: IfNotPresent
-          env:
-            {{- include "generic.pullEnvVarsFromConfigMaps" (dict
-             "Parameters" .Values.parameters
-             "include" .Template.Include
-             "Template" .Template) | indent 10 }}
           command:
             - "/bin/sh"
             - "-c"
             - |
-              {{- include "generic.buildCommandBuilderScript" (dict
-                  "CmdVarName" "CMD"
-                  "Command" "echo arguments into container: "
-                  "Parameters" .Values.parameters
-                  "PackageName" (include "generic.fullname" .)
-                  "include" .Template.Include
-                  "Template" .Template) | nindent 14 }}
-
-              $CMD || exit $?
-
-              # we've just printed out the arguments received, now it's time to run the appropriate container command
-              if [ -z "MIGRATION_API_ENABLED" ]; then
-                pipenv run python /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt
-              else
-                tail -f /dev/null
-              fi
+              source /shared/vars.sh
+              export START_API_COMMAND="pipenv run python /root/console_api/manage.py runserver_plus 0.0.0.0:8000 --cert-file cert.crt"
+              export WAIT_AND_DO_NOTHING_COMMAND="tail -f /dev/null"
+              migrationEnabled=$(echo "$@" | grep -o -- "--migrationApiEnabled" | wc -l); if [ "$migrationEnabled" -gt 0 ]; then $START_API_COMMAND; else $WAIT_AND_DO_NOTHING_COMMAND; fi > run.sh
+              exec migrationEnabled $ARGS
           volumeMounts:
-            - name: merged-config
-              mountPath: /etc/migration_services.yaml
-              subPath: migration_services.yaml
-            {{ if eq .Values.sharedLogsVolumeEnabled true}}
+            {{- if $sharedLogsVolumeEnabled -}}
             - name: shared-logs
               mountPath: /shared-logs-output
-            {{ end }}
-            {{- if eq .Values.snapshotVolumeEnabled true -}}
+            {{- end }}
+            - name: {{ $envVarMountName }}
+              mountPath: /shared
+            - name: merged-config
+              mountPath: /etc/
+              subPath: migration_services.yaml
+            {{- if $snapshotVolumeEnabled -}}
             - name: snapshot-volume
               mountPath: /storage
-            {{- end -}}
+            {{- end }}
+      volumes:
+        - name: {{ $envVarMountName }}
+          emptyDir: { }
+        - name: merged-config
+          emptyDir: { }
+        {{- if $sharedLogsVolumeEnabled  -}}
+        - name: shared-logs
+          persistentVolumeClaim:
+            claimName: {{ .Values.sharedLogsPvc }}
+        {{- end -}}
+        {{- if $snapshotVolumeEnabled -}}
+        - name: snapshot-volume
+          persistentVolumeClaim:
+            claimName: {{ .Values.snapshotVolumePvc -}}
+        {{- end }}

@@ -1,7 +1,6 @@
-{{- define "generic.buildCommandBuilderScript" -}}
+{{- define "generic.buildArgumentsBuilderScript" -}}
+{{ $argsName := .ArgsVarName | default "ARGS" }}
 set -e
-{{- $cmdvarname := .CmdVarName }}
-{{ $cmdvarname }}="{{ .Command }}"
 
 {{- /* Default environment variables if not set */}}
 {{- range $key, $param := .Parameters }}
@@ -16,20 +15,28 @@ fi
 {{- $envVarName := include "toSnakeCase" $key }}
 {{- if hasKey $param "value" }}
 if [ -n "${{ $envVarName }}" ]; then
-  {{ $cmdvarname }}="${{ $cmdvarname }} --{{ $key }} ${{ $envVarName }}"
+  export {{ $argsName }}="${{ $argsName }} --{{ $key }} ${{ $envVarName }}"
 fi
 {{- else if hasKey $param "list" }}
 if [ -n "${{ $envVarName }}" ]; then
   LIST_ITEMS=$(echo "${{ $envVarName }}" | yq eval '.[]' - | xargs -I{} echo -n "{} ")
-  {{ $cmdvarname }}="${{ $cmdvarname }} --{{ $key }} $LIST_ITEMS"
+  export {{ $argsName }}="${{ $argsName }} --{{ $key }} $LIST_ITEMS"
 fi
 {{- else }}
 if [ "${{ $envVarName }}" = "true" ] || [ "${{ $envVarName }}" = "1" ]; then
-  {{ $cmdvarname }}="${{ $cmdvarname }} --{{ $key }}"
+  export {{ $argsName }}="${{ $argsName }} --{{ $key }}"
 fi
 {{- end }}
 {{- end }}
 {{- end -}}
+
+{{- define "generic.buildCommandBuilderScript" -}}
+{{- include "generic.buildArgumentsBuilderScript" . }}
+{{- $command := .Command }}
+{{- $cmdvarname := .CmdVarName }}
+{{ $cmdvarname }}="{{ .Command }}"
+{{ $cmdvarname}}="{{ $command }} $ARGS"
+{{- end }}
 
 {{- define "generic.buildCommand" -}}
 {{- include "generic.buildCommandBuilderScript" (dict

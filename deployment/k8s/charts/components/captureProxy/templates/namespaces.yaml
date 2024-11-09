@@ -1,1 +1,1 @@
-{{ include "generic.createNamespace" .Values.namespace | indent 0 }}
+{{ include "generic.createNamespace" .Values.namespace }}

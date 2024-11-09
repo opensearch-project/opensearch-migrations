@@ -1,7 +1,8 @@
-{{- define "generic.createConfigMaps" }}
-{{- $packageName := .PackageName -}}
-{{- $namespace := .NameSpace -}}
-{{- range $key, $param := .Parameters }}
+{{- define "generic.createParameterConfigMap" }}
+{{ $key := .Key }}
+{{ $param := .Param }}
+{{ $namespace := .NameSpace }}
+{{- $weight := .Weight | default 0 }}
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -10,6 +11,8 @@ metadata:
   namespace: {{ $namespace }}
   labels:
     type: default
+  annotations:
+    helm.sh/hook-weight: "{{ $weight }}"
 data:
   {{- if hasKey $param "value" }}
   value: "{{ $param.value }}"
@@ -18,6 +21,9 @@ data:
     {{- range $item := $param.list }}
     - "{{ $item }}"
     {{- end }}
+  {{- else if hasKey $param "list" }}
+  data: |
+    {{ $param.data | toYaml | indent 4 }}
   {{- else }}
   present: "true"
   {{- end }}
@@ -30,7 +36,19 @@ metadata:
   namespace: {{ $namespace }}
   labels:
     type: override
+  annotations:
+    helm.sh/hook-weight: "{{ $weight }}"
 data: {}  # Empty configmap for user overrides
 {{- end }}
+{{- end -}}
+
+{{- define "generic.createConfigMaps" }}
+{{- $packageName := .PackageName -}}
+{{- $namespace := .NameSpace -}}
+{{- range $key, $param := .Parameters }}
+{{- include "generic.createParameterConfigMap" (dict
+  "Key" $key
+  "Param" $param
+  "NameSpace" .NameSpace)}}
 {{- end }}
 {{- end }}

@@ -1,4 +1,4 @@
-# Main Deployment
+{{ $mountName := "env-vars" }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -17,24 +17,26 @@ spec:
         app: {{ include "generic.fullname" . }}
         env: v1
     spec:
+      initContainers:
+        {{- include "generic.setupEnvLoadInitContainer" (merge . (dict
+           "MountName" $mountName
+           "include" .Template.Include)) | nindent 8 }}
       containers:
         - name: captureproxy
           image: migrations/capture_proxy:latest
           imagePullPolicy: IfNotPresent
-          env:
-            {{- include "generic.pullEnvVarsFromConfigMaps" (dict
-             "Parameters" .Values.parameters
-             "include" .Template.Include
-             "Template" .Template) | indent 10 }}
+
           command:
             - "/bin/sh"
             - "-c"
             - |
-              {{- include "generic.buildCommand" (dict
-                  "Command" "/runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy"
-                  "Parameters" .Values.parameters
-                  "PackageName" (include "generic.fullname" .)
-                  "include" .Template.Include
-                  "Template" .Template) | nindent 14 }}
+              source /shared/vars.sh
+              exec /runJavaWithClasspath.sh org.opensearch.migrations.trafficcapture.proxyserver.CaptureProxy $ARGS
           ports:
             - containerPort: 9200
+          volumeMounts:
+            - name: {{ $mountName }}
+              mountPath: /shared
+      volumes:
+        - name: {{ $mountName }}
+          emptyDir: {}

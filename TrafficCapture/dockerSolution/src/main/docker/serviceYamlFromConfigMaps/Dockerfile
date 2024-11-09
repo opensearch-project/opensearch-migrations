@@ -33,7 +33,7 @@ COPY Pipfile .
 COPY Pipfile.lock .
 RUN pipenv install --deploy
 
-COPY *.py /root/
+COPY configmap2yaml/* /root/
 RUN chmod ug+x /root/*.py
 
-ENTRYPOINT ["/.venv/bin/python", "configmap_watcher.py"]
+ENTRYPOINT ["/.venv/bin/python", "config_watcher.py"]

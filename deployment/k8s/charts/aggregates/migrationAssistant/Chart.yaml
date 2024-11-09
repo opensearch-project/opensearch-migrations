@@ -13,12 +13,12 @@ dependencies:
 #  - name: replayer
 #    version: "0.1.0"
 #    repository: "file://../../components/replayer"
-#  - name: capture-proxy
-#    condition: install-locally-managed-capture-proxy
-#    version: "0.1.0"
-#    repository: "file://../../components/captureProxy"
-#
-#
+  - name: capture-proxy
+    condition: install-locally-managed-capture-proxy
+    version: "0.1.0"
+    repository: "file://../../components/captureProxy"
+
+
 ##  - name: captured-traffic-kafka-cluster
 ##    condition: install-locally-managed-kafka
 ##    version: "0.1.0"
