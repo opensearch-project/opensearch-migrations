@@ -65,39 +65,39 @@ public class RfsMigrateDocuments {
         private boolean help;
 
         @Parameter(required = true,
-            names = { "--snapshot-name" },
+            names = { "--snapshot-name", "--snapshotName" },
             description = "The name of the snapshot to migrate")
         public String snapshotName;
 
         @Parameter(required = false,
-            names = { "--snapshot-local-dir" },
+            names = { "--snapshot-local-dir", "--snapshotLocalDir" },
             description = ("The absolute path to the directory on local disk where the snapshot exists.  " +
                 "Use this parameter if have a copy of the snapshot disk.  Mutually exclusive with " +
                 "--s3-local-dir, --s3-repo-uri, and --s3-region."))
         public String snapshotLocalDir = null;
 
         @Parameter(required = false,
-            names = { "--s3-local-dir" },
+            names = { "--s3-local-dir", "--s3LocalDir" },
             description = ("The absolute path to the directory on local disk to download S3 files to.  " +
                 "If you supply this, you must also supply --s3-repo-uri and --s3-region.  " +
                 "Mutually exclusive with --snapshot-local-dir."))
         public String s3LocalDir = null;
 
         @Parameter(required = false,
-            names = {"--s3-repo-uri" },
+            names = {"--s3-repo-uri", "--s3RepoUri" },
             description = ("The S3 URI of the snapshot repo, like: s3://my-bucket/dir1/dir2.  " +
                 "If you supply this, you must also supply --s3-local-dir and --s3-region.  " +
                 "Mutually exclusive with --snapshot-local-dir."))
         public String s3RepoUri = null;
 
         @Parameter(required = false,
-            names = { "--s3-region" },
+            names = { "--s3-region", "--s3Region" },
             description = ("The AWS Region the S3 bucket is in, like: us-east-2.  If you supply this, you must"
                 + " also supply --s3-local-dir and --s3-repo-uri.  Mutually exclusive with --snapshot-local-dir."))
         public String s3Region = null;
 
         @Parameter(required = true,
-            names = { "--lucene-dir" },
+            names = { "--lucene-dir", "--luceneDir" },
             description = "The absolute path to the directory where we'll put the Lucene docs")
         public String luceneDir;
 
@@ -105,20 +105,20 @@ public class RfsMigrateDocuments {
         public ConnectionContext.TargetArgs targetArgs = new ConnectionContext.TargetArgs();
 
         @Parameter(required = false,
-            names = { "--index-allowlist" },
+            names = { "--index-allowlist", "--indexAllowlist" },
             description = ("Optional.  List of index names to migrate (e.g. 'logs_2024_01, logs_2024_02').  " +
                 "Default: all non-system indices (e.g. those not starting with '.')"))
         public List<String> indexAllowlist = List.of();
 
         @Parameter(required = false,
-            names = { "--max-shard-size-bytes" },
+            names = { "--max-shard-size-bytes", "--maxShardSizeBytes" },
             description = ("Optional. The maximum shard size, in bytes, to allow when " +
                 "performing the document migration.  " +
                 "Useful for preventing disk overflow.  Default: 80 * 1024 * 1024 * 1024 (80 GB)"))
         public long maxShardSizeBytes = 80 * 1024 * 1024 * 1024L;
 
         @Parameter(required = false,
-            names = { "--initial-lease-duration" },
+            names = { "--initial-lease-duration", "--initialLeaseDuration" },
             converter = DurationConverter.class,
             description = "Optional. The time that the first attempt to migrate a shard's documents should take.  " +
                 "If a process takes longer than this the process will terminate, allowing another process to " +
@@ -126,32 +126,32 @@ public class RfsMigrateDocuments {
         public Duration initialLeaseDuration = Duration.ofMinutes(10);
 
         @Parameter(required = false,
-            names = { "--otel-collector-endpoint" },
+            names = { "--otel-collector-endpoint", "--otelCollectorEndpoint" },
             arity = 1,
             description = "Endpoint (host:port) for the OpenTelemetry Collector to which metrics logs should be"
                 + "forwarded. If no value is provided, metrics will not be forwarded.")
         String otelCollectorEndpoint;
 
         @Parameter(required = false,
-        names = "--documents-per-bulk-request",
+        names =  {"--documents-per-bulk-request", "--documentsPerBulkRequest"},
         description = "Optional.  The number of documents to be included within each bulk request sent. " +
             "Default no max (controlled by documents size)")
         int numDocsPerBulkRequest = Integer.MAX_VALUE;
 
         @Parameter(required = false,
-            names = "--documents-size-per-bulk-request",
+            names = { "--documents-size-per-bulk-request", "--documentsSizePerBulkRequest" },
             description = "Optional. The maximum aggregate document size to be used in bulk requests in bytes. " +
                 "Note does not apply to single document requests. Default 10 MiB")
         long numBytesPerBulkRequest = 10 * 1024L * 1024L;
 
         @Parameter(required = false,
-            names = "--max-connections",
+            names = {"--max-connections", "--maxConnections" },
             description = "Optional.  The maximum number of connections to simultaneously " +
                 "used to communicate to the target, default 10")
         int maxConnections = 10;
 
         @Parameter(required = true,
-            names = { "--source-version" },
+            names = { "--source-version", "--sourceVersion" },
             converter = VersionConverter.class,
             description = ("Version of the source cluster."))
         public Version sourceVersion = Version.fromString("ES 7.10");
@@ -191,7 +191,7 @@ public class RfsMigrateDocuments {
     public static void main(String[] args) throws Exception {
         // TODO: Add back arg printing after not consuming plaintext password MIGRATIONS-1915
         var workerId = ProcessHelpers.getNodeInstanceName();
-        log.info("Starting RfsMigrateDocuments with workerId =" + workerId);
+        log.info("Starting RfsMigrateDocuments with workerId=" + workerId);
 
         Args arguments = new Args();
         JCommander jCommander = JCommander.newBuilder().addObject(arguments).build();
