@@ -4,12 +4,34 @@ conditionalPackageInstalls:
   prometheus: true
   grafana: true
 
+namespace:
+  create: true
+  name: ma
+
 proxy:
   enabled: true
+  namespace:
+    name: ma
   parameters:
     destinationUri:
-      configMapName: "sourceClusterEndpoint" # this value will be used to pull the destination uri
+      configMapName: "source-cluster-endpoint"
       yamlPath: "endpoint"
     insecureDestination:
-      configMapName: "sourceClusterEndpoint" # this value will be used to pull the destination uri
+      configMapName: "source-cluster-endpoint"
       yamlPath: "allow_insecure"
+
+migration-console:
+  namespace:
+    name: ma
+
+bulk-document-loader:
+  namespace:
+    name: ma
+
+capture-proxy:
+  namespace:
+    name: ma
+
+replayer:
+  namespace:
+    name: ma

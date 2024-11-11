@@ -1,3 +1,4 @@
-sourceCluster:
-  value: {}
-  allowRuntimeOverride: false
+parameters:
+  sourceCluster:
+#    value: foo
+    allowRuntimeOverride: true

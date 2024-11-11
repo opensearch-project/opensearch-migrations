@@ -7,22 +7,31 @@ dependencies:
   - name: migration-console
     version: "0.1.0"
     repository: "file://../../components/migrationConsole"
+
   - name: bulk-document-loader
     version: "0.1.0"
     repository: "file://../../components/bulkLoad"
-#  - name: replayer
-#    version: "0.1.0"
-#    repository: "file://../../components/replayer"
+
   - name: capture-proxy
     condition: install-locally-managed-capture-proxy
     version: "0.1.0"
     repository: "file://../../components/captureProxy"
-
-
 ##  - name: captured-traffic-kafka-cluster
 ##    condition: install-locally-managed-kafka
 ##    version: "0.1.0"
 ##    repository: "file://../../captured-traffic-kafka-cluster"
+#  - name: replayer
+#    version: "0.1.0"
+#    repository: "file://../../components/replayer"
+
+  - name: shared-configs
+    version: "0.1.0"
+    repository: "file://../../sharedResources/sharedConfigs"
+
+##  - name: otel-collector
+##    version: 1.2.2
+##    repository:
+
 #  - name: grafana
 #    condition: install-locally-managed-grafana
 #    version: "8.5.0"
@@ -35,6 +44,3 @@ dependencies:
 #    condition: install-locally-managed-jaeger
 #    version: "3.2.0"
 #    repository: "https://jaegertracing.github.io/helm-charts"
-##  - name: otel-collector
-##    version: 1.2.2
-##    repository:
