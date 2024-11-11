@@ -9,6 +9,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
+import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
@@ -199,10 +201,8 @@ public class WorkCoordinatorTest {
             for (var i = 0; i < NUM_DOCS; ++i) {
                 String workItemId = getWorkItemAndVerify(testContext, "claimItemWorker", new ConcurrentHashMap<>(), Duration.ofSeconds(5), false, false);
                 var currentNumPendingItems = workCoordinator.numWorkItemsNotYetComplete(testContext::createItemsPendingContext);
-                ArrayList<String> successorWorkItems = new ArrayList<>();
-                for (int j = 0; j < NUM_SUCCESSOR_ITEMS; j++) {
-                    successorWorkItems.add(workItemId + "_successor_" + j);
-                }
+                var successorWorkItems = (ArrayList<String>) IntStream.range(0, NUM_SUCCESSOR_ITEMS).mapToObj(j -> workItemId + "_successor_" + j).collect(Collectors.toList());
+
                 workCoordinator.createSuccessorWorkItemsAndMarkComplete(
                         workItemId, successorWorkItems,
                         testContext::createSuccessorWorkItemsContext
@@ -257,10 +257,7 @@ public class WorkCoordinatorTest {
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         var docId = "R0";
         var N_SUCCESSOR_ITEMS = 3;
-        var successorItems = new ArrayList<String>();
-        for (int i = 0; i < N_SUCCESSOR_ITEMS; i++) {
-            successorItems.add(docId + "_successor_" + i);
-        }
+        var successorItems = (ArrayList<String>) IntStream.range(0, N_SUCCESSOR_ITEMS).mapToObj(i -> docId + "_successor_" + i).collect(Collectors.toList());
 
         var originalWorkItemExpiration = Duration.ofSeconds(5);
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "successorTest")) {
@@ -270,7 +267,7 @@ public class WorkCoordinatorTest {
             // Claim the work item
             getWorkItemAndVerify(testContext, "successorTest", new ConcurrentHashMap<>(), originalWorkItemExpiration, false, false);
             var client = httpClientSupplier.get();
-            // Add tbe list of successors to the work item
+            // Add the list of successors to the work item
             var body = "{\"doc\": {\"successor_items\": \"" + String.join(",", successorItems) + "\"}}";
             var response = client.makeJsonRequest("POST", ".migrations_working_state/_update/" + docId, null, body);
             Assertions.assertEquals(200, response.getStatusCode());
@@ -310,11 +307,7 @@ public class WorkCoordinatorTest {
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         var docId = "R0";
         var N_SUCCESSOR_ITEMS = 3;
-        var successorItems = new ArrayList<String>();
-        for (int i = 0; i < N_SUCCESSOR_ITEMS; i++) {
-            successorItems.add(docId + "_successor_" + i);
-        }
-
+        var successorItems = (ArrayList<String>) IntStream.range(0, N_SUCCESSOR_ITEMS).mapToObj(i -> docId + "_successor_" + i).collect(Collectors.toList());
 
         var originalWorkItemExpiration = Duration.ofSeconds(5);
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "successorTest")) {

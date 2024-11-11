@@ -9,10 +9,12 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.Optional;
+import java.util.Spliterators;
 import java.util.function.BiPredicate;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
+import java.util.stream.StreamSupport;
 
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 
@@ -54,6 +56,10 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public static final String COMPLETED_AT_FIELD_NAME = "completedAt";
     public static final String SOURCE_FIELD_NAME = "_source";
     public static final String SUCCESSOR_ITEMS_FIELD_NAME = "successor_items";
+    public static final String SUCCESSOR_ITEM_DELIMITER = ",";
+
+    public static final int CREATED_RESPONSE_CODE = 201;
+    public static final int CONFLICT_RESPONSE_CODE = 409;
 
     public static final String QUERY_INCOMPLETE_EXPIRED_ITEMS_STR = "    \"query\": {\n"
         + "      \"bool\": {"
@@ -241,7 +247,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "      }"
             + "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);"
             + "      if (params.expirationWindow > 0 && ctx._source." + COMPLETED_AT_FIELD_NAME + " == null) {"
-            +          // already done
+            +          // work item is not completed, but may be assigned to this or a different worker (or unassigned)
             "          if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " == params.workerId && "
             + "            ctx._source." + EXPIRATION_FIELD_NAME + " > serverTimeSeconds) {"
             + // count as an update to force the caller to lookup the expiration time, but no need to modify it
@@ -324,9 +330,9 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
     private ArrayList<String> getSuccessorItemsIfPresent(JsonNode responseDoc) {
         if (responseDoc.has(SUCCESSOR_ITEMS_FIELD_NAME)) {
-            return new ArrayList<>(Arrays.asList(responseDoc.get(SUCCESSOR_ITEMS_FIELD_NAME).asText().split(",")));
+            return new ArrayList<>(Arrays.asList(responseDoc.get(SUCCESSOR_ITEMS_FIELD_NAME).asText().split(SUCCESSOR_ITEM_DELIMITER)));
         }
-        return new ArrayList<>();
+        return null;
     }
 
     @Override
@@ -342,7 +348,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             var resultFromUpdate = getResult(updateResponse);
 
             if (resultFromUpdate == DocumentModificationResult.CREATED) {
-                return new WorkItemAndDuration(workItemId, startTime.plus(leaseDuration), new ArrayList<>());
+                return new WorkItemAndDuration(workItemId, startTime.plus(leaseDuration), null);
             } else {
                 final var httpResponse = httpClient.makeJsonRequest(
                     AbstractedHttpClient.GET_METHOD,
@@ -693,7 +699,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         var body = updateSuccessorWorkItemsTemplate.replace(SCRIPT_VERSION_TEMPLATE, "poc")
                 .replace(WORKER_ID_TEMPLATE, workerId)
                 .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().toEpochMilli() / 1000))
-                .replace(SUCCESSOR_WORK_ITEM_IDS_TEMPLATE, String.join(",", successorWorkItemIds));
+                .replace(SUCCESSOR_WORK_ITEM_IDS_TEMPLATE, String.join(SUCCESSOR_ITEM_DELIMITER, successorWorkItemIds));
 
         var response = httpClient.makeJsonRequest(
                 AbstractedHttpClient.POST_METHOD,
@@ -711,8 +717,10 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    // This is a idempotent function to create multiple unassigned work items. It uses the `create` function in the bulk API
-    // which creates a document only if the specified ID doesn't yet exist.
+    // This is an idempotent function to create multiple unassigned work items. It uses the `create` function in the bulk
+    // API which creates a document only if the specified ID doesn't yet exist. It is distinct from createUnassignedWorkItem
+    // because it is an expected outcome of this function that sometimes the work item is already created. That function
+    // uses `createOrUpdateLease`, whereas this function deliberately never modifies an already-existing work item.
     private void createUnassignedWorkItemsIfNonexistent(ArrayList<String> workItemIds) throws IOException, IllegalStateException {
         String workItemBodyTemplate = "{\"numAttempts\":0, \"scriptVersion\":\"" + SCRIPT_VERSION_TEMPLATE + "\", " +
             "\"creatorId\":\"" + WORKER_ID_TEMPLATE + "\", \"" + EXPIRATION_FIELD_NAME + "\":0 }";
@@ -745,13 +753,17 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         if (!errors) {
             return;
         }
-        var acceptableStatusCodes = List.of(201, 409);
+        // Sometimes these work items have already been created. This is because of the non-transactional nature of OpenSearch
+        // as a work coordinator. If a worker crashed/failed after updating the parent task's `successorItems` field, but before
+        // completing creation of all the successor items, some of them may already exist. The `create` action in a bulk
+        // request will not modify those items, but it will return a 409 CONFLICT response code for them.
+        var acceptableStatusCodes = List.of(CREATED_RESPONSE_CODE, CONFLICT_RESPONSE_CODE);
 
-        var createResults = new ArrayList<Boolean>();
-        resultTree.path("items").elements().forEachRemaining(
-                item -> createResults.add(acceptableStatusCodes.contains(item.path("create").path("status").asInt()))
-        );
-        if (createResults.contains(false)) {
+        var resultsIncludeUnacceptableStatusCodes = StreamSupport.stream(
+                Spliterators.spliteratorUnknownSize(resultTree.path("items").elements(), 0), false
+        ).anyMatch(item -> !acceptableStatusCodes.contains(item.path("create").path("status").asInt()));
+
+        if (resultsIncludeUnacceptableStatusCodes) {
             throw new IllegalStateException(
                     "One or more of the successor work item(s) could not be created: "
                             + String.join(", ", workItemIds)
@@ -769,10 +781,16 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException, IllegalStateException {
         if (successorWorkItemIds.contains(workItemId)) {
-            log.atError().setMessage("successorWorkItemIds {} can not not contain the parent workItemId: {}").addArgument(successorWorkItemIds).addArgument(workItemId).log();
-            throw new IllegalArgumentException("successorWorkItemIds can not not contain the parent workItemId");
+            throw new IllegalArgumentException(String.format("successorWorkItemIds %s can not not contain the parent workItemId: %s", successorWorkItemIds, workItemId));
+        }
+        if (successorWorkItemIds.stream().anyMatch(itemId -> itemId.contains(SUCCESSOR_ITEM_DELIMITER))) {
+            throw new IllegalArgumentException("successorWorkItemIds can not contain the delimiter: " + SUCCESSOR_ITEM_DELIMITER);
         }
         try (var ctx = contextSupplier.get()) {
+            // It is extremely valuable to try hard to get the work item updated with successor item ids. If it fails without
+            // completing this step, the next worker to pick up this lease will rerun all of the work. If it fails after this
+            // step, the next worker to pick it up will see this update and resume the work of creating the successor work items,
+            // without redriving the work.
             int updateWorkItemRetries = 0;
             while (true) {
                 try {

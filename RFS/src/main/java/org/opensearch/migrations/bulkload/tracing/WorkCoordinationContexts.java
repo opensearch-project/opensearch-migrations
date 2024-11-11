@@ -391,10 +391,14 @@ public interface WorkCoordinationContexts extends IWorkCoordinationContexts {
         }
 
         @Override
-        public ICompleteWorkItemContext getCompleteWorkItemContext() { return new CompleteWorkItemContext(this.rootInstrumentationScope, this); }
+        public ICompleteWorkItemContext getCompleteWorkItemContext() {
+            return new CompleteWorkItemContext(this.rootInstrumentationScope, this);
+        }
 
         @Override
-        public ICreateUnassignedWorkItemContext getCreateUnassignedWorkItemContext() { return new CreateUnassignedWorkItemContext(this.rootInstrumentationScope, this); }
+        public ICreateUnassignedWorkItemContext getCreateUnassignedWorkItemContext() {
+            return new CreateUnassignedWorkItemContext(this.rootInstrumentationScope, this);
+        }
 
         public static class MetricInstruments extends RetryMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
