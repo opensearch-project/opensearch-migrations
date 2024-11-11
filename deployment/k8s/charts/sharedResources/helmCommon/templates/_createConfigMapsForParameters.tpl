@@ -1,13 +1,14 @@
 {{- define "generic.createParameterConfigMap" }}
 {{ $key := .Key }}
 {{ $param := .Param }}
+{{ $namePrefix := .Prefix }}
 {{ $namespace := .NameSpace }}
 {{- $weight := .Weight | default 0 }}
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ $key | lower }}-default
+  name: {{ $namePrefix }}{{ $key | include "toKebabCase" }}-default
   namespace: {{ $namespace }}
   labels:
     type: default
@@ -27,12 +28,13 @@ data:
   {{- else }}
   present: "true"
   {{- end }}
+
 {{- if hasKey $param "allowRuntimeOverride" | ternary $param.allowRuntimeOverride true }}
 ---
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ $key | lower }}
+  name: {{ $namePrefix }}{{ $key | include "toKebabCase" }}
   namespace: {{ $namespace }}
   labels:
     type: override
@@ -43,12 +45,12 @@ data: {}  # Empty configmap for user overrides
 {{- end -}}
 
 {{- define "generic.createConfigMaps" }}
+{{- $outerCtx := . -}}
 {{- $packageName := .PackageName -}}
-{{- $namespace := .NameSpace -}}
 {{- range $key, $param := .Parameters }}
-{{- include "generic.createParameterConfigMap" (dict
+{{- include "generic.createParameterConfigMap" (merge (dict
   "Key" $key
   "Param" $param
-  "NameSpace" .NameSpace)}}
+  "Prefix" (printf "%s-" $packageName)) $outerCtx) }}
 {{- end }}
 {{- end }}

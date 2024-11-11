@@ -1,15 +1,18 @@
 {{- define "generic.pullEnvVarsFromConfigMaps" }}
-{{- range $key, $param := .Parameters }}
-- name: {{ include "toSnakeCase" $key }}_DEFAULT
+{{- $packageName := .PackageName -}}
+{{- range $sourceKey, $param := .Parameters -}}
+{{- $configMapKey := printf "%s-%s" $packageName (include "toKebabCase" $sourceKey) }}
+{{- $envName := printf "%s-%s" ($packageName | upper) ( include "toSnakeCase" $sourceKey | upper) }}
+- name: {{ $envName }}_DEFAULT
   valueFrom:
     configMapKeyRef:
-      name: {{ $key | lower }}-default
+      name: {{ $configMapKey }}-default
       key: {{ if hasKey $param "value" }}value{{ else if hasKey $param "list" }}list{{ else }}present{{ end }} {{/*TODO be explicit*/}}
 {{- if hasKey $param "allowRuntimeOverride" | ternary $param.allowRuntimeOverride true }}
-- name: {{ include "toSnakeCase" $key }}
+- name: {{ $envName }}
   valueFrom:
     configMapKeyRef:
-      name: {{ $key | lower }}
+      name: {{ $configMapKey }}
       key: {{ if hasKey $param "value" }}value{{ else if hasKey $param "list" }}list{{ else }}present{{ end }}
       optional: true
 {{- end }}

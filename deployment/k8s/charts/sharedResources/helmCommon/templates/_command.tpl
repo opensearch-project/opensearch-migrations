@@ -19,7 +19,7 @@ if [ -n "${{ $envVarName }}" ]; then
 fi
 {{- else if hasKey $param "list" }}
 if [ -n "${{ $envVarName }}" ]; then
-  LIST_ITEMS=$(echo "${{ $envVarName }}" | yq eval '.[]' - | xargs -I{} echo -n "{} ")
+  LIST_ITEMS=$(echo "${{ $envVarName }}" | yq eval '.[ ]' - | xargs -I{} echo -n "{} ")
   export {{ $argsName }}="${{ $argsName }} --{{ $key }} $LIST_ITEMS"
 fi
 {{- else }}
