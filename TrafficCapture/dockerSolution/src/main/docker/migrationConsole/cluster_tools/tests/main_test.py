@@ -1,7 +1,7 @@
-from src.cluster_tools.main import main
+from src.cluster_tools.base.main import main
 import argparse
 from tests.utils import get_target_index_info
-import src.tools.create_index as create_index
+import cluster_tools.tools.create_index as create_index
 import logging
 
 logger = logging.getLogger(__name__)

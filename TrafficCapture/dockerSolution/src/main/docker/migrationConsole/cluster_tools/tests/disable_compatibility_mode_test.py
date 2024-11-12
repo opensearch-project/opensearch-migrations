@@ -1,5 +1,5 @@
-from src.tools.disable_compatibility_mode import main as disable_compatibility_mode
-from src.cluster_tools.utils import console_curl
+from cluster_tools.tools.disable_compatibility_mode import main as disable_compatibility_mode
+from src.cluster_tools.base.utils import console_curl
 import logging
 
 logger = logging.getLogger(__name__)

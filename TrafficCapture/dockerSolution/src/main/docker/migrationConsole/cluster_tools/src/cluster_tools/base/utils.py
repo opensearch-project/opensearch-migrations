@@ -2,9 +2,6 @@ import json
 from typing import Dict, Optional, Union, Any
 from console_link.models.cluster import HttpMethod
 from console_link.environment import Environment
-import logging
-
-logger = logging.getLogger(__name__)
 
 
 def console_curl(
@@ -30,7 +27,6 @@ def console_curl(
         http_method = HttpMethod[method.upper()]
     except KeyError:
         message = f"Invalid HTTP method: {method}"
-        logger.error(message)
         raise ValueError(message)
 
     if cluster == 'source_cluster':
@@ -39,12 +35,10 @@ def console_curl(
         cluster_obj = env.target_cluster
     else:
         message = "`cluster` must be either 'source_cluster' or 'target_cluster'."
-        logger.error(message)
         raise ValueError(message)
 
     if cluster_obj is None:
         message = f"{cluster} is not defined in the environment."
-        logger.error(message)
         raise ValueError(message)
 
     if json_data is not None:
