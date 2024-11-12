@@ -1,6 +1,7 @@
 package org.opensearch.migrations;
 
 import java.io.File;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -46,29 +47,40 @@ class EndToEndTest {
     private File localDirectory;
 
     private static Stream<Arguments> scenarios() {
-        var scenarios = Stream.<Arguments>builder();
+        return SupportedClusters.sources().stream()
+                .flatMap(sourceCluster -> {
+                    // Determine applicable template types based on source version
+                    List<TemplateType> templateTypes = Stream.concat(
+                                    Stream.of(TemplateType.Legacy),
+                                    (sourceCluster.getVersion().getMajor() >= 7
+                                            ? Stream.of(TemplateType.Index, TemplateType.IndexAndComponent)
+                                            : Stream.empty()))
+                            .collect(Collectors.toList());
 
-        for (var sourceCluster : SupportedClusters.sources()) {
-            for (var targetCluster : SupportedClusters.targets()) {
-                for (var command : MetadataCommands.values()) {
-                    scenarios.add(Arguments.of(sourceCluster, targetCluster, TransferMedium.Http, command));
-                }
-                // Only test snapshot for migrate case
-                scenarios.add(Arguments.of(sourceCluster, targetCluster, TransferMedium.SnapshotImage, MetadataCommands.MIGRATE));
-            }
-        }
+                    return SupportedClusters.targets().stream()
+                            .flatMap(targetCluster -> templateTypes.stream().flatMap(templateType -> {
+                                // Generate arguments for both HTTP and SnapshotImage transfer mediums
+                                Stream<Arguments> httpArgs = Arrays.stream(MetadataCommands.values())
+                                        .map(command -> Arguments.of(sourceCluster, targetCluster, TransferMedium.Http, command, templateType));
 
-        return scenarios.build();
+                                Stream<Arguments> snapshotArgs = Stream.of(
+                                        Arguments.of(sourceCluster, targetCluster, TransferMedium.SnapshotImage, MetadataCommands.MIGRATE, templateType)
+                                );
+
+                                return Stream.concat(httpArgs, snapshotArgs);
+                            }));
+                });
     }
 
-    @ParameterizedTest(name = "From version {0} to version {1}, Command {2}, Medium of transfer {3}")
+    @ParameterizedTest(name = "From version {0} to version {1}, Command {2}, Medium of transfer {3}, and Template Type {4}")
     @MethodSource(value = "scenarios")
-    void metadataCommand(ContainerVersion sourceVersion, ContainerVersion targetVersion, TransferMedium medium, MetadataCommands command) throws Exception {
+    void metadataCommand(ContainerVersion sourceVersion, ContainerVersion targetVersion, TransferMedium medium,
+                         MetadataCommands command, TemplateType templateType) {
         try (
             final var sourceCluster = new SearchClusterContainer(sourceVersion);
             final var targetCluster = new SearchClusterContainer(targetVersion)
         ) {
-            metadataCommandOnClusters(sourceCluster, targetCluster, medium, command);
+            metadataCommandOnClusters(sourceCluster, targetCluster, medium, command, templateType);
         }
     }
 
@@ -77,35 +89,35 @@ class EndToEndTest {
         Http
     }
 
+    private enum TemplateType {
+        Legacy,
+        Index,
+        IndexAndComponent
+    }
+
     @SneakyThrows
     private void metadataCommandOnClusters(
         final SearchClusterContainer sourceCluster,
         final SearchClusterContainer targetCluster,
         final TransferMedium medium,
-        final MetadataCommands command
+        final MetadataCommands command,
+        final TemplateType templateType
     ) {
         // ACTION: Set up the source/target clusters
         var bothClustersStarted = CompletableFuture.allOf(
-            CompletableFuture.runAsync(() -> sourceCluster.start()),
-            CompletableFuture.runAsync(() -> targetCluster.start())
+            CompletableFuture.runAsync(sourceCluster::start),
+            CompletableFuture.runAsync(targetCluster::start)
         );
         bothClustersStarted.join();
 
-        Version sourceVersion = sourceCluster.getContainerVersion().getVersion();
-        var sourceIsES6_8 = VersionMatchers.isES_6_X.test(sourceVersion);
-        var sourceIsES7_X = VersionMatchers.isES_7_X.test(sourceVersion) || VersionMatchers.isOS_1_X.test(sourceVersion);
-
-        if (!(sourceIsES6_8 || sourceIsES7_X)) {
-            throw new RuntimeException("This test cannot handle the source cluster version" + sourceVersion);
-        }
-
         var testData = new TestData();
-        // Create the component and index templates
         var sourceClusterOperations = new ClusterOperations(sourceCluster.getUrl());
-        if (sourceIsES7_X) {
-            sourceClusterOperations.createES7Templates(testData.compoTemplateName, testData.indexTemplateName, "author", "blog*");
-        } else if (sourceIsES6_8) {
-            sourceClusterOperations.createES6LegacyTemplate(testData.indexTemplateName, "blog*");
+        if (templateType == TemplateType.Legacy) {
+            sourceClusterOperations.createLegacyTemplate(testData.indexTemplateName, "blog*");
+        } else if (templateType == TemplateType.Index) {
+            sourceClusterOperations.createIndexTemplate(testData.indexTemplateName, "author", "blog*");
+        } else if (templateType == TemplateType.IndexAndComponent) {
+            sourceClusterOperations.createComponentTemplate(testData.compoTemplateName, testData.indexTemplateName, "author", "blog*");
         }
 
         // Creates a document that uses the template
@@ -141,7 +153,7 @@ class EndToEndTest {
                 sourceCluster.copySnapshotData(localDirectory.toString());
                 arguments.fileSystemRepoPath = localDirectory.getAbsolutePath();
                 arguments.snapshotName = snapshotName;
-                arguments.sourceVersion = sourceVersion;
+                arguments.sourceVersion = sourceCluster.getContainerVersion().getVersion();
                 break;
         
             case Http:
@@ -171,9 +183,9 @@ class EndToEndTest {
             result = metadata.evaluate(arguments).execute(metadataContext);
         }
 
-        verifyCommandResults(result, sourceIsES6_8, testData);
+        verifyCommandResults(result, templateType, testData);
 
-        verifyTargetCluster(targetClusterOperations, command, sourceIsES6_8, testData);
+        verifyTargetCluster(targetClusterOperations, command, templateType, testData);
     }
 
     private static class TestData {
@@ -188,14 +200,14 @@ class EndToEndTest {
 
     private void verifyCommandResults(
         MigrationItemResult result,
-        boolean sourceIsES6_8,
+        TemplateType templateType,
         TestData testData) {
         log.info(result.asCliOutput());
         assertThat(result.getExitCode(), equalTo(0));
 
         var migratedItems = result.getItems();
         assertThat(getNames(migratedItems.getIndexTemplates()), containsInAnyOrder(testData.indexTemplateName));
-        assertThat(getNames(migratedItems.getComponentTemplates()), equalTo(sourceIsES6_8 ? List.of() : List.of(testData.compoTemplateName)));
+        assertThat(getNames(migratedItems.getComponentTemplates()), equalTo(templateType.equals(TemplateType.IndexAndComponent) ? List.of(testData.compoTemplateName) : List.of()));
         assertThat(getNames(migratedItems.getIndexes()), containsInAnyOrder(testData.blogIndexName, testData.movieIndexName, testData.indexThatAlreadyExists));
         assertThat(getNames(migratedItems.getAliases()), containsInAnyOrder(testData.aliasInTemplate, testData.aliasName));
     }
@@ -207,7 +219,7 @@ class EndToEndTest {
     private void verifyTargetCluster(
         ClusterOperations targetClusterOperations,
         MetadataCommands command,
-        boolean sourceIsES6_8,
+        TemplateType templateType,
         TestData testData
         ) {
         var expectUpdatesOnTarget = MetadataCommands.MIGRATE.equals(command);
@@ -233,14 +245,16 @@ class EndToEndTest {
         assertThat(res.getValue(), expectUpdatesOnTarget ? verifyAliasWasListed : not(verifyAliasWasListed));
 
         // Check that the templates were migrated
-        if (sourceIsES6_8) {
+        if (templateType.equals(TemplateType.Legacy)) {
             res = targetClusterOperations.get("/_template/" + testData.indexTemplateName);
             assertThat(res.getValue(), res.getKey(), verifyResponseCode);
-        } else {
+        } else if(templateType.equals(TemplateType.Index) || templateType.equals(TemplateType.IndexAndComponent)) {
             res = targetClusterOperations.get("/_index_template/" + testData.indexTemplateName);
             assertThat(res.getValue(), res.getKey(), verifyResponseCode);
-            var verifyBodyHasComponentTemplate = containsString("composed_of\":[\"" + testData.compoTemplateName + "\"]");
-            assertThat(res.getValue(), expectUpdatesOnTarget ? verifyBodyHasComponentTemplate : not(verifyBodyHasComponentTemplate));
+            if (templateType.equals(TemplateType.IndexAndComponent)) {
+                var verifyBodyHasComponentTemplate = containsString("composed_of\":[\"" + testData.compoTemplateName + "\"]");
+                assertThat(res.getValue(), expectUpdatesOnTarget ? verifyBodyHasComponentTemplate : not(verifyBodyHasComponentTemplate));
+            }
         }
     }
 }
