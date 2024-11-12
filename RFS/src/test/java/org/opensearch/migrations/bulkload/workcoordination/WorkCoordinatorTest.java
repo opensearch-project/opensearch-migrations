@@ -305,7 +305,7 @@ public class WorkCoordinatorTest {
                 Assertions.assertTrue(successorItems.contains(workItemId));
             }
             Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
-            Assertions.assertThrows(IllegalStateException.class, () -> {
+            Assertions.assertThrows(NoWorkToBeDoneException.class, () -> {
                 getWorkItemAndVerify(testContext, "finalClaimItem", seenWorkerItems, originalWorkItemExpiration, false, false);
             });
             Assertions.assertEquals(N_SUCCESSOR_ITEMS + 1, seenWorkerItems.size());
@@ -398,6 +398,12 @@ public class WorkCoordinatorTest {
     }
 
 
+    class NoWorkToBeDoneException extends Exception {
+        public NoWorkToBeDoneException() {
+            super();
+        }
+    }
+
     static AtomicInteger nonce = new AtomicInteger();
 
     @SneakyThrows
@@ -429,9 +435,10 @@ public class WorkCoordinatorTest {
                         throw new IllegalStateException();
                     }
 
+                    @SneakyThrows
                     @Override
                     public String onNoAvailableWorkToBeDone() throws IOException {
-                        throw new IllegalStateException();
+                        throw new NoWorkToBeDoneException();
                     }
 
                     @Override

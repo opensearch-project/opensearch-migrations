@@ -158,19 +158,12 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 action.execute();
                 break; // Exit if action succeeds
             } catch (NonRetryableException e) {
-                log.atError().setCause(e)
-                        .setMessage("Couldn't complete action due to a non-retryable exception.")
-                        .log();
                 Exception underlyingException = (Exception) e.getCause();
                 exceptionConsumer.accept(underlyingException);
                 throw new IllegalStateException(underlyingException);
             } catch (Exception e) {
                 attempt++;
                 if (attempt > maxRetries) {
-                    log.atError().setCause(e)
-                            .setMessage("Couldn't complete action due to exception after {} attempts. Max retries exceeded.")
-                            .addArgument(attempt)
-                            .log();
                     exceptionConsumer.accept(e);
                     throw new RetriesExceededException(e, attempt);
                 }
@@ -305,7 +298,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             +          // work item is not completed, but may be assigned to this or a different worker (or unassigned)
             "          if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " == params.workerId && "
             + "            ctx._source." + EXPIRATION_FIELD_NAME + " > serverTimeSeconds) {"
-            + // count as an update to force the caller to lookup the expiration time, but no need to modify it
+            +            // count as an update to force the caller to lookup the expiration time, but no need to modify it
             "            ctx.op = \\\"update\\\";"
             + "        } else if (ctx._source." + EXPIRATION_FIELD_NAME + " < serverTimeSeconds && " + // is expired
             "                     ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +      // sanity check
@@ -413,17 +406,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 );
                 final var responseDoc = objectMapper.readTree(httpResponse.getPayloadBytes()).path(SOURCE_FIELD_NAME);
                 if (resultFromUpdate == DocumentModificationResult.UPDATED) {
-                    final var workItem = new WorkItemWithPotentialSuccessors(
-                            workItemId,
-                            Instant.ofEpochMilli(1000 * responseDoc.path(EXPIRATION_FIELD_NAME).longValue()),
-                            getSuccessorItemsIfPresent(responseDoc)
-                    );
-                    if (workItem.successorWorkItemIds != null) {
-                        // continue the previous work of creating the successors and marking this item as completed
-                        createSuccessorWorkItemsAndMarkComplete(workItem.workItemId, workItem.successorWorkItemIds, ctx::getCreateSuccessorWorkItemsContext);
-                        return new AlreadyCompleted();
-                    }
-                    return new WorkItemAndDuration(workItemId, workItem.leaseExpirationTime);
+                    var leaseExpirationTime = Instant.ofEpochMilli(1000 * responseDoc.path(EXPIRATION_FIELD_NAME).longValue());
+                    return new WorkItemAndDuration(workItemId, leaseExpirationTime);
                 } else if (!responseDoc.path(COMPLETED_AT_FIELD_NAME).isMissingNode()) {
                     return new AlreadyCompleted();
                 } else if (resultFromUpdate == DocumentModificationResult.IGNORED) {
@@ -781,9 +765,6 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             }
         } catch (IllegalArgumentException e) {
             var resultTree = objectMapper.readTree(response.getPayloadBytes());
-            System.out.println("resultTree = " + resultTree);
-            System.out.println(resultTree.get("error"));
-            System.out.println(resultTree.get("error").get("type"));
             if (resultTree.has("error") &&
                     resultTree.get("error").has("type") &&
                     resultTree.get("error").get("type").asText().equals("illegal_argument_exception")) {
@@ -1033,9 +1014,10 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                             ctx.recordAssigned();
                             var workItem = getAssignedWorkItem(leaseChecker, ctx);
                             if (workItem.successorWorkItemIds != null) {
-                                // continue the previous work of creating the successors and marking this item as completed
+                                // continue the previous work of creating the successors and marking this item as completed.
                                 createSuccessorWorkItemsAndMarkComplete(workItem.workItemId, workItem.successorWorkItemIds, ctx::getCreateSuccessorWorkItemsContext);
-                                return new AlreadyCompleted();
+                                // this item is not acquirable, so repeat the loop to find a new item.
+                                continue;
                             }
                             return new WorkItemAndDuration(workItem.workItemId, workItem.leaseExpirationTime);
                         case NOTHING_TO_ACQUIRE:
