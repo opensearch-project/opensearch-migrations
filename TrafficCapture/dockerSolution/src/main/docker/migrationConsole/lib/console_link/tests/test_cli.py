@@ -463,6 +463,14 @@ def test_cli_backfill_start(runner, mocker):
     mock.assert_called_once()
     assert result.exit_code == 0
 
+def test_cli_backfill_pause(runner, mocker):
+    mock = mocker.patch.object(ECSRFSBackfill, 'pause', autospec=True)
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+                                 'backfill', 'pause'],
+                           catch_exceptions=True)
+    mock.assert_called_once()
+    assert result.exit_code == 0
+
 
 def test_cli_backfill_stop(runner, mocker):
     mock = mocker.patch.object(ECSRFSBackfill, 'stop', autospec=True)

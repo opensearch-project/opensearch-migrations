@@ -180,6 +180,13 @@ def test_ecs_rfs_backfill_start_sets_ecs_desired_count(ecs_rfs_backfill, mocker)
     assert isinstance(ecs_rfs_backfill, ECSRFSBackfill)
     mock.assert_called_once_with(ecs_rfs_backfill.ecs_client, 5)
 
+def test_ecs_rfs_backfill_pause_sets_ecs_desired_count(ecs_rfs_backfill, mocker):
+    assert ecs_rfs_backfill.default_scale == 5
+    mock = mocker.patch.object(ECSService, 'set_desired_count', autospec=True)
+    ecs_rfs_backfill.pause()
+
+    assert isinstance(ecs_rfs_backfill, ECSRFSBackfill)
+    mock.assert_called_once_with(ecs_rfs_backfill.ecs_client, 0)
 
 def test_ecs_rfs_backfill_stop_sets_ecs_desired_count(ecs_rfs_backfill, mocker):
     assert ecs_rfs_backfill.default_scale == 5

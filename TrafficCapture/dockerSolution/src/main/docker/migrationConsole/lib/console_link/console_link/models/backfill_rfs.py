@@ -80,6 +80,9 @@ class DockerRFSBackfill(RFSBackfill):
         self.target_cluster = target_cluster
         self.docker_config = self.config["reindex_from_snapshot"]["docker"]
 
+    def pause(self, pipeline_name=None) -> CommandResult:
+        raise NotImplementedError()
+
     def get_status(self, *args, **kwargs) -> CommandResult:
         return CommandResult(True, (BackfillStatus.RUNNING, "This is my running state message"))
 
@@ -103,6 +106,10 @@ class ECSRFSBackfill(RFSBackfill):
     def start(self, *args, **kwargs) -> CommandResult:
         logger.info(f"Starting RFS backfill by setting desired count to {self.default_scale} instances")
         return self.ecs_client.set_desired_count(self.default_scale)
+    
+    def pause(self, *args, **kwargs) -> CommandResult:
+        logger.info(f"Pausing RFS backfill by setting desired count to 0 instances")
+        return self.ecs_client.set_desired_count(0)
 
     def stop(self, *args, **kwargs) -> CommandResult:
         logger.info("Stopping RFS backfill by setting desired count to 0 instances")

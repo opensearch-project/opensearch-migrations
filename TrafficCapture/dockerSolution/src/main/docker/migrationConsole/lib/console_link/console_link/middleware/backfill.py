@@ -34,6 +34,12 @@ def start(backfill: Backfill, *args, **kwargs) -> CommandResult[str]:
     logger.info("Starting backfill")
     return backfill.start(*args, **kwargs)
 
+@handle_errors("backfill",
+               on_success=lambda result: (ExitCode.SUCCESS, "Backfill paused successfully." + "\n" + result))
+def pause(backfill: Backfill, *args, **kwargs) -> CommandResult[str]:
+    logger.info("Pausing backfill")
+    return backfill.pause(*args, **kwargs)
+
 
 @handle_errors("backfill",
                on_success=lambda result: (ExitCode.SUCCESS, "Backfill stopped successfully." + "\n" + result))

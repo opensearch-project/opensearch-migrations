@@ -291,6 +291,14 @@ def start_backfill_cmd(ctx, pipeline_name):
         raise click.ClickException(message)
     click.echo(message)
 
+@backfill_group.command(name="pause")
+@click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
+@click.pass_obj
+def pause_backfill_cmd(ctx, pipeline_name):
+    exitcode, message = backfill_.pause(ctx.env.backfill, pipeline_name=pipeline_name)
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(message)
 
 @backfill_group.command(name="stop")
 @click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
