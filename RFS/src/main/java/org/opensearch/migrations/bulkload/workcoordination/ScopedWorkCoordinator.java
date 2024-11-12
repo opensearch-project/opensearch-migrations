@@ -27,8 +27,7 @@ public class ScopedWorkCoordinator {
     public <T> T ensurePhaseCompletion(
         WorkItemGetter workItemIdSupplier,
         IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T> visitor,
-        Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier,
-        Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> successorContextSupplier
+        Supplier<IWorkCoordinationContexts.ICompleteWorkItemContext> contextSupplier
     ) throws IOException, InterruptedException {
         var acquisitionResult = workItemIdSupplier.tryAcquire(workCoordinator);
         return acquisitionResult.visit(new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<T>() {

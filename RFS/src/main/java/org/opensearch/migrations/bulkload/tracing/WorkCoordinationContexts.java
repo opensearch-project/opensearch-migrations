@@ -403,11 +403,6 @@ public interface WorkCoordinationContexts extends IWorkCoordinationContexts {
             return new CompleteWorkItemContext(this.rootInstrumentationScope, this);
         }
 
-        @Override
-        public ICreateUnassignedWorkItemContext getCreateUnassignedWorkItemContext() {
-            return new CreateUnassignedWorkItemContext(this.rootInstrumentationScope, this);
-        }
-
         public static class MetricInstruments extends RetryMetricInstruments {
             private MetricInstruments(Meter meter, String activityName) {
                 super(meter, autoLabels(activityName));
