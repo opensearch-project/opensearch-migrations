@@ -293,14 +293,14 @@ public class WorkCoordinatorTest {
             // Okay, we're now in a state where the only document available is the original, incomplete one.
             // We need to make sure that if we try to acquire this work item, it will jump into `createSuccessorWorkItemsAndMarkComplete`,
             // which we can verify because it should be completed successfully and have created the two missing items.
-            // It will throw an IllegalStateException from `getWorkItemAndVerify` because it ends up counting as an `AlreadyCompleted` work outcome
-            Assertions.assertThrows(IllegalStateException.class,
-                    () -> getWorkItemAndVerify(testContext, "successorTest", seenWorkerItems, originalWorkItemExpiration, false, false)
-            );
-            Assertions.assertEquals(N_SUCCESSOR_ITEMS - 1, workCoordinator.numWorkItemsNotYetComplete(testContext::createItemsPendingContext));
+            // After cleaning up the original, acquireNewWorkItem will re-run to claim a valid work item (one of the newly created successor items).
+            var nextSuccessorWorkItem = getWorkItemAndVerify(testContext, "cleanupOriginalAndClaimNextSuccessor", seenWorkerItems, originalWorkItemExpiration, false, true);
+            Assertions.assertTrue(successorItems.contains(nextSuccessorWorkItem));
+            // Now: the original work item is completed, the first successor item is completed (a few lines above) and the second successor is completed (immediately above)
+            Assertions.assertEquals(N_SUCCESSOR_ITEMS - 2, workCoordinator.numWorkItemsNotYetComplete(testContext::createItemsPendingContext));
 
-            // Now, we should be able to claim the other successor items but the _next_ call should fail because there are no available items
-            for (int i = 0; i < (N_SUCCESSOR_ITEMS - 1); i++) {
+            // Now, we should be able to claim the remaining successor items but the _next_ call should fail because there are no available items
+            for (int i = 0; i < (N_SUCCESSOR_ITEMS - 2); i++) {
                 workItemId = getWorkItemAndVerify(testContext, "claimItem_" + i, seenWorkerItems, originalWorkItemExpiration, false, true);
                 Assertions.assertTrue(successorItems.contains(workItemId));
             }
