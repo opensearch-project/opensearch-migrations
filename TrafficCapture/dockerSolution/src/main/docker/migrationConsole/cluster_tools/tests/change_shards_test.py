@@ -1,7 +1,7 @@
-from src.tools.change_shards import main as change_shards
+from cluster_tools.tools.change_shards import main as change_shards
 from tests.utils import target_cluster_refresh, get_target_index_info
-from src.tools.create_index import main as create_index
-from src.cluster_tools.utils import console_curl
+from cluster_tools.tools.create_index import main as create_index
+from src.cluster_tools.base.utils import console_curl
 import argparse
 import logging
 import pytest
