@@ -76,7 +76,7 @@ Below is an example for the structure of an Elasticsearch 7.10 snapshot, along w
 8. **Snapshot Metadata File**: SMILE encoded; contains things like whether the snapshot succeeded, the number of shards, how many shards succeeded, the ES/OS version, the indices in the snapshot, etc
 
 ## Ultra-High Level Design
-The responsibility of performing an RFS operation is performed by a group of one or more the RFS Workers (see Figure 1, below).
+The responsibility of performing an RFS operation is performed by a group of one or more RFS Workers (see Figure 1, below).
 
 ![RFS System Design](./RFS_Worker_HL_System.svg)
 
@@ -140,7 +140,7 @@ In this section, we describe in a high-level, narrative manner how the RFS Worke
 
 The RFS Worker’s running process has at least two running threads:
 
-* Main Thread - performs the work of moving the data from the source cluster to the target cluster; starts the Metrics and Healthcheck Threads
+* Main Thread - performs the work of moving the data from the source cluster to the target cluster; starts the Healthcheck Thread
 * Healthcheck Thread - on a regular, scheduled basis will check the process’ shared state to determine which work item the RFS Worker currently has a lease on (if any) and confirm the lease is still valid; if the lease has expired, it immediately kills the process and all threads (see [Work leases](#work-leases)).
 
 There are two pieces of state shared by the threads of the process, which the Main Thread is solely responsible for writing to.  The Healthcheck Thread treats this shared state as read-only.
@@ -224,7 +224,7 @@ We start with the following high-level assumptions about the structure of the so
 We have the following, additional assumptions about the process of performing a Reindex-from-Snapshot operation:
 
 * (A3) - Re-doing portions of the overall RFS operation is fine, as long as every portion is completed at least once
-* (A4) - Elasticsearch Shards can only be migrated after their Elasticsearch Index has been migrated
+* (A4) - Elasticsearch Shards can only be migrated after their Elasticsearch Index has been created or migrated
 * (A5) - Elasticsearch Shards can be migrated in parallel without ordering concerns
 
 ## Appendix: Centralized or Decentralized Coordination?
