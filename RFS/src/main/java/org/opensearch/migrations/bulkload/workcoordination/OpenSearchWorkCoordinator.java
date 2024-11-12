@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.Optional;
 import java.util.Spliterators;
 import java.util.function.BiPredicate;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
@@ -25,6 +26,7 @@ import lombok.Getter;
 import lombok.Lombok;
 import lombok.NonNull;
 import lombok.SneakyThrows;
+import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -37,8 +39,11 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     static final int MAX_DRIFT_RETRIES = 13; // last delay before failure: 40 seconds
     static final int MAX_MALFORMED_ASSIGNED_WORK_DOC_RETRIES = 17; // last delay before failure: 655.36 seconds
     static final int MAX_ASSIGNED_DOCUMENT_NOT_FOUND_RETRY_INTERVAL = 60 * 1000;
-    static final int MAX_CREATE_SUCCESSOR_WORK_ITEMS_RETRIES = 5;
-    static final int CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS = 10; // last delay before failure: 320 seconds
+    static final int MAX_CREATE_SUCCESSOR_WORK_ITEMS_RETRIES = 10;
+    static final int CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS = 10; // last delay before failure: 10 seconds
+    static final int MAX_CREATE_UNASSIGNED_SUCCESSOR_WORK_ITEM_RETRIES = 7; // last delay before failure: 1.2 seconds
+    static final int MAX_MARK_AS_COMPLETED_RETRIES = 7; // last delay before failure: 1.2 seconds
+
 
     public static final String SCRIPT_VERSION_TEMPLATE = "{SCRIPT_VERSION}";
     public static final String WORKER_ID_TEMPLATE = "{WORKER_ID}";
@@ -100,6 +105,18 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
+    /**
+     * This is a WorkAcquisitionOutcome for a WorkItem that may or may not already have successor work items.
+     */
+    @Getter
+    @AllArgsConstructor
+    @ToString
+    static class WorkItemWithPotentialSuccessors {
+        final String workItemId;
+        final Instant leaseExpirationTime;
+        final ArrayList<String> successorWorkItemIds;
+    }
+
     private final long tolerableClientServerClockDifferenceSeconds;
     private final AbstractedHttpClient httpClient;
     private final String workerId;
@@ -126,6 +143,44 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         this.workerId = workerId;
         this.clock = clock;
         this.objectMapper = new ObjectMapper();
+    }
+
+    @FunctionalInterface
+    public interface RetryableAction {
+        void execute() throws IOException, NonRetryableException, InterruptedException;
+    }
+
+    private static void retryWithExponentialBackoff(
+            RetryableAction action, int maxRetries, long baseRetryTimeMs, Consumer<Exception> exceptionConsumer) throws InterruptedException, IllegalStateException {
+        int attempt = 0;
+        while (true) {
+            try {
+                action.execute();
+                break; // Exit if action succeeds
+            } catch (NonRetryableException e) {
+                log.atError().setCause(e)
+                        .setMessage("Couldn't complete action due to a non-retryable exception.")
+                        .log();
+                Exception underlyingException = (Exception) e.getCause();
+                exceptionConsumer.accept(underlyingException);
+                throw new IllegalStateException(underlyingException);
+            } catch (Exception e) {
+                attempt++;
+                if (attempt > maxRetries) {
+                    log.atError().setCause(e)
+                            .setMessage("Couldn't complete action due to exception after {} attempts. Max retries exceeded.")
+                            .addArgument(attempt)
+                            .log();
+                    exceptionConsumer.accept(e);
+                    throw new RetriesExceededException(e, attempt);
+                }
+                Duration sleepDuration = Duration.ofMillis((long) (Math.pow(2.0, attempt - 1) * baseRetryTimeMs));
+                log.atWarn().setCause(e)
+                        .setMessage("Couldn't complete action due to exception. Backing off {} and trying again.")
+                        .addArgument(sleepDuration).log();
+                Thread.sleep(sleepDuration.toMillis());
+            }
+        }
     }
 
     public void setup(Supplier<IWorkCoordinationContexts.IInitializeCoordinatorStateContext> contextSupplier)
@@ -341,14 +396,14 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         String workItemId,
         Duration leaseDuration,
         Supplier<IWorkCoordinationContexts.IAcquireSpecificWorkContext> contextSupplier
-    ) throws IOException {
+    ) throws IOException, InterruptedException {
         try (var ctx = contextSupplier.get()) {
             var startTime = Instant.now();
             var updateResponse = createOrUpdateLeaseForDocument(workItemId, leaseDuration.toSeconds());
             var resultFromUpdate = getResult(updateResponse);
 
             if (resultFromUpdate == DocumentModificationResult.CREATED) {
-                return new WorkItemAndDuration(workItemId, startTime.plus(leaseDuration), null);
+                return new WorkItemAndDuration(workItemId, startTime.plus(leaseDuration));
             } else {
                 final var httpResponse = httpClient.makeJsonRequest(
                     AbstractedHttpClient.GET_METHOD,
@@ -358,11 +413,17 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 );
                 final var responseDoc = objectMapper.readTree(httpResponse.getPayloadBytes()).path(SOURCE_FIELD_NAME);
                 if (resultFromUpdate == DocumentModificationResult.UPDATED) {
-                    return new WorkItemAndDuration(
-                        workItemId,
-                        Instant.ofEpochMilli(1000 * responseDoc.path(EXPIRATION_FIELD_NAME).longValue()),
-                        getSuccessorItemsIfPresent(responseDoc)
+                    final var workItem = new WorkItemWithPotentialSuccessors(
+                            workItemId,
+                            Instant.ofEpochMilli(1000 * responseDoc.path(EXPIRATION_FIELD_NAME).longValue()),
+                            getSuccessorItemsIfPresent(responseDoc)
                     );
+                    if (workItem.successorWorkItemIds != null) {
+                        // continue the previous work of creating the successors and marking this item as completed
+                        createSuccessorWorkItemsAndMarkComplete(workItem.workItemId, workItem.successorWorkItemIds, ctx::getCreateSuccessorWorkItemsContext);
+                        return new AlreadyCompleted();
+                    }
+                    return new WorkItemAndDuration(workItemId, workItem.leaseExpirationTime);
                 } else if (!responseDoc.path(COMPLETED_AT_FIELD_NAME).isMissingNode()) {
                     return new AlreadyCompleted();
                 } else if (resultFromUpdate == DocumentModificationResult.IGNORED) {
@@ -576,7 +637,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    private WorkItemAndDuration getAssignedWorkItemUnsafe()
+    private WorkItemWithPotentialSuccessors getAssignedWorkItemUnsafe()
         throws IOException, AssignedWorkDocumentNotFoundException, MalformedAssignedWorkDocumentException {
         final var queryWorkersAssignedItemsTemplate = "{\n"
             + "  \"query\": {\n"
@@ -625,13 +686,14 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             throw new MalformedAssignedWorkDocumentException(response);
         }
 
-        var successorItems = getSuccessorItemsIfPresent(resultHitInner);
-        var rval = new WorkItemAndDuration(resultHitInner.get("_id").asText(), Instant.ofEpochMilli(1000 * expiration), successorItems);
+        var responseDoc = resultHitInner.get(SOURCE_FIELD_NAME);
+        var successorItems = getSuccessorItemsIfPresent(responseDoc);
+        var rval = new WorkItemWithPotentialSuccessors(resultHitInner.get("_id").asText(), Instant.ofEpochMilli(1000 * expiration), successorItems);
         log.atInfo().setMessage("Returning work item and lease: {}").addArgument(rval).log();
         return rval;
     }
 
-    private WorkItemAndDuration getAssignedWorkItem(LeaseChecker leaseChecker,
+    private WorkItemWithPotentialSuccessors getAssignedWorkItem(LeaseChecker leaseChecker,
                                                     IWorkCoordinationContexts.IAcquireNextWorkItemContext ctx)
         throws RetriesExceededException, InterruptedException
     {
@@ -671,7 +733,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    private void updateWorkItemWithSuccessors(String workItemId, ArrayList<String> successorWorkItemIds) throws IOException {
+    private void updateWorkItemWithSuccessors(String workItemId, ArrayList<String> successorWorkItemIds) throws IOException, NonRetryableException {
         final var updateSuccessorWorkItemsTemplate = "{\n"
                 + "  \"script\": {\n"
                 + "    \"lang\": \"painless\",\n"
@@ -707,7 +769,26 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 null,
                 body
         );
-        if (DocumentModificationResult.UPDATED != getResult(response)) {
+        try {
+            DocumentModificationResult modificationResult = getResult(response);
+            if (DocumentModificationResult.UPDATED != modificationResult) {
+                throw new IllegalStateException(
+                        "Unexpected response for workItemId: "
+                                + workItemId
+                                + ".  Response: "
+                                + response.toDiagnosticString()
+                );
+            }
+        } catch (IllegalArgumentException e) {
+            var resultTree = objectMapper.readTree(response.getPayloadBytes());
+            System.out.println("resultTree = " + resultTree);
+            System.out.println(resultTree.get("error"));
+            System.out.println(resultTree.get("error").get("type"));
+            if (resultTree.has("error") &&
+                    resultTree.get("error").has("type") &&
+                    resultTree.get("error").get("type").asText().equals("illegal_argument_exception")) {
+                throw new NonRetryableException(new IllegalArgumentException(resultTree.get("error").get("caused_by").asText()));
+            }
             throw new IllegalStateException(
                     "Unexpected response for workItemId: "
                             + workItemId
@@ -791,33 +872,24 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             // completing this step, the next worker to pick up this lease will rerun all of the work. If it fails after this
             // step, the next worker to pick it up will see this update and resume the work of creating the successor work items,
             // without redriving the work.
-            int updateWorkItemRetries = 0;
-            while (true) {
-                try {
-                    updateWorkItemWithSuccessors(workItemId, successorWorkItemIds);
-                    break;
-                } catch (IllegalStateException e) {
-                    updateWorkItemRetries++;
-                    if (updateWorkItemRetries > MAX_CREATE_SUCCESSOR_WORK_ITEMS_RETRIES) {
-                        ctx.addTraceException(e, true);
-                        log.atError().setCause(e).setMessage(
-                                "Throwing exception because max tries (" + MAX_CREATE_SUCCESSOR_WORK_ITEMS_RETRIES + ")" +
-                                        " have been exhausted").log();
-                        throw new RetriesExceededException(e, updateWorkItemRetries);
-                    }
-                    ctx.addTraceException(e, true);
-                    var sleepBeforeNextRetryDuration = Duration.ofMillis(
-                                    (long) (Math.pow(2.0, (updateWorkItemRetries-1)) * CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS));
-                    ctx.addTraceException(e, false);
-                    log.atWarn().setCause(e)
-                            .setMessage("Couldn't complete work assignment due to exception. Backing off {} and trying again.")
-                            .addArgument(sleepBeforeNextRetryDuration).log();
-                    Thread.sleep(sleepBeforeNextRetryDuration.toMillis());
-                }
-            }
-
-            createUnassignedWorkItemsIfNonexistent(successorWorkItemIds);
-            completeWorkItem(workItemId, ctx::getCompleteWorkItemContext);
+            retryWithExponentialBackoff(
+                    () -> updateWorkItemWithSuccessors(workItemId, successorWorkItemIds),
+                    MAX_CREATE_SUCCESSOR_WORK_ITEMS_RETRIES,
+                    CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
+                    e -> ctx.addTraceException(e, true)
+            );
+            retryWithExponentialBackoff(
+                    () -> createUnassignedWorkItemsIfNonexistent(successorWorkItemIds),
+                    MAX_CREATE_UNASSIGNED_SUCCESSOR_WORK_ITEM_RETRIES,
+                    CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
+                    e -> ctx.addTraceException(e, true)
+            );
+            retryWithExponentialBackoff(
+                    () -> completeWorkItem(workItemId, ctx::getCompleteWorkItemContext),
+                    MAX_MARK_AS_COMPLETED_RETRIES,
+                    CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
+                    e -> ctx.addTraceException(e, true)
+            );
             refresh(ctx::getRefreshContext);
         }
     }
@@ -867,6 +939,12 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         public RetriesExceededException(Throwable cause, int retries) {
             super(cause);
             this.retries = retries;
+        }
+    }
+
+    public static class NonRetryableException extends Exception {
+        public NonRetryableException(Exception cause) {
+            super(cause);
         }
     }
 
@@ -953,7 +1031,13 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     switch (obtainResult) {
                         case SUCCESSFUL_ACQUISITION:
                             ctx.recordAssigned();
-                            return getAssignedWorkItem(leaseChecker, ctx);
+                            var workItem = getAssignedWorkItem(leaseChecker, ctx);
+                            if (workItem.successorWorkItemIds != null) {
+                                // continue the previous work of creating the successors and marking this item as completed
+                                createSuccessorWorkItemsAndMarkComplete(workItem.workItemId, workItem.successorWorkItemIds, ctx::getCreateSuccessorWorkItemsContext);
+                                return new AlreadyCompleted();
+                            }
+                            return new WorkItemAndDuration(workItem.workItemId, workItem.leaseExpirationTime);
                         case NOTHING_TO_ACQUIRE:
                             ctx.recordNothingAvailable();
                             return new NoAvailableWorkToBeDone();

@@ -248,6 +248,10 @@ public interface WorkCoordinationContexts extends IWorkCoordinationContexts {
         public MetricInstruments getRetryMetrics() {
             return getRootInstrumentationScope().acquireSpecificWorkMetrics;
         }
+
+        public ICreateSuccessorWorkItemsContext  getCreateSuccessorWorkItemsContext() {
+            return new CreateSuccessorWorkItemsContext(this.rootInstrumentationScope, this);
+        }
     }
 
     @Getter
@@ -274,6 +278,10 @@ public interface WorkCoordinationContexts extends IWorkCoordinationContexts {
         @Override
         public IRefreshContext getRefreshContext() {
             return new Refresh(this.rootInstrumentationScope, this);
+        }
+
+        public ICreateSuccessorWorkItemsContext  getCreateSuccessorWorkItemsContext() {
+            return new CreateSuccessorWorkItemsContext(this.rootInstrumentationScope, this);
         }
 
         public static class MetricInstruments extends RetryMetricInstruments {

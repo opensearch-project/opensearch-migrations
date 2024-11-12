@@ -47,11 +47,6 @@ public class ScopedWorkCoordinator {
                 InterruptedException {
                 var workItemId = workItem.getWorkItemId();
                 leaseExpireTrigger.registerExpiration(workItem.workItemId, workItem.leaseExpirationTime);
-                if (!workItem.successorWorkItems.isEmpty()) {
-                    workCoordinator.createSuccessorWorkItemsAndMarkComplete(workItemId, workItem.successorWorkItems, successorContextSupplier);
-                    leaseExpireTrigger.markWorkAsCompleted(workItemId);
-                    return visitor.onAlreadyCompleted();
-                }
                 var rval = visitor.onAcquiredWork(workItem);
                 workCoordinator.completeWorkItem(workItemId, contextSupplier);
                 leaseExpireTrigger.markWorkAsCompleted(workItemId);

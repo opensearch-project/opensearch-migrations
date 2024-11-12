@@ -55,6 +55,8 @@ public interface IWorkCoordinationContexts {
 
     interface IAcquireSpecificWorkContext extends IBaseAcquireWorkContext {
         String ACTIVITY_NAME = ActivityNames.ACQUIRE_SPECIFIC_WORK;
+
+        ICreateSuccessorWorkItemsContext getCreateSuccessorWorkItemsContext();
     }
 
     interface IAcquireNextWorkItemContext extends IBaseAcquireWorkContext {
@@ -69,6 +71,9 @@ public interface IWorkCoordinationContexts {
         void recordRecoverableClockError();
 
         void recordFailure(OpenSearchWorkCoordinator.PotentialClockDriftDetectedException e);
+
+        ICreateSuccessorWorkItemsContext getCreateSuccessorWorkItemsContext();
+
     }
 
     interface ICompleteWorkItemContext extends IRetryableActivityContext {

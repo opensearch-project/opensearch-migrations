@@ -68,7 +68,7 @@ public interface IWorkCoordinator extends AutoCloseable {
         String workItemId,
         Duration leaseDuration,
         Supplier<IWorkCoordinationContexts.IAcquireSpecificWorkContext> contextSupplier
-    ) throws IOException;
+    ) throws IOException, InterruptedException;
     
     /**
      * Scan the created work items that have not yet had leases acquired and have not yet finished.
@@ -185,7 +185,6 @@ public interface IWorkCoordinator extends AutoCloseable {
     class WorkItemAndDuration implements WorkAcquisitionOutcome {
         final String workItemId;
         final Instant leaseExpirationTime;
-        final ArrayList<String> successorWorkItems;
 
         @Override
         public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException, InterruptedException {
