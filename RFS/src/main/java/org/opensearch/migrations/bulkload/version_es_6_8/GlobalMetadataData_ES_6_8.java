@@ -19,4 +19,14 @@ public class GlobalMetadataData_ES_6_8 implements GlobalMetadata {
     public ObjectNode getTemplates() {
         return (ObjectNode) root.get("templates");
     }
+
+    @Override
+    public ObjectNode getIndexTemplates() {
+        return null;
+    }
+
+    @Override
+    public ObjectNode getComponentTemplates() {
+        return null;
+    }
 }
