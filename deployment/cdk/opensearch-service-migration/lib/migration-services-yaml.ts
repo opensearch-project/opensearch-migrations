@@ -83,6 +83,7 @@ export class FileSystemSnapshotYaml {
 export class S3SnapshotYaml {
     repo_uri = '';
     aws_region = '';
+    role? = '';
 }
 
 export class SnapshotYaml {
