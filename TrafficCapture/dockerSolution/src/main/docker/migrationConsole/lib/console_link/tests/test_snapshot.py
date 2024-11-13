@@ -261,6 +261,7 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
                                   ], stdout=None, stderr=None, text=True, check=True)
 
+
 def test_s3_snapshot_create_calls_subprocess_run_with_correct_s3_role(mocker):
     s3_role = "arn:aws:iam::123456789012:role/OSMigrations-dev-us-west-1-default-SnapshotRole"
     config = {
@@ -339,6 +340,7 @@ def test_fs_snapshot_create_works_for_clusters_with_basic_auth(mocker):
                                   "--file-system-repo-path", config["snapshot"]["fs"]["repo_path"],
                                   "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
                                   ], stdout=None, stderr=None, text=True, check=True)
+
 
 def test_fs_snapshot_create_works_for_clusters_with_sigv4(mocker):
     config = {
