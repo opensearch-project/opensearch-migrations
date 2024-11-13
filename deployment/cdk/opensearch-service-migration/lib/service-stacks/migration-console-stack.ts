@@ -279,7 +279,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
                 createSnapshotOnAOSRole(this, artifactS3Arn, serviceTaskRole.roleArn,
                     this.region, props.stage, props.defaultDeployId)
                     .roleArn;
-            // HOW DO I GET THIS servicesYaml into the parameter AND get the service created?
         }
 
         const parameter = createMigrationStringParameter(this, servicesYaml.stringify(), {
