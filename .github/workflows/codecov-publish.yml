@@ -1,51 +1,48 @@
-#name: Codecov Publish
-#
-## Due to the behavior of workflow_run, changes to this file will
-## only be reflected once they are pushed up to the `default` (main) branch
-#
-#on:
-#  workflow_run:
-#    workflows: [CI]
-#    types:
-#      - completed
-#    branches:
-#      - gha_codecov_separate_workflow
-#      - main
-#
-#jobs:
-#  publish-codecov:
-#    if: ${{ github.event.workflow_run.conclusion == 'success' }}
-#    runs-on: ubuntu-latest
-#    steps:
-#      - name: get PR
-#        env:
-#          GH_TOKEN: ${{ github.token }}
-#        run: |
-#          - echo "pull_request=$(gh api -H 'Accept:
-#            application/vnd.github+json' -H 'X-Github-Api-Version: 2022-11-28' \
-#          - /repos/${{ github.repository}}/actions/runs/${{ github.event.workflow_run.id }} | jq .pull_requests[0].number)" >> $GITHUB_ENV
-#          - echo "Pull Request: $pull_request"
-#
-#      - name: Checkout Repository
-#        uses: actions/checkout@v4
-#
-#      - name: Download Coverage Artifacts
-#        uses: actions/download-artifact@v4
-#        with:
-#          pattern: coverage-reports-*
-#          path: ./coverage-reports
-#
-#      - name: Upload Coverage
-#        uses: codecov/codecov-action@v4
-#        with:
-#          fail_ci_if_error: true
-#          files: ./coverage-reports/**/*.*
-#          flags: unittests
-#          token: ${{ secrets.CODECOV_TOKEN }}
-#          verbose: true
-#          # Manual overrides for these parameters are needed because automatic detection
-#          # in codecov-action does not work for non-`pull_request` workflows.
-#          # In `main` branch push, these default to empty strings since we want to run
-#          # the analysis on HEAD.
-#          override_commit: ${{ steps.parse_previous_artifacts.outputs.override_commit || '' }}
-#          override_pr: ${{ steps.parse_previous_artifacts.outputs.override_pr || '' }}
+name: Codecov Publish
+
+# Due to the behavior of workflow_run, changes to this file will
+# only be reflected once they are pushed up to the `default` (main) branch
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types:
+      - completed
+
+jobs:
+  publish-codecov:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: get PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          - echo "pull_request=$(gh api -H 'Accept:
+            application/vnd.github+json' -H 'X-Github-Api-Version: 2022-11-28' \
+          - /repos/${{ github.repository}}/actions/runs/${{ github.event.workflow_run.id }} | jq .pull_requests[0].number)" >> $GITHUB_ENV
+          - echo "Pull Request: $pull_request"
+
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Coverage Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: coverage-reports-*
+          path: ./coverage-reports
+
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v4
+        with:
+          fail_ci_if_error: true
+          files: ./coverage-reports/**/*.*
+          flags: unittests
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
+          # Manual overrides for these parameters are needed because automatic detection
+          # in codecov-action does not work for non-`pull_request` workflows.
+          # In `main` branch push, these default to empty strings since we want to run
+          # the analysis on HEAD.
+          override_commit: ${{ steps.parse_previous_artifacts.outputs.override_commit || '' }}
+          override_pr: ${{ steps.parse_previous_artifacts.outputs.override_pr || '' }}
