@@ -89,6 +89,8 @@ jobs:
           pipenv run coverage xml
       - name: Upload Coverage
         uses: codecov/codecov-action@v4
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
         with:
           verbose: true
           token: ${{ secrets.CODECOV_TOKEN }}
