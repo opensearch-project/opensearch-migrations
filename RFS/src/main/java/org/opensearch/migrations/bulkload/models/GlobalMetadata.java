@@ -25,6 +25,10 @@ public interface GlobalMetadata {
 
     public ObjectNode getTemplates();
 
+    public ObjectNode getIndexTemplates();
+
+    public ObjectNode getComponentTemplates();
+
     /**
     * Defines the behavior required to read a snapshot's global metadata as JSON and convert it into a Data object
     */

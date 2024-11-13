@@ -6,4 +6,4 @@ script_dir_abs_path=$(dirname "$script_abs_path")
 cd "$script_dir_abs_path" || exit
 
 cd ../../.. || exit
-./gradlew :buildDockerImages -x test
+./gradlew :buildDockerImages -x test "$@"

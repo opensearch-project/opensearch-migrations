@@ -22,11 +22,19 @@ ext {
     finalVersion = buildSnapshot ? "${buildVersion}-SNAPSHOT" : buildVersion
 }
 
-// Apply the version to all projects
 allprojects {
     version = finalVersion
     // This should eventually change, see https://opensearch.atlassian.net/browse/MIGRATIONS-2167
     group = 'org.opensearch.migrations.trafficcapture'
+    tasks.withType(Jar).tap {
+        configureEach {
+            manifest {
+                attributes(
+                        'SPDX-License-Identifier': 'Apache-2.0'
+                )
+            }
+        }
+    }
 }
 
 subprojects { subproject ->
@@ -160,8 +168,9 @@ subprojects {
     task sourcesJar(type: Jar) {
         archiveClassifier.set('sources')
         from sourceSets.main.allSource
-        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        duplicatesStrategy = DuplicatesStrategy.WARN
     }
+
     def excludedProjectPaths = [
             ':RFS',
             ':TrafficCapture',
@@ -246,7 +255,7 @@ subprojects {
 
     // Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
     tasks.register('copyDependencies', Sync) {
-        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        duplicatesStrategy = DuplicatesStrategy.WARN
 
         from configurations.runtimeClasspath
         into "${buildDir}/dependencies"
