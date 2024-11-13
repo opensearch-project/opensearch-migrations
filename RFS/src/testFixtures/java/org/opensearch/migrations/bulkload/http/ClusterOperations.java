@@ -126,10 +126,10 @@ public class ClusterOperations {
     }
 
     /**
-     * Creates an ES6 legacy template, intended for use on only ES 6 clusters
+     * Creates a legacy template
      */
     @SneakyThrows
-    public void createES6LegacyTemplate(final String templateName, final String pattern) throws IOException {
+    public void createLegacyTemplate(final String templateName, final String pattern) throws IOException {
         final var templateJson = "{\r\n" + //
             "  \"index_patterns\": [\r\n" + //
             "    \"" + pattern + "\"\r\n" + //
@@ -158,7 +158,7 @@ public class ClusterOperations {
             "  }\r\n" + //
             "}";
 
-        final var createRepoRequest = new HttpPut(this.clusterUrl + "/_template/" + templateName);
+        final var createRepoRequest = new HttpPut(this.clusterUrl + "/_template/" + templateName + "?include_type_name=true");
         createRepoRequest.setEntity(new StringEntity(templateJson));
         createRepoRequest.setHeader("Content-Type", "application/json");
 
@@ -172,15 +172,15 @@ public class ClusterOperations {
     }
 
     /**
-     * Creates an ES7 legacy template, intended for use on only ES 7.8+ clusters
+     * Creates an ES7 component template, intended for use on only ES 7.8+ clusters
      */
     @SneakyThrows
-    public void createES7Templates(
+    public void createComponentTemplate(
         final String componentTemplateName,
         final String indexTemplateName,
         final String fieldName,
         final String indexPattern
-    ) throws IOException {
+    ) {
         final var componentTemplateJson = "{"
             + "\"template\": {"
             + "    \"settings\": {"
@@ -210,19 +210,71 @@ public class ClusterOperations {
 
         try (var response = httpClient.execute(createCompTempRequest)) {
             assertThat(
-                EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8),
-                response.getCode(),
-                equalTo(200)
+                    EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8),
+                    response.getCode(),
+                    equalTo(200)
             );
         }
+
+        final var indexTemplateJson = "{"
+                + "\"index_patterns\": [\""
+                + indexPattern
+                + "\"],"
+                + "\"composed_of\": [\""
+                + componentTemplateName
+                + "\"],"
+                + "\"priority\": 1,"
+                + "\"version\": 1"
+                + "}";
+
+        final var indexTempUrl = clusterUrl + "/_index_template/" + indexTemplateName;
+        final var createIndexTempRequest = new HttpPut(indexTempUrl);
+        createIndexTempRequest.setEntity(new StringEntity(indexTemplateJson));
+        createIndexTempRequest.setHeader("Content-Type", "application/json");
+
+        try (var response = httpClient.execute(createIndexTempRequest)) {
+            assertThat(
+                    EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8),
+                    response.getCode(),
+                    equalTo(200)
+            );
+        }
+    }
+
+
+    /**
+     * Creates an ES7 index template, intended for use on only ES 7.8+ clusters
+     */
+    @SneakyThrows
+    public void createIndexTemplate(
+        final String indexTemplateName,
+        final String fieldName,
+        final String indexPattern
+    ) {
+        final var templateJson = "{"
+            + "    \"settings\": {"
+            + "        \"number_of_shards\": 1,"
+            + "        \"number_of_replicas\": 1"
+            + "    },"
+            + "    \"mappings\": {"
+            + "        \"properties\": {"
+            + "            \""
+            + fieldName
+            + "\": {"
+            + "                \"type\": \"text\""
+            + "            }"
+            + "        }"
+            + "    },"
+            + "    \"aliases\": {"
+            + "        \"alias1\": {}"
+            + "    }"
+            + "}";
 
         final var indexTemplateJson = "{"
             + "\"index_patterns\": [\""
             + indexPattern
             + "\"],"
-            + "\"composed_of\": [\""
-            + componentTemplateName
-            + "\"],"
+            + "\"template\":" + templateJson + ","
             + "\"priority\": 1,"
             + "\"version\": 1"
             + "}";

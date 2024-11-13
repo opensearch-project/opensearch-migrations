@@ -3,7 +3,8 @@ import {
     parseClusterDefinition,
     validateFargateCpuArch,
     parseArgsToDict,
-    appendArgIfNotInExtraArgs
+    appendArgIfNotInExtraArgs,
+    validateAndReturnFormattedHttpURL
 } from "../lib/common-utilities";
 import {describe, test, expect} from '@jest/globals';
 
@@ -244,7 +245,7 @@ describe('validateFargateCpuArch', () => {
 
     test('parseClusterDefinition with basic auth parameters', () => {
         const clusterDefinition = {
-            endpoint: 'https://target-cluster',
+            endpoint: 'https://target-cluster:443',
             version: 'ES_7.10',
             auth: {
               type: 'basic',
@@ -263,7 +264,7 @@ describe('validateFargateCpuArch', () => {
 
     test('parseClusterDefinition with no auth', () => {
         const clusterDefinition = {
-            endpoint: 'XXXXXXXXXXXXXXXXXXXXXX',
+            endpoint: 'https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443',
             auth: {"type": "none"}
           }
         const parsed = parseClusterDefinition(clusterDefinition);
@@ -274,7 +275,7 @@ describe('validateFargateCpuArch', () => {
 
     test('parseClusterDefinition with sigv4 auth', () => {
         const clusterDefinition = {
-            endpoint: 'XXXXXXXXXXXXXXXXXXXXXX',
+            endpoint: 'https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443',
             auth: {
               type: 'sigv4',
               region: 'us-east-1',
@@ -288,4 +289,57 @@ describe('validateFargateCpuArch', () => {
         expect(parsed.auth.sigv4?.region).toBe(clusterDefinition.auth.region);
         expect(parsed.auth.sigv4?.serviceSigningName).toBe(clusterDefinition.auth.serviceSigningName);
     })
+
+    test('Test valid https imported target cluster endpoint with port is formatted correctly', () => {
+        const inputTargetEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443"
+        const expectedFormattedEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443"
+        const actualFormatted = validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+        expect(actualFormatted).toEqual(expectedFormattedEndpoint)
+    });
+
+    test('Test valid https imported target cluster endpoint with no port is formatted correctly', () => {
+        const inputTargetEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com"
+        const expectedFormattedEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443"
+        const actualFormatted = validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+        expect(actualFormatted).toEqual(expectedFormattedEndpoint)
+    });
+
+    test('Test valid http imported target cluster endpoint with no port is formatted correctly', () => {
+        const inputTargetEndpoint = "http://vpc-domain-abcdef.us-east-1.es.amazonaws.com"
+        const expectedFormattedEndpoint = "http://vpc-domain-abcdef.us-east-1.es.amazonaws.com:80"
+        const actualFormatted = validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+        expect(actualFormatted).toEqual(expectedFormattedEndpoint)
+    });
+
+    test('Test valid imported target cluster endpoint ending in slash is formatted correctly', () => {
+        const inputTargetEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com/"
+        const expectedFormattedEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443"
+        const actualFormatted = validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+        expect(actualFormatted).toEqual(expectedFormattedEndpoint)
+    });
+
+    test('Test valid imported target cluster endpoint having port and ending in slash is formatted correctly', () => {
+        const inputTargetEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443/"
+        const expectedFormattedEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443"
+        const actualFormatted = validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+        expect(actualFormatted).toEqual(expectedFormattedEndpoint)
+    });
+
+    test('Test target cluster endpoint with no protocol throws error', () => {
+        const inputTargetEndpoint = "vpc-domain-abcdef.us-east-1.es.amazonaws.com:443/"
+        const validateAndFormatURL = () => validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+        expect(validateAndFormatURL).toThrow()
+    });
+
+    test('Test target cluster endpoint with path throws error', () => {
+        const inputTargetEndpoint = "https://vpc-domain-abcdef.us-east-1.es.amazonaws.com:443/indexes"
+        const validateAndFormatURL = () => validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+        expect(validateAndFormatURL).toThrow()
+    });
+
+    test('Test invalid target cluster endpoint throws error', () => {
+        const inputTargetEndpoint = "vpc-domain-abcdef"
+        const validateAndFormatURL = () => validateAndReturnFormattedHttpURL(inputTargetEndpoint)
+        expect(validateAndFormatURL).toThrow()
+    });
 })

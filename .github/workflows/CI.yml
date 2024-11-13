@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-  pull_request:
+  pull_request_target:
 
 env:
   python-version: '3.11'
@@ -19,7 +19,7 @@ jobs:
         with:
           java-version: ${{ env.java-version }}
           distribution: "corretto"
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.gradle-version }}
       - name: Run Gradle Build
@@ -49,6 +49,7 @@ jobs:
       matrix:
         py-project:
           - ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link
+          - ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/cluster_tools
     defaults:
       run:
         working-directory: ${{ matrix.py-project }}
@@ -60,15 +61,16 @@ jobs:
       - run: |
           python3 -m pip install --upgrade pipenv
           pipenv install --deploy --dev
-          pipenv run coverage run -m pytest
+          pipenv run test
           pipenv run coverage xml
-      - name: Upload to Codecov
+      - name: Upload Coverage
         uses: codecov/codecov-action@v4
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
           files: ./coverage.xml
           flags: python-test
-          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
   console-api-tests:
     runs-on: ubuntu-latest
@@ -85,12 +87,15 @@ jobs:
           pipenv install --deploy --dev
           pipenv run coverage run --source='.' manage.py test console_api
           pipenv run coverage xml
-      - name: Upload to Codecov
+      - name: Upload Coverage
         uses: codecov/codecov-action@v4
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.xml
           fail_ci_if_error: true
+          files: ./coverage.xml
+          flags: python-test
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
+
 
   gradle-tests:
     runs-on: ubuntu-latest
@@ -100,7 +105,7 @@ jobs:
         with:
           java-version: ${{ env.java-version }}
           distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
@@ -121,15 +126,16 @@ jobs:
           path: |
             **/build/reports/tests/
             **/reports/jacoco/mergedReport/
-
-      - name: Upload to Codecov
+      - name: Upload Coverage
         uses: codecov/codecov-action@v4
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
+          disable_search: true
+          fail_ci_if_error: true
           files: ${{ github.workspace }}/build/reports/jacoco/mergedReport/jacocoMergedReport.xml
           flags: gradle-test
-          fail_ci_if_error: true
-          disable_search: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
+
 
   python-e2e-tests:
     runs-on: ubuntu-latest
@@ -139,7 +145,7 @@ jobs:
         with:
           java-version: ${{ env.java-version }}
           distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.gradle-version }}
       - uses: actions/setup-python@v5

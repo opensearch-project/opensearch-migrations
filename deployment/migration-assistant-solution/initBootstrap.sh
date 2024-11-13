@@ -50,6 +50,14 @@ else
 fi
 
 cd deployment/cdk/opensearch-service-migration || exit
+
+if [[ -n "$VPC_ID" ]]; then
+  sed -i "s|<VPC_ID>|$VPC_ID|g" /opensearch-migrations/deployment/cdk/opensearch-service-migration/cdk.context.json
+fi
+if [[ -n "$STAGE" ]]; then
+  sed -i "s|<STAGE>|$STAGE|g" /opensearch-migrations/deployment/cdk/opensearch-service-migration/cdk.context.json
+fi
+
 npm install -g aws-cdk 2>&1
 npm install 2>&1
 ./buildDockerImages.sh

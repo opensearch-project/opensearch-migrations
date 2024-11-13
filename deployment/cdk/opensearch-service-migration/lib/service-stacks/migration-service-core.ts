@@ -30,6 +30,7 @@ export interface MigrationServiceCoreProps extends StackPropsExt {
     readonly cpuArchitecture: CpuArchitecture,
     readonly dockerImageName: string,
     readonly dockerImageCommand?: string[],
+    readonly taskRole?: Role,
     readonly taskRolePolicies?: PolicyStatement[],
     readonly mountPoints?: MountPoint[],
     readonly volumes?: Volume[],
@@ -56,7 +57,7 @@ export class MigrationServiceCore extends Stack {
             vpc: props.vpc
         })
 
-        this.serviceTaskRole = createDefaultECSTaskRole(this, props.serviceName)
+        this.serviceTaskRole = props.taskRole ? props.taskRole : createDefaultECSTaskRole(this, props.serviceName)
         props.taskRolePolicies?.forEach(policy => this.serviceTaskRole.addToPolicy(policy))
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {

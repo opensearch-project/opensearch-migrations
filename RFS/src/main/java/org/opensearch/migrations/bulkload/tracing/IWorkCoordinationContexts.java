@@ -13,6 +13,7 @@ public interface IWorkCoordinationContexts {
         public static final String ACQUIRE_SPECIFIC_WORK = "acquireSpecificWorkItem";
         public static final String COMPLETE_WORK = "completeWork";
         public static final String ACQUIRE_NEXT_WORK = "acquireNextWorkItem";
+        public static final String CREATE_SUCCESSOR_WORK_ITEMS = "createSuccessorWorkItems";
 
         private ActivityNames() {}
     }
@@ -54,6 +55,8 @@ public interface IWorkCoordinationContexts {
 
     interface IAcquireSpecificWorkContext extends IBaseAcquireWorkContext {
         String ACTIVITY_NAME = ActivityNames.ACQUIRE_SPECIFIC_WORK;
+
+        ICreateSuccessorWorkItemsContext getCreateSuccessorWorkItemsContext();
     }
 
     interface IAcquireNextWorkItemContext extends IBaseAcquireWorkContext {
@@ -68,12 +71,22 @@ public interface IWorkCoordinationContexts {
         void recordRecoverableClockError();
 
         void recordFailure(OpenSearchWorkCoordinator.PotentialClockDriftDetectedException e);
+
+        ICreateSuccessorWorkItemsContext getCreateSuccessorWorkItemsContext();
+
     }
 
     interface ICompleteWorkItemContext extends IRetryableActivityContext {
         String ACTIVITY_NAME = ActivityNames.COMPLETE_WORK;
 
         IRefreshContext getRefreshContext();
+    }
+
+    interface ICreateSuccessorWorkItemsContext extends IRetryableActivityContext {
+        String ACTIVITY_NAME = ActivityNames.CREATE_SUCCESSOR_WORK_ITEMS;
+        IRefreshContext getRefreshContext();
+        ICompleteWorkItemContext getCompleteWorkItemContext();
+        ICreateUnassignedWorkItemContext getCreateUnassignedWorkItemContext();
     }
 
     interface IScopedWorkContext<C extends IBaseAcquireWorkContext> extends IScopedInstrumentationAttributes {

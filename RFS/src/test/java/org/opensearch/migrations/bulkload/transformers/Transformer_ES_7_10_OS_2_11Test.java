@@ -31,7 +31,7 @@ public class Transformer_ES_7_10_OS_2_11Test {
         GlobalMetadata transformedGlobalMetadata = transformer.transformGlobalMetadata(globalMetadata);
         GlobalMetadataData_OS_2_11 finalMetadata = new GlobalMetadataData_OS_2_11(transformedGlobalMetadata.toObjectNode());
 
-        String expectedBwcTemplates = "{\"bwc_template\":{\"order\":0,\"index_patterns\":[\"bwc_index*\"],\"settings\":{\"number_of_shards\":\"1\",\"number_of_replicas\":\"0\"},\"mappings\":[{\"arbitrary_type\":{\"properties\":{\"title\":{\"type\":\"text\"},\"content\":{\"type\":\"text\"}}}}],\"aliases\":{\"bwc_alias\":{}}}}";
+        String expectedBwcTemplates = "{\"bwc_template\":{\"order\":0,\"index_patterns\":[\"bwc_index*\"],\"settings\":{\"number_of_shards\":\"1\",\"number_of_replicas\":\"0\"},\"mappings\":{\"properties\":{\"title\":{\"type\":\"text\"},\"content\":{\"type\":\"text\"}}},\"aliases\":{\"bwc_alias\":{}}}}";
         String expectedIndexTemplates = "{\"fwc_template\":{\"index_patterns\":[\"fwc_index*\"],\"template\":{\"aliases\":{\"fwc_alias\":{}}},\"composed_of\":[\"fwc_mappings\",\"fwc_settings\"]}}";
         String expectedComponentTemplates = "{\"fwc_settings\":{\"template\":{\"settings\":{\"index\":{\"number_of_shards\":\"1\",\"number_of_replicas\":\"0\"}}}},\"fwc_mappings\":{\"template\":{\"mappings\":{\"properties\":{\"title\":{\"type\":\"text\"},\"content\":{\"type\":\"text\"}}}}}}";
 
