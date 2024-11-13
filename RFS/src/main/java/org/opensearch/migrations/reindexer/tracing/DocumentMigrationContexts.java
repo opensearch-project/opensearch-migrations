@@ -72,6 +72,11 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
         public IAddShardWorkItemContext createShardWorkItemContext() {
             return new AddShardWorkItemContext(rootInstrumentationScope, this);
         }
+
+        @Override
+        public IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext createSuccessorWorkItemsContext() {
+            return getWorkCoordinationRootContext().createSuccessorWorkItemsContext(getEnclosingScope());
+        }
     }
 
     class AddShardWorkItemContext extends BaseNestedSpanContext<
@@ -174,6 +179,11 @@ public interface DocumentMigrationContexts extends IDocumentMigrationContexts {
         @Override
         public IWorkCoordinationContexts.ICompleteWorkItemContext createCloseContet() {
             return getWorkCoordinationRootContext().createCompleteWorkContext();
+        }
+
+        @Override
+        public IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext createSuccessorWorkItemsContext() {
+            return getWorkCoordinationRootContext().createSuccessorWorkItemsContext();
         }
     }
 }
