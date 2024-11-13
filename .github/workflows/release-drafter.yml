@@ -26,7 +26,7 @@ jobs:
         with:
           java-version: ${{ env.java-version }}
           distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.gradle-version }}
       - uses: actions/checkout@v4
