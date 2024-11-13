@@ -73,7 +73,7 @@ jobs:
             token: ${{ secrets.CODECOV_TOKEN }}
             files: ./coverage.xml
             flags: python-test
-            fail_ci_if_error: true
+            fail_ci_if_error: false
 
   console-api-tests:
     runs-on: ubuntu-latest
@@ -100,7 +100,7 @@ jobs:
             token: ${{ secrets.CODECOV_TOKEN }}
             files: ./coverage.xml
             flags: python-test
-            fail_ci_if_error: true
+            fail_ci_if_error: false
 
 
   gradle-tests:
@@ -142,7 +142,7 @@ jobs:
             token: ${{ secrets.CODECOV_TOKEN }}
             files: ${{ github.workspace }}/build/reports/jacoco/mergedReport/jacocoMergedReport.xml
             flags: gradle-test
-            fail_ci_if_error: true
+            fail_ci_if_error: false
             disable_search: true
 
 
