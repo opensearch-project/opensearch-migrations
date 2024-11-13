@@ -231,7 +231,7 @@ jobs:
           fail_ci_if_error: true
           files: ./coverage-reports/**/*.*
           flags: unittests
-          token: ${{ secrets.CODECOV_TOKEN }}
+#          token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
 
   all-ci-checks-pass:
