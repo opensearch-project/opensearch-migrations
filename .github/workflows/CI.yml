@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-  pull_request:
+  pull_request_target:
 
 env:
   python-version: '3.11'
@@ -63,20 +63,20 @@ jobs:
           pipenv install --deploy --dev
           pipenv run test
           pipenv run coverage xml
-      - name: Upload Coverage with retry
-        uses: Wandalen/wretry.action@v3.7.2
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v4
         with:
-          attempt_limit: 5
-          attempt_delay: 2000
-          action: codecov/codecov-action@v4
-          with: |
-            token: ${{ secrets.CODECOV_TOKEN }}
-            files: ./coverage.xml
-            flags: python-test
-            fail_ci_if_error: true
+          verbose: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: python-test
+          fail_ci_if_error: true
 
   console-api-tests:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        iteration: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20]
     defaults:
       run:
         working-directory: ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/console_api
@@ -90,17 +90,14 @@ jobs:
           pipenv install --deploy --dev
           pipenv run coverage run --source='.' manage.py test console_api
           pipenv run coverage xml
-      - name: Upload Coverage with retry
-        uses: Wandalen/wretry.action@v3.7.2
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v4
         with:
-          attempt_limit: 5
-          attempt_delay: 2000
-          action: codecov/codecov-action@v4
-          with: |
-            token: ${{ secrets.CODECOV_TOKEN }}
-            files: ./coverage.xml
-            flags: python-test
-            fail_ci_if_error: true
+          verbose: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          files: ./coverage.xml
+          flags: python-test
+          fail_ci_if_error: true
 
 
   gradle-tests:
@@ -132,18 +129,15 @@ jobs:
           path: |
             **/build/reports/tests/
             **/reports/jacoco/mergedReport/
-      - name: Upload Coverage with retry
-        uses: Wandalen/wretry.action@v3.7.2
+      - name: Upload Coverage
+        uses: codecov/codecov-action@v4
         with:
-          attempt_limit: 5
-          attempt_delay: 2000
-          action: codecov/codecov-action@v4
-          with: |
-            token: ${{ secrets.CODECOV_TOKEN }}
-            files: ${{ github.workspace }}/build/reports/jacoco/mergedReport/jacocoMergedReport.xml
-            flags: gradle-test
-            fail_ci_if_error: true
-            disable_search: true
+          verbose: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
+          files: ${{ github.workspace }}/build/reports/jacoco/mergedReport/jacocoMergedReport.xml
+          flags: gradle-test
+          disable_search: true
 
 
 
