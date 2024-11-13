@@ -19,3 +19,7 @@ moto = {version = "*", extras = ["sts"]}
 
 [requires]
 python_version = "3.11"
+
+[scripts]
+test = "coverage run --source='.' manage.py test console_api"
+coverage = "coverage"
