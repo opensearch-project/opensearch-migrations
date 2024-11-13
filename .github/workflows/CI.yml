@@ -3,7 +3,11 @@ name: CI
 on:
   push:
   pull_request_target:
-    types: [assigned, opened, synchronize, reopened]
+    types:
+      - opened
+      - assigned
+      - synchronize
+      - reopened
 
 env:
   python-version: '3.11'
