@@ -66,11 +66,11 @@ jobs:
       - name: Upload Coverage
         uses: codecov/codecov-action@v4
         with:
-          verbose: true
-          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
           files: ./coverage.xml
           flags: python-test
-          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
   console-api-tests:
     runs-on: ubuntu-latest
@@ -90,11 +90,11 @@ jobs:
       - name: Upload Coverage
         uses: codecov/codecov-action@v4
         with:
-          verbose: true
-          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: true
           files: ./coverage.xml
           flags: python-test
-          fail_ci_if_error: true
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
 
   gradle-tests:
@@ -129,13 +129,12 @@ jobs:
       - name: Upload Coverage
         uses: codecov/codecov-action@v4
         with:
-          verbose: true
-          token: ${{ secrets.CODECOV_TOKEN }}
+          disable_search: true
           fail_ci_if_error: true
           files: ${{ github.workspace }}/build/reports/jacoco/mergedReport/jacocoMergedReport.xml
           flags: gradle-test
-          disable_search: true
-
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
 
   python-e2e-tests:
