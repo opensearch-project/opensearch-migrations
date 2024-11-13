@@ -19,7 +19,7 @@ jobs:
         with:
           java-version: ${{ env.java-version }}
           distribution: "corretto"
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.gradle-version }}
       - name: Run Gradle Build
@@ -105,7 +105,7 @@ jobs:
         with:
           java-version: ${{ env.java-version }}
           distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
@@ -145,7 +145,7 @@ jobs:
         with:
           java-version: ${{ env.java-version }}
           distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.gradle-version }}
       - uses: actions/setup-python@v5
