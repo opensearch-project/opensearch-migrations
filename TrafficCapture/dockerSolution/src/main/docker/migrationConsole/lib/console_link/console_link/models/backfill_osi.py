@@ -103,3 +103,6 @@ class OpenSearchIngestionBackfill(Backfill):
 
     def scale(self, units: int, *args, **kwargs) -> CommandResult:
         raise NotImplementedError()
+
+    def archive(self, pipeline_name=None) -> CommandResult:
+        raise NotImplementedError()

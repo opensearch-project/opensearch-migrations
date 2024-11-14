@@ -1,12 +1,14 @@
 from datetime import datetime
-from typing import Dict, Optional
 import json
+import os
+from typing import Any, Dict, Optional
+
 
 import requests
 
 from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.client_options import ClientOptions
-from console_link.models.cluster import Cluster
+from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.schema_tools import contains_one_of
 from console_link.models.command_result import CommandResult
 from console_link.models.ecs_service import ECSService
@@ -16,6 +18,8 @@ from cerberus import Validator
 import logging
 
 logger = logging.getLogger(__name__)
+
+WORKING_STATE_INDEX = ".migrations_working_state"
 
 DOCKER_RFS_SCHEMA = {
     "type": "dict",
@@ -73,7 +77,6 @@ class RFSBackfill(Backfill):
     def scale(self, units: int, *args, **kwargs) -> CommandResult:
         raise NotImplementedError()
 
-
 class DockerRFSBackfill(RFSBackfill):
     def __init__(self, config: Dict, target_cluster: Cluster) -> None:
         super().__init__(config)
@@ -88,7 +91,14 @@ class DockerRFSBackfill(RFSBackfill):
 
     def scale(self, units: int, *args, **kwargs) -> CommandResult:
         raise NotImplementedError()
+    
+    def archive(self, *args, **kwargs) -> CommandResult:
+        raise NotImplementedError()
+    
 
+class RfsWorkersInProgress(Exception):
+    def __init__(self):
+        super().__init__("RFS Workers are still in progress")
 
 class ECSRFSBackfill(RFSBackfill):
     def __init__(self, config: Dict, target_cluster: Cluster, client_options: Optional[ClientOptions] = None) -> None:
@@ -118,6 +128,23 @@ class ECSRFSBackfill(RFSBackfill):
     def scale(self, units: int, *args, **kwargs) -> CommandResult:
         logger.info(f"Scaling RFS backfill by setting desired count to {units} instances")
         return self.ecs_client.set_desired_count(units)
+    
+    def archive(self, *args, archive_dir_path: str = None, **kwargs) -> CommandResult:
+        logger.info("Confirming there are no currently in-progress workers")
+        status = self.ecs_client.get_instance_statuses()
+        if status.running > 0 or status.pending > 0 or status.desired > 0:
+            return CommandResult(False, RfsWorkersInProgress())
+
+        backup_path = get_working_state_index_backup_path(archive_dir_path)
+        logger.info(f"Backing up working state index to {backup_path}")
+        documents = self.target_cluster.fetch_all_documents(WORKING_STATE_INDEX)
+        backup_working_state_index(documents, backup_path)
+        logger.info(f"Working state index backed up successful")
+
+        logger.info("Cleaning up working state index on target cluster")
+        self.target_cluster.call_api(f"/{WORKING_STATE_INDEX}", method=HttpMethod.DELETE, params={"ignore_unavailable": "true"})
+        logger.info("Working state index cleaned up successful")
+        return CommandResult(True, backup_path)
 
     def get_status(self, deep_check: bool, *args, **kwargs) -> CommandResult:
         logger.info(f"Getting status of RFS backfill, with {deep_check=}")
@@ -192,6 +219,26 @@ class ECSRFSBackfill(RFSBackfill):
 
         return "\n".join([f"Shards {key}: {value}" for key, value in values.items() if value is not None])
 
+def get_working_state_index_backup_path(archive_dir_path: str = None) -> str:
+    shared_logs_dir = os.getenv("SHARED_LOGS_DIR_PATH", None)
+    if archive_dir_path:
+        backup_dir = archive_dir_path
+    elif shared_logs_dir is None:
+        backup_dir = "./working_state"
+    else:
+        backup_dir = os.path.join(shared_logs_dir, "working_state")
+
+    file_name = "working_state_backup.json"
+    return os.path.join(backup_dir, file_name)
+
+def backup_working_state_index(working_state: Dict[str, Any], backup_path: str):
+    # Ensure the backup directory exists
+    backup_dir = os.path.dirname(backup_path)
+    os.makedirs(backup_dir, exist_ok=True)
+
+    # Write the backup
+    with open(backup_path, "w") as f:
+        json.dump(working_state, f, indent=4)
 
 def parse_query_response(query: dict, cluster: Cluster, label: str) -> Optional[int]:
     try:

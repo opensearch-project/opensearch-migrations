@@ -1,6 +1,7 @@
 import json
 from pprint import pprint
 import sys
+import time
 from typing import Dict
 import click
 import console_link.middleware.clusters as clusters_
@@ -13,6 +14,7 @@ import console_link.middleware.kafka as kafka_
 import console_link.middleware.tuples as tuples_
 
 from console_link.models.cluster import HttpMethod
+from console_link.models.backfill_rfs import RfsWorkersInProgress
 from console_link.models.utils import ExitCode
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
@@ -309,6 +311,17 @@ def stop_backfill_cmd(ctx, pipeline_name):
         raise click.ClickException(message)
     click.echo(message)
 
+    click.echo("Archiving the working state of the backfill operation...")
+    exitcode, message = backfill_.archive(ctx.env.backfill)
+
+    while isinstance(message, RfsWorkersInProgress):
+        click.echo(f"RFS Workers are still running, waiting for them to complete...")
+        time.sleep(5)
+        exitcode, message = backfill_.archive(ctx.env.backfill)
+
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(f"Backfill working state archived to: {message}")
 
 @backfill_group.command(name="scale")
 @click.argument("units", type=int, required=True)

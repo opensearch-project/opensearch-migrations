@@ -63,5 +63,11 @@ class Backfill(ABC):
     def scale(self, units: int, *args, **kwargs) -> CommandResult[str]:
         pass
 
+    @abstractmethod
+    def archive(self, *args, **kwargs) -> CommandResult[str]:
+        """Archive the backfill operation.  Should return the information required to resume the backfill operations.
+        Should fail if there are currently running operations."""
+        pass
+
     def describe(self) -> Dict:
         return self.config
