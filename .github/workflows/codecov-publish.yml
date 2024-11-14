@@ -1,0 +1,56 @@
+name: Codecov Publish
+
+# Due to the behavior of workflow_run, changes to this file will
+# only be reflected once it is pushed up to the `default` (main) branch
+#
+# It is recommended to test changes to this file by pushing to the default branch
+# on a fork and evaluating the correctness of the action execution
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types:
+      - completed
+
+jobs:
+  publish-codecov:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download CodeCov Info
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          name: codecov-info
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Set Environment Variables from JSON
+        run: |
+          ls
+          # Read the JSON file and export each key-value pair as an environment variable
+          for key in $(jq -r 'keys[]' ./codecov_info.json); do
+            value=$(jq -r --arg key "$key" '.[$key]' ./codecov_info.json)
+            echo "codecov_info_$key=$value"
+            echo "codecov_info_$key=$value" >> $GITHUB_ENV
+          done
+      - name: Download Coverage Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          path: ./coverage-reports
+          pattern: coverage-reports-*
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v4
+        with:
+          fail_ci_if_error: true
+          files: /**/coverage-reports/**/*.*
+          flags: unittests
+          override_branch: ${{ env.codecov_info_branch }}
+          override_commit: ${{ env.codecov_info_commit }}
+          override_pr: ${{ env.codecov_info_pr_number }}
+          commit_parent: ${{ env.codecov_info_commit_parent }}
+          override_build_url: ${{ env.codecov_info_build_url }}
+          override_build:  ${{ env.codecov_info_build }}
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
