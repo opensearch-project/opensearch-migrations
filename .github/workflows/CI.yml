@@ -133,7 +133,7 @@ jobs:
         with:
           if-no-files-found: error
           name: coverage-reports-gradle-tests
-          path: /**/jacocoMergedReport.xml
+          path: ./**/jacocoMergedReport.xml
 
 
   python-e2e-tests:
