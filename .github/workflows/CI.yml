@@ -11,6 +11,27 @@ env:
   node-version: '18.x'
 
 jobs:
+  workflow-info:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create JSON Artifact
+        run: |
+          echo '{' > workflow-info.json
+          echo '  "pr_number": "${{ github.event.pull_request.number }}",' >> workflow-info.json
+          echo '  "commit": "${{ github.event.pull_request.head.sha || github.event.after || github.sha }}",' >> workflow-info.json
+          echo '  "branch": "${{ github.ref }}",' >> workflow-info.json
+          echo '  "commit_parent": "${{ github.event.pull_request.base.sha || github.event.before || github.base.sha }}",' >> workflow-info.json
+          echo '  "build_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",' >> workflow-info.json
+          echo '  "build": "${{ github.run_id }}"' >> workflow-info.json
+          echo '}' >> workflow-info.json
+          echo "workflow-info.json created"
+      - name: Upload JSON Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: workflow-info
+          path: workflow-info.json
+
+
   style-check:
     runs-on: ubuntu-latest
     steps:
@@ -76,26 +97,6 @@ jobs:
           if-no-files-found: error
           name: coverage-reports-python-tests-${{ env.SANITIZED_PY_PROJECT }}
           path: ${{ env.WORKING_DIR }}/coverage.xml
-
-  upload-codecov-info:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Create JSON Artifact
-        run: |
-          echo '{' > codecov_info.json
-          echo '  "pr_number": "${{ github.event.pull_request.number }}",' >> codecov_info.json
-          echo '  "commit": "${{ github.event.pull_request.head.sha || github.event.after || github.sha }}",' >> codecov_info.json
-          echo '  "branch": "${{ github.ref }}",' >> codecov_info.json
-          echo '  "commit_parent": "${{ github.event.pull_request.base.sha || github.event.before || github.base.sha }}",' >> codecov_info.json
-          echo '  "build_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",' >> codecov_info.json
-          echo '  "build": "${{ github.run_id }}"' >> codecov_info.json
-          echo '}' >> codecov_info.json
-          echo "codecov_info.json created"
-      - name: Upload JSON Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: codecov-info
-          path: codecov_info.json
 
 
   gradle-tests:

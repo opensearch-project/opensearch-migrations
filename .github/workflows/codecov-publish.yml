@@ -17,25 +17,23 @@ jobs:
     if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
-      - name: Download CodeCov Info
+      - name: Download Workflow Info
         uses: actions/download-artifact@v4
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
-          name: codecov-info
+          name: workflow-info
           run-id: ${{ github.event.workflow_run.id }}
       - name: Set Environment Variables from JSON
         run: |
           ls
           # Read the JSON file and export each key-value pair as an environment variable
-          for key in $(jq -r 'keys[]' ./codecov_info.json); do
-            value=$(jq -r --arg key "$key" '.[$key]' ./codecov_info.json)
-            echo "codecov_info_$key=$value"
-            echo "codecov_info_$key=$value" >> $GITHUB_ENV
+          for key in $(jq -r 'keys[]' ./workflow-info.json); do
+            value=$(jq -r --arg key "$key" '.[$key]' ./workflow-info.json)
+            echo "workflow-info_$key=$value"
+            echo "workflow-info_$key=$value" >> $GITHUB_ENV
           done
       - name: Download Coverage Artifacts
         uses: actions/download-artifact@v4
         with:
-          github-token: ${{ secrets.GITHUB_TOKEN }}
           path: ./coverage-reports
           pattern: coverage-reports-*
           run-id: ${{ github.event.workflow_run.id }}
@@ -46,11 +44,11 @@ jobs:
           fail_ci_if_error: true
           files: /**/coverage-reports/**/*.*
           flags: unittests
-          override_branch: ${{ env.codecov_info_branch }}
-          override_commit: ${{ env.codecov_info_commit }}
-          override_pr: ${{ env.codecov_info_pr_number }}
-          commit_parent: ${{ env.codecov_info_commit_parent }}
-          override_build_url: ${{ env.codecov_info_build_url }}
-          override_build:  ${{ env.codecov_info_build }}
+          override_branch: ${{ env.workflow-info_branch }}
+          override_commit: ${{ env.workflow-info_commit }}
+          override_pr: ${{ env.workflow-info_pr_number }}
+          commit_parent: ${{ env.workflow-info_commit_parent }}
+          override_build_url: ${{ env.workflow-info_build_url }}
+          override_build:  ${{ env.workflow-info_build }}
           token: ${{ secrets.CODECOV_TOKEN }}
           verbose: true
