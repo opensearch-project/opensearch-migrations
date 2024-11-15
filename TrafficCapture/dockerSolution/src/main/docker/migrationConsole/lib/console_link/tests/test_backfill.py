@@ -10,10 +10,10 @@ import requests_mock
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
-from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill, RfsWorkersInProgress, WorkingIndexDoesntExist
+from console_link.models.backfill_rfs import (DockerRFSBackfill, ECSRFSBackfill, RfsWorkersInProgress,
+        WorkingIndexDoesntExist)
 from console_link.models.ecs_service import ECSService, InstanceStatuses
-from console_link.models.factories import (UnsupportedBackfillTypeError,
-                                           get_backfill)
+from console_link.models.factories import UnsupportedBackfillTypeError, get_backfill
 from tests.utils import create_valid_cluster
 
 TEST_DATA_DIRECTORY = pathlib.Path(__file__).parent / "data"
@@ -182,6 +182,7 @@ def test_ecs_rfs_backfill_start_sets_ecs_desired_count(ecs_rfs_backfill, mocker)
     assert isinstance(ecs_rfs_backfill, ECSRFSBackfill)
     mock.assert_called_once_with(ecs_rfs_backfill.ecs_client, 5)
 
+
 def test_ecs_rfs_backfill_pause_sets_ecs_desired_count(ecs_rfs_backfill, mocker):
     assert ecs_rfs_backfill.default_scale == 5
     mock = mocker.patch.object(ECSService, 'set_desired_count', autospec=True)
@@ -190,6 +191,7 @@ def test_ecs_rfs_backfill_pause_sets_ecs_desired_count(ecs_rfs_backfill, mocker)
     assert isinstance(ecs_rfs_backfill, ECSRFSBackfill)
     mock.assert_called_once_with(ecs_rfs_backfill.ecs_client, 0)
 
+
 def test_ecs_rfs_backfill_stop_sets_ecs_desired_count(ecs_rfs_backfill, mocker):
     assert ecs_rfs_backfill.default_scale == 5
     mock = mocker.patch.object(ECSService, 'set_desired_count', autospec=True)
@@ -197,6 +199,7 @@ def test_ecs_rfs_backfill_stop_sets_ecs_desired_count(ecs_rfs_backfill, mocker):
 
     assert isinstance(ecs_rfs_backfill, ECSRFSBackfill)
     mock.assert_called_once_with(ecs_rfs_backfill.ecs_client, 0)
+
 
 def test_ecs_rfs_backfill_scale_sets_ecs_desired_count(ecs_rfs_backfill, mocker):
     mock = mocker.patch.object(ECSService, 'set_desired_count', autospec=True)
@@ -307,6 +310,7 @@ def test_ecs_rfs_deep_status_check_failure(ecs_rfs_backfill, mocker, caplog):
     assert result.success
     assert result.value[0] == BackfillStatus.RUNNING
 
+
 def test_ecs_rfs_backfill_archive_as_expected(ecs_rfs_backfill, mocker, tmpdir):
     mocked_instance_status = InstanceStatuses(
         desired=0,
@@ -329,7 +333,11 @@ def test_ecs_rfs_backfill_archive_as_expected(ecs_rfs_backfill, mocker, tmpdir):
     with open(expected_path, "r") as f:
         assert json.load(f) == mocked_docs
 
-    mock_api.assert_called_once_with(ANY, "/.migrations_working_state", method=HttpMethod.DELETE, params={"ignore_unavailable": "true"})
+    mock_api.assert_called_once_with(
+        ANY, "/.migrations_working_state", method=HttpMethod.DELETE,
+        params={"ignore_unavailable": "true"}
+    )
+
 
 def test_ecs_rfs_backfill_archive_no_index_as_expected(ecs_rfs_backfill, mocker, tmpdir):
     mocked_instance_status = InstanceStatuses(
@@ -341,12 +349,16 @@ def test_ecs_rfs_backfill_archive_no_index_as_expected(ecs_rfs_backfill, mocker,
 
     response_404 = requests.Response()
     response_404.status_code = 404
-    mocker.patch.object(Cluster, 'fetch_all_documents', autospec=True, side_effect=requests.HTTPError(response=response_404, request=requests.Request()))
+    mocker.patch.object(
+        Cluster, 'fetch_all_documents', autospec=True,
+        side_effect=requests.HTTPError(response=response_404, request=requests.Request())
+    )
 
     result = ecs_rfs_backfill.archive()
 
     assert not result.success
     assert isinstance(result.value, WorkingIndexDoesntExist)
+
 
 def test_ecs_rfs_backfill_archive_errors_if_in_progress(ecs_rfs_backfill, mocker):
     mocked_instance_status = InstanceStatuses(

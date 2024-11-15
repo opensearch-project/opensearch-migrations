@@ -293,6 +293,7 @@ def start_backfill_cmd(ctx, pipeline_name):
         raise click.ClickException(message)
     click.echo(message)
 
+
 @backfill_group.command(name="pause")
 @click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
 @click.pass_obj
@@ -301,6 +302,7 @@ def pause_backfill_cmd(ctx, pipeline_name):
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
+
 
 @backfill_group.command(name="stop")
 @click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
@@ -315,17 +317,18 @@ def stop_backfill_cmd(ctx, pipeline_name):
     exitcode, message = backfill_.archive(ctx.env.backfill)
 
     if isinstance(message, WorkingIndexDoesntExist):
-        click.echo(f"Working state index doesn't exist, skipping archive operation.")
+        click.echo("Working state index doesn't exist, skipping archive operation.")
         return
 
     while isinstance(message, RfsWorkersInProgress):
-        click.echo(f"RFS Workers are still running, waiting for them to complete...")
+        click.echo("RFS Workers are still running, waiting for them to complete...")
         time.sleep(5)
         exitcode, message = backfill_.archive(ctx.env.backfill)
 
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(f"Backfill working state archived to: {message}")
+
 
 @backfill_group.command(name="scale")
 @click.argument("units", type=int, required=True)

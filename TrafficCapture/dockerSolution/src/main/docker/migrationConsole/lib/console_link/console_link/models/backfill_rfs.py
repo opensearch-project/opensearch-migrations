@@ -1,7 +1,7 @@
 from datetime import datetime
 import json
 import os
-from typing import Any, Dict, Optional
+from typing import Dict, Optional
 
 
 import requests
@@ -77,6 +77,7 @@ class RFSBackfill(Backfill):
     def scale(self, units: int, *args, **kwargs) -> CommandResult:
         raise NotImplementedError()
 
+
 class DockerRFSBackfill(RFSBackfill):
     def __init__(self, config: Dict, target_cluster: Cluster) -> None:
         super().__init__(config)
@@ -100,9 +101,11 @@ class RfsWorkersInProgress(Exception):
     def __init__(self):
         super().__init__("RFS Workers are still in progress")
 
+
 class WorkingIndexDoesntExist(Exception):
     def __init__(self, index_name: str):
         super().__init__(f"The working state index '{index_name}' does not exist")
+
 
 class ECSRFSBackfill(RFSBackfill):
     def __init__(self, config: Dict, target_cluster: Cluster, client_options: Optional[ClientOptions] = None) -> None:
@@ -122,7 +125,7 @@ class ECSRFSBackfill(RFSBackfill):
         return self.ecs_client.set_desired_count(self.default_scale)
     
     def pause(self, *args, **kwargs) -> CommandResult:
-        logger.info(f"Pausing RFS backfill by setting desired count to 0 instances")
+        logger.info("Pausing RFS backfill by setting desired count to 0 instances")
         return self.ecs_client.set_desired_count(0)
 
     def stop(self, *args, **kwargs) -> CommandResult:
@@ -143,16 +146,21 @@ class ECSRFSBackfill(RFSBackfill):
             backup_path = get_working_state_index_backup_path(archive_dir_path, archive_file_name)
             logger.info(f"Backing up working state index to {backup_path}")
             backup_working_state_index(self.target_cluster, WORKING_STATE_INDEX, backup_path)
-            logger.info(f"Working state index backed up successful")
+            logger.info("Working state index backed up successful")
 
             logger.info("Cleaning up working state index on target cluster")
-            self.target_cluster.call_api(f"/{WORKING_STATE_INDEX}", method=HttpMethod.DELETE, params={"ignore_unavailable": "true"})
+            self.target_cluster.call_api(
+                f"/{WORKING_STATE_INDEX}",
+                method=HttpMethod.DELETE,
+                params={"ignore_unavailable": "true"}
+            )
             logger.info("Working state index cleaned up successful")
             return CommandResult(True, backup_path)
         except requests.HTTPError as e:
             if e.response.status_code == 404:
                 return CommandResult(False, WorkingIndexDoesntExist(WORKING_STATE_INDEX))
             return CommandResult(False, e)
+
 
     def get_status(self, deep_check: bool, *args, **kwargs) -> CommandResult:
         logger.info(f"Getting status of RFS backfill, with {deep_check=}")
@@ -175,6 +183,7 @@ class ECSRFSBackfill(RFSBackfill):
         elif instance_statuses.pending > 0:
             return CommandResult(True, (BackfillStatus.STARTING, status_string))
         return CommandResult(True, (BackfillStatus.STOPPED, status_string))
+
 
     def _get_detailed_status(self) -> Optional[str]:
         # Check whether the working state index exists. If not, we can't run queries.
@@ -227,6 +236,7 @@ class ECSRFSBackfill(RFSBackfill):
 
         return "\n".join([f"Shards {key}: {value}" for key, value in values.items() if value is not None])
 
+
 def get_working_state_index_backup_path(archive_dir_path: str = None, archive_file_name: str = None) -> str:
     shared_logs_dir = os.getenv("SHARED_LOGS_DIR_PATH", None)
     if archive_dir_path:
@@ -241,6 +251,7 @@ def get_working_state_index_backup_path(archive_dir_path: str = None, archive_fi
     else:
         file_name = f"working_state_backup_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
     return os.path.join(backup_dir, file_name)
+
 
 def backup_working_state_index(cluster: Cluster, index_name:str, backup_path: str):
     # Ensure the backup directory exists
@@ -263,6 +274,7 @@ def backup_working_state_index(cluster: Cluster, index_name:str, backup_path: st
             outfile.write(batch_json)
 
         outfile.write("\n]")  # Close the JSON array
+
 
 def parse_query_response(query: dict, cluster: Cluster, label: str) -> Optional[int]:
     try:

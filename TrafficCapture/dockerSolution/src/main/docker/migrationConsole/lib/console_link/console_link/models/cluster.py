@@ -229,7 +229,7 @@ class Cluster:
 
         # Step 2: Continue scrolling until no more documents
         while scroll_id and hits:
-            path = f"/_search/scroll"
+            path = "/_search/scroll"
             body = json.dumps({"scroll": "1m", "scroll_id": scroll_id})
             response = self.call_api(
                 path=path,
@@ -248,7 +248,7 @@ class Cluster:
 
         # Step 3: Cleanup the scroll if necessary
         if scroll_id:
-            path = f"/_search/scroll"
+            path = "/_search/scroll"
             body = json.dumps({"scroll_id": scroll_id})
             self.call_api(
                 path=path,

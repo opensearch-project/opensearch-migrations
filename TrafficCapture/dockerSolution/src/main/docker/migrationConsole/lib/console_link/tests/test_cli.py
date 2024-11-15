@@ -464,6 +464,7 @@ def test_cli_backfill_start(runner, mocker):
     mock.assert_called_once()
     assert result.exit_code == 0
 
+
 def test_cli_backfill_pause(runner, mocker):
     mock = mocker.patch.object(ECSRFSBackfill, 'pause', autospec=True)
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
@@ -471,6 +472,7 @@ def test_cli_backfill_pause(runner, mocker):
                            catch_exceptions=True)
     mock.assert_called_once()
     assert result.exit_code == 0
+
 
 def test_cli_backfill_stop(runner, mocker):
     mock_stop = mocker.patch.object(ECSRFSBackfill, 'stop', autospec=True)
@@ -480,7 +482,7 @@ def test_cli_backfill_stop(runner, mocker):
         CommandResult(success=True, value="/path/to/archive.json")
     ]
     mock_archive = mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True, side_effect=archive_result_seq)
-    mocker.patch.object(time, 'sleep', autospec=True) # make a no-op
+    mocker.patch.object(time, 'sleep', autospec=True)  # make a no-op
 
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
                                  'backfill', 'stop'],
@@ -489,12 +491,13 @@ def test_cli_backfill_stop(runner, mocker):
     assert mock_archive.call_count == 2
     assert result.exit_code == 0
 
+
 def test_cli_backfill_stop_no_index(runner, mocker):
     mock_stop = mocker.patch.object(ECSRFSBackfill, 'stop', autospec=True)
 
     archive_result = CommandResult(success=False, value=WorkingIndexDoesntExist("index"))
     mock_archive = mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True, return_value=archive_result)
-    mocker.patch.object(time, 'sleep', autospec=True) # make a no-op
+    mocker.patch.object(time, 'sleep', autospec=True)  # make a no-op
 
     result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
                                  'backfill', 'stop'],
