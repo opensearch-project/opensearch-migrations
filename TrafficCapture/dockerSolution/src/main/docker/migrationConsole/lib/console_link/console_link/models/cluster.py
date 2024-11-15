@@ -1,4 +1,4 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Generator, Optional
 from enum import Enum
 import json
 import logging
@@ -200,9 +200,11 @@ class Cluster:
         logger.info(f"Executing command: {display_command}")
         subprocess.run(command, shell=True)
 
-    def fetch_all_documents(self, index_name: str, batch_size: int = 100) -> Dict[str, Any]:
-        documents = {}
-        scroll_id = None
+    def fetch_all_documents(self, index_name: str, batch_size: int = 100) -> Generator[Dict[str, Any], None, None]:
+        """
+        Generator that fetches all documents from the specified index in batches
+        """
+
         session = requests.Session()
 
         # Step 1: Initiate the scroll
@@ -221,9 +223,9 @@ class Cluster:
         scroll_id = response_json.get('_scroll_id')
         hits = response_json.get('hits', {}).get('hits', [])
 
-        # Add documents to result dictionary
-        for hit in hits:
-            documents[hit['_id']] = hit['_source']
+        # Yield the first batch of documents
+        if hits:
+            yield {hit['_id']: hit['_source'] for hit in hits}
 
         # Step 2: Continue scrolling until no more documents
         while scroll_id and hits:
@@ -241,9 +243,8 @@ class Cluster:
             scroll_id = response_json.get('_scroll_id')
             hits = response_json.get('hits', {}).get('hits', [])
 
-            # Add documents to result dictionary
-            for hit in hits:
-                documents[hit['_id']] = hit['_source']
+            if hits:
+                yield {hit['_id']: hit['_source'] for hit in hits}
 
         # Step 3: Cleanup the scroll if necessary
         if scroll_id:
@@ -257,5 +258,3 @@ class Cluster:
                 session=session,
                 raise_error=False
             )
-
-        return documents

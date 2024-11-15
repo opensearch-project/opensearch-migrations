@@ -273,8 +273,8 @@ def test_valid_cluster_fetch_all_documents(requests_mock):
         }
     )
     requests_mock.delete(f"{cluster.endpoint}/_search/scroll")
-    documents = cluster.fetch_all_documents(test_index, batch_size=batch_size)
-    assert documents == {"id_1": {"test1": True}, "id_2": {"test2": True}}
+    documents = [batch for batch in cluster.fetch_all_documents(test_index, batch_size=batch_size)]
+    assert documents == [{"id_1": {"test1": True}}, {"id_2": {"test2": True}}]
 
 
 def test_connection_check_with_exception(mocker):

@@ -315,15 +315,15 @@ def test_ecs_rfs_backfill_archive_as_expected(ecs_rfs_backfill, mocker, tmpdir):
     )
     mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True, return_value=mocked_instance_status)
 
-    mocked_docs = {"id": {"key": "value"}}
+    mocked_docs = [{"id": {"key": "value"}}]
     mocker.patch.object(Cluster, 'fetch_all_documents', autospec=True, return_value=mocked_docs)
 
     mock_api = mocker.patch.object(Cluster, 'call_api', autospec=True, return_value=requests.Response())
 
-    result = ecs_rfs_backfill.archive(archive_dir_path=tmpdir.strpath)
+    result = ecs_rfs_backfill.archive(archive_dir_path=tmpdir.strpath, archive_file_name="backup.json")
 
     assert result.success
-    expected_path = os.path.join(tmpdir.strpath, "working_state_backup.json")
+    expected_path = os.path.join(tmpdir.strpath, "backup.json")
     assert result.value == expected_path
     assert os.path.exists(expected_path)
     with open(expected_path, "r") as f:
@@ -343,7 +343,7 @@ def test_ecs_rfs_backfill_archive_no_index_as_expected(ecs_rfs_backfill, mocker,
     response_404.status_code = 404
     mocker.patch.object(Cluster, 'fetch_all_documents', autospec=True, side_effect=requests.HTTPError(response=response_404, request=requests.Request()))
 
-    result = ecs_rfs_backfill.archive(archive_dir_path=tmpdir.strpath)
+    result = ecs_rfs_backfill.archive()
 
     assert not result.success
     assert isinstance(result.value, WorkingIndexDoesntExist)

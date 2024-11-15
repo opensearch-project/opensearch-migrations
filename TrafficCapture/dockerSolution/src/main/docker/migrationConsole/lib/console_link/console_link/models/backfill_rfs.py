@@ -133,17 +133,16 @@ class ECSRFSBackfill(RFSBackfill):
         logger.info(f"Scaling RFS backfill by setting desired count to {units} instances")
         return self.ecs_client.set_desired_count(units)
     
-    def archive(self, *args, archive_dir_path: str = None, **kwargs) -> CommandResult:
+    def archive(self, *args, archive_dir_path: str = None, archive_file_name: str = None, **kwargs) -> CommandResult:
         logger.info("Confirming there are no currently in-progress workers")
         status = self.ecs_client.get_instance_statuses()
         if status.running > 0 or status.pending > 0 or status.desired > 0:
             return CommandResult(False, RfsWorkersInProgress())
         
         try:
-            backup_path = get_working_state_index_backup_path(archive_dir_path)
+            backup_path = get_working_state_index_backup_path(archive_dir_path, archive_file_name)
             logger.info(f"Backing up working state index to {backup_path}")
-            documents = self.target_cluster.fetch_all_documents(WORKING_STATE_INDEX)
-            backup_working_state_index(documents, backup_path)
+            backup_working_state_index(self.target_cluster, WORKING_STATE_INDEX, backup_path)
             logger.info(f"Working state index backed up successful")
 
             logger.info("Cleaning up working state index on target cluster")
@@ -228,26 +227,42 @@ class ECSRFSBackfill(RFSBackfill):
 
         return "\n".join([f"Shards {key}: {value}" for key, value in values.items() if value is not None])
 
-def get_working_state_index_backup_path(archive_dir_path: str = None) -> str:
+def get_working_state_index_backup_path(archive_dir_path: str = None, archive_file_name: str = None) -> str:
     shared_logs_dir = os.getenv("SHARED_LOGS_DIR_PATH", None)
     if archive_dir_path:
         backup_dir = archive_dir_path
     elif shared_logs_dir is None:
-        backup_dir = "./working_state"
+        backup_dir = "./backfill_working_state"
     else:
-        backup_dir = os.path.join(shared_logs_dir, "working_state")
+        backup_dir = os.path.join(shared_logs_dir, "backfill_working_state")
 
-    file_name = "working_state_backup.json"
+    if archive_file_name:
+        file_name = archive_file_name
+    else:
+        file_name = f"working_state_backup_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
     return os.path.join(backup_dir, file_name)
 
-def backup_working_state_index(working_state: Dict[str, Any], backup_path: str):
+def backup_working_state_index(cluster: Cluster, index_name:str, backup_path: str):
     # Ensure the backup directory exists
     backup_dir = os.path.dirname(backup_path)
     os.makedirs(backup_dir, exist_ok=True)
 
-    # Write the backup
-    with open(backup_path, "w") as f:
-        json.dump(working_state, f, indent=4)
+    # Backup the docs in the working state index as a JSON array containing batches of documents
+    with open(backup_path, 'w') as outfile:
+        outfile.write("[\n")  # Start the JSON array
+        first_batch = True
+
+        for batch in cluster.fetch_all_documents(index_name=index_name):
+            if not first_batch:
+                outfile.write(",\n")
+            else:
+                first_batch = False
+            
+            # Dump the batch of documents as an entry in the array
+            batch_json = json.dumps(batch, indent=4)
+            outfile.write(batch_json)
+
+        outfile.write("\n]")  # Close the JSON array
 
 def parse_query_response(query: dict, cluster: Cluster, label: str) -> Optional[int]:
     try:
