@@ -1,0 +1,38 @@
+# Configuration for Strimzi Kafka Operator
+#strimzi-kafka-operator:
+# You can add operator-specific configurations here if needed
+# For example, enabling metrics, RBAC settings, etc.
+
+## Configuration for the Kafka Cluster
+#kafka:
+#  name: kafka-cluster
+#  version: "3.6.0" # Kafka version supporting KRaft
+#  replicas: 1
+#  config:
+#    processRoles: "broker,controller"
+#    nodeId: 1
+#    controllerQuorumVoters: "1@kafka-cluster-0.kafka-cluster-bootstrap:9093"
+#    interBrokerProtocolVersion: "3.5"
+#    logMessageFormatVersion: "3.5"
+#    autoCreateTopicsEnable: "true"
+#  storage:
+#    type: "ephemeral" # Use "persistent-claim" for persistent storage
+#    size: "20Gi"
+#    class: "managed-nfs-storage" # Set to empty string "" if not using a specific storage class
+#    deleteClaim: false
+#
+## Configuration for the Controller
+#controller:
+#  replicas: 1
+#  resources:
+#    limits:
+#      memory: "2Gi"
+#      cpu: "1000m"
+#    requests:
+#      memory: "1Gi"
+#      cpu: "500m"
+#  storage:
+#    type: "ephemeral" # Use "persistent-claim" for persistent storage
+#    size: "10Gi"
+#    class: "managed-nfs-storage" # Set to empty string "" if not using a specific storage class
+#    deleteClaim: false

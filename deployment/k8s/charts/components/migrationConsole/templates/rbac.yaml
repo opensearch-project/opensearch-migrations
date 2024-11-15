@@ -1,0 +1,28 @@
+# kubernetes/rbac.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: configmap-watcher
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: configmap-watcher
+rules:
+  - apiGroups: [""]
+    resources: ["configmaps"]
+    verbs: ["get", "watch", "list"]
+
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: configmap-watcher
+subjects:
+  - kind: ServiceAccount
+    name: configmap-watcher
+roleRef:
+  kind: Role
+  name: configmap-watcher
+  apiGroup: rbac.authorization.k8s.io

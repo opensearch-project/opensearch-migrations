@@ -1,0 +1,27 @@
+# Default values for elasticsearch-searchguard.
+replicaCount: 1
+image:
+  repository: migrations/elasticsearch_searchguard
+  pullPolicy: IfNotPresent
+  tag: "latest"
+service:
+  type: LoadBalancer
+  port: 19200 # Port exposed to external
+  targetPort: 9200 # Container port
+resources:
+  limits:
+    cpu: 100m
+    memory: 128Mi
+  requests:
+    cpu: 100m
+    memory: 128Mi
+env:
+  - name: path.repo
+    value: "/storage/snapshot"
+volumes:
+  - name: snapshot-vol
+    persistentVolumeClaim:
+      claimName: snapshot-vol-pvc
+volumeMounts:
+  - name: snapshot-vol
+    mountPath: /storage
