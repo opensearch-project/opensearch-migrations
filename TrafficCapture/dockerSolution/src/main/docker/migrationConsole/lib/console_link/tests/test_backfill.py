@@ -10,7 +10,7 @@ import requests_mock
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
-from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill, RfsWorkersInProgress
+from console_link.models.backfill_rfs import DockerRFSBackfill, ECSRFSBackfill, RfsWorkersInProgress, WorkingIndexDoesntExist
 from console_link.models.ecs_service import ECSService, InstanceStatuses
 from console_link.models.factories import (UnsupportedBackfillTypeError,
                                            get_backfill)
@@ -330,6 +330,23 @@ def test_ecs_rfs_backfill_archive_as_expected(ecs_rfs_backfill, mocker, tmpdir):
         assert json.load(f) == mocked_docs
 
     mock_api.assert_called_once_with(ANY, "/.migrations_working_state", method=HttpMethod.DELETE, params={"ignore_unavailable": "true"})
+
+def test_ecs_rfs_backfill_archive_no_index_as_expected(ecs_rfs_backfill, mocker, tmpdir):
+    mocked_instance_status = InstanceStatuses(
+        desired=0,
+        running=0,
+        pending=0
+    )
+    mocker.patch.object(ECSService, 'get_instance_statuses', autospec=True, return_value=mocked_instance_status)
+
+    response_404 = requests.Response()
+    response_404.status_code = 404
+    mocker.patch.object(Cluster, 'fetch_all_documents', autospec=True, side_effect=requests.HTTPError(response=response_404, request=requests.Request()))
+
+    result = ecs_rfs_backfill.archive(archive_dir_path=tmpdir.strpath)
+
+    assert not result.success
+    assert isinstance(result.value, WorkingIndexDoesntExist)
 
 def test_ecs_rfs_backfill_archive_errors_if_in_progress(ecs_rfs_backfill, mocker):
     mocked_instance_status = InstanceStatuses(

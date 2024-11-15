@@ -100,6 +100,10 @@ class RfsWorkersInProgress(Exception):
     def __init__(self):
         super().__init__("RFS Workers are still in progress")
 
+class WorkingIndexDoesntExist(Exception):
+    def __init__(self, index_name: str):
+        super().__init__(f"The working state index '{index_name}' does not exist")
+
 class ECSRFSBackfill(RFSBackfill):
     def __init__(self, config: Dict, target_cluster: Cluster, client_options: Optional[ClientOptions] = None) -> None:
         super().__init__(config)
@@ -134,17 +138,22 @@ class ECSRFSBackfill(RFSBackfill):
         status = self.ecs_client.get_instance_statuses()
         if status.running > 0 or status.pending > 0 or status.desired > 0:
             return CommandResult(False, RfsWorkersInProgress())
+        
+        try:
+            backup_path = get_working_state_index_backup_path(archive_dir_path)
+            logger.info(f"Backing up working state index to {backup_path}")
+            documents = self.target_cluster.fetch_all_documents(WORKING_STATE_INDEX)
+            backup_working_state_index(documents, backup_path)
+            logger.info(f"Working state index backed up successful")
 
-        backup_path = get_working_state_index_backup_path(archive_dir_path)
-        logger.info(f"Backing up working state index to {backup_path}")
-        documents = self.target_cluster.fetch_all_documents(WORKING_STATE_INDEX)
-        backup_working_state_index(documents, backup_path)
-        logger.info(f"Working state index backed up successful")
-
-        logger.info("Cleaning up working state index on target cluster")
-        self.target_cluster.call_api(f"/{WORKING_STATE_INDEX}", method=HttpMethod.DELETE, params={"ignore_unavailable": "true"})
-        logger.info("Working state index cleaned up successful")
-        return CommandResult(True, backup_path)
+            logger.info("Cleaning up working state index on target cluster")
+            self.target_cluster.call_api(f"/{WORKING_STATE_INDEX}", method=HttpMethod.DELETE, params={"ignore_unavailable": "true"})
+            logger.info("Working state index cleaned up successful")
+            return CommandResult(True, backup_path)
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                return CommandResult(False, WorkingIndexDoesntExist(WORKING_STATE_INDEX))
+            return CommandResult(False, e)
 
     def get_status(self, deep_check: bool, *args, **kwargs) -> CommandResult:
         logger.info(f"Getting status of RFS backfill, with {deep_check=}")

@@ -10,7 +10,7 @@ from click.testing import CliRunner
 import console_link.middleware as middleware
 from console_link.cli import cli
 from console_link.environment import Environment
-from console_link.models.backfill_rfs import ECSRFSBackfill, RfsWorkersInProgress
+from console_link.models.backfill_rfs import ECSRFSBackfill, RfsWorkersInProgress, WorkingIndexDoesntExist
 from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.command_result import CommandResult
 from console_link.models.ecs_service import ECSService, InstanceStatuses
@@ -472,7 +472,6 @@ def test_cli_backfill_pause(runner, mocker):
     mock.assert_called_once()
     assert result.exit_code == 0
 
-
 def test_cli_backfill_stop(runner, mocker):
     mock_stop = mocker.patch.object(ECSRFSBackfill, 'stop', autospec=True)
 
@@ -488,6 +487,20 @@ def test_cli_backfill_stop(runner, mocker):
                            catch_exceptions=False)
     mock_stop.assert_called_once()
     assert mock_archive.call_count == 2
+    assert result.exit_code == 0
+
+def test_cli_backfill_stop_no_index(runner, mocker):
+    mock_stop = mocker.patch.object(ECSRFSBackfill, 'stop', autospec=True)
+
+    archive_result = CommandResult(success=False, value=WorkingIndexDoesntExist("index"))
+    mock_archive = mocker.patch.object(ECSRFSBackfill, 'archive', autospec=True, return_value=archive_result)
+    mocker.patch.object(time, 'sleep', autospec=True) # make a no-op
+
+    result = runner.invoke(cli, ['--config-file', str(TEST_DATA_DIRECTORY / "services_with_ecs_rfs.yaml"),
+                                 'backfill', 'stop'],
+                           catch_exceptions=False)
+    mock_stop.assert_called_once()
+    assert mock_archive.call_count == 1
     assert result.exit_code == 0
 
 
