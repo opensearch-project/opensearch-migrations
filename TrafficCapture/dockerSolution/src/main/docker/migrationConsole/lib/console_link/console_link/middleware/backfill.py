@@ -36,6 +36,13 @@ def start(backfill: Backfill, *args, **kwargs) -> CommandResult[str]:
 
 
 @handle_errors("backfill",
+               on_success=lambda result: (ExitCode.SUCCESS, "Backfill paused successfully." + "\n" + result))
+def pause(backfill: Backfill, *args, **kwargs) -> CommandResult[str]:
+    logger.info("Pausing backfill")
+    return backfill.pause(*args, **kwargs)
+
+
+@handle_errors("backfill",
                on_success=lambda result: (ExitCode.SUCCESS, "Backfill stopped successfully." + "\n" + result))
 def stop(backfill: Backfill, *args, **kwargs) -> CommandResult[str]:
     logger.info("Stopping backfill")
@@ -54,3 +61,9 @@ def status(backfill: Backfill, deep_check: bool, *args, **kwargs) -> CommandResu
 def scale(backfill: Backfill, units: int, *args, **kwargs) -> CommandResult[str]:
     logger.info(f"Scaling backfill to {units} units")
     return backfill.scale(units, *args, **kwargs)
+
+
+@handle_errors("backfill")
+def archive(backfill: Backfill, *args, **kwargs) -> CommandResult[str]:
+    logger.info("Archiving backfill operation")
+    return backfill.archive(*args, **kwargs)

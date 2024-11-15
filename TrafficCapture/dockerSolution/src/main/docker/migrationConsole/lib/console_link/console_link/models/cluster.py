@@ -1,5 +1,6 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Generator, Optional
 from enum import Enum
+import json
 import logging
 import subprocess
 
@@ -198,3 +199,62 @@ class Cluster:
         display_command = command.replace(f"basic_auth_password:{password_to_censor}", "basic_auth_password:********")
         logger.info(f"Executing command: {display_command}")
         subprocess.run(command, shell=True)
+
+    def fetch_all_documents(self, index_name: str, batch_size: int = 100) -> Generator[Dict[str, Any], None, None]:
+        """
+        Generator that fetches all documents from the specified index in batches
+        """
+
+        session = requests.Session()
+
+        # Step 1: Initiate the scroll
+        path = f"/{index_name}/_search?scroll=1m"
+        headers = {'Content-Type': 'application/json'}
+        body = json.dumps({"size": batch_size, "query": {"match_all": {}}})
+        response = self.call_api(
+            path=path,
+            method=HttpMethod.POST,
+            data=body,
+            headers=headers,
+            session=session
+        )
+
+        response_json = response.json()
+        scroll_id = response_json.get('_scroll_id')
+        hits = response_json.get('hits', {}).get('hits', [])
+
+        # Yield the first batch of documents
+        if hits:
+            yield {hit['_id']: hit['_source'] for hit in hits}
+
+        # Step 2: Continue scrolling until no more documents
+        while scroll_id and hits:
+            path = "/_search/scroll"
+            body = json.dumps({"scroll": "1m", "scroll_id": scroll_id})
+            response = self.call_api(
+                path=path,
+                method=HttpMethod.POST,
+                data=body,
+                headers=headers,
+                session=session
+            )
+
+            response_json = response.json()
+            scroll_id = response_json.get('_scroll_id')
+            hits = response_json.get('hits', {}).get('hits', [])
+
+            if hits:
+                yield {hit['_id']: hit['_source'] for hit in hits}
+
+        # Step 3: Cleanup the scroll if necessary
+        if scroll_id:
+            path = "/_search/scroll"
+            body = json.dumps({"scroll_id": scroll_id})
+            self.call_api(
+                path=path,
+                method=HttpMethod.DELETE,
+                data=body,
+                headers=headers,
+                session=session,
+                raise_error=False
+            )

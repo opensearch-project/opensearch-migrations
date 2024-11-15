@@ -247,6 +247,36 @@ def test_valid_cluster_api_call_with_client_options(requests_mock):
     assert test_user_agent in requests_mock.last_request.headers['User-Agent']
 
 
+def test_valid_cluster_fetch_all_documents(requests_mock):
+    cluster = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    assert isinstance(cluster, Cluster)
+
+    test_index = "test_index"
+    batch_size = 1
+    test_scroll_id = "test_scroll_id"
+    requests_mock.post(
+        f"{cluster.endpoint}/{test_index}/_search?scroll=1m",
+        json={
+            "_scroll_id": test_scroll_id,
+            "hits": {
+                "hits": [{"_id": "id_1", "_source": {"test1": True}}]
+            }
+        }
+    )
+    requests_mock.post(
+        f"{cluster.endpoint}/_search/scroll",
+        json={
+            "_scroll_id": None,
+            "hits": {
+                "hits": [{"_id": "id_2", "_source": {"test2": True}}]
+            }
+        }
+    )
+    requests_mock.delete(f"{cluster.endpoint}/_search/scroll")
+    documents = [batch for batch in cluster.fetch_all_documents(test_index, batch_size=batch_size)]
+    assert documents == [{"id_1": {"test1": True}}, {"id_2": {"test2": True}}]
+
+
 def test_connection_check_with_exception(mocker):
     cluster = create_valid_cluster()
     api_mock = mocker.patch.object(Cluster, 'call_api', side_effect=Exception('Attempt to connect to cluster failed'))
