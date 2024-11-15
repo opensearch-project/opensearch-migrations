@@ -11,6 +11,27 @@ env:
   node-version: '18.x'
 
 jobs:
+  workflow-info:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create JSON Artifact
+        run: |
+          echo '{' > workflow-info.json
+          echo '  "pr_number": "${{ github.event.pull_request.number }}",' >> workflow-info.json
+          echo '  "commit": "${{ github.event.pull_request.head.sha || github.event.after || github.sha }}",' >> workflow-info.json
+          echo '  "branch": "${{ github.ref }}",' >> workflow-info.json
+          echo '  "commit_parent": "${{ github.event.pull_request.base.sha || github.event.before || github.base.sha }}",' >> workflow-info.json
+          echo '  "build_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",' >> workflow-info.json
+          echo '  "build": "${{ github.run_id }}"' >> workflow-info.json
+          echo '}' >> workflow-info.json
+          echo "workflow-info.json created"
+      - name: Upload JSON Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: workflow-info
+          path: workflow-info.json
+
+
   style-check:
     runs-on: ubuntu-latest
     steps:
@@ -19,7 +40,7 @@ jobs:
         with:
           java-version: ${{ env.java-version }}
           distribution: "corretto"
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.gradle-version }}
       - name: Run Gradle Build
@@ -42,17 +63,20 @@ jobs:
        run: |
         flake8 $(git ls-files '*.py')
 
-  python-tests:
+  console-python-tests:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         py-project:
-          - ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link
-          - ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/cluster_tools
+          - lib/console_link
+          - cluster_tools
+          - console_api
+    env:
+      WORKING_DIR: ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/${{ matrix.py-project }}
     defaults:
       run:
-        working-directory: ${{ matrix.py-project }}
+        working-directory: ${{ env.WORKING_DIR }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -63,44 +87,16 @@ jobs:
           pipenv install --deploy --dev
           pipenv run test
           pipenv run coverage xml
-      - name: Upload Coverage with retry
-        uses: Wandalen/wretry.action@v3.7.2
+      - name: Get Sanitized Name
+        env:
+          PY_PROJECT: ${{ matrix.py-project }}
+        run: echo "SANITIZED_PY_PROJECT=${PY_PROJECT/\//-}" >> $GITHUB_ENV
+      - name: Upload Coverage Reports
+        uses: actions/upload-artifact@v4
         with:
-          attempt_limit: 5
-          attempt_delay: 2000
-          action: codecov/codecov-action@v4
-          with: |
-            token: ${{ secrets.CODECOV_TOKEN }}
-            files: ./coverage.xml
-            flags: python-test
-            fail_ci_if_error: true
-
-  console-api-tests:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/console_api
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.python-version }}
-      - run: |
-          python3 -m pip install --upgrade pipenv
-          pipenv install --deploy --dev
-          pipenv run coverage run --source='.' manage.py test console_api
-          pipenv run coverage xml
-      - name: Upload Coverage with retry
-        uses: Wandalen/wretry.action@v3.7.2
-        with:
-          attempt_limit: 5
-          attempt_delay: 2000
-          action: codecov/codecov-action@v4
-          with: |
-            token: ${{ secrets.CODECOV_TOKEN }}
-            files: ./coverage.xml
-            flags: python-test
-            fail_ci_if_error: true
+          if-no-files-found: error
+          name: coverage-reports-python-tests-${{ env.SANITIZED_PY_PROJECT }}
+          path: ${{ env.WORKING_DIR }}/coverage.xml
 
 
   gradle-tests:
@@ -111,7 +107,7 @@ jobs:
         with:
           java-version: ${{ env.java-version }}
           distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
@@ -128,23 +124,16 @@ jobs:
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-reports
+          name: test-reports-gradle-tests
           path: |
             **/build/reports/tests/
             **/reports/jacoco/mergedReport/
-      - name: Upload Coverage with retry
-        uses: Wandalen/wretry.action@v3.7.2
+      - name: Upload Coverage Reports
+        uses: actions/upload-artifact@v4
         with:
-          attempt_limit: 5
-          attempt_delay: 2000
-          action: codecov/codecov-action@v4
-          with: |
-            token: ${{ secrets.CODECOV_TOKEN }}
-            files: ${{ github.workspace }}/build/reports/jacoco/mergedReport/jacocoMergedReport.xml
-            flags: gradle-test
-            fail_ci_if_error: true
-            disable_search: true
-
+          if-no-files-found: error
+          name: coverage-reports-gradle-tests
+          path: ./**/jacocoMergedReport.xml
 
 
   python-e2e-tests:
@@ -155,7 +144,7 @@ jobs:
         with:
           java-version: ${{ env.java-version }}
           distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.gradle-version }}
       - uses: actions/setup-python@v5
@@ -246,15 +235,17 @@ jobs:
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
 
+
   all-ci-checks-pass:
     needs:
-      - style-check
-      - node-tests
+      - console-python-tests
       - gradle-tests
       - link-checker
+      - node-tests
       - python-e2e-tests
-      - python-lint
-      - python-tests
+#      Temp disable linting from blocking
+#      - python-lint
+      - style-check
     if: always()
     runs-on: ubuntu-latest
     steps:

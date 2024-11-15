@@ -253,6 +253,34 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             }
         }
 
+        const serviceTaskRole = new Role(this, 'MigrationServiceTaskRole', {
+            assumedBy: new ServicePrincipal('ecs-tasks.amazonaws.com'),
+            description: 'Role for Migration Console ECS Tasks',
+        });
+
+        const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
+        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
+        let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
+            listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
+            // only add secrets policies if they're non-null
+            ...(getTargetSecretsPolicy ? [getTargetSecretsPolicy] : []),
+            ...(getSourceSecretsPolicy ? [getSourceSecretsPolicy] : [])
+        ]
+
+        if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
+            const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
+            servicePolicies = servicePolicies.concat(mskAdminPolicies)
+        }
+
+        if (props.managedServiceSourceSnapshotEnabled &&
+            servicesYaml.snapshot &&
+            servicesYaml.snapshot.s3) {
+            servicesYaml.snapshot.s3.role =
+                createSnapshotOnAOSRole(this, artifactS3Arn, serviceTaskRole.roleArn,
+                    this.region, props.stage, props.defaultDeployId)
+                    .roleArn;
+        }
+
         const parameter = createMigrationStringParameter(this, servicesYaml.stringify(), {
             ...props,
             parameter: MigrationSSMParameter.SERVICES_YAML_FILE,
@@ -267,18 +295,6 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/migration-console-${props.defaultDeployId}`,
         }
 
-        const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
-        const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
-        let servicePolicies = [sharedLogFileSystem.asPolicyStatement(), openSearchPolicy, openSearchServerlessPolicy, ecsUpdateServicePolicy, clusterTasksPolicy,
-            listTasksPolicy, artifactS3PublishPolicy, describeVPCPolicy, getSSMParamsPolicy, getMetricsPolicy,
-            // only add secrets policies if they're non-null
-            ...(getTargetSecretsPolicy ? [getTargetSecretsPolicy] : []),
-            ...(getSourceSecretsPolicy ? [getSourceSecretsPolicy] : [])
-        ]
-        if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
-            const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
-            servicePolicies = servicePolicies.concat(mskAdminPolicies)
-        }
 
         if (props.migrationAPIEnabled) {
             servicePortMappings = [{
@@ -319,16 +335,13 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             volumes: [sharedLogFileSystem.asVolume()],
             mountPoints: [sharedLogFileSystem.asMountPoint()],
             environment: environment,
+            taskRole: serviceTaskRole,
             taskRolePolicies: servicePolicies,
             cpuArchitecture: props.fargateCpuArch,
             taskCpuUnits: 1024,
             taskMemoryLimitMiB: 2048,
             ...props
         });
-
-        if (props.managedServiceSourceSnapshotEnabled) {
-            createSnapshotOnAOSRole(this, artifactS3Arn, this.serviceTaskRole.roleArn, this.region, props.stage, props.defaultDeployId);
-        }
     }
 
 }

@@ -1,6 +1,6 @@
 import argparse
 from typing import Any, Dict
-from cluster_tools.utils import console_curl
+from cluster_tools.base.utils import console_curl
 from console_link.environment import Environment
 import logging
 import uuid

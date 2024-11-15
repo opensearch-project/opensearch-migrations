@@ -7,7 +7,7 @@ setup(
     package_dir={"": "src"},
     entry_points={
         "console_scripts": [
-            "cluster_tools = cluster_tools.main:main",  # Links to `main` function in `cluster_tools/main.py`
+            "cluster_tools = cluster_tools.base.main:main",  # Links to `main` function in `cluster_tools/main.py`
         ],
     },
     classifiers=[

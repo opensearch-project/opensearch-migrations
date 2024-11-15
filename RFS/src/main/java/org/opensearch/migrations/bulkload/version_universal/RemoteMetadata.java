@@ -26,4 +26,22 @@ public class RemoteMetadata implements GlobalMetadata {
             .map(ObjectNode.class::cast)
             .orElse(null);
     }
+
+    @Override
+    public ObjectNode getIndexTemplates() {
+        return Optional.ofNullable(sourceData)
+                .map(node -> node.get("index_template"))
+                .map(node -> node.get("index_template"))
+                .filter(ObjectNode.class::isInstance)
+                .map(ObjectNode.class::cast)
+                .orElse(null);    }
+
+    @Override
+    public ObjectNode getComponentTemplates() {
+        return Optional.ofNullable(sourceData)
+                .map(node -> node.get("component_template"))
+                .map(node -> node.get("component_template"))
+                .filter(ObjectNode.class::isInstance)
+                .map(ObjectNode.class::cast)
+                .orElse(null);    }
 }

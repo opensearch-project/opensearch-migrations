@@ -4,41 +4,37 @@ import argparse
 import argcomplete
 from console_link.environment import Environment
 import logging
-import sys
+from datetime import datetime
+
+root_logger = logging.getLogger()
+root_logger.setLevel(logging.INFO)
 
 logger = logging.getLogger(__name__)
-logger.setLevel(logging.INFO)
 
 
-class ClusterToolsFilter(logging.Filter):
-    def filter(self, record):
-        return record.name.startswith('cluster_tools') or record.name.startswith('tools')
-
-
-def setup_logging():
-    """Sets up logging with a file handler for all logs and a stdout handler for 'cluster_tools' logs only."""
-
-    from datetime import datetime
+def setup_file_logging(tool_name: str):
+    """Sets up logging with a file handler for all logs."""
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     logs_dir = os.getenv("SHARED_LOGS_DIR_PATH", "./logs")
-    log_file_path = os.path.join(logs_dir, f'cluster_tools/log_{timestamp}_{os.getpid()}.log')
+    host_name = os.getenv("HOSTNAME", "localhost")
+    log_file_path = os.path.join(logs_dir, f'{host_name}/cluster_tools/{timestamp}_{tool_name}_log_{os.getpid()}.log')
     os.makedirs(os.path.dirname(log_file_path), exist_ok=True)
     file_handler = logging.FileHandler(log_file_path)
+    file_handler.setLevel(logging.INFO)
     file_handler.setFormatter(logging.Formatter('%(asctime)s - %(name)s - %(levelname)s - %(message)s'))
+    root_logger.addHandler(file_handler)
+    return file_handler
 
-    stdout_handler = logging.StreamHandler(sys.stdout)
+
+def setup_stdout_logging():
+    """Sets up a stdout handler for 'cluster_tools' logs only."""
+    stdout_handler = logging.StreamHandler()
+    stdout_handler.setLevel(logging.INFO)
     stdout_handler.setFormatter(logging.Formatter('%(message)s'))
-
-    # Apply the filter to the stdout handler
-    stdout_handler.addFilter(ClusterToolsFilter())
-
-    # Add both handlers to the main logger
-    logger.addHandler(file_handler)
-    logger.addHandler(stdout_handler)
-
-    # Setup logger for this module with name
-    module_logger = logging.getLogger(__name__)
-    return module_logger
+    root_module_name = __name__.split('.')[0]
+    stdout_handler.addFilter(logging.Filter(root_module_name))
+    root_logger.addHandler(stdout_handler)
+    return stdout_handler
 
 
 def list_tools():
@@ -52,9 +48,6 @@ def list_tools():
     return tools
 
 
-log_file_path = None
-
-
 def setup_parser(parser):
     parser.add_argument(
         '--config_file',
@@ -66,7 +59,7 @@ def setup_parser(parser):
     # Dynamically add subparsers for each tool
     for tool_name in list_tools():
         try:
-            tool_module = importlib.import_module(f"tools.{tool_name}")
+            tool_module = importlib.import_module(f"cluster_tools.tools.{tool_name}")
             tool_parser = subparsers.add_parser(tool_name, help=f"{tool_name} utility")
 
             # Check if the tool module has a 'define_arguments' function to define its arguments
@@ -84,7 +77,7 @@ def setup_parser(parser):
 
 
 def main(args=None):
-    global logger
+    setup_stdout_logging()
     # Create the main parser
     parser = argparse.ArgumentParser(
         description="CLI tool for managing and running different utilities."
@@ -103,8 +96,8 @@ def main(args=None):
             logger.info(f"  - {tool}")
         logger.info("\nRun `cluster_tools <tool>` to use a tool.")
     else:
-        # Setup logging for tool execution
-        logger = setup_logging()
+        # Setup file logging for tool execution
+        file_handler = setup_file_logging(args.tool)
         env = Environment(args.config_file)
         try:
             args.func(env, args)
@@ -112,8 +105,10 @@ def main(args=None):
             logger.error(f"An error occurred while executing the tool: {e}")
             raise e
         finally:
-            if log_file_path is not None:
-                logger.info(f"Logs saved to {log_file_path}")
+            if file_handler is not None:
+                logger.info(f"\nLogs saved to {file_handler.baseFilename}")
+                file_handler.close()
+                logger.removeHandler(file_handler)
 
 
 if __name__ == "__main__":

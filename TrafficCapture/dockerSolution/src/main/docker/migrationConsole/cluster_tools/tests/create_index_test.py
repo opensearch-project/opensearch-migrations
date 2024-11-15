@@ -1,4 +1,4 @@
-from src.tools.create_index import main as create_index
+from cluster_tools.tools.create_index import main as create_index
 from tests.utils import get_target_index_info
 import argparse
 import logging

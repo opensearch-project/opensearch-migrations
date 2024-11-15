@@ -1,6 +1,6 @@
 import argparse
 from console_link.environment import Environment
-from cluster_tools.utils import console_curl
+from cluster_tools.base.utils import console_curl
 import logging
 
 logger = logging.getLogger(__name__)
