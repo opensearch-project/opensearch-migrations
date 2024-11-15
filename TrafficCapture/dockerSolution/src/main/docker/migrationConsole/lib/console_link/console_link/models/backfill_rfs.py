@@ -161,7 +161,6 @@ class ECSRFSBackfill(RFSBackfill):
                 return CommandResult(False, WorkingIndexDoesntExist(WORKING_STATE_INDEX))
             return CommandResult(False, e)
 
-
     def get_status(self, deep_check: bool, *args, **kwargs) -> CommandResult:
         logger.info(f"Getting status of RFS backfill, with {deep_check=}")
         instance_statuses = self.ecs_client.get_instance_statuses()
@@ -183,7 +182,6 @@ class ECSRFSBackfill(RFSBackfill):
         elif instance_statuses.pending > 0:
             return CommandResult(True, (BackfillStatus.STARTING, status_string))
         return CommandResult(True, (BackfillStatus.STOPPED, status_string))
-
 
     def _get_detailed_status(self) -> Optional[str]:
         # Check whether the working state index exists. If not, we can't run queries.
@@ -253,7 +251,7 @@ def get_working_state_index_backup_path(archive_dir_path: str = None, archive_fi
     return os.path.join(backup_dir, file_name)
 
 
-def backup_working_state_index(cluster: Cluster, index_name:str, backup_path: str):
+def backup_working_state_index(cluster: Cluster, index_name: str, backup_path: str):
     # Ensure the backup directory exists
     backup_dir = os.path.dirname(backup_path)
     os.makedirs(backup_dir, exist_ok=True)

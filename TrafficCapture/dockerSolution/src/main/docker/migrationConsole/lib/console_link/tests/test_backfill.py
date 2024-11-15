@@ -11,7 +11,7 @@ from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.backfill_osi import OpenSearchIngestionBackfill
 from console_link.models.backfill_rfs import (DockerRFSBackfill, ECSRFSBackfill, RfsWorkersInProgress,
-        WorkingIndexDoesntExist)
+                                              WorkingIndexDoesntExist)
 from console_link.models.ecs_service import ECSService, InstanceStatuses
 from console_link.models.factories import UnsupportedBackfillTypeError, get_backfill
 from tests.utils import create_valid_cluster
