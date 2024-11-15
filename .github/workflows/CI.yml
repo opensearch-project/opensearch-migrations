@@ -243,8 +243,7 @@ jobs:
       - link-checker
       - node-tests
       - python-e2e-tests
-#      Temp disable linting from blocking
-#      - python-lint
+      - python-lint
       - style-check
     if: always()
     runs-on: ubuntu-latest
