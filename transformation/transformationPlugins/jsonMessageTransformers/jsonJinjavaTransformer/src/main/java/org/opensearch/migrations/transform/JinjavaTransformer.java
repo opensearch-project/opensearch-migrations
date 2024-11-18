@@ -1,8 +1,5 @@
 package org.opensearch.migrations.transform;
 
-import java.io.File;
-import java.io.Reader;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.function.Function;
 
@@ -10,7 +7,9 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hubspot.jinjava.Jinjava;
 import com.hubspot.jinjava.loader.FileLocator;
 import lombok.SneakyThrows;
+import lombok.extern.slf4j.Slf4j;
 
+@Slf4j
 public class JinjavaTransformer implements IJsonTransformer {
 
     protected final static ObjectMapper objectMapper = new ObjectMapper();
@@ -19,8 +18,8 @@ public class JinjavaTransformer implements IJsonTransformer {
     protected final Function<Map<String, Object>, Map<String, Object>> wrapSourceAsContextConverter;
 
     public JinjavaTransformer(String templateString,
-                              Function<Map<String, Object>, Map<String, Object>> wrapSourceAsContextConverter) {
-        this(templateString,  wrapSourceAsContextConverter, null);
+                              Function<Map<String, Object>, Map<String, Object>> contextProviderFromSource) {
+        this(templateString,  contextProviderFromSource, null);
     }
 
     public JinjavaTransformer(String templateString,
@@ -38,6 +37,7 @@ public class JinjavaTransformer implements IJsonTransformer {
     @Override
     public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
         String resultStr = jinjava.render(templateString, wrapSourceAsContextConverter.apply(incomingJson));
+        log.atInfo().setMessage("output = {}").addArgument(resultStr).log();
         return objectMapper.readValue(resultStr, Map.class);
     }
 }

@@ -1,0 +1,33 @@
+{% set uri_parts = request.URI.split('/') | reject('equalto', '') | list %}
+
+{% if uri_parts | length == 3 and uri_parts[0] in index_mappings and uri_parts[1] in index_mappings[uri_parts[0]] %}
+  {
+    "method": "{{ request.method }}",
+    "URI": "/{{ index_mappings[uri_parts[0]][uri_parts[1]] }}/_doc/{{ uri_parts[2] }}",
+    "headers": {{ request.headers | tojson }},
+    "payload": {{ request.payload | tojson }}
+  }
+{% elif uri_parts | length == 2 and uri_parts[0] in index_mappings %}
+  {
+    "method": "{{ request.method }}",
+    "URI": "{{ index_mappings[uri_parts[0]][uri_parts[1]] }}",
+    "payload": {
+      "inlinedJsonBody": {
+        "mappings": {
+          "properties": {
+            "type": {
+              "type": "keyword"
+            }
+            {%- for type_name, type_props in request.body.mappings.items() %}
+              {%- for prop_name, prop_def in type_props.properties.items() %}
+                ,
+                "{{ prop_name }}": {{ prop_def | tojson }}
+              {%- endfor %}
+            {%- endfor %}
+          }
+        }
+      }
+    }
+  }
+{% else %}
+ { "urilen": {{uri_parts | length}} }{% endif %}
