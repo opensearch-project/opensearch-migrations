@@ -4,8 +4,12 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.Callable;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
+import org.apache.lucene.index.LeafReader;
+import org.apache.lucene.index.SegmentReader;
+import org.apache.lucene.util.Bits;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
 import lombok.Lombok;
@@ -87,10 +91,10 @@ public class LuceneDocumentsReader {
      *    Lucene Index.
 
      */
-    public Flux<RfsLuceneDocument> readDocuments() {
+    public Flux<RfsLuceneDocument> readDocuments(int startSegmentIndex, int startDoc) {
         return Flux.using(
             () -> wrapReader(getReader(), softDeletesPossible, softDeletesField),
-            this::readDocsByLeavesInParallel,
+            reader -> readDocsByLeavesFromStartingPosition(reader, startSegmentIndex, startDoc),
             reader -> {
                 try {
                     reader.close();
@@ -114,35 +118,40 @@ public class LuceneDocumentsReader {
         }
     }
 
-    Publisher<RfsLuceneDocument> readDocsByLeavesInParallel(DirectoryReader reader) {
-        var segmentsToReadAtOnce = 1; // Arbitrary value
+    /* Start reading docs from a specific segment and document id.
+    If the startSegmentIndex is 0, it will start from the first segment.
+    If the startDocId is 0, it will start from the first document in the segment.
+     */
+    Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(DirectoryReader reader, int startSegmentIndex, int startDocId) {
         var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
-            .addArgument(reader::maxDoc)
-            .addArgument(() -> reader.leaves().size())
-            .log();
+                .addArgument(reader::maxDoc)
+                .addArgument(() -> reader.leaves().size())
+                .log();
 
         // Create shared scheduler for i/o bound document reading
         var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
 
         return Flux.fromIterable(reader.leaves())
-            .flatMap(this::getReadDocCallablesFromSegments, segmentsToReadAtOnce)
-            .flatMap(c -> Mono.fromCallable(c)
-                    .subscribeOn(sharedSegmentReaderScheduler), // Scheduler to read documents on
-                maxDocumentsToReadAtOnce) // Don't need to worry about prefetch before this step as documents aren't realized
-            .doOnTerminate(sharedSegmentReaderScheduler::dispose);
+                .skip(startSegmentIndex)
+                .flatMap(ctx -> getReadDocCallablesFromSegments(ctx,
+                        // Only use startDocId for the first segment we process
+                        ctx.ord == startSegmentIndex ? startDocId : 0))
+                .flatMap(c -> Mono.fromCallable(c)
+                                .subscribeOn(sharedSegmentReaderScheduler), // Scheduler to read documents on
+                        maxDocumentsToReadAtOnce) // Don't need to worry about prefetch before this step as documents aren't realized
+                .doOnTerminate(sharedSegmentReaderScheduler::dispose);
     }
 
-    Publisher<Callable<RfsLuceneDocument>> getReadDocCallablesFromSegments(LeafReaderContext leafReaderContext) {
-        @SuppressWarnings("resource") // segmentReader will be closed by parent DirectoryReader
+    Publisher<Callable<RfsLuceneDocument>> getReadDocCallablesFromSegments(LeafReaderContext leafReaderContext, int startDocId) {
         var segmentReader = leafReaderContext.reader();
         var liveDocs = segmentReader.getLiveDocs();
 
-        return Flux.range(0, segmentReader.maxDoc())
-            .subscribeOn(Schedulers.parallel())
-            .map(docIdx -> () -> ((liveDocs == null || liveDocs.get(docIdx)) ? // Filter for live docs
-                getDocument(segmentReader, docIdx, true) : // Get document, returns null to skip malformed docs
-                null));
+        return Flux.range(startDocId, segmentReader.maxDoc() - startDocId)
+                .subscribeOn(Schedulers.parallel())
+                .map(docIdx -> () -> ((liveDocs == null || liveDocs.get(docIdx)) ? // Filter for live docs
+                        getDocument(segmentReader, docIdx, true) : // Get document, returns null to skip malformed docs
+                        null));
     }
 
     protected DirectoryReader wrapReader(DirectoryReader reader, boolean softDeletesEnabled, String softDeletesField) throws IOException {

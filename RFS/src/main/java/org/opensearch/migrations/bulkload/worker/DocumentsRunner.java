@@ -96,7 +96,7 @@ public class DocumentsRunner {
 
         var unpacker = unpackerFactory.create(shardMetadata);
         var reader = readerFactory.apply(unpacker.unpack());
-        Flux<RfsLuceneDocument> documents = reader.readDocuments();
+        Flux<RfsLuceneDocument> documents = reader.readDocuments(indexAndShard.startingSegmentIndex, indexAndShard.startingDocId);
 
         reindexer.reindex(shardMetadata.getIndexName(), documents, context)
             .doOnError(error -> log.error("Error during reindexing: " + error))

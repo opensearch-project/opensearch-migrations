@@ -98,7 +98,7 @@ public class LuceneDocumentsReaderTest {
         // Use the LuceneDocumentsReader to get the documents
         var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
 
-        Flux<RfsLuceneDocument> documents = reader.readDocuments()
+        Flux<RfsLuceneDocument> documents = reader.readDocuments(0, 0)
             .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
 
         // Verify that the results are as expected
@@ -162,7 +162,7 @@ public class LuceneDocumentsReaderTest {
         // Use the LuceneDocumentsReader to get the documents
         var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
 
-        Flux<RfsLuceneDocument> documents = reader.readDocuments()
+        Flux<RfsLuceneDocument> documents = reader.readDocuments(0, 0)
             .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
 
         // Verify that the results are as expected
@@ -261,13 +261,13 @@ public class LuceneDocumentsReaderTest {
         }, 500, TimeUnit.MILLISECONDS);
 
         // Read documents
-        List<RfsLuceneDocument> actualDocuments = reader.readDocuments()
+        List<RfsLuceneDocument> actualDocuments = reader.readDocuments(0, 0)
             .subscribeOn(Schedulers.parallel())
             .collectList()
             .block(Duration.ofSeconds(2));
 
         // Verify results
-        var expectedConcurrentSegments = 5;
+        var expectedConcurrentSegments = 10;
         var expectedConcurrentDocReads = 100;
         assertNotNull(actualDocuments);
         assertEquals(numSegments * docsPerSegment, actualDocuments.size());
