@@ -60,7 +60,8 @@ public class ShardWorkPreparer {
                     context::createWorkAcquisitionContext
                 );
             } catch (InterruptedException e) {
-                throw e;
+                Thread.currentThread().interrupt();
+                throw Lombok.sneakyThrow(e);
             } catch (Exception e) {
                 throw Lombok.sneakyThrow(e);
             }
