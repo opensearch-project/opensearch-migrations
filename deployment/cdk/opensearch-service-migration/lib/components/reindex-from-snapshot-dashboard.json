@@ -12,9 +12,11 @@
         {
             "type": "property",
             "property": "DomainName",
-            "inputType": "input",
+            "inputType": "select",
             "id": "TC_DOMAIN_NAME",
             "label": "Target Cluster Domain Name",
+            "search": "{AWS/ES,ClientId,DomainName} MetricName=\"CPUUtilization\"",
+            "populateFrom": "DomainName",
             "defaultValue": "placeholder-name",
             "visible": true
         },
