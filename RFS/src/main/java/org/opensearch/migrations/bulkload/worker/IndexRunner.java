@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.worker;
 
 import java.util.List;
 import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
@@ -35,16 +36,34 @@ public class IndexRunner {
         };
         var results = IndexMetadataResults.builder();
 
+        // log out filtered items
+        repoDataProvider.getIndicesInSnapshot(snapshotName)
+                .stream()
+                .filter(Predicate.not(FilterScheme.filterIndicesByAllowList(indexAllowlist, logger)))
+                .forEach(index -> {
+                    var indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
+                    log.atInfo().setMessage("{ \"before\": {},\n\"after\":{}}")
+                            .addArgument(indexMetadata)
+                            .addArgument("Removed due to index filter")
+                            .log();
+                });
+
+
         repoDataProvider.getIndicesInSnapshot(snapshotName)
             .stream()
             .filter(FilterScheme.filterIndicesByAllowList(indexAllowlist, logger))
             .forEach(index -> {
                 var indexName = index.getName();
-                var indexMetadata = metadataFactory.fromRepo(snapshotName, indexName);
+                var originalIndexMetadata = metadataFactory.fromRepo(snapshotName, indexName);
 
                 CreationResult indexResult = null;
+                var indexMetadata = originalIndexMetadata.deepCopy();
                 try {
                     indexMetadata = transformer.transformIndexMetadata(indexMetadata);
+                    log.atInfo().setMessage("{ \"before\": {},\n\"after\":{}}")
+                            .addArgument(originalIndexMetadata)
+                            .addArgument(indexMetadata)
+                            .log();
                     indexResult = indexCreator.create(indexMetadata, mode, context);
                 } catch (Throwable t) {
                     indexResult = CreationResult.builder()
