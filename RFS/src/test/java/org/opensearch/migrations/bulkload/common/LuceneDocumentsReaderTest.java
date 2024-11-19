@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
@@ -313,18 +314,12 @@ public class LuceneDocumentsReaderTest {
             Flux<RfsLuceneDocument> documents = reader.readDocuments(0, documentStartingIndices.get(i))
                     .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
 
-            var verifier = StepVerifier.create(documents);
-            var expectedDocumentIds = documentIds.get(i);
-            expectedDocumentIds.forEach(id -> {
-                    verifier.expectNextMatches(doc -> {
-                        Assertions.assertEquals(id, doc.id);
-                        return true;
-                    });
-            });
-
-            verifier.expectComplete().verify();
+            var actualDocIds = documents.collectList().block().stream().map(doc -> doc.id).collect(Collectors.joining(","));
+            var expectedDocIds = String.join(",", documentIds.get(i));
+            Assertions.assertEquals(expectedDocIds, actualDocIds);
         }
     }
+
     @Test
     public void ReadDocumentsStartingFromCheckpointForManySegments_AsExpected() throws Exception {
         // This snapshot has three segments, each with only a single document.
@@ -357,16 +352,9 @@ public class LuceneDocumentsReaderTest {
             Flux<RfsLuceneDocument> documents = reader.readDocuments(i, 0)
                     .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
 
-            var verifier = StepVerifier.create(documents);
-            var expectedDocumentIds = documentIds.get(i);
-            expectedDocumentIds.forEach(id -> {
-                verifier.expectNextMatches(doc -> {
-                    Assertions.assertEquals(id, doc.id);
-                    return true;
-                });
-            });
-
-            verifier.expectComplete().verify();
+            var actualDocIds = documents.collectList().block().stream().map(doc -> doc.id).collect(Collectors.joining(","));
+            var expectedDocIds = String.join(",", documentIds.get(i));
+            Assertions.assertEquals(expectedDocIds, actualDocIds);
         }
     }
 
