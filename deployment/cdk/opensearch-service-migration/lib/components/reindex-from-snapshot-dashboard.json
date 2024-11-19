@@ -240,7 +240,8 @@
             "type": "metric",
             "properties": {
                 "metrics": [
-                    [ "AWS/ECS", "CPUUtilization", "ServiceName", "migration-MA_STAGE-reindex-from-snapshot", "ClusterName", "migration-MA_STAGE-ecs-cluster", { "region": "REGION", "label": "RFS Workers - MIN - ${MIN}, MAX - ${MAX}, AVG - ${AVG}" } ]
+                    [ { "expression": "METRICS()/PERIOD(m1)*60", "id" : "e1", "region": "REGION" } ],
+                    [ "AWS/ECS", "CPUUtilization", "ServiceName", "migration-MA_STAGE-reindex-from-snapshot", "ClusterName", "migration-MA_STAGE-ecs-cluster", { "region": "REGION", "label": "RFS Workers - MIN - ${MIN}, MAX - ${MAX}, AVG - ${AVG}", "id": "m1", "visible": false } ]
                 ],
                 "period": 60,
                 "region": "REGION",
