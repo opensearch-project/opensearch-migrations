@@ -13,6 +13,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
+import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
@@ -275,6 +276,98 @@ public class LuceneDocumentsReaderTest {
         assertEquals(expectedConcurrentSegments, observedConcurrentSegments.get(), "Expected concurrent open segments equal to 5");
 
 
+    }
+
+    @Test
+    public void ReadDocumentsStartingFromCheckpointForOneSegments_AsExpected() throws Exception {
+        // This snapshot has 6 documents in 1 segment. There are updates and deletes involved, so
+        // there are only 3 final documents, which affects which document id the reader should
+        // start at.
+        var snapshot = TestResources.SNAPSHOT_ES_7_10_W_SOFT;
+        var version = Version.fromString("ES 7.10");
+        List<List<String>> documentIds = List.of(
+                List.of("complexdoc", "unchangeddoc", "updateddoc"),
+                List.of("unchangeddoc", "updateddoc"),
+                List.of("unchangeddoc"));
+        List<Integer> documentStartingIndices = List.of(0, 2, 5);
+
+        final var repo = new FileSystemRepo(snapshot.dir);
+        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo);
+        DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
+
+        final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
+
+        SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(
+                repoAccessor,
+                tempDirectory,
+                shardMetadata,
+                Integer.MAX_VALUE
+        );
+        Path luceneDir = unpacker.unpack();
+
+        // Use the LuceneDocumentsReader to get the documents
+        var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
+
+
+        for (int i = 0; i < documentStartingIndices.size(); i++) {
+            Flux<RfsLuceneDocument> documents = reader.readDocuments(0, documentStartingIndices.get(i))
+                    .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
+
+            var verifier = StepVerifier.create(documents);
+            var expectedDocumentIds = documentIds.get(i);
+            expectedDocumentIds.forEach(id -> {
+                    verifier.expectNextMatches(doc -> {
+                        Assertions.assertEquals(id, doc.id);
+                        return true;
+                    });
+            });
+
+            verifier.expectComplete().verify();
+        }
+    }
+    @Test
+    public void ReadDocumentsStartingFromCheckpointForManySegments_AsExpected() throws Exception {
+        // This snapshot has three segments, each with only a single document.
+        var snapshot = TestResources.SNAPSHOT_ES_6_8;
+        var version = Version.fromString("ES 6.8");
+        List<List<String>> documentIds = List.of(
+                List.of("complexdoc", "unchangeddoc", "updateddoc"),
+                List.of("unchangeddoc", "updateddoc"),
+                List.of("unchangeddoc"));
+
+        final var repo = new FileSystemRepo(snapshot.dir);
+        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo);
+        DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
+
+        final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
+
+        SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(
+                repoAccessor,
+                tempDirectory,
+                shardMetadata,
+                Integer.MAX_VALUE
+        );
+        Path luceneDir = unpacker.unpack();
+
+        // Use the LuceneDocumentsReader to get the documents
+        var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
+
+
+        for (int i = 0; i < documentIds.size(); i++) {
+            Flux<RfsLuceneDocument> documents = reader.readDocuments(i, 0)
+                    .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
+
+            var verifier = StepVerifier.create(documents);
+            var expectedDocumentIds = documentIds.get(i);
+            expectedDocumentIds.forEach(id -> {
+                verifier.expectNextMatches(doc -> {
+                    Assertions.assertEquals(id, doc.id);
+                    return true;
+                });
+            });
+
+            verifier.expectComplete().verify();
+        }
     }
 
     protected void assertDocsEqual(String expectedId, String actualId, String expectedType,
