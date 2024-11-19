@@ -4,12 +4,8 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.Callable;
-import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.Function;
 
-import org.apache.lucene.index.LeafReader;
-import org.apache.lucene.index.SegmentReader;
-import org.apache.lucene.util.Bits;
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
 import lombok.Lombok;

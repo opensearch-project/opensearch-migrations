@@ -13,7 +13,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Stream;
 
-import org.junit.jupiter.api.Assertions;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
@@ -30,6 +29,7 @@ import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
