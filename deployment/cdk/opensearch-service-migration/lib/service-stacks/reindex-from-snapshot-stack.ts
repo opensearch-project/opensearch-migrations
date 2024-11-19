@@ -25,29 +25,41 @@ import { CfnDashboard } from "aws-cdk-lib/aws-cloudwatch";
 import * as rfsDashboard from '../components/reindex-from-snapshot-dashboard.json';
 
 
-function setDefaultValueForVariable(variables: any[], variableName: string, defaultValue: string): any[] {
-    for (let i = 0; i < variables.length; i++) {
-        if (variables[i].id === variableName) {
-            variables[i].defaultValue = defaultValue;
-            console.log(`changing ${variables[i].defaultValue} to ${defaultValue}`)
-            break;
-        }
-    }
-    console.log(`returning ${JSON.stringify(variables)}`);
-    return variables;
-}
-function setAccountIdForDashboard(dashboardBody: any, account: string): any {
-    dashboardBody.variables = setDefaultValueForVariable(dashboardBody.variables, 'ACCOUNT_ID', account)
-    return dashboardBody;
-}
-function setRegionForDashboard(dashboardBody: any, region: string): any {
-    dashboardBody.variables = setDefaultValueForVariable(dashboardBody.variables, 'REGION', region)
-    return dashboardBody;
-}
-function setStageForDashboard(dashboardBody: any, stage: string): any {
-    dashboardBody.variables = setDefaultValueForVariable(dashboardBody.variables, 'MA_STAGE', stage)
-    return dashboardBody;
-}
+interface DashboardVariable {
+    id: string;
+    defaultValue: string;
+  }
+  
+  function setDefaultValueForVariable(variables: DashboardVariable[], variableName: string, defaultValue: string): DashboardVariable[] {
+      for (const variable of variables) {
+          if (variable.id === variableName) {
+              variable.defaultValue = defaultValue;
+              console.log(`changing ${variable.defaultValue} to ${defaultValue}`);
+              break;
+          }
+      }
+      console.log(`returning ${JSON.stringify(variables)}`);
+      return variables;
+  }
+  
+  interface DashboardBody {
+    variables: DashboardVariable[];
+  }
+  
+  function setAccountIdForDashboard(dashboardBody: DashboardBody, account: string): DashboardBody {
+      dashboardBody.variables = setDefaultValueForVariable(dashboardBody.variables, 'ACCOUNT_ID', account);
+      return dashboardBody;
+  }
+  
+  function setRegionForDashboard(dashboardBody: DashboardBody, region: string): DashboardBody {
+      dashboardBody.variables = setDefaultValueForVariable(dashboardBody.variables, 'REGION', region);
+      return dashboardBody;
+  }
+  
+  function setStageForDashboard(dashboardBody: DashboardBody, stage: string): DashboardBody {
+      dashboardBody.variables = setDefaultValueForVariable(dashboardBody.variables, 'MA_STAGE', stage);
+      return dashboardBody;
+  }
 
 export interface ReindexFromSnapshotProps extends StackPropsExt {
     readonly vpc: IVpc,
