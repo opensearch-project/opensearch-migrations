@@ -76,7 +76,7 @@ class JinjavaTransformerProviderTest {
     public void testSimpleTransform() throws JsonProcessingException {
         var documentJson = parseStringAsJson(mapper, TEST_INPUT_REQUEST);
         var transformer = new JsonJinjavaTransformerProvider().createTransformer(Map.of(
-            "script",  EXCISE_TYPE_EXPRESSION_STRING));
+            "template",  EXCISE_TYPE_EXPRESSION_STRING));
         var transformedDocument = transformer.transformJson(documentJson);
         var outputStr = emitJson(mapper, transformedDocument);
 
