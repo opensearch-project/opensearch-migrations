@@ -25,6 +25,7 @@ import {
     InterfaceVpcEndpointAwsService,
     IpProtocol,
     MachineImage,
+    SecurityGroup,
     Vpc
 } from "aws-cdk-lib/aws-ec2";
 import {InstanceProfile, ManagedPolicy, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
@@ -239,6 +240,11 @@ export class SolutionsInfrastructureStack extends Stack {
             }),
         ]
 
+        const securityGroup = new SecurityGroup(this, 'BootstrapSecurityGroup', {
+            vpc: vpc,
+            allowAllOutbound: true,
+            allowAllIpv6Outbound: true,
+        });
         new Instance(this, 'BootstrapEC2Instance', {
             vpc: vpc,
             vpcSubnets: {
@@ -258,6 +264,7 @@ export class SolutionsInfrastructureStack extends Stack {
             initOptions: {
                 printLog: true,
             },
+            securityGroup
         });
 
         const dynamicEc2ImageParameter = this.node.findAll()
