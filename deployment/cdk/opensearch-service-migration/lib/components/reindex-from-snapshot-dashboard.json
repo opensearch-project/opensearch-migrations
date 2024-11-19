@@ -32,7 +32,7 @@
             "pattern": "ACCOUNT_ID",
             "inputType": "input",
             "id": "ACCOUNT_ID",
-            "label": "ACCOUNT_ID",
+            "label": "Account ID",
             "defaultValue": "ACCOUNT_ID",
             "visible": false
         }
@@ -99,7 +99,7 @@
                 }
             }
         },
-                {
+        {
             "height": 8,
             "width": 12,
             "y": 9,

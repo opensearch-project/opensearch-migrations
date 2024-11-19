@@ -34,11 +34,9 @@ interface DashboardVariable {
       for (const variable of variables) {
           if (variable.id === variableName) {
               variable.defaultValue = defaultValue;
-              console.log(`changing ${variable.defaultValue} to ${defaultValue}`);
               break;
           }
       }
-      console.log(`returning ${JSON.stringify(variables)}`);
       return variables;
   }
   
