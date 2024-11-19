@@ -141,8 +141,8 @@ public class SourceTestBase {
         }
 
         @Override
-        public Flux<RfsLuceneDocument> readDocuments() {
-            return super.readDocuments().map(docTransformer::apply);
+        public Flux<RfsLuceneDocument> readDocuments(int startSegmentIndex, int startDoc) {
+            return super.readDocuments(startSegmentIndex, startDoc).map(docTransformer::apply);
         }
     }
 

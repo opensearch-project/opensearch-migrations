@@ -119,7 +119,7 @@ public class ShardWorkPreparer {
                     );
                     try (var shardSetupContext = context.createShardWorkItemContext()) {
                         workCoordinator.createUnassignedWorkItem(
-                            IndexAndShard.formatAsWorkItemString(indexMetadata.getName(), shardId),
+                            IndexAndShardCursor.formatAsWorkItemString(indexMetadata.getName(), shardId),
                             shardSetupContext::createUnassignedWorkItemContext
                         );
                     } catch (IOException e) {
