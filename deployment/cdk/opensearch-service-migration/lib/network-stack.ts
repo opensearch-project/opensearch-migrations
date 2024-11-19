@@ -252,7 +252,6 @@ export class NetworkStack extends Stack {
             const defaultSecurityGroup = new SecurityGroup(this, 'osClusterAccessSG', {
                 vpc: this.vpc,
                 allowAllOutbound: false,
-                allowAllIpv6Outbound: false,
             });
             defaultSecurityGroup.addIngressRule(defaultSecurityGroup, Port.allTraffic());
 

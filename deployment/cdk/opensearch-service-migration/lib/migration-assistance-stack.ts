@@ -165,8 +165,7 @@ export class MigrationAssistanceStack extends Stack {
 
         const streamingSecurityGroup = new SecurityGroup(this, 'trafficStreamSourceSG', {
             vpc: props.vpc,
-            allowAllOutbound: false,
-            allowAllIpv6Outbound: false,
+            allowAllOutbound: false
         });
         streamingSecurityGroup.addIngressRule(streamingSecurityGroup, Port.allTraffic())
         createMigrationStringParameter(this, streamingSecurityGroup.securityGroupId, {
@@ -181,7 +180,6 @@ export class MigrationAssistanceStack extends Stack {
         const sharedLogsSG = new SecurityGroup(this, 'sharedLogsSG', {
             vpc: props.vpc,
             allowAllOutbound: false,
-            allowAllIpv6Outbound: false,
         });
         sharedLogsSG.addIngressRule(sharedLogsSG, Port.allTraffic());
 
@@ -207,7 +205,6 @@ export class MigrationAssistanceStack extends Stack {
             vpc: props.vpc,
             // Required for retrieving ECR image at service startup
             allowAllOutbound: true,
-            allowAllIpv6Outbound: true,
         })
         serviceSecurityGroup.addIngressRule(serviceSecurityGroup, Port.allTraffic());
 
