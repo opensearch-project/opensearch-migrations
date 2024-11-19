@@ -59,6 +59,8 @@ public class ShardWorkPreparer {
                     Duration.ofMinutes(5),
                     context::createWorkAcquisitionContext
                 );
+            } catch (InterruptedException e) {
+                throw e;
             } catch (Exception e) {
                 throw Lombok.sneakyThrow(e);
             }

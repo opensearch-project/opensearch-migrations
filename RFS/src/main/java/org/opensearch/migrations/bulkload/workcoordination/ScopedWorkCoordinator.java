@@ -21,7 +21,7 @@ public class ScopedWorkCoordinator {
 
     public interface WorkItemGetter {
         @NonNull
-        IWorkCoordinator.WorkAcquisitionOutcome tryAcquire(IWorkCoordinator wc);
+        IWorkCoordinator.WorkAcquisitionOutcome tryAcquire(IWorkCoordinator wc) throws InterruptedException;
     }
 
     public <T> T ensurePhaseCompletion(
