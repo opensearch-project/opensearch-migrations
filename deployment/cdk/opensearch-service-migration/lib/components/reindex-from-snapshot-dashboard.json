@@ -61,8 +61,8 @@
                 "view": "timeSeries",
                 "stacked": false,
                 "metrics": [
-                    [ { "expression": "METRICS()/1000", "id": "e1", "region": "REGION" } ],
-                    [ "AWS/ES", "IndexingRate", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "region": "region", "label": "Document Ingested per 60 seconds - MIN: ${MIN}, MAX: ${MAX}, AVG: ${AVG}", "id": "m1", "visible": false } ]
+                    [ { "expression": "METRICS()/1000/PERIOD(m1)*60", "id": "e1", "region": "REGION" } ],
+                    [ "AWS/ES", "IndexingRate", "DomainName", "TC_DOMAIN_NAME", "ClientId", "ACCOUNT_ID", { "region": "region", "label": "Document Ingested (included replicas) - MIN: ${MIN}, MAX: ${MAX}, AVG: ${AVG}", "id": "m1", "visible": false } ]
                 ],
                 "region": "REGION",
                 "title": "Target Cluster Document Index Rate",
@@ -248,7 +248,7 @@
                 "period": 60,
                 "region": "REGION",
                 "stacked": false,
-                "title": "RFS Workers Reporting in During Period",
+                "title": "RFS Workers Reporting In",
                 "view": "timeSeries",
                 "stat": "SampleCount"
             }
