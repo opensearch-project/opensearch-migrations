@@ -107,7 +107,7 @@ public class PerformanceVerificationTest {
 
         // Start reindexing in a separate thread
         Thread reindexThread = new Thread(() -> {
-            reindexer.reindex("test-index", reader.readDocuments(0, 0), mockContext).block();
+            reindexer.reindex("test-index", reader.readDocuments(), mockContext).block();
         });
         reindexThread.start();
 

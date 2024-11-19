@@ -7,7 +7,7 @@ import lombok.ToString;
 @AllArgsConstructor
 @Getter
 @ToString
-public class IndexAndShard {
+public class IndexAndShardCursor {
     public static final String SEPARATOR = "__";
     String indexName;
     int shard;
@@ -32,13 +32,13 @@ public class IndexAndShard {
         return name + SEPARATOR + shardId + SEPARATOR + startingSegmentIndex + SEPARATOR + startingDocId;
     }
 
-    public static IndexAndShard valueFromWorkItemString(String input) {
+    public static IndexAndShardCursor valueFromWorkItemString(String input) {
         var components = input.split(SEPARATOR + "+");
         if (components.length < 2) {
             throw new IllegalArgumentException("Illegal work item name: '" + input + "'");
         }
 
-        return new IndexAndShard(components[0], Integer.parseInt(components[1]),
+        return new IndexAndShardCursor(components[0], Integer.parseInt(components[1]),
                 components.length >= 3 ? Integer.parseInt(components[2]) : 0,
                 components.length >= 4 ? Integer.parseInt(components[3]) : 0);
     }

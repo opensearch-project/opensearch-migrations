@@ -99,7 +99,7 @@ public class LuceneDocumentsReaderTest {
         // Use the LuceneDocumentsReader to get the documents
         var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
 
-        Flux<RfsLuceneDocument> documents = reader.readDocuments(0, 0)
+        Flux<RfsLuceneDocument> documents = reader.readDocuments()
             .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
 
         // Verify that the results are as expected
@@ -163,7 +163,7 @@ public class LuceneDocumentsReaderTest {
         // Use the LuceneDocumentsReader to get the documents
         var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
 
-        Flux<RfsLuceneDocument> documents = reader.readDocuments(0, 0)
+        Flux<RfsLuceneDocument> documents = reader.readDocuments()
             .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
 
         // Verify that the results are as expected
@@ -262,7 +262,7 @@ public class LuceneDocumentsReaderTest {
         }, 500, TimeUnit.MILLISECONDS);
 
         // Read documents
-        List<RfsLuceneDocument> actualDocuments = reader.readDocuments(0, 0)
+        List<RfsLuceneDocument> actualDocuments = reader.readDocuments()
             .subscribeOn(Schedulers.parallel())
             .collectList()
             .block(Duration.ofSeconds(2));

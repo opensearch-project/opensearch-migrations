@@ -87,6 +87,10 @@ public class LuceneDocumentsReader {
      *    Lucene Index.
 
      */
+    public Flux<RfsLuceneDocument> readDocuments() {
+        return readDocuments(0, 0);
+    }
+
     public Flux<RfsLuceneDocument> readDocuments(int startSegmentIndex, int startDoc) {
         return Flux.using(
             () -> wrapReader(getReader(), softDeletesPossible, softDeletesField),
@@ -121,22 +125,22 @@ public class LuceneDocumentsReader {
     Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(DirectoryReader reader, int startSegmentIndex, int startDocId) {
         var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
-                .addArgument(reader::maxDoc)
-                .addArgument(() -> reader.leaves().size())
-                .log();
+            .addArgument(reader::maxDoc)
+            .addArgument(() -> reader.leaves().size())
+            .log();
 
         // Create shared scheduler for i/o bound document reading
         var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
 
         return Flux.fromIterable(reader.leaves())
-                .skip(startSegmentIndex)
-                .flatMap(ctx -> getReadDocCallablesFromSegments(ctx,
-                        // Only use startDocId for the first segment we process
-                        ctx.ord == startSegmentIndex ? startDocId : 0))
-                .flatMap(c -> Mono.fromCallable(c)
-                                .subscribeOn(sharedSegmentReaderScheduler), // Scheduler to read documents on
-                        maxDocumentsToReadAtOnce) // Don't need to worry about prefetch before this step as documents aren't realized
-                .doOnTerminate(sharedSegmentReaderScheduler::dispose);
+            .skip(startSegmentIndex)
+            .flatMap(ctx -> getReadDocCallablesFromSegments(ctx,
+                    // Only use startDocId for the first segment we process
+                    ctx.ord == startSegmentIndex ? startDocId : 0))
+            .flatMap(c -> Mono.fromCallable(c)
+                            .subscribeOn(sharedSegmentReaderScheduler), // Scheduler to read documents on
+                    maxDocumentsToReadAtOnce) // Don't need to worry about prefetch before this step as documents aren't realized
+            .doOnTerminate(sharedSegmentReaderScheduler::dispose);
     }
 
     Publisher<Callable<RfsLuceneDocument>> getReadDocCallablesFromSegments(LeafReaderContext leafReaderContext, int startDocId) {
@@ -144,10 +148,10 @@ public class LuceneDocumentsReader {
         var liveDocs = segmentReader.getLiveDocs();
 
         return Flux.range(startDocId, segmentReader.maxDoc() - startDocId)
-                .subscribeOn(Schedulers.parallel())
-                .map(docIdx -> () -> ((liveDocs == null || liveDocs.get(docIdx)) ? // Filter for live docs
-                        getDocument(segmentReader, docIdx, true) : // Get document, returns null to skip malformed docs
-                        null));
+            .subscribeOn(Schedulers.parallel())
+            .map(docIdx -> () -> ((liveDocs == null || liveDocs.get(docIdx)) ? // Filter for live docs
+                    getDocument(segmentReader, docIdx, true) : // Get document, returns null to skip malformed docs
+                    null));
     }
 
     protected DirectoryReader wrapReader(DirectoryReader reader, boolean softDeletesEnabled, String softDeletesField) throws IOException {
