@@ -59,6 +59,9 @@ public class ShardWorkPreparer {
                     Duration.ofMinutes(5),
                     context::createWorkAcquisitionContext
                 );
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw Lombok.sneakyThrow(e);
             } catch (Exception e) {
                 throw Lombok.sneakyThrow(e);
             }
@@ -116,7 +119,7 @@ public class ShardWorkPreparer {
                     );
                     try (var shardSetupContext = context.createShardWorkItemContext()) {
                         workCoordinator.createUnassignedWorkItem(
-                            IndexAndShard.formatAsWorkItemString(indexMetadata.getName(), shardId),
+                            IndexAndShardCursor.formatAsWorkItemString(indexMetadata.getName(), shardId),
                             shardSetupContext::createUnassignedWorkItemContext
                         );
                     } catch (IOException e) {

@@ -9,7 +9,10 @@ describe('Solutions stack', () => {
         solutionName: 'test-solution',
         solutionVersion: '0.0.1',
         codeBucket: 'test-bucket',
-        createVPC: true
+        createVPC: true, 
+        env: {
+            region: 'us-west-1'
+        }
     };
 
     test('Generate migration assistant stack with create VPC', () => {
