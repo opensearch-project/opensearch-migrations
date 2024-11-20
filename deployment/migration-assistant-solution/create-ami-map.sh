@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # AMI name to look up
-AMI_NAME="al2023-ami-2023.5.20241001.1-kernel-6.1-x86_64"
+AMI_NAME="al2023-ami-2023.6.20241031.0-kernel-6.1-x86_64"
 OWNER="amazon"
 
 # Get the list of all available AWS regions
