@@ -203,28 +203,28 @@ export class SolutionsInfrastructureStack extends Stack {
 
         // Generated with ../create-ami-map.sh
         const amiMap: Record<string, string> =  {
-            'us-east-2': 'ami-09da212cf18033880',
-            'us-east-1': 'ami-0fff1b9a61dec8a5f',
-            'us-west-1': 'ami-09b2477d43bc5d0ac',
-            'us-west-2': 'ami-0d081196e3df05f4d',
-            'ca-central-1': 'ami-0d9c7bbbda4b78ffd',
-            'ap-south-1': 'ami-078264b8ba71bc45e',
-            'sa-east-1': 'ami-0fd8b11b89c97edaf',
-            'eu-north-1': 'ami-097c5c21a18dc59ea',
-            'ap-northeast-1': 'ami-0ef29ab52ff72213b',
-            'ap-northeast-2': 'ami-0e18fe6ecdad223e5',
-            'ap-northeast-3': 'ami-022b677fdccc634eb',
-            'eu-central-1': 'ami-0592c673f0b1e7665',
-            'eu-west-2': 'ami-0b4c7755cdf0d9219',
-            'eu-west-3': 'ami-0a3598a00eff32f66',
-            'eu-west-1': 'ami-054a53dca63de757b',
-            'ap-southeast-2': 'ami-0cf70e1d861e1dfb8',
-            'ap-southeast-1': 'ami-0ad522a4a529e7aa8',
+            'us-east-2': 'ami-0fae88c1e6794aa17',
+            'us-east-1': 'ami-063d43db0594b521b',
+            'us-west-1': 'ami-05c65d8bb2e35991a',
+            'us-west-2': 'ami-066a7fbea5161f451',
+            'ca-central-1': 'ami-0d13170a36bc1b384',
+            'ap-south-1': 'ami-08bf489a05e916bbd',
+            'sa-east-1': 'ami-065c72b3f381dab73',
+            'eu-north-1': 'ami-04b54ebf295fe01d7',
+            'ap-northeast-1': 'ami-08ce76bae392de7dc',
+            'ap-northeast-2': 'ami-03d31e4041396b53c',
+            'ap-northeast-3': 'ami-0403e868508046e73',
+            'eu-central-1': 'ami-0eddb4a4e7d846d6f',
+            'eu-west-2': 'ami-02f617729751b375a',
+            'eu-west-3': 'ami-0db5e28c1b3823bb7',
+            'eu-west-1': 'ami-03ca36368dbc9cfa1',
+            'ap-southeast-2': 'ami-037a2314eeca55594',
+            'ap-southeast-1': 'ami-08f49baa317796afd',
         };
 
         // Manually looked up with https://us-gov-east-1.console.amazonaws-us-gov.com/ec2/home?region=us-gov-east-1#AMICatalog:
-        amiMap['us-gov-west-1'] = 'ami-0c428177c69dbc6ff';
-        amiMap['us-gov-east-1'] = 'ami-0345e99d9ca0e18a1';
+        amiMap['us-gov-west-1'] = 'ami-0e46a6a8d36d6f1f2';
+        amiMap['us-gov-east-1'] = 'ami-0016d10ace091da71';
 
         new Instance(this, 'BootstrapEC2Instance', {
             vpc: vpc,
