@@ -11,6 +11,9 @@ import {Construct} from 'constructs';
 import {
     BlockDeviceVolume,
     CloudFormationInit,
+    GatewayVpcEndpoint,
+    GatewayVpcEndpointAwsService,
+    IVpc,
     GenericLinuxImage,
     InitCommand,
     InitElement,
@@ -19,11 +22,15 @@ import {
     InstanceClass,
     InstanceSize,
     InstanceType,
+    InterfaceVpcEndpoint,
+    InterfaceVpcEndpointAwsService,
+    IpProtocol,
+    SecurityGroup,
     Vpc
 } from "aws-cdk-lib/aws-ec2";
-import {InstanceProfile, ManagedPolicy, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {CfnDocument} from "aws-cdk-lib/aws-ssm";
 import {Application, AttributeGroup} from "@aws-cdk/aws-servicecatalogappregistry-alpha";
+import { InstanceProfile, ManagedPolicy, Role, ServicePrincipal } from 'aws-cdk-lib/aws-iam';
 
 export interface SolutionsInfrastructureStackProps extends StackProps {
     readonly solutionId: string;
@@ -79,7 +86,7 @@ function addParameterLabel(labels: Record<string, ParameterLabel>, parameter: Cf
     labels[parameter.logicalId] = {"default": labelName}
 }
 
-function importVPC(stack: Stack, vpdIdParameter: CfnParameter, availabilityZonesParameter: CfnParameter, privateSubnetIdsParameter: CfnParameter) {
+function importVPC(stack: Stack, vpdIdParameter: CfnParameter, availabilityZonesParameter: CfnParameter, privateSubnetIdsParameter: CfnParameter): IVpc {
     const availabilityZones = availabilityZonesParameter.valueAsList
     const privateSubnetIds = privateSubnetIdsParameter.valueAsList
     return Vpc.fromVpcAttributes(stack, 'ImportedVPC', {
@@ -93,6 +100,14 @@ function generateExportString(exports:  Record<string, string>): string {
     return Object.entries(exports)
         .map(([key, value]) => `export ${key}=${value}`)
         .join("; ");
+}
+
+function getVpcEndpointForEFS(stack: Stack): InterfaceVpcEndpointAwsService {
+    const isGovRegion = stack.region?.startsWith('us-gov-')
+    if (isGovRegion) {
+        return InterfaceVpcEndpointAwsService.ELASTIC_FILESYSTEM_FIPS;
+    }
+    return InterfaceVpcEndpointAwsService.ELASTIC_FILESYSTEM;
 }
 
 export class SolutionsInfrastructureStack extends Stack {
@@ -162,9 +177,33 @@ export class SolutionsInfrastructureStack extends Stack {
             role: bootstrapRole
         })
 
-        let vpc;
+        let vpc: IVpc;
         if (props.createVPC) {
-            vpc = new Vpc(this, 'Vpc', {});
+            vpc = new Vpc(this, 'Vpc', {
+                ipProtocol: IpProtocol.DUAL_STACK
+            });
+            // S3 used for storage and retrieval of snapshot data for backfills
+            new GatewayVpcEndpoint(this, 'S3VpcEndpoint', {
+                service: GatewayVpcEndpointAwsService.S3,
+                vpc: vpc,
+            });
+
+            const serviceEndpoints = [
+                // Logs and disk usage scales based on total data transfer 
+                InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
+                getVpcEndpointForEFS(this),
+
+                // Elastic container registry is used for all images in the solution
+                InterfaceVpcEndpointAwsService.ECR,
+                InterfaceVpcEndpointAwsService.ECR_DOCKER,
+            ];
+            
+            serviceEndpoints.forEach(service => {
+                new InterfaceVpcEndpoint(this, `${service.shortName}VpcEndpoint`, {
+                    service,
+                    vpc: vpc,
+                });
+            })
         }
         else {
             const vpcIdParameter = new CfnParameter(this, 'VPCId', {
@@ -226,6 +265,11 @@ export class SolutionsInfrastructureStack extends Stack {
         amiMap['us-gov-west-1'] = 'ami-0e46a6a8d36d6f1f2';
         amiMap['us-gov-east-1'] = 'ami-0016d10ace091da71';
 
+        const securityGroup = new SecurityGroup(this, 'BootstrapSecurityGroup', {
+            vpc: vpc,
+            allowAllOutbound: true,
+            allowAllIpv6Outbound: true,
+        });
         new Instance(this, 'BootstrapEC2Instance', {
             vpc: vpc,
             vpcSubnets: {
@@ -245,6 +289,7 @@ export class SolutionsInfrastructureStack extends Stack {
             initOptions: {
                 printLog: true,
             },
+            securityGroup
         });
 
         const parameterGroups = [];
