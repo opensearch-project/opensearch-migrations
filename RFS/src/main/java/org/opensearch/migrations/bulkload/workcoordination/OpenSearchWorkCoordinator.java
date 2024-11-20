@@ -161,13 +161,15 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 Exception underlyingException = (Exception) e.getCause();
                 exceptionConsumer.accept(underlyingException);
                 throw new IllegalStateException(underlyingException);
+            } catch (InterruptedException e) {
+                throw e;
             } catch (Exception e) {
                 attempt++;
                 if (attempt > maxRetries) {
                     exceptionConsumer.accept(e);
                     throw new RetriesExceededException(e, attempt);
                 }
-                Duration sleepDuration = Duration.ofMillis((long) (Math.pow(2.0, attempt - 1) * baseRetryTimeMs));
+                Duration sleepDuration = Duration.ofMillis((long) (Math.pow(2.0, attempt - 1.0) * baseRetryTimeMs));
                 log.atWarn().setCause(e)
                         .setMessage("Couldn't complete action due to exception. Backing off {} and trying again.")
                         .addArgument(sleepDuration).log();
