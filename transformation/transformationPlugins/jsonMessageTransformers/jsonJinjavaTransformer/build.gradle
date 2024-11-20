@@ -8,6 +8,7 @@ dependencies {
     implementation group: 'com.hubspot.jinjava', name: 'jinjava', version: "2.7.3"
 
     testImplementation project(':TrafficCapture:trafficReplayer')
+    testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))
 

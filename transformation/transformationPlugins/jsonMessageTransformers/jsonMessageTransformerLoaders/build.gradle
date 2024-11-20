@@ -25,6 +25,7 @@ plugins {
 dependencies {
     implementation group: 'org.slf4j', name: 'slf4j-api'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    implementation group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-yaml'
 
     api project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 

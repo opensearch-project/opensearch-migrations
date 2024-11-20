@@ -60,8 +60,9 @@ class JinjavaTransformerTest {
                 "type2", "indexB"),
             "indexC", Map.of(
                 "type2", "indexC"));
-        indexTypeMappingRewriter = new JinjavaTransformer(template, request ->
-            Map.of("index_mappings", indexMappings,
+        indexTypeMappingRewriter = new JinjavaTransformer(template,
+            request -> Map.of(
+                "index_mappings", indexMappings,
                 "request", request));
     }
 

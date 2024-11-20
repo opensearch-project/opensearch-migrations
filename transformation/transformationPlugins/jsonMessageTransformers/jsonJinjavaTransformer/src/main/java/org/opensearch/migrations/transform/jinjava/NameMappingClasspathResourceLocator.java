@@ -8,7 +8,6 @@ import java.util.stream.Collectors;
 import com.google.common.io.Resources;
 import com.hubspot.jinjava.interpret.JinjavaInterpreter;
 import com.hubspot.jinjava.loader.ClasspathResourceLocator;
-import com.hubspot.jinjava.loader.ResourceNotFoundException;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
@@ -24,7 +23,7 @@ public class NameMappingClasspathResourceLocator extends ClasspathResourceLocato
                 return fullName + "/" + versionLines.get(0).trim();
             }
             throw new IllegalStateException("Expected defaultVersion resource to contain a single line with a name");
-        } catch (ResourceNotFoundException e) {
+        } catch (IllegalArgumentException e) {
             log.atTrace().setCause(e).setMessage("Caught ResourceNotFoundException, but this is expected").log();
         }
         return fullName;
@@ -32,6 +31,7 @@ public class NameMappingClasspathResourceLocator extends ClasspathResourceLocato
 
     @Override
     public String getString(String fullName, Charset encoding, JinjavaInterpreter interpreter) throws IOException {
-        return super.getString(getDefaultVersion("jinjava/" + fullName), encoding, interpreter);
+        var rval = super.getString(getDefaultVersion("jinjava/" + fullName), encoding, interpreter);
+        return rval;
     }
 }

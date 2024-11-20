@@ -2,8 +2,11 @@ package org.opensearch.migrations.transform;
 
 import java.util.Map;
 
+import lombok.SneakyThrows;
+
 public class TypeMappingSanitizationTransformerProvider implements IJsonTransformerProvider {
 
+    @SneakyThrows
     @Override
     public IJsonTransformer createTransformer(Object jsonConfig) {
         try {

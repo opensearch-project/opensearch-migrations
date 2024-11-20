@@ -4,9 +4,10 @@ plugins {
 }
 
 dependencies {
-    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
-
     api project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJinjavaTransformer')
+
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation group: 'com.google.guava', name: 'guava'
 
     testImplementation project(':TrafficCapture:trafficReplayer')
     testImplementation testFixtures(project(path: ':testHelperFixtures'))

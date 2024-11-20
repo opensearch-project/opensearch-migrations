@@ -41,12 +41,12 @@ class JinjavaTransformerProviderTest {
         + "}\n";
 
     static final String EXCISE_TYPE_EXPRESSION_STRING = "{\n"
-        + "  \"method\": method,\n"
-        + "  \"URI\": URI,\n"
-        + "  \"headers\": headers,\n"
+        + "  \"method\": \"{{ request.method }}\",\n"
+        + "  \"URI\": \"{{ request.URI }}\",\n"
+        + "  \"headers\": {{ request.headers | tojson }},\n"
         + "  \"payload\": {\n"
         + "    \"inlinedJsonBody\": {\n"
-        + "      \"mappings\": payload.inlinedJsonBody.mappings.oldType\n"
+        + "      \"mappings\": {{ request.payload.inlinedJsonBody.mappings.oldType | tojson }}\n"
         + "    }\n"
         + "  }\n"
         + "}";

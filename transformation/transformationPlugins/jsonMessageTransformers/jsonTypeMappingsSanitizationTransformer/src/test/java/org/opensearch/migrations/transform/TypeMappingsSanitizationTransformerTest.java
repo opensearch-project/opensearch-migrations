@@ -1,5 +1,6 @@
 package org.opensearch.migrations.transform;
 
+import java.io.IOException;
 import java.util.Map;
 
 import org.junit.jupiter.api.BeforeAll;
@@ -10,7 +11,7 @@ class TypeMappingsSanitizationTransformerTest {
 
     private static TypeMappingsSanitizationTransformer indexTypeMappingRewriter;
     @BeforeAll
-    static void initialize() {
+    static void initialize() throws IOException {
         var indexMappings = Map.of(
             "indexA", Map.of(
                 "type1", "indexA_1",
