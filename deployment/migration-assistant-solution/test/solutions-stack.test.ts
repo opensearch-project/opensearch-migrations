@@ -32,10 +32,9 @@ describe('Solutions stack', () => {
             },
         });
         const template = Template.fromStack(stack);
-        template.resourceCountIs('AWS::EC2::VPC', 1)
-        template.resourceCountIs('AWS::ServiceCatalogAppRegistry::Application', 1)
-        template.hasResourceProperties('AWS::EC2::Instance', {
-            InstanceType: "t3.large"
+        verifyResources(template, {
+            vpcCount: 1,
+            vpcEndpointCount: 5
         });
     });
 

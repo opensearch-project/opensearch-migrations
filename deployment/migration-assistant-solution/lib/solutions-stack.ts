@@ -24,6 +24,8 @@ import {
     InstanceType,
     InterfaceVpcEndpoint,
     InterfaceVpcEndpointAwsService,
+    IpProtocol,
+    SecurityGroup,
     Vpc
 } from "aws-cdk-lib/aws-ec2";
 import {CfnDocument} from "aws-cdk-lib/aws-ssm";
@@ -177,7 +179,9 @@ export class SolutionsInfrastructureStack extends Stack {
 
         let vpc: IVpc;
         if (props.createVPC) {
-            vpc = new Vpc(this, 'Vpc', {});
+            vpc = new Vpc(this, 'Vpc', {
+                ipProtocol: IpProtocol.DUAL_STACK
+            });
             // S3 used for storage and retrieval of snapshot data for backfills
             new GatewayVpcEndpoint(this, 'S3VpcEndpoint', {
                 service: GatewayVpcEndpointAwsService.S3,
@@ -261,6 +265,11 @@ export class SolutionsInfrastructureStack extends Stack {
         amiMap['us-gov-west-1'] = 'ami-0c428177c69dbc6ff';
         amiMap['us-gov-east-1'] = 'ami-0345e99d9ca0e18a1';
 
+        const securityGroup = new SecurityGroup(this, 'BootstrapSecurityGroup', {
+            vpc: vpc,
+            allowAllOutbound: true,
+            allowAllIpv6Outbound: true,
+        });
         new Instance(this, 'BootstrapEC2Instance', {
             vpc: vpc,
             vpcSubnets: {
@@ -280,6 +289,7 @@ export class SolutionsInfrastructureStack extends Stack {
             initOptions: {
                 printLog: true,
             },
+            securityGroup
         });
 
         const parameterGroups = [];
