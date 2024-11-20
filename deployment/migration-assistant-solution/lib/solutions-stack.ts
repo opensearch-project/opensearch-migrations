@@ -222,6 +222,10 @@ export class SolutionsInfrastructureStack extends Stack {
             'ap-southeast-1': 'ami-0ad522a4a529e7aa8',
         };
 
+        // Manually looked up with https://us-gov-east-1.console.amazonaws-us-gov.com/ec2/home?region=us-gov-east-1#AMICatalog:
+        amiMap['us-gov-west-1'] = 'ami-0c428177c69dbc6ff';
+        amiMap['us-gov-east-1'] = 'ami-0345e99d9ca0e18a1';
+
         new Instance(this, 'BootstrapEC2Instance', {
             vpc: vpc,
             vpcSubnets: {
