@@ -8,6 +8,7 @@ import java.util.Random;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.utils.PruferTreeGenerator;
 
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;

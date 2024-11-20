@@ -5,6 +5,10 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
+import org.opensearch.migrations.utils.TextTrackedFuture;
+import org.opensearch.migrations.utils.TrackedFuture;
+import org.opensearch.migrations.utils.TrackedFutureJsonFormatter;
+import org.opensearch.migrations.utils.TrackedFutureStringFormatter;
 
 import lombok.SneakyThrows;
 import org.junit.jupiter.api.Assertions;
@@ -175,7 +179,7 @@ class TextTrackedFutureTest {
                 + "{\"idHash\":"
                 + id1
                 + ",\"label\":\"A\",\"value\":\"1\"}]",
-            stcf3.formatAsJson(TextTrackedFutureTest::formatCompletableFuture)
+            TrackedFutureJsonFormatter.format(stcf3, TextTrackedFutureTest::formatCompletableFuture)
         );
 
         // A is clipped because of grandparent culling
@@ -192,7 +196,7 @@ class TextTrackedFutureTest {
                 + "{\"idHash\":"
                 + id2
                 + ",\"label\":\"B\",\"value\":\"11\"}]",
-            stcf3.formatAsJson(TextTrackedFutureTest::formatCompletableFuture)
+            TrackedFutureJsonFormatter.format(stcf3, TextTrackedFutureTest::formatCompletableFuture)
         );
     }
 
