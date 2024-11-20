@@ -11,7 +11,10 @@ describe('Solutions stack', () => {
             solutionName: 'test-solution',
             solutionVersion: '0.0.1',
             codeBucket: 'test-bucket',
-            createVPC: true
+            createVPC: true,
+            env: {
+                region: 'us-west-1'
+            }
         });
         const template = Template.fromStack(stack);
         template.resourceCountIs('AWS::EC2::VPC', 1)
@@ -27,7 +30,10 @@ describe('Solutions stack', () => {
             solutionName: 'test-solution',
             solutionVersion: '0.0.1',
             codeBucket: 'test-bucket',
-            createVPC: false
+            createVPC: false,
+            env: {
+                region: 'us-west-1'
+            }
         });
         const template = Template.fromStack(stack);
         template.resourceCountIs('AWS::EC2::VPC', 0)

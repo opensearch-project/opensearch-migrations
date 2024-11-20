@@ -36,6 +36,10 @@ The full range of functionality offered by the migration assistant deployed thro
 
 This project is writen in TypeScript and uses the cloud developer tookit (CDK) to produce its build artifacts, cloud formation templates that can be used to deploy onto Amazon Web Services.
 
+### Hardcoded AMIs
+
+While using EC2 we have run into issues with AMI's being released that broken our functionality so we are hardcoding all AMIs to ensure the solution will work.  Setup your AWS credentials in the command line and run the script `create-ami-map.sh` in this directory to find the matching AMI in all regions, then update the map inside the solutions stack, [ref](./create-ami-map.sh).
+
 ### Quick Start Guide
 
 * Install Node 18+ & Npm 10+ https://docs.npmjs.com/downloading-and-installing-node-js-and-npm

@@ -11,6 +11,7 @@ import {Construct} from 'constructs';
 import {
     BlockDeviceVolume,
     CloudFormationInit,
+    GenericLinuxImage,
     InitCommand,
     InitElement,
     InitFile,
@@ -18,7 +19,6 @@ import {
     InstanceClass,
     InstanceSize,
     InstanceType,
-    MachineImage,
     Vpc
 } from "aws-cdk-lib/aws-ec2";
 import {InstanceProfile, ManagedPolicy, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
@@ -201,6 +201,27 @@ export class SolutionsInfrastructureStack extends Stack {
             }),
         ]
 
+        // Generated with ../create-ami-map.sh
+        const amiMap: Record<string, string> =  {
+            'us-east-2': 'ami-09da212cf18033880',
+            'us-east-1': 'ami-0fff1b9a61dec8a5f',
+            'us-west-1': 'ami-09b2477d43bc5d0ac',
+            'us-west-2': 'ami-0d081196e3df05f4d',
+            'ca-central-1': 'ami-0d9c7bbbda4b78ffd',
+            'ap-south-1': 'ami-078264b8ba71bc45e',
+            'sa-east-1': 'ami-0fd8b11b89c97edaf',
+            'eu-north-1': 'ami-097c5c21a18dc59ea',
+            'ap-northeast-1': 'ami-0ef29ab52ff72213b',
+            'ap-northeast-2': 'ami-0e18fe6ecdad223e5',
+            'ap-northeast-3': 'ami-022b677fdccc634eb',
+            'eu-central-1': 'ami-0592c673f0b1e7665',
+            'eu-west-2': 'ami-0b4c7755cdf0d9219',
+            'eu-west-3': 'ami-0a3598a00eff32f66',
+            'eu-west-1': 'ami-054a53dca63de757b',
+            'ap-southeast-2': 'ami-0cf70e1d861e1dfb8',
+            'ap-southeast-1': 'ami-0ad522a4a529e7aa8',
+        };
+
         new Instance(this, 'BootstrapEC2Instance', {
             vpc: vpc,
             vpcSubnets: {
@@ -208,7 +229,7 @@ export class SolutionsInfrastructureStack extends Stack {
             },
             instanceName: `bootstrap-instance-${stackMarker}`,
             instanceType: InstanceType.of(InstanceClass.T3, InstanceSize.LARGE),
-            machineImage: MachineImage.latestAmazonLinux2023(),
+            machineImage: new GenericLinuxImage(amiMap),
             role: bootstrapRole,
             blockDevices: [
                 {
@@ -222,16 +243,6 @@ export class SolutionsInfrastructureStack extends Stack {
             },
         });
 
-        const dynamicEc2ImageParameter = this.node.findAll()
-            .filter(c => c instanceof CfnParameter)
-            .filter(c => (c as CfnParameter).type === "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>")
-            .pop() as CfnParameter;
-        if (dynamicEc2ImageParameter) {
-            dynamicEc2ImageParameter.description = "Latest Amazon Linux Image Id for the build machine";
-            dynamicEc2ImageParameter.overrideLogicalId("LastedAmazonLinuxImageId");
-            dynamicEc2ImageParameter.noEcho = true;
-        }
-
         const parameterGroups = [];
         if (importedVPCParameters.length > 0) {
             parameterGroups.push({
@@ -242,10 +253,6 @@ export class SolutionsInfrastructureStack extends Stack {
         parameterGroups.push({
             Label: { default: "Additional parameters" },
             Parameters: additionalParameters
-        });
-        parameterGroups.push({
-            Label: { default: "System parameters" },
-            Parameters: [dynamicEc2ImageParameter?.logicalId]
         });
 
         this.templateOptions.metadata = {
