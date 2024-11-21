@@ -3,9 +3,9 @@ package org.opensearch.migrations.replay.datatypes;
 import java.util.function.BiFunction;
 
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.util.OnlineRadixSorter;
-import org.opensearch.migrations.replay.util.TextTrackedFuture;
-import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.utils.OnlineRadixSorter;
+import org.opensearch.migrations.utils.TextTrackedFuture;
+import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.channel.ChannelFuture;
 import io.netty.channel.EventLoop;
