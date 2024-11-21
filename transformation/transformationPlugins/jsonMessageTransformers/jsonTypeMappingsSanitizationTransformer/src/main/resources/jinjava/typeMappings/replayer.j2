@@ -1,15 +1,16 @@
 {%- include "common/featureEnabled.j2" -%}
 
 {%- macro handle_else(uri_parts) -%}
-  {{- request | tojson }}
+{
+    "preserve": "*"
+}
 {%- endmacro -%}
 
 {%- macro rewrite_uri_to_strip_types(uri_parts, index_mappings, request) -%}
 {
   "method": "{{ request.method }}",
   "URI": "/{{ index_mappings[uri_parts[0]][uri_parts[1]] }}/_doc/{{ uri_parts[2] }}",
-  "headers": {{ request.headers | tojson }},
-  "payload": {{ request.payload | tojson }}
+  "preserve": ["headers","payload"]
 }
 {%- endmacro -%}
 
