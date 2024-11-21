@@ -39,8 +39,13 @@ execute_command_and_wait_for_result() {
   local command="$1"
   local instance_id="$2"
   echo "Executing command: [$command] on node: $instance_id"
+  sleep 5
   command_id=$(aws ssm send-command --instance-ids "$instance_id" --document-name "AWS-RunShellScript" --parameters commands="$command" --output text --query 'Command.CommandId')
-  sleep 10
+  if [[ -z "$command_id" ]]; then
+    echo "Error: Unable to retrieve command id from triggered SSM command"
+    exit 1
+  fi
+  sleep 5
   command_status=$(aws ssm get-command-invocation --command-id "$command_id" --instance-id "$instance_id" --output text --query 'Status')
   max_attempts=25
   attempt_count=0
