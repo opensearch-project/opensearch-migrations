@@ -33,7 +33,7 @@ def call(Map config = [:]) {
                                 sh "sudo npm install"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "sudo --preserve-env cdk deploy 'Migration-Assistant-Infra-Create-VPC' --require-approval never --concurrency 3"
+                                        sh "sudo --preserve-env cdk deploy 'Migration-Assistant-Infra-Create-VPC' --parameters Stage=${stage} --require-approval never --concurrency 3"
                                     }
                                 }
                             }
@@ -61,13 +61,11 @@ def call(Map config = [:]) {
         post {
             always {
                 timeout(time: 30, unit: 'MINUTES') {
-                    dir('test/cleanupDeployment') {
+                    dir('deployment/migration-assistant-solution') {
                         script {
-                            sh "sudo --preserve-env pipenv install --deploy --ignore-pipfile"
-                            def command = "pipenv run python3 cleanup_deployment.py --stage ${stage}"
                             withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                 withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                    sh "sudo --preserve-env ${command}"
+                                    sh "sudo --preserve-env cdk destroy 'Migration-Assistant-Infra-Create-VPC' --force"
                                 }
                             }
                         }
