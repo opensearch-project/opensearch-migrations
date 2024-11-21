@@ -78,7 +78,7 @@ if [[ -z "$instance_id" || "$instance_id" == "None" ]]; then
   exit 1
 fi
 
-init_command="/opensearch-migrations/initBootstrap.sh"
+init_command="cd /opensearch-migrations && ./initBootstrap.sh"
 execute_command_and_wait_for_result "$init_command" "$instance_id"
 verify_command="cdk --version && docker --version && java --version && python3 --version"
 execute_command_and_wait_for_result "$verify_command" "$instance_id"
