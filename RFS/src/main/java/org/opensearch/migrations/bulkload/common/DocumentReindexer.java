@@ -26,19 +26,17 @@ public class DocumentReindexer {
     private final int maxConcurrentWorkItems;
     private final IJsonTransformer transformer;
 
-    public Mono<Void> reindex(String indexName, Flux<RfsLuceneDocument> documentStream, IDocumentReindexContext context) {
+    public Flux<SegmentDocumentCursor> reindex(String indexName, Flux<RfsLuceneDocument> documentStream, IDocumentReindexContext context) {
         var scheduler = Schedulers.newParallel("DocumentBulkAggregator");
         var bulkDocs = documentStream
             .publishOn(scheduler, 1)
             .map(doc -> transformDocument(doc,indexName));
 
         return this.reindexDocsInParallelBatches(bulkDocs, indexName, context)
-            .doOnSuccess(unused -> log.debug("All batches processed"))
-            .doOnError(e -> log.error("Error prevented all batches from being processed", e))
             .doOnTerminate(scheduler::dispose);
     }
 
-    Mono<Void> reindexDocsInParallelBatches(Flux<BulkDocSection> docs, String indexName, IDocumentReindexContext context) {
+    Flux<SegmentDocumentCursor> reindexDocsInParallelBatches(Flux<BulkDocSection> docs, String indexName, IDocumentReindexContext context) {
         // Use parallel scheduler for send subscription due on non-blocking io client
         var scheduler = Schedulers.newParallel("DocumentBatchReindexer");
         var bulkDocsBatches = batchDocsBySizeOrCount(docs);
@@ -47,10 +45,9 @@ public class DocumentReindexer {
         return bulkDocsBatches
             .limitRate(bulkDocsToBuffer, 1) // Bulk Doc Buffer, Keep Full
             .publishOn(scheduler, 1) // Switch scheduler
-            .flatMap(docsGroup -> sendBulkRequest(UUID.randomUUID(), docsGroup, indexName, context, scheduler),
+            .flatMapSequential(docsGroup -> sendBulkRequest(UUID.randomUUID(), docsGroup, indexName, context, scheduler),
                 maxConcurrentWorkItems)
-            .doOnTerminate(scheduler::dispose)
-            .then();
+            .doOnTerminate(scheduler::dispose);
     }
 
     @SneakyThrows
@@ -63,7 +60,9 @@ public class DocumentReindexer {
         return BulkDocSection.fromMap(original.toMap());
     }
 
-    Mono<Void> sendBulkRequest(UUID batchId, List<BulkDocSection> docsBatch, String indexName, IDocumentReindexContext context, Scheduler scheduler) {
+    public static class SegmentDocumentCursor {}
+
+    Mono<SegmentDocumentCursor> sendBulkRequest(UUID batchId, List<BulkDocSection> docsBatch, String indexName, IDocumentReindexContext context, Scheduler scheduler) {
         return client.sendBulkRequest(indexName, docsBatch, context.createBulkRequest()) // Send the request
             .doFirst(() -> log.atInfo().setMessage("Batch Id:{}, {} documents in current bulk request.")
                 .addArgument(batchId)
@@ -76,7 +75,7 @@ public class DocumentReindexer {
                 .log())
             // Prevent the error from stopping the entire stream, retries occurring within sendBulkRequest
             .onErrorResume(e -> Mono.empty())
-            .then() // Discard the response object
+            .then(Mono.just(new SegmentDocumentCursor())) // Discard the response object
             .subscribeOn(scheduler);
     }
 

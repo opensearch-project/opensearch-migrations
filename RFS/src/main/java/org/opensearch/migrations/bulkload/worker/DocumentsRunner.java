@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.function.BiFunction;
+import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -17,13 +18,11 @@ import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
-import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 
 @Slf4j
-@AllArgsConstructor
 public class DocumentsRunner {
 
     private final ScopedWorkCoordinator workCoordinator;
@@ -32,6 +31,24 @@ public class DocumentsRunner {
     private final SnapshotShardUnpacker.Factory unpackerFactory;
     private final Function<Path, LuceneDocumentsReader> readerFactory;
     private final DocumentReindexer reindexer;
+    private final Consumer<DocumentReindexer.SegmentDocumentCursor> segmentDocumentCursorConsumer;
+
+    public DocumentsRunner(ScopedWorkCoordinator workCoordinator,
+                           Duration maxInitialLeaseDuration,
+                           DocumentReindexer reindexer,
+                           SnapshotShardUnpacker.Factory unpackerFactory,
+                           BiFunction<String, Integer, ShardMetadata> shardMetadataFactory,
+                           Function<Path, LuceneDocumentsReader> readerFactory,
+                           Consumer<DocumentReindexer.SegmentDocumentCursor> segmentDocumentCursorConsumer) {
+        this.maxInitialLeaseDuration = maxInitialLeaseDuration;
+        this.readerFactory = readerFactory;
+        this.reindexer = reindexer;
+        this.shardMetadataFactory = shardMetadataFactory;
+        this.unpackerFactory = unpackerFactory;
+        this.workCoordinator = workCoordinator;
+
+        this.segmentDocumentCursorConsumer = segmentDocumentCursorConsumer;
+    }
 
     public enum CompletionStatus {
         NOTHING_DONE,
@@ -99,7 +116,10 @@ public class DocumentsRunner {
         Flux<RfsLuceneDocument> documents = reader.readDocuments(indexAndShardCursor.startingSegmentIndex, indexAndShardCursor.startingDocId);
 
         reindexer.reindex(shardMetadata.getIndexName(), documents, context)
-            .doOnError(error -> log.error("Error during reindexing: " + error))
+            .doOnNext(segmentDocumentCursorConsumer)
+            .then()
+            .doOnError(e ->
+                log.atError().setCause(e).setMessage("Error prevented all batches from being processed").log())
             .doOnSuccess(
                 done -> log.atInfo().setMessage("Reindexing completed for Index {}, Shard {}")
                     .addArgument(shardMetadata::getIndexName)

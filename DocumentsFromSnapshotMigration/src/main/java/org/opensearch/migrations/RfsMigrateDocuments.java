@@ -6,6 +6,7 @@ import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
@@ -270,7 +271,9 @@ public class RfsMigrateDocuments {
         }
         IJsonTransformer docTransformer = new TransformationLoader().getTransformerFactoryLoader(docTransformerConfig);
 
-        try (var processManager = new LeaseExpireTrigger(RfsMigrateDocuments::exitOnLeaseTimeout, Clock.systemUTC());
+        AtomicReference<DocumentReindexer.SegmentDocumentCursor> lastIndexedDocument = new AtomicReference<>();
+        try (var processManager =
+                 new LeaseExpireTrigger(w -> exitOnLeaseTimeout(w, lastIndexedDocument), Clock.systemUTC());
              var workCoordinator = new OpenSearchWorkCoordinator(
                  new CoordinateWorkHttpClient(connectionContext),
                  TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
@@ -307,6 +310,7 @@ public class RfsMigrateDocuments {
             run(
                 LuceneDocumentsReader.getFactory(sourceResourceProvider),
                 reindexer,
+                lastIndexedDocument,
                 workCoordinator,
                 arguments.initialLeaseDuration,
                 processManager,
@@ -326,7 +330,9 @@ public class RfsMigrateDocuments {
         }
     }
 
-    private static void exitOnLeaseTimeout(String workItemId) {
+    private static void exitOnLeaseTimeout(String workItemId,
+                                           AtomicReference<DocumentReindexer.SegmentDocumentCursor> lastDocIndexed) {
+        // DO MORE HERE
         log.error("Terminating RfsMigrateDocuments because the lease has expired for " + workItemId);
         System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
     }
@@ -346,6 +352,7 @@ public class RfsMigrateDocuments {
 
     public static DocumentsRunner.CompletionStatus run(Function<Path, LuceneDocumentsReader> readerFactory,
                                                        DocumentReindexer reindexer,
+                                                       AtomicReference<DocumentReindexer.SegmentDocumentCursor> lastDocIndexedRef,
                                                        IWorkCoordinator workCoordinator,
                                                        Duration maxInitialLeaseDuration,
                                                        LeaseExpireTrigger leaseExpireTrigger,
@@ -370,14 +377,20 @@ public class RfsMigrateDocuments {
         )) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
         }
-        var runner = new DocumentsRunner(scopedWorkCoordinator, maxInitialLeaseDuration, (name, shard) -> {
-            var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, name, shard);
-            log.info("Shard size: " + shardMetadata.getTotalSizeBytes());
-            if (shardMetadata.getTotalSizeBytes() > maxShardSizeBytes) {
-                throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), maxShardSizeBytes);
-            }
-            return shardMetadata;
-        }, unpackerFactory, readerFactory, reindexer);
+        var runner = new DocumentsRunner(scopedWorkCoordinator,
+            maxInitialLeaseDuration,
+            reindexer,
+            unpackerFactory,
+            (name, shard) -> {
+                var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, name, shard);
+                log.info("Shard size: " + shardMetadata.getTotalSizeBytes());
+                if (shardMetadata.getTotalSizeBytes() > maxShardSizeBytes) {
+                    throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), maxShardSizeBytes);
+                }
+                return shardMetadata;
+            },
+            readerFactory,
+            lastDocIndexedRef::set);
         return runner.migrateNextShard(rootDocumentContext::createReindexContext);
     }
 
