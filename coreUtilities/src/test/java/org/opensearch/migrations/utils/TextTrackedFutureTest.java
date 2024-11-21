@@ -1,21 +1,18 @@
-package org.opensearch.migrations.replay.util;
+package org.opensearch.migrations.utils;
 
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Function;
 
-import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
-import org.opensearch.migrations.utils.TextTrackedFuture;
-import org.opensearch.migrations.utils.TrackedFuture;
-import org.opensearch.migrations.utils.TrackedFutureJsonFormatter;
-import org.opensearch.migrations.utils.TrackedFutureStringFormatter;
-
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.NonNull;
 import lombok.SneakyThrows;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
-@WrapWithNettyLeakDetection(disableLeakChecks = true)
 class TextTrackedFutureTest {
+    private final static ObjectMapper objectMapper = new ObjectMapper();
     @SneakyThrows
     private static void sneakyWait(CompletableFuture o) {
         o.get(5, TimeUnit.MINUTES);
@@ -63,7 +60,7 @@ class TextTrackedFutureTest {
 
         Assertions.assertEquals(
             "[{\"idHash\":" + id1 + ",\"label\":\"A\",\"value\":\"…\"}]",
-            TrackedFutureJsonFormatter.format(stcf1)
+            format(stcf1)
         );
         Assertions.assertEquals(
             "["
@@ -73,7 +70,7 @@ class TextTrackedFutureTest {
                 + "{\"idHash\":"
                 + id1
                 + ",\"label\":\"A\",\"value\":\"…\"}]",
-            TrackedFutureJsonFormatter.format(stcf2)
+            format(stcf2)
         );
         Assertions.assertEquals(
             "["
@@ -86,7 +83,7 @@ class TextTrackedFutureTest {
                 + "{\"idHash\":"
                 + id1
                 + ",\"label\":\"A\",\"value\":\"…\"}]",
-            TrackedFutureJsonFormatter.format(stcf3)
+            format(stcf3)
         );
 
         notifyAndWaitForGet(stcf1, notifier1);
@@ -103,7 +100,7 @@ class TextTrackedFutureTest {
 
         Assertions.assertEquals(
             "[{\"idHash\":" + id1 + ",\"label\":\"A\",\"value\":\"^\"}]",
-            TrackedFutureJsonFormatter.format(stcf1)
+            format(stcf1)
         );
         Assertions.assertEquals(
             "["
@@ -113,7 +110,7 @@ class TextTrackedFutureTest {
                 + "{\"idHash\":"
                 + id1
                 + ",\"label\":\"A\",\"value\":\"^\"}]",
-            TrackedFutureJsonFormatter.format(stcf2)
+            format(stcf2)
         );
         Assertions.assertEquals(
             "["
@@ -126,7 +123,7 @@ class TextTrackedFutureTest {
                 + "{\"idHash\":"
                 + id1
                 + ",\"label\":\"A\",\"value\":\"^\"}]",
-            TrackedFutureJsonFormatter.format(stcf3)
+            format(stcf3)
         );
 
         notifyAndWaitForGet(stcf2, notifier2);
@@ -143,7 +140,7 @@ class TextTrackedFutureTest {
 
         Assertions.assertEquals(
             "[{\"idHash\":" + id1 + ",\"label\":\"A\",\"value\":\"^\"}]",
-            TrackedFutureJsonFormatter.format(stcf1)
+            format(stcf1)
         );
         Assertions.assertEquals(
             "["
@@ -153,7 +150,7 @@ class TextTrackedFutureTest {
                 + "{\"idHash\":"
                 + id1
                 + ",\"label\":\"A\",\"value\":\"^\"}]",
-            TrackedFutureJsonFormatter.format(stcf2)
+            format(stcf2)
         );
         Assertions.assertEquals(
             "["
@@ -166,7 +163,7 @@ class TextTrackedFutureTest {
                 + "{\"idHash\":"
                 + id1
                 + ",\"label\":\"A\",\"value\":\"^\"}]",
-            TrackedFutureJsonFormatter.format(stcf3)
+            format(stcf3)
         );
         Assertions.assertEquals(
             "["
@@ -179,7 +176,7 @@ class TextTrackedFutureTest {
                 + "{\"idHash\":"
                 + id1
                 + ",\"label\":\"A\",\"value\":\"1\"}]",
-            TrackedFutureJsonFormatter.format(stcf3, TextTrackedFutureTest::formatCompletableFuture)
+            format(stcf3, TextTrackedFutureTest::formatCompletableFuture)
         );
 
         // A is clipped because of grandparent culling
@@ -196,8 +193,19 @@ class TextTrackedFutureTest {
                 + "{\"idHash\":"
                 + id2
                 + ",\"label\":\"B\",\"value\":\"11\"}]",
-            TrackedFutureJsonFormatter.format(stcf3, TextTrackedFutureTest::formatCompletableFuture)
+            format(stcf3, TextTrackedFutureTest::formatCompletableFuture)
         );
+    }
+
+    @SneakyThrows
+    private String format(TrackedFuture<String, Integer> tf) {
+        return objectMapper.writeValueAsString(TrackedFutureMapConverter.makeJson(tf, x -> null));
+    }
+
+    @SneakyThrows
+    private static <D> String format(TrackedFuture<D, ?> tf,
+                                     @NonNull Function<TrackedFuture<D, ?>, String> resultFormatter) {
+        return objectMapper.writeValueAsString(TrackedFutureMapConverter.makeJson(tf, resultFormatter));
     }
 
     public static String formatCompletableFuture(TrackedFuture<String, ?> cf) {

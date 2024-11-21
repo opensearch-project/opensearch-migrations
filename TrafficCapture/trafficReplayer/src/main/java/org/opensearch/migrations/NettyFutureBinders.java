@@ -7,8 +7,8 @@ import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
-import org.opensearch.migrations.replay.util.TextTrackedFuture;
-import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.utils.TextTrackedFuture;
+import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.channel.EventLoop;
 import io.netty.util.concurrent.Future;

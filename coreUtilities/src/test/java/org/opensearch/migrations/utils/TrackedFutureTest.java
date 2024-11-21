@@ -1,9 +1,6 @@
-package org.opensearch.migrations.replay.util;
+package org.opensearch.migrations.utils;
 
 import java.util.concurrent.Semaphore;
-
-import org.opensearch.migrations.utils.TextTrackedFuture;
-import org.opensearch.migrations.utils.TrackedFuture;
 
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;

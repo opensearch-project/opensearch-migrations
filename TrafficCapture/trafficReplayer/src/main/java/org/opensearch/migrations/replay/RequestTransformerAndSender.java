@@ -11,8 +11,8 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.util.TextTrackedFuture;
-import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.utils.TextTrackedFuture;
+import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.buffer.Unpooled;
 import lombok.AllArgsConstructor;

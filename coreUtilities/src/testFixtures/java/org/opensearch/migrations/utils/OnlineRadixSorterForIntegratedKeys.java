@@ -1,9 +1,6 @@
-package org.opensearch.migrations.replay.util;
+package org.opensearch.migrations.utils;
 
 import java.util.function.ToIntFunction;
-
-import org.opensearch.migrations.utils.OnlineRadixSorter;
-import org.opensearch.migrations.utils.TrackedFuture;
 
 import lombok.extern.slf4j.Slf4j;
 

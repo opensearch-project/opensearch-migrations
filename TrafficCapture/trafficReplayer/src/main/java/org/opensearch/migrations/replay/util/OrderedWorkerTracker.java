@@ -8,6 +8,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
+import org.opensearch.migrations.utils.TrackedFuture;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
