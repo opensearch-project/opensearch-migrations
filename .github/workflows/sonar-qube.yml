@@ -61,10 +61,22 @@ jobs:
     - name: Collect issues from the server
       run: |
         curl -s -u admin:admin "http://localhost:9000/api/issues/search?componentKeys=local_project" -o issues.json
-        echo "SonarQube Issues Cmdline Report:"
-        jq -r '.issues[] | "File: \(.component):\(.line), Rule: \(.rule), Message: \(.message)"' issues.json | sort
-        ISSUE_COUNT=$(jq '.issues | length' issues.json)
 
+        echo "::group::SonarQube Issues"
+        jq -r '.issues[] | "File: \(.component):\(.line), Rule: \(.rule), Message: \(.message)"' issues.json | sort
+        echo "::endgroup::"
+
+        # Annotate issue on the PR
+        jq -c '.issues[]' issues.json | while read -r issue; do
+          FILE=$(echo "$issue" | jq -r '.component | split(":")[1]')
+          LINE=$(echo "$issue" | jq -r '.line')
+          MESSAGE=$(echo "$issue" | jq -r '.message')
+          RULE=$(echo "$issue" | jq -r '.rule')
+
+          echo "::error file=$FILE,line=$LINE,title=$RULE::$MESSAGE"
+        done
+
+        ISSUE_COUNT=$(jq '.issues | length' issues.json)
         if [ "$ISSUE_COUNT" -gt 0 ]; then
           echo "❌ Build failed: Found $ISSUE_COUNT issues."
           exit 1
