@@ -221,16 +221,16 @@ class DocumentReindexerTest {
         assertEquals("{\"index\":{\"_id\":\"MQAA\",\"_index\":\"test-index\"}}\n{\"field\":\"value\"}", capturedBulkRequests.get(0).asBulkIndexString());    }
 
     private RfsLuceneDocument createTestDocument(String id) {
-        return new RfsLuceneDocument(id, null, "{\"field\":\"value\"}");
+        return new RfsLuceneDocument(0, 42, id, null, "{\"field\":\"value\"}");
     }
 
     private RfsLuceneDocument createTestDocumentWithWhitespace(String id) {
-        return new RfsLuceneDocument(id, null, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ");
+        return new RfsLuceneDocument(0, 42, id, null, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ");
     }
 
     private RfsLuceneDocument createLargeTestDocument(String id, int size) {
         String largeField = "x".repeat(size);
-        return new RfsLuceneDocument(id, null, "{\"field\":\"" + largeField + "\"}");
+        return new RfsLuceneDocument(0, 42, id, null, "{\"field\":\"" + largeField + "\"}");
     }
 
     @Test
@@ -327,6 +327,6 @@ class DocumentReindexerTest {
      */
     private RfsLuceneDocument createTestDocumentWithType(String id, String type) {
         String source = "{\"field\":\"value\"}";
-        return new RfsLuceneDocument(id, type, source);
+        return new RfsLuceneDocument(0, 42, id, type, source);
     }
 }

@@ -12,6 +12,7 @@ import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
 
@@ -33,6 +34,7 @@ import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpCli
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
+import org.opensearch.migrations.bulkload.worker.IndexAndShardCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.transform.TransformationLoader;
@@ -191,6 +193,7 @@ public class SourceTestBase {
 
             var defaultDocTransformer = new TransformationLoader().getTransformerFactoryLoader(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
 
+            AtomicReference<IndexAndShardCursor> progressCursor = new AtomicReference<>();
             try (var workCoordinator = new OpenSearchWorkCoordinator(
                 new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                     .host(targetAddress)
@@ -207,6 +210,7 @@ public class SourceTestBase {
                         .compressionEnabled(compressionEnabled)
                         .build()
                         .toConnectionContext()), 1000, Long.MAX_VALUE, 1, defaultDocTransformer),
+                    progressCursor,
                     new OpenSearchWorkCoordinator(
                         new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                             .host(targetAddress)

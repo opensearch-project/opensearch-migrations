@@ -59,7 +59,7 @@ class BulkDocSectionTest {
         BulkDocSection bulkDocSection = BulkDocSection.fromMap(indexMap);
 
         assertNotNull(bulkDocSection);
-        assertEquals("test-id", bulkDocSection.getDocId());
+        assertEquals("test-id", bulkDocSection.getOsDocId());
         assertEquals(metadata, bulkDocSection.toMap().get("index"));
         assertEquals(sourceDoc, bulkDocSection.toMap().get("source"));
     }
@@ -164,7 +164,7 @@ class BulkDocSectionTest {
         assertNotNull(fromMapSection);
         @SuppressWarnings("unchecked")
         Map<String, Object> indexCommand = (Map<String, Object>) fromMapSection.toMap().get("index");
-        assertEquals(id, fromMapSection.getDocId());
+        assertEquals(id, fromMapSection.getOsDocId());
         assertEquals(indexName, indexCommand.get("_index"));
         assertEquals(type, indexCommand.get("_type"));
         assertEquals(id, indexCommand.get("_id"));

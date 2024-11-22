@@ -101,12 +101,12 @@ public class LuceneDocumentsReaderTest {
         var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
 
         Flux<RfsLuceneDocument> documents = reader.readDocuments()
-            .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
+            .sort(Comparator.comparing(doc -> doc.osDocId)); // Sort for consistent order given LuceneDocumentsReader may interleave
 
         // Verify that the results are as expected
         StepVerifier.create(documents).expectNextMatches(doc -> {
             String expectedId = "complexdoc";
-            String actualId = doc.id;
+            String actualId = doc.osDocId;
 
             String expectedType = null;
             String actualType = doc.type;
@@ -117,7 +117,7 @@ public class LuceneDocumentsReaderTest {
             return true;
         }).expectNextMatches(doc -> {
             String expectedId = "unchangeddoc";
-            String actualId = doc.id;
+            String actualId = doc.osDocId;
 
             String expectedType = null;
             String actualType = doc.type;
@@ -129,7 +129,7 @@ public class LuceneDocumentsReaderTest {
             return true;
         }).expectNextMatches(doc -> {
             String expectedId = "updateddoc";
-            String actualId = doc.id;
+            String actualId = doc.osDocId;
 
             String expectedType = null;
             String actualType = doc.type;
@@ -165,12 +165,12 @@ public class LuceneDocumentsReaderTest {
         var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
 
         Flux<RfsLuceneDocument> documents = reader.readDocuments()
-            .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
+            .sort(Comparator.comparing(doc -> doc.osDocId)); // Sort for consistent order given LuceneDocumentsReader may interleave
 
         // Verify that the results are as expected
         StepVerifier.create(documents).expectNextMatches(doc -> {
             String expectedId = "complexdoc";
-            String actualId = doc.id;
+            String actualId = doc.osDocId;
 
              String expectedType = "type1";
              String actualType = doc.type;
@@ -182,7 +182,7 @@ public class LuceneDocumentsReaderTest {
             return true;
         }).expectNextMatches(doc -> {
             String expectedId = "unchangeddoc";
-            String actualId = doc.id;
+            String actualId = doc.osDocId;
 
              String expectedType = "type2";
              String actualType = doc.type;
@@ -193,7 +193,7 @@ public class LuceneDocumentsReaderTest {
             return true;
         }).expectNextMatches(doc -> {
             String expectedId = "updateddoc";
-            String actualId = doc.id;
+            String actualId = doc.osDocId;
 
              String expectedType = "type2";
              String actualType = doc.type;
@@ -312,9 +312,9 @@ public class LuceneDocumentsReaderTest {
 
         for (int i = 0; i < documentStartingIndices.size(); i++) {
             Flux<RfsLuceneDocument> documents = reader.readDocuments(0, documentStartingIndices.get(i))
-                    .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
+                    .sort(Comparator.comparing(doc -> doc.osDocId)); // Sort for consistent order given LuceneDocumentsReader may interleave
 
-            var actualDocIds = documents.collectList().block().stream().map(doc -> doc.id).collect(Collectors.joining(","));
+            var actualDocIds = documents.collectList().block().stream().map(doc -> doc.osDocId).collect(Collectors.joining(","));
             var expectedDocIds = String.join(",", documentIds.get(i));
             Assertions.assertEquals(expectedDocIds, actualDocIds);
         }
@@ -350,9 +350,9 @@ public class LuceneDocumentsReaderTest {
 
         for (int i = 0; i < documentIds.size(); i++) {
             Flux<RfsLuceneDocument> documents = reader.readDocuments(i, 0)
-                    .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
+                    .sort(Comparator.comparing(doc -> doc.osDocId)); // Sort for consistent order given LuceneDocumentsReader may interleave
 
-            var actualDocIds = documents.collectList().block().stream().map(doc -> doc.id).collect(Collectors.joining(","));
+            var actualDocIds = documents.collectList().block().stream().map(doc -> doc.osDocId).collect(Collectors.joining(","));
             var expectedDocIds = String.join(",", documentIds.get(i));
             Assertions.assertEquals(expectedDocIds, actualDocIds);
         }

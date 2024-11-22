@@ -42,4 +42,8 @@ public class IndexAndShardCursor {
                 components.length >= 3 ? Integer.parseInt(components[2]) : 0,
                 components.length >= 4 ? Integer.parseInt(components[3]) : 0);
     }
+
+    public String toWorkItemString() {
+        return formatAsWorkItemString(indexName, shard, startingSegmentIndex, startingDocId);
+    }
 }

@@ -34,16 +34,28 @@ public class BulkDocSection {
 
     @EqualsAndHashCode.Include
     @Getter
-    private final String docId;
+    private final int luceneSegId;
+    
+    @EqualsAndHashCode.Include
+    @Getter
+    private final int luceneDocId;
+
+    @EqualsAndHashCode.Include
+    @Getter
+    private final String osDocId;
     private final BulkIndex bulkIndex;
 
-    public BulkDocSection(String id, String indexName, String type, String docBody) {
-        this.docId = id;
-        this.bulkIndex = new BulkIndex(new BulkIndex.Metadata(id, type, indexName), parseSource(docBody));
+    public BulkDocSection(int luceneSegId, int luceneDocId, String osDocId, String indexName, String type, String docBody) {
+        this.luceneSegId = luceneSegId;
+        this.luceneDocId = luceneDocId;
+        this.osDocId = osDocId;
+        this.bulkIndex = new BulkIndex(new BulkIndex.Metadata(osDocId, type, indexName), parseSource(docBody));
     }
 
     private BulkDocSection(BulkIndex bulkIndex) {
-        this.docId = bulkIndex.metadata.id;
+        this.luceneSegId = 0; // TODO: Can we do better here?  Where is this constructor used?
+        this.luceneDocId = 0;
+        this.osDocId = bulkIndex.metadata.id;
         this.bulkIndex = bulkIndex;
     }
 

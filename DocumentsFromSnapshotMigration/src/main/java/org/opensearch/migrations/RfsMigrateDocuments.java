@@ -5,8 +5,11 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
@@ -20,12 +23,14 @@ import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
+import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
+import org.opensearch.migrations.bulkload.worker.IndexAndShardCursor;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
@@ -45,6 +50,7 @@ import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParameterException;
 import com.beust.jcommander.ParametersDelegate;
 import lombok.Getter;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.slf4j.MDC;
 
@@ -270,11 +276,19 @@ public class RfsMigrateDocuments {
         }
         IJsonTransformer docTransformer = new TransformationLoader().getTransformerFactoryLoader(docTransformerConfig);
 
-        try (var processManager = new LeaseExpireTrigger(RfsMigrateDocuments::exitOnLeaseTimeout, Clock.systemUTC());
-             var workCoordinator = new OpenSearchWorkCoordinator(
+        AtomicReference<IndexAndShardCursor> progressCursor = new AtomicReference<>();
+        try (var workCoordinator = new OpenSearchWorkCoordinator(
                  new CoordinateWorkHttpClient(connectionContext),
                  TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                 workerId)
+                 workerId);
+            var processManager = new LeaseExpireTrigger(
+                w -> exitOnLeaseTimeout(
+                        workCoordinator,
+                        w,
+                        progressCursor,
+                        context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
+                Clock.systemUTC()
+            );
         ) {
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
             OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
@@ -307,6 +321,7 @@ public class RfsMigrateDocuments {
             run(
                 LuceneDocumentsReader.getFactory(sourceResourceProvider),
                 reindexer,
+                progressCursor,
                 workCoordinator,
                 arguments.initialLeaseDuration,
                 processManager,
@@ -326,8 +341,27 @@ public class RfsMigrateDocuments {
         }
     }
 
-    private static void exitOnLeaseTimeout(String workItemId) {
+    @SneakyThrows
+    private static void exitOnLeaseTimeout(
+            IWorkCoordinator coordinator,
+            String workItemId, 
+            AtomicReference<IndexAndShardCursor> progressCursorRef,
+            Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
+    ) {
         log.error("Terminating RfsMigrateDocuments because the lease has expired for " + workItemId);
+        var progressCursor = progressCursorRef.get();
+        if (progressCursor != null) {
+            var successorWorkItem = progressCursor.toWorkItemString();
+            ArrayList<String> successorWorkItemIds = new ArrayList<>();
+            successorWorkItemIds.add(successorWorkItem);
+
+            coordinator.createSuccessorWorkItemsAndMarkComplete(
+                workItemId,
+                successorWorkItemIds,
+                contextSupplier
+            );
+        }
+        
         System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
     }
 
@@ -346,6 +380,7 @@ public class RfsMigrateDocuments {
 
     public static DocumentsRunner.CompletionStatus run(Function<Path, LuceneDocumentsReader> readerFactory,
                                                        DocumentReindexer reindexer,
+                                                       AtomicReference<IndexAndShardCursor> progressCursor,
                                                        IWorkCoordinator workCoordinator,
                                                        Duration maxInitialLeaseDuration,
                                                        LeaseExpireTrigger leaseExpireTrigger,
@@ -370,14 +405,20 @@ public class RfsMigrateDocuments {
         )) {
             throw new NoWorkLeftException("No work items are pending/all work items have been processed.  Returning.");
         }
-        var runner = new DocumentsRunner(scopedWorkCoordinator, maxInitialLeaseDuration, (name, shard) -> {
-            var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, name, shard);
-            log.info("Shard size: " + shardMetadata.getTotalSizeBytes());
-            if (shardMetadata.getTotalSizeBytes() > maxShardSizeBytes) {
-                throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), maxShardSizeBytes);
-            }
-            return shardMetadata;
-        }, unpackerFactory, readerFactory, reindexer);
+        var runner = new DocumentsRunner(scopedWorkCoordinator,
+            maxInitialLeaseDuration,
+            reindexer,
+            unpackerFactory,
+            (name, shard) -> {
+                var shardMetadata = shardMetadataFactory.fromRepo(snapshotName, name, shard);
+                log.info("Shard size: " + shardMetadata.getTotalSizeBytes());
+                if (shardMetadata.getTotalSizeBytes() > maxShardSizeBytes) {
+                    throw new DocumentsRunner.ShardTooLargeException(shardMetadata.getTotalSizeBytes(), maxShardSizeBytes);
+                }
+                return shardMetadata;
+            },
+            readerFactory,
+            progressCursor::set);
         return runner.migrateNextShard(rootDocumentContext::createReindexContext);
     }
 
