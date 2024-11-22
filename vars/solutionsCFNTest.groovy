@@ -37,6 +37,8 @@ def call(Map config = [:]) {
                                         sh "sudo --preserve-env cdk deploy 'Migration-Assistant-Infra-Create-VPC' --parameters Stage=${stage} --require-approval never --concurrency 3"
                                     }
                                 }
+                                // Wait for instance to be ready to accept SSM commands
+                                sh "sleep 15"
                             }
                         }
                     }
