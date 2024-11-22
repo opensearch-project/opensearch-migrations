@@ -6,6 +6,7 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import org.opensearch.migrations.transform.jinjava.NameMappingClasspathResourceLocator;
+import org.opensearch.migrations.transform.jinjava.RegexCaptureFilter;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hubspot.jinjava.Jinjava;
@@ -34,6 +35,7 @@ public class JinjavaTransformer implements IJsonTransformer {
         jinjava = new Jinjava();
         this.createContextWithSourceFunction = createContextWithSource;
         jinjava.setResourceLocator(resourceLocator);
+        jinjava.getGlobalContext().registerFilter(new RegexCaptureFilter());
         this.templateStr = templateString;
     }
 
