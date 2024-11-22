@@ -34,17 +34,13 @@ const getProps = () => {
 
 const app = new App();
 const infraProps = getProps()
-const baseImportVPCStackName = "Migration-Assistant-Infra-Import-VPC"
-const baseCreateVPCStackName = "Migration-Assistant-Infra-Create-VPC"
-new SolutionsInfrastructureStack(app, baseImportVPCStackName, {
+new SolutionsInfrastructureStack(app, "Migration-Assistant-Infra-Import-VPC", {
   synthesizer: new DefaultStackSynthesizer(),
   createVPC: false,
-  stackName: infraProps.stackNameSuffix ? `${baseImportVPCStackName}-${infraProps.stackNameSuffix}` : baseImportVPCStackName,
   ...infraProps
 });
-new SolutionsInfrastructureStack(app, baseCreateVPCStackName, {
+new SolutionsInfrastructureStack(app, "Migration-Assistant-Infra-Create-VPC", {
   synthesizer: new DefaultStackSynthesizer(),
   createVPC: true,
-  stackName: infraProps.stackNameSuffix ? `${baseCreateVPCStackName}-${infraProps.stackNameSuffix}` : baseCreateVPCStackName,
   ...infraProps
 });
