@@ -56,7 +56,7 @@ public class MigrateOrEvaluateArgs {
     public Version sourceVersion = null;
 
     @ParametersDelegate
-    public MetadataTransformerParams metadataTransformationParams = new MetadataTransformerParams();
+    public TransformerParams metadataTransformationParams = new MetadataTransformerParams();
 
     @Getter
     public static class MetadataTransformerParams implements TransformerParams {

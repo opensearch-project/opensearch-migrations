@@ -5,6 +5,7 @@ import java.util.List;
 
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
+import org.opensearch.migrations.bulkload.transformers.CompositeTransformer;
 import org.opensearch.migrations.bulkload.transformers.TransformFunctions;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.bulkload.transformers.TransformerToIJsonTransformerAdapter;
@@ -59,7 +60,7 @@ public abstract class MigratorEvaluatorBase {
             log.atInfo().setMessage("Metadata Transformations config string: {}")
                     .addArgument(transformerConfig).log();
         } else {
-            log.atInfo().setMessage("Using Noop transformation config: {}")
+            log.atInfo().setMessage("Using Noop custom transformation config: {}")
                     .addArgument(NOOP_TRANSFORMATION_CONFIG).log();
             transformerConfig = NOOP_TRANSFORMATION_CONFIG;
         }
@@ -68,13 +69,15 @@ public abstract class MigratorEvaluatorBase {
     }
 
     protected Transformer selectTransformer(Clusters clusters) {
-        var transformer = TransformFunctions.getTransformer(
+        var versionTransformer = TransformFunctions.getTransformer(
             clusters.getSource().getVersion(),
             clusters.getTarget().getVersion(),
             arguments.minNumberOfReplicas
         );
-        log.atInfo().setMessage("Selected transformer: {}").addArgument(transformer).log();
-        return transformer;
+        var customTransformer = getCustomTransformer();
+        var compositeTransformer = new CompositeTransformer(customTransformer, versionTransformer);
+        log.atInfo().setMessage("Selected transformer: {}").addArgument(compositeTransformer).log();
+        return compositeTransformer;
     }
 
     protected Items migrateAllItems(MigrationMode migrationMode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {

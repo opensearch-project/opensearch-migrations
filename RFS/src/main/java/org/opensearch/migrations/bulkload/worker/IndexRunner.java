@@ -36,17 +36,14 @@ public class IndexRunner {
         };
         var results = IndexMetadataResults.builder();
 
-        // log out filtered items
+        // Set results for filtered items
         repoDataProvider.getIndicesInSnapshot(snapshotName)
                 .stream()
                 .filter(Predicate.not(FilterScheme.filterIndicesByAllowList(indexAllowlist, logger)))
-                .forEach(index -> {
-                    var indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
-                    log.atInfo().setMessage("{ \"before\": {},\n\"after\":{}}")
-                            .addArgument(indexMetadata)
-                            .addArgument("Removed due to index filter")
-                            .log();
-                });
+                .forEach(index -> results.index(CreationResult.builder()
+                        .name(index.getName())
+                        .failureType(CreationFailureType.SKIPPED_DUE_TO_FILTER)
+                        .build()));
 
 
         repoDataProvider.getIndicesInSnapshot(snapshotName)
@@ -60,10 +57,6 @@ public class IndexRunner {
                 var indexMetadata = originalIndexMetadata.deepCopy();
                 try {
                     indexMetadata = transformer.transformIndexMetadata(indexMetadata);
-                    log.atInfo().setMessage("{ \"before\": {},\n\"after\":{}}")
-                            .addArgument(originalIndexMetadata)
-                            .addArgument(indexMetadata)
-                            .log();
                     indexResult = indexCreator.create(indexMetadata, mode, context);
                 } catch (Throwable t) {
                     indexResult = CreationResult.builder()

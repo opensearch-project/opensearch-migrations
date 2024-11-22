@@ -25,10 +25,7 @@ public class Migrate extends MigratorEvaluatorBase {
             var clusters = createClusters();
             migrateResult.clusters(clusters);
 
-            var transformer = new CompositeTransformer(
-                    getCustomTransformer(),
-                    selectTransformer(clusters)
-            );
+            var transformer = selectTransformer(clusters);
 
             var items = migrateAllItems(migrationMode, clusters, transformer, context);
             migrateResult.items(items);
