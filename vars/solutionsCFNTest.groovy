@@ -30,6 +30,7 @@ def call(Map config = [:]) {
                     timeout(time: 15, unit: 'MINUTES') {
                         dir('deployment/migration-assistant-solution') {
                             script {
+                                env.STACK_NAME_SUFFIX = "${stage}-us-east-1"
                                 sh "sudo npm install"
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
@@ -49,7 +50,23 @@ def call(Map config = [:]) {
                             script {
                                 withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
                                     withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
-                                        sh "sudo --preserve-env ./awsRunInitBootstrap.sh --stage ${stage}"
+                                        sh "sudo --preserve-env ./awsRunInitBootstrap.sh --stage ${stage} --workflow INIT_BOOTSTRAP"
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            stage('Verify Bootstrap Instance') {
+                steps {
+                    timeout(time: 5, unit: 'MINUTES') {
+                        dir('test') {
+                            script {
+                                withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {
+                                    withAWS(role: 'JenkinsDeploymentRole', roleAccount: "${MIGRATIONS_TEST_ACCOUNT_ID}", region: "us-east-1", duration: 3600, roleSessionName: 'jenkins-session') {
+                                        sh "sudo --preserve-env ./awsRunInitBootstrap.sh --stage ${stage} --workflow VERIFY_INIT_BOOTSTRAP"
                                     }
                                 }
                             }

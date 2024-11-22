@@ -5,20 +5,27 @@ usage() {
   echo "Script to run initBootstrap.sh on Migration Assistant bootstrap box"
   echo ""
   echo "Usage: "
-  echo "  ./awsRunInitBootstrap.sh  [--stage]"
+  echo "  ./awsRunInitBootstrap.sh  [--stage] [--workflow]--"
   echo ""
   echo "Options:"
-  echo "  --stage                                     Deployment stage name"
+  echo "  --stage                                     Deployment stage name, e.g. sol-integ"
+  echo "  --workflow                                  Workflow to execute, options include ALL(default)|INIT_BOOTSTRAP|VERIFY_INIT_BOOTSTRAP"
   echo ""
   exit 1
 }
 
 STAGE="aws-integ"
+WORKFLOW="ALL"
 REGION="us-east-1"
 while [[ $# -gt 0 ]]; do
   case $1 in
     --stage)
       STAGE="$2"
+      shift # past argument
+      shift # past value
+      ;;
+    --workflow)
+      WORKFLOW="$2"
       shift # past argument
       shift # past value
       ;;
@@ -72,18 +79,30 @@ execute_command_and_wait_for_result() {
   fi
 }
 
-# Retrieve the instance ID
-instance_id=$(aws ec2 describe-instances \
-  --filters "Name=tag:Name,Values=bootstrap-instance-${STAGE}-${REGION}" "Name=instance-state-name,Values=running" \
-  --query "Reservations[0].Instances[0].InstanceId" \
-  --output text)
+get_instance_id() {
+  # Retrieve the instance ID
+  instance_id=$(aws ec2 describe-instances \
+    --filters "Name=tag:Name,Values=bootstrap-instance-${STAGE}-${REGION}" "Name=instance-state-name,Values=running" \
+    --query "Reservations[0].Instances[0].InstanceId" \
+    --output text)
 
-if [[ -z "$instance_id" || "$instance_id" == "None" ]]; then
-  echo "Error: Running bootstrap EC2 instance not found"
-  exit 1
-fi
+  if [[ -z "$instance_id" || "$instance_id" == "None" ]]; then
+    echo "Error: Running bootstrap EC2 instance not found"
+    exit 1
+  fi
+  echo "$instance_id"
+}
 
+instance_id=$(get_instance_id)
 init_command="cd /opensearch-migrations && ./initBootstrap.sh"
-execute_command_and_wait_for_result "$init_command" "$instance_id"
 verify_command="cdk --version && docker --version && java --version && python3 --version"
-execute_command_and_wait_for_result "$verify_command" "$instance_id"
+if [ "$WORKFLOW" = "ALL" ]; then
+  execute_command_and_wait_for_result "$init_command" "$instance_id"
+  execute_command_and_wait_for_result "$verify_command" "$instance_id"
+elif [ "$WORKFLOW" = "INIT_BOOTSTRAP" ]; then
+  execute_command_and_wait_for_result "$init_command" "$instance_id"
+elif [ "$WORKFLOW" = "VERIFY_INIT_BOOTSTRAP" ]; then
+  execute_command_and_wait_for_result "$verify_command" "$instance_id"
+else
+  echo "Error: Unknown workflow: ${WORKFLOW} specified"
+fi
