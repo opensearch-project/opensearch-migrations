@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 
 @Slf4j
 @WrapWithNettyLeakDetection(disableLeakChecks = true)
-public class TypeMappingsSanitizationTest {
+public class TypeMappingsSanitizationProviderTest {
 
     static final String TEST_INPUT_REQUEST = "{\n"
         + "  \"method\": \"PUT\",\n"
@@ -53,7 +53,9 @@ public class TypeMappingsSanitizationTest {
                 "type1", "indexB",
                 "type2", "indexB"),
             "indexC", Map.of(
-                "type2", "indexC"));;
+                "type2", "indexC"),
+            "(time*)", Map.of(
+                "(type*)", "\\1_And_\\2"));;
         var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(config);
         var transformedDocument =
             transformer.transformJson(mapper.readValue(TEST_INPUT_REQUEST, new TypeReference<>(){}));

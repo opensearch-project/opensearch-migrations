@@ -1,0 +1,22 @@
+{% import "common/featureEnabled.j2" as flags %}
+within import {{ __macros__ | pprint }}
+{% macro route(input, feature_flags, default_action, routes) %}
+    {%- set ns = namespace(result=none, matched=false) -%}
+    {%- for feature_name, pattern_fn, action_fn in routes if not ns.matched -%}
+        {%- if not ns.matched -%} {# we haven't found a match yet, otherwise skip the rest #}
+            {%- set match = invoke_macro(pattern_fn, input) -%}
+            {%- if match is not none -%}
+                {%- set ns.matched = true -%}
+                {%- if flags.is_enabled(feature_flags, feature_name) -%}
+                    {%- set ns.result = invoke_macro(action_fn, match) -%}
+                {%- endif -%}
+            {%- endif -%}
+        {%- endif -%}
+    {%- endfor -%}
+    {%- if ns.result is none -%}
+        default answer:
+        {{- invoke_macro(default_action, input) -}}
+    {%- else -%}
+        result: {{- ns.result -}}
+    {%- endif -%}
+{% endmacro %}

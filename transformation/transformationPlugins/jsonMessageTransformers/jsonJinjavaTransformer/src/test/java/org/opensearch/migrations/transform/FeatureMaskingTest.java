@@ -19,20 +19,20 @@ public class FeatureMaskingTest {
         var flags = FeatureFlags.parseJson(incomingFlagStr);
         log.atInfo().setMessage("parsed flags: {}").addArgument(flags == null ? "[NULL]" : flags.writeJson()).log();
         final var template = "" +
-            "{%- include \"common/featureEnabled.j2\" -%}" +
+            "{%- import \"common/featureEnabled.j2\" as features -%}" +
             " { " +
             "{%- set ns = namespace(debug_info=['list: ']) -%}" +
             "{%- set ns.debug_info = ['list: '] -%}" +
             "\"enabledFlags\": \"" +
-            "{{- is_enabled(features,'testFlag') -}}," +
-            "{{- is_enabled(features,'testFlag.t1') -}}," +
-            "{{- is_enabled(features,'testFlag.t2') -}}," +
-            "{{- is_enabled(features,'nextTestFlag.n1') -}}" +
+            "{{- features.is_enabled(features,'testFlag') -}}," +
+            "{{- features.is_enabled(features,'testFlag.t1') -}}," +
+            "{{- features.is_enabled(features,'testFlag.t2') -}}," +
+            "{{- features.is_enabled(features,'nextTestFlag.n1') -}}" +
             "\"" +
             "}";
-        var sanitization = new JinjavaTransformer(template,
+        var transformed = new JinjavaTransformer(template,
             src -> flags == null ? Map.of() : Map.of("features", flags));
-        return sanitization.transformJson(Map.of());
+        return transformed.transformJson(Map.of());
     }
 
     @Test
