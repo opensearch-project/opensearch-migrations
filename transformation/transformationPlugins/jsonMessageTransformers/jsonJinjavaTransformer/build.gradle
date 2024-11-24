@@ -6,7 +6,6 @@ dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
     implementation group: 'com.hubspot.jinjava', name: 'jinjava', version: "2.7.3"
-    implementation group: 'com.google.re2j', name: 're2j', version: "1.7"
 
     testImplementation project(':TrafficCapture:trafficReplayer')
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')

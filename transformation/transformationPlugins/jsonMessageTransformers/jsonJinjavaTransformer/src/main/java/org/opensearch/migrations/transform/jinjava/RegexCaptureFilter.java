@@ -1,9 +1,9 @@
 package org.opensearch.migrations.transform.jinjava;
 
 import java.util.HashMap;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
-import com.google.re2j.Matcher;
-import com.google.re2j.Pattern;
 import com.hubspot.jinjava.interpret.JinjavaInterpreter;
 import com.hubspot.jinjava.lib.filter.Filter;
 

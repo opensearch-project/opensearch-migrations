@@ -19,7 +19,7 @@ public class RouteTest {
     public Map<String, Object> doRouting(Map<String, Object> flags, Map<String, Object> inputDoc) {
         log.atInfo().setMessage("parsed flags: {}").addArgument(flags).log();
         final var template = "" +
-            "{%- macro doDefault() -%}" +
+            "{%- macro doDefault(ignored_input) -%}" +
             "  {}" +
             "{%- endmacro -%}\n" +
 
@@ -38,9 +38,9 @@ public class RouteTest {
             "{%- import \"common/route.j2\" as rscope -%}" +
             "{{- rscope.route(source, source.label, flags, 'doDefault'," +
             "  [" +
-            "    ('matchA', 'Thing_A(.*)', 'echoFirstMatch')," +
-            "    ('matchA', 'Thing_A(.*)', 'echoFirstMatchAgain')," + // make sure that we don't get duplicate results
-            "    ('matchB', 'B(.*)', 'switchStuff')" +
+            "    ('Thing_A(.*)',        'echoFirstMatch',      'matchA')," +
+            "    ('Thing_A(.*)', 'echoFirstMatchAgain', 'matchA')," + // make sure that we don't get duplicate results
+            "    ('B(.*)',       'switchStuff',         'matchB')" +
             "  ])" +
             "-}}";
 
@@ -59,15 +59,13 @@ public class RouteTest {
             "stuff", Map.of(
                 "inner1", "data1",
                 "inner2", "data2"
-            )
-        );
+            ));
         var docB = Map.of(
             "label", "B-hive",
             "stuff", List.of(
                 "data1",
                 "data2"
-            )
-        );
+            ));
         {
             var resultMap = doRouting(null, docA);
             Assertions.assertEquals(1, resultMap.size());

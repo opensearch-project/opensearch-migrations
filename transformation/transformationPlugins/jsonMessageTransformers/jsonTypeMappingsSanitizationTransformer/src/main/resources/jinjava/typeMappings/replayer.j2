@@ -1,24 +1,25 @@
 {%- include "common/featureEnabled.j2" -%}
 
-{%- macro handle_else(uri_parts) -%}
+{%- macro default_action(source_and_mappings) -%}
 {
+    "diagPair": {{ source_and_mappings }},
     "preserve": "*"
 }
 {%- endmacro -%}
 
-{%- macro rewrite_uri_to_strip_types(uri_parts, index_mappings, request) -%}
+{%- macro rewrite_uri_to_strip_types(match, input_map) -%}
 {
-  "method": "{{ request.method }}",
-  "URI": "/{{ index_mappings[uri_parts[0]][uri_parts[1]] }}/_doc/{{ uri_parts[2] }}",
+  "method": "{{ input_map.request.method }}",
+  "URI": "/{{ input_map.index_mappings[match.group1][match.group2] }}/_doc/{{ match.group3 }}",
   "preserve": ["headers","payload"]
 }
 {%- endmacro -%}
 
-
-{% macro rewrite_typemapping_to_target_index(uri_parts, index_mappings, request) -%}
+{% macro rewrite_create_index(match, input_map) -%}
+{# In reality, this is going to need to figure out if there are multiple type mappings and deal with them according.y #}
 {
-  "method": "{{ request.method }}",
-  "URI": "{{ index_mappings[uri_parts[0]][uri_parts[1]] }}",
+  "method": "{{ input_map.request.method }}",
+  "URI": "{{ input_map.index_mappings[match.group1] }}",
   "payload": {
     "inlinedJsonBody": {
       "mappings": {
@@ -26,7 +27,7 @@
           "type": {
             "type": "keyword"
           }
-          {%- for type_name, type_props in request.body.mappings.items() -%}
+          {%- for type_name, type_props in input_map.request.body.mappings.items() -%}
             {%- for prop_name, prop_def in type_props.properties.items() -%}
               ,
               "{{- prop_name -}}": {{- prop_def | tojson -}}
@@ -39,19 +40,12 @@
 }
 {%- endmacro -%}
 
-
-{%- set uri_parts = request.URI.split('/') | reject('equalto', '') | list -%}
-
-{%- if uri_parts | length == 3 and uri_parts[0] in index_mappings and uri_parts[1] in index_mappings[uri_parts[0]] -%}
-  {%- if is_enabled(features, 'rewrite_uri_to_strip_types') -%}
-    {{ rewrite_uri_to_strip_types(uri_parts, index_mappings, request) -}}
-  {%- endif -%}
-{%- elif uri_parts | length == 2 and uri_parts[0] in index_mappings -%}
-  {%- if is_enabled(features, 'rewrite_typemapping_to_target_index') -%}
-    {{ rewrite_typemapping_to_target_index(uri_parts, index_mappings, request) -}}
-  {%- endif -%}
-{%- else -%}
-  {%- if is_enabled(features, 'handle_else') -%}
-    {{- handle_else(uri_parts) -}}
-  {%- endif -%}
-{%- endif -%}
+{% set source_and_mappings = { 'request': request, 'index_mappings': index_mappings} %}
+{%- import "common/route.j2" as rscope -%}
+{{- rscope.route(source_and_mappings, request.method + " " + request.URI, flags, 'default_action',
+    [
+        ('(?:PUT|POST) /([^/]*)/([^/]*)/.*', 'rewrite_uri_to_strip_types', 'rewrite_add_request_to_strip_types'),
+        (         'GET /([^/]*)/([^/]*)/.*', 'rewrite_uri_to_strip_types', 'rewrite_get_request_to_strip_types'),
+        ('(?:PUT|POST) /([^/]*)',            'rewrite_create_index', 'rewrite_create_index')
+  ])
+-}}
