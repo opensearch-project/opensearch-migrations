@@ -19,15 +19,15 @@ public class FeatureMaskingTest {
         var flags = FeatureFlags.parseJson(incomingFlagStr);
         log.atInfo().setMessage("parsed flags: {}").addArgument(flags == null ? "[NULL]" : flags.writeJson()).log();
         final var template = "" +
-            "{%- import \"common/featureEnabled.j2\" as features -%}" +
+            "{%- import \"common/featureEnabled.j2\" as fscope -%}" +
             " { " +
             "{%- set ns = namespace(debug_info=['list: ']) -%}" +
             "{%- set ns.debug_info = ['list: '] -%}" +
             "\"enabledFlags\": \"" +
-            "{{- features.is_enabled(features,'testFlag') -}}," +
-            "{{- features.is_enabled(features,'testFlag.t1') -}}," +
-            "{{- features.is_enabled(features,'testFlag.t2') -}}," +
-            "{{- features.is_enabled(features,'nextTestFlag.n1') -}}" +
+            "{{- fscope.is_enabled(features,'testFlag') -}}," +
+            "{{- fscope.is_enabled(features,'testFlag.t1') -}}," +
+            "{{- fscope.is_enabled(features,'testFlag.t2') -}}," +
+            "{{- fscope.is_enabled(features,'nextTestFlag.n1') -}}" +
             "\"" +
             "}";
         var transformed = new JinjavaTransformer(template,

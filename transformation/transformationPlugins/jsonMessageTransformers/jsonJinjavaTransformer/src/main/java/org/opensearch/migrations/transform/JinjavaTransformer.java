@@ -1,5 +1,6 @@
 package org.opensearch.migrations.transform;
 
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -56,7 +57,7 @@ public class JinjavaTransformer implements IJsonTransformer {
     public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
         var resultStr = jinjava.render(templateStr, createContextWithSourceFunction.apply(incomingJson));
         log.atInfo().setMessage("output from jinjava... {}").addArgument(resultStr).log();
-        var parsedObj = (Map<String,Object>) objectMapper.readValue(resultStr, Map.class);
+        var parsedObj = (Map<String,Object>) objectMapper.readValue(resultStr, LinkedHashMap.class);
         return doFinalSubstitutions(incomingJson, parsedObj);
     }
 

@@ -1,9 +1,9 @@
 package org.opensearch.migrations.transform;
 
 import java.io.IOException;
+import java.util.List;
 import java.util.Map;
-
-import org.opensearch.migrations.transform.flags.FeatureFlags;
+import java.util.TreeMap;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
@@ -23,27 +23,24 @@ public class RouteTest {
             "  {}" +
             "{%- endmacro -%}\n" +
 
-            "{%- macro matchIt(doc) -%}" +
-            "  {{ doc.label | regex_capture('Thing_A(.*)') }}" +
-            "{%- endmacro -%}\n" +
-            "{% macro handleIt(matches) %}\n" +
-            "{% for key, value in matches.items() %}\n" + // TODO - this is a string, not an object!
-
-//            "  {{ key }}: {{ value }}<br>\n" +
-            "{% endfor %}" +
-//            " - {{ matches['group'] }} - " +
-//            "  { \"matchedVal\": \"{{ matches['group1'] }}\"}" +
+            "{% macro echoFirstMatch(matches, input) %}\n" +
+            "  { \"matchedVal\": \"{{ matches['group1'] }}\"}" +
+            "{% endmacro %}" +
+            "{% macro echoFirstMatchAgain(matches, input) %}\n" +
+            "  { \"again\": \"{{ matches['group1'] }}\"}" +
+            "{% endmacro %}" +
+            "{% macro switchStuff(matches, input) %}\n" +
+            "  {% set swapped_list = [input.stuff[1], input.stuff[0]] %}" +
+            "  {% set input = input + {'stuff': swapped_list} %}" +
+            "  {{ input | tojson }} " +
             "{% endmacro %}" +
 
-            "    {% call doDefault() %}" +
-            "        {{input}}" +
-            "    {% endcall %}" +
-
-            "\n" +
-            "{%- import \"common/route.j2\" as router -%}" +
-            "{{- router.route(source, flags, doDefault," +
+            "{%- import \"common/route.j2\" as rscope -%}" +
+            "{{- rscope.route(source, source.label, flags, 'doDefault'," +
             "  [" +
-            "    ('labelMatches', 'matchIt', 'handleIt')" +
+            "    ('matchA', 'Thing_A(.*)', 'echoFirstMatch')," +
+            "    ('matchA', 'Thing_A(.*)', 'echoFirstMatchAgain')," + // make sure that we don't get duplicate results
+            "    ('matchB', 'B(.*)', 'switchStuff')" +
             "  ])" +
             "-}}";
 
@@ -52,45 +49,38 @@ public class RouteTest {
         return transformed.transformJson(inputDoc);
     }
 
-
     @Test
-    public void test() {
-        var flags = Map.of(
-            "first", false,
-            "second", (Object) true);
-        var inputDoc = Map.of(
-            "label", "Thing_A_and more!",
-            "stuff", Map.of(
-                "inner1", "data1",
-                "inner2", "data2"
-            )
-        );
-
-        log.atInfo().setMessage("parsed flags: {}").addArgument(flags).log();
-        final var template = "" +
-            "{% macro table(predicate_output) %}\n" +
-            "    {{Content of Macro 1\n}}" +
-            "{% endmacro %}\n" +
-            "\n";
-        var transformed = new JinjavaTransformer(template,
-            src -> flags == null ? Map.of("source", inputDoc) : Map.of("source", inputDoc, "flags", flags));
-        var result = transformed.transformJson(inputDoc);
-        System.out.println(result);
-    }
-
-    @Test
-    public void testA() {
+    public void test() throws IOException {
         var flagAOff = Map.of(
-            "first", false,
-            "second", (Object) true);
-        var doc = Map.of(
+            "matchA", false,
+            "matchB", (Object) true);
+        var docA = Map.of(
             "label", "Thing_A_and more!",
             "stuff", Map.of(
                 "inner1", "data1",
                 "inner2", "data2"
             )
         );
-        Assertions.assertEquals("_and more!", doRouting(null, doc).get("matchedVal"));
-        Assertions.assertTrue(doRouting(flagAOff, doc).isEmpty());
+        var docB = Map.of(
+            "label", "B-hive",
+            "stuff", List.of(
+                "data1",
+                "data2"
+            )
+        );
+        {
+            var resultMap = doRouting(null, docA);
+            Assertions.assertEquals(1, resultMap.size());
+            Assertions.assertEquals("_and more!", resultMap.get("matchedVal"));
+        }
+        {
+            var resultMap = doRouting(flagAOff, docA);
+            Assertions.assertTrue(resultMap.isEmpty());
+        }
+        {
+            var resultMap = doRouting(flagAOff, docB);
+            Assertions.assertEquals("{\"label\":\"B-hive\",\"stuff\":[\"data2\",\"data1\"]}",
+                objectMapper.writeValueAsString(new TreeMap<>(resultMap)));
+        }
     }
 }

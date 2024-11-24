@@ -7,9 +7,6 @@ import java.util.Optional;
 
 import com.hubspot.jinjava.interpret.Context;
 import com.hubspot.jinjava.interpret.JinjavaInterpreter;
-import com.hubspot.jinjava.lib.fn.ELFunctionDefinition;
-import com.hubspot.jinjava.lib.fn.Functions;
-import com.hubspot.jinjava.objects.collections.PyList;
 import com.hubspot.jinjava.lib.fn.MacroFunction;
 
 public class DynamicMacroFunction {
