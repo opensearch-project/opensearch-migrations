@@ -18,10 +18,10 @@ import java.util.stream.Collectors;
 import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.replay.datahandlers.IPacketConsumer;
 import org.opensearch.migrations.replay.datahandlers.http.HttpJsonTransformingConsumer;
-import org.opensearch.migrations.replay.util.TrackedFuture;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.buffer.Unpooled;
 import io.netty.channel.ChannelHandlerContext;

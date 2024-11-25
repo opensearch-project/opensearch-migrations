@@ -2,7 +2,7 @@ package org.opensearch.migrations.bulkload.common;
 
 import lombok.RequiredArgsConstructor;
 
-/** 
+/**
  * This class represents a document at the Lucene level within RFS.  It tracks where the document was within the Lucene
  * index, as well as the document's embedded Elasticsearch/OpenSearch properties
  */
@@ -22,4 +22,7 @@ public class RfsLuceneDocument {
 
     // The Elasticsearch/OpenSearch _source of the document
     public final String source;
+
+    // The Elasticsearch/OpenSearch custom shard routing of the document
+    public final String routing;
 }

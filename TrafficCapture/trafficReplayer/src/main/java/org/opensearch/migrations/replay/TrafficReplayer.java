@@ -15,7 +15,6 @@ import org.opensearch.migrations.replay.tracing.RootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
 import org.opensearch.migrations.replay.util.ActiveContextMonitor;
 import org.opensearch.migrations.replay.util.OrderedWorkerTracker;
-import org.opensearch.migrations.replay.util.TrackedFutureJsonFormatter;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.CompositeContextTracker;
@@ -28,6 +27,7 @@ import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.transform.TransformerConfigUtils;
 import org.opensearch.migrations.transform.TransformerParams;
 import org.opensearch.migrations.utils.ProcessHelpers;
+import org.opensearch.migrations.utils.TrackedFutureJsonFormatter;
 
 import com.beust.jcommander.JCommander;
 import com.beust.jcommander.Parameter;

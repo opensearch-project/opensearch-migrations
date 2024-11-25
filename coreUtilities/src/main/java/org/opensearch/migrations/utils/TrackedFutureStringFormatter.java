@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.util;
+package org.opensearch.migrations.utils;
 
 import java.util.Optional;
 import java.util.function.Function;

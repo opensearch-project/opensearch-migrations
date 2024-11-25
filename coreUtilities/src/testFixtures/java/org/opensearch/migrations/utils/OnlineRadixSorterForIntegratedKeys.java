@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.util;
+package org.opensearch.migrations.utils;
 
 import java.util.function.ToIntFunction;
 

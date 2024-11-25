@@ -38,7 +38,8 @@ public class RfsDocument {
                 doc.id,
                 indexName,
                 doc.type,
-                doc.source
+                doc.source,
+                doc.routing
             )
         );
     }

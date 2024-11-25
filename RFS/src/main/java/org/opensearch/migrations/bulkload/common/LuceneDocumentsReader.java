@@ -212,6 +212,8 @@ public class LuceneDocumentsReader {
         String openSearchDocId = null;
         String type = null;
         BytesRef sourceBytes = null;
+        String routing = null;
+
         try {
             for (var field : document.getFields()) {
                 String fieldName = field.name();
@@ -232,6 +234,10 @@ public class LuceneDocumentsReader {
                     case "_source": {
                         // All versions (?)
                         sourceBytes = field.binaryValue();
+                        break;
+                    }
+                    case "_routing": {
+                        routing = field.stringValue();
                         break;
                     }
                     default:
@@ -265,6 +271,6 @@ public class LuceneDocumentsReader {
         }
 
         log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
-        return new RfsLuceneDocument(luceneSegIndex, luceneDocId, openSearchDocId, type, sourceBytes.utf8ToString());
+        return new RfsLuceneDocument(luceneSegIndex, luceneDocId, openSearchDocId, type, sourceBytes.utf8ToString(), routing);
     }
 }

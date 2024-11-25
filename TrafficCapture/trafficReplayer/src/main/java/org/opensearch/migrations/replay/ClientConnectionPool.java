@@ -7,8 +7,8 @@ import java.util.function.BiFunction;
 import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.util.TextTrackedFuture;
-import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.utils.TextTrackedFuture;
+import org.opensearch.migrations.utils.TrackedFuture;
 
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
