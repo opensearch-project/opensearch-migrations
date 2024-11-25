@@ -94,7 +94,7 @@ public class SnapshotStateTest {
         final var docsCaptor = ArgumentCaptor.forClass(listOfBulkDocSectionType);
         verify(client, times(1)).sendBulkRequest(eq(indexName), docsCaptor.capture(), any());
         final var document = docsCaptor.getValue().get(0);
-        assertThat(document.getOsDocId(), equalTo(document1Id));
+        assertThat(document.getId(), equalTo(document1Id));
         assertThat(document.asBulkIndexString(), allOf(containsString(document1Id), containsString("{\"fo$o\":\"bar\"}")));
 
         verifyNoMoreInteractions(client);
@@ -169,7 +169,7 @@ public class SnapshotStateTest {
 
         assertThat("Only one document, the one that was updated", docsCaptor.getValue().size(), equalTo(1));
         final var document = docsCaptor.getValue().get(0);
-        assertThat(document.getOsDocId(), equalTo(document1Id));
+        assertThat(document.getId(), equalTo(document1Id));
         assertThat(document.asBulkIndexString(), not(containsString(document1BodyOriginal)));
 
         verifyNoMoreInteractions(client);

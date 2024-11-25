@@ -48,14 +48,13 @@ public class WorkloadGenerator {
         client.createIndex(indexName, indexRequestDoc, null);
 
         var docIdCounter = new AtomicInteger(0);
-        var segmentId = 0;
         var allDocs = workload.createDocs(options.totalDocs)
             .map(doc -> {
                 log.atTrace().setMessage("Created doc for index {}: {}")
                     .addArgument(indexName)
                     .addArgument(doc::toString).log();
                 var docId = docIdCounter.incrementAndGet();
-                return new BulkDocSection(segmentId, docId, indexName + "_" + docId, indexName, null, doc.toString());
+                return new BulkDocSection(indexName + "_" + docId, indexName, null, doc.toString());
             })
             .collect(Collectors.toList());
 

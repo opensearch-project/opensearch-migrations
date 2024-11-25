@@ -1,9 +1,11 @@
 package org.opensearch.migrations.bulkload.worker;
 
 import lombok.AllArgsConstructor;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.ToString;
 
+@EqualsAndHashCode
 @AllArgsConstructor
 @Getter
 @ToString

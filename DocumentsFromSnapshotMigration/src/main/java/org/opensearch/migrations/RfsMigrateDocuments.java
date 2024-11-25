@@ -351,6 +351,7 @@ public class RfsMigrateDocuments {
         log.error("Terminating RfsMigrateDocuments because the lease has expired for " + workItemId);
         var progressCursor = progressCursorRef.get();
         if (progressCursor != null) {
+            log.error("Progress cursor: " + progressCursor.toString());
             var successorWorkItem = progressCursor.toWorkItemString();
             ArrayList<String> successorWorkItemIds = new ArrayList<>();
             successorWorkItemIds.add(successorWorkItem);
@@ -361,7 +362,7 @@ public class RfsMigrateDocuments {
                 contextSupplier
             );
         }
-        
+
         System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
     }
 

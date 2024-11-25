@@ -23,6 +23,11 @@ import lombok.NoArgsConstructor;
 import lombok.ToString;
 import lombok.extern.slf4j.Slf4j;
 
+
+/**
+ * BulkDocSection represents a single document in a bulk request.  It tracks the shape of the document
+ * as needed for reindexing, as well as the metadata needed for the bulk request.
+ */
 @EqualsAndHashCode(onlyExplicitlyIncluded = true)
 @Slf4j
 public class BulkDocSection {
@@ -34,28 +39,16 @@ public class BulkDocSection {
 
     @EqualsAndHashCode.Include
     @Getter
-    private final int luceneSegId;
-    
-    @EqualsAndHashCode.Include
-    @Getter
-    private final int luceneDocId;
-
-    @EqualsAndHashCode.Include
-    @Getter
-    private final String osDocId;
+    private final String id;
     private final BulkIndex bulkIndex;
 
-    public BulkDocSection(int luceneSegId, int luceneDocId, String osDocId, String indexName, String type, String docBody) {
-        this.luceneSegId = luceneSegId;
-        this.luceneDocId = luceneDocId;
-        this.osDocId = osDocId;
-        this.bulkIndex = new BulkIndex(new BulkIndex.Metadata(osDocId, type, indexName), parseSource(docBody));
+    public BulkDocSection(String id, String indexName, String type, String source) {
+        this.id = id;
+        this.bulkIndex = new BulkIndex(new BulkIndex.Metadata(id, type, indexName), parseSource(source));
     }
 
     private BulkDocSection(BulkIndex bulkIndex) {
-        this.luceneSegId = 0; // TODO: Can we do better here?  Where is this constructor used?
-        this.luceneDocId = 0;
-        this.osDocId = bulkIndex.metadata.id;
+        this.id = bulkIndex.metadata.id;
         this.bulkIndex = bulkIndex;
     }
 
@@ -113,6 +106,9 @@ public class BulkDocSection {
         return (Map<String, Object>) OBJECT_MAPPER.convertValue(bulkIndex, Map.class);
     }
 
+    /**
+     * BulkIndex represents the serialization format of a single document in a bulk request.
+     */
     @NoArgsConstructor(force = true) // For Jackson
     @AllArgsConstructor
     @ToString
