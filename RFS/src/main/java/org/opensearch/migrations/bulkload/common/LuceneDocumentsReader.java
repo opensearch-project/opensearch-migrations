@@ -116,7 +116,7 @@ public class LuceneDocumentsReader {
     class SegmentNameSorter implements Comparator<LeafReader> {
         @Override
         public int compare(LeafReader leafReader1, LeafReader leafReader2) {
-            // Ensure both LeafReaders are instances of SegmentReader, which hold segment info
+            // If both LeafReaders are SegmentReaders, sort as normal
             if (leafReader1 instanceof SegmentReader && leafReader2 instanceof SegmentReader) {
                 SegmentCommitInfo segmentInfo1 = ((SegmentReader) leafReader1).getSegmentInfo();
                 SegmentCommitInfo segmentInfo2 = ((SegmentReader) leafReader2).getSegmentInfo();
@@ -125,8 +125,18 @@ public class LuceneDocumentsReader {
                 String segmentName2 = segmentInfo2.info.name;
 
                 return segmentName1.compareTo(segmentName2);
+            }
+            // Otherwise, shift the SegmentReaders to the front
+            else if (leafReader1 instanceof SegmentReader && !(leafReader2 instanceof SegmentReader)) {
+                log.info("Found non-SegmentReader of type {} in the DirectoryReader", leafReader2.getClass().getName());
+                return -1;
+            } else if (!(leafReader1 instanceof SegmentReader) && leafReader2 instanceof SegmentReader) {
+                log.info("Found non-SegmentReader of type {} in the DirectoryReader", leafReader1.getClass().getName());
+                return 1;
             } else {
-                throw new IllegalArgumentException("LeafReaders must be instances of SegmentReader to access segment names.");
+                log.info("Found non-SegmentReader of type {} in the DirectoryReader", leafReader1.getClass().getName());
+                log.info("Found non-SegmentReader of type {} in the DirectoryReader", leafReader2.getClass().getName());
+                return 0;
             }
         }
     }
@@ -199,7 +209,7 @@ public class LuceneDocumentsReader {
             return null;
         }
 
-        String osDocId = null;
+        String openSearchDocId = null;
         String type = null;
         BytesRef sourceBytes = null;
         try {
@@ -209,14 +219,14 @@ public class LuceneDocumentsReader {
                     case "_id": {
                         // ES 6+
                         var idBytes = field.binaryValue();
-                        osDocId = Uid.decodeId(idBytes.bytes);
+                        openSearchDocId = Uid.decodeId(idBytes.bytes);
                         break;
                     }
                     case "_uid": {
                         // ES <= 6
                         var combinedTypeId = field.stringValue().split("#", 2);
                         type = combinedTypeId[0];
-                        osDocId = combinedTypeId[1];
+                        openSearchDocId = combinedTypeId[1];
                         break;
                     }
                     case "_source": {
@@ -228,7 +238,7 @@ public class LuceneDocumentsReader {
                         break;
                 }
             }
-            if (osDocId == null) {
+            if (openSearchDocId == null) {
                 log.atError().setMessage("Document with index {} does not have an id. Skipping")
                     .addArgument(luceneDocId).log();
                 return null;  // Skip documents with missing id
@@ -236,11 +246,11 @@ public class LuceneDocumentsReader {
 
             if (sourceBytes == null || sourceBytes.bytes.length == 0) {
                 log.atWarn().setMessage("Document {} doesn't have the _source field enabled")
-                    .addArgument(osDocId).log();
+                    .addArgument(openSearchDocId).log();
                 return null;  // Skip these
             }
 
-            log.atDebug().setMessage("Reading document {}").addArgument(osDocId).log();
+            log.atDebug().setMessage("Reading document {}").addArgument(openSearchDocId).log();
         } catch (RuntimeException e) {
             StringBuilder errorMessage = new StringBuilder();
             errorMessage.append("Unable to parse Document id from Document.  The Document's Fields: ");
@@ -250,11 +260,11 @@ public class LuceneDocumentsReader {
         }
 
         if (!isLive) {
-            log.atDebug().setMessage("Document {} is not live").addArgument(osDocId).log();
+            log.atDebug().setMessage("Document {} is not live").addArgument(openSearchDocId).log();
             return null; // Skip these
         }
 
-        log.atDebug().setMessage("Document {} read successfully").addArgument(osDocId).log();
-        return new RfsLuceneDocument(luceneSegIndex, luceneDocId, osDocId, type, sourceBytes.utf8ToString());
+        log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
+        return new RfsLuceneDocument(luceneSegIndex, luceneDocId, openSearchDocId, type, sourceBytes.utf8ToString());
     }
 }

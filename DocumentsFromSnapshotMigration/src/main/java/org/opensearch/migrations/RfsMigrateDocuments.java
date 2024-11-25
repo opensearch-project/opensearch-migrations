@@ -361,6 +361,9 @@ public class RfsMigrateDocuments {
                 successorWorkItemIds,
                 contextSupplier
             );
+        } else {
+            log.error("No progress cursor to create successor work items from.");
+            log.error("Skipping creation of successor work item to retry the existing one");
         }
 
         System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
