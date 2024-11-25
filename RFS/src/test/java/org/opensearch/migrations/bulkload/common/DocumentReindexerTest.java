@@ -23,7 +23,6 @@ import org.mockito.MockitoAnnotations;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
 import reactor.test.StepVerifier;
-import software.amazon.awssdk.services.s3.endpoints.internal.Value.Int;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -323,16 +322,16 @@ class DocumentReindexerTest {
     }
 
     private RfsLuceneDocument createTestDocument(int id) {
-        return new RfsLuceneDocument(id, id, String.valueOf(id), null, "{\"field\":\"value\"}");
+        return new RfsLuceneDocument(id, id, String.valueOf(id), null, "{\"field\":\"value\"}", null);
     }
 
     private RfsLuceneDocument createTestDocumentWithWhitespace(int id) {
-        return new RfsLuceneDocument(id, id, String.valueOf(id), null, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ");
+        return new RfsLuceneDocument(id, id, String.valueOf(id), null, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ", null);
     }
 
     private RfsLuceneDocument createLargeTestDocument(int id, int size) {
         String largeField = "x".repeat(size);
-        return new RfsLuceneDocument(id, id, String.valueOf(id), null, "{\"field\":\"" + largeField + "\"}");
+        return new RfsLuceneDocument(id, id, String.valueOf(id), null, "{\"field\":\"" + largeField + "\"}", null);
     }
 
     /**
@@ -344,6 +343,6 @@ class DocumentReindexerTest {
      */
     private RfsLuceneDocument createTestDocumentWithType(int id, String type) {
         String source = "{\"field\":\"value\"}";
-        return new RfsLuceneDocument(id, id, String.valueOf(id), type, source);
+        return new RfsLuceneDocument(id, id, String.valueOf(id), type, source, null);
     }
 }

@@ -5,9 +5,9 @@ import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
+import org.opensearch.migrations.bulkload.worker.IndexAndShardCursor;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts.IDocumentReindexContext;
 import org.opensearch.migrations.transform.IJsonTransformer;
-import org.opensearch.migrations.bulkload.worker.IndexAndShardCursor;
 
 import lombok.RequiredArgsConstructor;
 import lombok.SneakyThrows;

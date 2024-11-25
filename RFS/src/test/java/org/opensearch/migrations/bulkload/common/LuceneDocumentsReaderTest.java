@@ -269,14 +269,12 @@ public class LuceneDocumentsReaderTest {
             .block(Duration.ofSeconds(2));
 
         // Verify results
-        var expectedConcurrentSegments = 10;
+        var expectedConcurrentSegments = 1; // Segment concurrency disabled for preserved ordering
         var expectedConcurrentDocReads = 100;
         assertNotNull(actualDocuments);
         assertEquals(numSegments * docsPerSegment, actualDocuments.size());
+        assertEquals(expectedConcurrentSegments, observedConcurrentSegments.get(), "Expected concurrent open segments equal to " + expectedConcurrentSegments);
         assertEquals(expectedConcurrentDocReads, observedConcurrentDocReads.get(), "Expected concurrent document reads to equal DEFAULT_BOUNDED_ELASTIC_SIZE");
-        assertEquals(expectedConcurrentSegments, observedConcurrentSegments.get(), "Expected concurrent open segments equal to 5");
-
-
     }
 
     @Test

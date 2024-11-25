@@ -4,7 +4,6 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.function.Function;
 
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
@@ -26,6 +25,7 @@ import org.apache.lucene.util.BytesRef;
 import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 @RequiredArgsConstructor
@@ -170,28 +170,41 @@ public class LuceneDocumentsReader {
 
         return Flux.fromIterable(reader.leaves())
             .skip(startSegmentIndex)
-            .flatMap(ctx -> getReadDocCallablesFromSegments(ctx,
-                    // Only use startDocId for the first segment we process
-                    ctx.ord == startSegmentIndex ? startDocId : 0))
-            .flatMap(c -> Mono.fromCallable(c)
-                            .subscribeOn(sharedSegmentReaderScheduler), // Scheduler to read documents on
-                    maxDocumentsToReadAtOnce) // Don't need to worry about prefetch before this step as documents aren't realized
+            .concatMapDelayError(c -> readDocsFromSegment(c,
+                // Only use startDocId for the first segment we process
+                    c.ord == startSegmentIndex ? startDocId : 0,
+                    sharedSegmentReaderScheduler,
+                    maxDocumentsToReadAtOnce)
+            )
+            .subscribeOn(sharedSegmentReaderScheduler) // Scheduler to read documents on
             .doOnTerminate(sharedSegmentReaderScheduler::dispose);
     }
 
-    Publisher<Callable<RfsLuceneDocument>> getReadDocCallablesFromSegments(LeafReaderContext leafReaderContext, int startDocId) {
+    Flux<RfsLuceneDocument> readDocsFromSegment(LeafReaderContext leafReaderContext, int startDocId, Scheduler scheduler,
+                                                int concurrency) {
         var segmentReader = leafReaderContext.reader();
         var liveDocs = segmentReader.getLiveDocs();
 
         int segmentIndex = leafReaderContext.ord;
 
         return Flux.range(startDocId, segmentReader.maxDoc() - startDocId)
-            .subscribeOn(Schedulers.parallel())
-            .map(docIdx -> () -> ((liveDocs == null || liveDocs.get(docIdx)) ? // Filter for live docs
-                    getDocument(segmentReader, segmentIndex, docIdx, true) : // Get document, returns null to skip malformed docs
-                    null));
+                .flatMapSequentialDelayError(docIdx -> Mono.defer(() -> {
+                    try {
+                        if (liveDocs == null || liveDocs.get(docIdx)) {
+                            // Get document, returns null to skip malformed docs
+                            RfsLuceneDocument document = getDocument(segmentReader, segmentIndex, docIdx, true);
+                            return Mono.justOrEmpty(document); // Emit only non-null documents
+                        } else {
+                            return Mono.empty(); // Skip non-live documents
+                        }
+                    } catch (Exception e) {
+                        // Handle individual document read failures gracefully
+                        return Mono.error(new RuntimeException("Error reading document at index: " + docIdx, e));
+                    }
+                }).subscribeOn(scheduler),
+                        concurrency, 1)
+                .subscribeOn(Schedulers.boundedElastic());
     }
-
     protected DirectoryReader wrapReader(DirectoryReader reader, boolean softDeletesEnabled, String softDeletesField) throws IOException {
         if (softDeletesEnabled) {
             return new SoftDeletesDirectoryReaderWrapper(reader, softDeletesField);
