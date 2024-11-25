@@ -1,27 +1,59 @@
 {%- include "common/featureEnabled.j2" -%}
 
-{%- macro default_action(source_and_mappings) -%}
-{
-    "diagPair": {{ source_and_mappings }},
-    "preserve": "*"
-}
+{%- macro preserve_original(source_and_mappings) -%}
+  { "preserve": "*" }
 {%- endmacro -%}
 
-{%- macro rewrite_uri_to_strip_types(match, input_map) -%}
-{
-  "method": "{{ input_map.request.method }}",
-  "URI": "/{{ input_map.index_mappings[match.group1][match.group2] }}/_doc/{{ match.group3 }}",
-  "preserve": ["headers","payload"]
-}
+{%- macro make_no_op() -%}
+    { "method": "GET", "URI": "/" }
 {%- endmacro -%}
 
-{% macro rewrite_create_index(match, input_map) -%}
-{# In reality, this is going to need to figure out if there are multiple type mappings and deal with them according.y #}
+{%- macro rewrite_uri_to_strip_types(source_index, source_type, regex_index_mappings) -%}
+    {%- set ns = namespace(target_index=none) -%}
+    {%- for entry in regex_index_mappings -%}
+        {%- set idx_regex = entry.get(0) -%}
+        {%- set type_regex = entry[1] -%}
+        {%- set target_idx_pattern = entry[2] -%}
+
+        {%- if ns.target_index is none -%}
+          {%- set conjoined_source = source_index + "/" + source_type -%}
+          {%- set conjoined_regex = idx_regex + "/" + type_regex -%}
+          {%- set didMatch = conjoined_source | regex_capture(conjoined_regex) -%}
+          {%- if didMatch is not none -%}
+              {%- set ns.target_index = conjoined_source | regex_replace(conjoined_regex, target_idx_pattern) -%}
+          {%- endif -%}
+        {%- endif -%}
+    {%- endfor -%}
+    {{- ns.target_index -}}
+{%- endmacro -%}
+
+{%- macro rewrite_uri_for_types(match, input_map) -%}
+    {%- set target_index = (input_map.index_mappings[match.group1] | default({}))[match.group2] -%}
+    {%- if target_index is none %} {# not sure if default arguments would be eagerly evaluated #}
+        {%- set target_index = invoke_macro('rewrite_uri_to_strip_types', match.group1, match.group2, input_map.regex_index_mappings) -%}
+    {%- endif -%}
+    {%- if target_index is none -%}
+        {{ make_no_op() }}
+    {%- else -%}
+        {
+          "method": "{{ input_map.request.method }}",
+          "URI": "/{{ target_index }}/_doc/{{ match.group3 }}",
+          "preserve": ["headers","payload"]
+        }
+    {%-  endif -%}
+{%- endmacro -%}
+
+{% macro rewrite_create_index_excise(match, input_map) -%}
 {
   "method": "{{ input_map.request.method }}",
   "URI": "{{ input_map.index_mappings[match.group1] }}",
   "payload": {
     "inlinedJsonBody": {
+      {%- for key, value in input_map.request.body.items() -%}
+        {%- if key != "mappings" -%}
+          "{{ key }}": {{ value | tojson }},
+        {%- endif -%}
+      {%- endfor -%}
       "mappings": {
         "properties": {
           "type": {
@@ -40,12 +72,28 @@
 }
 {%- endmacro -%}
 
-{% set source_and_mappings = { 'request': request, 'index_mappings': index_mappings} %}
+{% macro rewrite_create_index(match, input_map) -%}
+    {% set target_mappings = input_map.index_mappings[match.group1] | default({}) | length %}
+    {% if target_mappings == 0 %}
+      {{  make_no_op() }}
+    {% elif num_mappings == 1 %}
+      {{ rewrite_create_index_excise(match, input_map) }}
+    {% elif num_mappings > 1 %}
+    {% else %}
+        {{ preserve_original(input_mappings) }}
+    {% endif %}
+{%- endmacro -%}
+
+{% set source_and_mappings = {
+  'request': request,
+  'index_mappings': index_mappings,
+  'regex_index_mappings': regex_index_mappings}
+%}
 {%- import "common/route.j2" as rscope -%}
-{{- rscope.route(source_and_mappings, request.method + " " + request.URI, flags, 'default_action',
+{{- rscope.route(source_and_mappings, request.method + " " + request.URI, flags, 'preserve_original',
     [
-        ('(?:PUT|POST) /([^/]*)/([^/]*)/.*', 'rewrite_uri_to_strip_types', 'rewrite_add_request_to_strip_types'),
-        (         'GET /([^/]*)/([^/]*)/.*', 'rewrite_uri_to_strip_types', 'rewrite_get_request_to_strip_types'),
-        ('(?:PUT|POST) /([^/]*)',            'rewrite_create_index', 'rewrite_create_index')
+        ('(?:PUT|POST) /([^/]*)/([^/]*)/(.*)', 'rewrite_uri_for_types', 'rewrite_add_request_to_strip_types'),
+        (         'GET /([^/]*)/([^/]*)/.*',   'rewrite_uri_for_types', 'rewrite_get_request_to_strip_types'),
+        ('(?:PUT|POST) /([^/]*)',              'rewrite_create_index', 'rewrite_create_index')
   ])
 -}}

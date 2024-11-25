@@ -1,5 +1,6 @@
 package org.opensearch.migrations.replay;
 
+import java.util.List;
 import java.util.Map;
 
 import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
@@ -45,38 +46,49 @@ public class TypeMappingsSanitizationProviderTest {
 
     @Test
     public void testSimpleTransform() throws JsonProcessingException {
-        var config = Map.of(
-            "indexA", Map.of(
-                "type1", "indexA_1",
-                "type2", "indexA_2"),
-            "indexB", Map.of(
-                "type1", "indexB",
-                "type2", "indexB"),
-            "indexC", Map.of(
-                "type2", "indexC"),
-            "(time*)", Map.of(
-                "(type*)", "\\1_And_\\2"));;
-        var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(config);
+        var config = Map.of("staticMappings",
+            Map.of(
+                "indexA", Map.of(
+                    "type1", "indexA_1",
+                    "type2", "indexA_2"),
+                "indexB", Map.of(
+                    "type1", "indexB",
+                    "type2", "indexB"),
+                "indexC", Map.of(
+                    "type2", "indexC")),
+            "regexMappings", List.of(List.of("(time*)", "(type*)", "\\1_And_\\2")));
+        var provider = new TypeMappingSanitizationTransformerProvider();
+        var transformer = provider.createTransformer(config);
         var transformedDocument =
-            transformer.transformJson(mapper.readValue(TEST_INPUT_REQUEST, new TypeReference<>(){}));
+            transformer.transformJson(mapper.readValue(TEST_INPUT_REQUEST, new TypeReference<>() {
+            }));
         var outputStr = emitJson(mapper, transformedDocument);
 
         log.atInfo().setMessage("output={}").addArgument(outputStr).log();
         final String TEST_OUTPUT_REQUEST = "{\n"
-                + "  \"method\": \"PUT\",\n"
-                + "  \"URI\": \"/indexA_2/_doc/someuser\",\n"
-                + "  \"headers\": {\n"
-                + "    \"host\": \"127.0.0.1\"\n"
-                + "  },\n"
-                + "  \"payload\": {\n"
-                + "    \"inlinedJsonBody\": {\n"
-                + "      \"name\": \"Some User\",\n"
-                + "      \"user_name\": \"user\",\n"
-                + "      \"email\": \"user@example.com\"\n"
-                + "    }\n"
-                + "  }\n"
-                + "}\n";
+            + "  \"method\": \"PUT\",\n"
+            + "  \"URI\": \"/indexA_2/_doc/someuser\",\n"
+            + "  \"headers\": {\n"
+            + "    \"host\": \"127.0.0.1\"\n"
+            + "  },\n"
+            + "  \"payload\": {\n"
+            + "    \"inlinedJsonBody\": {\n"
+            + "      \"name\": \"Some User\",\n"
+            + "      \"user_name\": \"user\",\n"
+            + "      \"email\": \"user@example.com\"\n"
+            + "    }\n"
+            + "  }\n"
+            + "}\n";
 
-        Assertions.assertEquals(normalize(mapper, TEST_OUTPUT_REQUEST), normalize(mapper, outputStr));
+        var normalizedOutput = normalize(mapper, TEST_OUTPUT_REQUEST);
+        Assertions.assertEquals(normalizedOutput, normalize(mapper, outputStr));
+        {
+            var resultFromNullConfig = provider.createTransformer(null)
+                .transformJson(mapper.readValue(TEST_INPUT_REQUEST, new TypeReference<>() {
+                }));
+            Assertions.assertEquals(normalizedOutput
+                    .replace("/indexA_2/_doc/someuser", "/1_2/_doc/someuser"),
+                normalize(mapper, emitJson(mapper, resultFromNullConfig)));
+        }
     }
 }

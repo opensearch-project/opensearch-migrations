@@ -2,10 +2,12 @@ package org.opensearch.migrations.transform;
 
 import java.util.Map;
 
+import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.shaded.com.fasterxml.jackson.databind.ObjectMapper;
 
+@Slf4j
 class JinjavaTransformerTest {
 
     private final static String template = "" +
@@ -81,6 +83,6 @@ class JinjavaTransformerTest {
         var objMapper = new ObjectMapper();
         var resultObj = indexTypeMappingRewriter.transformJson(objMapper.readValue(testString, Map.class));
         var resultStr = objMapper.writeValueAsString(resultObj);
-        System.out.println("resultStr = " + resultStr);
+        log.atInfo().setMessage("resultStr = {}").setMessage(resultStr).log();
     }
 }
