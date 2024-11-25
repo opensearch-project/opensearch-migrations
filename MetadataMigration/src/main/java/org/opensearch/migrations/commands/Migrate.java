@@ -2,7 +2,6 @@ package org.opensearch.migrations.commands;
 
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
-import org.opensearch.migrations.bulkload.transformers.CompositeTransformer;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
 
 import com.beust.jcommander.ParameterException;
