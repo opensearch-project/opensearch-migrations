@@ -63,6 +63,17 @@ public class ClusterOperations {
         }
     }
 
+    @SneakyThrows
+    public void createDocument(final String index, final String docId, final String body, String routing) {
+        var indexDocumentRequest = new HttpPut(clusterUrl + "/" + index + "/_doc/" + docId + "?routing=" + routing);
+        indexDocumentRequest.setEntity(new StringEntity(body));
+        indexDocumentRequest.setHeader("Content-Type", "application/json");
+
+        try (var response = httpClient.execute(indexDocumentRequest)) {
+            assertThat(response.getCode(), anyOf(equalTo(201), equalTo(200)));
+        }
+    }
+
     public void deleteDocument(final String index, final String docId) throws IOException {
         var deleteDocumentRequest = new HttpDelete(clusterUrl + "/" + index + "/_doc/" + docId);
 

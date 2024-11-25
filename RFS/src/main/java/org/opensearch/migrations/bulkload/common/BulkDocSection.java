@@ -38,8 +38,12 @@ public class BulkDocSection {
     private final BulkIndex bulkIndex;
 
     public BulkDocSection(String id, String indexName, String type, String docBody) {
+        this(id, indexName, type, docBody, null);
+    }
+
+    public BulkDocSection(String id, String indexName, String type, String docBody, String routing) {
         this.docId = id;
-        this.bulkIndex = new BulkIndex(new BulkIndex.Metadata(id, type, indexName), parseSource(docBody));
+        this.bulkIndex = new BulkIndex(new BulkIndex.Metadata(id, type, indexName, routing), parseSource(docBody));
     }
 
     private BulkDocSection(BulkIndex bulkIndex) {
@@ -124,6 +128,8 @@ public class BulkDocSection {
             private final String type;
             @JsonProperty("_index")
             private final String index;
+            @JsonProperty("routing")
+            private final String routing;
         }
 
         public static class BulkIndexRequestSerializer extends JsonSerializer<BulkIndex> {
