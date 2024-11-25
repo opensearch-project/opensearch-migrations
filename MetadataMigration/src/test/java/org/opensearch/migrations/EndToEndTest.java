@@ -208,7 +208,8 @@ class EndToEndTest {
         var migratedItems = result.getItems();
         assertThat(getNames(getSuccessfulResults(migratedItems.getIndexTemplates())), containsInAnyOrder(testData.indexTemplateName));
         assertThat(getNames(getSuccessfulResults(migratedItems.getComponentTemplates())), equalTo(templateType.equals(TemplateType.IndexAndComponent) ? List.of(testData.compoTemplateName) : List.of()));
-        assertThat(getNames(getSuccessfulResults(migratedItems.getIndexes())), containsInAnyOrder(testData.blogIndexName, testData.movieIndexName, testData.indexThatAlreadyExists));
+        assertThat(getNames(getSuccessfulResults(migratedItems.getIndexes())), containsInAnyOrder(testData.blogIndexName, testData.movieIndexName));
+        assertThat(getNames(getFailedResultsByType(migratedItems.getIndexes(), CreationResult.CreationFailureType.ALREADY_EXISTS)), containsInAnyOrder(testData.indexThatAlreadyExists));
         assertThat(getNames(getSuccessfulResults(migratedItems.getAliases())), containsInAnyOrder(testData.aliasInTemplate, testData.aliasName));
 
     }
@@ -216,6 +217,12 @@ class EndToEndTest {
     private List<CreationResult> getSuccessfulResults(List<CreationResult> results) {
         return results.stream()
                 .filter(CreationResult::wasSuccessful)
+                .collect(Collectors.toList());
+    }
+
+    private List<CreationResult> getFailedResultsByType(List<CreationResult> results, CreationResult.CreationFailureType failureType) {
+        return results.stream()
+                .filter(r -> failureType.equals(r.getFailureType()))
                 .collect(Collectors.toList());
     }
 
