@@ -206,10 +206,17 @@ class EndToEndTest {
         assertThat(result.getExitCode(), equalTo(0));
 
         var migratedItems = result.getItems();
-        assertThat(getNames(migratedItems.getIndexTemplates()), containsInAnyOrder(testData.indexTemplateName));
-        assertThat(getNames(migratedItems.getComponentTemplates()), equalTo(templateType.equals(TemplateType.IndexAndComponent) ? List.of(testData.compoTemplateName) : List.of()));
-        assertThat(getNames(migratedItems.getIndexes()), containsInAnyOrder(testData.blogIndexName, testData.movieIndexName, testData.indexThatAlreadyExists));
-        assertThat(getNames(migratedItems.getAliases()), containsInAnyOrder(testData.aliasInTemplate, testData.aliasName));
+        assertThat(getNames(getSuccessfulResults(migratedItems.getIndexTemplates())), containsInAnyOrder(testData.indexTemplateName));
+        assertThat(getNames(getSuccessfulResults(migratedItems.getComponentTemplates())), equalTo(templateType.equals(TemplateType.IndexAndComponent) ? List.of(testData.compoTemplateName) : List.of()));
+        assertThat(getNames(getSuccessfulResults(migratedItems.getIndexes())), containsInAnyOrder(testData.blogIndexName, testData.movieIndexName, testData.indexThatAlreadyExists));
+        assertThat(getNames(getSuccessfulResults(migratedItems.getAliases())), containsInAnyOrder(testData.aliasInTemplate, testData.aliasName));
+
+    }
+
+    private List<CreationResult> getSuccessfulResults(List<CreationResult> results) {
+        return results.stream()
+                .filter(CreationResult::wasSuccessful)
+                .collect(Collectors.toList());
     }
 
     private List<String> getNames(List<CreationResult> items) {
