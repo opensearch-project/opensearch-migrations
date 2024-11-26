@@ -214,7 +214,7 @@ export class StackComposer {
         const reindexFromSnapshotMaxShardSizeGiB = this.getContextForType('reindexFromSnapshotMaxShardSizeGiB', 'number', defaultValues, contextJSON)
         const reindexFromSnapshotWorkerSize = this.getContextForType('reindexFromSnapshotWorkerSize', 'string', defaultValues, contextJSON)
         const albAcmCertArn = this.getContextForType('albAcmCertArn', 'string', defaultValues, contextJSON);
-        const managedServiceSourceSnapshotEnabled = this.getContextForType('managedServiceSourceSnapshotEnabled', 'boolean', defaultValues, contextJSON)
+        let managedServiceSourceSnapshotEnabled = this.getContextForType('managedServiceSourceSnapshotEnabled', 'boolean', defaultValues, contextJSON)
 
         // We're in a transition state from an older model with limited, individually defined fields and heading towards objects
         // that fully define the source and target cluster configurations. For the time being, we're supporting both.
@@ -245,6 +245,9 @@ export class StackComposer {
         if (managedServiceSourceSnapshotEnabled && !sourceCluster?.auth.sigv4) {
             throw new Error("A managed service source snapshot is only compatible with sigv4 authentication. If you would like to proceed" +
                 " please disable `managedServiceSourceSnapshotEnabled` and provide your own snapshot of the source cluster.")
+        } else if (sourceCluster?.auth.sigv4 && managedServiceSourceSnapshotEnabled == null) {
+            managedServiceSourceSnapshotEnabled = true;
+            CdkLogger.info("`managedServiceSourceSnapshotEnabled` is not set with source cluster set with sigv4 auth, defaulting to true.")
         }
 
         const targetClusterEndpointField = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
