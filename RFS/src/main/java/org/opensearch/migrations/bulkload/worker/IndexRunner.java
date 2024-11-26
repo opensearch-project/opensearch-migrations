@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.worker;
 
 import java.util.List;
 import java.util.function.BiConsumer;
+import java.util.function.Predicate;
 
 import org.opensearch.migrations.MigrationMode;
 import org.opensearch.migrations.bulkload.common.FilterScheme;
@@ -35,14 +36,25 @@ public class IndexRunner {
         };
         var results = IndexMetadataResults.builder();
 
+        // Set results for filtered items
+        repoDataProvider.getIndicesInSnapshot(snapshotName)
+                .stream()
+                .filter(Predicate.not(FilterScheme.filterIndicesByAllowList(indexAllowlist, logger)))
+                .forEach(index -> results.index(CreationResult.builder()
+                        .name(index.getName())
+                        .failureType(CreationFailureType.SKIPPED_DUE_TO_FILTER)
+                        .build()));
+
+
         repoDataProvider.getIndicesInSnapshot(snapshotName)
             .stream()
             .filter(FilterScheme.filterIndicesByAllowList(indexAllowlist, logger))
             .forEach(index -> {
                 var indexName = index.getName();
-                var indexMetadata = metadataFactory.fromRepo(snapshotName, indexName);
+                var originalIndexMetadata = metadataFactory.fromRepo(snapshotName, indexName);
 
                 CreationResult indexResult = null;
+                var indexMetadata = originalIndexMetadata.deepCopy();
                 try {
                     indexMetadata = transformer.transformIndexMetadata(indexMetadata);
                     indexResult = indexCreator.create(indexMetadata, mode, context);

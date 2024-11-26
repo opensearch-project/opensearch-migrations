@@ -18,7 +18,9 @@ public class JsonTransformerForDocumentTypeRemovalProvider implements IJsonTrans
         @Override
         @SuppressWarnings("unchecked")
         public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
-            ((Map<String, Object>) incomingJson.get("index")).remove("_type");
+            if (incomingJson.containsKey("index")) {
+                ((Map<String, Object>) incomingJson.get("index")).remove("_type");
+            }
             return incomingJson;
         }
     }
