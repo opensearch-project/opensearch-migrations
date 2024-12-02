@@ -59,8 +59,8 @@ public class GlobalMetadataCreator_OS_2_11Test {
         var results = creator.create(globalMetadata, MigrationMode.PERFORM, context);
         assertThat(results.fatalIssueCount(), equalTo(0L));
         assertThat(results.getLegacyTemplates(), containsInAnyOrder(createSuccessResult("lit1"), createResult("lit2", SKIPPED_DUE_TO_FILTER), createResult(".lits", SKIPPED_DUE_TO_FILTER)));
-        assertThat(results.getComponentTemplates(), containsInAnyOrder(createResult("ct1", SKIPPED_DUE_TO_FILTER), createSuccessResult(".cts")));
-        assertThat(results.getIndexTemplates(), containsInAnyOrder(createResult("it1", SKIPPED_DUE_TO_FILTER), createSuccessResult(".its")));
+        assertThat(results.getComponentTemplates(), containsInAnyOrder(createSuccessResult("ct1"), createResult(".cts", SKIPPED_DUE_TO_FILTER)));
+        assertThat(results.getIndexTemplates(), containsInAnyOrder(createSuccessResult("it1"), createResult(".its", SKIPPED_DUE_TO_FILTER)));
     }
 
     private CreationResult createSuccessResult(String name) {
