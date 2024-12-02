@@ -14,7 +14,6 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParam
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ContainerVersion;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
-import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.metadata.CreationResult;
@@ -162,12 +161,6 @@ class EndToEndTest {
         }
 
         arguments.targetArgs.host = targetCluster.getUrl();
-
-        var dataFilterArgs = new DataFilterArgs();
-        dataFilterArgs.indexAllowlist = List.of();
-        dataFilterArgs.componentTemplateAllowlist = List.of(testData.compoTemplateName);
-        dataFilterArgs.indexTemplateAllowlist = List.of(testData.indexTemplateName);
-        arguments.dataFilterArgs = dataFilterArgs;
 
         var targetClusterOperations = new ClusterOperations(targetCluster.getUrl());
         targetClusterOperations.createDocument(testData.indexThatAlreadyExists, "doc77", "{}");
