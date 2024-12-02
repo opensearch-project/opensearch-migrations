@@ -71,9 +71,9 @@ public class PerformanceVerificationTest {
             }
 
             @Override
-            protected RfsLuceneDocument getDocument(IndexReader reader, int luceneSegIndex, int luceneDocId, boolean isLive) {
+            protected RfsLuceneDocument getDocument(IndexReader reader, int luceneDocId, boolean isLive, int segmentDocBase) {
                 ingestedDocuments.incrementAndGet();
-                return super.getDocument(reader, luceneSegIndex, luceneDocId, isLive);
+                return super.getDocument(reader, luceneDocId, isLive, segmentDocBase);
             }
         };
 
@@ -107,7 +107,7 @@ public class PerformanceVerificationTest {
 
         // Start reindexing in a separate thread
         Thread reindexThread = new Thread(() -> {
-            reindexer.reindex("test-index", 0, reader.readDocuments(), mockContext).then().block();
+            reindexer.reindex("test-index", reader.readDocuments(), mockContext).then().block();
         });
         reindexThread.start();
 

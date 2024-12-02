@@ -8,11 +8,8 @@ import lombok.RequiredArgsConstructor;
  */
 @RequiredArgsConstructor
 public class RfsLuceneDocument {
-    // The Lucene segment identifier of the document
-    public final int luceneSegId;
-
-    // The Lucene document identifier of the document
-    public final int luceneDocId;
+    // The Lucene document number of the document
+    public final int luceneDocNumber;
 
     // The Elasticsearch/OpenSearch document identifier (_id) of the document
     public final String id;

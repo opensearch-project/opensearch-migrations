@@ -398,7 +398,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             var resultFromUpdate = getResult(updateResponse);
 
             if (resultFromUpdate == DocumentModificationResult.CREATED) {
-                return new WorkItemAndDuration(workItemId, startTime.plus(leaseDuration));
+                return new WorkItemAndDuration(startTime.plus(leaseDuration),
+                        WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItemId));
             } else {
                 final var httpResponse = httpClient.makeJsonRequest(
                     AbstractedHttpClient.GET_METHOD,
@@ -409,7 +410,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 final var responseDoc = objectMapper.readTree(httpResponse.getPayloadBytes()).path(SOURCE_FIELD_NAME);
                 if (resultFromUpdate == DocumentModificationResult.UPDATED) {
                     var leaseExpirationTime = Instant.ofEpochMilli(1000 * responseDoc.path(EXPIRATION_FIELD_NAME).longValue());
-                    return new WorkItemAndDuration(workItemId, leaseExpirationTime);
+                    return new WorkItemAndDuration(leaseExpirationTime,
+                            WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItemId));
                 } else if (!responseDoc.path(COMPLETED_AT_FIELD_NAME).isMissingNode()) {
                     return new AlreadyCompleted();
                 } else if (resultFromUpdate == DocumentModificationResult.IGNORED) {
@@ -1021,7 +1023,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                                 // this item is not acquirable, so repeat the loop to find a new item.
                                 continue;
                             }
-                            return new WorkItemAndDuration(workItem.workItemId, workItem.leaseExpirationTime);
+                            return new WorkItemAndDuration(workItem.getLeaseExpirationTime(),
+                                    WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItem.getWorkItemId()));
                         case NOTHING_TO_ACQUIRE:
                             ctx.recordNothingAvailable();
                             return new NoAvailableWorkToBeDone();

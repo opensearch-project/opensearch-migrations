@@ -7,7 +7,7 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
-import org.opensearch.migrations.bulkload.worker.IndexAndShardCursor;
+import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import org.opensearch.migrations.transform.IJsonTransformer;
 import org.opensearch.migrations.transform.TransformationLoader;
@@ -68,9 +68,9 @@ class DocumentReindexerTest {
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
 
-        StepVerifier.create(documentReindexer.reindex("test-index", 0, documentStream, mockContext))
+        StepVerifier.create(documentReindexer.reindex("test-index",  documentStream, mockContext))
             .expectNextCount(3)
-            .expectNext(new IndexAndShardCursor("test-index", 0, 10, 10))
+            .expectNext(new WorkItemCursor(10))
             .thenRequest(4)
             .verifyComplete();
 
@@ -107,9 +107,9 @@ class DocumentReindexerTest {
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
 
-        StepVerifier.create(documentReindexer.reindex("test-index", 0, documentStream, mockContext))
+        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
         .expectNextCount(4)
-        .expectNext(new IndexAndShardCursor("test-index", 0, 5, 5))
+        .expectNext(new WorkItemCursor(5))
         .thenRequest(5)
         .verifyComplete();
 
@@ -154,8 +154,8 @@ class DocumentReindexerTest {
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
 
-        StepVerifier.create(documentReindexer.reindex("test-index", 0, documentStream, mockContext))
-            .expectNext(new IndexAndShardCursor("test-index", 0, 5, 5))
+        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
+            .expectNext(new WorkItemCursor(5))
             .thenRequest(5)
             .verifyComplete();
 
@@ -188,8 +188,8 @@ class DocumentReindexerTest {
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
 
-        StepVerifier.create(documentReindexer.reindex("test-index", 0, documentStream, mockContext))
-            .expectNext(new IndexAndShardCursor("test-index", 0, 1, 1))
+        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
+            .expectNext(new WorkItemCursor(1))
             .thenRequest(1)
             .verifyComplete();
 
@@ -216,8 +216,8 @@ class DocumentReindexerTest {
                     String.format("{\"took\":1,\"errors\":false,\"items\":[%s]}", "{}".repeat((int)docCount))));
             });
 
-        StepVerifier.create(documentReindexer.reindex("test-index", 0, documentStream, mockContext))
-            .expectNext(new IndexAndShardCursor("test-index", 0, 1, 1))
+        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
+            .expectNext(new WorkItemCursor(1))
             .thenRequest(1)
             .verifyComplete();
 
@@ -251,9 +251,9 @@ class DocumentReindexerTest {
                     .doOnTerminate(concurrentRequests::decrementAndGet);
             });
 
-        StepVerifier.create(concurrentReindexer.reindex("test-index", 0, documentStream, mockContext))
+        StepVerifier.create(concurrentReindexer.reindex("test-index", documentStream, mockContext))
             .expectNextCount(99)
-            .expectNext(new IndexAndShardCursor("test-index", 0, 100, 100))
+            .expectNext(new WorkItemCursor(100))
             .thenRequest(100)
             .verifyComplete();
 
@@ -295,8 +295,8 @@ class DocumentReindexerTest {
                 });
 
         // Execute the reindexing process
-        StepVerifier.create(documentReindexer.reindex("test-index", 0, documentStream, mockContext))
-            .expectNext(new IndexAndShardCursor("test-index", 0, 3, 3))
+        StepVerifier.create(documentReindexer.reindex("test-index", documentStream, mockContext))
+            .expectNext(new WorkItemCursor(3))
             .thenRequest(1)
             .verifyComplete();
 
@@ -322,16 +322,16 @@ class DocumentReindexerTest {
     }
 
     private RfsLuceneDocument createTestDocument(int id) {
-        return new RfsLuceneDocument(id, id, String.valueOf(id), null, "{\"field\":\"value\"}", null);
+        return new RfsLuceneDocument(id, String.valueOf(id), null, "{\"field\":\"value\"}", null);
     }
 
     private RfsLuceneDocument createTestDocumentWithWhitespace(int id) {
-        return new RfsLuceneDocument(id, id, String.valueOf(id), null, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ", null);
+        return new RfsLuceneDocument(id, String.valueOf(id), null, " \r\n\t{\"field\"\n:\"value\"}\r\n\t ", null);
     }
 
     private RfsLuceneDocument createLargeTestDocument(int id, int size) {
         String largeField = "x".repeat(size);
-        return new RfsLuceneDocument(id, id, String.valueOf(id), null, "{\"field\":\"" + largeField + "\"}", null);
+        return new RfsLuceneDocument(id, String.valueOf(id), null, "{\"field\":\"" + largeField + "\"}", null);
     }
 
     /**
@@ -343,6 +343,6 @@ class DocumentReindexerTest {
      */
     private RfsLuceneDocument createTestDocumentWithType(int id, String type) {
         String source = "{\"field\":\"value\"}";
-        return new RfsLuceneDocument(id, id, String.valueOf(id), type, source, null);
+        return new RfsLuceneDocument(id, String.valueOf(id), type, source, null);
     }
 }

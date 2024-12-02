@@ -13,27 +13,15 @@ import lombok.AllArgsConstructor;
  */
 @AllArgsConstructor
 public class RfsDocument {
-    // The Lucene segment identifier of the document
-    public final int luceneSegId;
-
-    // The Lucene document identifier of the document
-    public final int luceneDocId;
-
-    // The original ElasticSearch/OpenSearch Index the document was in
-    public final String indexName;
-
-    // The original ElasticSearch/OpenSearch shard the document was in
-    public final int shardNumber;
+    // The Lucene index doc number of the document (global over shard / lucene-index)
+    public final int luceneDocNumber;
 
     // The Elasticsearch/OpenSearch document to be reindexed
     public final BulkDocSection document;
 
-    public static RfsDocument fromLuceneDocument(RfsLuceneDocument doc, String indexName, int shardNumber) {
+    public static RfsDocument fromLuceneDocument(RfsLuceneDocument doc, String indexName) {
         return new RfsDocument(
-            doc.luceneSegId,
-            doc.luceneDocId,
-            indexName,
-            shardNumber,
+            doc.luceneDocNumber,
             new BulkDocSection(
                 doc.id,
                 indexName,
@@ -46,10 +34,7 @@ public class RfsDocument {
 
     public static RfsDocument transform(Function<Map<String, Object>, Map<String, Object>> transformer, RfsDocument doc) {
         return new RfsDocument(
-            doc.luceneSegId,
-            doc.luceneDocId,
-            doc.indexName,
-            doc.shardNumber,
+            doc.luceneDocNumber,
             BulkDocSection.fromMap(transformer.apply(doc.document.toMap()))
         );
     }

@@ -109,11 +109,12 @@ class OpenSearchWorkCoodinatorTest {
     private static final AtomicInteger nonce = new AtomicInteger();
 
     static Stream<Arguments> makeConsumers() {
+        var workItem = new IWorkCoordinator.WorkItemAndDuration.WorkItem("item", 0, 0).toString();
         return Stream.<Function<IWorkCoordinator, Exception>>of(
             wc -> Assertions.assertThrows(Exception.class,
-                () -> wc.createUnassignedWorkItem("item" + nonce.incrementAndGet(), () -> null)),
+                () -> wc.createUnassignedWorkItem(workItem, () -> null)),
             wc -> Assertions.assertThrows(Exception.class,
-                () -> wc.createOrUpdateLeaseForWorkItem("item" + nonce.incrementAndGet(), Duration.ZERO, () -> null)))
+                () -> wc.createOrUpdateLeaseForWorkItem(workItem, Duration.ZERO, () -> null)))
             .map(Arguments::of);
     }
 

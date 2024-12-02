@@ -82,7 +82,7 @@ public class SimpleRestoreFromSnapshot_ES_7_10 implements SimpleRestoreFromSnaps
                 ).readDocuments();
 
                 final var finalShardId = shardId;
-                new DocumentReindexer(client, 100, Long.MAX_VALUE, 1, null).reindex(index.getName(), finalShardId, documents, context)
+                new DocumentReindexer(client, 100, Long.MAX_VALUE, 1, null).reindex(index.getName(), documents, context)
                     .then()
                     .doOnError(error -> logger.error("Error during reindexing: " + error))
                     .doOnSuccess(

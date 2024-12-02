@@ -92,7 +92,8 @@ public class WorkCoordinatorTest {
             Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
             for (var i = 0; i < NUM_DOCS; ++i) {
                 final var docId = "R" + i;
-                workCoordinator.createUnassignedWorkItem(docId, testContext::createUnassignedWorkContext);
+                var newWorkItem = IWorkCoordinator.WorkItemAndDuration.WorkItem.valueFromWorkItemString(docId + "__0__0");
+                workCoordinator.createUnassignedWorkItem(newWorkItem.toString(), testContext::createUnassignedWorkContext);
             }
             Assertions.assertTrue(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
         }
@@ -446,18 +447,18 @@ public class WorkCoordinatorTest {
                         InterruptedException {
                         log.atInfo().setMessage("Next work item picked={}").addArgument(workItem).log();
                         Assertions.assertNotNull(workItem);
-                        Assertions.assertNotNull(workItem.workItemId);
+                        Assertions.assertNotNull(workItem.getWorkItem().toString());
                         Assertions.assertTrue(workItem.leaseExpirationTime.isAfter(oldNow));
-                        var oldVal = seenWorkerItems.put(workItem.workItemId, workItem.workItemId);
+                        var oldVal = seenWorkerItems.put(workItem.getWorkItem().toString(), workItem.getWorkItem().toString());
                         Assertions.assertNull(oldVal);
 
                         if (markCompleted) {
                             workCoordinator.completeWorkItem(
-                                workItem.workItemId,
+                                workItem.getWorkItem().toString(),
                                 testContext::createCompleteWorkContext
                             );
                         }
-                        return workItem.workItemId;
+                        return workItem.getWorkItem().toString();
                     }
                 });
         } catch (OpenSearchWorkCoordinator.PotentialClockDriftDetectedException e) {

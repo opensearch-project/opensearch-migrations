@@ -30,7 +30,7 @@ import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
-import org.opensearch.migrations.bulkload.worker.IndexAndShardCursor;
+import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.RootDocumentMigrationContext;
@@ -276,13 +276,15 @@ public class RfsMigrateDocuments {
         }
         IJsonTransformer docTransformer = new TransformationLoader().getTransformerFactoryLoader(docTransformerConfig);
 
-        AtomicReference<IndexAndShardCursor> progressCursor = new AtomicReference<>();
+        AtomicReference<IWorkCoordinator.WorkItemAndDuration> workItemRef = new AtomicReference<>();
+        AtomicReference<WorkItemCursor> progressCursor = new AtomicReference<>();
         try (var workCoordinator = new OpenSearchWorkCoordinator(
                  new CoordinateWorkHttpClient(connectionContext),
                  TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                  workerId);
             var processManager = new LeaseExpireTrigger(
                 w -> exitOnLeaseTimeout(
+                        workItemRef,
                         workCoordinator,
                         w,
                         progressCursor,
@@ -343,19 +345,21 @@ public class RfsMigrateDocuments {
 
     @SneakyThrows
     private static void exitOnLeaseTimeout(
+            AtomicReference<IWorkCoordinator.WorkItemAndDuration> workItemRef,
             IWorkCoordinator coordinator,
             String workItemId, 
-            AtomicReference<IndexAndShardCursor> progressCursorRef,
+            AtomicReference<WorkItemCursor> progressCursorRef,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) {
-        log.error("Terminating RfsMigrateDocuments because the lease has expired for " + workItemId);
+        log.atWarn().setMessage("Terminating RfsMigrateDocuments because the lease has expired for {}")
+                .addArgument(workItemId)
+                .log();
         var progressCursor = progressCursorRef.get();
         if (progressCursor != null) {
-            log.error("Progress cursor: " + progressCursor.toString());
-            var successorWorkItem = progressCursor.toWorkItemString();
-            ArrayList<String> successorWorkItemIds = new ArrayList<>();
-            successorWorkItemIds.add(successorWorkItem);
-
+            log.atError().setMessage("Progress cursor: {}")
+                    .addArgument(progressCursor).log();
+            var workItemAndDuration = workItemRef.get();
+            var successorWorkItemIds = getSuccessorWorkItemIds(workItemAndDuration, progressCursor);
             coordinator.createSuccessorWorkItemsAndMarkComplete(
                 workItemId,
                 successorWorkItemIds,
@@ -367,6 +371,19 @@ public class RfsMigrateDocuments {
         }
 
         System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
+    }
+
+    private static ArrayList<String> getSuccessorWorkItemIds(IWorkCoordinator.WorkItemAndDuration workItemAndDuration, WorkItemCursor progressCursor) {
+        if (workItemAndDuration == null) {
+            throw new IllegalStateException("Unexpected worker coordination state. Expected workItem set when progressCursor not null.");
+        }
+        var workItem = workItemAndDuration.getWorkItem();
+        var successorWorkItem = new IWorkCoordinator.WorkItemAndDuration
+                .WorkItem(workItem.getIndexName(), workItem.getShardNumber(),
+                progressCursor.getDocId() + 1);
+        ArrayList<String> successorWorkItemIds = new ArrayList<>();
+        successorWorkItemIds.add(successorWorkItem.toString());
+        return successorWorkItemIds;
     }
 
     private static RootDocumentMigrationContext makeRootContext(Args arguments, String workerId) {
@@ -384,7 +401,7 @@ public class RfsMigrateDocuments {
 
     public static DocumentsRunner.CompletionStatus run(Function<Path, LuceneDocumentsReader> readerFactory,
                                                        DocumentReindexer reindexer,
-                                                       AtomicReference<IndexAndShardCursor> progressCursor,
+                                                       AtomicReference<WorkItemCursor> progressCursor,
                                                        IWorkCoordinator workCoordinator,
                                                        Duration maxInitialLeaseDuration,
                                                        LeaseExpireTrigger leaseExpireTrigger,

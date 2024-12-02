@@ -92,13 +92,13 @@ public class LuceneDocumentsReader {
 
      */
     public Flux<RfsLuceneDocument> readDocuments() {
-        return readDocuments(0, 0);
+        return readDocuments(0);
     }
 
-    public Flux<RfsLuceneDocument> readDocuments(int startSegmentIndex, int startDoc) {
+    public Flux<RfsLuceneDocument> readDocuments(int startDoc) {
         return Flux.using(
             () -> wrapReader(getReader(), softDeletesPossible, softDeletesField),
-            reader -> readDocsByLeavesFromStartingPosition(reader, startSegmentIndex, startDoc),
+            reader -> readDocsByLeavesFromStartingPosition(reader, startDoc),
             reader -> {
                 try {
                     reader.close();
@@ -158,7 +158,7 @@ public class LuceneDocumentsReader {
     If the startSegmentIndex is 0, it will start from the first segment.
     If the startDocId is 0, it will start from the first document in the segment.
      */
-    Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(DirectoryReader reader, int startSegmentIndex, int startDocId) {
+    Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(DirectoryReader reader, int startDocId) {
         var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
             .addArgument(reader::maxDoc)
@@ -167,12 +167,10 @@ public class LuceneDocumentsReader {
 
         // Create shared scheduler for i/o bound document reading
         var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
-
+        int startDocIdInt = 2;
         return Flux.fromIterable(reader.leaves())
-            .skip(startSegmentIndex)
             .concatMapDelayError(c -> readDocsFromSegment(c,
-                // Only use startDocId for the first segment we process
-                    c.ord == startSegmentIndex ? startDocId : 0,
+                    startDocIdInt,
                     sharedSegmentReaderScheduler,
                     maxDocumentsToReadAtOnce)
             )
@@ -180,19 +178,21 @@ public class LuceneDocumentsReader {
             .doOnTerminate(sharedSegmentReaderScheduler::dispose);
     }
 
-    Flux<RfsLuceneDocument> readDocsFromSegment(LeafReaderContext leafReaderContext, int startDocId, Scheduler scheduler,
+    Flux<RfsLuceneDocument> readDocsFromSegment(LeafReaderContext leafReaderContext, int docCommitId, Scheduler scheduler,
                                                 int concurrency) {
         var segmentReader = leafReaderContext.reader();
         var liveDocs = segmentReader.getLiveDocs();
 
         int segmentIndex = leafReaderContext.ord;
+        int segmentDocBase = leafReaderContext.docBase;
 
-        return Flux.range(startDocId, segmentReader.maxDoc() - startDocId)
+        return Flux.range(0, segmentReader.maxDoc())
+                .skipWhile(id -> id + segmentDocBase <= docCommitId)
                 .flatMapSequentialDelayError(docIdx -> Mono.defer(() -> {
                     try {
                         if (liveDocs == null || liveDocs.get(docIdx)) {
                             // Get document, returns null to skip malformed docs
-                            RfsLuceneDocument document = getDocument(segmentReader, segmentIndex, docIdx, true);
+                            RfsLuceneDocument document = getDocument(segmentReader, docIdx, true, segmentDocBase);
                             return Mono.justOrEmpty(document); // Emit only non-null documents
                         } else {
                             return Mono.empty(); // Skip non-live documents
@@ -212,7 +212,7 @@ public class LuceneDocumentsReader {
         return reader;
     }
 
-    protected RfsLuceneDocument getDocument(IndexReader reader, int luceneSegIndex, int luceneDocId, boolean isLive) {
+    protected RfsLuceneDocument getDocument(IndexReader reader, int luceneDocId, boolean isLive, int segmentDocBase) {
         Document document;
         try {
             document = reader.document(luceneDocId);
@@ -284,6 +284,6 @@ public class LuceneDocumentsReader {
         }
 
         log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
-        return new RfsLuceneDocument(luceneSegIndex, luceneDocId, openSearchDocId, type, sourceBytes.utf8ToString(), routing);
+        return new RfsLuceneDocument(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes.utf8ToString(), routing);
     }
 }

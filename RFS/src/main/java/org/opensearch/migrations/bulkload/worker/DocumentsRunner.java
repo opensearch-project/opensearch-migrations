@@ -32,7 +32,7 @@ public class DocumentsRunner {
     private final Function<Path, LuceneDocumentsReader> readerFactory;
     private final DocumentReindexer reindexer;
 
-    private final Consumer<IndexAndShardCursor> cursorConsumer;
+    private final Consumer<WorkItemCursor> cursorConsumer;
 
     public DocumentsRunner(ScopedWorkCoordinator workCoordinator,
                            Duration maxInitialLeaseDuration,
@@ -40,7 +40,7 @@ public class DocumentsRunner {
                            SnapshotShardUnpacker.Factory unpackerFactory,
                            BiFunction<String, Integer, ShardMetadata> shardMetadataFactory,
                            Function<Path, LuceneDocumentsReader> readerFactory,
-                           Consumer<IndexAndShardCursor> cursorConsumer) {
+                           Consumer<WorkItemCursor> cursorConsumer) {
         this.maxInitialLeaseDuration = maxInitialLeaseDuration;
         this.readerFactory = readerFactory;
         this.reindexer = reindexer;
@@ -80,7 +80,7 @@ public class DocumentsRunner {
 
                 @Override
                 public CompletionStatus onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) {
-                    doDocumentsMigration(IndexAndShardCursor.valueFromWorkItemString(workItem.getWorkItemId()), context);
+                    doDocumentsMigration(workItem.getWorkItem(), context);
                     return CompletionStatus.WORK_COMPLETED;
                 }
 
@@ -105,17 +105,17 @@ public class DocumentsRunner {
     }
 
     private void doDocumentsMigration(
-        IndexAndShardCursor indexAndShardCursor,
+        IWorkCoordinator.WorkItemAndDuration.WorkItem workItem,
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
-        log.info("Migrating docs for " + indexAndShardCursor);
-        ShardMetadata shardMetadata = shardMetadataFactory.apply(indexAndShardCursor.indexName, indexAndShardCursor.shard);
+        log.atInfo().setMessage("Migrating docs for {}").addArgument(workItem).log();
+        ShardMetadata shardMetadata = shardMetadataFactory.apply(workItem.getIndexName(), workItem.getShardNumber());
 
         var unpacker = unpackerFactory.create(shardMetadata);
         var reader = readerFactory.apply(unpacker.unpack());
-        Flux<RfsLuceneDocument> documents = reader.readDocuments(indexAndShardCursor.startingSegmentIndex, indexAndShardCursor.startingDocId);
+        Flux<RfsLuceneDocument> documents = reader.readDocuments(workItem.getStartingDocId());
 
-        reindexer.reindex(indexAndShardCursor.indexName, indexAndShardCursor.shard, documents, context)
+        reindexer.reindex(workItem.getIndexName(), documents, context)
             .doOnNext(cursorConsumer)
             .then()
             .doOnError(e ->

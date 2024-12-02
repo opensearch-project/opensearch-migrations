@@ -309,7 +309,7 @@ public class LuceneDocumentsReaderTest {
 
 
         for (int i = 0; i < documentStartingIndices.size(); i++) {
-            Flux<RfsLuceneDocument> documents = reader.readDocuments(0, documentStartingIndices.get(i))
+            Flux<RfsLuceneDocument> documents = reader.readDocuments(documentStartingIndices.get(i))
                     .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
 
             var actualDocIds = documents.collectList().block().stream().map(doc -> doc.id).collect(Collectors.joining(","));
@@ -347,8 +347,7 @@ public class LuceneDocumentsReaderTest {
 
 
         for (int i = 0; i < documentIds.size(); i++) {
-            Flux<RfsLuceneDocument> documents = reader.readDocuments(i, 0)
-                    .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
+            Flux<RfsLuceneDocument> documents = reader.readDocuments(0);
 
             var actualDocIds = documents.collectList().block().stream().map(doc -> doc.id).collect(Collectors.joining(","));
             var expectedDocIds = String.join(",", documentIds.get(i));

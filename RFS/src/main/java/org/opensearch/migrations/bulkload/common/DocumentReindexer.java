@@ -5,7 +5,7 @@ import java.util.UUID;
 import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
-import org.opensearch.migrations.bulkload.worker.IndexAndShardCursor;
+import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts.IDocumentReindexContext;
 import org.opensearch.migrations.transform.IJsonTransformer;
 
@@ -27,17 +27,17 @@ public class DocumentReindexer {
     private final int maxConcurrentWorkItems;
     private final IJsonTransformer transformer;
 
-    public Flux<IndexAndShardCursor> reindex(String indexName, int shardNumber, Flux<RfsLuceneDocument> documentStream, IDocumentReindexContext context) {
+    public Flux<WorkItemCursor> reindex(String indexName, Flux<RfsLuceneDocument> documentStream, IDocumentReindexContext context) {
         var scheduler = Schedulers.newParallel("DocumentBulkAggregator");
         var rfsDocs = documentStream
             .publishOn(scheduler, 1)
-            .map(doc -> transformDocument(doc, indexName, shardNumber));
+            .map(doc -> transformDocument(doc, indexName));
 
-        return this.reindexDocsInParallelBatches(rfsDocs, indexName, shardNumber, context)
+        return this.reindexDocsInParallelBatches(rfsDocs, indexName, context)
             .doOnTerminate(scheduler::dispose);
     }
 
-    Flux<IndexAndShardCursor> reindexDocsInParallelBatches(Flux<RfsDocument> docs, String indexName, int shardNumber, IDocumentReindexContext context) {
+    Flux<WorkItemCursor> reindexDocsInParallelBatches(Flux<RfsDocument> docs, String indexName, IDocumentReindexContext context) {
         // Use parallel scheduler for send subscription due on non-blocking io client
         var scheduler = Schedulers.newParallel("DocumentBatchReindexer");
         var bulkDocsBatches = batchDocsBySizeOrCount(docs);
@@ -52,8 +52,8 @@ public class DocumentReindexer {
     }
 
     @SneakyThrows
-    RfsDocument transformDocument(RfsLuceneDocument doc, String indexName, int shardNumber) {
-        var finalDocument = RfsDocument.fromLuceneDocument(doc, indexName, shardNumber);
+    RfsDocument transformDocument(RfsLuceneDocument doc, String indexName) {
+        var finalDocument = RfsDocument.fromLuceneDocument(doc, indexName);
         if (transformer != null) {
             finalDocument = RfsDocument.transform(transformer::transformJson, finalDocument);
         }
@@ -64,9 +64,9 @@ public class DocumentReindexer {
      * TODO: Update the reindexing code to rely on _index field embedded in each doc section rather than requiring it in the 
      * REST path.  See: https://opensearch.atlassian.net/browse/MIGRATIONS-2232
      */
-    Mono<IndexAndShardCursor> sendBulkRequest(UUID batchId, List<RfsDocument> docsBatch, String indexName, IDocumentReindexContext context, Scheduler scheduler) {
+    Mono<WorkItemCursor> sendBulkRequest(UUID batchId, List<RfsDocument> docsBatch, String indexName, IDocumentReindexContext context, Scheduler scheduler) {
         var lastDoc = docsBatch.get(docsBatch.size() - 1);
-        log.atInfo().setMessage("Last doc is: Index " + lastDoc.indexName + "Shard " + lastDoc.shardNumber + " Seg Id " + lastDoc.luceneSegId + " Lucene ID " + lastDoc.luceneDocId).log();
+        log.atInfo().setMessage("Last doc is: Source Index " + indexName + "Shard " + " Lucene Doc Number " + lastDoc.luceneDocNumber).log();
 
         List<BulkDocSection> bulkDocSections = docsBatch.stream()
                 .map(rfsDocument -> rfsDocument.document)
@@ -84,7 +84,7 @@ public class DocumentReindexer {
                 .log())
             // Prevent the error from stopping the entire stream, retries occurring within sendBulkRequest
             .onErrorResume(e -> Mono.empty())
-            .then(Mono.just(new IndexAndShardCursor(indexName, lastDoc.shardNumber, lastDoc.luceneSegId, lastDoc.luceneDocId))
+            .then(Mono.just(new WorkItemCursor(lastDoc.luceneDocNumber))
             .subscribeOn(scheduler));
     }
 
