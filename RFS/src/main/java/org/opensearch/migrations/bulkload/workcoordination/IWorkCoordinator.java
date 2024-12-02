@@ -8,15 +8,13 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.function.Supplier;
 
-import lombok.EqualsAndHashCode;
-import lombok.NoArgsConstructor;
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 
 import lombok.AllArgsConstructor;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.ToString;
-import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 
 /**
  * Multiple workers can create an instance of this class to coordinate what work each of them
