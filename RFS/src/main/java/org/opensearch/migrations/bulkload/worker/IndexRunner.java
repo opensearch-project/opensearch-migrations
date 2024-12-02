@@ -35,6 +35,10 @@ public class IndexRunner {
             .forEach(index -> {
                 CreationResult creationResult;
                 if (skipCreation.test(index.getName())) {
+                    log.atInfo()
+                        .setMessage("Index {} was not part of the allow list and will not be migrated.")
+                        .addArgument(index.getName())
+                        .log();
                     creationResult = CreationResult.builder()
                         .name(index.getName())
                         .failureType(CreationFailureType.SKIPPED_DUE_TO_FILTER)
