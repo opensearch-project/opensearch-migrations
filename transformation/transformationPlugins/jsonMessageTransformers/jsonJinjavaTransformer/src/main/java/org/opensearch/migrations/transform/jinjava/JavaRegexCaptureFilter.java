@@ -12,7 +12,7 @@ import com.hubspot.jinjava.interpret.JinjavaInterpreter;
 import com.hubspot.jinjava.lib.filter.Filter;
 import lombok.SneakyThrows;
 
-public class RegexCaptureFilter implements Filter {
+public class JavaRegexCaptureFilter implements Filter {
 
     private static LoadingCache<String, Pattern> regexCache =
         CacheBuilder.newBuilder().build(CacheLoader.from((Function<String, Pattern>)Pattern::compile));

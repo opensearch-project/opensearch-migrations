@@ -5,8 +5,8 @@
         {%- set ns = namespace(value=features) -%}
         {%- set debug = namespace(log=[]) -%}
         {%- for key in (path | split('.')) -%}
-            {% set debug.log = debug.log + ["k:"+key] -%}
-            {% set debug.log = debug.log + ["ismapping?:"+(ns.value is mapping)] -%}
+            {%- set debug.log = debug.log + ["k:"+key] -%}
+            {%- set debug.log = debug.log + ["ismapping?:"+(ns.value is mapping)] -%}
             {%- if ns.value is mapping and key in ns.value -%}
                 {%- set ns.value = ns.value[key] -%}
             {%- else -%}

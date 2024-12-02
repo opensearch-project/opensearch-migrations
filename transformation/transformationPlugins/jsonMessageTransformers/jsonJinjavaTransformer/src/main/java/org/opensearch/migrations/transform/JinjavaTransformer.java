@@ -7,8 +7,10 @@ import java.util.Optional;
 import java.util.function.Function;
 
 import org.opensearch.migrations.transform.jinjava.DynamicMacroFunction;
+import org.opensearch.migrations.transform.jinjava.JavaRegexCaptureFilter;
+import org.opensearch.migrations.transform.jinjava.JavaRegexReplaceFilter;
 import org.opensearch.migrations.transform.jinjava.NameMappingClasspathResourceLocator;
-import org.opensearch.migrations.transform.jinjava.RegexCaptureFilter;
+import org.opensearch.migrations.transform.jinjava.ThrowTag;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.hubspot.jinjava.Jinjava;
@@ -38,17 +40,18 @@ public class JinjavaTransformer implements IJsonTransformer {
         jinjava = new Jinjava();
         this.createContextWithSourceFunction = createContextWithSource;
         jinjava.setResourceLocator(resourceLocator);
-        jinjava.getGlobalContext().registerFilter(new RegexCaptureFilter());
-        var dynamicMacroFunction = new ELFunctionDefinition(
+        jinjava.getGlobalContext().registerFilter(new JavaRegexCaptureFilter());
+        jinjava.getGlobalContext().registerFilter(new JavaRegexReplaceFilter());
+
+        jinjava.getGlobalContext().registerFunction(new ELFunctionDefinition(
             "",
             "invoke_macro",
             DynamicMacroFunction.class,
             "invokeMacro",
             String.class,
             Object[].class
-        );
-
-        jinjava.getGlobalContext().registerFunction(dynamicMacroFunction);
+        ));
+        jinjava.getGlobalContext().registerTag(new ThrowTag());
         this.templateStr = templateString;
     }
 

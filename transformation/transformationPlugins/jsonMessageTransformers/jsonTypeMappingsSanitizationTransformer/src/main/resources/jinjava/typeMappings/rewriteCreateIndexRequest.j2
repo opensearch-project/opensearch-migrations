@@ -1,0 +1,58 @@
+{%- import "typeMappings/makeNoop.j2" as noop -%}
+{%- import "typeMappings/preserveAll.j2" as preserve -%}
+
+{%- macro rewrite_create_index_as_unioned_excise(source_index_name, target_index_name, input_map) -%}
+    {%- set source_input_types = input_map.index_mappings[source_index_name] -%}
+    {%- set source_type_name = source_input_types.keys() | first() -%}
+    {
+        "method": "{{ input_map.request.method }}",
+        "URI": "/{{ target_index_name }}",
+        "payload": {
+            "inlinedJsonBody": {
+                {%- for key, value in input_map.request.payload.inlinedJsonBody.items() -%}
+                    {%- if key != "mappings" -%}
+                        "{{ key }}": {{ value | tojson }},
+                    {%- endif -%}
+                {%- endfor -%}
+                "mappings": {
+                    "properties": {
+                        {%- set ns = namespace(combined_props={"type": "keyword"}) -%}
+                        {%- for source_type_name in source_input_types.keys() -%}
+                            {%- set type_props = input_map.request.payload.inlinedJsonBody.mappings.get(source_type_name) -%}
+                            {%- for prop_name, prop_def in type_props.properties.items() -%}
+                                {%- if prop_name in ns.combined_props -%}
+                                    {%- if ns.combined_props[prop_name] != prop_def -%}
+                                        {%- throw "Conflicting definitions for property {{ prop_name }} ({{ ns.combined_props[prop_name] }} and {{ prop_def }})" -%}
+                                    {%- endif -%}
+                                {%- else -%}
+                                    {%- set body = prop_def | tojson -%}
+                                    {%- set jsonblob = ("{\"" + prop_name + "\":" + body + "}") | fromjson -%}
+                                    {%- set ns.combined_props = ns.combined_props + jsonblob -%}
+                                {%- endif -%}
+                            {%- endfor -%}
+                        {%- endfor -%}
+
+                        {%- for prop_name, prop_def in ns.combined_props.items() -%}
+                            "{{- prop_name -}}": {{- prop_def | tojson -}},
+                        {%- endfor -%}
+
+                        "type": { "type": "keyword" }
+                    }
+                }
+            }
+        }
+    }
+{%- endmacro -%}
+{%- macro rewrite_create_index(match, input_map) -%}
+    {%- set source_index_name = match.group1 -%}
+    {%- set target_indices = (input_map.index_mappings[source_index_name] | default({})).values() | unique() -%}
+    {%- set num_mappings = target_indices | length -%}
+    {%- if num_mappings == 0 -%}
+        {{-  noop.make_request() -}}
+    {%- elif num_mappings == 1 -%}
+        {{- rewrite_create_index_as_unioned_excise(source_index_name, (target_indices | first), input_map) -}}
+    {%- elif num_mappings > 1 -%}
+        {# Need to extend the replayer to allow multiple requests since this needs to become multiple requests #}
+        {{- preserve.make_keep_json(input_mappings) -}}
+    {%- endif -%}
+{%- endmacro -%}

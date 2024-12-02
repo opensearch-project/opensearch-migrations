@@ -1,0 +1,76 @@
+{%- include "typeMappings/rewriteIndexForTarget.j2" -%}
+{%- import "typeMappings/rewriteIndexForTarget.j2" as transidx -%}
+
+{%- macro run_create(command, target_index, doc) -%}
+{%- endmacro -%}
+{%- macro run_index(command, target_index, doc) -%}
+{%- endmacro -%}
+
+{%- macro run_delete(command, target_index) -%}
+    {%- if target_index -%}
+        {%- set ns = namespace(delete_inner={}) -%}
+        {%- for key, value in command.items() -%}
+            {%- if key != '_type' and key != '_index' -%}
+                {%- set inner_json = value | tojson -%}
+                {%- set jsonblob = ("{\"" + key + "\":" + inner_json + "}") | fromjson -%}
+                {%- set ns.delete_inner = ns.delete_inner + jsonblob -%}
+            {%- endif -%}
+        {%- endfor -%}
+        {%- set index_json = target_index | tojson -%}
+        {%- set index_blob = ("{\"_index\":" + index_json + "}") | fromjson -%}
+        {%- set ns.delete_inner = ns.delete_inner + index_blob -%}
+        {%- set final_json = ("{\"delete\":" + (ns.delete_inner | tojson) + "}") | fromjson -%}
+        {{ final_json | tojson }}
+    {%- endif -%}
+{%- endmacro -%}
+
+{%- macro run_update(command, target_index, doc) -%}
+{%- endmacro -%}
+{%- macro rewrite_bulk_for_default_source_index(uri_match, input_map, source_index) -%}
+{
+    "preserve": ["headers","method","URI","protocol"],
+    "payload": {
+        "inlinedJsonSequenceBodies": [
+            {%- set operation_types = ['delete', 'update', 'index', 'create'] -%}
+            {%- for item in input_map.request.payload.inlinedJsonSequenceBodies -%}
+                {%- set operation = namespace(type=None) -%}
+                {%- for type in operation_types -%}
+                    {%- if item is mapping and type in item -%}
+                        {%- set operation.type = type -%}
+                    {%- endif -%}
+                {%- endfor -%}
+
+                {%- if operation.type is not none -%}
+                    {%- set command = item[operation.type] -%}
+                    {%- set target_index = transidx.convert_source_index_to_target(command['_index'], command['_type'], input_map.index_mappings, input_map.regex_index_mappings) -%}
+{#                    command['_index'] {{ command['_index'] }}, command['_type'] = {{ command['_type'] }}, input_map.index_mappings = {{ input_map.index_mappings }}, input_map.regex_index_mappings = {{ input_map.regex_index_mappings }})#}
+                    {%- if operation.type == 'delete' -%}
+                        {{ run_delete(command, target_index) }}
+                    {%- else -%}
+                        {%- if loop.index < operations|length -%}
+                            {%- set next_item = operations[loop.index] -%}
+                            {%- if operation.type == 'create' -%}
+                                {{ run_create(command, target_index, next_item) }}
+                            {%- elif operation.type == 'update' -%}
+                                {{ run_update(command, target_index, next_item) }}
+                            {%- elif operation.type == 'index' -%}
+                                {{ run_index(command, target_index, next_item) }}
+                            {%- endif -%}
+                            {%- set loop.index = loop.index + 1 -%}
+                        {%- else -%}
+                            Handle case where there's no next item but one was expected
+                            {#                    {{ throw_error('Expected document after ' + operation.type + ' operation') }}#}
+                        {%- endif -%}
+                    {%- endif -%}
+                {%- else -%}
+                    Handle case where no valid operation type was found
+                    {#            {{ throw_error('Invalid operation type in item: ' + item|string) }}#}
+                {%- endif -%}
+            {%- endfor -%}
+        ]
+    }
+}
+{%- endmacro -%}
+{%- macro rewrite_bulk(match, input_map) -%}
+    {{ rewrite_bulk_for_default_source_index(match, input_map, none) }}
+{%- endmacro -%}
