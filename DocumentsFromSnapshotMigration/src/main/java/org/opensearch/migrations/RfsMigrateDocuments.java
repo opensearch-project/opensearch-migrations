@@ -281,7 +281,9 @@ public class RfsMigrateDocuments {
         try (var workCoordinator = new OpenSearchWorkCoordinator(
                  new CoordinateWorkHttpClient(connectionContext),
                  TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
-                 workerId);
+                 workerId,
+                Clock.systemUTC(),
+                workItemRef::set);
             var processManager = new LeaseExpireTrigger(
                 w -> exitOnLeaseTimeout(
                         workItemRef,
@@ -356,18 +358,28 @@ public class RfsMigrateDocuments {
                 .log();
         var progressCursor = progressCursorRef.get();
         if (progressCursor != null) {
-            log.atError().setMessage("Progress cursor: {}")
+            log.atWarn().setMessage("Progress cursor: {}")
                     .addArgument(progressCursor).log();
             var workItemAndDuration = workItemRef.get();
+            log.atWarn().setMessage("Work Item and Duration: {}").addArgument(workItemAndDuration)
+                    .log();
+            log.atWarn().setMessage("Work Item: {}").addArgument(workItemAndDuration.getWorkItem())
+                    .log();
+            if (workItemAndDuration == null) {
+                throw new IllegalStateException("Unexpected state with progressCursor and not work item");
+            }
             var successorWorkItemIds = getSuccessorWorkItemIds(workItemAndDuration, progressCursor);
+            log.atWarn().setMessage("Successor Work Ids: {}").addArgument(String.join(", ", successorWorkItemIds))
+                    .log();
             coordinator.createSuccessorWorkItemsAndMarkComplete(
                 workItemId,
                 successorWorkItemIds,
                 contextSupplier
             );
         } else {
-            log.error("No progress cursor to create successor work items from.");
-            log.error("Skipping creation of successor work item to retry the existing one");
+            log.atWarn().setMessage("No progress cursor to create successor work items from. This can happen when" +
+                    "downloading and unpacking shard takes longer than the lease").log();
+            log.atWarn().setMessage("Skipping creation of successor work item to retry the existing one with more time");
         }
 
         System.exit(PROCESS_TIMED_OUT_EXIT_CODE);

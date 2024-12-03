@@ -123,26 +123,39 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     private final ObjectMapper objectMapper;
     @Getter
     private final Clock clock;
+    private final Consumer<WorkItemAndDuration> workItemConsumer;
 
     public OpenSearchWorkCoordinator(
         AbstractedHttpClient httpClient,
         long tolerableClientServerClockDifferenceSeconds,
         String workerId
     ) {
-        this(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, Clock.systemUTC());
+        this(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, Clock.systemUTC(), w -> {});
     }
+
+    public OpenSearchWorkCoordinator(
+            AbstractedHttpClient httpClient,
+            long tolerableClientServerClockDifferenceSeconds,
+            String workerId,
+            Clock clock
+    ) {
+        this(httpClient, tolerableClientServerClockDifferenceSeconds, workerId, clock, w -> {});
+    }
+
 
     public OpenSearchWorkCoordinator(
         AbstractedHttpClient httpClient,
         long tolerableClientServerClockDifferenceSeconds,
         String workerId,
-        Clock clock
+        Clock clock,
+        Consumer<WorkItemAndDuration> workItemConsumer
     ) {
         this.tolerableClientServerClockDifferenceSeconds = tolerableClientServerClockDifferenceSeconds;
         this.httpClient = httpClient;
         this.workerId = workerId;
         this.clock = clock;
         this.objectMapper = new ObjectMapper();
+        this.workItemConsumer = workItemConsumer;
     }
 
     @FunctionalInterface
@@ -158,6 +171,9 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 action.execute();
                 break; // Exit if action succeeds
             } catch (NonRetryableException e) {
+                log.atError().setCause(e)
+                        .setMessage("Received NonRetryableException error.")
+                        .log();
                 Exception underlyingException = (Exception) e.getCause();
                 exceptionConsumer.accept(underlyingException);
                 throw new IllegalStateException(underlyingException);
@@ -750,7 +766,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 .replace(WORKER_ID_TEMPLATE, workerId)
                 .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().toEpochMilli() / 1000))
                 .replace(SUCCESSOR_WORK_ITEM_IDS_TEMPLATE, String.join(SUCCESSOR_ITEM_DELIMITER, successorWorkItemIds));
-
+        log.atInfo().setMessage("Making update for successor work item for id {}")
+                .addArgument(workItemId).log();
         var response = httpClient.makeJsonRequest(
                 AbstractedHttpClient.POST_METHOD,
                 INDEX_NAME + "/_update/" + workItemId,
@@ -768,6 +785,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 );
             }
         } catch (IllegalArgumentException e) {
+            log.atError().setCause(e).setMessage("Encountered error during update work item with successors").log();
             var resultTree = objectMapper.readTree(response.getPayloadBytes());
             if (resultTree.has("error") &&
                     resultTree.get("error").has("type") &&
@@ -797,6 +815,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             body.append("{\"create\":{\"_id\":\"").append(workItemId).append("\"}}\n");
             body.append(workItemBody).append("\n");
         }
+        log.atInfo().setMessage("Calling createUnassignedWorkItemsIfNonexistent with workItemIds {}")
+                .addArgument(String.join(", ", workItemIds)).log();
         var response = httpClient.makeJsonRequest(
                 AbstractedHttpClient.POST_METHOD,
                 INDEX_NAME + "/_bulk",
@@ -1023,8 +1043,10 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                                 // this item is not acquirable, so repeat the loop to find a new item.
                                 continue;
                             }
-                            return new WorkItemAndDuration(workItem.getLeaseExpirationTime(),
+                            var workItemAndDuration = new WorkItemAndDuration(workItem.getLeaseExpirationTime(),
                                     WorkItemAndDuration.WorkItem.valueFromWorkItemString(workItem.getWorkItemId()));
+                            workItemConsumer.accept(workItemAndDuration);
+                            return workItemAndDuration;
                         case NOTHING_TO_ACQUIRE:
                             ctx.recordNothingAvailable();
                             return new NoAvailableWorkToBeDone();

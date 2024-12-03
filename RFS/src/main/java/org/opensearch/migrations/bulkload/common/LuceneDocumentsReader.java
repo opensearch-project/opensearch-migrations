@@ -183,11 +183,10 @@ public class LuceneDocumentsReader {
         var segmentReader = leafReaderContext.reader();
         var liveDocs = segmentReader.getLiveDocs();
 
-        int segmentIndex = leafReaderContext.ord;
         int segmentDocBase = leafReaderContext.docBase;
 
         return Flux.range(0, segmentReader.maxDoc())
-                .skipWhile(id -> id + segmentDocBase <= docCommitId)
+                .skipWhile(id -> id + segmentDocBase <= docCommitId && docCommitId != 0)
                 .flatMapSequentialDelayError(docIdx -> Mono.defer(() -> {
                     try {
                         if (liveDocs == null || liveDocs.get(docIdx)) {
