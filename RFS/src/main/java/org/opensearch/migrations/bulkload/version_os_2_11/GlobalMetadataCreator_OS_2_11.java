@@ -149,7 +149,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
             var creationResult = CreationResult.builder().name(templateName);
 
             if (skipCreation.test(templateName)) {
-                log.atInfo().setMessage("Template {} was skipped due to allow list filter {}").addArgument(templateName).addArgument(templateAllowList).log();
+                log.atInfo().setMessage("Template {} was skipped due to allowlist filter {}").addArgument(templateName).addArgument(templateAllowList).log();
                 return creationResult.failureType(CreationFailureType.SKIPPED_DUE_TO_FILTER).build();
             }
 

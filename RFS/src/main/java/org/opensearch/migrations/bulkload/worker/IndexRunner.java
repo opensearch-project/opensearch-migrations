@@ -36,7 +36,7 @@ public class IndexRunner {
                 CreationResult creationResult;
                 if (skipCreation.test(index.getName())) {
                     log.atInfo()
-                        .setMessage("Index {} was not part of the allow list and will not be migrated.")
+                        .setMessage("Index {} was not part of the allowlist and will not be migrated.")
                         .addArgument(index.getName())
                         .log();
                     creationResult = CreationResult.builder()
