@@ -43,7 +43,6 @@ class JsonTransformerTest {
     }
 
     private String emitJson(Object transformedDocument) throws JsonProcessingException {
-        ObjectMapper mapper = new ObjectMapper();
         mapper.configure(com.fasterxml.jackson.core.JsonParser.Feature.ALLOW_COMMENTS, true); // optional
         return mapper.writeValueAsString(transformedDocument);
     }

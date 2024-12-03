@@ -11,13 +11,18 @@ import com.hubspot.jinjava.lib.fn.MacroFunction;
 
 public class DynamicMacroFunction {
 
+    private DynamicMacroFunction() {}
+
     /**
      * Called from templates through the registration in the JinjavaTransformer class
      */
     public static Object invokeMacro(String macroName, Object... args) {
         JinjavaInterpreter interpreter = JinjavaInterpreter.getCurrent();
 
-        MacroFunction macro = getMacroFromContext(interpreter.getContext(), macroName);
+        var macro = getMacroFromContext(interpreter.getContext(), macroName);
+        if (macro == null) {
+            throw new IllegalArgumentException("Could not find argument name " + macroName);
+        }
 
         Context macroContext = new Context(interpreter.getContext());
         int argCount = Math.min(args.length, macro.getArguments().size());
@@ -39,7 +44,7 @@ public class DynamicMacroFunction {
             } else if (defaults.containsKey(paramName)) {
                 argsMap.put(paramName, defaults.get(paramName));
             } else {
-                throw new RuntimeException("Missing argument for macro: " + paramName);
+                throw new IllegalArgumentException("Missing argument for macro: " + paramName);
             }
         }
 

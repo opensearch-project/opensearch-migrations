@@ -10,7 +10,7 @@ import org.testcontainers.shaded.com.fasterxml.jackson.databind.ObjectMapper;
 @Slf4j
 class JinjavaTransformerTest {
 
-    private final static String template = "" +
+    private static final String TEMPLATE = "" +
         "{# First, parse the URI to check if it matches the pattern we want to transform #}\n" +
         "{% set uri_parts = request.uri.split('/') %}\n" +
         "{% set is_type_request = uri_parts | length == 2 %}\n" +
@@ -62,7 +62,7 @@ class JinjavaTransformerTest {
                 "type2", "indexB"),
             "indexC", Map.of(
                 "type2", "indexC"));
-        indexTypeMappingRewriter = new JinjavaTransformer(template,
+        indexTypeMappingRewriter = new JinjavaTransformer(TEMPLATE,
             request -> Map.of(
                 "index_mappings", indexMappings,
                 "request", request));

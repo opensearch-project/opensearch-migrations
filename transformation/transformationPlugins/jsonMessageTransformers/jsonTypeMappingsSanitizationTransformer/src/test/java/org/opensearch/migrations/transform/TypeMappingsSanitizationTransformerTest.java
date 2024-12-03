@@ -15,7 +15,7 @@ import org.junit.jupiter.api.Test;
 
 @Slf4j
 class TypeMappingsSanitizationTransformerTest {
-    private final static ObjectMapper objMapper = new ObjectMapper();
+    private static final ObjectMapper objMapper = new ObjectMapper();
 
     private static TypeMappingsSanitizationTransformer indexTypeMappingRewriter;
     @BeforeAll
@@ -139,7 +139,7 @@ class TypeMappingsSanitizationTransformerTest {
         user.path("properties").fields().forEachRemaining(e -> newProperties.put(e.getKey(), e.getValue()));
         var tweet = mappings.remove("tweet");
         tweet.path("properties").fields().forEachRemaining(e -> newProperties.put(e.getKey(), e.getValue()));
-        var properties = mappings.put("properties", objMapper.valueToTree(newProperties));
+        mappings.set("properties", objMapper.valueToTree(newProperties));
         ((ObjectNode)expected).put(JsonKeysForHttpMessage.URI_KEY, "/communal");
         Assertions.assertEquals(expected, objMapper.readTree(objMapper.writeValueAsString(result)));
     }

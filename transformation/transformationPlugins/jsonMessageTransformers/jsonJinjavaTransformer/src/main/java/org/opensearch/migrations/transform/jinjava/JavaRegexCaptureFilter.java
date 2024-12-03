@@ -28,12 +28,12 @@ public class JavaRegexCaptureFilter implements Filter {
     }
 
     @Override
-    public Object filter(Object var, JinjavaInterpreter interpreter, String... args) {
-        if (var == null || args.length < 1) {
+    public Object filter(Object inputObject, JinjavaInterpreter interpreter, String... args) {
+        if (inputObject == null || args.length < 1) {
             return null;
         }
 
-        String input = var.toString();
+        String input = inputObject.toString();
         String pattern = args[0];
 
         try {

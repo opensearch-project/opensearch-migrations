@@ -18,6 +18,9 @@ public class TypeMappingSanitizationTransformerProvider implements IJsonTransfor
             if (jsonConfig == null) {
                 return new TypeMappingsSanitizationTransformer(TypeMappingsSanitizationTransformer.REPLAYER_VARIANT,
                     null, null, null);
+            } else if (jsonConfig instanceof String && ((String) jsonConfig).isEmpty()) {
+                return new TypeMappingsSanitizationTransformer(TypeMappingsSanitizationTransformer.REPLAYER_VARIANT,
+                    null, null, null);
             } else if (!(jsonConfig instanceof Map)) {
                 throw new IllegalArgumentException(getConfigUsageStr());
             }

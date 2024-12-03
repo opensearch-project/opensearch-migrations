@@ -14,8 +14,6 @@ import org.junit.jupiter.api.Test;
 public class RouteTest {
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
-    private final static String DEFAULT_RESPONSE = "{ \"default\": {}}";
-
     public Map<String, Object> doRouting(Map<String, Object> flags, Map<String, Object> inputDoc) {
         log.atInfo().setMessage("parsed flags: {}").addArgument(flags).log();
         final var template = "" +

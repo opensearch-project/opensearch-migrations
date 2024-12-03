@@ -4,7 +4,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
-import java.util.function.Function;
+import java.util.Optional;
+import java.util.function.UnaryOperator;
 
 import com.google.common.io.Resources;
 
@@ -32,15 +33,15 @@ public class TypeMappingsSanitizationTransformer extends JinjavaTransformer {
             makeSourceWrapperFunction(featureFlags, indexMappings, regexIndexMappings));
     }
 
-    private static Function<Map<String, Object>, Map<String, Object>>
+    private static UnaryOperator<Map<String, Object>>
     makeSourceWrapperFunction(Map<String, Object> featureFlagsIncoming,
                               Map<String, Map<String, String>> indexMappingsIncoming,
                               List<List<String>> regexIndexMappingsIncoming)
     {
         var featureFlags = featureFlagsIncoming != null ? featureFlagsIncoming : Map.of();
         var indexMappings = indexMappingsIncoming != null ? indexMappingsIncoming : Map.of();
-        var regexIndexMappings = regexIndexMappingsIncoming != null ? regexIndexMappingsIncoming :
-            (indexMappingsIncoming == null ? List.of(List.of("(.*)", "(.*)", "\\1_\\2")) : List.of());
+        var regexIndexMappings = Optional.ofNullable(regexIndexMappingsIncoming)
+            .orElseGet(() -> (indexMappingsIncoming == null ? List.of(List.of("(.*)", "(.*)", "\\1_\\2")) : List.of()));
 
         return incomingJson -> Map.of("request", incomingJson,
             "index_mappings", indexMappings,

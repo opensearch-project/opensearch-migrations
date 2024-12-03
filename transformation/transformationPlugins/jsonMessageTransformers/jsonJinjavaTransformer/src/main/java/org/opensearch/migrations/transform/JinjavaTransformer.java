@@ -5,6 +5,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 import org.opensearch.migrations.transform.jinjava.DynamicMacroFunction;
 import org.opensearch.migrations.transform.jinjava.JavaRegexCaptureFilter;
@@ -22,19 +23,19 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class JinjavaTransformer implements IJsonTransformer {
 
-    protected final static ObjectMapper objectMapper = new ObjectMapper();
+    protected static final ObjectMapper objectMapper = new ObjectMapper();
 
     protected final Jinjava jinjava;
     protected final Function<Map<String, Object>, Map<String, Object>> createContextWithSourceFunction;
     private final String templateStr;
 
     public JinjavaTransformer(String templateString,
-                              Function<Map<String, Object>, Map<String, Object>> contextProviderFromSource) {
+                              UnaryOperator<Map<String, Object>> contextProviderFromSource) {
         this(templateString, contextProviderFromSource, new NameMappingClasspathResourceLocator());
     }
 
     public JinjavaTransformer(String templateString,
-                              Function<Map<String, Object>, Map<String, Object>> createContextWithSource,
+                              UnaryOperator<Map<String, Object>> createContextWithSource,
                               ResourceLocator resourceLocator)
     {
         jinjava = new Jinjava();

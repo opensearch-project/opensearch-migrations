@@ -31,7 +31,6 @@ public class NameMappingClasspathResourceLocator extends ClasspathResourceLocato
 
     @Override
     public String getString(String fullName, Charset encoding, JinjavaInterpreter interpreter) throws IOException {
-        var rval = super.getString(getDefaultVersion("jinjava/" + fullName), encoding, interpreter);
-        return rval;
+        return super.getString(getDefaultVersion("jinjava/" + fullName), encoding, interpreter);
     }
 }

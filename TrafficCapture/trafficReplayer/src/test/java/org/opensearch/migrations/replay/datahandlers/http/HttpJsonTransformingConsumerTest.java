@@ -331,7 +331,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
             new TransformationLoader().getTransformerFactoryLoader(
                 HOST_NAME,
                 null,
-                "[{\"JsonTransformerForOpenSearch23PlusTargetTransformerProvider\":\"\"}]"
+                "[{\"TypeMappingSanitizationTransformerProvider\":\"\"}]"
             ),
             null,
             testPacketCapture,

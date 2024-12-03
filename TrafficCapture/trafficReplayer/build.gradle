@@ -59,7 +59,7 @@ dependencies {
     testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
-    testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
+    testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
 
     testImplementation group: 'org.apache.httpcomponents.client5', name: 'httpclient5'
     testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'

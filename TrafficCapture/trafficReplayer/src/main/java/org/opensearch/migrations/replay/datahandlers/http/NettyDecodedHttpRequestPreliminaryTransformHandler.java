@@ -67,13 +67,9 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
             IAuthTransformer authTransformer = requestPipelineOrchestrator.authTransfomerFactory.getAuthTransformer(
                 httpJsonMessage
             );
+            HttpJsonRequestWithFaultingPayload transformedMessage = null;
             try {
-                handlePayloadNeutralTransformationOrThrow(
-                    ctx,
-                    originalHttpJsonMessage,
-                    transform(transformer, httpJsonMessage),
-                    authTransformer
-                );
+                transformedMessage = transform(transformer, httpJsonMessage);
             } catch (PayloadNotLoadedException pnle) {
                 log.atDebug().setMessage("The transforms for this message require payload manipulation, "
                         + "all content handlers are being loaded.").log();
@@ -84,6 +80,17 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
                     getAuthTransformerAsStreamingTransformer(authTransformer)
                 );
                 ctx.fireChannelRead(handleAuthHeaders(httpJsonMessage, authTransformer));
+            } catch (Exception e) {
+                throw new TransformationException(e);
+            }
+
+            if (transformedMessage != null) {
+                handlePayloadNeutralTransformationOrThrow(
+                    ctx,
+                    originalHttpJsonMessage,
+                    transformedMessage,
+                    authTransformer
+                );
             }
         } else if (msg instanceof HttpContent) {
             ctx.fireChannelRead(msg);

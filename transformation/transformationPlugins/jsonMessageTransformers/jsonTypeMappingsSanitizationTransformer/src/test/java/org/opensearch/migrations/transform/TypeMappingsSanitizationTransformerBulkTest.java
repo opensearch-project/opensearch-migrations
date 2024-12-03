@@ -18,7 +18,7 @@ import static org.hamcrest.Matchers.*;
 @Slf4j
 public class TypeMappingsSanitizationTransformerBulkTest {
 
-    private final static ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
     private static TypeMappingsSanitizationTransformer indexTypeMappingRewriter;
     @BeforeAll
     static void initialize() throws IOException {
