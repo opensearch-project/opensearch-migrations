@@ -11,6 +11,7 @@ dependencies {
     implementation project(":coreUtilities")
     implementation project(":RFS")
     implementation project(':transformation')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
 
     implementation group: 'org.jcommander', name: 'jcommander'
     implementation group: 'org.slf4j', name: 'slf4j-api'

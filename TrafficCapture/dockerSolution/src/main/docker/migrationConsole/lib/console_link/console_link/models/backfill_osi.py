@@ -90,6 +90,9 @@ class OpenSearchIngestionBackfill(Backfill):
             pipeline_name = self.osi_props.pipeline_name
         start_pipeline(osi_client=self.osi_client, pipeline_name=pipeline_name)
 
+    def pause(self, pipeline_name=None) -> CommandResult:
+        raise NotImplementedError()
+
     def stop(self, pipeline_name=None):
         if pipeline_name is None:
             pipeline_name = self.osi_props.pipeline_name
@@ -99,4 +102,7 @@ class OpenSearchIngestionBackfill(Backfill):
         raise NotImplementedError()
 
     def scale(self, units: int, *args, **kwargs) -> CommandResult:
+        raise NotImplementedError()
+
+    def archive(self, pipeline_name=None) -> CommandResult:
         raise NotImplementedError()

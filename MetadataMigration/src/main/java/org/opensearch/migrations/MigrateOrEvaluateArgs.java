@@ -4,9 +4,11 @@ package org.opensearch.migrations;
 
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
+import org.opensearch.migrations.transform.TransformerParams;
 
 import com.beust.jcommander.Parameter;
 import com.beust.jcommander.ParametersDelegate;
+import lombok.Getter;
 
 public class MigrateOrEvaluateArgs {
     @Parameter(names = {"--help", "-h"}, help = true, description = "Displays information about how to use this tool")
@@ -52,4 +54,39 @@ public class MigrateOrEvaluateArgs {
 
     @Parameter(names = {"--source-version" }, description = "Version of the source cluster, for example: Elasticsearch 7.10 or OS 1.3.", converter = VersionConverter.class)
     public Version sourceVersion = null;
+
+    @ParametersDelegate
+    public TransformerParams metadataTransformationParams = new MetadataTransformerParams();
+
+    @Getter
+    public static class MetadataTransformerParams implements TransformerParams {
+        public String getTransformerConfigParameterArgPrefix() {
+            return "";
+        }
+        @Parameter(
+                required = false,
+                names = "--transformer-config-base64",
+                arity = 1,
+                description = "Configuration of metadata transformers.  The same contents as --transformer-config but " +
+                        "Base64 encoded so that the configuration is easier to pass as a command line parameter.")
+        private String transformerConfigEncoded;
+
+        @Parameter(
+                required = false,
+                names = "--transformer-config",
+                arity = 1,
+                description = "Configuration of metadata transformers.  Either as a string that identifies the "
+                        + "transformer that should be run (with default settings) or as json to specify options "
+                        + "as well as multiple transformers to run in sequence.  "
+                        + "For json, keys are the (simple) names of the loaded transformers and values are the "
+                        + "configuration passed to each of the transformers.")
+        private String transformerConfig;
+
+        @Parameter(
+                required = false,
+                names = "--transformer-config-file",
+                arity = 1,
+                description = "Path to the JSON configuration file of metadata transformers.")
+        private String transformerConfigFile;
+    }
 }

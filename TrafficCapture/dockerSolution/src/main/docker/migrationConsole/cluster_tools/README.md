@@ -114,8 +114,21 @@ Generate a coverage report to see how much of the code is tested.
 pipenv run coverage report
 ```
 
-** Generated HTML**
+**Generated HTML**
 
 ```bash
 pipenv run coverage html
+```
+
+### Troubleshooting
+
+#### Docker connection issue
+```
+docker.errors.DockerException: Error while fetching server API version: ('Connection aborted.', FileNotFoundError(2, 'No such file or directory'))
+```
+
+1. Confirm that Docker is running with a command such as `docker ps`
+2. If `DOCKER_HOST` environment variable is not set, attempt to set this to the local socket, e.g. on Mac
+```
+export DOCKER_HOST=unix:///Users/<USER_NAME>/.docker/run/docker.sock
 ```

@@ -8,6 +8,7 @@ import java.util.stream.Collectors;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 
@@ -52,6 +53,28 @@ public class SearchClusterRequests {
         }));
 
         return mapOfIndexAndDocCount;
+    }
+
+    @SneakyThrows
+    public JsonNode searchIndexByQueryString(
+        final RestClient client,
+        final String index,
+        final String queryString,
+        final String routing) {
+        var path = index + "/_search?q=" + queryString;
+        if (routing != null) {
+            path = path + "&routing=" + routing;
+        }
+
+        var searchResponse = client.get(path, context.createUnboundRequestContext());
+        assertThat(
+                String.format(
+                        "Expected 200 but got %d. Path: %s, Body: %s",
+                        searchResponse.statusCode, path, searchResponse.body),
+                searchResponse.statusCode,
+                equalTo(200));
+
+        return mapper.readTree(searchResponse.body).get("hits").get("hits");
     }
 
     public List<String> filterToInterestingIndices(final List<String> indices) {

@@ -262,6 +262,37 @@ def test_s3_snapshot_create_calls_subprocess_run_with_correct_args(mocker):
                                   ], stdout=None, stderr=None, text=True, check=True)
 
 
+def test_s3_snapshot_create_calls_subprocess_run_with_correct_s3_role(mocker):
+    s3_role = "arn:aws:iam::123456789012:role/OSMigrations-dev-us-west-1-default-SnapshotRole"
+    config = {
+        "snapshot": {
+            "snapshot_name": "reindex_from_snapshot",
+            "s3": {
+                "repo_uri": "s3://my-snapshot-bucket",
+                "aws_region": "us-east-2",
+                "role": s3_role
+            }
+        }
+    }
+    max_snapshot_rate = 100
+    source = create_valid_cluster(auth_type=AuthMethod.NO_AUTH)
+    snapshot = S3Snapshot(config["snapshot"], source)
+
+    mock = mocker.patch("subprocess.run")
+    snapshot.create(max_snapshot_rate_mb_per_node=max_snapshot_rate)
+
+    mock.assert_called_once_with(["/root/createSnapshot/bin/CreateSnapshot",
+                                  "--snapshot-name", config["snapshot"]["snapshot_name"],
+                                  "--source-host", source.endpoint,
+                                  "--source-insecure",
+                                  "--s3-repo-uri", config["snapshot"]["s3"]["repo_uri"],
+                                  "--s3-region", config["snapshot"]["s3"]["aws_region"],
+                                  "--no-wait",
+                                  "--max-snapshot-rate-mb-per-node", str(max_snapshot_rate),
+                                  "--s3-role-arn", s3_role,
+                                  ], stdout=None, stderr=None, text=True, check=True)
+
+
 def test_s3_snapshot_create_fails_for_clusters_with_auth(mocker):
     config = {
         "snapshot": {

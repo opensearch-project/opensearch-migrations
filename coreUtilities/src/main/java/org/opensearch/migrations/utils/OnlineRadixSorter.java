@@ -1,13 +1,10 @@
-package org.opensearch.migrations.replay.util;
+package org.opensearch.migrations.utils;
 
 import java.util.Optional;
 import java.util.SortedMap;
 import java.util.TreeMap;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.IntStream;
-
-import org.opensearch.migrations.replay.datatypes.FutureTransformer;
-import org.opensearch.migrations.utils.SequentialSpanCompressingReducer;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;

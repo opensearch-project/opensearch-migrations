@@ -4,36 +4,58 @@ import { App } from 'aws-cdk-lib';
 import { SolutionsInfrastructureStack } from '../lib/solutions-stack';
 
 describe('Solutions stack', () => {
+    const defaultProperties = {
+        solutionId: 'SO0000',
+        solutionName: 'test-solution',
+        solutionVersion: '0.0.1',
+        codeBucket: 'test-bucket',
+        createVPC: true, 
+        env: {
+            region: 'us-west-1'
+        }
+    };
+
     test('Generate migration assistant stack with create VPC', () => {
-        const app = new App();
-        const stack = new SolutionsInfrastructureStack(app, 'TestMigrationAssistantStack', {
-            solutionId: 'SO0000',
-            solutionName: 'test-solution',
-            solutionVersion: '0.0.1',
-            codeBucket: 'test-bucket',
-            createVPC: true
-        });
+        const stack = new SolutionsInfrastructureStack(new App(), 'TestMigrationAssistantStack', defaultProperties);
         const template = Template.fromStack(stack);
-        template.resourceCountIs('AWS::EC2::VPC', 1)
-        template.resourceCountIs('AWS::ServiceCatalogAppRegistry::Application', 1)
-        template.hasResourceProperties('AWS::EC2::Instance', {
-            InstanceType: "t3.large"
+        verifyResources(template, {
+            vpcCount: 1,
+            vpcEndpointCount: 5
         });
     });
+
+    test('Generate migration assistant stack with create VPC in Gov Region', () => {
+        const stack = new SolutionsInfrastructureStack(new App(), 'TestMigrationAssistantStack',  {
+            ...defaultProperties,
+            env: {
+                region : "us-gov-east-1",
+            },
+        });
+        const template = Template.fromStack(stack);
+        verifyResources(template, {
+            vpcCount: 1,
+            vpcEndpointCount: 5
+        });
+    });
+
     test('Generate migration assistant stack with imported VPC', () => {
-        const app = new App();
-        const stack = new SolutionsInfrastructureStack(app, 'TestMigrationAssistantStack', {
-            solutionId: 'SO0000',
-            solutionName: 'test-solution',
-            solutionVersion: '0.0.1',
-            codeBucket: 'test-bucket',
+        const stack = new SolutionsInfrastructureStack(new App(), 'TestMigrationAssistantStack', {
+            ...defaultProperties,
             createVPC: false
         });
         const template = Template.fromStack(stack);
-        template.resourceCountIs('AWS::EC2::VPC', 0)
-        template.resourceCountIs('AWS::ServiceCatalogAppRegistry::Application', 1)
+        verifyResources(template, {
+            vpcCount: 0,
+            vpcEndpointCount: 0
+        });
+    });
+
+    function verifyResources(template: Template, props: { vpcCount: number, vpcEndpointCount: number }) {
+        template.resourceCountIs('AWS::EC2::VPC', props.vpcCount);
+        template.resourceCountIs('AWS::EC2::VPCEndpoint', props.vpcEndpointCount);
+        template.resourceCountIs('AWS::ServiceCatalogAppRegistry::Application', 1);
         template.hasResourceProperties('AWS::EC2::Instance', {
             InstanceType: "t3.large"
         });
-    });
+    }
 });

@@ -88,9 +88,13 @@ public class LuceneDocumentsReader {
 
      */
     public Flux<RfsLuceneDocument> readDocuments() {
+        return readDocuments(0, 0);
+    }
+
+    public Flux<RfsLuceneDocument> readDocuments(int startSegmentIndex, int startDoc) {
         return Flux.using(
             () -> wrapReader(getReader(), softDeletesPossible, softDeletesField),
-            this::readDocsByLeavesInParallel,
+            reader -> readDocsByLeavesFromStartingPosition(reader, startSegmentIndex, startDoc),
             reader -> {
                 try {
                     reader.close();
@@ -114,8 +118,11 @@ public class LuceneDocumentsReader {
         }
     }
 
-    Publisher<RfsLuceneDocument> readDocsByLeavesInParallel(DirectoryReader reader) {
-        var segmentsToReadAtOnce = 5; // Arbitrary value
+    /* Start reading docs from a specific segment and document id.
+    If the startSegmentIndex is 0, it will start from the first segment.
+    If the startDocId is 0, it will start from the first document in the segment.
+     */
+    Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(DirectoryReader reader, int startSegmentIndex, int startDocId) {
         var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
             .addArgument(reader::maxDoc)
@@ -126,23 +133,25 @@ public class LuceneDocumentsReader {
         var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
 
         return Flux.fromIterable(reader.leaves())
-            .flatMap(this::getReadDocCallablesFromSegments, segmentsToReadAtOnce)
+            .skip(startSegmentIndex)
+            .flatMap(ctx -> getReadDocCallablesFromSegments(ctx,
+                    // Only use startDocId for the first segment we process
+                    ctx.ord == startSegmentIndex ? startDocId : 0))
             .flatMap(c -> Mono.fromCallable(c)
-                    .subscribeOn(sharedSegmentReaderScheduler), // Scheduler to read documents on
-                maxDocumentsToReadAtOnce) // Don't need to worry about prefetch before this step as documents aren't realized
+                            .subscribeOn(sharedSegmentReaderScheduler), // Scheduler to read documents on
+                    maxDocumentsToReadAtOnce) // Don't need to worry about prefetch before this step as documents aren't realized
             .doOnTerminate(sharedSegmentReaderScheduler::dispose);
     }
 
-    Publisher<Callable<RfsLuceneDocument>> getReadDocCallablesFromSegments(LeafReaderContext leafReaderContext) {
-        @SuppressWarnings("resource") // segmentReader will be closed by parent DirectoryReader
+    Publisher<Callable<RfsLuceneDocument>> getReadDocCallablesFromSegments(LeafReaderContext leafReaderContext, int startDocId) {
         var segmentReader = leafReaderContext.reader();
         var liveDocs = segmentReader.getLiveDocs();
 
-        return Flux.range(0, segmentReader.maxDoc())
+        return Flux.range(startDocId, segmentReader.maxDoc() - startDocId)
             .subscribeOn(Schedulers.parallel())
             .map(docIdx -> () -> ((liveDocs == null || liveDocs.get(docIdx)) ? // Filter for live docs
-                getDocument(segmentReader, docIdx, true) : // Get document, returns null to skip malformed docs
-                null));
+                    getDocument(segmentReader, docIdx, true) : // Get document, returns null to skip malformed docs
+                    null));
     }
 
     protected DirectoryReader wrapReader(DirectoryReader reader, boolean softDeletesEnabled, String softDeletesField) throws IOException {
@@ -165,6 +174,8 @@ public class LuceneDocumentsReader {
         String id = null;
         String type = null;
         BytesRef sourceBytes = null;
+        String routing = null;
+
         try {
             for (var field : document.getFields()) {
                 String fieldName = field.name();
@@ -185,6 +196,10 @@ public class LuceneDocumentsReader {
                     case "_source": {
                         // All versions (?)
                         sourceBytes = field.binaryValue();
+                        break;
+                    }
+                    case "_routing": {
+                        routing = field.stringValue();
                         break;
                     }
                     default:
@@ -218,6 +233,6 @@ public class LuceneDocumentsReader {
         }
 
         log.atDebug().setMessage("Document {} read successfully").addArgument(id).log();
-        return new RfsLuceneDocument(id, type, sourceBytes.utf8ToString());
+        return new RfsLuceneDocument(id, type, sourceBytes.utf8ToString(), routing);
     }
 }

@@ -1,12 +1,14 @@
 from datetime import datetime
-from typing import Dict, Optional
 import json
+import os
+from typing import Dict, Optional
+
 
 import requests
 
 from console_link.models.backfill_base import Backfill, BackfillStatus
 from console_link.models.client_options import ClientOptions
-from console_link.models.cluster import Cluster
+from console_link.models.cluster import Cluster, HttpMethod
 from console_link.models.schema_tools import contains_one_of
 from console_link.models.command_result import CommandResult
 from console_link.models.ecs_service import ECSService
@@ -16,6 +18,8 @@ from cerberus import Validator
 import logging
 
 logger = logging.getLogger(__name__)
+
+WORKING_STATE_INDEX = ".migrations_working_state"
 
 DOCKER_RFS_SCHEMA = {
     "type": "dict",
@@ -80,11 +84,27 @@ class DockerRFSBackfill(RFSBackfill):
         self.target_cluster = target_cluster
         self.docker_config = self.config["reindex_from_snapshot"]["docker"]
 
+    def pause(self, pipeline_name=None) -> CommandResult:
+        raise NotImplementedError()
+
     def get_status(self, *args, **kwargs) -> CommandResult:
         return CommandResult(True, (BackfillStatus.RUNNING, "This is my running state message"))
 
     def scale(self, units: int, *args, **kwargs) -> CommandResult:
         raise NotImplementedError()
+    
+    def archive(self, *args, **kwargs) -> CommandResult:
+        raise NotImplementedError()
+    
+
+class RfsWorkersInProgress(Exception):
+    def __init__(self):
+        super().__init__("RFS Workers are still in progress")
+
+
+class WorkingIndexDoesntExist(Exception):
+    def __init__(self, index_name: str):
+        super().__init__(f"The working state index '{index_name}' does not exist")
 
 
 class ECSRFSBackfill(RFSBackfill):
@@ -103,6 +123,10 @@ class ECSRFSBackfill(RFSBackfill):
     def start(self, *args, **kwargs) -> CommandResult:
         logger.info(f"Starting RFS backfill by setting desired count to {self.default_scale} instances")
         return self.ecs_client.set_desired_count(self.default_scale)
+    
+    def pause(self, *args, **kwargs) -> CommandResult:
+        logger.info("Pausing RFS backfill by setting desired count to 0 instances")
+        return self.ecs_client.set_desired_count(0)
 
     def stop(self, *args, **kwargs) -> CommandResult:
         logger.info("Stopping RFS backfill by setting desired count to 0 instances")
@@ -111,6 +135,31 @@ class ECSRFSBackfill(RFSBackfill):
     def scale(self, units: int, *args, **kwargs) -> CommandResult:
         logger.info(f"Scaling RFS backfill by setting desired count to {units} instances")
         return self.ecs_client.set_desired_count(units)
+    
+    def archive(self, *args, archive_dir_path: str = None, archive_file_name: str = None, **kwargs) -> CommandResult:
+        logger.info("Confirming there are no currently in-progress workers")
+        status = self.ecs_client.get_instance_statuses()
+        if status.running > 0 or status.pending > 0 or status.desired > 0:
+            return CommandResult(False, RfsWorkersInProgress())
+        
+        try:
+            backup_path = get_working_state_index_backup_path(archive_dir_path, archive_file_name)
+            logger.info(f"Backing up working state index to {backup_path}")
+            backup_working_state_index(self.target_cluster, WORKING_STATE_INDEX, backup_path)
+            logger.info("Working state index backed up successful")
+
+            logger.info("Cleaning up working state index on target cluster")
+            self.target_cluster.call_api(
+                f"/{WORKING_STATE_INDEX}",
+                method=HttpMethod.DELETE,
+                params={"ignore_unavailable": "true"}
+            )
+            logger.info("Working state index cleaned up successful")
+            return CommandResult(True, backup_path)
+        except requests.HTTPError as e:
+            if e.response.status_code == 404:
+                return CommandResult(False, WorkingIndexDoesntExist(WORKING_STATE_INDEX))
+            return CommandResult(False, e)
 
     def get_status(self, deep_check: bool, *args, **kwargs) -> CommandResult:
         logger.info(f"Getting status of RFS backfill, with {deep_check=}")
@@ -184,6 +233,45 @@ class ECSRFSBackfill(RFSBackfill):
                            f" sum to the incomplete ({values['incomplete']}) shards." + disclaimer)
 
         return "\n".join([f"Shards {key}: {value}" for key, value in values.items() if value is not None])
+
+
+def get_working_state_index_backup_path(archive_dir_path: str = None, archive_file_name: str = None) -> str:
+    shared_logs_dir = os.getenv("SHARED_LOGS_DIR_PATH", None)
+    if archive_dir_path:
+        backup_dir = archive_dir_path
+    elif shared_logs_dir is None:
+        backup_dir = "./backfill_working_state"
+    else:
+        backup_dir = os.path.join(shared_logs_dir, "backfill_working_state")
+
+    if archive_file_name:
+        file_name = archive_file_name
+    else:
+        file_name = f"working_state_backup_{datetime.now().strftime('%Y%m%d%H%M%S')}.json"
+    return os.path.join(backup_dir, file_name)
+
+
+def backup_working_state_index(cluster: Cluster, index_name: str, backup_path: str):
+    # Ensure the backup directory exists
+    backup_dir = os.path.dirname(backup_path)
+    os.makedirs(backup_dir, exist_ok=True)
+
+    # Backup the docs in the working state index as a JSON array containing batches of documents
+    with open(backup_path, 'w') as outfile:
+        outfile.write("[\n")  # Start the JSON array
+        first_batch = True
+
+        for batch in cluster.fetch_all_documents(index_name=index_name):
+            if not first_batch:
+                outfile.write(",\n")
+            else:
+                first_batch = False
+            
+            # Dump the batch of documents as an entry in the array
+            batch_json = json.dumps(batch, indent=4)
+            outfile.write(batch_json)
+
+        outfile.write("\n]")  # Close the JSON array
 
 
 def parse_query_response(query: dict, cluster: Cluster, label: str) -> Optional[int]:

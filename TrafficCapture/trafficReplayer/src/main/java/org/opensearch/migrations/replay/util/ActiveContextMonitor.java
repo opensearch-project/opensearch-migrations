@@ -23,6 +23,7 @@ import org.opensearch.migrations.Utils;
 import org.opensearch.migrations.tracing.ActiveContextTracker;
 import org.opensearch.migrations.tracing.ActiveContextTrackerByActivityType;
 import org.opensearch.migrations.tracing.IScopedInstrumentationAttributes;
+import org.opensearch.migrations.utils.TrackedFuture;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
