@@ -46,14 +46,31 @@ public class TypeMappingsSanitizationTransformerBulkTest {
                 "  \"" + JsonKeysForHttpMessage.HEADERS_KEY + "\": {},\n" +
                 "  \"" + JsonKeysForHttpMessage.PAYLOAD_KEY + "\": {\n" +
                 "    \"" + JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY + "\": [\n" +
-//                "{ \"index\" : { \"_index\" : \"test\", \"_type\" : \"type1\", \"_id\" : \"1\" } },\n" +
-//                "{ \"field1\" : \"value1\" },\n" +
-                "{ \"delete\" : { \"_index\" : \"test\", \"_type\" : \"type1\", \"_id\" : \"2\" } },\n" +
-                "{ \"delete\" : { \"_index\" : \"time-January_1970\", \"_type\" : \"cpu\", \"_id\" : \"8\" } }\n" +
-//                "{ \"create\" : { \"_index\" : \"test\", \"_type\" : \"type1\", \"_id\" : \"3\" } },\n" +
-//                "{ \"field1\" : \"value3\" },\n" +
-//                "{ \"update\" : {\"_id\" : \"1\", \"_type\" : \"type1\", \"_index\" : \"test\"} },\n" +
-//                "{ \"doc\" : {\"field2\" : \"value2\"} }\n" +
+                "{ \"index\": { \"_index\": \"indexA\", \"_type\": \"type1\", \"_id\": \"1\" } },\n" +
+                "{ \"field1\": \"value1\" },\n" +
+
+                "{ \"index\": { \"_index\": \"indexA\", \"_type\": \"typeDontMap\", \"_id\": \"1\" } },\n" +
+                "{ \"field1\": \"value9\" },\n" +
+
+                "{ \"delete\": { \"_index\": \"test\", \"_type\": \"type1\", \"_id\": \"2\" } },\n" +
+
+                "{ \"delete\": { \"_index\": \"time-January_1970\", \"_type\": \"cpu\", \"_id\": \"8\" } },\n" +
+
+                "{ \"create\": { \"_index\": \"indexC\", \"_type\": \"type1\", \"_id\": \"3\" } },\n" +
+                "{ \"field1\": \"value3\" },\n" +
+
+                "{ \"create\": { \"_index\": \"indexC\", \"_type\": \"type2\", \"_id\": \"14\" } },\n" +
+                "{ \"field14\": \"value14\" },\n" +
+
+                "{ \"update\": {\"_id\": \"1\", \"_type\": \"type1\", \"_index\": \"indexB\"} },\n" +
+                "{ \"doc\": {\"field2\": \"value2\"} },\n" +
+
+                "{ \"update\": {\"_id\": \"1\", \"_type\": \"type2\", \"_index\": \"indexB\"} },\n" +
+                "{ \"doc\": {\"field10\": \"value10\"} },\n" +
+
+                "{ \"update\": {\"_id\": \"1\", \"_type\": \"type3\", \"_index\": \"indexB\"} },\n" +
+                "{ \"doc\": {\"field10\": \"value11\"} }\n" +
+
                 "    ]\n" +
                 "  }\n" +
                 "}";
@@ -66,13 +83,20 @@ public class TypeMappingsSanitizationTransformerBulkTest {
                 "  \"" + JsonKeysForHttpMessage.HEADERS_KEY + "\": {},\n" +
                 "  \"" + JsonKeysForHttpMessage.PAYLOAD_KEY + "\": {\n" +
                 "    \"" + JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY + "\": [\n" +
-//                "{ \"index\" : { \"_index\" : \"test\", \"_type\" : \"type1\", \"_id\" : \"1\" } },\n" +
-//                "{ \"field1\" : \"value1\" },\n" +
-                "{ \"delete\" : { \"_index\" : \"time-January_1970-cpu\", \"_id\" : \"8\" } }\n" +
-//                "{ \"create\" : { \"_index\" : \"test\", \"_type\" : \"type1\", \"_id\" : \"3\" } },\n" +
-//                "{ \"field1\" : \"value3\" },\n" +
-//                "{ \"update\" : {\"_id\" : \"1\", \"_type\" : \"type1\", \"_index\" : \"test\"} },\n" +
-//                "{ \"doc\" : {\"field2\" : \"value2\"} }\n" +
+                "{ \"index\": { \"_index\": \"indexA_1\", \"_id\": \"1\" } },\n" +
+                "{ \"field1\": \"value1\" },\n" +
+
+                "{ \"delete\": { \"_index\": \"time-January_1970-cpu\", \"_id\": \"8\" } },\n" +
+
+                "{ \"create\": { \"_index\": \"indexC\", \"_id\": \"14\" } },\n" +
+                "{ \"field14\": \"value14\" },\n" +
+
+                "{ \"update\": {\"_id\": \"1\", \"_index\": \"indexB\"} },\n" +
+                "{ \"doc\": {\"field2\": \"value2\"} },\n" +
+
+                "{ \"update\": {\"_id\": \"1\", \"_index\": \"indexB\"} },\n" +
+                "{ \"doc\": {\"field10\": \"value10\"} }\n" +
+
                 "    ]\n" +
                 "  }\n" +
                 "}";
@@ -86,7 +110,8 @@ public class TypeMappingsSanitizationTransformerBulkTest {
                 throw new RuntimeException(e);
             }
         }).log();
-        Assertions.assertEquals(normalize(OBJECT_MAPPER.readValue(expectedString, LinkedHashMap.class)), normalize(resultObj));
+        Assertions.assertEquals(normalize(OBJECT_MAPPER.readValue(expectedString, LinkedHashMap.class)),
+            normalize(resultObj));
     }
 
     static String normalize(Object obj) throws Exception {

@@ -56,7 +56,7 @@ public class TypeMappingsSanitizationProviderTest {
                     "type2", "indexB"),
                 "indexC", Map.of(
                     "type2", "indexC")),
-            "regexMappings", List.of(List.of("(time*)", "(type*)", "\\1_And_\\2")));
+            "regexMappings", List.of(List.of("(time*)", "(type*)", "$1_And_$2")));
         var provider = new TypeMappingSanitizationTransformerProvider();
         var transformer = provider.createTransformer(config);
         var transformedDocument =
