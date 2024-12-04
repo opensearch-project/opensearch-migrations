@@ -3,7 +3,6 @@ package org.opensearch.migrations.bulkload.worker;
 import java.io.IOException;
 import java.time.Duration;
 import java.util.List;
-import java.util.function.BiConsumer;
 import java.util.stream.IntStream;
 
 import org.opensearch.migrations.bulkload.common.FilterScheme;
@@ -99,24 +98,37 @@ public class ShardWorkPreparer {
         List<String> indexAllowlist,
         IDocumentMigrationContexts.IShardSetupAttemptContext context
     ) {
-        log.info("Setting up the Documents Work Items...");
+        log.atInfo()
+            .setMessage("Setting up the Documents Work Items...")
+            .log();
         SnapshotRepo.Provider repoDataProvider = metadataFactory.getRepoDataProvider();
-
-        BiConsumer<String, Boolean> logger = (indexName, accepted) -> {
-            if (Boolean.FALSE.equals(accepted)) {
-                log.info("Index " + indexName + " rejected by allowlist");
-            }
-        };
+        var allowedIndexes = FilterScheme.filterByAllowList(indexAllowlist);
         repoDataProvider.getIndicesInSnapshot(snapshotName)
             .stream()
-            .filter(FilterScheme.filterIndicesByAllowList(indexAllowlist, logger))
+            .filter(index -> {
+                var accepted = allowedIndexes.test(index.getName());
+                if (!accepted) {
+                    log.atInfo()
+                        .setMessage("None of the documents in index {} will be reindexed, it was not included in the allowlist: {} ")
+                        .addArgument(index.getName())
+                        .addArgument(indexAllowlist)
+                        .log();
+                }
+                return accepted;
+            })
             .forEach(index -> {
                 IndexMetadata indexMetadata = metadataFactory.fromRepo(snapshotName, index.getName());
-                log.info("Index " + indexMetadata.getName() + " has " + indexMetadata.getNumberOfShards() + " shards");
+                log.atInfo()
+                    .setMessage("Index {} has {} shards")
+                    .addArgument(indexMetadata.getName())
+                    .addArgument(indexMetadata.getNumberOfShards())
+                    .log();
                 IntStream.range(0, indexMetadata.getNumberOfShards()).forEach(shardId -> {
-                    log.info(
-                        "Creating Documents Work Item for index: " + indexMetadata.getName() + ", shard: " + shardId
-                    );
+                    log.atInfo()
+                        .setMessage("Creating Documents Work Item for index: {}, shard: {}")
+                        .addArgument(indexMetadata.getName())
+                        .addArgument(shardId)
+                        .log();
                     try (var shardSetupContext = context.createShardWorkItemContext()) {
                         workCoordinator.createUnassignedWorkItem(
                             IndexAndShardCursor.formatAsWorkItemString(indexMetadata.getName(), shardId),
@@ -128,6 +140,8 @@ public class ShardWorkPreparer {
                 });
             });
 
-        log.info("Finished setting up the Documents Work Items.");
+        log.atInfo()
+            .setMessage("Finished setting up the Documents Work Items.")
+            .log();
     }
 }
