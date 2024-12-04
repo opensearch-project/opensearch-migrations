@@ -63,17 +63,14 @@ public class TypeMappingsSanitizationProviderTest {
             + "}\n";
 
         var provider = new TypeMappingSanitizationTransformerProvider();
-
+        Map<String, Object>  inputMap = mapper.readValue(TEST_INPUT_REQUEST, new TypeReference<>() {});
         {
-            var transformedDocument = provider.createTransformer(config)
-                .transformJson(mapper.readValue(TEST_INPUT_REQUEST, new TypeReference<>() {}));
+            var transformedDocument = provider.createTransformer(config).transformJson(inputMap);
             Assertions.assertEquals(JsonNormalizer.fromString(EXPECTED),
                 JsonNormalizer.fromObject(transformedDocument));
         }
         {
-            var resultFromNullConfig = provider.createTransformer(null)
-                .transformJson(mapper.readValue(TEST_INPUT_REQUEST, new TypeReference<>() {
-                }));
+            var resultFromNullConfig = provider.createTransformer(null).transformJson(inputMap);
             Assertions.assertEquals(
                 JsonNormalizer.fromString(
                     EXPECTED.replace(

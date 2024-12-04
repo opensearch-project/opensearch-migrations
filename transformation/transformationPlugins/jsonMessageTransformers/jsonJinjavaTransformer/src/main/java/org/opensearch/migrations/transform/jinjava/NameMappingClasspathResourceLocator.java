@@ -3,15 +3,43 @@ package org.opensearch.migrations.transform.jinjava;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
+import com.google.common.cache.CacheBuilder;
+import com.google.common.cache.CacheLoader;
+import com.google.common.cache.LoadingCache;
 import com.google.common.io.Resources;
 import com.hubspot.jinjava.interpret.JinjavaInterpreter;
 import com.hubspot.jinjava.loader.ClasspathResourceLocator;
+import com.hubspot.jinjava.loader.ResourceNotFoundException;
+import lombok.AllArgsConstructor;
+import lombok.EqualsAndHashCode;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class NameMappingClasspathResourceLocator extends ClasspathResourceLocator {
+    @AllArgsConstructor
+    @Getter
+    @EqualsAndHashCode
+    private static class ResourceCacheKey {
+        private String fullName;
+        private Charset encoding;
+    }
+
+    private final LoadingCache<ResourceCacheKey, String> resourceCache = CacheBuilder.newBuilder()
+        .build(new CacheLoader<>() {
+            @Override
+            public String load(ResourceCacheKey key) throws IOException {
+                try {
+                    String versionedName = getDefaultVersion("jinjava/" + key.getFullName());
+                    return Resources.toString(Resources.getResource(versionedName), key.getEncoding());
+                } catch (IllegalArgumentException e) {
+                    throw new ResourceNotFoundException("Couldn't find resource: " + key.getFullName());
+                }
+            }
+        });
 
     private String getDefaultVersion(final String fullName) throws IOException {
         try {
@@ -31,6 +59,10 @@ public class NameMappingClasspathResourceLocator extends ClasspathResourceLocato
 
     @Override
     public String getString(String fullName, Charset encoding, JinjavaInterpreter interpreter) throws IOException {
-        return super.getString(getDefaultVersion("jinjava/" + fullName), encoding, interpreter);
+        try {
+            return resourceCache.get(new ResourceCacheKey(fullName, encoding));
+        } catch (ExecutionException e) {
+            throw new IOException("Failed to get resource content from cache", e);
+        }
     }
 }

@@ -14,7 +14,6 @@ dependencies {
 
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformer')
     testImplementation project(':coreUtilities')
-    testImplementation project(':TrafficCapture:trafficReplayer')
     testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))
