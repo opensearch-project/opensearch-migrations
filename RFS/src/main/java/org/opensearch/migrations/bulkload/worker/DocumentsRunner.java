@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.worker;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -16,6 +17,7 @@ import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
 import lombok.Lombok;
@@ -31,8 +33,8 @@ public class DocumentsRunner {
     private final SnapshotShardUnpacker.Factory unpackerFactory;
     private final Function<Path, LuceneDocumentsReader> readerFactory;
     private final DocumentReindexer reindexer;
-
     private final Consumer<WorkItemCursor> cursorConsumer;
+    private final WorkItemTimeProvider timeProvider;
 
     public DocumentsRunner(ScopedWorkCoordinator workCoordinator,
                            Duration maxInitialLeaseDuration,
@@ -40,7 +42,8 @@ public class DocumentsRunner {
                            SnapshotShardUnpacker.Factory unpackerFactory,
                            BiFunction<String, Integer, ShardMetadata> shardMetadataFactory,
                            Function<Path, LuceneDocumentsReader> readerFactory,
-                           Consumer<WorkItemCursor> cursorConsumer) {
+                           Consumer<WorkItemCursor> cursorConsumer,
+                           WorkItemTimeProvider timeProvider) {
         this.maxInitialLeaseDuration = maxInitialLeaseDuration;
         this.readerFactory = readerFactory;
         this.reindexer = reindexer;
@@ -48,6 +51,7 @@ public class DocumentsRunner {
         this.unpackerFactory = unpackerFactory;
         this.workCoordinator = workCoordinator;
         this.cursorConsumer = cursorConsumer;
+        this.timeProvider = timeProvider;
     }
 
     public enum CompletionStatus {
@@ -65,7 +69,9 @@ public class DocumentsRunner {
         try (var context = contextSupplier.get()) {
             return workCoordinator.ensurePhaseCompletion(wc -> {
                 try {
-                    return wc.acquireNextWorkItem(maxInitialLeaseDuration, context::createOpeningContext);
+                    var workAcquisitionOutcome = wc.acquireNextWorkItem(maxInitialLeaseDuration, context::createOpeningContext);
+                    timeProvider.getLeaseAcquisitionTimeRef().set(Instant.now());
+                    return workAcquisitionOutcome;
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw Lombok.sneakyThrow(e);
@@ -113,6 +119,9 @@ public class DocumentsRunner {
 
         var unpacker = unpackerFactory.create(shardMetadata);
         var reader = readerFactory.apply(unpacker.unpack());
+
+        timeProvider.getDocumentMigraionStartTimeRef().set(Instant.now());
+
         Flux<RfsLuceneDocument> documents = reader.readDocuments(workItem.getStartingDocId());
 
         reindexer.reindex(workItem.getIndexName(), documents, context)

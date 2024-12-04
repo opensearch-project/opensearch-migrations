@@ -341,7 +341,8 @@ public class WorkCoordinatorTest {
 
             // Now attempt to go through with the correct successor item list
             Assertions.assertThrows(IllegalStateException.class,
-                    () -> workCoordinator.createSuccessorWorkItemsAndMarkComplete(docId, successorItems, testContext::createSuccessorWorkItemsContext));
+                    () -> workCoordinator.createSuccessorWorkItemsAndMarkComplete(docId, successorItems, 0,
+                            testContext::createSuccessorWorkItemsContext));
         }
     }
 
@@ -363,7 +364,9 @@ public class WorkCoordinatorTest {
 
             // Now attempt to go through with the correct successor item list
             Assertions.assertThrows(IllegalArgumentException.class,
-                    () -> workCoordinator.createSuccessorWorkItemsAndMarkComplete(initialWorkItem, successorItems, testContext::createSuccessorWorkItemsContext));
+                    () -> workCoordinator.createSuccessorWorkItemsAndMarkComplete(initialWorkItem, successorItems,
+                            0,
+                            testContext::createSuccessorWorkItemsContext));
         }
     }
 
@@ -391,6 +394,7 @@ public class WorkCoordinatorTest {
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, workerName)) {
             workCoordinator.createSuccessorWorkItemsAndMarkComplete(
                     workItemId, successorWorkItems,
+                    0,
                     testContext::createSuccessorWorkItemsContext
             );
         } catch (Exception e) {

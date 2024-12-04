@@ -294,7 +294,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "    \"scriptVersion\": \"" + SCRIPT_VERSION_TEMPLATE + "\",\n"
             + "    \"" + EXPIRATION_FIELD_NAME + "\": 0,\n"
             + "    \"creatorId\": \"" + WORKER_ID_TEMPLATE + "\",\n"
-            + "    \"numAttempts\": 0\n"
+            + "    \"nextAcquisitionLeaseExponent\": 0\n"
             + "  },\n"
             + "  \"script\": {\n"
             + "    \"lang\": \"painless\",\n"
@@ -311,7 +311,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "      if (Math.abs(params.clientTimestamp - serverTimeSeconds) > {CLOCK_DEVIATION_SECONDS_THRESHOLD}) {"
             + "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");"
             + "      }"
-            + "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);"
+            + "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.nextAcquisitionLeaseExponent)) * params.expirationWindow);"
             + "      if (params.expirationWindow > 0 && ctx._source." + COMPLETED_AT_FIELD_NAME + " == null) {"
             +          // work item is not completed, but may be assigned to this or a different worker (or unassigned)
             "          if (ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " == params.workerId && "
@@ -322,7 +322,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             "                     ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +      // sanity check
             "            ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;"
             + "          ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;"
-            + "          ctx._source.numAttempts += 1;"
+            + "          ctx._source.nextAcquisitionLeaseExponent += 1;"
             + "        } else {"
             + "          ctx.op = \\\"noop\\\";"
             + "        }"
@@ -334,7 +334,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + // close script
             "}"; // close top-level
 
-        var body = upsertLeaseBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, "poc")
+        var body = upsertLeaseBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, "2.0")
             .replace(WORKER_ID_TEMPLATE, workerId)
             .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().toEpochMilli() / 1000))
             .replace(EXPIRATION_WINDOW_TEMPLATE, Long.toString(expirationWindowSeconds))
@@ -465,7 +465,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 + "  }\n"
                 + "}";
 
-            var body = markWorkAsCompleteBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, "poc")
+            var body = markWorkAsCompleteBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, "2.0")
                 .replace(WORKER_ID_TEMPLATE, workerId)
                 .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().toEpochMilli() / 1000));
 
@@ -584,12 +584,12 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             + "      if (Math.abs(params.clientTimestamp - serverTimeSeconds) > {CLOCK_DEVIATION_SECONDS_THRESHOLD}) {"
             + "        throw new IllegalArgumentException(\\\"The current times indicated between the client and server are too different.\\\");"
             + "      }"
-            + "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.numAttempts)) * params.expirationWindow);"
+            + "      long newExpiration = params.clientTimestamp + (((long)Math.pow(2, ctx._source.nextAcquisitionLeaseExponent)) * params.expirationWindow);"
             + "      if (ctx._source." + EXPIRATION_FIELD_NAME + " < serverTimeSeconds && " + // is expired
             "          ctx._source." + EXPIRATION_FIELD_NAME + " < newExpiration) {" +        // sanity check
             "        ctx._source." + EXPIRATION_FIELD_NAME + " = newExpiration;"
             + "        ctx._source." + LEASE_HOLDER_ID_FIELD_NAME + " = params.workerId;"
-            + "        ctx._source.numAttempts += 1;"
+            + "        ctx._source.nextAcquisitionLeaseExponent += 1;"
             + "      } else {"
             + "        ctx.op = \\\"noop\\\";"
             + "      }"
@@ -600,7 +600,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             "}";
 
         final var timestampEpochSeconds = clock.instant().toEpochMilli() / 1000;
-        final var body = queryUpdateTemplate.replace(SCRIPT_VERSION_TEMPLATE, "poc")
+        final var body = queryUpdateTemplate.replace(SCRIPT_VERSION_TEMPLATE, "2.0")
             .replace(WORKER_ID_TEMPLATE, workerId)
             .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(timestampEpochSeconds))
             .replace(OLD_EXPIRATION_THRESHOLD_TEMPLATE, Long.toString(timestampEpochSeconds))
@@ -762,7 +762,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 + "  }\n"
                 + "}";
 
-        var body = updateSuccessorWorkItemsTemplate.replace(SCRIPT_VERSION_TEMPLATE, "poc")
+        var body = updateSuccessorWorkItemsTemplate.replace(SCRIPT_VERSION_TEMPLATE, "2.0")
                 .replace(WORKER_ID_TEMPLATE, workerId)
                 .replace(CLIENT_TIMESTAMP_TEMPLATE, Long.toString(clock.instant().toEpochMilli() / 1000))
                 .replace(SUCCESSOR_WORK_ITEM_IDS_TEMPLATE, String.join(SUCCESSOR_ITEM_DELIMITER, successorWorkItemIds));
@@ -805,10 +805,10 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     // API which creates a document only if the specified ID doesn't yet exist. It is distinct from createUnassignedWorkItem
     // because it is an expected outcome of this function that sometimes the work item is already created. That function
     // uses `createOrUpdateLease`, whereas this function deliberately never modifies an already-existing work item.
-    private void createUnassignedWorkItemsIfNonexistent(ArrayList<String> workItemIds) throws IOException, IllegalStateException {
-        String workItemBodyTemplate = "{\"numAttempts\":0, \"scriptVersion\":\"" + SCRIPT_VERSION_TEMPLATE + "\", " +
+    private void createUnassignedWorkItemsIfNonexistent(ArrayList<String> workItemIds, int nextAcquisitionLeaseExponent) throws IOException, IllegalStateException {
+        String workItemBodyTemplate = "{\"nextAcquisitionLeaseExponent\":" + nextAcquisitionLeaseExponent + ", \"scriptVersion\":\"" + SCRIPT_VERSION_TEMPLATE + "\", " +
             "\"creatorId\":\"" + WORKER_ID_TEMPLATE + "\", \"" + EXPIRATION_FIELD_NAME + "\":0 }";
-        String workItemBody = workItemBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, "poc").replace(WORKER_ID_TEMPLATE, workerId);
+        String workItemBody = workItemBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, "2.0").replace(WORKER_ID_TEMPLATE, workerId);
 
         StringBuilder body = new StringBuilder();
         for (var workItemId : workItemIds) {
@@ -864,6 +864,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     public void createSuccessorWorkItemsAndMarkComplete(
             String workItemId,
             ArrayList<String> successorWorkItemIds,
+            int successorNextAcquisitionLeaseExponent,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException, IllegalStateException {
         if (successorWorkItemIds.contains(workItemId)) {
@@ -884,7 +885,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                     e -> ctx.addTraceException(e, true)
             );
             retryWithExponentialBackoff(
-                    () -> createUnassignedWorkItemsIfNonexistent(successorWorkItemIds),
+                    () -> createUnassignedWorkItemsIfNonexistent(successorWorkItemIds, successorNextAcquisitionLeaseExponent),
                     MAX_CREATE_UNASSIGNED_SUCCESSOR_WORK_ITEM_RETRIES,
                     CREATE_SUCCESSOR_WORK_ITEMS_RETRY_BASE_MS,
                     e -> ctx.addTraceException(e, true)
@@ -1039,7 +1040,11 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                             var workItem = getAssignedWorkItem(leaseChecker, ctx);
                             if (workItem.successorWorkItemIds != null) {
                                 // continue the previous work of creating the successors and marking this item as completed.
-                                createSuccessorWorkItemsAndMarkComplete(workItem.workItemId, workItem.successorWorkItemIds, ctx::getCreateSuccessorWorkItemsContext);
+                                createSuccessorWorkItemsAndMarkComplete(workItem.workItemId, workItem.successorWorkItemIds,
+                                        // in cases of partial successor creation, create with 0 nextAcquisitionLeaseExponent to use default
+                                        // lease duration
+                                        0,
+                                        ctx::getCreateSuccessorWorkItemsContext);
                                 // this item is not acquirable, so repeat the loop to find a new item.
                                 continue;
                             }

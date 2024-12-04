@@ -33,6 +33,7 @@ import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
@@ -228,7 +229,8 @@ public class SourceTestBase {
                     sourceResourceProvider.getShardMetadata(),
                     unpackerFactory,
                     MAX_SHARD_SIZE_BYTES,
-                    context);
+                    context,
+                    new WorkItemTimeProvider());
             }
         } finally {
             deleteTree(tempDir);

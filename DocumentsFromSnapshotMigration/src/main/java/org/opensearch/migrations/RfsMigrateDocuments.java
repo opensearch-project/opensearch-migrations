@@ -5,6 +5,7 @@ import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.time.Clock;
 import java.time.Duration;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
@@ -29,6 +30,7 @@ import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
@@ -60,6 +62,9 @@ public class RfsMigrateDocuments {
     public static final int NO_WORK_LEFT_EXIT_CODE = 3;
     public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
     public static final String LOGGING_MDC_WORKER_ID = "workerId";
+
+    // Increase successor nextAcquisitionLeaseExponent if shard setup takes more than 10% of lease total time
+    private static final double SHARD_SETUP_LEASE_DURATION_THRESHOLD = 0.1;
 
     public static final String DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG = "[" +
             "  {" +
@@ -276,8 +281,9 @@ public class RfsMigrateDocuments {
         }
         IJsonTransformer docTransformer = new TransformationLoader().getTransformerFactoryLoader(docTransformerConfig);
 
-        AtomicReference<IWorkCoordinator.WorkItemAndDuration> workItemRef = new AtomicReference<>();
-        AtomicReference<WorkItemCursor> progressCursor = new AtomicReference<>();
+        var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
+        var progressCursor = new AtomicReference<WorkItemCursor>();
+        var workItemTimeProvider = new WorkItemTimeProvider();
         try (var workCoordinator = new OpenSearchWorkCoordinator(
                  new CoordinateWorkHttpClient(connectionContext),
                  TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
@@ -290,6 +296,8 @@ public class RfsMigrateDocuments {
                         workCoordinator,
                         w,
                         progressCursor,
+                        workItemTimeProvider,
+                        arguments.initialLeaseDuration,
                         context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
                 Clock.systemUTC()
             );
@@ -335,7 +343,8 @@ public class RfsMigrateDocuments {
                 sourceResourceProvider.getShardMetadata(),
                 unpackerFactory,
                 arguments.maxShardSizeBytes,
-                context);
+                context,
+                workItemTimeProvider);
         } catch (NoWorkLeftException e) {
             log.atWarn().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
             System.exit(NO_WORK_LEFT_EXIT_CODE);
@@ -351,6 +360,8 @@ public class RfsMigrateDocuments {
             IWorkCoordinator coordinator,
             String workItemId, 
             AtomicReference<WorkItemCursor> progressCursorRef,
+            WorkItemTimeProvider workItemTimeProvider,
+            Duration initialLeaseDuration,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) {
         log.atWarn().setMessage("Terminating RfsMigrateDocuments because the lease has expired for {}")
@@ -361,28 +372,68 @@ public class RfsMigrateDocuments {
             log.atWarn().setMessage("Progress cursor: {}")
                     .addArgument(progressCursor).log();
             var workItemAndDuration = workItemRef.get();
+            if (workItemAndDuration == null) {
+                throw new IllegalStateException("Unexpected state with progressCursor set without a" +
+                        "work item");
+            }
             log.atWarn().setMessage("Work Item and Duration: {}").addArgument(workItemAndDuration)
                     .log();
             log.atWarn().setMessage("Work Item: {}").addArgument(workItemAndDuration.getWorkItem())
                     .log();
-            if (workItemAndDuration == null) {
-                throw new IllegalStateException("Unexpected state with progressCursor and not work item");
-            }
             var successorWorkItemIds = getSuccessorWorkItemIds(workItemAndDuration, progressCursor);
             log.atWarn().setMessage("Successor Work Ids: {}").addArgument(String.join(", ", successorWorkItemIds))
                     .log();
+            var successorNextAcquisitionLeaseExponent = getSuccessorNextAcquisitionLeaseExponent(workItemTimeProvider, initialLeaseDuration, workItemAndDuration.getLeaseExpirationTime());
             coordinator.createSuccessorWorkItemsAndMarkComplete(
                 workItemId,
                 successorWorkItemIds,
+                successorNextAcquisitionLeaseExponent,
                 contextSupplier
             );
         } else {
             log.atWarn().setMessage("No progress cursor to create successor work items from. This can happen when" +
                     "downloading and unpacking shard takes longer than the lease").log();
-            log.atWarn().setMessage("Skipping creation of successor work item to retry the existing one with more time");
+            log.atWarn().setMessage("Skipping creation of successor work item to retry the existing one with more time")
+                    .log();
         }
 
         System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
+    }
+
+    protected static int getSuccessorNextAcquisitionLeaseExponent(WorkItemTimeProvider workItemTimeProvider, Duration initialLeaseDuration,
+                                       Instant leaseExpirationTime) {
+        if (workItemTimeProvider.getLeaseAcquisitionTimeRef().get() == null ||
+            workItemTimeProvider.getDocumentMigraionStartTimeRef().get() == null) {
+            throw new IllegalStateException("Unexpected state with either leaseAquisitionTime or" +
+                    "documentMigrationStartTime as null while creating successor work item");
+        }
+        var leaseAcquisitionTime = workItemTimeProvider.getLeaseAcquisitionTimeRef().get();
+        var documentMigrationStartTime = workItemTimeProvider.getDocumentMigraionStartTimeRef().get();
+        var leaseDuration = Duration.between(leaseAcquisitionTime, leaseExpirationTime);
+        var leaseDurationFactor = (double) leaseDuration.toMillis() / initialLeaseDuration.toMillis();
+        // 2 ^ n = leaseDurationFactor <==> log2(leaseDurationFactor) = n, n >= 0
+        var existingNextAcquisitionLeaseExponent = Math.max(Math.round(Math.log(leaseDurationFactor) / Math.log(2)), 0);
+        var shardSetupDuration = Duration.between(leaseAcquisitionTime, documentMigrationStartTime);
+        var successorShardNextAcquisitionLeaseExponent = (int) (existingNextAcquisitionLeaseExponent + (((double) shardSetupDuration.toMillis() / leaseDuration.toMillis() > SHARD_SETUP_LEASE_DURATION_THRESHOLD) ? 1 : 0));
+
+        log.atDebug().setMessage("SuccessorNextAcquisitionLeaseExponent calculated values:" +
+                "\nleaseAcquisitionTime:{}" +
+                "\ndocumentMigrationStartTime:{}" +
+                "\nleaseDuration:{}" +
+                "\nleaseDurationFactor:{}" +
+                "\nexistingNextAcquisitionLeaseExponent:{}" +
+                "\nshardSetupDuration:{}" +
+                "\nsuccessorShardNextAcquisitionLeaseExponent:{}")
+                .addArgument(leaseAcquisitionTime)
+                .addArgument(documentMigrationStartTime)
+                .addArgument(leaseDuration)
+                .addArgument(leaseDurationFactor)
+                .addArgument(existingNextAcquisitionLeaseExponent)
+                .addArgument(shardSetupDuration)
+                .addArgument(successorShardNextAcquisitionLeaseExponent)
+                .log();
+
+        return successorShardNextAcquisitionLeaseExponent;
     }
 
     private static ArrayList<String> getSuccessorWorkItemIds(IWorkCoordinator.WorkItemAndDuration workItemAndDuration, WorkItemCursor progressCursor) {
@@ -423,7 +474,8 @@ public class RfsMigrateDocuments {
                                                        ShardMetadata.Factory shardMetadataFactory,
                                                        SnapshotShardUnpacker.Factory unpackerFactory,
                                                        long maxShardSizeBytes,
-                                                       RootDocumentMigrationContext rootDocumentContext)
+                                                       RootDocumentMigrationContext rootDocumentContext,
+                                                       WorkItemTimeProvider timeProvider)
         throws IOException, InterruptedException, NoWorkLeftException
     {
         var scopedWorkCoordinator = new ScopedWorkCoordinator(workCoordinator, leaseExpireTrigger);
@@ -451,7 +503,8 @@ public class RfsMigrateDocuments {
                 return shardMetadata;
             },
             readerFactory,
-            progressCursor::set);
+            progressCursor::set,
+            timeProvider);
         return runner.migrateNextShard(rootDocumentContext::createReindexContext);
     }
 

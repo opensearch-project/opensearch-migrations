@@ -241,7 +241,7 @@ ID: <name of the index to be migrated>
 FIELDS:
     * name (string): The index name
     * status (string): NOT_STARTED, COMPLETED, FAILED
-    * numAttempts (integer): Times the task has been attempted
+    * nextAcquisitionLeaseExponent (integer): Times the task has been attempted
     * numShards (integer): Number of shards in the index
 
 DOCUMENTS MIGRATION STATUS RECORD
@@ -249,7 +249,7 @@ ID: docs_status
 FIELDS:
     * status (string): SETUP, IN_PROGRESS, COMPLETED, FAILED
     * leaseExpiry (timestamp): When the current work lease expires
-    * numAttempts (integer): Times the task has been attempted
+    * nextAcquisitionLeaseExponent (integer): Times the task has been attempted
 
 SHARD WORK ENTRY RECORD
 ID: <name of the index to be migrated>_<shard number>
@@ -258,5 +258,5 @@ FIELDS:
     * shardId (integer): The shard number
     * status (string): NOT_STARTED, COMPLETED, FAILED
     * leaseExpiry (timestamp): When the current work lease expires
-    * numAttempts (integer): Times the task has been attempted
+    * nextAcquisitionLeaseExponent (integer): Times the task has been attempted
 ```

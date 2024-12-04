@@ -167,10 +167,9 @@ public class LuceneDocumentsReader {
 
         // Create shared scheduler for i/o bound document reading
         var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
-        int startDocIdInt = 2;
         return Flux.fromIterable(reader.leaves())
             .concatMapDelayError(c -> readDocsFromSegment(c,
-                    startDocIdInt,
+                    startDocId,
                     sharedSegmentReaderScheduler,
                     maxDocumentsToReadAtOnce)
             )
@@ -184,6 +183,11 @@ public class LuceneDocumentsReader {
         var liveDocs = segmentReader.getLiveDocs();
 
         int segmentDocBase = leafReaderContext.docBase;
+
+        log.atInfo().setMessage("For segment: {}, working on docCommitId: {}")
+                .addArgument(leafReaderContext)
+                .addArgument(docCommitId)
+                .log();
 
         return Flux.range(0, segmentReader.maxDoc())
                 .skipWhile(id -> id + segmentDocBase <= docCommitId && docCommitId != 0)

@@ -112,6 +112,7 @@ public interface IWorkCoordinator extends AutoCloseable {
     void createSuccessorWorkItemsAndMarkComplete(
         String workItemId,
         ArrayList<String> successorWorkItemIds,
+        int initialNextAcquisitionLeaseExponent,
         Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException;
 
