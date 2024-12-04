@@ -67,7 +67,9 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
             IAuthTransformer authTransformer = requestPipelineOrchestrator.authTransfomerFactory.getAuthTransformer(
                 httpJsonMessage
             );
+            final var payloadMap = (PayloadAccessFaultingMap) httpJsonMessage.payload();
             try {
+                payloadMap.setDisableThrowingPayloadNotLoaded(false);
                 handlePayloadNeutralTransformationOrThrow(
                     ctx,
                     originalHttpJsonMessage,
@@ -86,6 +88,8 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
                     getAuthTransformerAsStreamingTransformer(authTransformer)
                 );
                 ctx.fireChannelRead(handleAuthHeaders(httpJsonMessage, authTransformer));
+            } finally {
+                payloadMap.setDisableThrowingPayloadNotLoaded(true);
             }
         } else if (msg instanceof HttpContent) {
             ctx.fireChannelRead(msg);
