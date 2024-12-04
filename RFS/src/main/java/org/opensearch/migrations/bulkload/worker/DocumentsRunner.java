@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.concurrent.CountDownLatch;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.function.Function;
@@ -23,6 +24,7 @@ import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
+import reactor.core.publisher.Mono;
 
 @Slf4j
 public class DocumentsRunner {
@@ -35,6 +37,7 @@ public class DocumentsRunner {
     private final DocumentReindexer reindexer;
     private final Consumer<WorkItemCursor> cursorConsumer;
     private final WorkItemTimeProvider timeProvider;
+    private final Consumer<Runnable> cancellationTriggerConsumer;
 
     public DocumentsRunner(ScopedWorkCoordinator workCoordinator,
                            Duration maxInitialLeaseDuration,
@@ -43,6 +46,7 @@ public class DocumentsRunner {
                            BiFunction<String, Integer, ShardMetadata> shardMetadataFactory,
                            Function<Path, LuceneDocumentsReader> readerFactory,
                            Consumer<WorkItemCursor> cursorConsumer,
+                           Consumer<Runnable> cancellationTriggerConsumer,
                            WorkItemTimeProvider timeProvider) {
         this.maxInitialLeaseDuration = maxInitialLeaseDuration;
         this.readerFactory = readerFactory;
@@ -51,6 +55,7 @@ public class DocumentsRunner {
         this.unpackerFactory = unpackerFactory;
         this.workCoordinator = workCoordinator;
         this.cursorConsumer = cursorConsumer;
+        this.cancellationTriggerConsumer = cancellationTriggerConsumer;
         this.timeProvider = timeProvider;
     }
 
@@ -86,8 +91,34 @@ public class DocumentsRunner {
 
                 @Override
                 public CompletionStatus onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) {
-                    doDocumentsMigration(workItem.getWorkItem(), context);
-                    return CompletionStatus.WORK_COMPLETED;
+                    var docMigrationMono = setupDocMigration(workItem.getWorkItem(), context);
+                    var latch = new CountDownLatch(1);
+                    var disposable = docMigrationMono.subscribe( lastItem -> {},
+                            error -> log.atError()
+                                    .setCause(error)
+                                    .setMessage("Error prevented all batches from being processed")
+                                    .log(),
+                            () ->  {
+                                log.atInfo().setMessage("Reindexing completed for Index {}, Shard {}")
+                                        .addArgument(workItem.getWorkItem().getIndexName())
+                                        .addArgument(workItem.getWorkItem().getShardNumber())
+                                        .log();
+                                latch.countDown();
+                            });
+                    // This allows us to cancel the subscription to stop sending new docs
+                    // when the lease expires and a successor work item is made.
+                    // There may be outstanding requests with newer docs that have not been fully processed
+                    // and thus will show up as "deleted"/updated docs when the successor work item is processed.
+                    // Consider triggering an upstream cancellation before sending requests prior to the lease expiration
+                    // allowing for time to attempt to "flush out" pending requests before creating the successor items.
+                    cancellationTriggerConsumer.accept(disposable::dispose);
+                    try {
+                        latch.await();
+                        return CompletionStatus.WORK_COMPLETED;
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        throw Lombok.sneakyThrow(e);
+                    }
                 }
 
                 @Override
@@ -110,7 +141,7 @@ public class DocumentsRunner {
         }
     }
 
-    private void doDocumentsMigration(
+    private Mono<WorkItemCursor> setupDocMigration(
         IWorkCoordinator.WorkItemAndDuration.WorkItem workItem,
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
@@ -124,19 +155,8 @@ public class DocumentsRunner {
 
         Flux<RfsLuceneDocument> documents = reader.readDocuments(workItem.getStartingDocId());
 
-        reindexer.reindex(workItem.getIndexName(), documents, context)
+        return reindexer.reindex(workItem.getIndexName(), documents, context)
             .doOnNext(cursorConsumer)
-            .then()
-            .doOnError(e ->
-                log.atError().setCause(e).setMessage("Error prevented all batches from being processed").log())
-            .doOnSuccess(
-                done -> log.atInfo().setMessage("Reindexing completed for Index {}, Shard {}")
-                    .addArgument(shardMetadata::getIndexName)
-                    .addArgument(shardMetadata::getShardId)
-                    .log()
-            )
-            // Wait for the reindexing to complete before proceeding
-            .block();
-        log.info("Docs migrated");
+            .last();
     }
 }

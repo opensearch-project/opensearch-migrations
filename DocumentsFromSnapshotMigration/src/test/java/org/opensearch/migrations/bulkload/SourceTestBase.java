@@ -230,6 +230,7 @@ public class SourceTestBase {
                     unpackerFactory,
                     MAX_SHARD_SIZE_BYTES,
                     context,
+                    new AtomicReference<>(),
                     new WorkItemTimeProvider());
             }
         } finally {

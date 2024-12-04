@@ -8,6 +8,7 @@ import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.Supplier;
@@ -283,6 +284,7 @@ public class RfsMigrateDocuments {
 
         var workItemRef = new AtomicReference<IWorkCoordinator.WorkItemAndDuration>();
         var progressCursor = new AtomicReference<WorkItemCursor>();
+        var cancellationRunnableRef = new AtomicReference<Runnable>();
         var workItemTimeProvider = new WorkItemTimeProvider();
         try (var workCoordinator = new OpenSearchWorkCoordinator(
                  new CoordinateWorkHttpClient(connectionContext),
@@ -290,7 +292,7 @@ public class RfsMigrateDocuments {
                  workerId,
                 Clock.systemUTC(),
                 workItemRef::set);
-            var processManager = new LeaseExpireTrigger(
+             var processManager = new LeaseExpireTrigger(
                 w -> exitOnLeaseTimeout(
                         workItemRef,
                         workCoordinator,
@@ -298,6 +300,7 @@ public class RfsMigrateDocuments {
                         progressCursor,
                         workItemTimeProvider,
                         arguments.initialLeaseDuration,
+                        () -> Optional.ofNullable(cancellationRunnableRef.get()).ifPresent(Runnable::run),
                         context.getWorkCoordinationContext()::createSuccessorWorkItemsContext),
                 Clock.systemUTC()
             );
@@ -344,6 +347,7 @@ public class RfsMigrateDocuments {
                 unpackerFactory,
                 arguments.maxShardSizeBytes,
                 context,
+                cancellationRunnableRef,
                 workItemTimeProvider);
         } catch (NoWorkLeftException e) {
             log.atWarn().setMessage("No work left to acquire.  Exiting with error code to signal that.").log();
@@ -362,13 +366,17 @@ public class RfsMigrateDocuments {
             AtomicReference<WorkItemCursor> progressCursorRef,
             WorkItemTimeProvider workItemTimeProvider,
             Duration initialLeaseDuration,
+            Runnable cancellationRunnable,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) {
         log.atWarn().setMessage("Terminating RfsMigrateDocuments because the lease has expired for {}")
                 .addArgument(workItemId)
                 .log();
-        var progressCursor = progressCursorRef.get();
-        if (progressCursor != null) {
+        if (progressCursorRef.get() != null) {
+            log.atWarn().setMessage("Progress cursor set, cancelling active doc migration if still running").log();
+            cancellationRunnable.run();
+            // Get a new progressCursor after cancellation for most up-to-date checkpoint
+            var progressCursor = progressCursorRef.get();
             log.atWarn().setMessage("Progress cursor: {}")
                     .addArgument(progressCursor).log();
             var workItemAndDuration = workItemRef.get();
@@ -475,6 +483,7 @@ public class RfsMigrateDocuments {
                                                        SnapshotShardUnpacker.Factory unpackerFactory,
                                                        long maxShardSizeBytes,
                                                        RootDocumentMigrationContext rootDocumentContext,
+                                                       AtomicReference<Runnable> cancellationRunnable,
                                                        WorkItemTimeProvider timeProvider)
         throws IOException, InterruptedException, NoWorkLeftException
     {
@@ -504,6 +513,7 @@ public class RfsMigrateDocuments {
             },
             readerFactory,
             progressCursor::set,
+            cancellationRunnable::set,
             timeProvider);
         return runner.migrateNextShard(rootDocumentContext::createReindexContext);
     }
