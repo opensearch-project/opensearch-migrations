@@ -38,6 +38,7 @@ export interface SolutionsInfrastructureStackProps extends StackProps {
     readonly solutionVersion: string;
     readonly codeBucket: string;
     readonly createVPC: boolean;
+    readonly stackNameSuffix?: string;
 }
 
 interface ParameterLabel {
@@ -113,7 +114,8 @@ function getVpcEndpointForEFS(stack: Stack): InterfaceVpcEndpointAwsService {
 export class SolutionsInfrastructureStack extends Stack {
 
     constructor(scope: Construct, id: string, props: SolutionsInfrastructureStackProps) {
-        super(scope, id, props);
+        const finalId = props.stackNameSuffix ? `${id}-${props.stackNameSuffix}` : id
+        super(scope, finalId, props);
         this.templateOptions.templateFormatVersion = '2010-09-09';
         new CfnMapping(this, 'Solution', {
             mapping: {
@@ -189,7 +191,7 @@ export class SolutionsInfrastructureStack extends Stack {
             });
 
             const serviceEndpoints = [
-                // Logs and disk usage scales based on total data transfer 
+                // Logs and disk usage scales based on total data transfer
                 InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
                 getVpcEndpointForEFS(this),
 
@@ -197,7 +199,7 @@ export class SolutionsInfrastructureStack extends Stack {
                 InterfaceVpcEndpointAwsService.ECR,
                 InterfaceVpcEndpointAwsService.ECR_DOCKER,
             ];
-            
+
             serviceEndpoints.forEach(service => {
                 new InterfaceVpcEndpoint(this, `${service.shortName}VpcEndpoint`, {
                     service,

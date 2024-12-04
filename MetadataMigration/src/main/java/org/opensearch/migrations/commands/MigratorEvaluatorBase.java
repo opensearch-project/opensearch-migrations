@@ -5,8 +5,10 @@ import java.util.List;
 
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
+import org.opensearch.migrations.bulkload.transformers.CompositeTransformer;
 import org.opensearch.migrations.bulkload.transformers.TransformFunctions;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
+import org.opensearch.migrations.bulkload.transformers.TransformerToIJsonTransformerAdapter;
 import org.opensearch.migrations.bulkload.worker.IndexMetadataResults;
 import org.opensearch.migrations.bulkload.worker.IndexRunner;
 import org.opensearch.migrations.bulkload.worker.MetadataRunner;
@@ -17,12 +19,19 @@ import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.metadata.CreationResult;
 import org.opensearch.migrations.metadata.GlobalMetadataCreatorResults;
 import org.opensearch.migrations.metadata.tracing.RootMetadataMigrationContext;
+import org.opensearch.migrations.transform.TransformationLoader;
+import org.opensearch.migrations.transform.TransformerConfigUtils;
 
 import lombok.extern.slf4j.Slf4j;
 
 /** Shared functionality between migration and evaluation commands */
 @Slf4j
 public abstract class MigratorEvaluatorBase {
+    public static final String NOOP_TRANSFORMATION_CONFIG = "[" +
+            "  {" +
+            "    \"NoopTransformerProvider\":\"\"" +
+            "  }" +
+            "]";
 
     static final int INVALID_PARAMETER_CODE = 999;
     static final int UNEXPECTED_FAILURE_CODE = 888;
@@ -45,14 +54,30 @@ public abstract class MigratorEvaluatorBase {
         return clusters.build();
     }
 
+    protected Transformer getCustomTransformer() {
+        var transformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.metadataTransformationParams);
+        if (transformerConfig != null) {
+            log.atInfo().setMessage("Metadata Transformations config string: {}")
+                    .addArgument(transformerConfig).log();
+        } else {
+            log.atInfo().setMessage("Using Noop custom transformation config: {}")
+                    .addArgument(NOOP_TRANSFORMATION_CONFIG).log();
+            transformerConfig = NOOP_TRANSFORMATION_CONFIG;
+        }
+        var transformer =  new TransformationLoader().getTransformerFactoryLoader(transformerConfig);
+        return new TransformerToIJsonTransformerAdapter(transformer);
+    }
+
     protected Transformer selectTransformer(Clusters clusters) {
-        var transformer = TransformFunctions.getTransformer(
+        var versionTransformer = TransformFunctions.getTransformer(
             clusters.getSource().getVersion(),
             clusters.getTarget().getVersion(),
             arguments.minNumberOfReplicas
         );
-        log.info("Selected transformer " + transformer.toString());
-        return transformer;
+        var customTransformer = getCustomTransformer();
+        var compositeTransformer = new CompositeTransformer(customTransformer, versionTransformer);
+        log.atInfo().setMessage("Selected transformer: {}").addArgument(compositeTransformer).log();
+        return compositeTransformer;
     }
 
     protected Items migrateAllItems(MigrationMode migrationMode, Clusters clusters, Transformer transformer, RootMetadataMigrationContext context) {

@@ -3,17 +3,27 @@ package org.opensearch.migrations.bulkload.version_es_7_10;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.transformers.TransformFunctions;
 
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.Getter;
+import lombok.NoArgsConstructor;
 
-public class IndexMetadataData_ES_7_10 implements IndexMetadata {
+@NoArgsConstructor(force = true) // For Jackson
+@JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.NONE, getterVisibility = JsonAutoDetect.Visibility.NONE)
+@JsonTypeInfo(use = JsonTypeInfo.Id.CLASS, property = "type")
+public class IndexMetadataData_ES_7_10 extends IndexMetadata {
     @Getter
+    @JsonProperty("body")
     private final ObjectNode rawJson;
     private ObjectNode mappings;
     private ObjectNode settings;
     @Getter
+    @JsonProperty("id")
     private final String id;
     @Getter
+    @JsonProperty("name")
     private final String name;
 
     public IndexMetadataData_ES_7_10(ObjectNode root, String indexId, String indexName) {

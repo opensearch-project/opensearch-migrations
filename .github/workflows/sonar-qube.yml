@@ -1,0 +1,92 @@
+name: SonarQube Analysis
+
+on:
+  push:
+  pull_request:
+
+env:
+  java-version: '11'
+  gradle-version: '8.0.2'
+
+jobs:
+  sonar:
+    name: Run SonarQube Analysis
+    runs-on: ubuntu-latest
+
+    services:
+      sonarqube:
+        image: sonarqube:community
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd="curl -s -u admin:admin http://localhost:9000/api/system/health | grep -o GREEN"
+          --health-interval=10s
+          --health-timeout=10s
+          --health-retries=60
+        env:
+          SONAR_ES_BOOTSTRAP_CHECKS_DISABLE: "true"
+
+    steps:
+    - uses: actions/checkout@v3
+    - uses: actions/setup-java@v4
+      with:
+        distribution: 'corretto'
+        java-version: |
+            11
+    - name: Cache SonarQube Scanner
+      uses: actions/cache@v3
+      with:
+        path: ~/.sonar/cache
+        key: sonar-cache
+        restore-keys: sonar-cache
+    - uses: gradle/actions/setup-gradle@v4
+      with:
+        gradle-version: 8.0.2
+        gradle-home-cache-cleanup: true
+    - name: Run Gradle Build
+      run: ./gradlew copyDependencies
+    - name: Run SonarQube Scanner
+      run: |
+        curl -sLo sonar-scanner-cli.zip https://binaries.sonarsource.com/Distribution/sonar-scanner-cli/sonar-scanner-cli-6.2.1.4610-linux-x64.zip
+        unzip -q sonar-scanner-cli.zip -d $HOME
+        export PATH="$HOME/sonar-scanner-6.2.1.4610-linux-x64/bin:$PATH"
+        sonar-scanner \
+          -Dsonar.projectKey=local_project \
+          -Dsonar.sources=. \
+          -Dsonar.host.url=http://localhost:9000 \
+          -Dsonar.login=admin \
+          -Dsonar.password=admin
+    - name: Wait for issues to be processed
+      run: sleep 60
+    - name: Collect issues from the server
+      run: |
+        curl -s -u admin:admin "http://localhost:9000/api/issues/search?componentKeys=local_project" -o issues.json
+
+        echo "::group::SonarQube Issues"
+        jq -r '.issues[] | "File: \(.component):\(.line), Rule: \(.rule), Message: \(.message)"' issues.json | sort
+        echo "::endgroup::"
+
+        # Annotate issue on the PR
+        jq -c '.issues[]' issues.json | while read -r issue; do
+          FILE=$(echo "$issue" | jq -r '.component | split(":")[1]')
+          LINE=$(echo "$issue" | jq -r '.line')
+          MESSAGE=$(echo "$issue" | jq -r '.message')
+          RULE=$(echo "$issue" | jq -r '.rule')
+
+          echo "::error file=$FILE,line=$LINE,title=$RULE::$MESSAGE"
+        done
+
+        ISSUE_COUNT=$(jq '.issues | length' issues.json)
+        BASELINE_ISSUE_COUNT=89 # Baseline issue count
+        if [ "$ISSUE_COUNT" -gt "$BASELINE_ISSUE_COUNT" ]; then
+          echo "❌ Build failed: Found $ISSUE_COUNT issues, which is more than the baseline of $BASELINE_ISSUE_COUNT."
+          exit 1
+        else
+          echo "✅ Build passed: Found $ISSUE_COUNT issues, which is within the baseline of $BASELINE_ISSUE_COUNT."
+        fi
+    - name: Upload SonarQube Artifacts
+      if: always()
+      uses: actions/upload-artifact@v3
+      with:
+        name: sonar-reports
+        path: issues.json

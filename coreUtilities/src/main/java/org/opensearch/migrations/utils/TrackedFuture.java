@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.util;
+package org.opensearch.migrations.utils;
 
 import java.time.Duration;
 import java.util.Optional;
@@ -243,9 +243,5 @@ public class TrackedFuture<D, T> {
 
     public String formatAsString(@NonNull Function<TrackedFuture<D, ?>, String> resultFormatter) {
         return TrackedFutureStringFormatter.format(this, resultFormatter);
-    }
-
-    public String formatAsJson(@NonNull Function<TrackedFuture<D, ?>, String> resultFormatter) {
-        return TrackedFutureJsonFormatter.format(this, resultFormatter);
     }
 }

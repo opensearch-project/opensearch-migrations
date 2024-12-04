@@ -1,4 +1,4 @@
-package org.opensearch.migrations;
+package org.opensearch.migrations.utils;
 
 import java.util.ArrayList;
 import java.util.Arrays;

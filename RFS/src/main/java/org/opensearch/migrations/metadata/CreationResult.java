@@ -26,10 +26,11 @@ public class CreationResult implements Comparable<CreationResult>  {
 
     @AllArgsConstructor
     @Getter
-    public static enum CreationFailureType {
+    public enum CreationFailureType {
         ALREADY_EXISTS(false, "already exists"),
         UNABLE_TO_TRANSFORM_FAILURE(true, "failed to transform to the target version"),
-        TARGET_CLUSTER_FAILURE(true, "failed on target cluster");
+        TARGET_CLUSTER_FAILURE(true, "failed on target cluster"),
+        SKIPPED_DUE_TO_FILTER(false, "skipped due to filter");
 
         private final boolean fatal;
         private final String message;

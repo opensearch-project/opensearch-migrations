@@ -15,7 +15,6 @@ import java.util.stream.Collectors;
 import org.opensearch.migrations.Flavor;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
-import org.opensearch.migrations.bulkload.common.OpenSearchClient.OperationFailed;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.common.http.HttpResponse;
 import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
@@ -37,7 +36,7 @@ public class OpenSearchClient {
 
     /** Amazon OpenSearch Serverless cluster don't have a version number, but
      * its closely aligned with the latest open-source OpenSearch 2.X */
-    private static Version AMAZON_SERVERLESS_VERSION = Version.builder()
+    private static final Version AMAZON_SERVERLESS_VERSION = Version.builder()
         .flavor(Flavor.AMAZON_SERVERLESS_OPENSEARCH)
         .major(2)
         .build();
@@ -89,7 +88,7 @@ public class OpenSearchClient {
                 if (resp.statusCode == 404) {
                     return Mono.just(AMAZON_SERVERLESS_VERSION);
                 }
-                return Mono.error(new OperationFailed("Unexpected status code " + resp.statusCode, resp));
+                return Mono.error(new UnexpectedStatusCode(resp));
             })
             .doOnError(e -> log.error(e.getMessage()))
             .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
@@ -105,7 +104,7 @@ public class OpenSearchClient {
             .retryWhen(CHECK_IF_ITEM_EXISTS_RETRY_STRATEGY)
             .flatMap(hasCompatibilityModeEnabled -> {
                 log.atInfo().setMessage("Checking CompatibilityMode, was enabled? {}").addArgument(hasCompatibilityModeEnabled).log();
-                if (!hasCompatibilityModeEnabled) {
+                if (Boolean.FALSE.equals(hasCompatibilityModeEnabled)) {
                     return Mono.just(versionFromRootApi);
                 }
                 return client.getAsync("_nodes/_all/nodes,version?format=json", null)
@@ -150,7 +149,7 @@ public class OpenSearchClient {
 
     Mono<Boolean> checkCompatibilityModeFromResponse(HttpResponse resp) {
         if (resp.statusCode != 200) {
-            return Mono.error(new OperationFailed("Unexpected status code " + resp.statusCode, resp));
+            return Mono.error(new UnexpectedStatusCode(resp));
         }
         try {
             var body = Optional.of(objectMapper.readTree(resp.body));
@@ -175,7 +174,7 @@ public class OpenSearchClient {
 
     private Mono<Version> getVersionFromNodes(HttpResponse resp) {
         if (resp.statusCode != 200) {
-            return Mono.error(new OperationFailed("Unexpected status code " + resp.statusCode, resp));
+            return Mono.error(new UnexpectedStatusCode(resp));
         }
         var foundVersions = new HashSet<Version>();
         try {
@@ -188,7 +187,7 @@ public class OpenSearchClient {
                 foundVersions.add(nodeVersion);
             });
 
-            if (foundVersions.size() == 0) {
+            if (foundVersions.isEmpty()) {
                 return Mono.error(new OperationFailed("Unable to find any version numbers", resp));
             }
 
@@ -547,13 +546,19 @@ public class OpenSearchClient {
         }
     }
 
-    public static class OperationFailed extends RfsException {
+    public static class OperationFailed extends RuntimeException {
         public final transient HttpResponse response;
 
         public OperationFailed(String message, HttpResponse response) {
             super(message +"\nBody:\n" + response);
 
             this.response = response;
+        }
+    }
+
+    public static class UnexpectedStatusCode extends OperationFailed {
+        public UnexpectedStatusCode(HttpResponse response) {
+            super("Unexpected status code " + response.statusCode, response);
         }
     }
 }

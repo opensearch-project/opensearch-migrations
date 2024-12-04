@@ -2,6 +2,7 @@ package org.opensearch.migrations.bulkload.version_os_2_11;
 
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 
+import com.fasterxml.jackson.core.JsonPointer;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 
 public class GlobalMetadataData_OS_2_11 implements GlobalMetadata {
@@ -16,25 +17,18 @@ public class GlobalMetadataData_OS_2_11 implements GlobalMetadata {
         return root;
     }
 
-    public ObjectNode getTemplates() {
-        return (ObjectNode) root.get("templates");
+    @Override
+    public JsonPointer getTemplatesPath() {
+        return JsonPointer.compile("/templates");
     }
 
-    public ObjectNode getIndexTemplates() {
-        String indexTemplateKey = "index_template";
-        if (root.get(indexTemplateKey) != null) {
-            return (ObjectNode) root.get(indexTemplateKey).get(indexTemplateKey);
-        } else {
-            return null;
-        }
+    @Override
+    public JsonPointer getIndexTemplatesPath() {
+        return JsonPointer.compile("/index_template/index_template");
     }
 
-    public ObjectNode getComponentTemplates() {
-        String componentTemplateKey = "component_template";
-        if (root.get(componentTemplateKey) != null) {
-            return (ObjectNode) root.get(componentTemplateKey).get(componentTemplateKey);
-        } else {
-            return null;
-        }
+    @Override
+    public JsonPointer getComponentTemplatesPath() {
+        return JsonPointer.compile("/component_template/component_template");
     }
 }

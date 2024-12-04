@@ -1,5 +1,7 @@
 package org.opensearch.migrations.replay.datatypes;
 
+import org.opensearch.migrations.utils.FutureTransformer;
+
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 

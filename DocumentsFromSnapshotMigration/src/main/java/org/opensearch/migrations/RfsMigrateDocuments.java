@@ -176,7 +176,7 @@ public class RfsMigrateDocuments {
         public String getTransformerConfigParameterArgPrefix() {
             return DOC_CONFIG_PARAMETER_ARG_PREFIX;
         }
-        final static String DOC_CONFIG_PARAMETER_ARG_PREFIX = "doc-";
+        private static final String DOC_CONFIG_PARAMETER_ARG_PREFIX = "doc-";
 
         @Parameter(
                 required = false,

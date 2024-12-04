@@ -1,4 +1,4 @@
-package org.opensearch.migrations.replay.util;
+package org.opensearch.migrations.utils;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -7,32 +7,13 @@ import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.Lombok;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 
-public class TrackedFutureJsonFormatter {
+public class TrackedFutureMapConverter {
 
-    static ObjectMapper objectMapper = new ObjectMapper();
-
-    private TrackedFutureJsonFormatter() {}
-
-    public static <D> String format(TrackedFuture<D, ?> tf) {
-        return format(tf, x -> null);
-    }
-
-    public static <D> String format(
-        TrackedFuture<D, ?> tf,
-        @NonNull Function<TrackedFuture<D, ?>, String> resultFormatter
-    ) {
-        try {
-            return objectMapper.writeValueAsString(makeJson(tf, resultFormatter));
-        } catch (Exception e) {
-            throw Lombok.sneakyThrow(e);
-        }
-    }
-
+    private TrackedFutureMapConverter() {}
+    
     public static <D> List<Object> makeJson(
         TrackedFuture<D, ?> tf,
         @NonNull Function<TrackedFuture<D, ?>, String> resultFormatter

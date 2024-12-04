@@ -5,8 +5,8 @@ import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.StringJoiner;
 
-import org.opensearch.migrations.replay.util.TextTrackedFuture;
-import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.utils.TextTrackedFuture;
+import org.opensearch.migrations.utils.TrackedFuture;
 
 public class TimeToResponseFulfillmentFutureMap {
 
