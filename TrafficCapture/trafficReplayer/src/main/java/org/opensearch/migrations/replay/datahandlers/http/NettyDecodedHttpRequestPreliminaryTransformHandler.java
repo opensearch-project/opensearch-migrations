@@ -7,7 +7,6 @@ import java.util.Objects;
 import java.util.Optional;
 
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
-import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -70,18 +69,22 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
             HttpJsonRequestWithFaultingPayload transformedMessage = null;
             try {
                 transformedMessage = transform(transformer, httpJsonMessage);
-            } catch (PayloadNotLoadedException pnle) {
-                log.atDebug().setMessage("The transforms for this message require payload manipulation, "
-                        + "all content handlers are being loaded.").log();
-                // make a fresh message and its headers
-                requestPipelineOrchestrator.addJsonParsingHandlers(
-                    ctx,
-                    transformer,
-                    getAuthTransformerAsStreamingTransformer(authTransformer)
-                );
-                ctx.fireChannelRead(handleAuthHeaders(httpJsonMessage, authTransformer));
             } catch (Exception e) {
-                throw new TransformationException(e);
+                var payload = (PayloadAccessFaultingMap) httpJsonMessage.payload();
+                if (payload.missingPaylaodWasAccessed()) {
+                    payload.resetMissingPaylaodWasAccessed();
+                    log.atDebug().setMessage("The transforms for this message require payload manipulation, "
+                        + "all content handlers are being loaded.").log();
+                    // make a fresh message and its headers
+                    requestPipelineOrchestrator.addJsonParsingHandlers(
+                        ctx,
+                        transformer,
+                        getAuthTransformerAsStreamingTransformer(authTransformer)
+                    );
+                    ctx.fireChannelRead(handleAuthHeaders(httpJsonMessage, authTransformer));
+                } else{
+                    throw new TransformationException(e);
+                }
             }
 
             if (transformedMessage != null) {

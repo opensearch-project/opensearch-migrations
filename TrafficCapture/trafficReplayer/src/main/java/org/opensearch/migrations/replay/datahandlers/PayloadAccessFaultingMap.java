@@ -32,6 +32,7 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
     @Getter
     @Setter
     private boolean disableThrowingPayloadNotLoaded;
+    private boolean payloadWasAccessed;
 
     public PayloadAccessFaultingMap(StrictCaseInsensitiveHttpHeadersMap headers) {
         underlyingMap = new TreeMap<>();
@@ -51,19 +52,19 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
                     return new Iterator<>() {
                         @Override
                         public boolean hasNext() {
-                            throw PayloadNotLoadedException.getInstance();
+                            throw makeFault();
                         }
 
                         @Override
                         public Map.Entry<String, Object> next() {
-                            throw PayloadNotLoadedException.getInstance();
+                            throw makeFault();
                         }
                     };
                 }
 
                 @Override
                 public int size() {
-                    throw PayloadNotLoadedException.getInstance();
+                    throw makeFault();
                 }
             };
         } else {
@@ -80,8 +81,21 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
     public Object get(Object key) {
         var value = super.get(key);
         if (value == null && !disableThrowingPayloadNotLoaded) {
-            throw PayloadNotLoadedException.getInstance();
+            throw makeFault();
         }
         return value;
+    }
+
+    public boolean missingPaylaodWasAccessed() {
+        return payloadWasAccessed;
+    }
+
+    public void resetMissingPaylaodWasAccessed() {
+        payloadWasAccessed = false;
+    }
+
+    private PayloadNotLoadedException makeFault() throws PayloadNotLoadedException {
+        payloadWasAccessed = true;
+        return PayloadNotLoadedException.getInstance();
     }
 }
