@@ -10,10 +10,10 @@
   'index_mappings': index_mappings,
   'regex_index_mappings': regex_index_mappings}
 -%}
-{{- rscope.route(source_and_mappings, request.method + " " + request.URI, flags, 'make_keep_json',
+{{- rscope.route(source_and_mappings, request.method + " " + request.URI, flags, 'preserve.make_keep_json',
     [
         ('(?:PUT|POST) /([^/]*)/([^/]*)/(.*)', 'rewrite_doc_request',  'rewrite_add_request_to_strip_types'),
-        (         'GET /([^/]*)/([^/]*)/.*',   'rewrite_doc_request',  'rewrite_get_request_to_strip_types'),
+        (         'GET /((?!\\.\\.$)[^-_+\\p{Lu}\\\\/*?\\\"<>|,# ][^\\p{Lu}\\\\/*?\\\"<>|,# ]*)/((?!\\.\\.$)[^-_+\\p{Lu}\\\\/*?\\\"<>|,# ][^\\p{Lu}\\\\/*?\\\"<>|,# ]*)/([^/]+)$',  'rewrite_doc_request',  'rewrite_get_request_to_strip_types'),
         ('(?:PUT|POST) /_bulk',                'rewrite_bulk',         'rewrite_bulk'),
         ('(?:PUT|POST) /([^/]*)',              'rewrite_create_index', 'rewrite_create_index')
   ])

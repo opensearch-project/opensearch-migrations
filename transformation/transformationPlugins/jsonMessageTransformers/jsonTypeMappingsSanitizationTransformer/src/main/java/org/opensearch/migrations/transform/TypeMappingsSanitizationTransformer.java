@@ -41,7 +41,7 @@ public class TypeMappingsSanitizationTransformer extends JinjavaTransformer {
         var featureFlags = featureFlagsIncoming != null ? featureFlagsIncoming : Map.of();
         var indexMappings = indexMappingsIncoming != null ? indexMappingsIncoming : Map.of();
         var regexIndexMappings = Optional.ofNullable(regexIndexMappingsIncoming)
-            .orElseGet(() -> (indexMappingsIncoming == null ? List.of(List.of("(.*)", "(.*)", "\\1_\\2")) : List.of()));
+            .orElseGet(() -> (indexMappingsIncoming == null ? List.of(List.of("(.*)", ".*", "$1")) : List.of()));
 
         return incomingJson -> Map.of("request", incomingJson,
             "index_mappings", indexMappings,

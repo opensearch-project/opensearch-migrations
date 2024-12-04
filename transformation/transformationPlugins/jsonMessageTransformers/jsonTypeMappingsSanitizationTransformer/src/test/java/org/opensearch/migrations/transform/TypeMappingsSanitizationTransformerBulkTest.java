@@ -5,15 +5,14 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+import org.opensearch.migrations.testutils.JsonNormalizer;
+
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.Test;
-
-import static org.hamcrest.Matchers.*;
 
 @Slf4j
 public class TypeMappingsSanitizationTransformerBulkTest {
@@ -110,14 +109,7 @@ public class TypeMappingsSanitizationTransformerBulkTest {
                 throw new RuntimeException(e);
             }
         }).log();
-        Assertions.assertEquals(normalize(OBJECT_MAPPER.readValue(expectedString, LinkedHashMap.class)),
-            normalize(resultObj));
+        Assertions.assertEquals(JsonNormalizer.fromString(expectedString), JsonNormalizer.fromObject(resultObj));
     }
 
-    static String normalize(Object obj) throws Exception {
-        return new ObjectMapper()
-            .configure(SerializationFeature.ORDER_MAP_ENTRIES_BY_KEYS, true)
-            .configure(SerializationFeature.INDENT_OUTPUT, true)
-            .writeValueAsString(obj);
-    }
 }

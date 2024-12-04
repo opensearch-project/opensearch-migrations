@@ -83,7 +83,7 @@ public class JinjavaTransformer implements IJsonTransformer {
         var preserveKeys = (List<String>) parsedRoot.get(JsonKeysForHttpMessage.PRESERVE_KEY);
         if (preserveKeys != null) {
             preserveKeys.forEach(preservedKey ->
-                parsedRoot.put(preservedKey, incomingRoot.get(preservedKey)));
+                Optional.ofNullable(incomingRoot.get(preservedKey)).ifPresent(v->parsedRoot.put(preservedKey, v)));
             parsedRoot.remove(JsonKeysForHttpMessage.PRESERVE_KEY);
         }
     }

@@ -41,7 +41,7 @@ public class JavaRegexReplaceFilter implements Filter {
         try {
             Matcher matcher = getCompiledPattern(pattern).matcher(input);
             var rval = matcher.replaceAll(replacement);
-            log.atError().setMessage("replaced value {}").addArgument(rval).log();
+            log.atError().setMessage("replaced value {} with {}").addArgument(input).addArgument(rval).log();
             return rval;
         } catch (Exception e) {
             return null;
