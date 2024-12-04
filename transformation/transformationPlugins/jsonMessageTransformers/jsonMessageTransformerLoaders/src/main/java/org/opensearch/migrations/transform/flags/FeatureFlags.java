@@ -5,7 +5,6 @@ import java.util.HashMap;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
-import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -18,7 +17,6 @@ public class FeatureFlags extends HashMap<String, Object> {
 
     // Static ObjectMappers for JSON and YAML
     private static final ObjectMapper jsonMapper = new ObjectMapper();
-    private static final ObjectMapper yamlMapper = new ObjectMapper(new YAMLFactory());
 
 
     // Parsing methods
@@ -26,16 +24,8 @@ public class FeatureFlags extends HashMap<String, Object> {
         return jsonMapper.readValue(contents, FeatureFlags.class);
     }
 
-    public static FeatureFlags parseYaml(String contents) throws IOException {
-        return yamlMapper.readValue(contents, FeatureFlags.class);
-    }
-
     public String writeJson() throws IOException {
         return jsonMapper.writeValueAsString(this);
-    }
-
-    public String writeYaml() throws IOException {
-        return yamlMapper.writeValueAsString(this);
     }
 
     @Override
