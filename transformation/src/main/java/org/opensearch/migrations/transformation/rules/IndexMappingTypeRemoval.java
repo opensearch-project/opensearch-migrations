@@ -45,7 +45,7 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
     public CanApplyResult canApply(final Index index) {
         final var mappingNode = index.getRawJson().get(MAPPINGS_KEY);
 
-        if (mappingNode == null) {
+        if (mappingNode == null || mappingNode.size() == 0) {
             return CanApplyResult.NO;
         }
 
