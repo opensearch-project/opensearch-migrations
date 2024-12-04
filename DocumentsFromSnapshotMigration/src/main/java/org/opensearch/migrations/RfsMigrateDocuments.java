@@ -64,8 +64,10 @@ public class RfsMigrateDocuments {
     public static final int TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 5;
     public static final String LOGGING_MDC_WORKER_ID = "workerId";
 
+    // Decrease successor nextAcquisitionLeaseExponent if shard setup takes less than 2.5% of total lease time
     // Increase successor nextAcquisitionLeaseExponent if shard setup takes more than 10% of lease total time
-    private static final double SHARD_SETUP_LEASE_DURATION_THRESHOLD = 0.1;
+    private static final double DECREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD = 0.025;
+    private static final double INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD = 0.1;
 
     public static final String DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG = "[" +
             "  {" +
@@ -422,22 +424,43 @@ public class RfsMigrateDocuments {
         // 2 ^ n = leaseDurationFactor <==> log2(leaseDurationFactor) = n, n >= 0
         var existingNextAcquisitionLeaseExponent = Math.max(Math.round(Math.log(leaseDurationFactor) / Math.log(2)), 0);
         var shardSetupDuration = Duration.between(leaseAcquisitionTime, documentMigrationStartTime);
-        var successorShardNextAcquisitionLeaseExponent = (int) (existingNextAcquisitionLeaseExponent + (((double) shardSetupDuration.toMillis() / leaseDuration.toMillis() > SHARD_SETUP_LEASE_DURATION_THRESHOLD) ? 1 : 0));
+
+        var shardSetupDurationFactor = (double) shardSetupDuration.toMillis() / leaseDuration.toMillis();
+        int successorShardNextAcquisitionLeaseExponent = (int) existingNextAcquisitionLeaseExponent;
+        if (shardSetupDurationFactor < DECREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD && successorShardNextAcquisitionLeaseExponent > 0) {
+            // This can happen after a period of slow shard downloads e.g. S3 throttling/slow workers
+            // that caused leases to grow larger than desired
+            log.atInfo().setMessage("Shard setup took {}% of lease time which is less than target lower threshold of {}%." +
+                    "Decreasing successor lease duration exponent.")
+                    .addArgument(String.format("%.2f", shardSetupDurationFactor * 100))
+                    .addArgument(String.format("%.2f", DECREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD * 100))
+                    .log();
+            successorShardNextAcquisitionLeaseExponent = successorShardNextAcquisitionLeaseExponent - 1;
+        } else if (shardSetupDurationFactor > INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD) {
+            log.atInfo().setMessage("Shard setup took {}% of lease time which is more than target upper threshold of {}%." +
+                            "Increasing successor lease duration exponent.")
+                    .addArgument(String.format("%.2f", shardSetupDurationFactor * 100))
+                    .addArgument(String.format("%.2f", INCREASE_LEASE_DURATION_SHARD_SETUP_THRESHOLD * 100))
+                    .log();
+            successorShardNextAcquisitionLeaseExponent = successorShardNextAcquisitionLeaseExponent + 1;
+        }
 
         log.atDebug().setMessage("SuccessorNextAcquisitionLeaseExponent calculated values:" +
-                "\nleaseAcquisitionTime:{}" +
-                "\ndocumentMigrationStartTime:{}" +
-                "\nleaseDuration:{}" +
-                "\nleaseDurationFactor:{}" +
-                "\nexistingNextAcquisitionLeaseExponent:{}" +
-                "\nshardSetupDuration:{}" +
-                "\nsuccessorShardNextAcquisitionLeaseExponent:{}")
+                        "\nleaseAcquisitionTime:{}" +
+                        "\ndocumentMigrationStartTime:{}" +
+                        "\nleaseDuration:{}" +
+                        "\nleaseDurationFactor:{}" +
+                        "\nexistingNextAcquisitionLeaseExponent:{}" +
+                        "\nshardSetupDuration:{}" +
+                        "\nshardSetupDurationFactor:{}" +
+                        "\nsuccessorShardNextAcquisitionLeaseExponent:{}")
                 .addArgument(leaseAcquisitionTime)
                 .addArgument(documentMigrationStartTime)
                 .addArgument(leaseDuration)
                 .addArgument(leaseDurationFactor)
                 .addArgument(existingNextAcquisitionLeaseExponent)
                 .addArgument(shardSetupDuration)
+                .addArgument(shardSetupDurationFactor)
                 .addArgument(successorShardNextAcquisitionLeaseExponent)
                 .log();
 
