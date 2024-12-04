@@ -1,5 +1,6 @@
 package org.opensearch.migrations.bulkload.common;
 
+import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -7,6 +8,7 @@ import lombok.RequiredArgsConstructor;
  * index, as well as the document's embedded Elasticsearch/OpenSearch properties
  */
 @RequiredArgsConstructor
+@Getter
 public class RfsLuceneDocument {
     // The Lucene document number of the document
     public final int luceneDocNumber;

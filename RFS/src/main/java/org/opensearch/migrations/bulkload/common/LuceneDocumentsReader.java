@@ -177,20 +177,20 @@ public class LuceneDocumentsReader {
             .doOnTerminate(sharedSegmentReaderScheduler::dispose);
     }
 
-    Flux<RfsLuceneDocument> readDocsFromSegment(LeafReaderContext leafReaderContext, int docCommitId, Scheduler scheduler,
+    Flux<RfsLuceneDocument> readDocsFromSegment(LeafReaderContext leafReaderContext, int docStartingId, Scheduler scheduler,
                                                 int concurrency) {
         var segmentReader = leafReaderContext.reader();
         var liveDocs = segmentReader.getLiveDocs();
 
         int segmentDocBase = leafReaderContext.docBase;
 
-        log.atInfo().setMessage("For segment: {}, working on docCommitId: {}")
+        log.atInfo().setMessage("For segment: {}, working on docStartingId: {}")
                 .addArgument(leafReaderContext)
-                .addArgument(docCommitId)
+                .addArgument(docStartingId)
                 .log();
 
         return Flux.range(0, segmentReader.maxDoc())
-                .skipWhile(id -> id + segmentDocBase <= docCommitId && docCommitId != 0)
+                .skipWhile(docNum -> segmentDocBase + docNum < docStartingId)
                 .flatMapSequentialDelayError(docIdx -> Mono.defer(() -> {
                     try {
                         if (liveDocs == null || liveDocs.get(docIdx)) {
