@@ -42,6 +42,7 @@ import org.junit.jupiter.api.Test;
  * GET call to find out the new expiration value.
  */
 @Slf4j
+@Tag("longTest")
 public class WorkCoordinatorTest {
 
     public static final String DUMMY_FINISHED_DOC_ID = "dummy_finished_doc";
@@ -129,7 +130,7 @@ public class WorkCoordinatorTest {
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
             for (var i = 0; i < NUM_DOCS; ++i) {
-                final var docId = "R" + i;
+                final var docId = "R__0__" + i;
                 workCoordinator.createUnassignedWorkItem(docId, testContext::createUnassignedWorkContext);
             }
             Assertions.assertTrue(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
@@ -192,7 +193,7 @@ public class WorkCoordinatorTest {
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
             for (var i = 0; i < NUM_DOCS; ++i) {
-                final var docId = "R" + i + "__0__0";
+                final var docId = "R__0__" + i;
                 workCoordinator.createUnassignedWorkItem(docId, testContext::createUnassignedWorkContext);
             }
             Assertions.assertTrue(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
@@ -200,27 +201,54 @@ public class WorkCoordinatorTest {
 
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "claimItemWorker")) {
             for (var i = 0; i < NUM_DOCS; ++i) {
-//                String workItemId = getWorkItemAndVerify(testContext, "claimItemWorker", new ConcurrentHashMap<>(), Duration.ofSeconds(10), false, false);
-//                var currentNumPendingItems = workCoordinator.numWorkItemsNotYetComplete(testContext::createItemsPendingContext);
-//                var successorWorkItems = (ArrayList<String>) IntStream.range(i+1, NUM_SUCCESSOR_ITEMS).mapToObj(j -> workItemId.replace("0", String.valueOf(j))).collect(Collectors.toList());
+                String workItemId = getWorkItemAndVerify(
+                    testContext,
+                    "claimItemWorker",
+                    new ConcurrentHashMap<>(),
+                    Duration.ofSeconds(10),
+                    false,
+                    false
+                );
+                var currentNumPendingItems = workCoordinator.numWorkItemsNotYetComplete(testContext::createItemsPendingContext);
 
-//                workCoordinator.createSuccessorWorkItemsAndMarkComplete(
-//                        workItemId, successorWorkItems,
-//                        testContext::createSuccessorWorkItemsContext
-//                );
-//                Assertions.assertTrue(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
-                // One item marked as completed, and NUM_SUCCESSOR_ITEMS created.
-//                Assertions.assertEquals(currentNumPendingItems - 1 - i + NUM_SUCCESSOR_ITEMS, workCoordinator.numWorkItemsNotYetComplete(testContext::createItemsPendingContext));
+                var successorWorkItems = new ArrayList<String>();
+                for (int j = 0; j < NUM_SUCCESSOR_ITEMS; j++) {
+                    successorWorkItems.add("successor__" + i + "__" + j);
+                }
+
+                workCoordinator.createSuccessorWorkItemsAndMarkComplete(
+                    workItemId,
+                    successorWorkItems,
+                    0,
+                    testContext::createSuccessorWorkItemsContext
+                );
+                Assertions.assertTrue(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
+
+                Assertions.assertEquals(
+                    currentNumPendingItems + NUM_SUCCESSOR_ITEMS - 1,
+                    workCoordinator.numWorkItemsNotYetComplete(testContext::createItemsPendingContext)
+                );
             }
-//            Assertions.assertEquals(NUM_SUCCESSOR_ITEMS * NUM_DOCS, workCoordinator.numWorkItemsNotYetComplete(testContext::createItemsPendingContext));
+            Assertions.assertEquals(
+                NUM_SUCCESSOR_ITEMS * NUM_DOCS,
+                workCoordinator.numWorkItemsNotYetComplete(testContext::createItemsPendingContext)
+            );
         }
+
         // Now go claim NUM_DOCS * NUM_SUCCESSOR_ITEMS items to verify all were created and are claimable.
-//        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "claimItemWorker")) {
-//            for (var i = 0; i < NUM_DOCS * NUM_SUCCESSOR_ITEMS; ++i) {
-//                getWorkItemAndVerify(testContext, "claimWorker_" + i, new ConcurrentHashMap<>(), Duration.ofSeconds(10), false, true);
-//            }
-//            Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
-//        }
+        try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "claimItemWorker")) {
+            for (var i = 0; i < NUM_DOCS * NUM_SUCCESSOR_ITEMS; ++i) {
+                getWorkItemAndVerify(
+                    testContext,
+                    "claimWorker_" + i,
+                    new ConcurrentHashMap<>(),
+                    Duration.ofSeconds(10),
+                    false,
+                    true
+                );
+            }
+            Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
+        }
     }
 
     @Test
@@ -264,22 +292,23 @@ public class WorkCoordinatorTest {
         // but not all.  This tests that the coordinator handles this case correctly by continuing to make the originally specific successor items.
         var testContext = WorkCoordinationTestContext.factory().withAllTracking();
         var docId = "R0";
+        var initialWorkItem = docId + "__0__0";
         var N_SUCCESSOR_ITEMS = 3;
-        var successorItems = (ArrayList<String>) IntStream.range(0, N_SUCCESSOR_ITEMS).mapToObj(i -> docId + "_successor_" + i).collect(Collectors.toList());
+        var successorItems = (ArrayList<String>) IntStream.range(1, N_SUCCESSOR_ITEMS + 1).mapToObj(i -> docId + "__0__" + i).collect(Collectors.toList());
 
         var originalWorkItemExpiration = Duration.ofSeconds(5);
         final var seenWorkerItems = new ConcurrentHashMap<String, String>();
 
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "successorTest")) {
             Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
-            workCoordinator.createUnassignedWorkItem(docId, testContext::createUnassignedWorkContext);
+            workCoordinator.createUnassignedWorkItem(initialWorkItem, testContext::createUnassignedWorkContext);
             Assertions.assertTrue(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
             // Claim the work item
             getWorkItemAndVerify(testContext, "successorTest", seenWorkerItems, originalWorkItemExpiration, false, false);
             var client = httpClientSupplier.get();
             // Add the list of successors to the work item
             var body = "{\"doc\": {\"successor_items\": \"" + String.join(",", successorItems) + "\"}}";
-            var response = client.makeJsonRequest("POST", ".migrations_working_state/_update/" + docId, null, body);
+            var response = client.makeJsonRequest("POST", ".migrations_working_state/_update/" + initialWorkItem, null, body);
             Assertions.assertEquals(200, response.getStatusCode());
             // Create a successor item and then claim it with a long lease.
             workCoordinator.createUnassignedWorkItem(successorItems.get(0), testContext::createUnassignedWorkContext);
@@ -301,7 +330,7 @@ public class WorkCoordinatorTest {
             Assertions.assertEquals(N_SUCCESSOR_ITEMS - 2, workCoordinator.numWorkItemsNotYetComplete(testContext::createItemsPendingContext));
 
             // Now, we should be able to claim the remaining successor items but the _next_ call should fail because there are no available items
-            for (int i = 0; i < (N_SUCCESSOR_ITEMS - 2); i++) {
+            for (int i = 1; i < (N_SUCCESSOR_ITEMS - 1); i++) {
                 workItemId = getWorkItemAndVerify(testContext, "claimItem_" + i, seenWorkerItems, originalWorkItemExpiration, false, true);
                 Assertions.assertTrue(successorItems.contains(workItemId));
             }
@@ -389,7 +418,7 @@ public class WorkCoordinatorTest {
         );
         ArrayList<String> successorWorkItems = new ArrayList<>();
         for (int j = 0; j < numSuccessorItems; j++) {
-            successorWorkItems.add(workItemId + "_successor_" + j);
+            successorWorkItems.add(workItemId + "__0__" + j);
         }
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, workerName)) {
             workCoordinator.createSuccessorWorkItemsAndMarkComplete(
