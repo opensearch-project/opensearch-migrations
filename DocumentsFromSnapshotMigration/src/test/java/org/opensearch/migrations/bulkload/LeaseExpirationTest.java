@@ -37,7 +37,6 @@ import org.testcontainers.containers.Network;
  * Some of the functionality and code are shared between the two and should be refactored.
  */
 @Slf4j
-@Tag("isolatedTest")
 public class LeaseExpirationTest extends SourceTestBase {
 
     public static final String TARGET_DOCKER_HOSTNAME = "target";
@@ -52,21 +51,29 @@ public class LeaseExpirationTest extends SourceTestBase {
     }
 
     @Test
+    @Tag("isolatedTest")
     public void testProcessExitsAsExpected() {
-        // 2 Shards, for each shard, expect three status code 2 and one status code 0
+        // Sending 5 docs per request with 4 requests concurrently with each taking 0.125 second is 160 docs/sec
+        // will process 9760 docs in 61 seconds. With 20s lease duration, expect to be finished in 4 leases.
+        // This is ensured with the toxiproxy settings, the migration should not be able to be completed
+        // faster, but with a heavily loaded test environment, may be slower which is why this is marked as
+        // isolated.
+        // 2 Shards, for each shard, expect three status code 2 and one status code 0 (4 leases)
         int shards = 2;
+        int indexDocCount = 9760 * shards;
         int migrationProcessesPerShard = 4;
         int continueExitCode = 2;
         int finalExitCodePerShard = 0;
         runTestProcessWithCheckpoint(continueExitCode, (migrationProcessesPerShard - 1) * shards,
-                finalExitCodePerShard, shards,
+                finalExitCodePerShard, shards, shards, indexDocCount,
             d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer
             ));
     }
 
     @SneakyThrows
-    private void runTestProcessWithCheckpoint(int initialExitCode, int initialExitCodes,
-                                              int eventualExitCode, int eventualExitCodeCount,
+    private void runTestProcessWithCheckpoint(int expectedInitialExitCode, int expectedInitialExitCodeCount,
+                                              int expectedEventualExitCode, int expectedEventualExitCodeCount,
+                                              int shards, int indexDocCount,
                                               Function<RunData, Integer> processRunner) {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
 
@@ -101,7 +108,6 @@ public class LeaseExpirationTest extends SourceTestBase {
 
             var sourceClusterOperations = new ClusterOperations(esSourceContainer.getUrl());
 
-            var shards = 2;
             // Number of default shards is different across different versions on ES/OS.
             // So we explicitly set it.
             String body = String.format(
@@ -117,11 +123,7 @@ public class LeaseExpirationTest extends SourceTestBase {
             );
             sourceClusterOperations.createIndex("geonames", body);
 
-
-            // Sending 5 docs per request with 4 requests concurrently with each taking 0.125 second is 160 docs/sec
-            // will process 9760 docs in 61 seconds. With 20s lease duration, expect to be finished in 4 leases
-            var docsPerShard = 9760;
-            workloadOptions.totalDocs = shards * docsPerShard;
+            workloadOptions.totalDocs = indexDocCount;
             workloadOptions.workloads = List.of(Workloads.GEONAMES);
             workloadOptions.maxBulkBatchSize = 1000;
             generator.generate(workloadOptions);
@@ -144,16 +146,16 @@ public class LeaseExpirationTest extends SourceTestBase {
             do {
                 exitCode = processRunner.apply(new RunData(tempDirSnapshot, tempDirLucene, proxyContainer));
                 runs++;
-                if (exitCode == initialExitCode) {
+                if (exitCode == expectedInitialExitCode) {
                     initialExitCodeCount++;
                 }
-                if (exitCode == eventualExitCode) {
+                if (exitCode == expectedEventualExitCode) {
                     finalExitCodeCount++;
                 }
                 log.atInfo().setMessage("Process exited with code: {}").addArgument(exitCode).log();
                 // Clean tree for subsequent run
                 deleteTree(tempDirLucene);
-            } while (finalExitCodeCount < eventualExitCodeCount && runs < initialExitCodes * 2);
+            } while (finalExitCodeCount < expectedEventualExitCodeCount && runs < expectedInitialExitCodeCount * 2);
 
             // Assert doc count on the target cluster matches source
             checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer,
@@ -161,21 +163,21 @@ public class LeaseExpirationTest extends SourceTestBase {
 
             // Check if the final exit code is as expected
             Assertions.assertEquals(
+                    expectedEventualExitCodeCount,
                     finalExitCodeCount,
-                    eventualExitCodeCount,
                     "The program did not exit with the expected final exit code."
             );
 
             Assertions.assertEquals(
-                    eventualExitCode,
+                    expectedEventualExitCode,
                     exitCode,
                     "The program did not exit with the expected final exit code."
             );
 
             Assertions.assertEquals(
-                    initialExitCodes,
+                    expectedInitialExitCodeCount,
                     initialExitCodeCount,
-                    "The program did not exit with the expected number of " + initialExitCode +" exit codes"
+                    "The program did not exit with the expected number of " + expectedInitialExitCode +" exit codes"
             );
         } finally {
             deleteTree(tempDirSnapshot);
