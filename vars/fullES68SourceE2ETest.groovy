@@ -42,7 +42,8 @@ def call(Map config = [:]) {
             ]
         ]
     ]
-    def transformersArg = JsonOutput.toJson(jsonTransformers)
+    def jsonString = JsonOutput.toJson(jsonTransformers)
+    def transformersArg = jsonString.bytes.encodeBase64().toString()
     def source_cdk_context = """
         {
           "source-single-node-ec2": {
@@ -81,7 +82,7 @@ def call(Map config = [:]) {
             "trafficReplayerServiceEnabled": true,
             "trafficReplayerExtraArgs": "--speedup-factor 10.0",
             "reindexFromSnapshotServiceEnabled": true,
-            "reindexFromSnapshotExtraArgs": "--transformer-config $transformersArg"
+            "reindexFromSnapshotExtraArgs": "--transformer-config-base64 $transformersArg"
             "sourceCluster": {
                 "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
                 "auth": {"type": "none"},
