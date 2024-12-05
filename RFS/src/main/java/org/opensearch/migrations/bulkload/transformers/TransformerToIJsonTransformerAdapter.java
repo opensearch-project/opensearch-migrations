@@ -28,7 +28,7 @@ import org.slf4j.LoggerFactory;
 @Slf4j
 public class TransformerToIJsonTransformerAdapter implements Transformer {
     public static final String OUTPUT_TRANSFORMATION_JSON_LOGGER = "OutputTransformationJsonLogger";
-    private final static ObjectMapper MAPPER = new ObjectMapper();
+    private static final ObjectMapper MAPPER = new ObjectMapper();
     private final IJsonTransformer transformer;
     private final Logger transformerLogger;
 
@@ -65,7 +65,7 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
 
     @SuppressWarnings("unchecked")
     private static Map<String, Object> objectNodeToMap(Object node) {
-        return (Map<String, Object>) MAPPER.convertValue(node, Map.class);
+        return MAPPER.convertValue(node, Map.class);
     }
 
     @SneakyThrows
@@ -124,22 +124,19 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
                 )
                 .map(this::transformMigrationItem).collect(Collectors.toList());
 
-        var transformedLegacy = transformedTemplates.stream().filter(
-                item -> item instanceof LegacyTemplate
-        )
-                .map(item -> (LegacyTemplate) item)
+        var transformedLegacy = transformedTemplates.stream()
+                .filter(LegacyTemplate.class::isInstance)
+                .map(IndexTemplate.class::cast)
                 .collect(Collectors.toList());
 
-        var transformedIndex = transformedTemplates.stream().filter(
-                        item -> item instanceof IndexTemplate
-                )
-                .map(item -> (IndexTemplate) item)
+        var transformedIndex = transformedTemplates.stream()
+                .filter(IndexTemplate.class::isInstance)
+                .map(IndexTemplate.class::cast)
                 .collect(Collectors.toList());
 
-        var transformedComponent = transformedTemplates.stream().filter(
-                        item -> item instanceof ComponentTemplate
-                )
-                .map(item -> (ComponentTemplate) item)
+        var transformedComponent = transformedTemplates.stream()
+                .filter(ComponentTemplate.class::isInstance)
+                .map(ComponentTemplate.class::cast)
                 .collect(Collectors.toList());
 
         assert transformedLegacy.size() + transformedIndex.size() + transformedComponent.size() == transformedTemplates.size();
