@@ -7,8 +7,8 @@ def call(Map config = [:]) {
           "source-single-node-ec2": {
             "suffix": "ec2-source-<STAGE>",
             "networkStackSuffix": "ec2-source-<STAGE>",
-            "distVersion": "6.8.23",
-            "distributionUrl": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-6.8.23.tar.gz",
+            "distVersion": "5.6.16",
+            "distributionUrl": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-5.6.16.tar.gz",
             "captureProxyEnabled": false,
             "securityDisabled": true,
             "minDistribution": false,
@@ -43,7 +43,7 @@ def call(Map config = [:]) {
             "sourceCluster": {
                 "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
                 "auth": {"type": "none"},
-                "version": "ES_6.8.23"
+                "version": "ES_5.6.16"
             },
             "tlsSecurityPolicy": "TLS_1_2",
             "enforceHTTPS": true,

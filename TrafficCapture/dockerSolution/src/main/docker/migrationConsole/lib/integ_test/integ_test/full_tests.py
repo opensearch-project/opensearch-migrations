@@ -1,8 +1,10 @@
+import json
 import logging
 import os
 import pytest
 import unittest
 from http import HTTPStatus
+
 from console_link.middleware.clusters import connection_check, clear_indices, ConnectionResult
 from console_link.models.cluster import Cluster
 from console_link.models.backfill_base import Backfill
@@ -13,7 +15,8 @@ from console_link.models.snapshot import Snapshot
 from console_link.middleware.kafka import delete_topic
 from console_link.models.metadata import Metadata
 from console_link.cli import Context
-from common_operations import (create_index, create_document, check_doc_counts_match, wait_for_running_replayer)
+from common_operations import (create_index, create_document, check_doc_counts_match, wait_for_running_replayer,
+                               get_index_name_transformation, convert_transformations_to_str)
 logger = logging.getLogger(__name__)
 
 
@@ -88,21 +91,36 @@ class E2ETests(unittest.TestCase):
 
         # Load initial data
         index_name = f"test_e2e_0001_{pytest.unique_id}"
+        transformed_index = f"{index_name}_transformed"
         doc_id_base = "e2e_0001_doc"
-        create_index(cluster=source_cluster, index_name=index_name, test_case=self)
+        index_body = {
+            'settings': {
+                'index': {
+                    'number_of_shards': 3,
+                    'number_of_replicas': 0
+                }
+            }
+        }
+        create_index(cluster=source_cluster, index_name=index_name, data=json.dumps(index_body), test_case=self)
         create_document(cluster=source_cluster, index_name=index_name, doc_id=doc_id_base + "_1",
                         expected_status_code=HTTPStatus.CREATED, test_case=self)
 
-        # Perform metadata and backfill migrations
         backfill.create()
+        # Delete existing snapshot if present and create a new snapshot
         snapshot: Snapshot = pytest.console_env.snapshot
         status_result: CommandResult = snapshot.status()
         if status_result.success:
             snapshot.delete()
         snapshot_result: CommandResult = snapshot.create(wait=True)
         assert snapshot_result.success
-        metadata_result: CommandResult = metadata.migrate()
+
+        # Perform metadata migration with a transform to index name
+        index_name_transform = get_index_name_transformation(existing_index_name=index_name,
+                                                             target_index_name=transformed_index)
+        transform_arg = convert_transformations_to_str(transform_list=[index_name_transform])
+        metadata_result: CommandResult = metadata.migrate(extra_args=["--transformer-config", transform_arg])
         assert metadata_result.success
+
         backfill_start_result: CommandResult = backfill.start()
         assert backfill_start_result.success
         # small enough to allow containers to be reused, big enough to test scaling out
