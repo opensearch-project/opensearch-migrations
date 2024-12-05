@@ -85,7 +85,7 @@ public class DocumentsRunner {
                 }
             }, new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<>() {
                 @Override
-                public CompletionStatus onAlreadyCompleted() throws IOException {
+                public CompletionStatus onAlreadyCompleted() {
                     return CompletionStatus.NOTHING_DONE;
                 }
 
@@ -93,23 +93,23 @@ public class DocumentsRunner {
                 public CompletionStatus onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) {
                     var docMigrationCursors = setupDocMigration(workItem.getWorkItem(), context);
                     var latch = new CountDownLatch(1);
-                    var finishScheduler = Schedulers.newSingle( "finish-scheduler");
+                    var finishScheduler = Schedulers.newSingle( "workFinishScheduler");
                     var disposable = docMigrationCursors
                         .subscribeOn(finishScheduler)
-                            .doFinally(s -> finishScheduler.dispose())
+                        .doFinally(s -> finishScheduler.dispose())
                         .takeLast(1)
-                        .subscribe( lastItem -> {},
-                        error -> log.atError()
-                                .setCause(error)
-                                .setMessage("Error prevented all batches from being processed")
-                                .log(),
-                        () ->  {
-                            log.atInfo().setMessage("Reindexing completed for Index {}, Shard {}")
-                                    .addArgument(workItem.getWorkItem().getIndexName())
-                                    .addArgument(workItem.getWorkItem().getShardNumber())
-                                    .log();
-                            latch.countDown();
-                        });
+                        .subscribe(lastItem -> {},
+                            error -> log.atError()
+                                    .setCause(error)
+                                    .setMessage("Error prevented all batches from being processed")
+                                    .log(),
+                            () ->  {
+                                log.atInfo().setMessage("Reindexing completed for Index {}, Shard {}")
+                                        .addArgument(workItem.getWorkItem().getIndexName())
+                                        .addArgument(workItem.getWorkItem().getShardNumber())
+                                        .log();
+                                latch.countDown();
+                            });
                     // This allows us to cancel the subscription to stop sending new docs
                     // when the lease expires and a successor work item is made.
                     // There may be in-flight requests that are not reflected in the progress cursor
