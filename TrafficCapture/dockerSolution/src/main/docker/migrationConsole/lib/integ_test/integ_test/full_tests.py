@@ -133,11 +133,11 @@ class E2ETests(unittest.TestCase):
         ignore_list = [".", "searchguard", "sg7", "security-auditlog", "reindexed-logs"]
         expected_docs = {}
         # Source should have both documents
-        expected_docs[index_name] = {"count": 2}
+        expected_docs[transformed_index] = {"count": 2}
         check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_docs,
                                index_prefix_ignore_list=ignore_list, test_case=self)
         # Target should have one document from snapshot
-        expected_docs[index_name] = {"count": 1}
+        expected_docs[transformed_index] = {"count": 1}
         check_doc_counts_match(cluster=target_cluster, expected_index_details=expected_docs,
                                index_prefix_ignore_list=ignore_list, max_attempts=20, delay=30.0, test_case=self)
 
@@ -149,7 +149,7 @@ class E2ETests(unittest.TestCase):
         replayer.start()
         wait_for_running_replayer(replayer=replayer)
 
-        expected_docs[index_name] = {"count": 3}
+        expected_docs[transformed_index] = {"count": 3}
         check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_docs,
                                index_prefix_ignore_list=ignore_list, test_case=self)
 

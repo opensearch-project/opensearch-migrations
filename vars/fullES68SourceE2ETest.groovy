@@ -10,7 +10,7 @@ def call(Map config = [:]) {
             JsonConditionalTransformerProvider: [
                 [
                     JsonJMESPathPredicateProvider: [
-                        script: "name == 'test_e2e_0001_$testUniqueId'"
+                        script: "index._index == 'test_e2e_0001_$testUniqueId'"
                     ]
                 ],
                 [
@@ -19,7 +19,7 @@ def call(Map config = [:]) {
                             script: [
                                 operation: "modify-overwrite-beta",
                                 spec: [
-                                    name: "test_e2e_0001_${testUniqueId}_transformed"
+                                    'index.\\_index': "test_e2e_0001_${testUniqueId}_transformed"
                                 ]
                             ]
                         ]
