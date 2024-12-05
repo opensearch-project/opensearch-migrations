@@ -3,7 +3,7 @@ import { OpenSearchDomainStack } from "../lib/opensearch-domain-stack";
 import { createStackComposer, createStackComposerOnlyPassedContext } from "./test-utils";
 import { App } from "aws-cdk-lib";
 import { StackComposer } from "../lib/stack-composer";
-import { KafkaStack } from "../lib";
+import { KafkaStack, MigrationConsoleStack } from "../lib";
 import { describe, beforeEach, afterEach, test, expect, jest } from '@jest/globals';
 import { ContainerImage } from "aws-cdk-lib/aws-ecs";
 
@@ -29,6 +29,78 @@ describe('Stack Composer Tests', () => {
     const domainTemplate = Template.fromStack(domainStack)
     domainTemplate.resourceCountIs("AWS::OpenSearchService::Domain", 1)
   })
+
+  function testManagedServiceSourceSnapshot(
+    { sourceAuth, additionalOptions }: { sourceAuth: Record<string, unknown>; additionalOptions: Record<string, unknown> },
+    expectedRoleCount: number,
+    description: string
+  ) {
+    test(description, () => {
+      const contextOptions = {
+        sourceCluster: {
+          "endpoint": "https://test-cluster",
+          "auth": sourceAuth,
+          "version": "ES_7.10"
+        },
+        targetCluster: {
+          "endpoint": "https://test-cluster",
+          "auth": {"type": "none"},
+          "version": "OS_1.3"
+        },
+        vpcEnabled: true,
+        migrationConsoleServiceEnabled: true,
+        migrationAssistanceEnabled: true,
+        reindexFromSnapshotServiceEnabled: true,
+        ...additionalOptions
+      };
+
+      const openSearchStacks = createStackComposer(contextOptions);
+      const migrationConsoleStack = openSearchStacks.stacks.filter((s) => s instanceof MigrationConsoleStack)[0];
+      const migrationConsoleTemplate = Template.fromStack(migrationConsoleStack);
+      migrationConsoleTemplate.resourceCountIs("AWS::IAM::Role", expectedRoleCount);
+      if (expectedRoleCount === 3) {
+        migrationConsoleTemplate.hasResourceProperties("AWS::IAM::Role", {
+          RoleName: "OSMigrations-unit-test-us-east-1-default-SnapshotRole"
+        });
+      }
+    });
+  }
+
+  const sigv4Auth = {
+    "type": "sigv4",
+    "region": "us-east-1",
+    "serviceSigningName": "es"
+  };
+
+  const noAuth = {"type": "none"};
+
+  testManagedServiceSourceSnapshot(
+    {
+      sourceAuth: sigv4Auth,
+      additionalOptions: {}
+    },
+    3,
+    'Test sigv4 source cluster with no managedServiceSourceSnapshotEnabled, defaults to true'
+  );
+
+  testManagedServiceSourceSnapshot(
+    {
+      sourceAuth: sigv4Auth,
+      additionalOptions: { managedServiceSourceSnapshotEnabled: false }
+    },
+    2,
+    'Test sigv4 source cluster with false managedServiceSourceSnapshotEnabled, does not create snapshot role'
+  );
+
+  testManagedServiceSourceSnapshot(
+    {
+      sourceAuth: noAuth,
+      additionalOptions: {}
+    },
+    2,
+    'Test no auth source cluster with no managedServiceSourceSnapshotEnabled, defaults to false'
+  );
+
 
   test('Test invalid engine version format throws error', () => {
     const contextOptions = {

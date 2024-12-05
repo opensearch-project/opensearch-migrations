@@ -1,26 +1,20 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.util.List;
-import java.util.function.BiConsumer;
 import java.util.function.Predicate;
 
 public class FilterScheme {
     private FilterScheme() {}
 
-    public static Predicate<SnapshotRepo.Index> filterIndicesByAllowList(
-        List<String> indexAllowlist,
-        BiConsumer<String, Boolean> indexNameAcceptanceObserver
-    ) {
-        return index -> {
+    public static Predicate<String> filterByAllowList(List<String> allowlist) {
+        return item -> {
             boolean accepted;
-            if (indexAllowlist.isEmpty()) {
-                accepted = !index.getName().startsWith(".");
+            // By default allow all items except 'system' items that start with a period
+            if (allowlist == null || allowlist.isEmpty()) {
+                accepted = !item.startsWith(".");
             } else {
-                accepted = indexAllowlist.contains(index.getName());
+                accepted = allowlist.contains(item);
             }
-
-            indexNameAcceptanceObserver.accept(index.getName(), accepted);
-
             return accepted;
         };
     }
