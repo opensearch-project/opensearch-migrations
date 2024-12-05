@@ -260,7 +260,7 @@ public class WorkCoordinatorTest {
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, "docCreatorWorker")) {
             Assertions.assertFalse(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
             for (var i = 0; i < NUM_DOCS; ++i) {
-                final var docId = "R" + i + "__0__0";
+                final var docId = "R__0__" + i;
                 workCoordinator.createUnassignedWorkItem(docId, testContext::createUnassignedWorkContext);
             }
             Assertions.assertTrue(workCoordinator.workItemsNotYetComplete(testContext::createItemsPendingContext));
@@ -273,7 +273,7 @@ public class WorkCoordinatorTest {
             int finalI = i;
             allFutures.add(
                     CompletableFuture.supplyAsync(
-                            () -> getWorkItemAndCompleteWithSuccessors(testContext, "successor_test_" + finalI, seenWorkerItems, expiration, true, NUM_SUCCESSOR_ITEMS),
+                            () -> getWorkItemAndCompleteWithSuccessors(testContext, "successor__0__" + finalI, seenWorkerItems, expiration, true, NUM_SUCCESSOR_ITEMS),
                             executorService
                     )
             );
@@ -418,7 +418,8 @@ public class WorkCoordinatorTest {
         );
         ArrayList<String> successorWorkItems = new ArrayList<>();
         for (int j = 0; j < numSuccessorItems; j++) {
-            successorWorkItems.add(workItemId + "__0__" + j);
+            // Replace "__" with "_" in workerId to create a unique name
+            successorWorkItems.add(workItemId.replace("__", "_") + "__0__" + j);
         }
         try (var workCoordinator = new OpenSearchWorkCoordinator(httpClientSupplier.get(), 3600, workerName)) {
             workCoordinator.createSuccessorWorkItemsAndMarkComplete(
