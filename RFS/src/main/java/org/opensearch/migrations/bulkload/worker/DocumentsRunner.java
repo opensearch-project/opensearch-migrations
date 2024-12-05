@@ -112,10 +112,15 @@ public class DocumentsRunner {
                         });
                     // This allows us to cancel the subscription to stop sending new docs
                     // when the lease expires and a successor work item is made.
-                    // There may be outstanding requests with newer docs that have not been fully processed
-                    // and thus will show up as "deleted"/updated docs when the successor work item is processed.
-                    // Consider triggering an upstream cancellation before sending requests prior to the lease expiration
-                    // allowing for time to attempt to "flush out" pending requests before creating the successor items.
+                    // There may be in-flight requests that are not reflected in the progress cursor
+                    // and thus will be sent again during the successor work item.
+                    // These will count as "deleted" from a lucene perspective and show up as "deletedDocs" during cat-indices
+                    // However, the target active state will remain consistent with the snapshot and will get cleaned
+                    // up during lucene segment merges.
+                    //
+                    // To reduce the docs processed more than once, consider triggering an upstream cancellation
+                    // before sending requests prior to the lease expiration allowing
+                    // the in-flight requests to be finished before creating the successor items.
                     cancellationTriggerConsumer.accept(disposable::dispose);
                     try {
                         latch.await();
