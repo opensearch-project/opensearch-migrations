@@ -19,21 +19,7 @@ def call(Map config = [:]) {
                             script: [
                                 operation: "modify-overwrite-beta",
                                 spec: [
-                                    name: "transformed_index"
-                                ]
-                            ]
-                        ]
-                    ],
-                    [
-                        JsonJoltTransformerProvider: [
-                            script: [
-                                operation: "modify-overwrite-beta",
-                                spec: [
-                                    settings: [
-                                        index: [
-                                            number_of_replicas: 3
-                                        ]
-                                    ]
+                                    name: "test_e2e_0001_${testUniqueId}_transformed"
                                 ]
                             ]
                         ]
