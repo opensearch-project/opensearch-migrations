@@ -82,7 +82,7 @@ def call(Map config = [:]) {
             "trafficReplayerServiceEnabled": true,
             "trafficReplayerExtraArgs": "--speedup-factor 10.0",
             "reindexFromSnapshotServiceEnabled": true,
-            "reindexFromSnapshotExtraArgs": "--transformer-config-base64 $transformersArg"
+            "reindexFromSnapshotExtraArgs": "--transformer-config-base64 $transformersArg",
             "sourceCluster": {
                 "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
                 "auth": {"type": "none"},
