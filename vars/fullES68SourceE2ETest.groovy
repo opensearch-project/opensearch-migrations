@@ -32,17 +32,17 @@ def call(Map config = [:]) {
     ]
     def rfsJsonString = JsonOutput.toJson(rfsJsonTransformations)
     def rfsTransformersArg = rfsJsonString.bytes.encodeBase64().toString()
-    def replayerJsonTransformations = [
-        [
-            "JsonJMESPathTransformerProvider": [
-                "script": [
-                    "URI": replace(URI, "test_e2e_0001_$testUniqueId", "test_e2e_0001_${testUniqueId}_transformed")
-                ]
-            ]
-        ]
-    ]
-    def replayerJsonString = JsonOutput.toJson(replayerJsonTransformations)
-    def replayerTransformersArg = replayerJsonString.bytes.encodeBase64().toString()
+//    def replayerJsonTransformations = [
+//        [
+//            "JsonJMESPathTransformerProvider": [
+//                "script": [
+//                    "URI": replace(URI, "test_e2e_0001_$testUniqueId", "test_e2e_0001_${testUniqueId}_transformed")
+//                ]
+//            ]
+//        ]
+//    ]
+//    def replayerJsonString = JsonOutput.toJson(replayerJsonTransformations)
+//    def replayerTransformersArg = replayerJsonString.bytes.encodeBase64().toString()
     def source_cdk_context = """
         {
           "source-single-node-ec2": {
@@ -79,7 +79,7 @@ def call(Map config = [:]) {
             "captureProxyServiceEnabled": true,
             "targetClusterProxyServiceEnabled": true,
             "trafficReplayerServiceEnabled": true,
-            "trafficReplayerExtraArgs": "--speedup-factor 10.0 --transformer-config-encoded $replayerTransformersArg",
+            "trafficReplayerExtraArgs": "--speedup-factor 10.0",
             "reindexFromSnapshotServiceEnabled": true,
             "reindexFromSnapshotExtraArgs": "--doc-transformer-config-base64 $rfsTransformersArg",
             "sourceCluster": {
