@@ -5,7 +5,7 @@ def call(Map config = [:]) {
     def migrationContextId = 'full-migration'
     def time = new Date().getTime()
     def testUniqueId = "integ_full_${time}_${currentBuild.number}"
-    def jsonTransformers = [
+    def rfsJsonTransformations = [
         [
             JsonConditionalTransformerProvider: [
                 [
@@ -19,7 +19,9 @@ def call(Map config = [:]) {
                             script: [
                                 operation: "modify-overwrite-beta",
                                 spec: [
-                                    'index.\\_index': "test_e2e_0001_${testUniqueId}_transformed"
+                                    index: [
+                                        '\\_index': "test_e2e_0001_${testUniqueId}_transformed"
+                                    ]
                                 ]
                             ]
                         ]
@@ -28,8 +30,19 @@ def call(Map config = [:]) {
             ]
         ]
     ]
-    def jsonString = JsonOutput.toJson(jsonTransformers)
-    def transformersArg = jsonString.bytes.encodeBase64().toString()
+    def rfsJsonString = JsonOutput.toJson(rfsJsonTransformations)
+    def rfsTransformersArg = rfsJsonString.bytes.encodeBase64().toString()
+    def replayerJsonTransformations = [
+        [
+            "JsonJMESPathTransformerProvider": [
+                "script": [
+                    "URI": replace(URI, "test_e2e_0001_$testUniqueId", "test_e2e_0001_${testUniqueId}_transformed")
+                ]
+            ]
+        ]
+    ]
+    def replayerJsonString = JsonOutput.toJson(replayerJsonTransformations)
+    def replayerTransformersArg = replayerJsonString.bytes.encodeBase64().toString()
     def source_cdk_context = """
         {
           "source-single-node-ec2": {
@@ -66,9 +79,9 @@ def call(Map config = [:]) {
             "captureProxyServiceEnabled": true,
             "targetClusterProxyServiceEnabled": true,
             "trafficReplayerServiceEnabled": true,
-            "trafficReplayerExtraArgs": "--speedup-factor 10.0",
+            "trafficReplayerExtraArgs": "--speedup-factor 10.0 --transformer-config-encoded $replayerTransformersArg",
             "reindexFromSnapshotServiceEnabled": true,
-            "reindexFromSnapshotExtraArgs": "--doc-transformer-config-base64 $transformersArg",
+            "reindexFromSnapshotExtraArgs": "--doc-transformer-config-base64 $rfsTransformersArg",
             "sourceCluster": {
                 "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
                 "auth": {"type": "none"},
