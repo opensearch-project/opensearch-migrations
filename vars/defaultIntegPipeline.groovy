@@ -20,6 +20,8 @@ def call(Map config = [:]) {
     def source_context_file_name = 'sourceJenkinsContext.json'
     def migration_context_file_name = 'migrationJenkinsContext.json'
     def skipCaptureProxyOnNodeSetup = config.skipCaptureProxyOnNodeSetup ?: false
+    def time = new Date().getTime()
+    def testUniqueId = config.testUniqueId ?: "integ_full_${time}_${currentBuild.number}"
     def testDir = "/root/lib/integ_test/integ_test"
     def integTestCommand = config.integTestCommand ?: "${testDir}/replayer_tests.py"
     pipeline {
@@ -153,13 +155,11 @@ def call(Map config = [:]) {
                                 if (config.integTestStep) {
                                     config.integTestStep()
                                 } else {
-                                    def time = new Date().getTime()
-                                    def uniqueId = "integ_min_${time}_${currentBuild.number}"
-                                    def test_result_file = "${testDir}/reports/${uniqueId}/report.xml"
+                                    def test_result_file = "${testDir}/reports/${testUniqueId}/report.xml"
                                     def populatedIntegTestCommand = integTestCommand.replaceAll("<STAGE>", stage)
-                                    def command = "pipenv run pytest --log-file=${testDir}/reports/${uniqueId}/pytest.log " +
+                                    def command = "pipenv run pytest --log-file=${testDir}/reports/${testUniqueId}/pytest.log " +
                                             "--junitxml=${test_result_file} ${populatedIntegTestCommand} " +
-                                            "--unique_id ${uniqueId} " +
+                                            "--unique_id ${testUniqueId} " +
                                             "--stage ${stage} " +
                                             "-s"
                                     withCredentials([string(credentialsId: 'migrations-test-account-id', variable: 'MIGRATIONS_TEST_ACCOUNT_ID')]) {

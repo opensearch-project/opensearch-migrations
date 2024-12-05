@@ -4,13 +4,13 @@ def call(Map config = [:]) {
     def sourceContextId = 'source-single-node-ec2'
     def migrationContextId = 'full-migration'
     def time = new Date().getTime()
-    def uniqueId = "integ_min_${time}_${currentBuild.number}"
+    def testUniqueId = "integ_full_${time}_${currentBuild.number}"
     def jsonTransformers = [
         [
             JsonConditionalTransformerProvider: [
                 [
                     JsonJMESPathPredicateProvider: [
-                        script: "name == 'test_e2e_0001_$uniqueId'"
+                        script: "name == 'test_e2e_0001_$testUniqueId'"
                     ]
                 ],
                 [
@@ -82,7 +82,7 @@ def call(Map config = [:]) {
             "trafficReplayerServiceEnabled": true,
             "trafficReplayerExtraArgs": "--speedup-factor 10.0",
             "reindexFromSnapshotServiceEnabled": true,
-            "reindexFromSnapshotExtraArgs": "--transformer-config-base64 $transformersArg",
+            "reindexFromSnapshotExtraArgs": "--doc-transformer-config-base64 $transformersArg",
             "sourceCluster": {
                 "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
                 "auth": {"type": "none"},
@@ -112,6 +112,7 @@ def call(Map config = [:]) {
             defaultStageId: 'full-es68',
             skipCaptureProxyOnNodeSetup: true,
             jobName: 'full-es68source-e2e-test',
+            testUniqueId: testUniqueId,
             integTestCommand: '/root/lib/integ_test/integ_test/full_tests.py --source_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9201 --target_proxy_alb_endpoint https://alb.migration.<STAGE>.local:9202'
     )
 }
