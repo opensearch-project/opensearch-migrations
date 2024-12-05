@@ -25,6 +25,8 @@ import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Scheduler;
+import reactor.core.scheduler.Schedulers;
 
 @Slf4j
 public class DocumentsRunner {
@@ -91,20 +93,25 @@ public class DocumentsRunner {
 
                 @Override
                 public CompletionStatus onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) {
-                    var docMigrationMono = setupDocMigration(workItem.getWorkItem(), context);
+                    var docMigrationCursors = setupDocMigration(workItem.getWorkItem(), context);
                     var latch = new CountDownLatch(1);
-                    var disposable = docMigrationMono.subscribe( lastItem -> {},
-                            error -> log.atError()
-                                    .setCause(error)
-                                    .setMessage("Error prevented all batches from being processed")
-                                    .log(),
-                            () ->  {
-                                log.atInfo().setMessage("Reindexing completed for Index {}, Shard {}")
-                                        .addArgument(workItem.getWorkItem().getIndexName())
-                                        .addArgument(workItem.getWorkItem().getShardNumber())
-                                        .log();
-                                latch.countDown();
-                            });
+                    var finishScheduler = Schedulers.newSingle( "finish-scheduler");
+                    var disposable = docMigrationCursors
+                        .subscribeOn(finishScheduler)
+                            .doFinally(s -> finishScheduler.dispose())
+                        .takeLast(1)
+                        .subscribe( lastItem -> {},
+                        error -> log.atError()
+                                .setCause(error)
+                                .setMessage("Error prevented all batches from being processed")
+                                .log(),
+                        () ->  {
+                            log.atInfo().setMessage("Reindexing completed for Index {}, Shard {}")
+                                    .addArgument(workItem.getWorkItem().getIndexName())
+                                    .addArgument(workItem.getWorkItem().getShardNumber())
+                                    .log();
+                            latch.countDown();
+                        });
                     // This allows us to cancel the subscription to stop sending new docs
                     // when the lease expires and a successor work item is made.
                     // There may be outstanding requests with newer docs that have not been fully processed
@@ -141,7 +148,7 @@ public class DocumentsRunner {
         }
     }
 
-    private Mono<WorkItemCursor> setupDocMigration(
+    private Flux<WorkItemCursor> setupDocMigration(
         IWorkCoordinator.WorkItemAndDuration.WorkItem workItem,
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
@@ -156,7 +163,6 @@ public class DocumentsRunner {
         Flux<RfsLuceneDocument> documents = reader.readDocuments(workItem.getStartingDocId());
 
         return reindexer.reindex(workItem.getIndexName(), documents, context)
-            .doOnNext(cursorConsumer)
-            .last();
+            .doOnNext(cursorConsumer);
     }
 }

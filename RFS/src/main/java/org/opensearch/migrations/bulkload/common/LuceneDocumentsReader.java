@@ -174,7 +174,7 @@ public class LuceneDocumentsReader {
                     maxDocumentsToReadAtOnce)
             )
             .subscribeOn(sharedSegmentReaderScheduler) // Scheduler to read documents on
-            .doOnTerminate(sharedSegmentReaderScheduler::dispose);
+            .doFinally(s -> sharedSegmentReaderScheduler.dispose());
     }
 
     Flux<RfsLuceneDocument> readDocsFromSegment(LeafReaderContext leafReaderContext, int docStartingId, Scheduler scheduler,
@@ -206,7 +206,7 @@ public class LuceneDocumentsReader {
                     }
                 }).subscribeOn(scheduler),
                         concurrency, 1)
-                .subscribeOn(Schedulers.boundedElastic());
+                .subscribeOn(scheduler);
     }
     protected DirectoryReader wrapReader(DirectoryReader reader, boolean softDeletesEnabled, String softDeletesField) throws IOException {
         if (softDeletesEnabled) {

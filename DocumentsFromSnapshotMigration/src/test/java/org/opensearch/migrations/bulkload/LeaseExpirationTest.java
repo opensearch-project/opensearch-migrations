@@ -77,7 +77,7 @@ public class LeaseExpirationTest extends SourceTestBase {
             var esSourceContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2)
                     .withAccessToHost(true);
             var network = Network.newNetwork();
-            var osTargetContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2)
+            var osTargetContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
                     .withAccessToHost(true)
                     .withNetwork(network)
                     .withNetworkAliases(TARGET_DOCKER_HOSTNAME);

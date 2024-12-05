@@ -92,7 +92,7 @@ public class PerformanceVerificationTest {
                     return null;
                 }).subscribeOn(blockingScheduler)
                 .then(Mono.just(response))
-                .doOnTerminate(blockingScheduler::dispose);
+                .doFinally(s -> blockingScheduler.dispose());
         });
 
         // Create DocumentReindexer

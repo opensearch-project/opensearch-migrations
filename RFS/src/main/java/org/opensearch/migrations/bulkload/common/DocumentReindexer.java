@@ -34,7 +34,7 @@ public class DocumentReindexer {
             .map(doc -> transformDocument(doc, indexName));
 
         return this.reindexDocsInParallelBatches(rfsDocs, indexName, context)
-            .doOnTerminate(scheduler::dispose);
+            .doFinally(s -> scheduler.dispose());
     }
 
     Flux<WorkItemCursor> reindexDocsInParallelBatches(Flux<RfsDocument> docs, String indexName, IDocumentReindexContext context) {
@@ -48,7 +48,7 @@ public class DocumentReindexer {
             .publishOn(scheduler, 1) // Switch scheduler
             .flatMapSequential(docsGroup -> sendBulkRequest(UUID.randomUUID(), docsGroup, indexName, context, scheduler),
                 maxConcurrentWorkItems)
-            .doOnTerminate(scheduler::dispose);
+            .doFinally(s -> scheduler.dispose());
     }
 
     @SneakyThrows
