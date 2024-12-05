@@ -91,7 +91,7 @@ class E2ETests(unittest.TestCase):
 
         # Load initial data
         index_name = f"test_e2e_0001_{pytest.unique_id}"
-        transformed_index = f"{index_name}_transformed"
+        transformed_index_name = f"{index_name}_transformed"
         doc_id_base = "e2e_0001_doc"
         index_body = {
             'settings': {
@@ -116,7 +116,7 @@ class E2ETests(unittest.TestCase):
 
         # Perform metadata migration with a transform to index name
         index_name_transform = get_index_name_transformation(existing_index_name=index_name,
-                                                             target_index_name=transformed_index)
+                                                             target_index_name=transformed_index_name)
         transform_arg = convert_transformations_to_str(transform_list=[index_name_transform])
         metadata_result: CommandResult = metadata.migrate(extra_args=["--transformer-config", transform_arg])
         assert metadata_result.success
@@ -131,14 +131,15 @@ class E2ETests(unittest.TestCase):
                         expected_status_code=HTTPStatus.CREATED, test_case=self)
 
         ignore_list = [".", "searchguard", "sg7", "security-auditlog", "reindexed-logs"]
-        expected_docs = {}
+        expected_source_docs = {}
+        expected_target_docs = {}
         # Source should have both documents
-        expected_docs[transformed_index] = {"count": 2}
-        check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_docs,
+        expected_source_docs[index_name] = {"count": 2}
+        check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_source_docs,
                                index_prefix_ignore_list=ignore_list, test_case=self)
         # Target should have one document from snapshot
-        expected_docs[transformed_index] = {"count": 1}
-        check_doc_counts_match(cluster=target_cluster, expected_index_details=expected_docs,
+        expected_target_docs[transformed_index_name] = {"count": 1}
+        check_doc_counts_match(cluster=target_cluster, expected_index_details=expected_target_docs,
                                index_prefix_ignore_list=ignore_list, max_attempts=20, delay=30.0, test_case=self)
 
         backfill.stop()
@@ -149,9 +150,9 @@ class E2ETests(unittest.TestCase):
         replayer.start()
         wait_for_running_replayer(replayer=replayer)
 
-        expected_docs[transformed_index] = {"count": 3}
-        check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_docs,
+        expected_source_docs[index_name] = {"count": 3}
+        expected_target_docs[transformed_index_name] = {"count": 3}
+        check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_source_docs,
                                index_prefix_ignore_list=ignore_list, test_case=self)
-
-        check_doc_counts_match(cluster=target_cluster, expected_index_details=expected_docs,
+        check_doc_counts_match(cluster=target_cluster, expected_index_details=expected_target_docs,
                                index_prefix_ignore_list=ignore_list, max_attempts=30, delay=10.0, test_case=self)
