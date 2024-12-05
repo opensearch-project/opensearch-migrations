@@ -1,14 +1,55 @@
+import groovy.json.JsonOutput
 
 def call(Map config = [:]) {
     def sourceContextId = 'source-single-node-ec2'
     def migrationContextId = 'full-migration'
+    def time = new Date().getTime()
+    def uniqueId = "integ_min_${time}_${currentBuild.number}"
+    def jsonTransformers = [
+        [
+            JsonConditionalTransformerProvider: [
+                [
+                    JsonJMESPathPredicateProvider: [
+                        script: "name == 'test_e2e_0001_$uniqueId'"
+                    ]
+                ],
+                [
+                    [
+                        JsonJoltTransformerProvider: [
+                            script: [
+                                operation: "modify-overwrite-beta",
+                                spec: [
+                                    name: "transformed_index"
+                                ]
+                            ]
+                        ]
+                    ],
+                    [
+                        JsonJoltTransformerProvider: [
+                            script: [
+                                operation: "modify-overwrite-beta",
+                                spec: [
+                                    settings: [
+                                        index: [
+                                            number_of_replicas: 3
+                                        ]
+                                    ]
+                                ]
+                            ]
+                        ]
+                    ]
+                ]
+            ]
+        ]
+    ]
+    def transformersArg = JsonOutput.toJson(jsonTransformers)
     def source_cdk_context = """
         {
           "source-single-node-ec2": {
             "suffix": "ec2-source-<STAGE>",
             "networkStackSuffix": "ec2-source-<STAGE>",
-            "distVersion": "5.6.16",
-            "distributionUrl": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-5.6.16.tar.gz",
+            "distVersion": "6.8.23",
+            "distributionUrl": "https://artifacts.elastic.co/downloads/elasticsearch/elasticsearch-oss-6.8.23.tar.gz",
             "captureProxyEnabled": false,
             "securityDisabled": true,
             "minDistribution": false,
@@ -40,10 +81,11 @@ def call(Map config = [:]) {
             "trafficReplayerServiceEnabled": true,
             "trafficReplayerExtraArgs": "--speedup-factor 10.0",
             "reindexFromSnapshotServiceEnabled": true,
+            "reindexFromSnapshotExtraArgs": "--transformer-config $transformersArg"
             "sourceCluster": {
                 "endpoint": "<SOURCE_CLUSTER_ENDPOINT>",
                 "auth": {"type": "none"},
-                "version": "ES_5.6.16"
+                "version": "ES_6.8.23"
             },
             "tlsSecurityPolicy": "TLS_1_2",
             "enforceHTTPS": true,
