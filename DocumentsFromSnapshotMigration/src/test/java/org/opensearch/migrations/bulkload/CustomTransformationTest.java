@@ -49,7 +49,7 @@ public class CustomTransformationTest extends SourceTestBase {
     }
 
     @Test
-    public void testProcessExitsAsExpected() {
+    public void testCustomTransformationProducesDesiredTargetClusterState() {
         String nameTransformation = createIndexNameTransformation("geonames", "geonames_transformed");
         var expectedSourceMap = new HashMap<String, Integer>();
         expectedSourceMap.put("geonames", 1);
@@ -122,15 +122,11 @@ public class CustomTransformationTest extends SourceTestBase {
             esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
             int exitCode;
-            int initialExitCodeCount = 0;
             int finalExitCodeCount = 0;
             int runs = 0;
             do {
                 exitCode = processRunner.apply(new RunData(tempDirSnapshot, tempDirLucene, osTargetContainer));
                 runs++;
-                if (exitCode == initialExitCode) {
-                    initialExitCodeCount++;
-                }
                 if (exitCode == eventualExitCode) {
                     finalExitCodeCount++;
                 }
