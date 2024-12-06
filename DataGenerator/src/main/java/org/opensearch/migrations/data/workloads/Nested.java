@@ -104,8 +104,9 @@ public class Nested implements Workload, IFieldCreator, IRandomDataBuilders {
         var numAnswers = random.nextInt(5) + 1;
 
         for (int i = 0; i < numAnswers; i++) {
+            long randomTime = randomTime(timeFrom, random);
             var answer = mapper.createObjectNode()
-                .put("date", randomTime(timeFrom, random))
+                .put("date", randomTime)
                 .put("user", randomUser(random));
             answers.add(answer);
         }
