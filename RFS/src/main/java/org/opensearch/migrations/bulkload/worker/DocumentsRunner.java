@@ -3,10 +3,7 @@ package org.opensearch.migrations.bulkload.worker;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.time.Duration;
-import java.time.Instant;
-import java.util.concurrent.CountDownLatch;
 import java.util.function.BiFunction;
-import java.util.function.Consumer;
 import java.util.function.Function;
 import java.util.function.Supplier;
 
@@ -18,15 +15,15 @@ import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
 import org.opensearch.migrations.bulkload.models.ShardMetadata;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
-import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
 
+import lombok.AllArgsConstructor;
 import lombok.Lombok;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Flux;
-import reactor.core.scheduler.Schedulers;
 
 @Slf4j
+@AllArgsConstructor
 public class DocumentsRunner {
 
     private final ScopedWorkCoordinator workCoordinator;
@@ -35,29 +32,6 @@ public class DocumentsRunner {
     private final SnapshotShardUnpacker.Factory unpackerFactory;
     private final Function<Path, LuceneDocumentsReader> readerFactory;
     private final DocumentReindexer reindexer;
-    private final Consumer<WorkItemCursor> cursorConsumer;
-    private final WorkItemTimeProvider timeProvider;
-    private final Consumer<Runnable> cancellationTriggerConsumer;
-
-    public DocumentsRunner(ScopedWorkCoordinator workCoordinator,
-                           Duration maxInitialLeaseDuration,
-                           DocumentReindexer reindexer,
-                           SnapshotShardUnpacker.Factory unpackerFactory,
-                           BiFunction<String, Integer, ShardMetadata> shardMetadataFactory,
-                           Function<Path, LuceneDocumentsReader> readerFactory,
-                           Consumer<WorkItemCursor> cursorConsumer,
-                           Consumer<Runnable> cancellationTriggerConsumer,
-                           WorkItemTimeProvider timeProvider) {
-        this.maxInitialLeaseDuration = maxInitialLeaseDuration;
-        this.readerFactory = readerFactory;
-        this.reindexer = reindexer;
-        this.shardMetadataFactory = shardMetadataFactory;
-        this.unpackerFactory = unpackerFactory;
-        this.workCoordinator = workCoordinator;
-        this.cursorConsumer = cursorConsumer;
-        this.cancellationTriggerConsumer = cancellationTriggerConsumer;
-        this.timeProvider = timeProvider;
-    }
 
     public enum CompletionStatus {
         NOTHING_DONE,
@@ -74,9 +48,7 @@ public class DocumentsRunner {
         try (var context = contextSupplier.get()) {
             return workCoordinator.ensurePhaseCompletion(wc -> {
                 try {
-                    var workAcquisitionOutcome = wc.acquireNextWorkItem(maxInitialLeaseDuration, context::createOpeningContext);
-                    timeProvider.getLeaseAcquisitionTimeRef().set(Instant.now());
-                    return workAcquisitionOutcome;
+                    return wc.acquireNextWorkItem(maxInitialLeaseDuration, context::createOpeningContext);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     throw Lombok.sneakyThrow(e);
@@ -85,50 +57,14 @@ public class DocumentsRunner {
                 }
             }, new IWorkCoordinator.WorkAcquisitionOutcomeVisitor<>() {
                 @Override
-                public CompletionStatus onAlreadyCompleted() {
+                public CompletionStatus onAlreadyCompleted() throws IOException {
                     return CompletionStatus.NOTHING_DONE;
                 }
 
                 @Override
                 public CompletionStatus onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) {
-                    var docMigrationCursors = setupDocMigration(workItem.getWorkItem(), context);
-                    var latch = new CountDownLatch(1);
-                    var finishScheduler = Schedulers.newSingle( "workFinishScheduler");
-                    var disposable = docMigrationCursors
-                        .subscribeOn(finishScheduler)
-                        .doFinally(s -> finishScheduler.dispose())
-                        .takeLast(1)
-                        .subscribe(lastItem -> {},
-                            error -> log.atError()
-                                    .setCause(error)
-                                    .setMessage("Error prevented all batches from being processed")
-                                    .log(),
-                            () ->  {
-                                log.atInfo().setMessage("Reindexing completed for Index {}, Shard {}")
-                                        .addArgument(workItem.getWorkItem().getIndexName())
-                                        .addArgument(workItem.getWorkItem().getShardNumber())
-                                        .log();
-                                latch.countDown();
-                            });
-                    // This allows us to cancel the subscription to stop sending new docs
-                    // when the lease expires and a successor work item is made.
-                    // There may be in-flight requests that are not reflected in the progress cursor
-                    // and thus will be sent again during the successor work item.
-                    // These will count as "deleted" from a lucene perspective and show up as "deletedDocs" during cat-indices
-                    // However, the target active state will remain consistent with the snapshot and will get cleaned
-                    // up during lucene segment merges.
-                    //
-                    // To reduce the docs processed more than once, consider triggering an upstream cancellation
-                    // before sending requests prior to the lease expiration allowing
-                    // the in-flight requests to be finished before creating the successor items.
-                    cancellationTriggerConsumer.accept(disposable::dispose);
-                    try {
-                        latch.await();
-                        return CompletionStatus.WORK_COMPLETED;
-                    } catch (InterruptedException e) {
-                        Thread.currentThread().interrupt();
-                        throw Lombok.sneakyThrow(e);
-                    }
+                    doDocumentsMigration(IndexAndShardCursor.valueFromWorkItemString(workItem.getWorkItemId()), context);
+                    return CompletionStatus.WORK_COMPLETED;
                 }
 
                 @Override
@@ -151,21 +87,27 @@ public class DocumentsRunner {
         }
     }
 
-    private Flux<WorkItemCursor> setupDocMigration(
-        IWorkCoordinator.WorkItemAndDuration.WorkItem workItem,
+    private void doDocumentsMigration(
+        IndexAndShardCursor indexAndShardCursor,
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
-        log.atInfo().setMessage("Migrating docs for {}").addArgument(workItem).log();
-        ShardMetadata shardMetadata = shardMetadataFactory.apply(workItem.getIndexName(), workItem.getShardNumber());
+        log.info("Migrating docs for " + indexAndShardCursor);
+        ShardMetadata shardMetadata = shardMetadataFactory.apply(indexAndShardCursor.indexName, indexAndShardCursor.shard);
 
         var unpacker = unpackerFactory.create(shardMetadata);
         var reader = readerFactory.apply(unpacker.unpack());
+        Flux<RfsLuceneDocument> documents = reader.readDocuments(indexAndShardCursor.startingSegmentIndex, indexAndShardCursor.startingDocId);
 
-        timeProvider.getDocumentMigraionStartTimeRef().set(Instant.now());
-
-        Flux<RfsLuceneDocument> documents = reader.readDocuments(workItem.getStartingDocId());
-
-        return reindexer.reindex(workItem.getIndexName(), documents, context)
-            .doOnNext(cursorConsumer);
+        reindexer.reindex(shardMetadata.getIndexName(), documents, context)
+            .doOnError(error -> log.error("Error during reindexing: " + error))
+            .doOnSuccess(
+                done -> log.atInfo().setMessage("Reindexing completed for Index {}, Shard {}")
+                    .addArgument(shardMetadata::getIndexName)
+                    .addArgument(shardMetadata::getShardId)
+                    .log()
+            )
+            // Wait for the reindexing to complete before proceeding
+            .block();
+        log.info("Docs migrated");
     }
 }
