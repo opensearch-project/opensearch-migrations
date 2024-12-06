@@ -156,6 +156,18 @@ LOGGING = {
             'filename': 'logs/transform_api.info.log',
             'formatter': 'verbose',
         },
+        'transform_expert_debug_file': {
+            'level': 'DEBUG',
+            'class': 'logging.FileHandler',
+            'filename': 'logs/transform_expert.debug.log',
+            'formatter': 'verbose',
+        },
+        'transform_expert_info_file': {
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': 'logs/transform_expert.info.log',
+            'formatter': 'verbose',
+        },
         'django_debug_file': {
             'level': 'DEBUG',
             'class': 'logging.FileHandler',
@@ -166,6 +178,11 @@ LOGGING = {
     'loggers': {
         'transform_api': {
             'handlers': ['transform_api_debug_file', 'transform_api_info_file'],
+            'level': 'DEBUG',  # Logs DEBUG and higher for your app
+            'propagate': False,  # Prevent log messages from propagating to other loggers
+        },
+        'transform_expert': {
+            'handlers': ['transform_expert_debug_file', 'transform_expert_info_file'],
             'level': 'DEBUG',  # Logs DEBUG and higher for your app
             'propagate': False,  # Prevent log messages from propagating to other loggers
         },

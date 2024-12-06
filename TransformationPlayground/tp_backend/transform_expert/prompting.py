@@ -59,7 +59,7 @@ You will do this by ensuring your transform code returns each new index as a sep
 """
 
 
-def get_transform_index_prompt(source_version: str, target_version: str, source_json: Dict[str, Any]) -> str:
+def get_transform_index_prompt(source_version: str, target_version: str, source_json: Dict[str, Any]) -> SystemMessage:
     return SystemMessage(
         content=index_prompt_template.format(
             source_version=source_version,
