@@ -13,11 +13,13 @@ import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
+import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.data.WorkloadGenerator;
 import org.opensearch.migrations.data.WorkloadOptions;
+import org.opensearch.migrations.data.workloads.Workloads;
+import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
-import org.opensearch.testcontainers.OpensearchContainer;
 
 import eu.rekawek.toxiproxy.model.ToxicDirection;
 import lombok.AllArgsConstructor;
@@ -28,28 +30,17 @@ import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.junit.jupiter.params.ParameterizedTest;
-import org.junit.jupiter.params.provider.CsvSource;
 import org.testcontainers.containers.Network;
 
 /**
- * TODO - the code in this test was lifted from FullTest.java (now named ParallelDocumentMigrationsTest.java).
+ * TODO - the code in this test was lifted from ProcessLifecycleTest.java
  * Some of the functionality and code are shared between the two and should be refactored.
  */
 @Slf4j
-@Tag("longTest")
-public class ProcessLifecycleTest extends SourceTestBase {
+public class LeaseExpirationTest extends SourceTestBase {
 
     public static final String TARGET_DOCKER_HOSTNAME = "target";
     public static final String SNAPSHOT_NAME = "test_snapshot";
-    public static final List<String> INDEX_ALLOWLIST = List.of();
-    public static final int OPENSEARCH_PORT = 9200;
-
-    enum FailHow {
-        NEVER,
-        AT_STARTUP,
-        WITH_DELAYS
-    }
 
     @AllArgsConstructor
     @Getter
@@ -60,71 +51,51 @@ public class ProcessLifecycleTest extends SourceTestBase {
     }
 
     @Test
-    public void testExitsZeroThenThreeForSimpleSetup() throws Exception {
-        testProcess(3,
-            d -> {
-                var firstExitCode =
-                    runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, FailHow.NEVER);
-                Assertions.assertEquals(0, firstExitCode);
-                for (int i=0; i<10; ++i) {
-                    var secondExitCode =
-                        runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, FailHow.NEVER);
-                    if (secondExitCode != 0) {
-                        var lastErrorCode =
-                            runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, FailHow.NEVER);
-                        Assertions.assertEquals(secondExitCode, lastErrorCode);
-                        return lastErrorCode;
-                    }
-                }
-                Assertions.fail("Ran for many test iterations and didn't get a No Work Available exit code");
-                return -1; // won't be evaluated
-            });
-    }
-
-    @ParameterizedTest
-    @CsvSource(value = {
-        // This test will go through a proxy that doesn't add any defects and the process will use defaults
-        // so that it successfully runs to completion on a small dataset in a short amount of time
-        "NEVER, 0",
-        // This test is dependent on the toxiproxy being disabled before Migrate Documents is called.
-        // The Document Migration process will throw an exception immediately, which will cause an exit.
-        "AT_STARTUP, 1",
-        // This test is dependent upon the max lease duration that is passed to the command line. It's set
-        // to such a short value (1s) that no document migration will exit in that amount of time. For good
-        // measure though, the toxiproxy also adds latency to the requests to make it impossible for the
-        // migration to complete w/in that 1s.
-        "WITH_DELAYS, 2"
-    })
-    public void testProcessExitsAsExpected(String failAfterString, int expectedExitCode) throws Exception {
-        final var failHow = FailHow.valueOf(failAfterString);
-        testProcess(expectedExitCode,
-            d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer, failHow));
+    @Tag("isolatedTest")
+    public void testProcessExitsAsExpected() {
+        // Sending 5 docs per request with 4 requests concurrently with each taking 0.125 second is 160 docs/sec
+        // will process 9760 docs in 61 seconds. With 20s lease duration, expect to be finished in 4 leases.
+        // This is ensured with the toxiproxy settings, the migration should not be able to be completed
+        // faster, but with a heavily loaded test environment, may be slower which is why this is marked as
+        // isolated.
+        // 2 Shards, for each shard, expect three status code 2 and one status code 0 (4 leases)
+        int shards = 2;
+        int indexDocCount = 9760 * shards;
+        int migrationProcessesPerShard = 4;
+        int continueExitCode = 2;
+        int finalExitCodePerShard = 0;
+        runTestProcessWithCheckpoint(continueExitCode, (migrationProcessesPerShard - 1) * shards,
+                finalExitCodePerShard, shards, shards, indexDocCount,
+            d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer
+            ));
     }
 
     @SneakyThrows
-    private void testProcess(int expectedExitCode, Function<RunData, Integer> processRunner) {
+    private void runTestProcessWithCheckpoint(int expectedInitialExitCode, int expectedInitialExitCodeCount,
+                                              int expectedEventualExitCode, int expectedEventualExitCodeCount,
+                                              int shards, int indexDocCount,
+                                              Function<RunData, Integer> processRunner) {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
-
-        var targetImageName = SearchClusterContainer.OS_V2_14_0.getImageName();
 
         var tempDirSnapshot = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
         var tempDirLucene = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
 
         try (
-            var network = Network.newNetwork();
             var esSourceContainer = new SearchClusterContainer(SearchClusterContainer.ES_V7_10_2)
-                .withNetwork(network)
-                .withNetworkAliases(SOURCE_SERVER_ALIAS);
-            var osTargetContainer = new OpensearchContainer<>(targetImageName).withExposedPorts(OPENSEARCH_PORT)
-                .withNetwork(network)
-                .withNetworkAliases(TARGET_DOCKER_HOSTNAME);
+                    .withAccessToHost(true);
+            var network = Network.newNetwork();
+            var osTargetContainer = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
+                    .withAccessToHost(true)
+                    .withNetwork(network)
+                    .withNetworkAliases(TARGET_DOCKER_HOSTNAME);
             var proxyContainer = new ToxiProxyWrapper(network)
         ) {
             CompletableFuture.allOf(
-                CompletableFuture.runAsync(() -> esSourceContainer.start()),
-                CompletableFuture.runAsync(() -> osTargetContainer.start()),
-                CompletableFuture.runAsync(() -> proxyContainer.start(TARGET_DOCKER_HOSTNAME, OPENSEARCH_PORT))
+                CompletableFuture.runAsync(esSourceContainer::start),
+                CompletableFuture.runAsync(osTargetContainer::start)
             ).join();
+
+            proxyContainer.start("target", 9200);
 
             // Populate the source cluster with data
             var client = new OpenSearchClient(ConnectionContextTestParams.builder()
@@ -133,7 +104,29 @@ public class ProcessLifecycleTest extends SourceTestBase {
                 .toConnectionContext()
             );
             var generator = new WorkloadGenerator(client);
-            generator.generate(new WorkloadOptions());
+            var workloadOptions = new WorkloadOptions();
+
+            var sourceClusterOperations = new ClusterOperations(esSourceContainer.getUrl());
+
+            // Number of default shards is different across different versions on ES/OS.
+            // So we explicitly set it.
+            String body = String.format(
+                    "{" +
+                            "  \"settings\": {" +
+                            "    \"index\": {" +
+                            "      \"number_of_shards\": %d," +
+                            "      \"number_of_replicas\": 0" +
+                            "    }" +
+                            "  }" +
+                            "}",
+                    shards
+            );
+            sourceClusterOperations.createIndex("geonames", body);
+
+            workloadOptions.totalDocs = indexDocCount;
+            workloadOptions.workloads = List.of(Workloads.GEONAMES);
+            workloadOptions.maxBulkBatchSize = 1000;
+            generator.generate(workloadOptions);
 
             // Create the snapshot from the source cluster
             var args = new CreateSnapshot.Args();
@@ -146,18 +139,48 @@ public class ProcessLifecycleTest extends SourceTestBase {
 
             esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
-            int actualExitCode = processRunner.apply(new RunData(tempDirSnapshot, tempDirLucene, proxyContainer));
-            log.atInfo().setMessage("Process exited with code: {}").addArgument(actualExitCode).log();
+            int exitCode;
+            int initialExitCodeCount = 0;
+            int finalExitCodeCount = 0;
+            int runs = 0;
+            do {
+                exitCode = processRunner.apply(new RunData(tempDirSnapshot, tempDirLucene, proxyContainer));
+                runs++;
+                if (exitCode == expectedInitialExitCode) {
+                    initialExitCodeCount++;
+                }
+                if (exitCode == expectedEventualExitCode) {
+                    finalExitCodeCount++;
+                }
+                log.atInfo().setMessage("Process exited with code: {}").addArgument(exitCode).log();
+                // Clean tree for subsequent run
+                deleteTree(tempDirLucene);
+            } while (finalExitCodeCount < expectedEventualExitCodeCount && runs < expectedInitialExitCodeCount * 2);
 
-            // Check if the exit code is as expected
+            // Assert doc count on the target cluster matches source
+            checkClusterMigrationOnFinished(esSourceContainer, osTargetContainer,
+                    DocumentMigrationTestContext.factory().noOtelTracking());
+
+            // Check if the final exit code is as expected
             Assertions.assertEquals(
-                expectedExitCode,
-                actualExitCode,
-                "The program did not exit with the expected status code."
+                    expectedEventualExitCodeCount,
+                    finalExitCodeCount,
+                    "The program did not exit with the expected final exit code."
+            );
+
+            Assertions.assertEquals(
+                    expectedEventualExitCode,
+                    exitCode,
+                    "The program did not exit with the expected final exit code."
+            );
+
+            Assertions.assertEquals(
+                    expectedInitialExitCodeCount,
+                    initialExitCodeCount,
+                    "The program did not exit with the expected number of " + expectedInitialExitCode +" exit codes"
             );
         } finally {
             deleteTree(tempDirSnapshot);
-            deleteTree(tempDirLucene);
         }
     }
 
@@ -165,19 +188,16 @@ public class ProcessLifecycleTest extends SourceTestBase {
     private static int runProcessAgainstToxicTarget(
         Path tempDirSnapshot,
         Path tempDirLucene,
-        ToxiProxyWrapper proxyContainer,
-        FailHow failHow)
+        ToxiProxyWrapper proxyContainer
+    )
     {
         String targetAddress = proxyContainer.getProxyUriAsString();
         var tp = proxyContainer.getProxy();
-        if (failHow == FailHow.AT_STARTUP) {
-            tp.disable();
-        } else if (failHow == FailHow.WITH_DELAYS) {
-            tp.toxics().latency("latency-toxic", ToxicDirection.DOWNSTREAM, 100);
-        }
+        var latency = tp.toxics().latency("latency-toxic", ToxicDirection.UPSTREAM, 125);
 
-        int timeoutSeconds = 90;
-        ProcessBuilder processBuilder = setupProcess(tempDirSnapshot, tempDirLucene, targetAddress, failHow);
+        // Set to less than 2x lease time to ensure leases aren't doubling
+        int timeoutSeconds = 30;
+        ProcessBuilder processBuilder = setupProcess(tempDirSnapshot, tempDirLucene, targetAddress);
 
         var process = runAndMonitorProcess(processBuilder);
         boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
@@ -191,6 +211,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
             Assertions.fail("The process did not finish within the timeout period (" + timeoutSeconds + " seconds).");
         }
 
+        latency.remove();
+
         return process.exitValue();
     }
 
@@ -199,8 +221,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
     private static ProcessBuilder setupProcess(
         Path tempDirSnapshot,
         Path tempDirLucene,
-        String targetAddress,
-        FailHow failHow
+        String targetAddress
     ) {
         String classpath = System.getProperty("java.class.path");
         String javaHome = System.getProperty("java.home");
@@ -218,13 +239,13 @@ public class ProcessLifecycleTest extends SourceTestBase {
             "--index-allowlist",
             "geonames",
             "--documents-per-bulk-request",
-            "10",
+            "5",
             "--max-connections",
-            "1",
+            "4",
             "--source-version",
             "ES_7_10",
             "--initial-lease-duration",
-            failHow == FailHow.NEVER ? "PT10M" : "PT1S" };
+            "PT20s" };
 
         // Kick off the doc migration process
         log.atInfo().setMessage("Running RfsMigrateDocuments with args: {}")
@@ -241,4 +262,5 @@ public class ProcessLifecycleTest extends SourceTestBase {
         processBuilder.redirectOutput();
         return processBuilder;
     }
+
 }

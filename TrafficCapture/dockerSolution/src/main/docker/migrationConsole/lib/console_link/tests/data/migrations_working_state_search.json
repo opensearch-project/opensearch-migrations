@@ -11,8 +11,8 @@
         "_id": "logs-211998__2",
         "_score": 1.0,
         "_source": {
-          "numAttempts": 0,
-          "scriptVersion": "poc",
+          "nextAcquisitionLeaseExponent": 0,
+          "scriptVersion": "2.0",
           "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
           "expiration": 0
         }
@@ -22,8 +22,8 @@
         "_id": "logs-211998__3",
         "_score": 1.0,
         "_source": {
-          "numAttempts": 0,
-          "scriptVersion": "poc",
+          "nextAcquisitionLeaseExponent": 0,
+          "scriptVersion": "2.0",
           "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
           "expiration": 0
         }
@@ -33,8 +33,8 @@
         "_id": "logs-211998__4",
         "_score": 1.0,
         "_source": {
-          "numAttempts": 0,
-          "scriptVersion": "poc",
+          "nextAcquisitionLeaseExponent": 0,
+          "scriptVersion": "2.0",
           "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
           "expiration": 0
         }
@@ -44,8 +44,8 @@
         "_id": "logs-221998__0",
         "_score": 1.0,
         "_source": {
-          "numAttempts": 0,
-          "scriptVersion": "poc",
+          "nextAcquisitionLeaseExponent": 0,
+          "scriptVersion": "2.0",
           "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
           "expiration": 0
         }
@@ -55,8 +55,8 @@
         "_id": "logs-221998__1",
         "_score": 1.0,
         "_source": {
-          "numAttempts": 0,
-          "scriptVersion": "poc",
+          "nextAcquisitionLeaseExponent": 0,
+          "scriptVersion": "2.0",
           "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
           "expiration": 0
         }
@@ -66,8 +66,8 @@
         "_id": "logs-221998__2",
         "_score": 1.0,
         "_source": {
-          "numAttempts": 0,
-          "scriptVersion": "poc",
+          "nextAcquisitionLeaseExponent": 0,
+          "scriptVersion": "2.0",
           "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
           "expiration": 0
         }
@@ -77,8 +77,8 @@
         "_id": "logs-221998__3",
         "_score": 1.0,
         "_source": {
-          "numAttempts": 0,
-          "scriptVersion": "poc",
+          "nextAcquisitionLeaseExponent": 0,
+          "scriptVersion": "2.0",
           "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
           "expiration": 0
         }
@@ -88,8 +88,8 @@
         "_id": "logs-221998__4",
         "_score": 1.0,
         "_source": {
-          "numAttempts": 0,
-          "scriptVersion": "poc",
+          "nextAcquisitionLeaseExponent": 0,
+          "scriptVersion": "2.0",
           "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
           "expiration": 0
         }
@@ -99,8 +99,8 @@
         "_id": "logs-201998__0",
         "_score": 1.0,
         "_source": {
-          "numAttempts": 0,
-          "scriptVersion": "poc",
+          "nextAcquisitionLeaseExponent": 0,
+          "scriptVersion": "2.0",
           "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
           "expiration": 0
         }
@@ -110,8 +110,8 @@
         "_id": "logs-201998__1",
         "_score": 1.0,
         "_source": {
-          "numAttempts": 0,
-          "scriptVersion": "poc",
+          "nextAcquisitionLeaseExponent": 0,
+          "scriptVersion": "2.0",
           "creatorId": "77eccd7d-6baf-4816-b0f3-473ca3ca17e4",
           "expiration": 0
         }
