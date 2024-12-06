@@ -4,8 +4,13 @@ verify_ssl = true
 name = "pypi"
 
 [packages]
+boto3 = "*"
+botocore = "*"
 django = "*"
 djangorestframework = "*"
+langchain = "*"
+langchain-aws = "*"
+requests = "*"
 
 [dev-packages]
 

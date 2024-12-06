@@ -9,7 +9,8 @@ https://docs.djangoproject.com/en/5.1/topics/settings/
 For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.1/ref/settings/
 """
-
+import logging
+import os
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -38,7 +39,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
-    'api',
+    'transform_api',
 ]
 
 MIDDLEWARE = [
@@ -123,3 +124,55 @@ STATIC_URL = 'static/'
 # https://docs.djangoproject.com/en/5.1/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+
+# Logging configuration
+logging.getLogger("boto3").setLevel(logging.WARNING) # Suppress noisy boto logs
+logging.getLogger("botocore").setLevel(logging.WARNING) # Suppress noisy boto logs
+
+os.makedirs('logs', exist_ok=True)  # Ensure logs directory exists
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '%(asctime)s [%(levelname)s] %(name)s: %(message)s',
+        },
+        'simple': {
+            'format': '%(message)s',
+        },
+    },
+    'handlers': {
+        'transform_api_debug_file': {
+            'level': 'DEBUG',
+            'class': 'logging.FileHandler',
+            'filename': 'logs/transform_api.debug.log',
+            'formatter': 'verbose',
+        },
+        'transform_api_info_file': {
+            'level': 'INFO',
+            'class': 'logging.FileHandler',
+            'filename': 'logs/transform_api.info.log',
+            'formatter': 'verbose',
+        },
+        'django_debug_file': {
+            'level': 'DEBUG',
+            'class': 'logging.FileHandler',
+            'filename': 'logs/django.debug.log',
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'transform_api': {
+            'handlers': ['transform_api_debug_file', 'transform_api_info_file'],
+            'level': 'DEBUG',  # Logs DEBUG and higher for your app
+            'propagate': False,  # Prevent log messages from propagating to other loggers
+        },
+        'django': {
+            'handlers': ['django_debug_file'],
+            'level': 'DEBUG',  # Logs DEBUG and higher for Django
+            'propagate': False,
+        },
+    },
+}
