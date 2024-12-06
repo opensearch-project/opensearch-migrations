@@ -126,7 +126,7 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
 
         var transformedLegacy = transformedTemplates.stream()
                 .filter(LegacyTemplate.class::isInstance)
-                .map(IndexTemplate.class::cast)
+                .map(LegacyTemplate.class::cast)
                 .collect(Collectors.toList());
 
         var transformedIndex = transformedTemplates.stream()
