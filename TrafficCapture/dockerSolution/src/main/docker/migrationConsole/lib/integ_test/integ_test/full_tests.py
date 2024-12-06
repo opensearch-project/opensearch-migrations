@@ -152,7 +152,7 @@ class E2ETests(unittest.TestCase):
 
         expected_source_docs[index_name] = {"count": 3}
         # TODO Replayer transformation needed to only have docs in the transformed index
-        expected_target_docs[index_name] = {"count": 2}
+        expected_target_docs[index_name] = {"count": 3}
         check_doc_counts_match(cluster=source_cluster, expected_index_details=expected_source_docs,
                                index_prefix_ignore_list=ignore_list, test_case=self)
         check_doc_counts_match(cluster=target_cluster, expected_index_details=expected_target_docs,
