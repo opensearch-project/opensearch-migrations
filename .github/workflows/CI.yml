@@ -11,27 +11,6 @@ env:
   node-version: '18.x'
 
 jobs:
-  workflow-info:
-    runs-on: ubuntu-latest
-    steps:
-      - name: Create JSON Artifact
-        run: |
-          echo '{' > workflow-info.json
-          echo '  "pr_number": "${{ github.event.pull_request.number }}",' >> workflow-info.json
-          echo '  "commit": "${{ github.event.pull_request.head.sha || github.event.after || github.sha }}",' >> workflow-info.json
-          echo '  "branch": "${{ github.ref }}",' >> workflow-info.json
-          echo '  "commit_parent": "${{ github.event.pull_request.base.sha || github.event.before || github.base.sha }}",' >> workflow-info.json
-          echo '  "build_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",' >> workflow-info.json
-          echo '  "build": "${{ github.run_id }}"' >> workflow-info.json
-          echo '}' >> workflow-info.json
-          echo "workflow-info.json created"
-      - name: Upload JSON Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: workflow-info
-          path: workflow-info.json
-
-
   style-check:
     runs-on: ubuntu-latest
     steps:
@@ -79,19 +58,24 @@ jobs:
         working-directory: ${{ env.WORKING_DIR }}
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Run Tests
+        uses: actions/setup-python@v5
         with:
           python-version: ${{ env.python-version }}
       - run: |
           python3 -m pip install --upgrade pipenv
           pipenv install --deploy --dev
           pipenv run test
-          pipenv run coverage xml
+      - name: Generate Coverage Report
+        if: always()
+        run: pipenv run coverage xml
       - name: Get Sanitized Name
+        if: always()
         env:
           PY_PROJECT: ${{ matrix.py-project }}
         run: echo "SANITIZED_PY_PROJECT=${PY_PROJECT/\//-}" >> $GITHUB_ENV
       - name: Upload Coverage Reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
@@ -129,6 +113,7 @@ jobs:
             **/build/reports/tests/
             **/reports/jacoco/mergedReport/
       - name: Upload Coverage Reports
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           if-no-files-found: error
@@ -235,6 +220,26 @@ jobs:
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
 
+  report-codecov:
+    needs:
+      - gradle-tests
+      - console-python-tests
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Coverage Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./coverage-reports
+          pattern: coverage-reports-*
+      - name: Upload coverage report
+        uses: codecov/codecov-action@v5
+        with:
+          fail_ci_if_error: true
+          files: /**/coverage-reports/**/*.*
+          flags: unittests
+          token: ${{ secrets.CODECOV_TOKEN }}
+          verbose: true
 
   all-ci-checks-pass:
     needs:
