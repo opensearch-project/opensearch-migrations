@@ -321,7 +321,7 @@ class OpenSearchClientTest {
 
     private BulkDocSection createBulkDoc(String docId) {
         var bulkDoc = mock(BulkDocSection.class, withSettings().strictness(org.mockito.quality.Strictness.LENIENT));
-        when(bulkDoc.getId()).thenReturn(docId);
+        when(bulkDoc.getDocId()).thenReturn(docId);
         when(bulkDoc.asBulkIndexString()).thenReturn("BULK-INDEX\nBULK_BODY");
         return bulkDoc;
     }

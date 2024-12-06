@@ -1,9 +1,7 @@
 package org.opensearch.migrations.bulkload;
 
 
-import java.io.BufferedReader;
 import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -14,7 +12,6 @@ import java.util.Random;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
 
@@ -35,9 +32,7 @@ import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
 import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
-import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
-import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.transform.TransformationLoader;
@@ -48,7 +43,6 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
-import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import reactor.core.publisher.Flux;
 
@@ -64,36 +58,6 @@ public class SourceTestBase {
             baseSourceImage,
             GENERATOR_BASE_IMAGE,
             new String[] { "/root/runTestBenchmarks.sh", "--endpoint", "http://" + SOURCE_SERVER_ALIAS + ":9200/" } };
-    }
-
-    @NotNull
-    protected static Process runAndMonitorProcess(ProcessBuilder processBuilder) throws IOException {
-        var process = processBuilder.start();
-
-        log.atInfo().setMessage("Process started with ID: {}").addArgument(() -> process.toHandle().pid()).log();
-
-        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-        var readerThread = new Thread(() -> {
-            String line;
-            while (true) {
-                try {
-                    if ((line = reader.readLine()) == null) break;
-                } catch (IOException e) {
-                    log.atWarn().setCause(e).setMessage("Couldn't read next line from sub-process").log();
-                    return;
-                }
-                String finalLine = line;
-                log.atInfo()
-                    .setMessage("from sub-process [{}]: {}")
-                    .addArgument(() -> process.toHandle().pid())
-                    .addArgument(finalLine)
-                    .log();
-            }
-        });
-
-        // Kill the process and fail if we have to wait too long
-        readerThread.start();
-        return process;
     }
 
     @AllArgsConstructor
@@ -177,8 +141,8 @@ public class SourceTestBase {
         }
 
         @Override
-        public Flux<RfsLuceneDocument> readDocuments(int startDoc) {
-            return super.readDocuments(startDoc).map(docTransformer);
+        public Flux<RfsLuceneDocument> readDocuments(int startSegmentIndex, int startDoc) {
+            return super.readDocuments(startSegmentIndex, startDoc).map(docTransformer::apply);
         }
     }
 
@@ -227,7 +191,6 @@ public class SourceTestBase {
 
             var defaultDocTransformer = new TransformationLoader().getTransformerFactoryLoader(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
 
-            AtomicReference<WorkItemCursor> progressCursor = new AtomicReference<>();
             try (var workCoordinator = new OpenSearchWorkCoordinator(
                 new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                     .host(targetAddress)
@@ -244,7 +207,6 @@ public class SourceTestBase {
                         .compressionEnabled(compressionEnabled)
                         .build()
                         .toConnectionContext()), 1000, Long.MAX_VALUE, 1, defaultDocTransformer),
-                    progressCursor,
                     new OpenSearchWorkCoordinator(
                         new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                             .host(targetAddress)
@@ -262,9 +224,7 @@ public class SourceTestBase {
                     sourceResourceProvider.getShardMetadata(),
                     unpackerFactory,
                     MAX_SHARD_SIZE_BYTES,
-                    context,
-                    new AtomicReference<>(),
-                    new WorkItemTimeProvider());
+                    context);
             }
         } finally {
             deleteTree(tempDir);
