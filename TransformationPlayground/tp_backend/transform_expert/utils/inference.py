@@ -10,7 +10,6 @@ from langchain_core.runnables import Runnable
 class InferenceTask:
     transform_id: str
     context: List[BaseMessage]
-    llm: Runnable[LanguageModelInput, BaseMessage]
 
     def to_json(self) -> dict:
         return {
@@ -29,8 +28,17 @@ class InferenceResult:
             "response": self.response.to_json()
         }
 
-async def perform_async_inference(batched_tasks: List[InferenceTask]) -> List[InferenceResult]:
-    async_responses = [task.llm.ainvoke(task.context) for task in batched_tasks]
+
+def perform_inference(llm: Runnable[LanguageModelInput, BaseMessage], batched_tasks: List[InferenceTask]) -> List[InferenceResult]:
+    return asyncio.run(_perform_async_inference(llm, batched_tasks))
+
+# Inference APIs can be throttled pretty aggressively.  Performing them as a batch operation can help with increasing
+# throughput. Ideally, we'd be using Bedrock's batch inference API, but Bedrock's approach to that is an asynchronous
+# process that writes the results to S3 and returns a URL to the results.  This is not implemented by default in the
+# ChatBedrockConverse class, so we'll skip true batch processing for now.  Instead, we'll just perform the inferences in
+# parallel with aggressive retry logic.
+async def _perform_async_inference(llm: Runnable[LanguageModelInput, BaseMessage], batched_tasks: List[InferenceTask]) -> List[InferenceResult]:
+    async_responses = [llm.ainvoke(task.context) for task in batched_tasks]
     responses = await asyncio.gather(*async_responses)
 
     return [InferenceResult(transform_id=task.transform_id, response=response) for task, response in zip(batched_tasks, responses)]

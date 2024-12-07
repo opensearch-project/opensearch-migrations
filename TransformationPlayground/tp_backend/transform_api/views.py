@@ -12,21 +12,27 @@ import uuid
 
 from langchain_core.messages import HumanMessage
 
-from transform_expert.prompting import get_transform_index_prompt
-from transform_expert.utils.transforms import invoke_transform_expert, TransformTask, llm_python_w_tools
+from transform_expert.expert import get_expert, invoke_transform_expert
+from transform_expert.parameters import SourceVersion, TargetVersion, InputShapeType, TransformLanguage
+from transform_expert.utils.transforms import TransformTask
 
 
 logger = logging.getLogger("transform_api")
 
 class TransformationsView(APIView):
     def _perform_transformation(self, transform_id: str, input_shape: Dict[str, Any]) -> TransformTask:
-        system_message = get_transform_index_prompt(
-            "Elasticsearch 6.8",
-            "OpenSearch 2.14",
+        expert = get_expert(
+            source_version=SourceVersion.ES_6_8,
+            target_version=TargetVersion.OS_2_14,
+            input_shape_type=InputShapeType.INDEX,
+            transform_language=TransformLanguage.PYTHON
+        )
+
+        system_message = expert.system_prompt_factory(
             {
                 "indexName": "test_index",
                 "indexJson": input_shape
-            }
+            }            
         )
         turns = [
             system_message,
@@ -36,11 +42,10 @@ class TransformationsView(APIView):
         transform_task = TransformTask(
             transform_id=transform_id,
             context=turns,
-            llm=llm_python_w_tools,
             transform=None
         )
 
-        transform_result = invoke_transform_expert(transform_task)
+        transform_result = invoke_transform_expert(expert, transform_task)
 
         return transform_result
 
@@ -65,6 +70,7 @@ class TransformationsView(APIView):
             logger.debug(f"Transformation logic:\n{transform_result.transform.to_file_format()}")
         except Exception as e:
             logger.error(f"Transformation failed: {str(e)}")
+            logger.exception(e)
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
         # Save the transformation record (optional)
