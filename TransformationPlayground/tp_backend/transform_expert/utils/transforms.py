@@ -41,13 +41,15 @@ class TransformTask:
     transform_id: str
     context: List[BaseMessage]
     llm: Runnable[LanguageModelInput, BaseMessage]
-    transform: Transform
+    transform: Transform = None
+    output: str = "bleh"
 
     def to_json(self) -> Dict[str, Any]:
         return {
             "transform_id": self.transform_id,
             "context": [turn.to_json() for turn in self.context],
-            "transform": self.transform.to_json() if self.transform else None
+            "transform": self.transform.to_json() if self.transform else None,
+            "output": self.output if self.output else None
         }
     
     def to_inference_task(self) -> InferenceTask:

@@ -1,6 +1,6 @@
 from django.urls import path
-from transform_api.views import TransformationView
+from transform_api.views import TransformationsView
 
 urlpatterns = [
-    path('transform/', TransformationView.as_view(), name='transform'),
+    path('transforms/', TransformationsView.as_view(), name='transforms'),
 ]
