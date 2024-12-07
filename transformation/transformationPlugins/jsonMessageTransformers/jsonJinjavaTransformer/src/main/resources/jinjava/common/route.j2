@@ -1,5 +1,5 @@
 {%- import "common/featureEnabled.j2" as fscope -%}
-{%- import "common/featureEnabled.j2" as fscope -%}
+
 {%- macro route(input, field_to_match, feature_flags, default_action, routes) -%}
     {%- set ns = namespace(result=none, matched=false) -%}
     {%- for pattern, action_fn, feature_name_param in routes if not ns.matched -%}

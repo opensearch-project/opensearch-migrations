@@ -71,8 +71,8 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
                 transformedMessage = transform(transformer, httpJsonMessage);
             } catch (Exception e) {
                 var payload = (PayloadAccessFaultingMap) httpJsonMessage.payload();
-                if (payload.missingPaylaodWasAccessed()) {
-                    payload.resetMissingPaylaodWasAccessed();
+                if (payload.missingPayloadWasAccessed()) {
+                    payload.resetMissingPayloadWasAccessed();
                     log.atDebug().setMessage("The transforms for this message require payload manipulation, "
                         + "all content handlers are being loaded.").log();
                     // make a fresh message and its headers

@@ -1,6 +1,8 @@
 This transformer converts routes for various requests (see below) to indices that used
 [multi-type mappings](https://www.elastic.co/guide/en/elasticsearch/reference/5.6/mapping.html) (configured from ES 5.x 
-and earlier clusters) to work with newer versions of Elasticsearch and OpenSearch.
+and earlier clusters) to work with newer versions of Elasticsearch and OpenSearch.  
+See "[Removal of Type Mappings](https://www.elastic.co/guide/en/elasticsearch/reference/7.10/removal-of-types.html)"
+to understand how type mappings are treated differently through different versions of Elasticsearch.
 
 ## Usage Prior to Elasticsearch 6 
 
@@ -79,7 +81,7 @@ activity:
 
 Any _indices_ that are NOT specified won't be modified - all additions, changes, and queries on those other indices not
 specified at the root level will remain untouched by the static mapping rewriter.  However, missing types from a 
-specified index _**will**_ be removed.  To remove ALL the activity for a given index, specify an empty index with no
+specified index will be removed.  To remove ALL the activity for a given index, specify an index with no
 children types.
 ```
 activity: {}

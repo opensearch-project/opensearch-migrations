@@ -57,12 +57,21 @@
 
                 {%- if operation.type -%}
                     {%- set parameters = item[operation.type] -%}
-                    {%- set target_index = transidx.convert_source_index_to_target(parameters['_index'], parameters['_type'], input_map.index_mappings, input_map.regex_index_mappings) -%}
+                    {%- set type_name = parameters['_type'] -%}
+                    {%- set target_index = transidx.convert_source_index_to_target(parameters['_index'], type_name, input_map.index_mappings, input_map.regex_index_mappings) if type_name -%}
                     {%- if operation.type == 'delete' -%}
-                        {%- set operation.output = run_delete(parameters, target_index) -%}
+                        {%- if type_name -%}
+                            {%- set operation.output = run_delete(parameters, target_index) -%}
+                        {%- else -%}
+                            {%- set operation.output = (item | tojson) -%}
+                        {%- endif -%}
                     {%- else -%}
                         {%- if loop.index < operations|length -%}
-                            {%- set operation.output = rewrite_command(operation.type, parameters, target_index, operations[loop.index]) -%}
+                            {%- if type_name -%}
+                                {%- set operation.output = rewrite_command(operation.type, parameters, target_index, operations[loop.index]) -%}
+                            {%- else -%}
+                                {%- set operation.output = (item | tojson) ~ "," ~ (operations[loop.index] | tojson) -%}
+                            {%- endif -%}
                             {%- set loopcontrol.skipnext = true -%}
                         {%- else -%}
                             {%- throw "Handle case where there's no next item but one was expected for item {{ item }}" -%}

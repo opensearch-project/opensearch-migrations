@@ -3,6 +3,8 @@ package org.opensearch.migrations.transform.jinjava;
 import java.io.IOException;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.ExecutionException;
 import java.util.stream.Collectors;
 
@@ -20,6 +22,8 @@ import lombok.extern.slf4j.Slf4j;
 
 @Slf4j
 public class NameMappingClasspathResourceLocator extends ClasspathResourceLocator {
+    final Map<String, String> overrideResourceMap;
+
     @AllArgsConstructor
     @Getter
     @EqualsAndHashCode
@@ -41,7 +45,11 @@ public class NameMappingClasspathResourceLocator extends ClasspathResourceLocato
             }
         });
 
-    private String getDefaultVersion(final String fullName) throws IOException {
+    public NameMappingClasspathResourceLocator(Map<String, String> overrideResourceMap) {
+        this.overrideResourceMap = Optional.ofNullable(overrideResourceMap).orElse(Map.of());
+    }
+
+    private static String getDefaultVersion(final String fullName) throws IOException {
         try {
             var versionFile = fullName + "/defaultVersion";
             var versionLines = Resources.readLines(Resources.getResource(versionFile), StandardCharsets.UTF_8).stream()
@@ -59,6 +67,10 @@ public class NameMappingClasspathResourceLocator extends ClasspathResourceLocato
 
     @Override
     public String getString(String fullName, Charset encoding, JinjavaInterpreter interpreter) throws IOException {
+        var overrideResource = overrideResourceMap.get(fullName);
+        if (overrideResource != null) {
+            return overrideResource;
+        }
         try {
             return resourceCache.get(new ResourceCacheKey(fullName, encoding));
         } catch (ExecutionException e) {

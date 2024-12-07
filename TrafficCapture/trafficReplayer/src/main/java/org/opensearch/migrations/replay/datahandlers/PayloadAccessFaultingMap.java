@@ -86,11 +86,11 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
         return value;
     }
 
-    public boolean missingPaylaodWasAccessed() {
+    public boolean missingPayloadWasAccessed() {
         return payloadWasAccessed;
     }
 
-    public void resetMissingPaylaodWasAccessed() {
+    public void resetMissingPayloadWasAccessed() {
         payloadWasAccessed = false;
     }
 

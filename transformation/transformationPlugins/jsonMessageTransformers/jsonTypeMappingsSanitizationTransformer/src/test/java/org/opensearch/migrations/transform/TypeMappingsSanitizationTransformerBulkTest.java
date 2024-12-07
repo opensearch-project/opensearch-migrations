@@ -22,16 +22,16 @@ public class TypeMappingsSanitizationTransformerBulkTest {
     @BeforeAll
     static void initialize() throws IOException {
         var indexMappings = Map.of(
-            "indexA", Map.of(
-                "type1", "indexA_1",
-                "type2", "indexA_2"),
-            "indexB", Map.of(
-                "type1", "indexB",
-                "type2", "indexB"),
-            "indexC", Map.of(
-                "type2", "indexC"));
+            "indexa", Map.of(
+                "type1", "indexa_1",
+                "type2", "indexa_2"),
+            "indexb", Map.of(
+                "type1", "indexb",
+                "type2", "indexb"),
+            "indexc", Map.of(
+                "type2", "indexc"));
         var regexIndexMappings = List.of(
-            List.of("time-(.*)", "(.*)", "time-$1-$2"));
+            List.of("time-(.*)", "(.*)", "time-\\1-\\2"));
         indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings);
     }
 
@@ -45,30 +45,35 @@ public class TypeMappingsSanitizationTransformerBulkTest {
                 "  \"" + JsonKeysForHttpMessage.HEADERS_KEY + "\": {},\n" +
                 "  \"" + JsonKeysForHttpMessage.PAYLOAD_KEY + "\": {\n" +
                 "    \"" + JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY + "\": [\n" +
-                "{ \"index\": { \"_index\": \"indexA\", \"_type\": \"type1\", \"_id\": \"1\" } },\n" +
+                "{ \"index\": { \"_index\": \"indexa\", \"_type\": \"type1\", \"_id\": \"1\" } },\n" +
                 "{ \"field1\": \"value1\" },\n" +
 
-                "{ \"index\": { \"_index\": \"indexA\", \"_type\": \"typeDontMap\", \"_id\": \"1\" } },\n" +
+                "{ \"index\": { \"_index\": \"indexa\", \"_type\": \"typeDontMap\", \"_id\": \"1\" } },\n" +
                 "{ \"field1\": \"value9\" },\n" +
 
                 "{ \"delete\": { \"_index\": \"test\", \"_type\": \"type1\", \"_id\": \"2\" } },\n" +
 
                 "{ \"delete\": { \"_index\": \"time-January_1970\", \"_type\": \"cpu\", \"_id\": \"8\" } },\n" +
 
-                "{ \"create\": { \"_index\": \"indexC\", \"_type\": \"type1\", \"_id\": \"3\" } },\n" +
+                "{ \"create\": { \"_index\": \"indexc\", \"_type\": \"type1\", \"_id\": \"3\" } },\n" +
                 "{ \"field1\": \"value3\" },\n" +
 
-                "{ \"create\": { \"_index\": \"indexC\", \"_type\": \"type2\", \"_id\": \"14\" } },\n" +
+                "{ \"create\": { \"_index\": \"indexc\", \"_type\": \"type2\", \"_id\": \"14\" } },\n" +
                 "{ \"field14\": \"value14\" },\n" +
 
-                "{ \"update\": {\"_id\": \"1\", \"_type\": \"type1\", \"_index\": \"indexB\"} },\n" +
+                "{ \"update\": {\"_id\": \"1\", \"_type\": \"type1\", \"_index\": \"indexb\"} },\n" +
                 "{ \"doc\": {\"field2\": \"value2\"} },\n" +
 
-                "{ \"update\": {\"_id\": \"1\", \"_type\": \"type2\", \"_index\": \"indexB\"} },\n" +
+                "{ \"update\": {\"_id\": \"1\", \"_type\": \"type2\", \"_index\": \"indexb\"} },\n" +
                 "{ \"doc\": {\"field10\": \"value10\"} },\n" +
 
-                "{ \"update\": {\"_id\": \"1\", \"_type\": \"type3\", \"_index\": \"indexB\"} },\n" +
-                "{ \"doc\": {\"field10\": \"value11\"} }\n" +
+                "{ \"update\": {\"_id\": \"1\", \"_type\": \"type3\", \"_index\": \"indexb\"} },\n" +
+                "{ \"doc\": {\"field11\": \"value11\"} },\n" +
+
+                "{ \"delete\": {\"_id\": \"12\", \"_index\": \"index_without_typemappings\"} },\n" +
+
+                "{ \"update\": {\"_id\": \"13\", \"_index\": \"index_without_typemappings\"} },\n" +
+                "{ \"doc\": {\"field13\": \"value11\"} }\n" +
 
                 "    ]\n" +
                 "  }\n" +
@@ -82,19 +87,24 @@ public class TypeMappingsSanitizationTransformerBulkTest {
                 "  \"" + JsonKeysForHttpMessage.HEADERS_KEY + "\": {},\n" +
                 "  \"" + JsonKeysForHttpMessage.PAYLOAD_KEY + "\": {\n" +
                 "    \"" + JsonKeysForHttpMessage.INLINED_NDJSON_BODIES_DOCUMENT_KEY + "\": [\n" +
-                "{ \"index\": { \"_index\": \"indexA_1\", \"_id\": \"1\" } },\n" +
+                "{ \"index\": { \"_index\": \"indexa_1\", \"_id\": \"1\" } },\n" +
                 "{ \"field1\": \"value1\" },\n" +
 
                 "{ \"delete\": { \"_index\": \"time-January_1970-cpu\", \"_id\": \"8\" } },\n" +
 
-                "{ \"create\": { \"_index\": \"indexC\", \"_id\": \"14\" } },\n" +
+                "{ \"create\": { \"_index\": \"indexc\", \"_id\": \"14\" } },\n" +
                 "{ \"field14\": \"value14\" },\n" +
 
-                "{ \"update\": {\"_id\": \"1\", \"_index\": \"indexB\"} },\n" +
+                "{ \"update\": {\"_id\": \"1\", \"_index\": \"indexb\"} },\n" +
                 "{ \"doc\": {\"field2\": \"value2\"} },\n" +
 
-                "{ \"update\": {\"_id\": \"1\", \"_index\": \"indexB\"} },\n" +
-                "{ \"doc\": {\"field10\": \"value10\"} }\n" +
+                "{ \"update\": {\"_id\": \"1\", \"_index\": \"indexb\"} },\n" +
+                "{ \"doc\": {\"field10\": \"value10\"} },\n" +
+
+                "{ \"delete\": {\"_id\": \"12\", \"_index\": \"index_without_typemappings\"} },\n" +
+
+                "{ \"update\": {\"_id\": \"13\", \"_index\": \"index_without_typemappings\"} },\n" +
+                "{ \"doc\": {\"field13\": \"value11\"} }\n" +
 
                 "    ]\n" +
                 "  }\n" +

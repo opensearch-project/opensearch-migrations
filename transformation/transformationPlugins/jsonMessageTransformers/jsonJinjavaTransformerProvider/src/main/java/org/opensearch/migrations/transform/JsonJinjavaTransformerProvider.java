@@ -2,7 +2,11 @@ package org.opensearch.migrations.transform;
 
 import java.util.Collections;
 import java.util.Map;
+import java.util.Optional;
 
+import org.opensearch.migrations.transform.jinjava.JinjavaConfig;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
 import org.apache.commons.collections4.map.CompositeMap;
 
 
@@ -10,6 +14,9 @@ public class JsonJinjavaTransformerProvider implements IJsonTransformerProvider 
 
     public static final String REQUEST_KEY = "request";
     public static final String TEMPLATE_KEY = "template";
+    public static final String JINJAVA_CONFIG_KEY = "jinjavaConfig";
+
+    public final static ObjectMapper mapper = new ObjectMapper();
 
     @Override
     public IJsonTransformer createTransformer(Object jsonConfig) {
@@ -30,7 +37,9 @@ public class JsonJinjavaTransformerProvider implements IJsonTransformerProvider 
         try {
             var templateString = (String) config.get(TEMPLATE_KEY);
             return new JinjavaTransformer(templateString,
-                source -> new CompositeMap<>(Map.of(REQUEST_KEY, source), immutableBaseConfig));
+                source -> new CompositeMap<>(Map.of(REQUEST_KEY, source), immutableBaseConfig),
+                Optional.ofNullable(config.get(JINJAVA_CONFIG_KEY)).map(jinjavaConfig ->
+                    mapper.convertValue(jinjavaConfig, JinjavaConfig.class)).orElse(new JinjavaConfig()));
         } catch (ClassCastException e) {
             throw new IllegalArgumentException(getConfigUsageStr(), e);
         }

@@ -1,16 +1,25 @@
 package org.opensearch.migrations.transform;
 
 import java.util.Map;
+import java.util.stream.Collectors;
+
+import org.opensearch.migrations.testutils.CloseableLogSetup;
+import org.opensearch.migrations.testutils.JsonNormalizer;
+import org.opensearch.migrations.transform.jinjava.JinjavaConfig;
+import org.opensearch.migrations.transform.jinjava.LogFunction;
 
 import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.shaded.com.fasterxml.jackson.databind.ObjectMapper;
+
 
 @Slf4j
 class JinjavaTransformerTest {
 
-    private static final String TEMPLATE = "" +
+    private static final ObjectMapper OBJECT_MAPPER = new ObjectMapper();
+
+    private static final String INDEX_TYPE_MAPPING_SAMPLE_TEMPLATE = "" +
         "{# First, parse the URI to check if it matches the pattern we want to transform #}\n" +
         "{% set uri_parts = request.uri.split('/') %}\n" +
         "{% set is_type_request = uri_parts | length == 2 %}\n" +
@@ -50,26 +59,8 @@ class JinjavaTransformerTest {
         "  {{ request | tojson }}\n" +
         "{% endif %}";
 
-    private static JinjavaTransformer indexTypeMappingRewriter;
-    @BeforeAll
-    static void initialize() {
-        var indexMappings = Map.of(
-            "indexA", Map.of(
-                "type1", "indexA_1",
-                "type2", "indexA_2"),
-            "indexB", Map.of(
-                "type1", "indexB",
-                "type2", "indexB"),
-            "indexC", Map.of(
-                "type2", "indexC"));
-        indexTypeMappingRewriter = new JinjavaTransformer(TEMPLATE,
-            request -> Map.of(
-                "index_mappings", indexMappings,
-                "request", request));
-    }
-
     @Test
-    public void test() throws Exception {
+    public void testTypeMappingSample() throws Exception {
         var testString =
         "{\n" +
             "  \"verb\": \"PUT\",\n" +
@@ -80,9 +71,63 @@ class JinjavaTransformerTest {
             "    \"email\": \"user@example.com\"\n" +
             "  }\n" +
             "}";
-        var objMapper = new ObjectMapper();
-        var resultObj = indexTypeMappingRewriter.transformJson(objMapper.readValue(testString, Map.class));
-        var resultStr = objMapper.writeValueAsString(resultObj);
-        log.atInfo().setMessage("resultStr = {}").setMessage(resultStr).log();
+        var indexMappings = Map.of(
+            "indexA", Map.of(
+                "type1", "indexA_1",
+                "type2", "indexA_2"),
+            "indexB", Map.of(
+                "type1", "indexB",
+                "type2", "indexB"),
+            "indexC", Map.of(
+                "type2", "indexC"));
+        var indexTypeMappingRewriter = new JinjavaTransformer(INDEX_TYPE_MAPPING_SAMPLE_TEMPLATE,
+            request -> Map.of(
+                "index_mappings", indexMappings,
+                "request", request),
+            new JinjavaConfig(null,
+                Map.of("hello", "{%- macro hello() -%} hi {%- endmacro -%}\n")));
+
+        var resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, Map.class));
+        Assertions.assertEquals(JsonNormalizer.fromString(testString.replace("indexA/type2/", "indexA_2/_doc/")),
+            JsonNormalizer.fromObject(resultObj));
+    }
+
+    @Test
+    public void testCustomScript() throws Exception {
+        var indexTypeMappingRewriter = new JinjavaTransformer("" +
+            "{%- include \"hello\" -%}" +
+            "{{invoke_macro('hello')}}",
+            request -> Map.of("request", request),
+            new JinjavaConfig(null,
+                Map.of("hello", "{%- macro hello() -%}{\"hi\": \"world\"}{%- endmacro -%}\n")));
+
+        var resultObj = indexTypeMappingRewriter.transformJson(Map.of());
+        var resultStr = OBJECT_MAPPER.writeValueAsString(resultObj);
+        Assertions.assertEquals("{\"hi\":\"world\"}", resultStr);
+    }
+
+    @Test
+    public void debugLoggingWorks() throws Exception {
+        try (var closeableLogSetup = new CloseableLogSetup(LogFunction.class.getName())) {
+            final String FIRST_LOG_VAL = "LOGGED_VALUE=16";
+            final String SECOND_LOG_VAL = "next one";
+            final String THIRD_LOG_VAL = "LAST";
+
+            var indexTypeMappingRewriter = new JinjavaTransformer("" +
+                "{{ log_value_and_return('ERROR', log_value_and_return('ERROR', '" + FIRST_LOG_VAL + "', '" + SECOND_LOG_VAL + "'), '') }}" +
+                "{{ log_value('ERROR', '" + THIRD_LOG_VAL + "') }} " +
+                "{}",
+                request -> Map.of("request", request),
+                new JinjavaConfig(null,
+                    Map.of("hello", "{%- macro hello() -%}{\"hi\": \"world\"}{%- endmacro -%}\n")));
+
+            var resultObj = indexTypeMappingRewriter.transformJson(Map.of());
+            var resultStr = OBJECT_MAPPER.writeValueAsString(resultObj);
+            Assertions.assertEquals("{}", resultStr);
+
+            var logEvents = closeableLogSetup.getLogEvents();
+            Assertions.assertEquals(String.join("\n", new String[]{FIRST_LOG_VAL, SECOND_LOG_VAL, THIRD_LOG_VAL}),
+                logEvents.stream().collect(Collectors.joining("\n")));
+        }
     }
 }

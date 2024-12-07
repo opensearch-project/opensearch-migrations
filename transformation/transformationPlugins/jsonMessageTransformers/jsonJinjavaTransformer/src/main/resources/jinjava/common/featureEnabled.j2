@@ -3,19 +3,14 @@
       true
     {%- else -%}
         {%- set ns = namespace(value=features) -%}
-        {%- set debug = namespace(log=[]) -%}
         {%- for key in (path | split('.')) -%}
-            {%- set debug.log = debug.log + ["k:"+key] -%}
-            {%- set debug.log = debug.log + ["ismapping?:"+(ns.value is mapping)] -%}
+{#            {{- log_value('ERROR', "my logged key:"+key) -}}{{-  log_value('INFO', "ismapping:") -}}#}
             {%- if ns.value is mapping and key in ns.value -%}
                 {%- set ns.value = ns.value[key] -%}
             {%- else -%}
                 {%- set ns.value = None -%}
             {%- endif -%}
         {%- endfor -%}
-        {%- set debug.log = debug.log + ["val=" + (ns.value)] -%}
-        {%- set debug.log = debug.log + ["is map?=" + (ns.value is map)] -%}
-        {%- set debug.log = debug.log + ["enabled val=" + (ns.value.enabled)] -%}
         {%- if ns.value is boolean and ns.value -%}
             true
         {%- elif ns.value is mapping and ns.value.get('enabled') is boolean -%}
