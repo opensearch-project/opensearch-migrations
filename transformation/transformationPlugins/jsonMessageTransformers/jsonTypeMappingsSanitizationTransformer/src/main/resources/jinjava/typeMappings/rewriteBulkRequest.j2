@@ -19,9 +19,19 @@
 {%- macro get_index() -%}index{% endmacro %}
 {%- macro get_update() -%}update{% endmacro %}
 
+{%- macro rewrite_command_parameters(command, parameters, target_index) -%}
+    {%- if target_index -%}
+        "{{ invoke_macro("get_"+command) }}": {{ retarget_command_parameters(parameters, target_index) }}
+    {%- endif -%}
+{%- endmacro -%}
+
+{%- macro rewrite_index_parameters(parameters, target_index) -%}
+    {{ rewrite_command_parameters('index', parameters, target_index) }}
+{%- endmacro -%}
+
 {%- macro rewrite_command(command, parameters, target_index, doc) -%}
     {%- if target_index -%}
-        { "{{ invoke_macro("get_"+command) }}": {{ retarget_command_parameters(parameters, target_index) }} },
+        { {{ rewrite_command_parameters(command, parameters, target_index) }} },
         {{ doc | tojson }}
     {%- endif -%}
 {%- endmacro -%}

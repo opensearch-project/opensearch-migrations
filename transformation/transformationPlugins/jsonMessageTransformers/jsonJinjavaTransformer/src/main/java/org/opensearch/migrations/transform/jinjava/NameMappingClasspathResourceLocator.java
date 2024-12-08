@@ -74,7 +74,7 @@ public class NameMappingClasspathResourceLocator extends ClasspathResourceLocato
         try {
             return resourceCache.get(new ResourceCacheKey(fullName, encoding));
         } catch (ExecutionException e) {
-            throw new IOException("Failed to get resource content from cache", e);
+            throw new IOException("Failed to get resource content named `" + fullName + "`from cache", e);
         }
     }
 }

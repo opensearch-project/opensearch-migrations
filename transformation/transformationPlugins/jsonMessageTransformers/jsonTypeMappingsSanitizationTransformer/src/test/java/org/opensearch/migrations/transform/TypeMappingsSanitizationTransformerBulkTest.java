@@ -36,7 +36,7 @@ public class TypeMappingsSanitizationTransformerBulkTest {
     }
 
     @Test
-    public void testBulk() throws Exception {
+    public void testBulkRequest() throws Exception {
         var testString =
             "{\n" +
                 "  \"" + JsonKeysForHttpMessage.METHOD_KEY + "\": \"PUT\",\n" +
