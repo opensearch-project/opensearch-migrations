@@ -8,6 +8,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Optional;
+import java.util.function.Predicate;
 
 import org.opensearch.migrations.replay.datahandlers.JsonAccumulator;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
@@ -24,6 +25,7 @@ import io.netty.handler.codec.http.LastHttpContent;
 import io.netty.util.ReferenceCountUtil;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.slf4j.event.Level;
 
 /**
  * This accumulates HttpContent messages through a JsonAccumulator and eventually fires off a
@@ -93,7 +95,10 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
                     }
                 }
             } catch (JacksonException e) {
-                log.atInfo().setCause(e).setMessage("Error parsing json body.  " +
+                log.atLevel(hasRequestContentTypeMatching(capturedHttpJsonMessage,
+                        // a JacksonException for non-json data doesn't need to be surfaced to a user
+                        v -> v.startsWith("application/json")) ?  Level.INFO : Level.TRACE)
+                    .setCause(e).setMessage("Error parsing json body.  " +
                     "Will pass all payload bytes directly as a ByteBuf within the payload map").log();
                 jsonWasInvalid = true;
                 parsedJsonObjects.clear();
@@ -123,7 +128,9 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
 
                     var leftoverBody = accumulatedBody.slice(jsonBodyByteLength,
                         accumulatedBody.readableBytes() - jsonBodyByteLength);
-                    if (jsonBodyByteLength == 0 && isRequestContentTypeNotText(capturedHttpJsonMessage)) {
+                    if (jsonBodyByteLength == 0 &&
+                        hasRequestContentTypeMatching(capturedHttpJsonMessage, v -> !v.startsWith("text/")))
+                    {
                         context.onPayloadSetBinary();
                         capturedHttpJsonMessage.payload()
                             .put(JsonKeysForHttpMessage.INLINED_BINARY_BODY_DOCUMENT_KEY,
@@ -157,12 +164,13 @@ public class NettyJsonBodyAccumulateHandler extends ChannelInboundHandlerAdapter
         }
     }
 
-    private boolean isRequestContentTypeNotText(HttpJsonMessageWithFaultingPayload message) {
+    private boolean hasRequestContentTypeMatching(HttpJsonMessageWithFaultingPayload message,
+                                                  Predicate<String> contentTypeFilter) {
         // ContentType not text if specified and has a value with / and that value does not start with text/
         return Optional.ofNullable(capturedHttpJsonMessage.headers().insensitiveGet(HttpHeaderNames.CONTENT_TYPE.toString()))
             .map(s -> s.stream()
                 .filter(v -> v.contains("/"))
-                .filter(v -> !v.startsWith("text/"))
+                .filter(contentTypeFilter)
                 .count() > 1
             )
             .orElse(false);
