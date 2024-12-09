@@ -127,7 +127,7 @@ subprojects {
         systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
         systemProperty 'log4j2.contextSelector', 'org.apache.logging.log4j.core.selector.BasicContextSelector'
         // Verify assertions in tests
-        jvmArgs '-ea'
+        jvmArgs = ['-ea', '-XX:+HeapDumpOnOutOfMemoryError']
         jacoco.enabled = true
     }
 
