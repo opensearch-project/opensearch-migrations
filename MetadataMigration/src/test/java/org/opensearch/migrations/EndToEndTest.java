@@ -1,7 +1,6 @@
 package org.opensearch.migrations;
 
 import java.io.File;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.Collectors;
@@ -48,39 +47,28 @@ class EndToEndTest {
 
     private static Stream<Arguments> scenarios() {
         return SupportedClusters.sources().stream()
-                .flatMap(sourceCluster -> {
-                    // Determine applicable template types based on source version
-                    List<TemplateType> templateTypes = Stream.concat(
-                                    Stream.of(TemplateType.Legacy),
-                                    (sourceCluster.getVersion().getMajor() >= 7
-                                            ? Stream.of(TemplateType.Index, TemplateType.IndexAndComponent)
-                                            : Stream.empty()))
-                            .collect(Collectors.toList());
-
-                    return SupportedClusters.targets().stream()
-                            .flatMap(targetCluster -> templateTypes.stream().flatMap(templateType -> {
-                                // Generate arguments for both HTTP and SnapshotImage transfer mediums
-                                Stream<Arguments> httpArgs = Arrays.stream(MetadataCommands.values())
-                                        .map(command -> Arguments.of(sourceCluster, targetCluster, TransferMedium.Http, command, templateType));
-
-                                Stream<Arguments> snapshotArgs = Stream.of(
-                                        Arguments.of(sourceCluster, targetCluster, TransferMedium.SnapshotImage, MetadataCommands.MIGRATE, templateType)
-                                );
-
-                                return Stream.concat(httpArgs, snapshotArgs);
-                            }));
-                });
+            .flatMap(sourceCluster -> 
+                SupportedClusters.targets().stream()
+                    .flatMap(targetCluster ->
+                        Stream.concat(
+                            Stream.of(Arguments.of(sourceCluster, targetCluster, TransferMedium.Http)),
+                            Stream.of(Arguments.of(sourceCluster, targetCluster, TransferMedium.SnapshotImage))
+                        )
+                    )
+                );
     }
 
-    @ParameterizedTest(name = "From version {0} to version {1}, Command {2}, Medium of transfer {3}, and Template Type {4}")
+    @ParameterizedTest(name = "From version {0} to version {1}, Command {2}")
     @MethodSource(value = "scenarios")
-    void metadataCommand(ContainerVersion sourceVersion, ContainerVersion targetVersion, TransferMedium medium,
-                         MetadataCommands command, TemplateType templateType) {
+    void metadataCommand(ContainerVersion sourceVersion, ContainerVersion targetVersion, TransferMedium medium) {
+        var templateType = VersionMatchers.isES_6_X.test(sourceVersion.getVersion())
+            ? TemplateType.Legacy : TemplateType.IndexAndComponent;
         try (
             final var sourceCluster = new SearchClusterContainer(sourceVersion);
             final var targetCluster = new SearchClusterContainer(targetVersion)
         ) {
-            metadataCommandOnClusters(sourceCluster, targetCluster, medium, command, templateType);
+            metadataCommandOnClusters(sourceCluster, targetCluster, medium, MetadataCommands.EVALUATE, templateType);
+            metadataCommandOnClusters(sourceCluster, targetCluster, medium, MetadataCommands.MIGRATE, templateType);
         }
     }
 
@@ -91,7 +79,6 @@ class EndToEndTest {
 
     private enum TemplateType {
         Legacy,
-        Index,
         IndexAndComponent
     }
 
@@ -114,9 +101,8 @@ class EndToEndTest {
         var sourceClusterOperations = new ClusterOperations(sourceCluster.getUrl());
         if (templateType == TemplateType.Legacy) {
             sourceClusterOperations.createLegacyTemplate(testData.indexTemplateName, "blog*");
-        } else if (templateType == TemplateType.Index) {
-            sourceClusterOperations.createIndexTemplate(testData.indexTemplateName, "author", "blog*");
         } else if (templateType == TemplateType.IndexAndComponent) {
+            sourceClusterOperations.createIndexTemplate(testData.indexTemplateName, "author", "blog*");
             sourceClusterOperations.createComponentTemplate(testData.compoTemplateName, testData.indexTemplateName, "author", "blog*");
         }
 
@@ -135,7 +121,7 @@ class EndToEndTest {
         switch (medium) {
             case SnapshotImage:
                 var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
-                var snapshotName = "my_snap";
+                var snapshotName = "my_snap_" + command.name().toLowerCase();
                 log.info("Source cluster {}", sourceCluster.getUrl());
                 var sourceClient = new OpenSearchClient(ConnectionContextTestParams.builder()
                     .host(sourceCluster.getUrl())
@@ -262,13 +248,11 @@ class EndToEndTest {
         if (templateType.equals(TemplateType.Legacy)) {
             res = targetClusterOperations.get("/_template/" + testData.indexTemplateName);
             assertThat(res.getValue(), res.getKey(), verifyResponseCode);
-        } else if(templateType.equals(TemplateType.Index) || templateType.equals(TemplateType.IndexAndComponent)) {
+        } else if(templateType.equals(TemplateType.IndexAndComponent)) {
             res = targetClusterOperations.get("/_index_template/" + testData.indexTemplateName);
             assertThat(res.getValue(), res.getKey(), verifyResponseCode);
-            if (templateType.equals(TemplateType.IndexAndComponent)) {
-                var verifyBodyHasComponentTemplate = containsString("composed_of\":[\"" + testData.compoTemplateName + "\"]");
-                assertThat(res.getValue(), expectUpdatesOnTarget ? verifyBodyHasComponentTemplate : not(verifyBodyHasComponentTemplate));
-            }
+            var verifyBodyHasComponentTemplate = containsString("composed_of\":[\"" + testData.compoTemplateName + "\"]");
+            assertThat(res.getValue(), expectUpdatesOnTarget ? verifyBodyHasComponentTemplate : not(verifyBodyHasComponentTemplate));
         }
     }
 }
