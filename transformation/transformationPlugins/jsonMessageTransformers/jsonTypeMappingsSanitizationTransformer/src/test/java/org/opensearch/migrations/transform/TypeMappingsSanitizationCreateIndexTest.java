@@ -58,6 +58,7 @@ public class TypeMappingsSanitizationCreateIndexTest {
         var expectedString = "{\n" +
             "  \"URI\" : \"/a_user\",\n" +
             "  \"method\" : \"PUT\",\n" +
+            "  \"protocol\" : \"HTTP/1.1\",\n" +
             "  \"payload\" : {\n" +
             "    \"inlinedJsonBody\" : {\n" +
             "      \"mappings\" : {\n" +

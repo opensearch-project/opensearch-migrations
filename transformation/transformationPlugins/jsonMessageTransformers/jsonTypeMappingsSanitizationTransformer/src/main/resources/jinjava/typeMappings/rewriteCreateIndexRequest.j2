@@ -5,7 +5,7 @@
     {%- set source_input_types = input_map.index_mappings[source_index_name] -%}
     {%- set source_type_name = source_input_types.keys() | first() -%}
     {
-        "preserve": ["protocol", "headers"],
+        "preserveWhenMissing": "*",
         "method": "{{ input_map.request.method }}",
         "URI": "/{{ target_index_name }}",
         "payload": {

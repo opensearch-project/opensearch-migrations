@@ -9,6 +9,7 @@ public class TestRequestBuilder {
         var uri = formatCreateIndexUri(indexName, includeTypeName);
         return "{\n" +
             "  \"" + JsonKeysForHttpMessage.METHOD_KEY + "\": \"PUT\",\n" +
+            "  \"" + JsonKeysForHttpMessage.PROTOCOL_KEY + "\": \"HTTP/1.1\",\n" +
             "  \"" + JsonKeysForHttpMessage.URI_KEY + "\": \"" + uri + "\",\n" +
             "  \"" + JsonKeysForHttpMessage.PAYLOAD_KEY + "\": {\n" +
             "    \"" + JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY + "\": " +

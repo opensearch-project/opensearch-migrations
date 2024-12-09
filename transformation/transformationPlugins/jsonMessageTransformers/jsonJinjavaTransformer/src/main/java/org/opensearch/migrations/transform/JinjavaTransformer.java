@@ -81,29 +81,6 @@ public class JinjavaTransformer implements IJsonTransformer {
         var resultStr = jinjava.render(templateStr, createContextWithSourceFunction.apply(incomingJson));
         log.atInfo().setMessage("output from jinjava... {}").addArgument(resultStr).log();
         var parsedObj = (Map<String,Object>) objectMapper.readValue(resultStr, LinkedHashMap.class);
-        return doFinalSubstitutions(incomingJson, parsedObj);
-    }
-
-    private Map<String, Object> doFinalSubstitutions(Map<String, Object> incomingJson, Map<String, Object> parsedObj) {
-        return Optional.ofNullable(parsedObj.get(JsonKeysForHttpMessage.PRESERVE_KEY)).filter(v->v.equals("*"))
-            .map(star -> incomingJson)
-            .orElseGet(() -> {
-                findAndReplacePreserves(incomingJson, parsedObj);
-                findAndReplacePreserves((Map<String, Object>) incomingJson.get(JsonKeysForHttpMessage.PAYLOAD_KEY),
-                    (Map<String, Object>) parsedObj.get(JsonKeysForHttpMessage.PAYLOAD_KEY));
-                return parsedObj;
-            });
-    }
-
-    private void findAndReplacePreserves(Map<String, Object> incomingRoot, Map<String, Object> parsedRoot) {
-        if (parsedRoot == null || incomingRoot == null) {
-            return;
-        }
-        var preserveKeys = (List<String>) parsedRoot.get(JsonKeysForHttpMessage.PRESERVE_KEY);
-        if (preserveKeys != null) {
-            preserveKeys.forEach(preservedKey ->
-                Optional.ofNullable(incomingRoot.get(preservedKey)).ifPresent(v->parsedRoot.put(preservedKey, v)));
-            parsedRoot.remove(JsonKeysForHttpMessage.PRESERVE_KEY);
-        }
+        return PreservesProcessor.doFinalSubstitutions(incomingJson, parsedObj);
     }
 }
