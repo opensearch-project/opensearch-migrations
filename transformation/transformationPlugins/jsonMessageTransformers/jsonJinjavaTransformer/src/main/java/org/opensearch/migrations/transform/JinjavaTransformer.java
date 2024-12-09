@@ -79,7 +79,7 @@ public class JinjavaTransformer implements IJsonTransformer {
     @Override
     public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
         var resultStr = jinjava.render(templateStr, createContextWithSourceFunction.apply(incomingJson));
-        log.atInfo().setMessage("output from jinjava... {}").addArgument(resultStr).log();
+        log.atDebug().setMessage("output from jinjava... {}").addArgument(resultStr).log();
         var parsedObj = (Map<String,Object>) objectMapper.readValue(resultStr, LinkedHashMap.class);
         return PreservesProcessor.doFinalSubstitutions(incomingJson, parsedObj);
     }

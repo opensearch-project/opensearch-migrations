@@ -36,11 +36,11 @@ public class TypeMappingSanitizationTransformerProvider implements IJsonTransfor
             return new TypeMappingsSanitizationTransformer(
                 (Map<String, Map<String, String>>) config.get(STATIC_MAPPINGS),
                 (List<List<String>>) config.get(REGEX_MAPPINGS),
-                Optional.ofNullable(config.get(SOURCE_PROPERTIES_KEY)).map(jinjavaConfig ->
-                    mapper.convertValue(jinjavaConfig, SourceProperties.class)).orElse(null),
+                Optional.ofNullable(config.get(SOURCE_PROPERTIES_KEY)).map(m ->
+                    mapper.convertValue(m, SourceProperties.class)).orElse(null),
                 (Map<String, Object>) config.get(FEATURE_FLAGS),
-                Optional.ofNullable(config.get(JINJAVA_CONFIG_KEY)).map(jinjavaConfig ->
-                    mapper.convertValue(jinjavaConfig, JinjavaConfig.class)).orElse(null));
+                Optional.ofNullable(config.get(JINJAVA_CONFIG_KEY)).map(m ->
+                    mapper.convertValue(m, JinjavaConfig.class)).orElse(null));
         } catch (ClassCastException e) {
             throw new IllegalArgumentException(getConfigUsageStr(), e);
         }

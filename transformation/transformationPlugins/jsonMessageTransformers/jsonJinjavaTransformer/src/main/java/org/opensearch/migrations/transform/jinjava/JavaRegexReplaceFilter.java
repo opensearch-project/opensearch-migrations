@@ -81,7 +81,7 @@ public class JavaRegexReplaceFilter implements Filter {
                             c.get(JinjavaTransformer.REGEX_REPLACEMENT_CONVERSION_PATTERNS)))
                         .orElse(DEFAULT_REGEX_REPLACE_FILTER)));
             var rval = matcher.replaceAll(rewritten);
-            log.atError().setMessage("replaced value {} with {}").addArgument(input).addArgument(rval).log();
+            log.atTrace().setMessage("replaced value {} with {}").addArgument(input).addArgument(rval).log();
             return rval;
         } catch (Exception e) {
             throw new RegexReplaceException(e, input, pattern, replacement, rewritten);
