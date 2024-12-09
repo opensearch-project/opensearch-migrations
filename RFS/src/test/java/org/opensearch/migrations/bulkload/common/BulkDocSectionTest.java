@@ -34,7 +34,7 @@ class BulkDocSectionTest {
     static final Map<String, Object> SOURCE_DOC_1 = Map.of("field", "value");
 
     static final BulkDocSection BULK_DOC_SECTION_1 = new BulkDocSection("test-id", "test-index", "_doc",
-            "{\"field\":\"value\"}");
+            "{\"field\":\"value\"}", null);
 
     static final BulkDocSection BULK_DOC_SECTION_2 = new BulkDocSection("test-id", "test-index", "_doc",
             "{\"field\":\"value\"}", "routing1");
@@ -71,8 +71,8 @@ class BulkDocSectionTest {
 
     @Test
     void testConvertToBulkRequestBody() {
-        BulkDocSection section1 = new BulkDocSection("id1", "index1", "_doc", "{\"field\":\"value1\"}");
-        BulkDocSection section2 = new BulkDocSection("id2", "index2", "_doc", "{\"field\":\"value2\"}");
+        BulkDocSection section1 = new BulkDocSection("id1", "index1", "_doc", "{\"field\":\"value1\"}", null);
+        BulkDocSection section2 = new BulkDocSection("id2", "index2", "_doc", "{\"field\":\"value2\"}", null);
         BulkDocSection section3 = new BulkDocSection("id3", "index3", "_doc", "{\"field\":\"value3\"}", "routing1");
 
         Collection<BulkDocSection> bulkSections = Arrays.asList(section1, section2, section3);
@@ -100,7 +100,7 @@ class BulkDocSectionTest {
         BulkDocSection bulkDocSection = BulkDocSection.fromMap(indexMap);
 
         assertNotNull(bulkDocSection);
-        assertEquals("test-id", bulkDocSection.getDocId());
+        assertEquals("test-id", bulkDocSection.getId());
         assertEquals(metadata, bulkDocSection.toMap().get("index"));
         assertEquals(sourceDoc, bulkDocSection.toMap().get("source"));
     }
@@ -134,7 +134,7 @@ class BulkDocSectionTest {
     void testDeserializationException() {
         // Create a BulkDocSection with invalid data to cause deserialization failure
         Exception exception = assertThrows(BulkDocSection.DeserializationException.class, () -> {
-            new BulkDocSection(null, null, null, "{\"field_value");
+            new BulkDocSection(null, null, null, "{\"field_value", null);
         });
 
         assertTrue(exception.getMessage().contains("Failed to parse source doc"));
@@ -163,7 +163,7 @@ class BulkDocSectionTest {
         String indexName = "test-large-index";
         String type = "_doc";
 
-        BulkDocSection bulkDocSection = new BulkDocSection(id, indexName, type, docBody);
+        BulkDocSection bulkDocSection = new BulkDocSection(id, indexName, type, docBody, null);
 
         // Test asString
         String asString = bulkDocSection.asBulkIndexString();
@@ -186,7 +186,7 @@ class BulkDocSectionTest {
         assertNotNull(fromMapSection);
         @SuppressWarnings("unchecked")
         Map<String, Object> indexCommand = (Map<String, Object>) fromMapSection.toMap().get("index");
-        assertEquals(id, fromMapSection.getDocId());
+        assertEquals(id, fromMapSection.getId());
         assertEquals(indexName, indexCommand.get("_index"));
         assertEquals(type, indexCommand.get("_type"));
         assertEquals(id, indexCommand.get("_id"));

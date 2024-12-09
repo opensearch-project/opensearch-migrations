@@ -1,9 +1,10 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
+import java.util.Comparator;
 import java.util.List;
-import java.util.concurrent.Callable;
 import java.util.function.Function;
 
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
@@ -15,13 +16,17 @@ import org.apache.lucene.document.Document;
 import org.apache.lucene.index.DirectoryReader;
 import org.apache.lucene.index.IndexCommit;
 import org.apache.lucene.index.IndexReader;
+import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
+import org.apache.lucene.index.SegmentCommitInfo;
+import org.apache.lucene.index.SegmentReader;
 import org.apache.lucene.index.SoftDeletesDirectoryReaderWrapper;
 import org.apache.lucene.store.FSDirectory;
 import org.apache.lucene.util.BytesRef;
 import org.reactivestreams.Publisher;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.Mono;
+import reactor.core.scheduler.Scheduler;
 import reactor.core.scheduler.Schedulers;
 
 @RequiredArgsConstructor
@@ -88,13 +93,13 @@ public class LuceneDocumentsReader {
 
      */
     public Flux<RfsLuceneDocument> readDocuments() {
-        return readDocuments(0, 0);
+        return readDocuments(0);
     }
 
-    public Flux<RfsLuceneDocument> readDocuments(int startSegmentIndex, int startDoc) {
+    public Flux<RfsLuceneDocument> readDocuments(int startDoc) {
         return Flux.using(
             () -> wrapReader(getReader(), softDeletesPossible, softDeletesField),
-            reader -> readDocsByLeavesFromStartingPosition(reader, startSegmentIndex, startDoc),
+            reader -> readDocsByLeavesFromStartingPosition(reader, startDoc),
             reader -> {
                 try {
                     reader.close();
@@ -105,24 +110,109 @@ public class LuceneDocumentsReader {
         });
     }
 
-    protected DirectoryReader getReader() throws IOException {// Get the list of commits and pick the latest one
+    /**
+     * We need to ensure a stable ordering of segments so we can start reading from a specific segment and document id.
+     * To do this, we sort the segments by their ID or name.
+     */
+    static class SegmentNameSorter implements Comparator<LeafReader> {
+        @Override
+        public int compare(LeafReader leafReader1, LeafReader leafReader2) {
+            var compareResponse = compareIfSegmentReader(leafReader1, leafReader2);
+            if (compareResponse == 0) {
+                Function<LeafReader, String> getLeafReaderDebugInfo = (leafReader) -> {
+                    var leafDetails = new StringBuilder();
+                    leafDetails.append("Class: ").append(leafReader.getClass().getName()).append("\n");
+                    leafDetails.append("Context: ").append(leafReader.getContext()).append("\n");
+                    if (leafReader instanceof SegmentReader) {
+                        SegmentCommitInfo segmentInfo = ((SegmentReader) leafReader).getSegmentInfo();
+                        leafDetails.append("SegmentInfo: ").append(segmentInfo).append("\n");
+                        leafDetails.append("SegmentInfoId: ").append(new String(segmentInfo.getId(), StandardCharsets.UTF_8)).append("\n");
+                    }
+                    return leafDetails.toString();
+                };
+                log.atError().setMessage("Unexpected equality during leafReader sorting, expected sort to yield no equality " +
+                        "to ensure consistent segment ordering. This may cause missing documents if both segments" +
+                        "contains docs. LeafReader1DebugInfo: {} \nLeafReader2DebugInfo: {}")
+                        .addArgument(getLeafReaderDebugInfo.apply(leafReader1))
+                        .addArgument(getLeafReaderDebugInfo.apply(leafReader2))
+                        .log();
+                assert false: "Expected unique segmentName sorting for stable sorting.";
+            }
+            return compareResponse;
+        }
+
+        private int compareIfSegmentReader(LeafReader leafReader1, LeafReader leafReader2) {
+            // If both LeafReaders are SegmentReaders, sort on segment info name.
+            // Name is the "Unique segment name in the directory" which is always present on a SegmentInfo
+            if (leafReader1 instanceof SegmentReader && leafReader2 instanceof SegmentReader) {
+                SegmentCommitInfo segmentInfo1 = ((SegmentReader) leafReader1).getSegmentInfo();
+                SegmentCommitInfo segmentInfo2 = ((SegmentReader) leafReader2).getSegmentInfo();
+
+                var segmentName1 = segmentInfo1.info.name;
+                var segmentName2 = segmentInfo2.info.name;
+
+                return segmentName1.compareTo(segmentName2);
+            }
+            // Otherwise, keep initial sort
+            return 0;
+        }
+    }
+
+    protected DirectoryReader getReader() throws IOException {
+        // Get the list of commits and pick the latest one
         try (FSDirectory directory = FSDirectory.open(indexDirectoryPath)) {
             List  <IndexCommit> commits = DirectoryReader.listCommits(directory);
             IndexCommit latestCommit = commits.get(commits.size() - 1);
-
             return DirectoryReader.open(
                 latestCommit,
                 6, // Minimum supported major version - Elastic 5/Lucene 6
-                null // No specific sorting required
+                new SegmentNameSorter()
             );
         }
     }
+
+    /**
+     * Finds the starting segment using a binary search where the maximum document ID in the segment
+     * is greater than or equal to the specified start document ID. The method returns a Flux
+     * containing the list of segments starting from the identified segment.
+     *
+     * @param leaves    the list of LeafReaderContext representing segments
+     * @param startDocId the document ID from which to start processing
+     * @return a Flux containing the segments starting from the identified segment
+     */
+    public static Flux<LeafReaderContext> getSegmentsFromStartingSegment(List<LeafReaderContext> leaves, int startDocId) {
+        if (startDocId == 0) {
+            log.info("Skipping segment binary search since startDocId is 0.");
+            return Flux.fromIterable(leaves);
+        }
+
+        int left = 0;
+        int right = leaves.size() - 1;
+
+        // Perform binary search to find the starting segment
+        while (left <= right) {
+            int mid = left + (right - left) / 2;
+            LeafReaderContext midSegment = leaves.get(mid);
+
+            int maxDocIdInSegment = midSegment.docBaseInParent + midSegment.reader().maxDoc() - 1;
+
+            if (maxDocIdInSegment < startDocId) {
+                left = mid + 1;
+            } else {
+                right = mid - 1;
+            }
+        }
+
+        // `left` now points to the first segment where maxDocIdInSegment >= startDocId
+        return Flux.fromIterable(leaves.subList(left, leaves.size()));
+    }
+
 
     /* Start reading docs from a specific segment and document id.
     If the startSegmentIndex is 0, it will start from the first segment.
     If the startDocId is 0, it will start from the first document in the segment.
      */
-    Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(DirectoryReader reader, int startSegmentIndex, int startDocId) {
+    Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(DirectoryReader reader, int startDocId) {
         var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
             .addArgument(reader::maxDoc)
@@ -131,29 +221,51 @@ public class LuceneDocumentsReader {
 
         // Create shared scheduler for i/o bound document reading
         var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
-
-        return Flux.fromIterable(reader.leaves())
-            .skip(startSegmentIndex)
-            .flatMap(ctx -> getReadDocCallablesFromSegments(ctx,
-                    // Only use startDocId for the first segment we process
-                    ctx.ord == startSegmentIndex ? startDocId : 0))
-            .flatMap(c -> Mono.fromCallable(c)
-                            .subscribeOn(sharedSegmentReaderScheduler), // Scheduler to read documents on
-                    maxDocumentsToReadAtOnce) // Don't need to worry about prefetch before this step as documents aren't realized
-            .doOnTerminate(sharedSegmentReaderScheduler::dispose);
+        return getSegmentsFromStartingSegment(reader.leaves(), startDocId)
+            .concatMapDelayError(c -> readDocsFromSegment(c,
+                    startDocId,
+                    sharedSegmentReaderScheduler,
+                    maxDocumentsToReadAtOnce)
+            )
+            .subscribeOn(sharedSegmentReaderScheduler) // Scheduler to read documents on
+            .doFinally(s -> sharedSegmentReaderScheduler.dispose());
     }
 
-    Publisher<Callable<RfsLuceneDocument>> getReadDocCallablesFromSegments(LeafReaderContext leafReaderContext, int startDocId) {
+    Flux<RfsLuceneDocument> readDocsFromSegment(LeafReaderContext leafReaderContext, int docStartingId, Scheduler scheduler,
+                                                int concurrency) {
         var segmentReader = leafReaderContext.reader();
         var liveDocs = segmentReader.getLiveDocs();
 
-        return Flux.range(startDocId, segmentReader.maxDoc() - startDocId)
-            .subscribeOn(Schedulers.parallel())
-            .map(docIdx -> () -> ((liveDocs == null || liveDocs.get(docIdx)) ? // Filter for live docs
-                    getDocument(segmentReader, docIdx, true) : // Get document, returns null to skip malformed docs
-                    null));
-    }
+        int segmentDocBase = leafReaderContext.docBaseInParent;
 
+        // Start at
+        int startDocIdInSegment = Math.max(docStartingId - segmentDocBase, 0);
+        int numDocsToProcessInSegment = segmentReader.maxDoc() - startDocIdInSegment;
+
+        log.atInfo().setMessage("For segment: {}, migrating from doc: {}. Will process {} docs in segment.")
+                .addArgument(leafReaderContext)
+                .addArgument(startDocIdInSegment)
+                .addArgument(numDocsToProcessInSegment)
+                .log();
+
+        return Flux.range(startDocIdInSegment, numDocsToProcessInSegment)
+                .flatMapSequentialDelayError(docIdx -> Mono.defer(() -> {
+                    try {
+                        if (liveDocs == null || liveDocs.get(docIdx)) {
+                            // Get document, returns null to skip malformed docs
+                            RfsLuceneDocument document = getDocument(segmentReader, docIdx, true, segmentDocBase);
+                            return Mono.justOrEmpty(document); // Emit only non-null documents
+                        } else {
+                            return Mono.empty(); // Skip non-live documents
+                        }
+                    } catch (Exception e) {
+                        // Handle individual document read failures gracefully
+                        return Mono.error(new RuntimeException("Error reading document at index: " + docIdx, e));
+                    }
+                }).subscribeOn(scheduler),
+                        concurrency, 1)
+                .subscribeOn(scheduler);
+    }
     protected DirectoryReader wrapReader(DirectoryReader reader, boolean softDeletesEnabled, String softDeletesField) throws IOException {
         if (softDeletesEnabled) {
             return new SoftDeletesDirectoryReaderWrapper(reader, softDeletesField);
@@ -161,17 +273,17 @@ public class LuceneDocumentsReader {
         return reader;
     }
 
-    protected RfsLuceneDocument getDocument(IndexReader reader, int docId, boolean isLive) {
+    protected RfsLuceneDocument getDocument(IndexReader reader, int luceneDocId, boolean isLive, int segmentDocBase) {
         Document document;
         try {
-            document = reader.document(docId);
+            document = reader.document(luceneDocId);
         } catch (IOException e) {
             log.atError().setCause(e).setMessage("Failed to read document at Lucene index location {}")
-                .addArgument(docId).log();
+                .addArgument(luceneDocId).log();
             return null;
         }
 
-        String id = null;
+        String openSearchDocId = null;
         String type = null;
         BytesRef sourceBytes = null;
         String routing = null;
@@ -183,14 +295,14 @@ public class LuceneDocumentsReader {
                     case "_id": {
                         // ES 6+
                         var idBytes = field.binaryValue();
-                        id = Uid.decodeId(idBytes.bytes);
+                        openSearchDocId = Uid.decodeId(idBytes.bytes);
                         break;
                     }
                     case "_uid": {
                         // ES <= 6
                         var combinedTypeId = field.stringValue().split("#", 2);
                         type = combinedTypeId[0];
-                        id = combinedTypeId[1];
+                        openSearchDocId = combinedTypeId[1];
                         break;
                     }
                     case "_source": {
@@ -206,19 +318,19 @@ public class LuceneDocumentsReader {
                         break;
                 }
             }
-            if (id == null) {
+            if (openSearchDocId == null) {
                 log.atError().setMessage("Document with index {} does not have an id. Skipping")
-                    .addArgument(docId).log();
+                    .addArgument(luceneDocId).log();
                 return null;  // Skip documents with missing id
             }
 
             if (sourceBytes == null || sourceBytes.bytes.length == 0) {
                 log.atWarn().setMessage("Document {} doesn't have the _source field enabled")
-                    .addArgument(id).log();
+                    .addArgument(openSearchDocId).log();
                 return null;  // Skip these
             }
 
-            log.atDebug().setMessage("Reading document {}").addArgument(id).log();
+            log.atDebug().setMessage("Reading document {}").addArgument(openSearchDocId).log();
         } catch (RuntimeException e) {
             StringBuilder errorMessage = new StringBuilder();
             errorMessage.append("Unable to parse Document id from Document.  The Document's Fields: ");
@@ -228,11 +340,11 @@ public class LuceneDocumentsReader {
         }
 
         if (!isLive) {
-            log.atDebug().setMessage("Document {} is not live").addArgument(id).log();
+            log.atDebug().setMessage("Document {} is not live").addArgument(openSearchDocId).log();
             return null; // Skip these
         }
 
-        log.atDebug().setMessage("Document {} read successfully").addArgument(id).log();
-        return new RfsLuceneDocument(id, type, sourceBytes.utf8ToString(), routing);
+        log.atDebug().setMessage("Document {} read successfully").addArgument(openSearchDocId).log();
+        return new RfsLuceneDocument(segmentDocBase + luceneDocId, openSearchDocId, type, sourceBytes.utf8ToString(), routing);
     }
 }
