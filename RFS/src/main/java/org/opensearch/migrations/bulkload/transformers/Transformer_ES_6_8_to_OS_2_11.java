@@ -38,8 +38,16 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
             templatesRoot.fields().forEachRemaining(template -> {
                 var templateCopy = (ObjectNode) template.getValue().deepCopy();
                 var indexTemplate = (Index) () -> templateCopy;
-                transformIndex(indexTemplate, IndexType.TEMPLATE);
-                templates.set(template.getKey(), indexTemplate.getRawJson());
+                try {
+                    transformIndex(indexTemplate, IndexType.TEMPLATE);
+                    templates.set(template.getKey(), indexTemplate.getRawJson());
+                }  catch (Exception e) {
+                    log.atError()
+                        .setMessage("Unable to transform object: {}")
+                        .addArgument(indexTemplate::getRawJson)
+                        .setCause(e)
+                        .log();
+                }
             });
             newRoot.set("templates", templates);
         }

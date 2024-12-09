@@ -121,6 +121,21 @@ public class IndexMappingTypeRemovalTest {
     }
 
     @Test
+    void testApplyTransformation_emptyMappingArray() {
+        // Setup
+        var originalJson = indexSettingJson("\"mappings\": [],");
+        var indexJson = originalJson.deepCopy();
+
+        // Action
+        var wasChanged = applyTransformation(indexJson);
+        assertThat(canApply(originalJson), equalTo(CanApplyResult.NO));
+
+        // Verification
+        assertThat(wasChanged, equalTo(false));
+        assertThat(indexJson.toPrettyString(), equalTo(originalJson.toPrettyString()));
+    }
+
+    @Test
     void testApplyTransformation_noMappingNode() {
         // Setup
         var originalJson = indexSettingJson("");
