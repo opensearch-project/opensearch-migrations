@@ -101,7 +101,7 @@ The following sample shows how indices that start with 'time-' will be migrated 
 already matched will be dropped.
 ```
 [
-  ["time-(.*)", "(cpu)", "time-$1-$2"]
+  ["time-(.*)", "(cpu)", "time-\\1-\\2"]
 ]
 ```
 
@@ -109,8 +109,8 @@ The following example preserves all other non-matched items,
 merging all types into a single index with the same name as the source index.
 ```
 [
-  ["time-(.*)", "(cpu)", "time-$1-$2"],
-  ["(.*)", ".*", "$1"]
+  ["time-(.*)", "(cpu)", "time-\\1-\\2"],
+  ["", ".*", ""]
 ]
 ```
 

@@ -32,7 +32,7 @@ Patterns are ONLY supported via regexMappings.
         }
     },
     "regexMappings": [
-        [ "(time*)", "(type*)", "$1_And_$2" ]
+        [ "(time*)", "(type*)", "\\1_And_\\2" ]
     ]
 }
 ```
