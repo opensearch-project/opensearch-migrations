@@ -449,7 +449,7 @@ public class OpenSearchClient {
     public Mono<BulkResponse> sendBulkRequest(String indexName, List<BulkDocSection> docs,
                                               IRfsContexts.IRequestContext context)
     {
-        final var docsMap = docs.stream().collect(Collectors.toMap(d -> d.getId(), d -> d));
+        final var docsMap = docs.stream().collect(Collectors.toMap(d -> d.getDocId(), d -> d));
         return Mono.defer(() -> {
             final String targetPath = indexName + "/_bulk";
             log.atTrace().setMessage("Creating bulk body with document ids {}").addArgument(docsMap::keySet).log();

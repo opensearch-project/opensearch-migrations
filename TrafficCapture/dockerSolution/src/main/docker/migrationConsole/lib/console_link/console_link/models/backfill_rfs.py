@@ -232,7 +232,7 @@ class ECSRFSBackfill(RFSBackfill):
             logger.warning(f"Unclaimed ({values['unclaimed']}) and in progress ({values['in progress']}) shards do not"
                            f" sum to the incomplete ({values['incomplete']}) shards." + disclaimer)
 
-        return "\n".join([f"Shards {key}: {value}" for key, value in values.items() if value is not None])
+        return "\n".join([f"Work items {key}: {value}" for key, value in values.items() if value is not None])
 
 
 def get_working_state_index_backup_path(archive_dir_path: str = None, archive_file_name: str = None) -> str:
