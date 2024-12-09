@@ -10,7 +10,7 @@ from langchain_core.runnables import Runnable
 
 
 from transform_expert.utils.inference import perform_inference
-from transform_expert.parameters import SourceVersion, TargetVersion, InputShapeType, TransformLanguage
+from transform_expert.parameters import SourceVersion, TargetVersion, TransformType, TransformLanguage
 from transform_expert.prompting import get_system_prompt_factory
 from transform_expert.tools import ToolBundle, get_tool_bundle
 from transform_expert.utils.transforms import TransformTask
@@ -25,7 +25,7 @@ class Expert:
     system_prompt_factory: Callable[[Dict[str, Any]], SystemMessage]
     tools: ToolBundle
 
-def get_expert(source_version: SourceVersion, target_version: TargetVersion, input_shape_type: InputShapeType, transform_language: TransformLanguage) -> Expert:
+def get_expert(source_version: SourceVersion, target_version: TargetVersion, input_shape_type: TransformType, transform_language: TransformLanguage) -> Expert:
     logger.info(f"Building expert for: {source_version}, {target_version}, {input_shape_type}, {transform_language}")
 
     # Get the tool bundle for the given transform language

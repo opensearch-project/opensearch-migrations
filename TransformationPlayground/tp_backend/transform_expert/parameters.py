@@ -8,9 +8,9 @@ class SourceVersion(Enum):
     ES_6_8 = "Elasticsearch 6.8"
 
 class TargetVersion(Enum):
-    OS_2_14 = "OpenSearch 2.14"
+    OS_2_17 = "OpenSearch 2.17"
 
-class InputShapeType(Enum):
+class TransformType(Enum):
     INDEX = "Index"
 
 class TransformLanguage(Enum):

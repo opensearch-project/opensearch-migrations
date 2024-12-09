@@ -2,7 +2,7 @@ from typing import Any, Dict, List
 
 from rest_framework import serializers
 
-from transform_expert.parameters import SourceVersion, TargetVersion, InputShapeType, TransformLanguage
+from transform_expert.parameters import SourceVersion, TargetVersion, TransformType, TransformLanguage
 
 
 class EnumChoiceField(serializers.ChoiceField):
@@ -26,7 +26,7 @@ class EnumChoiceField(serializers.ChoiceField):
 
 
 class TransformationCreateRequestSerializer(serializers.Serializer):
-    transform_type = EnumChoiceField(enum=InputShapeType)
+    transform_type = EnumChoiceField(enum=TransformType)
     transform_language = EnumChoiceField(enum=TransformLanguage)
     source_version = EnumChoiceField(enum=SourceVersion)
     target_version = EnumChoiceField(enum=TargetVersion)
