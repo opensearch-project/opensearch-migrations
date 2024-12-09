@@ -1,12 +1,14 @@
 plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
     id 'io.freefair.lombok'
 }
 
 dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
+    api group: 'com.hubspot.jinjava', name: 'jinjava', version: "2.7.3"
+
     implementation group: 'com.google.guava', name: 'guava'
-    implementation group: 'com.hubspot.jinjava', name: 'jinjava', version: "2.7.3"
 
     testImplementation project(':TrafficCapture:trafficReplayer')
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')

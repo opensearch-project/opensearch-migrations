@@ -1,6 +1,7 @@
 plugins {
     id 'io.freefair.lombok'
     id 'java-library'
+    id 'java-test-fixtures'
 }
 
 dependencies {
@@ -11,6 +12,9 @@ dependencies {
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     implementation group: 'com.google.guava', name: 'guava'
+
+    testFixturesImplementation project(':TrafficCapture:trafficReplayer')
+    testFixturesImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
 
     testImplementation project(':TrafficCapture:trafficReplayer')
     testImplementation testFixtures(project(path: ':testHelperFixtures'))

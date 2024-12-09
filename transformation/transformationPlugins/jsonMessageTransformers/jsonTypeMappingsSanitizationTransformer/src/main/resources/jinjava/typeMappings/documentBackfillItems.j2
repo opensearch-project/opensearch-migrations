@@ -3,8 +3,6 @@
 {%- import "typeMappings/rewriteIndexForTarget.j2" as transidx -%}
 
 {%- set parameters = source_document.index -%}
-{{  log_value('ERROR', parameters) }}
-{{  log_value('WARN', source_document.source) }}
 
 {%- set type_name = parameters['_type'] -%}
 {%- if type_name -%}

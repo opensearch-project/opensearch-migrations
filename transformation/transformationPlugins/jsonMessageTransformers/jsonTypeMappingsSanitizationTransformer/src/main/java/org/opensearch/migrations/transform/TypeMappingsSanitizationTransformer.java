@@ -14,7 +14,7 @@ import com.google.common.io.Resources;
 
 public class TypeMappingsSanitizationTransformer extends JinjavaTransformer {
 
-    public static final String ENTRYPOINT_JINJA_TEMPLATE = "jinjava/typeMappings/transformByType.j2";
+    public static final String ENTRYPOINT_JINJA_TEMPLATE = "jinjava/typeMappings/transformByTypeOfSourceInput.j2";
 
     public TypeMappingsSanitizationTransformer(
         Map<String, Map<String, String>> indexMappings,

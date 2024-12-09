@@ -4,7 +4,6 @@
     {%- else -%}
         {%- set ns = namespace(value=features) -%}
         {%- for key in (path | split('.')) -%}
-{#            {{- log_value('ERROR', "my logged key:"+key) -}}{{-  log_value('INFO', "ismapping:") -}}#}
             {%- if ns.value is mapping and key in ns.value -%}
                 {%- set ns.value = ns.value[key] -%}
             {%- else -%}

@@ -16,9 +16,9 @@
 
 {%- macro convert_source_index_to_target(source_index, source_type, index_mappings, regex_index_mappings) -%}
     {%- set ns = namespace(target_index=none) -%}
-    {%- set ns.target_index2 = (index_mappings[source_index] | default({}))[source_type] -%}
-    {%- if ns.target_index2 is none -%}
-        {%- set ns.target_index2 = convert_source_index_to_target_via_regex(source_index, source_type, regex_index_mappings) -%}
+    {%- set ns.target_index = (index_mappings[source_index] | default({}))[source_type] -%}
+    {%- if ns.target_index is none -%}
+        {%- set ns.target_index = convert_source_index_to_target_via_regex(source_index, source_type, regex_index_mappings) -%}
     {%- endif -%}
-    {{ ns.target_index2 }}
+    {{- ns.target_index -}}
 {%- endmacro -%}

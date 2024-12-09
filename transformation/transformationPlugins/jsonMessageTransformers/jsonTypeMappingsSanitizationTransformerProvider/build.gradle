@@ -16,6 +16,7 @@ dependencies {
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
 
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformer')
+    testImplementation testFixtures(project(path:':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformer'))
     testImplementation project(':coreUtilities')
     testImplementation testFixtures(project(path: ':coreUtilities'))
     testImplementation testFixtures(project(path: ':testHelperFixtures'))

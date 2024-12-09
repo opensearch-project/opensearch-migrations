@@ -8,13 +8,14 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class SourceProperties {
-   private Version version;
+    private String type;
+    private Version version;
 
-   @Data
-   @NoArgsConstructor  
-   @AllArgsConstructor
-   public static class Version {
-       private int major;
-       private int minor;
-   }
+    @Data
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class Version {
+        private int major;
+        private int minor;
+    }
 }
