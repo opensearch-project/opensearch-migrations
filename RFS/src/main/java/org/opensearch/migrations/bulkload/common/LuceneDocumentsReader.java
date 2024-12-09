@@ -5,7 +5,6 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
-import java.util.Optional;
 import java.util.function.Function;
 
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
@@ -118,48 +117,44 @@ public class LuceneDocumentsReader {
     static class SegmentNameSorter implements Comparator<LeafReader> {
         @Override
         public int compare(LeafReader leafReader1, LeafReader leafReader2) {
-            // If both LeafReaders are SegmentReaders, sort as normal
+            var compareResponse = compareIfSegmentReader(leafReader1, leafReader2);
+            if (compareResponse == 0) {
+                Function<LeafReader, String> getLeafReaderDebugInfo = (leafReader) -> {
+                    var leafDetails = new StringBuilder();
+                    leafDetails.append("Class: ").append(leafReader.getClass().getName()).append("\n");
+                    leafDetails.append("Context: ").append(leafReader.getContext()).append("\n");
+                    if (leafReader instanceof SegmentReader) {
+                        SegmentCommitInfo segmentInfo = ((SegmentReader) leafReader).getSegmentInfo();
+                        leafDetails.append("SegmentInfo: ").append(segmentInfo).append("\n");
+                        leafDetails.append("SegmentInfoId: ").append(new String(segmentInfo.getId(), StandardCharsets.UTF_8)).append("\n");
+                    }
+                    return leafDetails.toString();
+                };
+                log.atError().setMessage("Unexpected equality during leafReader sorting, expected sort to yield no equality " +
+                        "to ensure consistent segment ordering. This may cause missing documents if both segments" +
+                        "contains docs. LeafReader1DebugInfo: {} \nLeafReader2DebugInfo: {}")
+                        .addArgument(getLeafReaderDebugInfo.apply(leafReader1))
+                        .addArgument(getLeafReaderDebugInfo.apply(leafReader2))
+                        .log();
+                assert false: "Expected unique segmentName sorting for stable sorting.";
+            }
+            return compareResponse;
+        }
+
+        private int compareIfSegmentReader(LeafReader leafReader1, LeafReader leafReader2) {
+            // If both LeafReaders are SegmentReaders, sort on segment info name.
+            // Name is the "Unique segment name in the directory" which is always present on a SegmentInfo
             if (leafReader1 instanceof SegmentReader && leafReader2 instanceof SegmentReader) {
                 SegmentCommitInfo segmentInfo1 = ((SegmentReader) leafReader1).getSegmentInfo();
                 SegmentCommitInfo segmentInfo2 = ((SegmentReader) leafReader2).getSegmentInfo();
 
-                // getId returns and Id that uniquely identifies this segment commit or null if there is no ID
-                // assigned. This ID changes each time the segment changes due to a delete,
-                // doc-value or field update. We will prefer to sort based on ID amd fallback to name
-                var segmentCompareString1 = Optional.ofNullable(segmentInfo1.getId())
-                        .map(idBytes -> new String(idBytes, StandardCharsets.UTF_8))
-                        .orElseGet(() -> {
-                            var segmentName1 = segmentInfo1.info.name;
-                            log.atWarn().setMessage("SegmentReader of type {} does not have an Id, falling back to name {}")
-                                    .addArgument(leafReader1.getClass().getName())
-                                    .addArgument(segmentName1)
-                                    .log();
-                            return segmentName1;
-                        });
-                var segmentCompareString2 = Optional.ofNullable(segmentInfo2.getId())
-                        .map(idBytes -> new String(idBytes, StandardCharsets.UTF_8))
-                        .orElseGet(() -> {
-                            var segmentName2 = segmentInfo2.info.name;
-                            log.atWarn().setMessage("SegmentReader of type {} does not have an Id, falling back to name {}")
-                                    .addArgument(leafReader2.getClass().getName())
-                                    .addArgument(segmentName2)
-                                    .log();
-                            return segmentName2;
-                        });
-                return segmentCompareString1.compareTo(segmentCompareString2);
+                var segmentName1 = segmentInfo1.info.name;
+                var segmentName2 = segmentInfo2.info.name;
+
+                return segmentName1.compareTo(segmentName2);
             }
-            // Otherwise, shift the SegmentReaders to the front
-            else if (leafReader1 instanceof SegmentReader && !(leafReader2 instanceof SegmentReader)) {
-                log.warn("Found non-SegmentReader of type {} in the DirectoryReader", leafReader2.getClass().getName());
-                return -1;
-            } else if (!(leafReader1 instanceof SegmentReader) && leafReader2 instanceof SegmentReader) {
-                log.warn("Found non-SegmentReader of type {} in the DirectoryReader", leafReader1.getClass().getName());
-                return 1;
-            } else {
-                log.warn("Found non-SegmentReader of type {} in the DirectoryReader", leafReader1.getClass().getName());
-                log.warn("Found non-SegmentReader of type {} in the DirectoryReader", leafReader2.getClass().getName());
-                return 0;
-            }
+            // Otherwise, keep initial sort
+            return 0;
         }
     }
 
@@ -186,6 +181,11 @@ public class LuceneDocumentsReader {
      * @return a Flux containing the segments starting from the identified segment
      */
     public static Flux<LeafReaderContext> getSegmentsFromStartingSegment(List<LeafReaderContext> leaves, int startDocId) {
+        if (startDocId == 0) {
+            log.info("Skipping segment binary search since startDocId is 0.");
+            return Flux.fromIterable(leaves);
+        }
+
         int left = 0;
         int right = leaves.size() - 1;
 
