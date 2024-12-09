@@ -26,13 +26,12 @@ class EnumChoiceField(serializers.ChoiceField):
 
 
 class TransformationCreateRequestSerializer(serializers.Serializer):
-    # Use EnumChoiceField for fields that represent enums
     transform_type = EnumChoiceField(enum=InputShapeType)
     transform_language = EnumChoiceField(enum=TransformLanguage)
     source_version = EnumChoiceField(enum=SourceVersion)
     target_version = EnumChoiceField(enum=TargetVersion)
     input_shape = serializers.JSONField()
-    test_target_url = serializers.URLField()
+    test_target_url = serializers.URLField(required=False, default=None)
 
     def validate_input_shape(self, value: Dict[str, Any]) -> Dict[str, Any]:
         """

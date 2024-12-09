@@ -59,17 +59,23 @@ def test_index_transform(transform_task: TransformTask, test_client: OpenSearchC
 
         # TODO: Validate the output shape matches the spec
 
-        # report_entries.append(f"The transformed output has {len(output)} Index entries.")
+        if test_client:
+            report.append_entry(f"The transformed output has {len(output)} Index entries.", logger.info)
+            for index_def in output:
+                try:
+                    index_name = index_def["index_name"]
+                    settings = index_def["index_json"]
+                    report.append_entry(f"Attempting to create & delete index '{index_name}' with transformed settings...", logger.info)
+                    create_response = test_client.create_index(index_name, settings)
+                    report.append_entry(f"Created index '{index_name}'.  Response: \n{json.dumps(create_response)}", logger.info)
 
-        # for index_def in output:
-        #     index_name = index_def["indexName"]
-        #     settings = index_def["indexJson"]
-        #     report_entries.append(f"Attempting to create & delete index '{index_name}' with transformed settings...")
-        #     create_response = test_client.create_index(index_name, settings)
-        #     report_entries.append(f"Created index '{index_name}'.  Response: \n{json.dumps(create_response)}")
-
-        #     delete_response = test_client.delete_index(index_name)
-        #     report_entries.append(f"Deleted index '{index_name}'.  Response: \n{json.dumps(delete_response)}")
+                    delete_response = test_client.delete_index(index_name)
+                    report.append_entry(f"Deleted index '{index_name}'.  Response: \n{json.dumps(delete_response)}", logger.info)
+                except Exception as e:
+                    report.append_entry(f"Error when testing creation/deletion of index: {str(e)}", logger.error)
+                    raise e
+        else:
+            report.append_entry("No target cluster provided.  Skipping index creation/deletion tests.", logger.info)
 
         report.passed = True
     except Exception as e:

@@ -23,13 +23,16 @@ logger = logging.getLogger("transform_api")
 
 class TransformationsView(APIView):
     def _perform_transformation(self, transform_id: str, request: TransformationCreateRequestSerializer) -> TransformTaskTestReport:
-        # Confirm the target cluster is accessible
-        test_connection = OpenSearchClient(
-            RESTClient(
-                ConnectionDetails(base_url=request.validated_data["test_target_url"])
+        # Create a test client and confirm the target cluster is accessible if the connection details are provided
+        if request.validated_data["test_target_url"]:
+            test_connection = OpenSearchClient(
+                RESTClient(
+                    ConnectionDetails(base_url=request.validated_data["test_target_url"])
+                )
             )
-        )
-        test_target_connection(test_connection)
+            test_target_connection(test_connection)
+        else:
+            test_connection = None
 
         # Get the expert and generate the transformation
         expert = get_expert(
@@ -79,6 +82,9 @@ class TransformationsView(APIView):
             logger.info(f"Transformation successful")
             logger.debug(f"Transformation output:\n{transform_report.task.output}")
             logger.debug(f"Transformation logic:\n{transform_report.task.transform.to_file_format()}")
+        except TestTargetInnaccessibleError as e:
+            logger.error(f"Target cluster is not accessible: {str(e)}")
+            return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
         except Exception as e:
             logger.error(f"Transformation failed: {str(e)}")
             logger.exception(e)
