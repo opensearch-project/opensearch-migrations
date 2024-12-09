@@ -9,7 +9,7 @@
         {
         "method": "{{ input_map.request.method }}",
         "URI": "/{{ target_index }}/_doc/{{ match.group3 }}",
-        "preserve": ["headers","payload"]
+        "preserveWhenMissing": ["headers","payload"]
         }
     {%-  endif -%}
 {%- endmacro -%}

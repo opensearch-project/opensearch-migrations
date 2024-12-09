@@ -44,7 +44,7 @@
 
 {%- macro rewrite_bulk_for_default_source_index(uri_match, input_map, source_index) -%}
 {
-    "preserve": ["headers","method","URI","protocol"],
+    "preserveWhenMissing": "*",
     "payload": {
         "inlinedJsonSequenceBodies": [
             {%- set operation_types = ['delete', 'update', 'index', 'create'] -%}

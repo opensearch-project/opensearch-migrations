@@ -44,7 +44,8 @@ public class TypeMappingsSanitizationCreateIndexTest {
         var indexTypeMappingRewriter = makeIndexTypeMappingRewriter();
         var result = (Map<String, Object>)
             indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
-        Assertions.assertEquals(JsonNormalizer.fromString("{ \"method\": \"GET\", \"URI\": \"/\" }"),
+        var expected = "{ \"method\": \"GET\", \"URI\": \"/\", \"protocol\" : \"HTTP/1.0\" }";
+        Assertions.assertEquals(JsonNormalizer.fromString(expected),
             JsonNormalizer.fromObject(result));
     }
 
