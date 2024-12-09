@@ -11,6 +11,18 @@ class OpenSearchClient():
     def __init__(self, rest_client: RESTClient) -> None:
         self.rest_client = rest_client
 
+    def get_url(self) -> str:
+        return self.rest_client.base_url
+
+    def is_accessible(self) -> bool:
+        logger.info("Checking if OpenSearch Cluster is accessible")
+        try:
+            self.rest_client.get("")
+            return True
+        except Exception as e:
+            logger.error(f"OpenSearch Cluster is not accessible: {str(e)}")
+            return False
+
     def create_index(self, index_name: str, settings: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         logger.info(f"Creating index: {index_name} with settings: {settings}")
         endpoint = f"{index_name}"

@@ -40,7 +40,7 @@ def get_expert(source_version: SourceVersion, target_version: TargetVersion, inp
         }
     )
 
-    # Define our Bedrock LLM
+    # Define our Bedrock LLM and attach the tools to it
     llm = ChatBedrockConverse(
         model="anthropic.claude-3-5-sonnet-20240620-v1:0", # This is the older version of the model, could be updated
         temperature=0,
@@ -61,7 +61,7 @@ def get_expert(source_version: SourceVersion, target_version: TargetVersion, inp
         tools=tool_bundle
     )
 
-def invoke_transform_expert(expert: Expert, task: TransformTask) -> TransformTask:
+def invoke_expert(expert: Expert, task: TransformTask) -> TransformTask:
     logger.info(f"Invoking the Transform Expert for transform_id: {task.transform_id}")
     logger.debug(f"Transform Task: {str(task.to_json())}")
 
@@ -89,7 +89,7 @@ def invoke_transform_expert(expert: Expert, task: TransformTask) -> TransformTas
         )
     )
 
-    logger.info(f"Transform Expert completed for transform_id: {task.transform_id}")
+    logger.info(f"Transform completed for transform_id: {task.transform_id}")
     logger.debug(f"Updated Transform Task: {str(task.to_json())}")
 
     return task

@@ -1,38 +1,46 @@
 import logging
+import json
 from typing import Any, Dict
 
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from .serializers import TransformationRequestSerializer, TransformationSerializer
-from .models import Transformation
+from .serializers import TransformationCreateRequestSerializer, TransformationCreateResponseSerializer
 
 
 import uuid
 
 from langchain_core.messages import HumanMessage
 
-from transform_expert.expert import get_expert, invoke_transform_expert
-from transform_expert.parameters import SourceVersion, TargetVersion, InputShapeType, TransformLanguage
+from transform_expert.expert import get_expert, invoke_expert
+from transform_expert.utils.rest_client import RESTClient, ConnectionDetails
+from transform_expert.utils.opensearch_client import OpenSearchClient
+from transform_expert.testing import test_target_connection, TestTargetInnaccessibleError, test_index_transform, TransformTaskTestReport
 from transform_expert.utils.transforms import TransformTask
 
 
 logger = logging.getLogger("transform_api")
 
 class TransformationsView(APIView):
-    def _perform_transformation(self, transform_id: str, input_shape: Dict[str, Any]) -> TransformTask:
+    def _perform_transformation(self, transform_id: str, request: TransformationCreateRequestSerializer) -> TransformTaskTestReport:
+        # Confirm the target cluster is accessible
+        test_connection = OpenSearchClient(
+            RESTClient(
+                ConnectionDetails(base_url=request.validated_data["test_target_url"])
+            )
+        )
+        test_target_connection(test_connection)
+
+        # Get the expert and generate the transformation
         expert = get_expert(
-            source_version=SourceVersion.ES_6_8,
-            target_version=TargetVersion.OS_2_14,
-            input_shape_type=InputShapeType.INDEX,
-            transform_language=TransformLanguage.PYTHON
+            source_version=request.validated_data["source_version"],
+            target_version=request.validated_data["target_version"],
+            input_shape_type=request.validated_data["transform_type"],
+            transform_language=request.validated_data["transform_language"]
         )
 
         system_message = expert.system_prompt_factory(
-            {
-                "indexName": "test_index",
-                "indexJson": input_shape
-            }            
+            request.validated_data["input_shape"]           
         )
         turns = [
             system_message,
@@ -41,47 +49,48 @@ class TransformationsView(APIView):
 
         transform_task = TransformTask(
             transform_id=transform_id,
+            input=request.validated_data["input_shape"],
             context=turns,
             transform=None
         )
 
-        transform_result = invoke_transform_expert(expert, transform_task)
+        transform_result = invoke_expert(expert, transform_task)
 
-        return transform_result
+        # Execute the transformation on the input
+        transform_test_report = test_index_transform(transform_result, test_connection)
+
+        return transform_test_report
 
 
     def post(self, request):
         logger.info(f"Received transformation request: {request.data}")
 
         # Validate incoming data
-        serializer = TransformationRequestSerializer(data=request.data)
-        if not serializer.is_valid():
-            logger.error(f"Invalid transformation request: {serializer.errors}")
-            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
-        
-        input_shape = serializer.validated_data['input_shape']
+        requestSerializer = TransformationCreateRequestSerializer(data=request.data)
+        if not requestSerializer.is_valid():
+            logger.error(f"Invalid transformation request: {requestSerializer.errors}")
+            return Response(requestSerializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
         transform_id = str(uuid.uuid4())
 
         # Perform the transformation
         try:
-            transform_result = self._perform_transformation(transform_id, input_shape)
+            transform_report = self._perform_transformation(transform_id, requestSerializer)
             logger.info(f"Transformation successful")
-            logger.debug(f"Transformation output:\n{transform_result.output}")
-            logger.debug(f"Transformation logic:\n{transform_result.transform.to_file_format()}")
+            logger.debug(f"Transformation output:\n{transform_report.task.output}")
+            logger.debug(f"Transformation logic:\n{transform_report.task.transform.to_file_format()}")
         except Exception as e:
             logger.error(f"Transformation failed: {str(e)}")
             logger.exception(e)
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-        # Save the transformation record (optional)
-        transformation = Transformation.objects.create(
-            id=transform_id,
-            input_shape=input_shape,
-            output_shape=transform_result.output,
-            transform=transform_result.transform.to_file_format()
-        )
-        logger.info(f"Transformation record saved w/ ID: {transformation.id}")
-
         # Serialize and return the response
-        response_serializer = TransformationSerializer(transformation)
+        response_serializer = TransformationCreateResponseSerializer(data={
+            "output_shape": transform_report.task.output,
+            "transform_logic": transform_report.task.transform.to_file_format()
+        })
+        if not response_serializer.is_valid():
+            logger.error(f"Invalid transformation response: {response_serializer.errors}")
+            return Response(response_serializer.errors, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        
         return Response(response_serializer.data, status=status.HTTP_200_OK)

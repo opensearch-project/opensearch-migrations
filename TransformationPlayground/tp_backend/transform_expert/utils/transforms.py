@@ -1,14 +1,11 @@
-import asyncio
 from dataclasses import dataclass
-import importlib
 import logging
-import os
+from types import ModuleType
 from typing import Any, Callable, Dict, List
 
-from langchain_core.language_models import LanguageModelInput
 from langchain_core.messages import BaseMessage
 
-from transform_expert.utils.inference import InferenceTask, perform_inference
+from transform_expert.utils.inference import InferenceTask
 
 
 logger = logging.getLogger("transform_expert")
@@ -33,13 +30,15 @@ class Transform:
 @dataclass
 class TransformTask:
     transform_id: str
+    input: Dict[str, Any]
     context: List[BaseMessage]
     transform: Transform = None
-    output: str = "bleh"
+    output: List[Dict[str, Any]] = None
 
     def to_json(self) -> Dict[str, Any]:
         return {
             "transform_id": self.transform_id,
+            "input": self.input if self.input else None,
             "context": [turn.to_json() for turn in self.context],
             "transform": self.transform.to_json() if self.transform else None,
             "output": self.output if self.output else None
@@ -51,22 +50,28 @@ class TransformTask:
             context=self.context
         )
 
-def get_transform_file_path(transform_files_dir: str, transform_id: str) -> str:
-    return os.path.join(transform_files_dir, f"{transform_id}_transform.py")
+class TransformInvalidSyntaxError(Exception):
+    pass
 
-def get_transform_input_file_path(transform_files_dir: str, transform_id: str) -> str:
-    return os.path.join(transform_files_dir, f"{transform_id}_input.json")
+class TransformNotInModuleError(Exception):
+    pass
 
-def get_transform_output_file_path(transform_files_dir: str, transform_id: str) -> str:
-    return os.path.join(transform_files_dir, f"{transform_id}_output.json")
+class TransformNotExecutableError(Exception):
+    pass
 
-def get_transform_report_file_path(transform_files_dir: str, transform_id: str) -> str:
-    return os.path.join(transform_files_dir, f"{transform_id}_report.json")
+def load_transform(transform: Transform) -> Callable[[Dict[str, Any]], List[Dict[str, Any]]]:
+    # Take the raw transform logic and attempt to load it into an executable form
+    try:
+        transform_module = ModuleType("transform")
+        exec(transform.to_file_format(), transform_module.__dict__)
+    except SyntaxError as e:
+        raise TransformInvalidSyntaxError(f"Syntax error in the transform code: {str(e)}")
 
-def load_transform_from_file(transform_file_path: str) -> Callable[[Dict[str, Any]], List[Dict[str, Any]]]:
-    module_spec = importlib.util.spec_from_file_location("transform", transform_file_path)
-    if module_spec is None:
-        raise ImportError(f"Cannot load the transform module from {transform_file_path}")
-    module = importlib.util.module_from_spec(module_spec)
-    module_spec.loader.exec_module(module)
-    return module.transform
+    # Confirm we can pull out a usable transform
+    if not hasattr(transform_module, "transform"):
+        raise TransformNotInModuleError("The transform module does not contain a member named 'transform'")
+    
+    if not callable(transform_module.transform):
+        raise TransformNotExecutableError("The 'transform' attribute must be an executable function")
+    
+    return transform_module.transform
