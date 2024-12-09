@@ -64,7 +64,16 @@ public class WorkloadGenerator {
         }
 
         return bulkDocGroups.stream()
-            .map(docs -> client.sendBulkRequest(indexName, docs, null).toFuture())
+            .map(docs -> {
+                var sendFuture = client.sendBulkRequest(indexName, docs, null).toFuture();
+                if (options.refreshAfterEachWrite) {
+                    sendFuture.thenRun(() -> client.refresh(null));
+                    // Requests will be sent in parallel unless we wait for completion
+                    // This allows more segments to be created
+                    sendFuture.join();
+                }
+                return sendFuture;
+            })
             .collect(Collectors.toList());
     }
 }

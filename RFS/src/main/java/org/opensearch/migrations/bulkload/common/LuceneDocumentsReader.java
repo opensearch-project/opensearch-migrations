@@ -1,9 +1,11 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
+import java.util.Optional;
 import java.util.function.Function;
 
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
@@ -111,9 +113,9 @@ public class LuceneDocumentsReader {
 
     /**
      * We need to ensure a stable ordering of segments so we can start reading from a specific segment and document id.
-     * To do this, we sort the segments by their name.
+     * To do this, we sort the segments by their ID or name.
      */
-    class SegmentNameSorter implements Comparator<LeafReader> {
+    static class SegmentNameSorter implements Comparator<LeafReader> {
         @Override
         public int compare(LeafReader leafReader1, LeafReader leafReader2) {
             // If both LeafReaders are SegmentReaders, sort as normal
@@ -121,31 +123,51 @@ public class LuceneDocumentsReader {
                 SegmentCommitInfo segmentInfo1 = ((SegmentReader) leafReader1).getSegmentInfo();
                 SegmentCommitInfo segmentInfo2 = ((SegmentReader) leafReader2).getSegmentInfo();
 
-                String segmentName1 = segmentInfo1.info.name;
-                String segmentName2 = segmentInfo2.info.name;
-
-                return segmentName1.compareTo(segmentName2);
+                // getId returns and Id that uniquely identifies this segment commit or null if there is no ID
+                // assigned. This ID changes each time the segment changes due to a delete,
+                // doc-value or field update. We will prefer to sort based on ID amd fallback to name
+                var segmentCompareString1 = Optional.ofNullable(segmentInfo1.getId())
+                        .map(idBytes -> new String(idBytes, StandardCharsets.UTF_8))
+                        .orElseGet(() -> {
+                            var segmentName1 = segmentInfo1.info.name;
+                            log.atWarn().setMessage("SegmentReader of type {} does not have an Id, falling back to name {}")
+                                    .addArgument(leafReader1.getClass().getName())
+                                    .addArgument(segmentName1)
+                                    .log();
+                            return segmentName1;
+                        });
+                var segmentCompareString2 = Optional.ofNullable(segmentInfo2.getId())
+                        .map(idBytes -> new String(idBytes, StandardCharsets.UTF_8))
+                        .orElseGet(() -> {
+                            var segmentName2 = segmentInfo2.info.name;
+                            log.atWarn().setMessage("SegmentReader of type {} does not have an Id, falling back to name {}")
+                                    .addArgument(leafReader2.getClass().getName())
+                                    .addArgument(segmentName2)
+                                    .log();
+                            return segmentName2;
+                        });
+                return segmentCompareString1.compareTo(segmentCompareString2);
             }
             // Otherwise, shift the SegmentReaders to the front
             else if (leafReader1 instanceof SegmentReader && !(leafReader2 instanceof SegmentReader)) {
-                log.info("Found non-SegmentReader of type {} in the DirectoryReader", leafReader2.getClass().getName());
+                log.warn("Found non-SegmentReader of type {} in the DirectoryReader", leafReader2.getClass().getName());
                 return -1;
             } else if (!(leafReader1 instanceof SegmentReader) && leafReader2 instanceof SegmentReader) {
-                log.info("Found non-SegmentReader of type {} in the DirectoryReader", leafReader1.getClass().getName());
+                log.warn("Found non-SegmentReader of type {} in the DirectoryReader", leafReader1.getClass().getName());
                 return 1;
             } else {
-                log.info("Found non-SegmentReader of type {} in the DirectoryReader", leafReader1.getClass().getName());
-                log.info("Found non-SegmentReader of type {} in the DirectoryReader", leafReader2.getClass().getName());
+                log.warn("Found non-SegmentReader of type {} in the DirectoryReader", leafReader1.getClass().getName());
+                log.warn("Found non-SegmentReader of type {} in the DirectoryReader", leafReader2.getClass().getName());
                 return 0;
             }
         }
     }
 
-    protected DirectoryReader getReader() throws IOException {// Get the list of commits and pick the latest one
+    protected DirectoryReader getReader() throws IOException {
+        // Get the list of commits and pick the latest one
         try (FSDirectory directory = FSDirectory.open(indexDirectoryPath)) {
             List  <IndexCommit> commits = DirectoryReader.listCommits(directory);
             IndexCommit latestCommit = commits.get(commits.size() - 1);
-
             return DirectoryReader.open(
                 latestCommit,
                 6, // Minimum supported major version - Elastic 5/Lucene 6
@@ -153,6 +175,38 @@ public class LuceneDocumentsReader {
             );
         }
     }
+
+    /**
+     * Finds the starting segment using a binary search where the maximum document ID in the segment
+     * is greater than or equal to the specified start document ID. The method returns a Flux
+     * containing the list of segments starting from the identified segment.
+     *
+     * @param leaves    the list of LeafReaderContext representing segments
+     * @param startDocId the document ID from which to start processing
+     * @return a Flux containing the segments starting from the identified segment
+     */
+    public static Flux<LeafReaderContext> getSegmentsFromStartingSegment(List<LeafReaderContext> leaves, int startDocId) {
+        int left = 0;
+        int right = leaves.size() - 1;
+
+        // Perform binary search to find the starting segment
+        while (left <= right) {
+            int mid = left + (right - left) / 2;
+            LeafReaderContext midSegment = leaves.get(mid);
+
+            int maxDocIdInSegment = midSegment.docBaseInParent + midSegment.reader().maxDoc() - 1;
+
+            if (maxDocIdInSegment < startDocId) {
+                left = mid + 1;
+            } else {
+                right = mid - 1;
+            }
+        }
+
+        // `left` now points to the first segment where maxDocIdInSegment >= startDocId
+        return Flux.fromIterable(leaves.subList(left, leaves.size()));
+    }
+
 
     /* Start reading docs from a specific segment and document id.
     If the startSegmentIndex is 0, it will start from the first segment.
@@ -167,7 +221,7 @@ public class LuceneDocumentsReader {
 
         // Create shared scheduler for i/o bound document reading
         var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
-        return Flux.fromIterable(reader.leaves())
+        return getSegmentsFromStartingSegment(reader.leaves(), startDocId)
             .concatMapDelayError(c -> readDocsFromSegment(c,
                     startDocId,
                     sharedSegmentReaderScheduler,
@@ -182,15 +236,19 @@ public class LuceneDocumentsReader {
         var segmentReader = leafReaderContext.reader();
         var liveDocs = segmentReader.getLiveDocs();
 
-        int segmentDocBase = leafReaderContext.docBase;
+        int segmentDocBase = leafReaderContext.docBaseInParent;
 
-        log.atInfo().setMessage("For segment: {}, working on docStartingId: {}")
+        // Start at
+        int startDocIdInSegment = Math.max(docStartingId - segmentDocBase, 0);
+        int numDocsToProcessInSegment = segmentReader.maxDoc() - startDocIdInSegment;
+
+        log.atInfo().setMessage("For segment: {}, migrating from doc: {}. Will process {} docs in segment.")
                 .addArgument(leafReaderContext)
-                .addArgument(docStartingId)
+                .addArgument(startDocIdInSegment)
+                .addArgument(numDocsToProcessInSegment)
                 .log();
 
-        return Flux.range(0, segmentReader.maxDoc())
-                .skipWhile(docNum -> segmentDocBase + docNum < docStartingId)
+        return Flux.range(startDocIdInSegment, numDocsToProcessInSegment)
                 .flatMapSequentialDelayError(docIdx -> Mono.defer(() -> {
                     try {
                         if (liveDocs == null || liveDocs.get(docIdx)) {

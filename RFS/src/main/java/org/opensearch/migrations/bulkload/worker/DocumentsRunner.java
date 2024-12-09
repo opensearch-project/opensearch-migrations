@@ -101,7 +101,7 @@ public class DocumentsRunner {
                         .subscribe(lastItem -> {},
                             error -> log.atError()
                                     .setCause(error)
-                                    .setMessage("Error prevented all batches from being processed")
+                                    .setMessage("Error prevented some batches from being processed")
                                     .log(),
                             () ->  {
                                 log.atInfo().setMessage("Reindexing completed for Index {}, Shard {}")

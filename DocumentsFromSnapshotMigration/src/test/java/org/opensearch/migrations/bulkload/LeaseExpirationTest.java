@@ -14,6 +14,7 @@ import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
+import org.opensearch.migrations.data.IndexOptions;
 import org.opensearch.migrations.data.WorkloadGenerator;
 import org.opensearch.migrations.data.WorkloadOptions;
 import org.opensearch.migrations.data.workloads.Workloads;
@@ -29,7 +30,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
-import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.containers.Network;
 
 /**
@@ -50,9 +52,10 @@ public class LeaseExpirationTest extends SourceTestBase {
         ToxiProxyWrapper proxyContainer;
     }
 
-    @Test
     @Tag("isolatedTest")
-    public void testProcessExitsAsExpected() {
+    @ParameterizedTest
+    @ValueSource(booleans = {true, false})
+    public void testProcessExitsAsExpected(boolean forceMoreSegments) {
         // Sending 5 docs per request with 4 requests concurrently with each taking 0.125 second is 160 docs/sec
         // will process 9760 docs in 61 seconds. With 20s lease duration, expect to be finished in 4 leases.
         // This is ensured with the toxiproxy settings, the migration should not be able to be completed
@@ -65,7 +68,7 @@ public class LeaseExpirationTest extends SourceTestBase {
         int continueExitCode = 2;
         int finalExitCodePerShard = 0;
         runTestProcessWithCheckpoint(continueExitCode, (migrationProcessesPerShard - 1) * shards,
-                finalExitCodePerShard, shards, shards, indexDocCount,
+                finalExitCodePerShard, shards, shards, indexDocCount, forceMoreSegments,
             d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer
             ));
     }
@@ -74,6 +77,7 @@ public class LeaseExpirationTest extends SourceTestBase {
     private void runTestProcessWithCheckpoint(int expectedInitialExitCode, int expectedInitialExitCodeCount,
                                               int expectedEventualExitCode, int expectedEventualExitCodeCount,
                                               int shards, int indexDocCount,
+                                              boolean forceMoreSegments,
                                               Function<RunData, Integer> processRunner) {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
 
@@ -125,7 +129,10 @@ public class LeaseExpirationTest extends SourceTestBase {
 
             workloadOptions.totalDocs = indexDocCount;
             workloadOptions.workloads = List.of(Workloads.GEONAMES);
-            workloadOptions.maxBulkBatchSize = 1000;
+            workloadOptions.index.indexSettings.put(IndexOptions.PROP_NUMBER_OF_SHARDS, shards);
+            // Segments will be created on each refresh which tests segment ordering logic
+            workloadOptions.refreshAfterEachWrite = forceMoreSegments;
+            workloadOptions.maxBulkBatchSize = forceMoreSegments ? 10 : 1000;
             generator.generate(workloadOptions);
 
             // Create the snapshot from the source cluster

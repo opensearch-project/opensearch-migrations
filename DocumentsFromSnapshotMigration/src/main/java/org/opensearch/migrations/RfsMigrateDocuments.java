@@ -375,7 +375,7 @@ public class RfsMigrateDocuments {
                 .addArgument(workItemId)
                 .log();
         if (progressCursorRef.get() != null) {
-            log.atWarn().setMessage("Progress cursor set, cancelling active doc migration if still running").log();
+            log.atWarn().setMessage("Progress cursor set, cancelling active doc migration").log();
             cancellationRunnable.run();
             // Get a new progressCursor after cancellation for most up-to-date checkpoint
             var progressCursor = progressCursorRef.get();

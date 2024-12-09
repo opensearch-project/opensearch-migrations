@@ -18,4 +18,6 @@ public class WorkloadOptions {
     public int maxBulkBatchSize = 50;
 
     public final IndexOptions index = new IndexOptions();
+
+    public boolean refreshAfterEachWrite = false;
 }
