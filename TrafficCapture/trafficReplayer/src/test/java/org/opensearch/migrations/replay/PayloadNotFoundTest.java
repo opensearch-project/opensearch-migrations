@@ -19,7 +19,9 @@ public class PayloadNotFoundTest {
         FAULTING_MAP.setPath("/_bulk");
         FAULTING_MAP.setHeaders(new ListKeyAdaptingCaseInsensitiveHeadersMap(new StrictCaseInsensitiveHttpHeadersMap()));
         FAULTING_MAP.headers().put("Content-Type", "application/json");
-        FAULTING_MAP.setPayloadFaultMap(new PayloadAccessFaultingMap(FAULTING_MAP.headers().asStrictMap()));
+        var payloadMap = new PayloadAccessFaultingMap(FAULTING_MAP.headers().asStrictMap());
+        FAULTING_MAP.setPayloadFaultMap(payloadMap);
+        payloadMap.setDisableThrowingPayloadNotLoaded(false);
         final String EXPECTED = "{\n"
             + "  \"method\": \"PUT\",\n"
             + "  \"URI\": \"/_bulk\",\n"

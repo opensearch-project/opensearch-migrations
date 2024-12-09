@@ -35,6 +35,7 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
     private boolean payloadWasAccessed;
 
     public PayloadAccessFaultingMap(StrictCaseInsensitiveHttpHeadersMap headers) {
+        disableThrowingPayloadNotLoaded = true;
         underlyingMap = new TreeMap<>();
         isJson = Optional.ofNullable(headers.get("content-type"))
             .map(list -> list.stream().anyMatch(s -> s.startsWith("application/json")))

@@ -67,7 +67,9 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
                 httpJsonMessage
             );
             HttpJsonRequestWithFaultingPayload transformedMessage = null;
+            final var payloadMap = (PayloadAccessFaultingMap) httpJsonMessage.payload();
             try {
+                payloadMap.setDisableThrowingPayloadNotLoaded(false);
                 transformedMessage = transform(transformer, httpJsonMessage);
             } catch (Exception e) {
                 var payload = (PayloadAccessFaultingMap) httpJsonMessage.payload();
@@ -85,6 +87,8 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
                 } else{
                     throw new TransformationException(e);
                 }
+            } finally {
+                payloadMap.setDisableThrowingPayloadNotLoaded(true);
             }
 
             if (transformedMessage != null) {
@@ -139,22 +143,28 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
 
         var pipeline = ctx.pipeline();
         if (streamingAuthTransformer != null) {
-            log.atInfo().setMessage("{} An Authorization Transformation is required for this message.  "
-                    + "The headers and payload will be parsed and reformatted.")
-                .addArgument(diagnosticLabel).log();
+            log.info(
+                diagnosticLabel
+                    + "An Authorization Transformation is required for this message.  "
+                    + "The headers and payload will be parsed and reformatted."
+            );
             requestPipelineOrchestrator.addContentRepackingHandlers(ctx, streamingAuthTransformer);
             ctx.fireChannelRead(httpJsonMessage);
         } else if (headerFieldsAreIdentical(originalRequest, httpJsonMessage)) {
-            log.atInfo().setMessage("{} Transformation isn't necessary.  "
-                    + "Resetting the processing pipeline to let the caller send the original network bytes as-is.")
-                .addArgument(diagnosticLabel)
-                .log();
+            log.info(
+                diagnosticLabel
+                    + "Transformation isn't necessary.  "
+                    + "Resetting the processing pipeline to let the caller send the original network bytes as-is."
+            );
             RequestPipelineOrchestrator.removeAllHandlers(pipeline);
+
         } else if (headerFieldIsIdentical("content-encoding", originalRequest, httpJsonMessage)
             && headerFieldIsIdentical("transfer-encoding", originalRequest, httpJsonMessage)) {
-            log.atInfo().setMessage("{} There were changes to the headers that require the message to be reformatted "
-                    + "but the payload doesn't need to be transformed.")
-                .addArgument(diagnosticLabel).log();
+            log.info(
+                diagnosticLabel
+                    + "There were changes to the headers that require the message to be reformatted "
+                    + "but the payload doesn't need to be transformed."
+            );
             // By adding the baseline handlers and removing this and previous handlers in reverse order,
             // we will cause the upstream handlers to flush their in-progress accumulated ByteBufs downstream
             // to be processed accordingly
@@ -162,9 +172,11 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
             ctx.fireChannelRead(httpJsonMessage);
             RequestPipelineOrchestrator.removeThisAndPreviousHandlers(pipeline, this);
         } else {
-            log.atInfo().setMessage("{} New headers have been specified that require the payload stream to be "
-                    + "reformatted.  Setting up the processing pipeline to parse and reformat the request payload.")
-                .addArgument(diagnosticLabel).log();
+            log.info(
+                diagnosticLabel
+                    + "New headers have been specified that require the payload stream to be "
+                    + "reformatted.  Setting up the processing pipeline to parse and reformat the request payload."
+            );
             requestPipelineOrchestrator.addContentRepackingHandlers(ctx, streamingAuthTransformer);
             ctx.fireChannelRead(httpJsonMessage);
         }
