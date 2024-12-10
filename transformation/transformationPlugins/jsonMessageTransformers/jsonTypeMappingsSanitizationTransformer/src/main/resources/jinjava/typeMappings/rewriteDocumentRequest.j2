@@ -1,0 +1,15 @@
+{%- import "typeMappings/makeNoop.j2" as noop -%}
+{%- import "typeMappings/rewriteIndexForTarget.j2" as transidx -%}
+
+{%- macro rewrite_doc_request(match, input_map) -%}
+    {%- set target_index = transidx.convert_source_index_to_target(match.group1, match.group2, input_map.index_mappings, input_map.regex_index_mappings) -%}
+    {%- if target_index is none -%}
+        {{- noop.make_request() -}}
+    {%- else -%}
+        {
+        "method": "{{ input_map.request.method }}",
+        "URI": "/{{ target_index }}/_doc/{{ match.group3 }}",
+        "preserveWhenMissing": "*"
+        }
+    {%-  endif -%}
+{%- endmacro -%}

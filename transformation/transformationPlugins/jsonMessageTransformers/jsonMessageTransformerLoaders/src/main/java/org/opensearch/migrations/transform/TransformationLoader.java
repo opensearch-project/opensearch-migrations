@@ -148,7 +148,11 @@ public class TransformationLoader {
         @Override
         public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
             var headers = (Map<String, Object>) incomingJson.get(JsonKeysForHttpMessage.HEADERS_KEY);
-            headers.replace("host", newHostName);
+            if (headers != null) {
+                headers.replace("host", newHostName);
+            } else {
+                log.atDebug().setMessage("Host header is null in incoming message: {}").addArgument(incomingJson).log();
+            }
             return incomingJson;
         }
     }

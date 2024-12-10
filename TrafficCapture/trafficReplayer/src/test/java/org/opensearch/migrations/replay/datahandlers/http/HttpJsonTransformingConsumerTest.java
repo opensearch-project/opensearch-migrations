@@ -25,6 +25,7 @@ import org.opensearch.migrations.transform.RemovingAuthTransformerFactory;
 import org.opensearch.migrations.transform.TransformationLoader;
 import org.opensearch.migrations.utils.TrackedFuture;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.util.ReferenceCountUtil;
@@ -331,8 +332,11 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
             new TransformationLoader().getTransformerFactoryLoader(
                 HOST_NAME,
                 null,
-                "[{\"JsonTransformerForOpenSearch23PlusTargetTransformerProvider\":\"\"}]"
-            ),
+                new ObjectMapper().writeValueAsString(List.of(
+                    Map.of("JsonJinjavaTransformerProvider", Map.of(
+                        "template", "{%- throw \"intentional exception\" -%}"
+                    ))
+                ))),
             null,
             testPacketCapture,
             rootContext.getTestConnectionRequestContext(0)
@@ -362,10 +366,7 @@ class HttpJsonTransformingConsumerTest extends InstrumentationTest {
         );
         var outputAndResult = finalizationFuture.get();
         Assertions.assertInstanceOf(TransformationException.class,
-            TrackedFuture.unwindPossibleCompletionException(outputAndResult.transformationStatus.getException()),
-            "It's acceptable for now that the OpenSearch upgrade transformation can't handle non-json " +
-                "content.  If that Transform wants to handle this on its own, we'll need to use another transform " +
-                "configuration so that it throws and we can do this test.");
+            TrackedFuture.unwindPossibleCompletionException(outputAndResult.transformationStatus.getException()));
         var combinedOutputBuf = outputAndResult.transformedOutput.getResponseAsByteBuf();
         Assertions.assertTrue(combinedOutputBuf.readableBytes() == 0);
         combinedOutputBuf.release();
