@@ -85,13 +85,13 @@ public class EndToEndTest extends SourceTestBase {
             // So we explicitly set it.
             String body = String.format(
                 "{" +
-                "  \"settings\": {" +
-                "    \"index\": {" +
-                "      \"number_of_shards\": %d," +
-                "      \"number_of_replicas\": 0" +
-                "    }" +
-                "  }" +
-                "}",
+                    "  \"settings\": {" +
+                    "    \"index\": {" +
+                    "      \"number_of_shards\": %d," +
+                    "      \"number_of_replicas\": 0" +
+                    "    }" +
+                    "  }" +
+                    "}",
                 numberOfShards
             );
             sourceClusterOperations.createIndex(indexName, body);

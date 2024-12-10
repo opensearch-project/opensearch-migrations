@@ -54,10 +54,10 @@ public class SourceTestBase {
     public static final long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
 
     protected static Object[] makeParamsForBase(SearchClusterContainer.ContainerVersion baseSourceImage) {
-        return new Object[] {
+        return new Object[]{
             baseSourceImage,
             GENERATOR_BASE_IMAGE,
-            new String[] { "/root/runTestBenchmarks.sh", "--endpoint", "http://" + SOURCE_SERVER_ALIAS + ":9200/" } };
+            new String[]{"/root/runTestBenchmarks.sh", "--endpoint", "http://" + SOURCE_SERVER_ALIAS + ":9200/"}};
     }
 
     @AllArgsConstructor
@@ -102,7 +102,7 @@ public class SourceTestBase {
         Version version,
         boolean compressionEnabled
     ) {
-        for (int runNumber = 1;; ++runNumber) {
+        for (int runNumber = 1; ; ++runNumber) {
             try {
                 var workResult = migrateDocumentsWithOneWorker(
                     sourceRepo,
@@ -146,7 +146,8 @@ public class SourceTestBase {
         }
     }
 
-    static class LeasePastError extends Error {}
+    static class LeasePastError extends Error {
+    }
 
     @SneakyThrows
     public static DocumentsRunner.CompletionStatus migrateDocumentsWithOneWorker(
