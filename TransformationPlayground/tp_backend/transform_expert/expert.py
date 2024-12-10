@@ -25,8 +25,8 @@ class Expert:
     system_prompt_factory: Callable[[Dict[str, Any]], SystemMessage]
     tools: ToolBundle
 
-def get_expert(source_version: SourceVersion, target_version: TargetVersion, input_shape_type: TransformType, transform_language: TransformLanguage) -> Expert:
-    logger.info(f"Building expert for: {source_version}, {target_version}, {input_shape_type}, {transform_language}")
+def get_expert(source_version: SourceVersion, target_version: TargetVersion, transform_type: TransformType, transform_language: TransformLanguage) -> Expert:
+    logger.info(f"Building expert for: {source_version}, {target_version}, {transform_type}, {transform_language}")
 
     # Get the tool bundle for the given transform language
     tool_bundle = get_tool_bundle(transform_language)
@@ -43,7 +43,7 @@ def get_expert(source_version: SourceVersion, target_version: TargetVersion, inp
     # Define our Bedrock LLM and attach the tools to it
     llm = ChatBedrockConverse(
         model="anthropic.claude-3-5-sonnet-20240620-v1:0", # This is the older version of the model, could be updated
-        temperature=0,
+        temperature=0, # Suitable for straightforward, practical code generation
         max_tokens=4096,
         region_name="us-west-2", # Somewhat necessary to hardcode, as models are only available in limited regions
         config=config
@@ -55,7 +55,7 @@ def get_expert(source_version: SourceVersion, target_version: TargetVersion, inp
         system_prompt_factory=get_system_prompt_factory(
             source_version=source_version,
             target_version=target_version,
-            input_shape_type=input_shape_type,
+            input_shape_type=transform_type,
             transform_language=transform_language
         ),
         tools=tool_bundle

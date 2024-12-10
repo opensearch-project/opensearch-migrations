@@ -23,74 +23,45 @@ class EnumChoiceField(serializers.ChoiceField):
     def to_representation(self, value):
         # Convert the Enum member back to its value for representation
         return value.value if isinstance(value, self.enum) else value
+    
+class IndexShapeField(serializers.Field):
+    """
+    Custom serializer field to validate index shape data with the structure:
+    {"index_name": <string>, "index_json": <dict>}
+    """
 
+    def to_internal_value(self, data: Dict[str, Any]) -> Dict[str, Any]:
+        if not isinstance(data, dict):
+            raise serializers.ValidationError("Must be a JSON object.")
 
-class TransformationCreateRequestSerializer(serializers.Serializer):
-    transform_type = EnumChoiceField(enum=TransformType)
-    transform_language = EnumChoiceField(enum=TransformLanguage)
-    source_version = EnumChoiceField(enum=SourceVersion)
-    target_version = EnumChoiceField(enum=TargetVersion)
-    input_shape = serializers.JSONField()
-    test_target_url = serializers.URLField(required=False, default=None)
-
-    def validate_input_shape(self, value: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Custom validation to ensure `input_shape` has the required structure:
-        {"index_name": <string>, "index_json": <dict>}
-        """
         # Ensure required keys exist
-        if not isinstance(value, dict):
-            raise serializers.ValidationError("input_shape must be a JSON object.")
-        if 'index_name' not in value or 'index_json' not in value:
+        if 'index_name' not in data or 'index_json' not in data:
             raise serializers.ValidationError(
-                "input_shape must contain 'index_name' and 'index_json' keys."
+                "Must contain 'index_name' and 'index_json' keys."
             )
 
         # Validate `index_name`
-        if not isinstance(value['index_name'], str):
+        if not isinstance(data['index_name'], str):
             raise serializers.ValidationError("'index_name' must be a string.")
 
         # Validate `index_json`
-        if not isinstance(value['index_json'], dict):
+        if not isinstance(data['index_json'], dict):
             raise serializers.ValidationError("'index_json' must be a dictionary.")
 
+        return data
+
+    def to_representation(self, value: Dict[str, Any]) -> Dict[str, Any]:
+        # Pass-through representation logic
         return value
+
+
+class TransformsIndexCreateRequestSerializer(serializers.Serializer):
+    transform_language = EnumChoiceField(enum=TransformLanguage)
+    source_version = EnumChoiceField(enum=SourceVersion)
+    target_version = EnumChoiceField(enum=TargetVersion)
+    input_shape = IndexShapeField()
+    test_target_url = serializers.URLField(required=False, default=None)
     
-class TransformationCreateResponseSerializer(serializers.Serializer):
-    # Define our fields
-    output_shape = serializers.JSONField()
+class TransformsIndexCreateResponseSerializer(serializers.Serializer):
+    output_shape = serializers.ListField(child=IndexShapeField())
     transform_logic = serializers.CharField()
-
-    # Define our custom validation methods
-    def validate_output_shape(self, value: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Custom validation to ensure `output_shape` has the required structure:
-        [
-            {"index_name": <string>, "index_json": <dict>},
-            ...
-        ]
-        """
-        # Ensure "output_shape" is a list
-        if not isinstance(value, list):
-            raise serializers.ValidationError("output_shape must be a JSON list.")
-        
-        # Ensure each item in the list is a dictionary
-        for item in value:
-            if not isinstance(item, dict):
-                raise serializers.ValidationError("Each item in output_shape must be a JSON object.")
-            
-            # Ensure required keys exist
-            if 'index_name' not in item or 'index_json' not in item:
-                raise serializers.ValidationError(
-                    "Each item in output_shape must contain 'index_name' and 'index_json' keys."
-                )
-
-            # Validate `index_name`
-            if not isinstance(item['index_name'], str):
-                raise serializers.ValidationError("'index_name' must be a string.")
-
-            # Validate `index_json`
-            if not isinstance(item['index_json'], dict):
-                raise serializers.ValidationError("'index_json' must be a dictionary.")
-
-        return value

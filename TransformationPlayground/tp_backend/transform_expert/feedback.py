@@ -49,7 +49,6 @@ def test_index_transform(transform_task: TransformTask, test_client: OpenSearchC
             report.append_entry("Loaded the transform function without exceptions", logger.info)
         except Exception as e:
             report.append_entry("The transform function loading has failed", logger.error)
-            report.append_entry(f"Error: {str(e)}", logger.error)
             raise e
 
         report.append_entry("Attempting to invoke the transform function against the input...", logger.info)
