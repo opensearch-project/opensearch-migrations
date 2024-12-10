@@ -72,7 +72,8 @@ public class SnapshotStateTest {
         operations.createDocument(indexName, document1Id, document1Body);
 
         final var snapshotName = "snapshot-1";
-        operations.takeSnapshot(snapshotName, indexName);
+        final var repoName = "test-repo";
+        operations.takeSnapshot(repoName, snapshotName, indexName);
 
         final File snapshotCopy = new File(localDirectory + "/snapshotCopy");
         cluster.copySnapshotData(snapshotCopy.getAbsolutePath());
@@ -110,7 +111,8 @@ public class SnapshotStateTest {
         operations.createDocument(indexName, document1Id, document1Body);
         operations.deleteDocument(indexName, document1Id);
         final var snapshotName = "snapshot-delete-item";
-        operations.takeSnapshot(snapshotName, indexName);
+        var repoName = "test-repo";
+        operations.takeSnapshot(repoName, snapshotName, indexName);
 
         final File snapshotCopy = new File(localDirectory + "/snapshotCopy");
         cluster.copySnapshotData(snapshotCopy.getAbsolutePath());
@@ -145,7 +147,8 @@ public class SnapshotStateTest {
         operations.createDocument(indexName, document1Id, document1BodyUpdated);
 
         final var snapshotName = "snapshot-delete-item";
-        operations.takeSnapshot(snapshotName, indexName);
+        final var repoName = "test-repo";
+        operations.takeSnapshot(repoName, snapshotName, indexName);
 
         final File snapshotCopy = new File(localDirectory + "/snapshotCopy");
         cluster.copySnapshotData(snapshotCopy.getAbsolutePath());

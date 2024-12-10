@@ -59,15 +59,15 @@ public class MigrateOrEvaluateArgs {
     public Version sourceVersion = null;
 
     @ParametersDelegate
-    public MetadataTransformerParams metadataTransformationParams = new MetadataTransformationParams();
+    public MetadataTransformationParams metadataTransformationParams = new MetadataTransformationParams();
 
     @ParametersDelegate
     public TransformerParams metadataCustomTransformationParams = new MetadataCustomTransformationParams();
 
     @Getter
     public static class MetadataTransformationParams implements MetadataTransformerParams {
-        @Parameter(names = {"--multi-type-behavior"}, description = "How to resolve multi type mappings e.g SPLIT or UNION.", converter = MultiTypeResolutionBehaviorConverter.class)
-        public IndexMappingTypeRemoval.MultiTypeResolutionBehavior multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.SPLIT;
+        @Parameter(names = {"--multi-type-behavior"}, description = "Define behavior for resolving multi type mappings.")
+        public IndexMappingTypeRemoval.MultiTypeResolutionBehavior multiTypeResolutionBehavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.NONE;
     }
 
     @Getter

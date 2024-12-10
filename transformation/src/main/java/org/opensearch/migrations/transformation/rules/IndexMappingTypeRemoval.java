@@ -43,6 +43,7 @@ import lombok.extern.slf4j.Slf4j;
 @AllArgsConstructor
 public class IndexMappingTypeRemoval implements TransformationRule<Index> {
     public enum MultiTypeResolutionBehavior {
+        NONE,
         UNION,
         SPLIT
     }

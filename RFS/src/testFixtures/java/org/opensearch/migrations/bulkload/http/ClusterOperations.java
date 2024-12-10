@@ -178,6 +178,17 @@ public class ClusterOperations {
     }
 
     @SneakyThrows
+    public String attemptCreateIndex(final String index, final String body) {
+        var createIndexRequest = new HttpPut(clusterUrl + "/" + index);
+        createIndexRequest.setEntity(new StringEntity(body));
+        createIndexRequest.setHeader("Content-Type", "application/json");
+
+        try (var response = httpClient.execute(createIndexRequest)) {
+            return EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+        }
+    }
+
+    @SneakyThrows
     public Map.Entry<Integer, String> get(final String path) {
         final var getRequest = new HttpGet(clusterUrl + path);
 
@@ -187,17 +198,17 @@ public class ClusterOperations {
         }
     }
 
-    public void takeSnapshot(final String snapshotName, final String indexPattern) throws IOException {
+    public void takeSnapshot(final String repoName, final String snapshotName, final String indexPattern) throws IOException {
         final var snapshotJson = "{\n"
             + "  \"indices\": \""
             + indexPattern
             + "\",\n"
             + "  \"ignore_unavailable\": true,\n"
-            + "  \"include_global_state\": false\n"
+            + "  \"include_global_state\": true\n"
             + "}";
 
         final var createSnapshotRequest = new HttpPut(
-            clusterUrl + "/_snapshot/test-repo/" + snapshotName + "?wait_for_completion=true"
+            clusterUrl + "/_snapshot/" + repoName + "/" + snapshotName + "?wait_for_completion=true"
         );
         createSnapshotRequest.setEntity(new StringEntity(snapshotJson));
         createSnapshotRequest.setHeader("Content-Type", "application/json");
