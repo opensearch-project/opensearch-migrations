@@ -22,6 +22,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -176,6 +177,7 @@ class MultiTypeMappingTransformationTest {
     }
 
     @SneakyThrows
+    @Disabled("This test is disabled because ES5 does not allow multiple types with the same field name and different types")
     @Test
     public void multiTypeTransformationTest_union_withConflicts() {
         try (
@@ -196,21 +198,37 @@ class MultiTypeMappingTransformationTest {
             // Test data
             var originalIndexName = "test_index";
 
+            var sourceClient = new OpenSearchClient(ConnectionContextTestParams.builder()
+                    .host(indexCreatedCluster.getUrl())
+                    .insecure(true)
+                    .build()
+                    .toConnectionContext());
+
+            var mappings = "{" +
+            "  \"type1\": {" +
+            "    \"properties\": {" +
+            "      \"field1\": { \"type\": \"float\" }" +
+            "    }" +
+            "  }," +
+            "  \"type2\": {" +
+            "    \"properties\": {" +
+            "      \"field1\": { \"type\": \"long\" }" +
+            "    }" +
+            "  }" +
+            "}";
+
             // Create index and add a document on the source cluster
-            indexCreatedOperations.createIndex(originalIndexName);
-            indexCreatedOperations.createDocument(originalIndexName, "1", "{\"field1\":123}", null, "type1");
-            indexCreatedOperations.createDocument(originalIndexName, "2", "{\"field1\":1.1}", null, "type2");
+            indexCreatedOperations.createIndexWithMappings(originalIndexName, mappings);
+            sourceClient.refresh(null);
+            indexCreatedOperations.createDocument(originalIndexName, "1", "{\"field1\":1.1}", null, "type1");
+            sourceClient.refresh(null);
+            indexCreatedOperations.createDocument(originalIndexName, "2", "{\"field1\":\"My Name\"}", null, "type2");
 
             var arguments = new MigrateOrEvaluateArgs();
 
             // Use SnapshotImage as the transfer medium
             var snapshotName = "initial-setup-snapshot";
             var snapshotContext = SnapshotTestContext.factory().noOtelTracking();
-            var sourceClient = new OpenSearchClient(ConnectionContextTestParams.builder()
-                    .host(indexCreatedCluster.getUrl())
-                    .insecure(true)
-                    .build()
-                    .toConnectionContext());
             var snapshotCreator = new FileSystemSnapshotCreator(
                     snapshotName,
                     sourceClient,
@@ -284,6 +302,7 @@ class MultiTypeMappingTransformationTest {
             var actualCreationResult = result.getItems().getIndexes().get(0);
             assertThat(actualCreationResult.getException(), instanceOf(IndexTransformationException.class));
             assertThat(actualCreationResult.getName(), equalTo(originalIndexName));
+            assertThat(actualCreationResult.getException().getMessage(), equalTo("test"));
 
             // Verify that the transformed index exists on the target cluster
             var res = targetOperations.get("/" + originalIndexName);

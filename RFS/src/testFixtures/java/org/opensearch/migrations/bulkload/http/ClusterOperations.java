@@ -140,6 +140,19 @@ public class ClusterOperations {
         }
     }
 
+    public void createIndexWithMappings(final String index, final String mappings) {
+        var body = "{" +
+                "  \"settings\": {" +
+                "    \"index\": {" +
+                "      \"number_of_shards\": 5," +
+                "      \"number_of_replicas\": 0" +
+                "    }" +
+                "  }," +
+                "  \"mappings\": " + mappings +
+                "}";
+        createIndex(index, body);
+    }
+
     public void createIndex(final String index) {
         var body = "{" + //
         "  \"settings\": {" + //
