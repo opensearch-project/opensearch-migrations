@@ -53,9 +53,9 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
     private static final ObjectMapper MAPPER = new ObjectMapper();
     public final MultiTypeResolutionBehavior multiTypeResolutionBehavior;
 
-    // Default with SPLIT
+    // Default with NONE
     public IndexMappingTypeRemoval() {
-        this(MultiTypeResolutionBehavior.SPLIT);
+        this(MultiTypeResolutionBehavior.NONE);
     }
 
     @Override
@@ -76,6 +76,9 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
         // 1. <pre>{"mappings": [{ "foo": {...} }, { "bar": {...} }]}</pre>
         // 2. <pre>{"mappings": [{ "foo": {...}, "bar": {...}  }]}</pre>
         if (mappingNode.isArray() && (mappingNode.size() > 1 || mappingNode.get(0).size() > 1)) {
+            if (MultiTypeResolutionBehavior.NONE.equals(multiTypeResolutionBehavior)) {
+                return new Unsupported("No multi type resolution behavior declared");
+            }
             if (MultiTypeResolutionBehavior.SPLIT.equals(multiTypeResolutionBehavior)) {
                 return new Unsupported("Split on multiple mapping types is not supported");
             }
