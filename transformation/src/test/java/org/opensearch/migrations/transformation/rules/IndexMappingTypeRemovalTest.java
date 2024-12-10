@@ -66,7 +66,7 @@ public class IndexMappingTypeRemovalTest {
                 defaultMappingProperties + //
                 "  }\n" + //
                 "}],\n"
-        );
+    );
 
     private final BiFunction<String, String, ObjectNode> mutlipleMappingsWithSingleTypes = (
         typeName1,
@@ -82,21 +82,21 @@ public class IndexMappingTypeRemovalTest {
                 defaultMappingProperties + //
                 "  }\n" + //
                 "}],\n"
-        );
+    );
 
     private final BiFunction<String, String, ObjectNode> conflictingMappingWithMultipleTypes = (typeName1, typeName2) -> indexSettingJson(
         "\"mappings\": [{\n" +
-        "  \"" + typeName1 + "\": {\n" +
-        "    \"properties\": {\n" +
-        "      \"age\": { \"type\": \"integer\" }\n" +
-        "    }\n" +
-        "  }},{\n" +
-        "  \"" + typeName2 + "\": {\n" +
-        "    \"properties\": {\n" +
-        "      \"age\": { \"type\": \"text\" }\n" +
-        "    }\n" +
-        "  }\n" +
-        "}],\n"
+            "  \"" + typeName1 + "\": {\n" +
+            "    \"properties\": {\n" +
+            "      \"age\": { \"type\": \"integer\" }\n" +
+            "    }\n" +
+            "  }},{\n" +
+            "  \"" + typeName2 + "\": {\n" +
+            "    \"properties\": {\n" +
+            "      \"age\": { \"type\": \"text\" }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}],\n"
     );
 
 
@@ -119,14 +119,21 @@ public class IndexMappingTypeRemovalTest {
     }
 
     private CanApplyResult canApply(final ObjectNode indexJson) {
-        var transformer = new IndexMappingTypeRemoval();
+        return canApply(IndexMappingTypeRemoval.MultiTypeResolutionBehavior.NONE, indexJson);
+    }
+
+    private CanApplyResult canApply(final IndexMappingTypeRemoval.MultiTypeResolutionBehavior behavior, final ObjectNode indexJson) {
+        var transformer = new IndexMappingTypeRemoval(behavior);
         var index = mock(Index.class);
         Mockito.when(index.getRawJson()).thenReturn(indexJson);
         return transformer.canApply(index);
     }
-
     private boolean applyTransformation(final ObjectNode indexJson) {
-        var transformer = new IndexMappingTypeRemoval();
+        return applyTransformation(IndexMappingTypeRemoval.MultiTypeResolutionBehavior.NONE, indexJson);
+    }
+
+    private boolean applyTransformation(final IndexMappingTypeRemoval.MultiTypeResolutionBehavior behavior, final ObjectNode indexJson) {
+        var transformer = new IndexMappingTypeRemoval(behavior);
         var index = mock(Index.class);
         Mockito.when(index.getRawJson()).thenReturn(indexJson);
 
@@ -221,34 +228,46 @@ public class IndexMappingTypeRemovalTest {
         assertThat(indexJson.toPrettyString(), not(containsString(typeName)));
     }
 
-    @Test
-    void testApplyTransformation_twoCustomTypes() {
+    @ParameterizedTest
+    @CsvSource({
+        "SPLIT, Split on multiple mapping types is not supported",
+        "NONE, No multi type resolution behavior declared"
+    })
+    void testApplyTransformation_twoCustomTypes(String resolutionBehavior, String expectedReason) {
         // Setup
         var originalJson = mappingWithMutlipleTypes.apply("t1", "t2");
         var indexJson = originalJson.deepCopy();
 
+        var behavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.valueOf(resolutionBehavior);
+
         // Action
-        var wasChanged = applyTransformation(indexJson);
-        var canApply = canApply(originalJson);
+        var wasChanged = applyTransformation(behavior, indexJson);
+        var canApply = canApply(behavior, originalJson);
         assertThat(canApply, instanceOf(Unsupported.class));
-        assertThat(((Unsupported) canApply).getReason(), equalTo("Split on multiple mapping types is not supported"));
+        assertThat(((Unsupported) canApply).getReason(), equalTo(expectedReason));
 
         // Verification
         assertThat(wasChanged, equalTo(false));
         assertThat(originalJson.toPrettyString(), equalTo(indexJson.toPrettyString()));
     }
 
-    @Test
-    void testApplyTransformation_twoMappingEntries() {
+
+    @ParameterizedTest
+    @CsvSource({
+        "SPLIT, Split on multiple mapping types is not supported",
+        "NONE, No multi type resolution behavior declared"
+    })
+    void testApplyTransformation_twoMappingEntries(String resolutionBehavior, String expectedReason) {
         // Setup
         var originalJson = mutlipleMappingsWithSingleTypes.apply("t1", "t2");
         var indexJson = originalJson.deepCopy();
+        var behavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.valueOf(resolutionBehavior);
 
         // Action
-        var wasChanged = applyTransformation(indexJson);
-        var canApply = canApply(originalJson);
+        var wasChanged = applyTransformation(behavior, indexJson);
+        var canApply = canApply(behavior, originalJson);
         assertThat(canApply, instanceOf(Unsupported.class));
-        assertThat(((Unsupported) canApply).getReason(), equalTo("Split on multiple mapping types is not supported"));
+        assertThat(((Unsupported) canApply).getReason(), equalTo(expectedReason));
 
         // Verification
         assertThat(wasChanged, equalTo(false));
@@ -306,27 +325,5 @@ public class IndexMappingTypeRemovalTest {
         // Action & Verification
         var exception = assertThrows(IllegalArgumentException.class, () -> applyTransformation(indexJson, transformer));
         assertThat(exception.getMessage(), containsString("Conflicting definitions for property during union age"));
-    }
-
-    @ParameterizedTest
-    @CsvSource({
-        "SPLIT, Split on multiple mapping types is not supported",
-        "NONE, No multi type resolution behavior declared"
-    })
-    void testApplyTransformation_multiType_unsupported(String resolutionBehavior, String expectedReason) {
-        // Setup
-        var behavior = IndexMappingTypeRemoval.MultiTypeResolutionBehavior.valueOf(resolutionBehavior);
-        var originalJson = mappingWithMutlipleTypes.apply("type1", "type2");
-        var indexJson = originalJson.deepCopy();
-        var transformer = new IndexMappingTypeRemoval(behavior);
-
-        // Action & Verification
-        var wasChanged = applyTransformation(indexJson, transformer);
-        var canApply = transformer.canApply(createMockIndex(originalJson));
-
-        // Verification
-        assertThat(canApply, instanceOf(Unsupported.class));
-        assertThat(((Unsupported) canApply).getReason(), equalTo(expectedReason));
-        assertThat(wasChanged, equalTo(false));
     }
 }

@@ -55,16 +55,16 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             "ES_JAVA_OPTS", "-Xms512m -Xmx512m")),
         ELASTICSEARCH(
             new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
-                    .put("xpack.security.enabled", "false")
-                    .build()),
+                .put("xpack.security.enabled", "false")
+                .build()),
         ELASTICSEARCH_OSS(
             new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
-                    .build()),
+                .build()),
         OPENSEARCH(
             new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
-                    .put("plugins.security.disabled", "true")
-                    .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
-                    .build()
+                .put("plugins.security.disabled", "true")
+                .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
+                .build()
         );
 
         @Getter
