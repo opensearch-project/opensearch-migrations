@@ -180,7 +180,7 @@ public class ClusterOperations {
             "    \"number_of_shards\": 1\r\n" + //
             "  },\r\n" + //
             "  \"aliases\": {\r\n" + //
-            "    \"alias1\": {}\r\n" + //
+            "    \"alias_legacy\": {}\r\n" + //
             "  },\r\n" + //
             "  \"mappings\": {\r\n" + //
             "    \"_doc\": {\r\n" + //
@@ -239,7 +239,7 @@ public class ClusterOperations {
             + "        }"
             + "    },"
             + "    \"aliases\": {"
-            + "        \"alias1\": {}"
+            + "        \"alias_component\": {}"
             + "    }"
             + "},"
             + "\"version\": 1"
@@ -308,7 +308,7 @@ public class ClusterOperations {
             + "        }"
             + "    },"
             + "    \"aliases\": {"
-            + "        \"alias1\": {}"
+            + "        \"alias_index\": {}"
             + "    }"
             + "}";
 

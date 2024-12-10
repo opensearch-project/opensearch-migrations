@@ -1,5 +1,6 @@
 package org.opensearch.migrations;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
 import java.util.stream.Collectors;
@@ -13,6 +14,8 @@ import org.opensearch.migrations.metadata.CreationResult;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
+import org.hamcrest.Matcher;
+import org.hamcrest.Matchers;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -44,8 +47,13 @@ class EndToEndTest extends BaseMigrationTest {
                     .collect(Collectors.toList());
 
                 return SupportedClusters.targets().stream()
-                    .flatMap(targetCluster -> templateTypes.stream().flatMap(templateType -> Arrays.stream(TransferMedium.values())
-                        .map(transferMedium -> Arguments.of(sourceCluster, targetCluster, transferMedium, templateType))));
+                    .flatMap(targetCluster -> Arrays.stream(TransferMedium.values())
+                        .map(transferMedium -> Arguments.of(
+                            sourceCluster,
+                            targetCluster,
+                            transferMedium,
+                            templateTypes)))
+                    .collect(Collectors.toList()).stream();
             });
     }
 
@@ -54,15 +62,15 @@ class EndToEndTest extends BaseMigrationTest {
     void metadataCommand(SearchClusterContainer.ContainerVersion sourceVersion,
                          SearchClusterContainer.ContainerVersion targetVersion,
                          TransferMedium medium,
-                         TemplateType templateType) {
+                         List<TemplateType> templateTypes) {
         try (
             final var sourceCluster = new SearchClusterContainer(sourceVersion);
             final var targetCluster = new SearchClusterContainer(targetVersion)
         ) {
             this.sourceCluster = sourceCluster;
             this.targetCluster = targetCluster;
-            metadataCommandOnClusters(medium, MetadataCommands.EVALUATE, templateType);
-            metadataCommandOnClusters(medium, MetadataCommands.MIGRATE, templateType);
+            metadataCommandOnClusters(medium, MetadataCommands.EVALUATE, templateTypes);
+            metadataCommandOnClusters(medium, MetadataCommands.MIGRATE, templateTypes);
         }
     }
 
@@ -80,25 +88,42 @@ class EndToEndTest extends BaseMigrationTest {
     @SneakyThrows
     private void metadataCommandOnClusters(TransferMedium medium,
                                            MetadataCommands command,
-                                           TemplateType templateType) {
+                                           List<TemplateType> templateTypes) {
         startClusters();
 
         var testData = new TestData();
 
-        if (templateType == TemplateType.Legacy) {
-            sourceOperations.createLegacyTemplate(testData.indexTemplateName, "blog*");
-        } else if (templateType == TemplateType.Index) {
-            sourceOperations.createIndexTemplate(testData.indexTemplateName, "author", "blog*");
-        } else if (templateType == TemplateType.IndexAndComponent) {
-            sourceOperations.createComponentTemplate(testData.compoTemplateName, testData.indexTemplateName, "author", "blog*");
+        for (TemplateType templateType : templateTypes) {
+            String uniqueSuffix = templateType.name().toLowerCase();
+            String templateName = testData.indexTemplateName + "_" + uniqueSuffix;
+            String indexPattern = "blog_" + uniqueSuffix + "_*";
+            String fieldName = "author_" + uniqueSuffix;
+
+            if (templateType == TemplateType.Legacy) {
+                sourceOperations.createLegacyTemplate(templateName, indexPattern);
+                testData.aliasNames.add("alias_legacy");
+            } else if (templateType == TemplateType.Index) {
+                sourceOperations.createIndexTemplate(templateName, fieldName, indexPattern);
+                testData.aliasNames.add("alias_index");
+            } else if (templateType == TemplateType.IndexAndComponent) {
+                String componentTemplateName = testData.compoTemplateName + "_" + uniqueSuffix;
+                sourceOperations.createComponentTemplate(componentTemplateName, templateName, fieldName, indexPattern);
+                testData.aliasNames.add("alias_component");
+                testData.componentTemplateNames.add(componentTemplateName);
+            }
+            testData.templateNames.add(templateName);
+
+            // Create documents that use the templates
+            String blogIndexName = "blog_" + uniqueSuffix + "_2023";
+            sourceOperations.createDocument(blogIndexName, "222", "{\"" + fieldName + "\":\"Tobias Funke\"}");
+            testData.blogIndexNames.add(blogIndexName);
         }
 
-        // Creates a document that uses the template
-        sourceOperations.createDocument(testData.blogIndexName, "222", "{\"author\":\"Tobias Funke\"}");
         sourceOperations.createDocument(testData.movieIndexName, "123", "{\"title\":\"This is Spinal Tap\"}");
         sourceOperations.createDocument(testData.indexThatAlreadyExists, "doc66", "{}");
 
         sourceOperations.createAlias(testData.aliasName, "movies*");
+        testData.aliasNames.add(testData.aliasName);
 
         var arguments = new MigrateOrEvaluateArgs();
 
@@ -116,9 +141,10 @@ class EndToEndTest extends BaseMigrationTest {
 
         // Set up data filters
         var dataFilterArgs = new DataFilterArgs();
-        dataFilterArgs.indexAllowlist = List.of();
-        dataFilterArgs.componentTemplateAllowlist = List.of(testData.compoTemplateName);
-        dataFilterArgs.indexTemplateAllowlist = List.of(testData.indexTemplateName);
+        dataFilterArgs.indexAllowlist = Stream.concat(testData.blogIndexNames.stream(),
+            Stream.of(testData.movieIndexName, testData.indexThatAlreadyExists)).collect(Collectors.toList());
+        dataFilterArgs.componentTemplateAllowlist = testData.componentTemplateNames;
+        dataFilterArgs.indexTemplateAllowlist = testData.templateNames;
         arguments.dataFilterArgs = dataFilterArgs;
 
         targetOperations.createDocument(testData.indexThatAlreadyExists, "doc77", "{}");
@@ -126,40 +152,43 @@ class EndToEndTest extends BaseMigrationTest {
         // Execute migration
         MigrationItemResult result = executeMigration(arguments, command);
 
-        verifyCommandResults(result, templateType, testData);
+        verifyCommandResults(result, templateTypes, testData);
 
-        verifyTargetCluster(command, templateType, testData);
+        verifyTargetCluster(command, templateTypes, testData);
     }
 
     private static class TestData {
         final String compoTemplateName = "simple_component_template";
         final String indexTemplateName = "simple_index_template";
         final String aliasInTemplate = "alias1";
-        final String blogIndexName = "blog_2023";
         final String movieIndexName = "movies_2023";
         final String aliasName = "movies-alias";
         final String indexThatAlreadyExists = "already-exists";
+        final List<String> blogIndexNames = new ArrayList<>();
+        final List<String> templateNames = new ArrayList<>();
+        final List<String> componentTemplateNames = new ArrayList<>();
+        final List<String> aliasNames = new ArrayList<>();
     }
 
     private void verifyCommandResults(MigrationItemResult result,
-                                      TemplateType templateType,
+                                      List<TemplateType> templateTypes,
                                       TestData testData) {
         log.info(result.asCliOutput());
         assertThat(result.getExitCode(), equalTo(0));
 
         var migratedItems = result.getItems();
         assertThat(getNames(getSuccessfulResults(migratedItems.getIndexTemplates())),
-            containsInAnyOrder(testData.indexTemplateName));
-        assertThat(
-            getNames(getSuccessfulResults(migratedItems.getComponentTemplates())),
-            equalTo(templateType.equals(TemplateType.IndexAndComponent) ? List.of(testData.compoTemplateName) : List.of())
-        );
+            containsInAnyOrder(testData.templateNames.toArray(new String[0])));
+        assertThat(getNames(getSuccessfulResults(migratedItems.getComponentTemplates())),
+            containsInAnyOrder(testData.componentTemplateNames.toArray(new String[0])));
         assertThat(getNames(getSuccessfulResults(migratedItems.getIndexes())),
-            containsInAnyOrder(testData.blogIndexName, testData.movieIndexName));
-        assertThat(getNames(getFailedResultsByType(migratedItems.getIndexes(), CreationResult.CreationFailureType.ALREADY_EXISTS)),
+            containsInAnyOrder(Stream.concat(testData.blogIndexNames.stream(),
+                Stream.of(testData.movieIndexName)).toArray()));
+        assertThat(getNames(getFailedResultsByType(migratedItems.getIndexes(),
+                CreationResult.CreationFailureType.ALREADY_EXISTS)),
             containsInAnyOrder(testData.indexThatAlreadyExists));
         assertThat(getNames(getSuccessfulResults(migratedItems.getAliases())),
-            containsInAnyOrder(testData.aliasInTemplate, testData.aliasName));
+            containsInAnyOrder(testData.aliasNames.toArray(new String[0])));
     }
 
     private List<CreationResult> getSuccessfulResults(List<CreationResult> results) {
@@ -179,17 +208,19 @@ class EndToEndTest extends BaseMigrationTest {
     }
 
     private void verifyTargetCluster(MetadataCommands command,
-                                     TemplateType templateType,
+                                     List<TemplateType> templateTypes,
                                      TestData testData) {
         var expectUpdatesOnTarget = MetadataCommands.MIGRATE.equals(command);
         // If the command was migrate, the target cluster should have the items, if not they shouldn't
         var verifyResponseCode = expectUpdatesOnTarget ? equalTo(200) : equalTo(404);
 
-        // Check that the index was migrated
-        var res = targetOperations.get("/" + testData.blogIndexName);
-        assertThat(res.getValue(), res.getKey(), verifyResponseCode);
+        // Check that the indices were migrated
+        for (String blogIndexName : testData.blogIndexNames) {
+            var res = targetOperations.get("/" + blogIndexName);
+            assertThat(res.getValue(), res.getKey(), verifyResponseCode);
+        }
 
-        res = targetOperations.get("/" + testData.movieIndexName);
+        var res = targetOperations.get("/" + testData.movieIndexName);
         assertThat(res.getValue(), res.getKey(), verifyResponseCode);
 
         res = targetOperations.get("/" + testData.aliasName);
@@ -200,20 +231,22 @@ class EndToEndTest extends BaseMigrationTest {
 
         res = targetOperations.get("/_aliases");
         assertThat(res.getValue(), res.getKey(), equalTo(200));
-        var verifyAliasWasListed = allOf(containsString(testData.aliasInTemplate), containsString(testData.aliasName));
+        @SuppressWarnings("unchecked")
+        var verifyAliasWasListed = allOf(
+            testData.aliasNames.stream()
+                .map(Matchers::containsString)
+                .toArray(Matcher[]::new)
+        );
         assertThat(res.getValue(), expectUpdatesOnTarget ? verifyAliasWasListed : not(verifyAliasWasListed));
 
         // Check that the templates were migrated
-        if (templateType.equals(TemplateType.Legacy)) {
-            res = targetOperations.get("/_template/" + testData.indexTemplateName);
-            assertThat(res.getValue(), res.getKey(), verifyResponseCode);
-        } else if (templateType.equals(TemplateType.Index) || templateType.equals(TemplateType.IndexAndComponent)) {
-            res = targetOperations.get("/_index_template/" + testData.indexTemplateName);
-            assertThat(res.getValue(), res.getKey(), verifyResponseCode);
-            if (templateType.equals(TemplateType.IndexAndComponent)) {
-                var verifyBodyHasComponentTemplate = containsString("composed_of\":[\"" + testData.compoTemplateName + "\"]");
-                assertThat(res.getValue(), expectUpdatesOnTarget ? verifyBodyHasComponentTemplate : not(verifyBodyHasComponentTemplate));
+        for (String templateName : testData.templateNames) {
+            if (templateName.contains("legacy")) {
+                res = targetOperations.get("/_template/" + templateName);
+            } else {
+                res = targetOperations.get("/_index_template/" + templateName);
             }
+            assertThat(res.getValue(), res.getKey(), verifyResponseCode);
         }
     }
 }
