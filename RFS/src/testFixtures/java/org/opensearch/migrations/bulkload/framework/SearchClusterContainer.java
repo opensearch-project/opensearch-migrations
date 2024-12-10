@@ -21,13 +21,13 @@ import org.testcontainers.utility.DockerImageName;
 @Slf4j
 public class SearchClusterContainer extends GenericContainer<SearchClusterContainer> {
     public static final String CLUSTER_SNAPSHOT_DIR = "/tmp/snapshots";
-    public static final ContainerVersion ES_V7_10_2 = new ElasticsearchOssVersion(
-        "docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2",
-        Version.fromString("ES 7.10.2")
-    );
     public static final ContainerVersion ES_V7_17 = new ElasticsearchVersion(
         "docker.elastic.co/elasticsearch/elasticsearch:7.17.22",
         Version.fromString("ES 7.17.22")
+    );
+    public static final ContainerVersion ES_V7_10_2 = new ElasticsearchOssVersion(
+        "docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2",
+        Version.fromString("ES 7.10.2")
     );
     public static final ContainerVersion ES_V6_8_23 = new ElasticsearchOssVersion(
         "docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23",
@@ -35,8 +35,8 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     );
 
     public static final ContainerVersion ES_V5_6_13 = new ElasticsearchVersion(
-        "docker.elastic.co/elasticsearch/elasticsearch:5.6.13",
-        Version.fromString("ES 5.6.13")
+        "docker.elastic.co/elasticsearch/elasticsearch:5.6.16",
+        Version.fromString("ES 5.6.16")
     );
 
 

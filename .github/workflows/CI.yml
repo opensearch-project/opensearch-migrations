@@ -111,6 +111,44 @@ jobs:
         with:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
+      - name: Generate Cache Key from Dockerfiles
+        id: generate_cache_key
+        run: |
+          files=$(find . -type f \( -name 'docker-compose.yml' -o -name 'Dockerfile' \))
+          file_contents=$(cat $files)
+          key=$(echo "${file_contents}" | sha1sum | awk '{print $1}')
+          echo "key=${key}" >> "$GITHUB_OUTPUT"
+      - name: Cache Docker Images
+        uses: ScribeMD/docker-cache@0.5.0
+        with:
+          key: docker-${{ runner.os }}-${{ steps.generate_cache_key.outputs.key }}
+      - name: Pre pull images
+        run: |
+          pull_if_not_present() {
+            local image="$1"
+            if docker image inspect "$image" > /dev/null 2>&1; then
+              echo "Image '$image' already exists locally."
+            else
+              echo "Pulling image '$image'..."
+              docker pull "$image"
+            fi
+          }
+          images=(
+            "opensearchproject/opensearch:1.3.16"
+            "opensearchproject/opensearch:2.14.0"
+            "docker.elastic.co/elasticsearch/elasticsearch:7.17.22"
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2"
+            "docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23"
+            "docker.elastic.co/elasticsearch/elasticsearch:5.6.16"
+            "httpd:alpine"
+            "confluentinc/cp-kafka:7.5.0"
+            "ghcr.io/shopify/toxiproxy:latest"
+            "amazonlinux:2023"
+            "alpine:3.16"
+          )
+          for image in "${images[@]}"; do
+            pull_if_not_present "$image"
+          done
       - name: Run Gradle Build
         run: ./gradlew build -x test -x TrafficCapture:dockerSolution:build -x spotlessCheck --stacktrace
         env:
@@ -161,6 +199,7 @@ jobs:
         uses: ScribeMD/docker-cache@0.5.0
         with:
           key: docker-${{ runner.os }}-${{ steps.generate_cache_key.outputs.key }}
+          read-only: true
       - name: Start Docker Solution
         run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
         env:
