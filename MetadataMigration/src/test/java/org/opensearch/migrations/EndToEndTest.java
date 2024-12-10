@@ -18,7 +18,10 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
-import static org.hamcrest.CoreMatchers.*;
+import static org.hamcrest.CoreMatchers.allOf;
+import static org.hamcrest.CoreMatchers.containsString;
+import static org.hamcrest.CoreMatchers.equalTo;
+import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsInAnyOrder;
 
@@ -31,19 +34,19 @@ class EndToEndTest extends BaseMigrationTest {
 
     private static Stream<Arguments> scenarios() {
         return SupportedClusters.sources().stream()
-                .flatMap(sourceCluster -> {
-                    // Determine applicable template types based on source version
-                    List<TemplateType> templateTypes = Stream.concat(
-                                    Stream.of(TemplateType.Legacy),
-                                    (sourceCluster.getVersion().getMajor() >= 7
-                                            ? Stream.of(TemplateType.Index, TemplateType.IndexAndComponent)
-                                            : Stream.empty()))
-                            .collect(Collectors.toList());
+            .flatMap(sourceCluster -> {
+                // Determine applicable template types based on source version
+                List<TemplateType> templateTypes = Stream.concat(
+                        Stream.of(TemplateType.Legacy),
+                        (sourceCluster.getVersion().getMajor() >= 7
+                            ? Stream.of(TemplateType.Index, TemplateType.IndexAndComponent)
+                            : Stream.empty()))
+                    .collect(Collectors.toList());
 
-                    return SupportedClusters.targets().stream()
-                            .flatMap(targetCluster -> templateTypes.stream().flatMap(templateType -> Arrays.stream(TransferMedium.values())
-                                    .map(transferMedium -> Arguments.of(sourceCluster, targetCluster, transferMedium, templateType))));
-                });
+                return SupportedClusters.targets().stream()
+                    .flatMap(targetCluster -> templateTypes.stream().flatMap(templateType -> Arrays.stream(TransferMedium.values())
+                        .map(transferMedium -> Arguments.of(sourceCluster, targetCluster, transferMedium, templateType))));
+            });
     }
 
     @ParameterizedTest(name = "From version {0} to version {1}, Medium {2}, Command {3}, Template Type {4}")
@@ -53,8 +56,8 @@ class EndToEndTest extends BaseMigrationTest {
                          TransferMedium medium,
                          TemplateType templateType) {
         try (
-                final var sourceCluster = new SearchClusterContainer(sourceVersion);
-                final var targetCluster = new SearchClusterContainer(targetVersion)
+            final var sourceCluster = new SearchClusterContainer(sourceVersion);
+            final var targetCluster = new SearchClusterContainer(targetVersion)
         ) {
             this.sourceCluster = sourceCluster;
             this.targetCluster = targetCluster;
@@ -146,29 +149,29 @@ class EndToEndTest extends BaseMigrationTest {
 
         var migratedItems = result.getItems();
         assertThat(getNames(getSuccessfulResults(migratedItems.getIndexTemplates())),
-                containsInAnyOrder(testData.indexTemplateName));
+            containsInAnyOrder(testData.indexTemplateName));
         assertThat(
-                getNames(getSuccessfulResults(migratedItems.getComponentTemplates())),
-                equalTo(templateType.equals(TemplateType.IndexAndComponent) ? List.of(testData.compoTemplateName) : List.of())
+            getNames(getSuccessfulResults(migratedItems.getComponentTemplates())),
+            equalTo(templateType.equals(TemplateType.IndexAndComponent) ? List.of(testData.compoTemplateName) : List.of())
         );
         assertThat(getNames(getSuccessfulResults(migratedItems.getIndexes())),
-                containsInAnyOrder(testData.blogIndexName, testData.movieIndexName));
+            containsInAnyOrder(testData.blogIndexName, testData.movieIndexName));
         assertThat(getNames(getFailedResultsByType(migratedItems.getIndexes(), CreationResult.CreationFailureType.ALREADY_EXISTS)),
-                containsInAnyOrder(testData.indexThatAlreadyExists));
+            containsInAnyOrder(testData.indexThatAlreadyExists));
         assertThat(getNames(getSuccessfulResults(migratedItems.getAliases())),
-                containsInAnyOrder(testData.aliasInTemplate, testData.aliasName));
+            containsInAnyOrder(testData.aliasInTemplate, testData.aliasName));
     }
 
     private List<CreationResult> getSuccessfulResults(List<CreationResult> results) {
         return results.stream()
-                .filter(CreationResult::wasSuccessful)
-                .collect(Collectors.toList());
+            .filter(CreationResult::wasSuccessful)
+            .collect(Collectors.toList());
     }
 
     private List<CreationResult> getFailedResultsByType(List<CreationResult> results, CreationResult.CreationFailureType failureType) {
         return results.stream()
-                .filter(r -> failureType.equals(r.getFailureType()))
-                .collect(Collectors.toList());
+            .filter(r -> failureType.equals(r.getFailureType()))
+            .collect(Collectors.toList());
     }
 
     private List<String> getNames(List<CreationResult> items) {
