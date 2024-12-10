@@ -146,8 +146,9 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
                     "    }" +
                     "  }" +
                     "}";
-            var res = clusterOperations.attemptCreateIndex(originalIndexName, body);
-            assertThat(res, containsString("mapper [field1] cannot be changed from type [long] to [float]"));
+            var res = clusterOperations.put("/" + originalIndexName, body);
+            assertThat(res.getKey(), equalTo(400));
+            assertThat(res.getValue(), containsString("mapper [field1] cannot be changed from type [long] to [float]"));
         }
     }
 }

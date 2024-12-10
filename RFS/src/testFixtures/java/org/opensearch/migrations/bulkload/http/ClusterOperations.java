@@ -125,13 +125,15 @@ public class ClusterOperations {
     }
 
     @SneakyThrows
-    public String attemptCreateIndex(final String index, final String body) {
-        var createIndexRequest = new HttpPut(clusterUrl + "/" + index);
-        createIndexRequest.setEntity(new StringEntity(body));
-        createIndexRequest.setHeader("Content-Type", "application/json");
-
-        try (var response = httpClient.execute(createIndexRequest)) {
-            return EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+    public Map.Entry<Integer, String> put(final String path, final String body) {
+        final var putRequest = new HttpPut(clusterUrl + path);
+        if (body != null) {
+            putRequest.setEntity(new StringEntity(body));
+            putRequest.setHeader("Content-Type", "application/json");
+        }
+        try (var response = httpClient.execute(putRequest)) {
+            var responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+            return Map.entry(response.getCode(), responseBody);
         }
     }
 
