@@ -6,8 +6,6 @@ from typing import Any, Callable, Dict, List
 
 from langchain_core.messages import BaseMessage
 
-from transform_expert.utils.inference import InferenceTask
-
 
 logger = logging.getLogger("transform_expert")
 
@@ -53,12 +51,6 @@ class TransformTask:
             "transform": self.transform.to_json() if self.transform else None,
             "output": self.output if self.output else None
         }
-    
-    def to_inference_task(self) -> InferenceTask:
-        return InferenceTask(
-            transform_id=self.transform_id,
-            context=self.context
-        )
 
 class TransformInvalidSyntaxError(Exception):
     pass

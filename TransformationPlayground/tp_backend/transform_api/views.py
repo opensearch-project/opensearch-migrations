@@ -1,15 +1,12 @@
 import logging
-
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from rest_framework import status
-from .serializers import TransformsIndexCreateRequestSerializer, TransformsIndexCreateResponseSerializer
-
-
 import uuid
 
 from langchain_core.messages import HumanMessage
+from rest_framework.views import APIView
+from rest_framework.response import Response
+from rest_framework import status
 
+from .serializers import TransformsIndexCreateRequestSerializer, TransformsIndexCreateResponseSerializer
 from transform_expert.expert import get_expert, invoke_expert
 from transform_expert.parameters import TransformType
 from transform_expert.validation import test_target_connection, TestTargetInnaccessibleError, IndexTransformValidator, ValidationReport
@@ -19,6 +16,7 @@ from transform_expert.utils.transforms import TransformTask
 
 
 logger = logging.getLogger("transform_api")
+
 
 class TransformsIndexView(APIView):
     def post(self, request):
@@ -94,7 +92,7 @@ class TransformsIndexView(APIView):
 
         transform_result = invoke_expert(expert, transform_task)
 
-        # Execute the transformation on the input
-        transform_test_report = IndexTransformValidator(transform_task, test_connection).validate()
+        # Execute the transformation on the input and test it against the target cluster
+        transform_test_report = IndexTransformValidator(transform_result, test_connection).validate()
 
         return transform_test_report

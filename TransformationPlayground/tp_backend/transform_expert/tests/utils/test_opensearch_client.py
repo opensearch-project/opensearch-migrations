@@ -1,5 +1,5 @@
 from django.test import TestCase
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
 from requests import HTTPError, ConnectionError
 from transform_expert.utils.opensearch_client import OpenSearchClient
 from transform_expert.utils.rest_client import RESTClient, ConnectionDetails
