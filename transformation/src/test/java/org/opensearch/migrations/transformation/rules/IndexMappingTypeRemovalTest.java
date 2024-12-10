@@ -211,7 +211,7 @@ public class IndexMappingTypeRemovalTest {
         var wasChanged = applyTransformation(indexJson);
         var canApply = canApply(originalJson);
         assertThat(canApply, instanceOf(Unsupported.class));
-        assertThat(((Unsupported) canApply).getReason(), equalTo("Multiple mapping types are not supported"));
+        assertThat(((Unsupported) canApply).getReason(), equalTo("Split on multiple mapping types is not supported"));
 
         // Verification
         assertThat(wasChanged, equalTo(false));
@@ -228,7 +228,7 @@ public class IndexMappingTypeRemovalTest {
         var wasChanged = applyTransformation(indexJson);
         var canApply = canApply(originalJson);
         assertThat(canApply, instanceOf(Unsupported.class));
-        assertThat(((Unsupported) canApply).getReason(), equalTo("Multiple mapping types are not supported"));
+        assertThat(((Unsupported) canApply).getReason(), equalTo("Split on multiple mapping types is not supported"));
 
         // Verification
         assertThat(wasChanged, equalTo(false));

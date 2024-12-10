@@ -98,7 +98,7 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
             final var resolvedMappingsNode = MAPPER.createObjectNode();
             if (mappingsNode.size() < 2) {
                 final var mappingsInnerNode = (ObjectNode) mappingsNode.get(0);
-                var properties = mappingsInnerNode.get(PROPERTIES_KEY);
+                var properties = mappingsInnerNode.fields().next().getValue().get(PROPERTIES_KEY);
                 resolvedMappingsNode.set(PROPERTIES_KEY, properties);
             } else if (MultiTypeResolutionBehavior.UNION.equals(multiTypeResolutionBehavior)) {
                 var resolvedProperties = resolvedMappingsNode.withObjectProperty(PROPERTIES_KEY);
@@ -136,8 +136,8 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
                             });
                         }
                 );
-                index.getRawJson().set(MAPPINGS_KEY, resolvedMappingsNode);
             }
+            index.getRawJson().set(MAPPINGS_KEY, resolvedMappingsNode);
         }
 
         if (mappingsNode.isObject()) {
