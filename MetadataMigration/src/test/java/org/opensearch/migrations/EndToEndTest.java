@@ -41,17 +41,8 @@ class EndToEndTest extends BaseMigrationTest {
                             .collect(Collectors.toList());
 
                     return SupportedClusters.targets().stream()
-                            .flatMap(targetCluster -> templateTypes.stream().flatMap(templateType -> {
-                                // Generate arguments for both HTTP and SnapshotImage transfer mediums
-                                Stream<Arguments> httpArgs = Arrays.stream(MetadataCommands.values())
-                                        .map(command -> Arguments.of(sourceCluster, targetCluster, TransferMedium.Http, command, templateType));
-
-                                Stream<Arguments> snapshotArgs = Stream.of(
-                                        Arguments.of(sourceCluster, targetCluster, TransferMedium.SnapshotImage, MetadataCommands.MIGRATE, templateType)
-                                );
-
-                                return Stream.concat(httpArgs, snapshotArgs);
-                            }));
+                            .flatMap(targetCluster -> templateTypes.stream().flatMap(templateType -> Arrays.stream(TransferMedium.values())
+                                    .map(transferMedium -> Arguments.of(sourceCluster, targetCluster, transferMedium, templateType))));
                 });
     }
 
@@ -60,7 +51,6 @@ class EndToEndTest extends BaseMigrationTest {
     void metadataCommand(SearchClusterContainer.ContainerVersion sourceVersion,
                          SearchClusterContainer.ContainerVersion targetVersion,
                          TransferMedium medium,
-                         MetadataCommands command,
                          TemplateType templateType) {
         try (
                 final var sourceCluster = new SearchClusterContainer(sourceVersion);
@@ -68,7 +58,8 @@ class EndToEndTest extends BaseMigrationTest {
         ) {
             this.sourceCluster = sourceCluster;
             this.targetCluster = targetCluster;
-            metadataCommandOnClusters(medium, command, templateType);
+            metadataCommandOnClusters(medium, MetadataCommands.EVALUATE, templateType);
+            metadataCommandOnClusters(medium, MetadataCommands.MIGRATE, templateType);
         }
     }
 
@@ -110,7 +101,7 @@ class EndToEndTest extends BaseMigrationTest {
 
         switch (medium) {
             case SnapshotImage:
-                var snapshotName = createSnapshot("my_snap");
+                var snapshotName = createSnapshot("my_snap_" + command.name().toLowerCase());
                 arguments = prepareSnapshotMigrationArgs(snapshotName);
                 break;
 
