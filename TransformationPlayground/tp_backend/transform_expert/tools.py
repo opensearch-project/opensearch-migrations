@@ -5,7 +5,7 @@ from typing import List
 from langchain_core.tools import StructuredTool
 from pydantic import BaseModel, Field
 
-from transform_expert.utils.transforms import Transform
+from transform_expert.utils.transforms import TransformPython
 from transform_expert.parameters import TransformLanguage
 
 
@@ -37,8 +37,8 @@ class MakePythonTransform(BaseModel):
     description: str = Field(description="A description of the transformation logic.")
     code: str = Field(description="The executable transformation code that converts the source shape to the target shape.")
 
-def make_python_transform(imports: str, description: str, code: str) -> Transform:
-    return Transform(imports=imports, description=description, code=code)
+def make_python_transform(imports: str, description: str, code: str) -> TransformPython:
+    return TransformPython(imports=imports, description=description, code=code)
 
 make_python_transform_tool = StructuredTool.from_function(
     func=make_python_transform,

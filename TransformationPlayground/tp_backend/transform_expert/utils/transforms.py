@@ -1,3 +1,4 @@
+from abc import ABC, abstractmethod
 from dataclasses import dataclass
 import logging
 from types import ModuleType
@@ -11,8 +12,17 @@ from transform_expert.utils.inference import InferenceTask
 logger = logging.getLogger("transform_expert")
 
 
+class TransformBase(ABC):
+    @abstractmethod
+    def to_json(self) -> Dict[str, Any]:
+        pass
+
+    @abstractmethod
+    def to_file_format(self) -> str:
+        pass
+
 @dataclass
-class Transform:
+class TransformPython(TransformBase):
     imports: str
     description: str
     code: str
@@ -32,7 +42,7 @@ class TransformTask:
     transform_id: str
     input: Dict[str, Any]
     context: List[BaseMessage]
-    transform: Transform = None
+    transform: TransformBase = None
     output: List[Dict[str, Any]] = None
 
     def to_json(self) -> Dict[str, Any]:
@@ -59,7 +69,7 @@ class TransformNotInModuleError(Exception):
 class TransformNotExecutableError(Exception):
     pass
 
-def load_transform(transform: Transform) -> Callable[[Dict[str, Any]], List[Dict[str, Any]]]:
+def load_transform(transform: TransformBase) -> Callable[[Dict[str, Any]], List[Dict[str, Any]]]:
     # Take the raw transform logic and attempt to load it into an executable form
     try:
         transform_module = ModuleType("transform")

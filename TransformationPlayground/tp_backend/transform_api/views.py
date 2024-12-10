@@ -12,7 +12,7 @@ from langchain_core.messages import HumanMessage
 
 from transform_expert.expert import get_expert, invoke_expert
 from transform_expert.parameters import TransformType
-from transform_expert.feedback import test_target_connection, TestTargetInnaccessibleError, test_index_transform, TransformTaskTestReport
+from transform_expert.validation import test_target_connection, TestTargetInnaccessibleError, IndexTransformValidator, ValidationReport
 from transform_expert.utils.rest_client import RESTClient, ConnectionDetails
 from transform_expert.utils.opensearch_client import OpenSearchClient
 from transform_expert.utils.transforms import TransformTask
@@ -57,7 +57,7 @@ class TransformsIndexView(APIView):
         
         return Response(response_serializer.data, status=status.HTTP_200_OK)
     
-    def _perform_transformation(self, transform_id: str, request: TransformsIndexCreateRequestSerializer) -> TransformTaskTestReport:
+    def _perform_transformation(self, transform_id: str, request: TransformsIndexCreateRequestSerializer) -> ValidationReport:
         # Create a test client and confirm the target cluster is accessible if the connection details are provided
         if request.validated_data["test_target_url"]:
             test_connection = OpenSearchClient(
@@ -95,6 +95,6 @@ class TransformsIndexView(APIView):
         transform_result = invoke_expert(expert, transform_task)
 
         # Execute the transformation on the input
-        transform_test_report = test_index_transform(transform_result, test_connection)
+        transform_test_report = IndexTransformValidator(transform_task, test_connection).validate()
 
         return transform_test_report
