@@ -1,9 +1,10 @@
 import logging
+from requests import HTTPError, ConnectionError
 from typing import Optional, Dict, Any
 
 from transform_expert.utils.rest_client import RESTClient
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("transform_expert")
 
 class OpenSearchClient():
     rest_client: RESTClient
@@ -19,7 +20,7 @@ class OpenSearchClient():
         try:
             self.rest_client.get("")
             return True
-        except Exception as e:
+        except (HTTPError, ConnectionError) as e:
             logger.error(f"OpenSearch Cluster is not accessible: {str(e)}")
             return False
 

@@ -3,13 +3,12 @@ import requests
 import logging
 from typing import Optional, Dict, Any
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("transform_expert")
 
 @dataclass
 class ConnectionDetails:
     base_url: str
 
-# Raw REST client responsible for making HTTP requests to the OpenSearch cluster
 class RESTClient():
     def __init__(self, connection_details: ConnectionDetails) -> None:
         self.base_url = connection_details.base_url.rstrip('/')
