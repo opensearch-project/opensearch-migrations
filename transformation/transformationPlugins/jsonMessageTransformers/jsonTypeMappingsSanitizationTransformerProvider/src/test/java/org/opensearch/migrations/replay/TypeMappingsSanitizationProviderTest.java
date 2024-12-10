@@ -31,18 +31,18 @@ public class TypeMappingsSanitizationProviderTest {
     public void testSimpleTransform() throws JsonProcessingException {
         var config = Map.of("staticMappings",
             Map.of(
-                "indexA", Map.of(
-                    "type1", "indexA_1",
-                    "type2", "indexA_2"),
-                "indexB", Map.of(
-                    "type1", "indexB",
-                    "type2", "indexB"),
-                "indexC", Map.of(
-                    "type2", "indexC")),
+                "indexa", Map.of(
+                    "type1", "indexa_1",
+                    "type2", "indexa_2"),
+                "indexb", Map.of(
+                    "type1", "indexb",
+                    "type2", "indexb"),
+                "indexc", Map.of(
+                    "type2", "indexc")),
             "regexMappings", List.of(List.of("(time.*)", "(type.*)", "\\1_And_\\2")));
         final String TEST_INPUT_REQUEST = "{\n"
             + "  \"method\": \"PUT\",\n"
-            + "  \"URI\": \"/indexA/type2/someuser\",\n"
+            + "  \"URI\": \"/indexa/type2/someuser\",\n"
             + "  \"headers\": {\n"
             + "    \"host\": \"127.0.0.1\"\n"
             + "  },\n"
@@ -56,7 +56,7 @@ public class TypeMappingsSanitizationProviderTest {
             + "}\n";
         final String EXPECTED = "{\n"
             + "  \"method\": \"PUT\",\n"
-            + "  \"URI\": \"/indexA_2/_doc/someuser\",\n"
+            + "  \"URI\": \"/indexa_2/_doc/someuser\",\n"
             + "  \"headers\": {\n"
             + "    \"host\": \"127.0.0.1\"\n"
             + "  },\n"
@@ -82,8 +82,8 @@ public class TypeMappingsSanitizationProviderTest {
             Assertions.assertEquals(
                 JsonNormalizer.fromString(
                     EXPECTED.replace(
-                        "/indexA_2/_doc/someuser",
-                        "/indexA/_doc/someuser")),
+                        "/indexa_2/_doc/someuser",
+                        "/indexa_type2/_doc/someuser")),
                 JsonNormalizer.fromObject(resultFromNullConfig));
         }
     }

@@ -1,7 +1,6 @@
 package org.opensearch.migrations.transform;
 
 import java.util.LinkedHashMap;
-import java.util.List;
 
 import org.opensearch.migrations.testutils.JsonNormalizer;
 
@@ -23,13 +22,12 @@ public class TypeMappingsSanitizationDocBackfillTest {
                 "}";
 
         var expectedString = "{\n" +
-            "  \"index\": { \"_index\": \"network\", \"_id\": \"1\" },\n" +
+            "  \"index\": { \"_index\": \"performance_network\", \"_id\": \"1\" },\n" +
             "  \"source\": { \"field1\": \"value1\" }\n" +
             "}";
 
 
-        var regexIndexMappings = List.of(List.of(".*", "", ""));
-        var indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(null, regexIndexMappings);
+        var indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(null, null);
         var resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
         log.atInfo().setMessage("resultStr = {}").addArgument(() -> {
             try {

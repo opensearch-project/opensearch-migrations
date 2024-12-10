@@ -55,47 +55,71 @@ GET activity/post/_search
 
 ## Routing data to new indices
 
-The structure of the documents and indices need to change.  Some options are to use separate indices, drop some of 
+The structure of the documents and indices need to change.  Options are to use separate indices, drop some of 
 the types to make an index single-purpose, or to create an index that's the union of all the types' fields.
 
-With a simple mapping directive, we can define each of these three behaviors.  The following yaml shows how to map 
-documents into two different indices named users and posts: 
+Specific instances of those behaviors can be expressed via a map (or dictionary) or indices to types to target indices.
+The following sample json shows how to map documents from the 'activity' index into two different indices 
+('users' and 'posts'): 
 ```
-activity:
-  user: new_users
-  post: new_posts
-```
-
-To drop one type, just leave it out:
-```
-activity:
-  user: only_users
+{
+  "activity": {
+    "user: "new_users",
+    "post": "new_posts"
+   }
 ```
 
-To merge types together, use the same value:
+To drop the 'post' type, just leave it out:
 ```
-activity:
-  user: any_activity
-  post: any_activity
-```
-
-Any _indices_ that are NOT specified won't be modified - all additions, changes, and queries on those other indices not
-specified at the root level will remain untouched by the static mapping rewriter.  However, missing types from a 
-specified index will be removed.  To remove ALL the activity for a given index, specify an index with no
-children types.
-```
-activity: {}
+{
+  "activity": {
+    "user": "only_users"
+  }
+}
 ```
 
-In addition to static source/target mappings, users can specify source and type pairs as a regex and use any captured 
-groups in the target index name.  Regex rules take precedent _after_ the static rules and are only applied when there 
-was no index match in the static mappings.  
+To merge types into a single index, use the same value:
+```
+{
+  "activity": {
+    "user": "any_activity",
+    "post": "any_activity",
+  }
+}
+```
 
-Regex replacement is controlled via an ordered list of `[indexNamePattern, typeNamePattern, replacementString]`.  
-The transformer will use the replacement for the first matched item found.  
-If none are found, unlike missing indices for static mappings, the system presumes that the index and type are 
-**NOT** to be propagated to the target - any reference to those types and their corresponding data will be suppressed.  
-To preserve all items, a default rule will need to be included.  
+To remove ALL the activity for a given index, specify an index with no children types.
+```
+{
+  "activity": {}
+}
+```
+
+Those regex rules take precedence **after** the static mappings specified above.
+
+In addition to static source/target mappings, users can specify source and type pairs as regex patterns and 
+use captured groups in the target index name.  
+Any source _indices_ that are NOT specified in the maps will be processed through the regex route rules.
+The regex rules are only applied if the source index doesn't match a key in the static route map
+
+Regex replace rules are evaluated by concatenating the source index and source types into a single string.
+The pattern components are also concatenated into a corresponding match string.
+The replacement value will replace the _matched_ part of the source index + typename and replace it with the
+specified value.
+If that specified value contains (numerical) backreferences, those will pull from the captured groups of the 
+concatenated pattern.  
+The concatenated pattern is the index pattern followed by the type pattern, meaning that the groups in the index are
+numbered from 1 and the type pattern group numbers start after all the groups from the index.
+
+Missing types from a specified index will be removed.
+When the regex pattern isn't defined `["(.*)", "(.*)", "\\1_\\2"]` is used to map each type into its own isolated
+index, preserving all data and its separation.
+
+For more details about regexes, see the [Python](https://docs.python.org/3/library/re.html#re.sub) or 
+[Java](https://docs.oracle.com/javase/8/docs/api/java/util/regex/Pattern.html) documentation.  
+This transform uses python-style backreferences (`'`\1`) for replacement patterns.
+Notice that regexes can NOT be specified in the index-type map.
+They can _only_ be used via the list, which will be evaluated in the order of the list until a match is found.
 
 The following sample shows how indices that start with 'time-' will be migrated and every other index and type not
 already matched will be dropped.
@@ -114,41 +138,18 @@ merging all types into a single index with the same name as the source index.
 ]
 ```
 
-## Final Results
+For more examples, compare the following cases.  
+Though note that anything matched by the static maps shown above will block any of these rules from being evaluated.
 
-``` 
-PUT any_activity
-{
-    "mappings": {
-      "properties": {
-        "type": {
-          "type": "keyword"
-        },
-        "name": {
-          "type": "text"
-        },
-        "user_name": {
-          "type": "keyword"
-        },
-        "email": {
-          "type": "keyword"
-        },
-        "content": {
-          "type": "text"
-        },
-        "tweeted_at": {
-          "type": "date"
-        }
-      }
-    }
-}
+| Regex Entry                                                                    | Source Index | Source Type | Target Index      | PUT Doc URL                    | Bulk Index Command                                             |
+|--------------------------------------------------------------------------------|-------------|-------------|-------------------|--------------------------------|----------------------------------------------------------------|
+| `[["time-(.*)", "(cpu)", "time-\\1-\\2"]]`                                     | time-nov11  | cpu         | time-nov11-cpu    | /time-nov11-cpu/_doc/doc512    | `{"index": {"_index": "time-nov11-cpu", "_id": "doc512" }}`    |
+| `[["time-(.*)", "(cpu)", "time-\\1-\\2"]]`                                     | logs        | access      | [DELETED]         | [DELETED]                      | [DELETED]                                                      |
+| `[["time-(.*)", "(cpu)", "time-\\1-\\2"],`<br/>` ["(.*)", "(.*)", "\\1-\\2"]]` | logs        | access      | logs_access       | /logs_access/_doc/doc513       | `{"index": {"_index": "logs_access", "_id": "doc513" }}`       |
+| `[["time-(.*)", "(cpu)", "time-\\1-\\2"],`<br/>`[["", ".*", ""]]`              | everything  | widgets     | everything        | /everything/_doc/doc514        | `{"index": {"_index": "everything", "_id": "doc514" }}`        |
+| `[["time-(.*)", "(cpu)", "time-\\1-\\2"],`<br/>`[["", ".*", ""]]`              | everything  | sprockets   | everything        | /everything/_doc/doc515        | `{"index": {"_index": "everything", "_id": "doc515" }}`        |
+| `[["time-(.*)", "(.*)-(cpu)", "\\2-\\3-\\1"]]`                                 | time-nov11  | host123-cpu | host123-cpu-nov11 | /host123-cpu-nov11/_doc/doc512 | `{"index": {"_index": "host123-cpu-nov11", "_id": "doc512" }}` |
+| `[["", ".*", ""]]`                                                             | metadata    | users       | metadata          | /metadata/_doc/doc516          | `{"index": {"_index": "metadata", "_id": "doc516" }}`          |
+| `[[".*", ".*", "leftovers"]]`                                                  | logs        | access      | leftovers         | /leftovers/_doc/doc517         | `{"index": {"_index": "leftovers", "_id": "doc517" }}`         |
+| `[[".*", ".*", "leftovers"]]`                                                  | permissions | access      | leftovers         | /leftovers/_doc/doc517         | `{"index": {"_index": "leftovers", "_id": "doc517" }}`         |
 
-PUT any_activity/_doc/someuser
-{
-  "name": "Some User",
-  "user_name": "user",
-  "email": "user@example.com"
-}
-
-
-```

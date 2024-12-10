@@ -49,7 +49,7 @@ public class TypeMappingsSanitizationTransformer extends JinjavaTransformer {
         // types of patterns are being used.
         // This regex says, match the type part and reduce it to nothing, leave the index part untouched.
         var regexIndexMappings = Optional.ofNullable(regexIndexMappingsIncoming)
-            .orElseGet(() -> (indexMappingsIncoming == null ? List.of(List.of("", ".*", "")) : List.of()));
+            .orElseGet(() -> (indexMappingsIncoming == null ? List.of(List.of("(.*)", "(.*)", "\\1_\\2")) : List.of()));
 
         return incomingJson -> Map.of("source_document", incomingJson,
             "index_mappings", indexMappings,
