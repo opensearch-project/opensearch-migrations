@@ -45,13 +45,3 @@ make_python_transform_tool = StructuredTool.from_function(
     name="MakePythonTransform",
     args_schema=MakePythonTransform
 )
-
-
-
-
-
-
-
-
-    
-

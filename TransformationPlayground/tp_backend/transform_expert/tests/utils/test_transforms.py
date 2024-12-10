@@ -36,6 +36,3 @@ class LoadTransformCase(TestCase):
 
         with self.assertRaises(TransformNotExecutableError):
             load_transform(transform)
-
-        
-

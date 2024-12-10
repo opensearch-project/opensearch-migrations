@@ -7,7 +7,7 @@ This package contains the work-in-progress code for the Transformation Playgroun
 #### Backend
 To run the backend code locally, use a Python virtual environment.  You'll need AWS Credentials in your AWS Keyring, permissions to invoke Bedrock, and to have onboarded your account to use Claude 3.5 Sonnet (`anthropic.claude-3-5-sonnet-20240620-v1:0`) in `us-west-2`.
 
-```
+```bash
 # Start in the repo root
 
 python3 -m venv venv
