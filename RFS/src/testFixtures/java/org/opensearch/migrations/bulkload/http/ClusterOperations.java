@@ -2,7 +2,12 @@ package org.opensearch.migrations.bulkload.http;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+
+import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 
 import lombok.SneakyThrows;
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
@@ -31,7 +36,7 @@ public class ClusterOperations {
         httpClient = HttpClients.createDefault();
     }
 
-    public void createSnapshotRepository(final String repoPath) throws IOException {
+    public void createSnapshotRepository(final String repoPath, final String repoName) throws IOException {
         // Create snapshot repository
         final var repositoryJson = "{\n"
             + "  \"type\": \"fs\",\n"
@@ -43,7 +48,7 @@ public class ClusterOperations {
             + "  }\n"
             + "}";
 
-        final var createRepoRequest = new HttpPut(clusterUrl + "/_snapshot/test-repo");
+        final var createRepoRequest = new HttpPut(clusterUrl + "/_snapshot/" + repoName);
         createRepoRequest.setEntity(new StringEntity(repositoryJson));
         createRepoRequest.setHeader("Content-Type", "application/json");
 
@@ -53,19 +58,72 @@ public class ClusterOperations {
     }
 
     @SneakyThrows
-    public void createDocument(final String index, final String docId, final String body) {
-        var indexDocumentRequest = new HttpPut(clusterUrl + "/" + index + "/_doc/" + docId);
-        indexDocumentRequest.setEntity(new StringEntity(body));
-        indexDocumentRequest.setHeader("Content-Type", "application/json");
+    public void deleteAllSnapshotsAndRepository(final String repoName) throws IOException {
+        // Get all snapshots in the repository
+        HttpGet getSnapshotsRequest = new HttpGet(clusterUrl + "/_snapshot/" + repoName + "/_all");
+        getSnapshotsRequest.setHeader("Content-Type", "application/json");
 
-        try (var response = httpClient.execute(indexDocumentRequest)) {
-            assertThat(response.getCode(), anyOf(equalTo(201), equalTo(200)));
+        List<String> snapshotNames = new ArrayList<>();
+        try (var response = httpClient.execute(getSnapshotsRequest)) {
+            if (response.getCode() == 200) {
+                String responseBody = EntityUtils.toString(response.getEntity());
+                // Extract snapshot names from the response
+                int index = 0;
+                while ((index = responseBody.indexOf("\"snapshot\":\"", index)) != -1) {
+                    index += "\"snapshot\":\"".length();
+                    int endIndex = responseBody.indexOf("\"", index);
+                    if (endIndex == -1) break;
+                    String snapshotName = responseBody.substring(index, endIndex);
+                    snapshotNames.add(snapshotName);
+                }
+            } else if (response.getCode() == 404) {
+                // Repository does not exist or no snapshots
+                return;
+            } else {
+                throw new IOException("Failed to list snapshots for repository " + repoName + ", status code: " + response.getCode());
+            }
+        }
+
+        // Delete each snapshot
+        for (String snapshot : snapshotNames) {
+            HttpDelete deleteSnapshotRequest = new HttpDelete(clusterUrl + "/_snapshot/" + repoName + "/" + snapshot);
+            deleteSnapshotRequest.setHeader("Content-Type", "application/json");
+            try (var response = httpClient.execute(deleteSnapshotRequest)) {
+                assertThat(response.getCode(), anyOf(equalTo(200), equalTo(202)));
+            }
+        }
+
+        // Delete the repository
+        HttpDelete deleteRepoRequest = new HttpDelete(clusterUrl + "/_snapshot/" + repoName);
+        deleteRepoRequest.setHeader("Content-Type", "application/json");
+        try (var response = httpClient.execute(deleteRepoRequest)) {
+            assertThat(response.getCode(), equalTo(200));
         }
     }
 
     @SneakyThrows
-    public void createDocument(final String index, final String docId, final String body, String routing) {
-        var indexDocumentRequest = new HttpPut(clusterUrl + "/" + index + "/_doc/" + docId + "?routing=" + routing);
+    public static void deleteSnapshotDir(SearchClusterContainer container) {
+        container.execInContainer("sh", "-c", "rm -rf " + SearchClusterContainer.CLUSTER_SNAPSHOT_DIR + "/*");
+    }
+
+    @SneakyThrows
+    public void restoreSnapshot(final String repository, final String snapshotName) {
+        var restoreRequest = new HttpPost(clusterUrl + "/_snapshot/" + repository + "/" + snapshotName + "/_restore"+ "?wait_for_completion=true");
+        restoreRequest.setHeader("Content-Type", "application/json");
+        restoreRequest.setEntity(new StringEntity("{}"));
+
+        try (var response = httpClient.execute(restoreRequest)) {
+            assertThat(response.getCode(), anyOf(equalTo(200), equalTo(202)));
+        }
+    }
+
+    public void createDocument(final String index, final String docId, final String body) {
+        createDocument(index, docId, body, null, "_doc");
+    }
+
+    @SneakyThrows
+    public void createDocument(final String index, final String docId, final String body, String routing, String type) {
+        var indexDocumentRequest = new HttpPut(clusterUrl + "/" + index + "/" + Optional.ofNullable(type).orElse("_doc") + "/" + docId + "?routing=" + routing);
         indexDocumentRequest.setEntity(new StringEntity(body));
         indexDocumentRequest.setHeader("Content-Type", "application/json");
 
@@ -122,7 +180,7 @@ public class ClusterOperations {
             + indexPattern
             + "\",\n"
             + "  \"ignore_unavailable\": true,\n"
-            + "  \"include_global_state\": true\n"
+            + "  \"include_global_state\": false\n"
             + "}";
 
         final var createSnapshotRequest = new HttpPut(

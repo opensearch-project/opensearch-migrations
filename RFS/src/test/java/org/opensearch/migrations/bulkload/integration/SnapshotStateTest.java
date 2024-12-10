@@ -53,7 +53,7 @@ public class SnapshotStateTest {
 
         // Configure operations and rfs implementation
         operations = new ClusterOperations(cluster.getUrl());
-        operations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR);
+        operations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, "test-repo");
         srfs = new SimpleRestoreFromSnapshot_ES_7_10();
     }
 

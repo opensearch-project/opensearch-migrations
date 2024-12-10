@@ -12,11 +12,13 @@ import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParam
 import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.ClusterOperations;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
+import org.opensearch.migrations.bulkload.transformers.MetadataTransformerParams;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.metadata.tracing.MetadataMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.transform.TransformerParams;
+import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
 
 import lombok.Builder;
 import lombok.Data;
@@ -215,8 +217,12 @@ class CustomTransformationTest {
         dataFilterArgs.componentTemplateAllowlist = List.of(componentTemplateName, "transformed_component_template");
         arguments.dataFilterArgs = dataFilterArgs;
 
+        // Use split for multi type mappings resolution
+        arguments.metadataTransformationParams = TestMetadataTransformationParams.builder()
+                .multiTypeResolutionBehavior(IndexMappingTypeRemoval.MultiTypeResolutionBehavior.SPLIT)
+                .build();
         // Specify the custom transformer configuration
-        arguments.metadataTransformationParams = TestTransformationParams.builder()
+        arguments.metadataCustomTransformationParams = TestCustomTransformationParams.builder()
                 .transformerConfig(customTransformationJson)
                 .build();
 
@@ -271,11 +277,18 @@ class CustomTransformationTest {
 
     @Data
     @Builder
-    private static class TestTransformationParams implements TransformerParams {
+    private static class TestCustomTransformationParams implements TransformerParams {
         @Builder.Default
         private String transformerConfigParameterArgPrefix = "";
         private String transformerConfigEncoded;
         private String transformerConfig;
         private String transformerConfigFile;
     }
+
+    @Data
+    @Builder
+    private static class TestMetadataTransformationParams implements MetadataTransformerParams {
+        private IndexMappingTypeRemoval.MultiTypeResolutionBehavior multiTypeResolutionBehavior;
+    }
+
 }

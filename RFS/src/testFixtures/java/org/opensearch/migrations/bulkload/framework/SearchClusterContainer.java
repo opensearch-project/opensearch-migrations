@@ -21,7 +21,7 @@ import org.testcontainers.utility.DockerImageName;
 @Slf4j
 public class SearchClusterContainer extends GenericContainer<SearchClusterContainer> {
     public static final String CLUSTER_SNAPSHOT_DIR = "/tmp/snapshots";
-    public static final ContainerVersion ES_V7_10_2 = new ElasticsearchVersion(
+    public static final ContainerVersion ES_V7_10_2 = new ElasticsearchOssVersion(
         "docker.elastic.co/elasticsearch/elasticsearch-oss:7.10.2",
         Version.fromString("ES 7.10.2")
     );
@@ -29,10 +29,16 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         "docker.elastic.co/elasticsearch/elasticsearch:7.17.22",
         Version.fromString("ES 7.17.22")
     );
-    public static final ContainerVersion ES_V6_8_23 = new ElasticsearchVersion(
+    public static final ContainerVersion ES_V6_8_23 = new ElasticsearchOssVersion(
         "docker.elastic.co/elasticsearch/elasticsearch-oss:6.8.23",
         Version.fromString("ES 6.8.23")
     );
+
+    public static final ContainerVersion ES_V5_6_13 = new ElasticsearchVersion(
+            "docker.elastic.co/elasticsearch/elasticsearch:5.6.13",
+            Version.fromString("ES 5.6.13")
+    );
+
 
     public static final ContainerVersion OS_V1_3_16 = new OpenSearchVersion(
         "opensearchproject/opensearch:1.3.16",
@@ -44,12 +50,18 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
     );
 
     private enum INITIALIZATION_FLAVOR {
-        ELASTICSEARCH(Map.of(
-            "discovery.type", "single-node",
-            "path.repo", CLUSTER_SNAPSHOT_DIR,
-            "ES_JAVA_OPTS", "-Xms512m -Xmx512m")),
+        BASE(Map.of("discovery.type", "single-node",
+        "path.repo", CLUSTER_SNAPSHOT_DIR,
+        "ES_JAVA_OPTS", "-Xms512m -Xmx512m")),
+        ELASTICSEARCH(
+            new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
+                    .put("xpack.security.enabled", "false")
+                    .build()),
+        ELASTICSEARCH_OSS(
+            new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
+                    .build()),
         OPENSEARCH(
-            new ImmutableMap.Builder<String, String>().putAll(ELASTICSEARCH.getEnvVariables())
+            new ImmutableMap.Builder<String, String>().putAll(BASE.getEnvVariables())
                 .put("plugins.security.disabled", "true")
                 .put("OPENSEARCH_INITIAL_ADMIN_PASSWORD", "SecurityIsDisabled123$%^")
                 .build()
@@ -133,6 +145,12 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             this.initializationType = initializationType;
         }
 
+    }
+
+    public static class ElasticsearchOssVersion extends ContainerVersion {
+        public ElasticsearchOssVersion(String imageName, Version version) {
+            super(imageName, version, INITIALIZATION_FLAVOR.ELASTICSEARCH_OSS);
+        }
     }
 
     public static class ElasticsearchVersion extends ContainerVersion {
