@@ -142,17 +142,17 @@ Migration Candidates:
 
 Transformations:
    Index:
-      ERROR - IndexMappingTypeRemoval is Unsupported on Index `logs-181998` "Split on multiple mapping types is not supported""
+      ERROR - IndexMappingTypeRemoval is Unsupported on Index `logs-181998` "No multi type resolution behavior declared""
    Index Template:
-      ERROR - IndexMappingTypeRemoval is Unsupported on Index Template `daily_logs` "Split on multiple mapping types is not supported"
+      ERROR - IndexMappingTypeRemoval is Unsupported on Index Template `daily_logs` "No multi type resolution behavior declared"
    DEBUG - 6 transformations did not apply, add --`full` to see all results
 
 Result:
    2 migration issues detected
 
 Issues:
-   IndexMappingTypeRemoval is Unsupported on Index `logs-181998` "Split on multiple mapping types is not supported""
-   IndexMappingTypeRemoval is Unsupported on Index Template `daily_logs` "Split on multiple mapping types is not supported"
+   IndexMappingTypeRemoval is Unsupported on Index `logs-181998` "No multi type resolution behavior declared""
+   IndexMappingTypeRemoval is Unsupported on Index Template `daily_logs` "No multi type resolution behavior declared"
 ```
 ### Exclude incompatible rolling logs indices
 
