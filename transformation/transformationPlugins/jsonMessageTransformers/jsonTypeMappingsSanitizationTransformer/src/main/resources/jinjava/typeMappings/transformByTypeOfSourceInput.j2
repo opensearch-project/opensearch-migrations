@@ -1,0 +1,12 @@
+{%- if not source_document -%}
+    {%- throw "No source_document was defined - nothing to transform!" -%}
+{%- endif -%}
+
+{%- if ("method" in source_document and "URI" in source_document) -%}
+    {%- include "typeMappings/httpRequests.j2" -%}
+{%- elif ("index" in source_document and "source" in source_document) -%}
+    {%- include "typeMappings/documentBackfillItems.j2" -%}
+{%- else -%}
+    {%- import "typeMappings/preserveAll.j2" as preserve -%}
+    {{- preserve.make_keep_json()  -}}
+{%- endif -%}

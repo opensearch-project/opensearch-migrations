@@ -145,7 +145,7 @@ transform to add GZIP encoding and another to apply a new header would be config
 ```
 
 To run only one transformer without any configuration, the `--transformer-config` argument can simply 
-be set to the name of the transformer (e.g. 'JsonTransformerForOpenSearch23PlusTargetTransformerProvider', 
+be set to the name of the transformer (e.g. 'TypeMappingSanitizationTransformerProvider', 
 without quotes or any json surrounding it).
 
 The user can also specify a file to read the transformations from using the `--transformer-config-file`.  Users can
@@ -153,7 +153,7 @@ also pass the script as an argument via `--transformer-config-base64`.  Each of 
 is mutually exclusive.
 
 Some simple transformations are included to change headers to add compression or to force an HTTP message payload to 
-be chunked.  Another transformer, [JsonTypeMappingTransformer.java](../../transformation/transformationPlugins/jsonMessageTransformers/openSearch23PlusTargetTransformerProvider/src/main/java/org/opensearch/migrations/transform/JsonTypeMappingTransformer.java),
+be chunked.  Another transformer, [TypeMappingSanitizationTransformer.java](../../transformation/transformationPlugins/jsonMessageTransformers/jsonTypeMappingsSanitizationTransformer/src/main/java/org/opensearch/migrations/transform/TypeMappingsSanitizationTransformer.java),
 is a work-in-progress to excise type mapping references from URIs and message payloads since versions of OpenSource
 greater than 2.3 do not support them.
 

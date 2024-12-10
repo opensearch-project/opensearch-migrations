@@ -161,6 +161,8 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
             .add("SOURCE_STATUS_CODE/TARGET_STATUS_CODE...")
             .add("SOURCE_RESPONSE_SIZE_BYTES/TARGET_RESPONSE_SIZE_BYTES...")
             .add("SOURCE_LATENCY_MS/TARGET_LATENCY_MS...")
+            .add("METHOD...")
+            .add("URI...")
             .toString();
     }
 
@@ -218,6 +220,16 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
                     transformStreamToString(parsed.targetResponseList.stream(),
                         r -> "" + r.get(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY))
             )
+            // method
+            .add(
+                parsed.sourceRequestOp
+                    .map(r -> (String) r.get(ParsedHttpMessagesAsDicts.METHOD_KEY))
+                    .orElse(MISSING_STR))
+            // uri
+            .add(
+                parsed.sourceRequestOp
+                    .map(r -> (String) r.get(ParsedHttpMessagesAsDicts.REQUEST_URI_KEY))
+                    .orElse(MISSING_STR))
             .toString();
     }
 

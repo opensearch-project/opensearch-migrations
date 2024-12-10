@@ -197,7 +197,8 @@ public class HttpByteBufFormatter {
                 } else {
                     content.release();
                 }
-            } else if (msg instanceof HttpMessage) {
+            }
+            if (msg instanceof HttpMessage) { // this & HttpContent are interfaces & 'Full' messages implement both
                 message = (HttpMessage) msg;
             }
             if (msg instanceof LastHttpContent) {
@@ -206,16 +207,16 @@ public class HttpByteBufFormatter {
                 }
                 var finalMsg = (message instanceof HttpRequest)
                     ? new DefaultFullHttpRequest(message.protocolVersion(),
-                    ((HttpRequest) message).method(),
-                    ((HttpRequest) message).uri(),
-                    aggregatedContents,
-                    message.headers(),
-                    ((LastHttpContent) msg).trailingHeaders())
+                        ((HttpRequest) message).method(),
+                        ((HttpRequest) message).uri(),
+                        aggregatedContents,
+                        message.headers(),
+                        ((LastHttpContent) msg).trailingHeaders())
                     : new DefaultFullHttpResponse(message.protocolVersion(),
-                    ((HttpResponse)message).status(),
-                    aggregatedContents,
-                    message.headers(),
-                    ((LastHttpContent) msg).trailingHeaders());
+                        ((HttpResponse)message).status(),
+                        aggregatedContents,
+                        message.headers(),
+                        ((LastHttpContent) msg).trailingHeaders());
                 super.channelRead(ctx, finalMsg);
             }
         }

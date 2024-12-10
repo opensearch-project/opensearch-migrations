@@ -9,9 +9,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class JsonConditionalTransformerProvider implements IJsonTransformerProvider {
 
-    public JsonConditionalTransformerProvider() {
-    }
-
     @Override
     @SneakyThrows
     public IJsonTransformer createTransformer(Object jsonConfig) {

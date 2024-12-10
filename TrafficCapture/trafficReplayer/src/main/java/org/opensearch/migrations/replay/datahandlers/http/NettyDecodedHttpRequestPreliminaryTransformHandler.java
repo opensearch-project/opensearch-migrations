@@ -7,7 +7,6 @@ import java.util.Objects;
 import java.util.Optional;
 
 import org.opensearch.migrations.replay.datahandlers.PayloadAccessFaultingMap;
-import org.opensearch.migrations.replay.datahandlers.PayloadNotLoadedException;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.transform.IAuthTransformer;
 import org.opensearch.migrations.transform.IJsonTransformer;
@@ -67,25 +66,38 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
             IAuthTransformer authTransformer = requestPipelineOrchestrator.authTransfomerFactory.getAuthTransformer(
                 httpJsonMessage
             );
+            HttpJsonRequestWithFaultingPayload transformedMessage = null;
+            final var payloadMap = (PayloadAccessFaultingMap) httpJsonMessage.payload();
             try {
+                payloadMap.setDisableThrowingPayloadNotLoaded(false);
+                transformedMessage = transform(transformer, httpJsonMessage);
+            } catch (Exception e) {
+                var payload = (PayloadAccessFaultingMap) httpJsonMessage.payload();
+                if (payload.missingPayloadWasAccessed()) {
+                    payload.resetMissingPayloadWasAccessed();
+                    log.atDebug().setMessage("The transforms for this message require payload manipulation, "
+                        + "all content handlers are being loaded.").log();
+                    // make a fresh message and its headers
+                    requestPipelineOrchestrator.addJsonParsingHandlers(
+                        ctx,
+                        transformer,
+                        getAuthTransformerAsStreamingTransformer(authTransformer)
+                    );
+                    ctx.fireChannelRead(handleAuthHeaders(httpJsonMessage, authTransformer));
+                } else{
+                    throw new TransformationException(e);
+                }
+            } finally {
+                payloadMap.setDisableThrowingPayloadNotLoaded(true);
+            }
+
+            if (transformedMessage != null) {
                 handlePayloadNeutralTransformationOrThrow(
                     ctx,
                     originalHttpJsonMessage,
-                    transform(transformer, httpJsonMessage),
+                    transformedMessage,
                     authTransformer
                 );
-            } catch (PayloadNotLoadedException pnle) {
-                log.debug(
-                    "The transforms for this message require payload manipulation, "
-                        + "all content handlers are being loaded."
-                );
-                // make a fresh message and its headers
-                requestPipelineOrchestrator.addJsonParsingHandlers(
-                    ctx,
-                    transformer,
-                    getAuthTransformerAsStreamingTransformer(authTransformer)
-                );
-                ctx.fireChannelRead(handleAuthHeaders(httpJsonMessage, authTransformer));
             }
         } else if (msg instanceof HttpContent) {
             ctx.fireChannelRead(msg);
@@ -148,26 +160,26 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
 
         } else if (headerFieldIsIdentical("content-encoding", originalRequest, httpJsonMessage)
             && headerFieldIsIdentical("transfer-encoding", originalRequest, httpJsonMessage)) {
-                log.info(
-                    diagnosticLabel
-                        + "There were changes to the headers that require the message to be reformatted "
-                        + "but the payload doesn't need to be transformed."
-                );
-                // By adding the baseline handlers and removing this and previous handlers in reverse order,
-                // we will cause the upstream handlers to flush their in-progress accumulated ByteBufs downstream
-                // to be processed accordingly
-                requestPipelineOrchestrator.addBaselineHandlers(pipeline);
-                ctx.fireChannelRead(httpJsonMessage);
-                RequestPipelineOrchestrator.removeThisAndPreviousHandlers(pipeline, this);
-            } else {
-                log.info(
-                    diagnosticLabel
-                        + "New headers have been specified that require the payload stream to be "
-                        + "reformatted.  Setting up the processing pipeline to parse and reformat the request payload."
-                );
-                requestPipelineOrchestrator.addContentRepackingHandlers(ctx, streamingAuthTransformer);
-                ctx.fireChannelRead(httpJsonMessage);
-            }
+            log.info(
+                diagnosticLabel
+                    + "There were changes to the headers that require the message to be reformatted "
+                    + "but the payload doesn't need to be transformed."
+            );
+            // By adding the baseline handlers and removing this and previous handlers in reverse order,
+            // we will cause the upstream handlers to flush their in-progress accumulated ByteBufs downstream
+            // to be processed accordingly
+            requestPipelineOrchestrator.addBaselineHandlers(pipeline);
+            ctx.fireChannelRead(httpJsonMessage);
+            RequestPipelineOrchestrator.removeThisAndPreviousHandlers(pipeline, this);
+        } else {
+            log.info(
+                diagnosticLabel
+                    + "New headers have been specified that require the payload stream to be "
+                    + "reformatted.  Setting up the processing pipeline to parse and reformat the request payload."
+            );
+            requestPipelineOrchestrator.addContentRepackingHandlers(ctx, streamingAuthTransformer);
+            ctx.fireChannelRead(httpJsonMessage);
+        }
     }
 
     private static HttpJsonRequestWithFaultingPayload handleAuthHeaders(

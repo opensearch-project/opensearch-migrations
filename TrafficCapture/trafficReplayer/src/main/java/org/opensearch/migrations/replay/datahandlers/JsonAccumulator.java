@@ -116,10 +116,10 @@ public class JsonAccumulator {
                     pushCompletedValue(parser.getText());
                     break;
                 case VALUE_NUMBER_INT:
-                    pushCompletedValue(parser.getIntValue());
+                    pushCompletedValue(parser.getLongValue());
                     break;
                 case VALUE_NUMBER_FLOAT:
-                    pushCompletedValue(parser.getFloatValue());
+                    pushCompletedValue(parser.getDoubleValue());
                     break;
                 case NOT_AVAILABLE:
                     // pipeline stall - need more data

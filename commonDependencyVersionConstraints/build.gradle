@@ -55,6 +55,8 @@ dependencies {
 
     def jackson = '2.16.2'
     api group: 'com.fasterxml.jackson.core', name: 'jackson-databind', version: jackson
+    api group: 'com.fasterxml.jackson.core', name: 'jackson-dataformat-yaml', version: jackson
+    api group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-yaml', version: jackson
     api group: 'com.fasterxml.jackson.dataformat', name: 'jackson-dataformat-smile', version: jackson
 
     def jupiter = '5.10.2'

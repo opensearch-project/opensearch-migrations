@@ -30,7 +30,7 @@ dependencies {
     implementation project(":RFS")
     implementation project(":transformation")
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
-    runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
+    runtimeOnly project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
 
     implementation group: 'org.apache.logging.log4j', name: 'log4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-core'
