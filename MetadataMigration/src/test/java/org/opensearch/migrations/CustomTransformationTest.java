@@ -224,10 +224,4 @@ class CustomTransformationTest extends BaseMigrationTest {
         private String transformerConfig;
         private String transformerConfigFile;
     }
-
-    @Data
-    @Builder
-    private static class TestMetadataTransformationParams implements org.opensearch.migrations.bulkload.transformers.MetadataTransformerParams {
-        private IndexMappingTypeRemoval.MultiTypeResolutionBehavior multiTypeResolutionBehavior;
-    }
 }
