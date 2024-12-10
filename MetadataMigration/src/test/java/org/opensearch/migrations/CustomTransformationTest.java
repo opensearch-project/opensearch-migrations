@@ -8,7 +8,6 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
 import org.opensearch.migrations.commands.MigrationItemResult;
 import org.opensearch.migrations.transform.TransformerParams;
-import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
 
 import lombok.Builder;
 import lombok.Data;
