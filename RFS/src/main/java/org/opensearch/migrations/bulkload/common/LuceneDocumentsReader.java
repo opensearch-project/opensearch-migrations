@@ -161,13 +161,17 @@ public class LuceneDocumentsReader {
         return reader;
     }
 
-    protected RfsLuceneDocument getDocument(IndexReader reader, int docId, boolean isLive) {
+    protected RfsLuceneDocument getDocument(IndexReader reader, int docSegId, boolean isLive) {
         Document document;
         try {
-            document = reader.document(docId);
+            document = reader.document(docSegId);
         } catch (IOException e) {
-            log.atError().setCause(e).setMessage("Failed to read document at Lucene index location {}")
-                .addArgument(docId).log();
+            log.atError()
+                .setCause(e)
+                .setMessage("Failed to read document segment id {} from source {}")
+                .addArgument(docSegId)
+                .addArgument(indexDirectoryPath)
+                .log();
             return null;
         }
 
@@ -207,18 +211,21 @@ public class LuceneDocumentsReader {
                 }
             }
             if (id == null) {
-                log.atError().setMessage("Document with index {} does not have an id. Skipping")
-                    .addArgument(docId).log();
+                log.atWarn().setMessage("Skipping document segment id {} from source {}, it does not have an referenceable id.")
+                    .addArgument(docSegId)
+                    .addArgument(indexDirectoryPath)
+                    .log();
                 return null;  // Skip documents with missing id
             }
 
             if (sourceBytes == null || sourceBytes.bytes.length == 0) {
-                log.atWarn().setMessage("Document {} doesn't have the _source field enabled")
-                    .addArgument(id).log();
+                log.atWarn().setMessage("Skipping document segment id {} document id {} from source {}, it doesn't have the _source field enabled.")
+                    .addArgument(docSegId)
+                    .addArgument(id)
+                    .addArgument(indexDirectoryPath)
+                    .log();
                 return null;  // Skip these
             }
-
-            log.atDebug().setMessage("Reading document {}").addArgument(id).log();
         } catch (RuntimeException e) {
             StringBuilder errorMessage = new StringBuilder();
             errorMessage.append("Unable to parse Document id from Document.  The Document's Fields: ");
@@ -232,7 +239,10 @@ public class LuceneDocumentsReader {
             return null; // Skip these
         }
 
-        log.atDebug().setMessage("Document {} read successfully").addArgument(id).log();
+        log.atDebug().setMessage("Document id {} from source {} read successfully.")
+            .addArgument(id)
+            .addArgument(indexDirectoryPath)
+            .log();
         return new RfsLuceneDocument(id, type, sourceBytes.utf8ToString(), routing);
     }
 }
