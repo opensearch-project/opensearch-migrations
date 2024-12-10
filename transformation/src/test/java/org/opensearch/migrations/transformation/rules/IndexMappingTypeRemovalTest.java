@@ -231,7 +231,7 @@ public class IndexMappingTypeRemovalTest {
     @ParameterizedTest
     @CsvSource({
         "SPLIT, Split on multiple mapping types is not supported",
-        "NONE, No multi type resolution behavior declared"
+        "NONE, No multi type resolution behavior declared, specify --multi-type-behavior to process"
     })
     void testApplyTransformation_twoCustomTypes(String resolutionBehavior, String expectedReason) {
         // Setup
@@ -255,7 +255,7 @@ public class IndexMappingTypeRemovalTest {
     @ParameterizedTest
     @CsvSource({
         "SPLIT, Split on multiple mapping types is not supported",
-        "NONE, No multi type resolution behavior declared"
+        "NONE, No multi type resolution behavior declared, specify --multi-type-behavior to process"
     })
     void testApplyTransformation_twoMappingEntries(String resolutionBehavior, String expectedReason) {
         // Setup

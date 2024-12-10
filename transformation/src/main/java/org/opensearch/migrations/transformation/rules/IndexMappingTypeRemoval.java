@@ -77,7 +77,7 @@ public class IndexMappingTypeRemoval implements TransformationRule<Index> {
         // 2. <pre>{"mappings": [{ "foo": {...}, "bar": {...}  }]}</pre>
         if (mappingNode.isArray() && (mappingNode.size() > 1 || mappingNode.get(0).size() > 1)) {
             if (MultiTypeResolutionBehavior.NONE.equals(multiTypeResolutionBehavior)) {
-                return new Unsupported("No multi type resolution behavior declared");
+                return new Unsupported("No multi type resolution behavior declared, specify --multi-type-behavior to process");
             }
             if (MultiTypeResolutionBehavior.SPLIT.equals(multiTypeResolutionBehavior)) {
                 return new Unsupported("Split on multiple mapping types is not supported");
