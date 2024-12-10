@@ -69,7 +69,7 @@ class MultiTypeMappingTransformationTest {
             // Create index and add a document on the source cluster
             indexCreatedOperations.createIndex(originalIndexName);
             indexCreatedOperations.createDocument(originalIndexName, "1", "{\"field1\":\"My Name\"}", null, "type1");
-            indexCreatedOperations.createDocument(originalIndexName, "2", "{\"field2\":123}", null, "type2");
+            indexCreatedOperations.createDocument(originalIndexName, "2", "{\"field1\":\"string\", \"field2\":123}", null, "type2");
             indexCreatedOperations.createDocument(originalIndexName, "3", "{\"field3\":1.1}", null, "type3");
 
             var arguments = new MigrateOrEvaluateArgs();
