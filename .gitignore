@@ -4,6 +4,7 @@ coverage.xml
 .DS_Store
 .gradle/
 .venv
+*venv
 __pycache__
 *.egg-info*
 .python-version
@@ -27,3 +28,6 @@ TrafficCapture/dockerSolution/src/main/docker/migrationConsole/staging
 
 # Directory used to temporarily store snapshots during testing
 DocumentsFromSnapshotMigration/docker/snapshots/
+
+# Local testing resources
+*db.sqlite3
