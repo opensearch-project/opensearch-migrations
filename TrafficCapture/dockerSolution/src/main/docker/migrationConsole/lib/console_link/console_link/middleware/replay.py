@@ -40,7 +40,8 @@ def scale(replayer: Replayer, units: int, *args, **kwargs) -> CommandResult[str]
     return replayer.scale(units, *args, **kwargs)
 
 
-@handle_replay_errors()
+@handle_replay_errors(
+    on_success=lambda status: (ExitCode.SUCCESS, f"{status[0]}\n{status[1]}"))
 def status(replayer: Replayer, *args, **kwargs) -> CommandResult[str]:
     logger.info("Getting replayer status")
     return replayer.get_status(*args, **kwargs)
