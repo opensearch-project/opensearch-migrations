@@ -83,7 +83,7 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
         super(DockerImageName.parse(version.imageName));
         this.withExposedPorts(9200, 9300)
             .withEnv(version.getInitializationType().getEnvVariables())
-            .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofSeconds(20)));
+            .waitingFor(Wait.forHttp("/").forPort(9200).forStatusCode(200).withStartupTimeout(Duration.ofMinutes(5)));
 
         this.containerVersion = version;
     }
