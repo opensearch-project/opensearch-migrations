@@ -3,6 +3,7 @@ FROM amazonlinux:2023
 ENV PIP_ROOT_USER_ACTION ignore
 ENV LANG C.UTF-8
 
+# procps-ng used for enabling 'watch' command on console
 RUN dnf install -y --setopt=install_weak_deps=False \
         curl-minimal \
         diffutils \
@@ -26,6 +27,7 @@ RUN dnf install -y --setopt=install_weak_deps=False \
         vim \
         wget \
         zlib-devel \
+        procps-ng \
         && \
     dnf clean all && \
     rm -rf /var/cache/dnf
