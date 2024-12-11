@@ -102,11 +102,4 @@ public class MigrateOrEvaluateArgs {
                 description = "Path to the JSON configuration file of metadata transformers.")
         private String transformerConfigFile;
     }
-
-    static class MultiTypeResolutionBehaviorConverter implements IStringConverter<IndexMappingTypeRemoval.MultiTypeResolutionBehavior> {
-        @Override
-        public IndexMappingTypeRemoval.MultiTypeResolutionBehavior convert(String value) {
-            return IndexMappingTypeRemoval.MultiTypeResolutionBehavior.valueOf(value.toUpperCase());
-        }
-    }
 }

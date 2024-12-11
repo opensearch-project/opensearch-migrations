@@ -9,6 +9,8 @@ import org.opensearch.migrations.bulkload.version_os_2_11.IndexMetadataData_OS_2
 import org.opensearch.migrations.transformation.TransformationRule;
 import org.opensearch.migrations.transformation.entity.Index;
 import org.opensearch.migrations.transformation.rules.IndexMappingTypeRemoval;
+import org.opensearch.migrations.transformation.rules.IndexSettingsMapperDynamicRemoval;
+import org.opensearch.migrations.transformation.rules.IndexSettingsMapperSingleRemoval;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -27,10 +29,17 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
         this.awarenessAttributeDimensionality = awarenessAttributeDimensionality;
         this.indexTransformations = List.of(new IndexMappingTypeRemoval(
                 params.getMultiTypeResolutionBehavior()
-        ));
-        this.indexTemplateTransformations = List.of(new IndexMappingTypeRemoval(
+            ),
+            new IndexSettingsMapperDynamicRemoval(),
+            new IndexSettingsMapperSingleRemoval()
+        );
+        this.indexTemplateTransformations = List.of(
+            new IndexMappingTypeRemoval(
                 params.getMultiTypeResolutionBehavior()
-        ));
+            ),
+            new IndexSettingsMapperDynamicRemoval(),
+            new IndexSettingsMapperSingleRemoval()
+        );
     }
 
     @Override

@@ -65,7 +65,7 @@ public class ClusterOperations {
     }
 
     public void createDocument(final String index, final String docId, final String body) {
-        createDocument(index, docId, body, null, "_doc");
+        createDocument(index, docId, body, null, "my_doc");
     }
 
     @SneakyThrows
@@ -75,7 +75,8 @@ public class ClusterOperations {
         indexDocumentRequest.setHeader("Content-Type", "application/json");
 
         try (var response = httpClient.execute(indexDocumentRequest)) {
-            assertThat(response.getCode(), anyOf(equalTo(201), equalTo(200)));
+            var responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+            assertThat(responseBody, response.getCode(), anyOf(equalTo(201), equalTo(200)));
         }
     }
 
@@ -173,7 +174,7 @@ public class ClusterOperations {
     @SneakyThrows
     public void createLegacyTemplate(final String templateName, final String pattern) throws IOException {
         final var templateJson = "{\r\n" + //
-            "  \"index_patterns\": [\r\n" + //
+            "  \"template\": [\r\n" + //
             "    \"" + pattern + "\"\r\n" + //
             "  ],\r\n" + //
             "  \"settings\": {\r\n" + //
@@ -183,7 +184,7 @@ public class ClusterOperations {
             "    \"alias_legacy\": {}\r\n" + //
             "  },\r\n" + //
             "  \"mappings\": {\r\n" + //
-            "    \"_doc\": {\r\n" + //
+            "    \"my_doc\": {\r\n" + //
             "      \"_source\": {\r\n" + //
             "        \"enabled\": true\r\n" + //
             "      },\r\n" + //
@@ -200,7 +201,7 @@ public class ClusterOperations {
             "  }\r\n" + //
             "}";
 
-        final var createRepoRequest = new HttpPut(this.clusterUrl + "/_template/" + templateName + "?include_type_name=true");
+        final var createRepoRequest = new HttpPut(this.clusterUrl + "/_template/" + templateName);
         createRepoRequest.setEntity(new StringEntity(templateJson));
         createRepoRequest.setHeader("Content-Type", "application/json");
 

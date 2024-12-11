@@ -9,6 +9,7 @@ import org.opensearch.migrations.transformation.entity.Index;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -20,6 +21,7 @@ import static org.hamcrest.MatcherAssert.assertThat;
 import static org.hamcrest.Matchers.containsString;
 import static org.hamcrest.Matchers.equalTo;
 import static org.hamcrest.Matchers.not;
+import static org.hamcrest.Matchers.allOf;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.Mockito.mock;
@@ -325,5 +327,74 @@ public class IndexMappingTypeRemovalTest {
         // Action & Verification
         var exception = assertThrows(IllegalArgumentException.class, () -> applyTransformation(indexJson, transformer));
         assertThat(exception.getMessage(), containsString("Conflicting definitions for property during union age"));
+    }
+
+    @Test
+    @SneakyThrows
+    void testFailed() {
+        var originalJson = (ObjectNode)new ObjectMapper().readTree("{\r\n" + //
+            "    \"settings\": {\r\n" + //
+            "        \"index\": {\r\n" + //
+            "            \"creation_date\": \"1733959046299\",\r\n" + //
+            "            \"number_of_shards\": \"5\",\r\n" + //
+            "            \"number_of_replicas\": \"0\",\r\n" + //
+            "            \"uuid\": \"7hZYO5c1Q8OCVAwuuH18Nw\",\r\n" + //
+            "            \"version\": {\r\n" + //
+            "                \"created\": \"5061699\"\r\n" + //
+            "            },\r\n" + //
+            "            \"provided_name\": \"test_index\"\r\n" + //
+            "        }\r\n" + //
+            "    },\r\n" + //
+            "    \"aliases\": {},\r\n" + //
+            "    \"mappings\": {\r\n" + //
+            "        \"type2\": {\r\n" + //
+            "            \"properties\": {\r\n" + //
+            "                \"field1\": {\r\n" + //
+            "                    \"type\": \"text\",\r\n" + //
+            "                    \"fields\": {\r\n" + //
+            "                        \"keyword\": {\r\n" + //
+            "                            \"type\": \"keyword\",\r\n" + //
+            "                            \"ignore_above\": 256\r\n" + //
+            "                        }\r\n" + //
+            "                    }\r\n" + //
+            "                },\r\n" + //
+            "                \"field2\": {\r\n" + //
+            "                    \"type\": \"long\"\r\n" + //
+            "                }\r\n" + //
+            "            }\r\n" + //
+            "        },\r\n" + //
+            "        \"type1\": {\r\n" + //
+            "            \"properties\": {\r\n" + //
+            "                \"field1\": {\r\n" + //
+            "                    \"type\": \"text\",\r\n" + //
+            "                    \"fields\": {\r\n" + //
+            "                        \"keyword\": {\r\n" + //
+            "                            \"type\": \"keyword\",\r\n" + //
+            "                            \"ignore_above\": 256\r\n" + //
+            "                        }\r\n" + //
+            "                    }\r\n" + //
+            "                }\r\n" + //
+            "            }\r\n" + //
+            "        },\r\n" + //
+            "        \"type3\": {\r\n" + //
+            "            \"properties\": {\r\n" + //
+            "                \"field3\": {\r\n" + //
+            "                    \"type\": \"float\"\r\n" + //
+            "                }\r\n" + //
+            "            }\r\n" + //
+            "        }\r\n" + //
+            "    }\r\n" + //
+            "}");
+        var indexJson = originalJson.deepCopy();
+
+        // Action
+        var wasChanged = applyTransformation(indexJson);
+        assertThat(canApply(originalJson), equalTo(CanApplyResult.YES));
+
+        // Verification
+        assertThat(wasChanged, equalTo(true));
+        assertThat(indexJson.toPrettyString(), not(equalTo(originalJson.toPrettyString())));
+        assertThat(indexJson.toPrettyString(), allOf(containsString("field1"), containsString("field2"), containsString("field3")));
+                
     }
 }

@@ -12,15 +12,11 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
-import org.testcontainers.containers.BindMode;
-
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.opensearch.migrations.bulkload.framework.SearchClusterContainer.ES_V6_8_23;
 
 /**
  * Test class to verify custom transformations during metadata migrations.
@@ -31,23 +27,19 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
 
     @SneakyThrows
     @Test
-    @Disabled("TODO, fix in GHA")
     public void multiTypeTransformationTest_union() {
         try (
                 final var indexCreatedCluster = new SearchClusterContainer(SearchClusterContainer.ES_V5_6_16);
-                final var upgradedSourceCluster = new SearchClusterContainer(ES_V6_8_23)
-                    .withFileSystemBind(localDirectory.getAbsolutePath(), SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, BindMode.READ_WRITE);
                 final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
         ) {
             indexCreatedCluster.start();
 
-            this.sourceCluster = upgradedSourceCluster;
+            this.sourceCluster = indexCreatedCluster;
             this.targetCluster = targetCluster;
 
             startClusters();
 
             var indexCreatedOperations = new ClusterOperations(indexCreatedCluster.getUrl());
-            var upgradedSourceOperations = new ClusterOperations(upgradedSourceCluster.getUrl());
 
             var originalIndexName = "test_index";
 
@@ -57,27 +49,14 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             indexCreatedOperations.createDocument(originalIndexName, "2", "{\"field1\":\"string\", \"field2\":123}", null, "type2");
             indexCreatedOperations.createDocument(originalIndexName, "3", "{\"field3\":1.1}", null, "type3");
 
-            var snapshotName = "es5-created-index";
-            var es5Repo = "es5";
-            indexCreatedOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, es5Repo);
-            indexCreatedOperations.takeSnapshot(es5Repo, snapshotName, originalIndexName);
+            var arguments = new MigrateOrEvaluateArgs();
+            arguments.sourceArgs.host = sourceCluster.getUrl();
+            arguments.targetArgs.host = targetCluster.getUrl();
 
-            indexCreatedCluster.copySnapshotData(localDirectory.getAbsolutePath());
-
-            // Register snapshot repository and restore snapshot in ES 6 cluster
-            upgradedSourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, es5Repo);
-            upgradedSourceOperations.restoreSnapshot(es5Repo, snapshotName);
-
-            // Verify index exists on upgraded cluster
-            var checkIndexUpgraded = upgradedSourceOperations.get("/" + originalIndexName);
-            assertThat(checkIndexUpgraded.getKey(), equalTo(200));
-            assertThat(checkIndexUpgraded.getValue(), containsString(originalIndexName));
-
-            var updatedSnapshotName = createSnapshot("union-snapshot");
-            var arguments = prepareSnapshotMigrationArgs(updatedSnapshotName);
 
             // Set up data filters
             var dataFilterArgs = new DataFilterArgs();
+            dataFilterArgs.indexTemplateAllowlist = List.of("");
             dataFilterArgs.indexAllowlist = List.of(originalIndexName);
             arguments.dataFilterArgs = dataFilterArgs;
 
