@@ -15,6 +15,7 @@ VALID_TUPLE_PARSED = TEST_DATA_DIRECTORY / "valid_tuple_parsed.json"
 VALID_TUPLE_GZIPPED_CHUNKED = TEST_DATA_DIRECTORY / "valid_tuple_gzipped_and_chunked.json"
 VALID_TUPLE_GZIPPED_CHUNKED_PARSED = TEST_DATA_DIRECTORY / "valid_tuple_gzipped_and_chunked_parsed.json"
 INVALID_TUPLE = TEST_DATA_DIRECTORY / "invalid_tuple.json"
+VALID_TUPLE_MISSING_COMPONENT = TEST_DATA_DIRECTORY / "valid_tuple_missing_component.json"
 
 
 def test_get_element_with_regex_succeeds():
@@ -161,3 +162,14 @@ def test_parse_tuple_with_malformed_bodies(caplog):
     assert json.loads(tuple_) == parsed  # Values weren't changed if they couldn't be interpreted
     assert "Body value of sourceResponse on line 0 could not be decoded to utf-8" in caplog.text
     assert "Body value of targetResponses item 0 on line 0 should be a json, but could not be parsed" in caplog.text
+
+
+def test_parse_tuple_with_missing_component():
+    with open(VALID_TUPLE_MISSING_COMPONENT, 'r') as f:
+        tuple_ = f.read()
+
+    assert 'sourceResponse' not in json.loads(tuple_)
+    parsed = parse_tuple(tuple_, 0)
+
+    assert 'sourceResponse' not in parsed
+    assert json.loads(tuple_).keys() == parsed.keys()

@@ -1,0 +1,21 @@
+{%- macro is_enabled(features, path) -%}
+    {%- if features == None -%}
+      true
+    {%- else -%}
+        {%- set ns = namespace(value=features) -%}
+        {%- for key in (path | split('.')) -%}
+            {%- if ns.value is mapping and key in ns.value -%}
+                {%- set ns.value = ns.value[key] -%}
+            {%- else -%}
+                {%- set ns.value = None -%}
+            {%- endif -%}
+        {%- endfor -%}
+        {%- if ns.value is boolean and ns.value -%}
+            true
+        {%- elif ns.value is mapping and ns.value.get('enabled') is boolean -%}
+            {{- ns.value.get('enabled') -}}
+        {%- else -%}
+            false
+        {%- endif -%}
+    {%- endif -%}
+{%- endmacro -%}

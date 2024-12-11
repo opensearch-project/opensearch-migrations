@@ -191,7 +191,11 @@ def parse_tuple(line: str, line_no: int) -> dict:
         return initial_tuple
 
     for component in SINGLE_COMPONENTS:
-        tuple_component = TupleComponent(component, initial_tuple[component], line_no, is_bulk_path)
+        if component in initial_tuple:
+            tuple_component = TupleComponent(component, initial_tuple[component], line_no, is_bulk_path)
+        else:
+            logger.info(f"`{component}` was not present on line {line_no}. Skipping component.")
+            continue
 
         processed_tuple = tuple_component.b64decode().decode_utf8().parse_as_json()
         final_value = processed_tuple.final_value
@@ -201,6 +205,9 @@ def parse_tuple(line: str, line_no: int) -> dict:
             logger.error(processed_tuple.error)
 
     for component in LIST_COMPONENTS:
+        if component not in initial_tuple:
+            logger.info(f"`{component}` was not present on line {line_no}. Skipping component.")
+            continue
         for i, item in enumerate(initial_tuple[component]):
             tuple_component = TupleComponent(f"{component} item {i}", item, line_no, is_bulk_path)
 

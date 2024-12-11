@@ -1,0 +1,103 @@
+{%- include "typeMappings/rewriteIndexForTarget.j2" -%}
+{%- import "typeMappings/rewriteIndexForTarget.j2" as transidx -%}
+
+{%- macro retarget_command_parameters(parameters, target_index) -%}
+    {%- set ns = namespace(new_params={}) -%}
+    {%- for key, value in parameters.items() -%}
+        {%- if key != '_type' and key != '_index' -%}
+            {%- set inner_json = value | tojson -%}
+            {%- set jsonblob = ("{\"" + key + "\":" + inner_json + "}") | fromjson -%}
+            {%- set ns.new_params = ns.new_params + jsonblob -%}
+        {%- endif -%}
+    {%- endfor -%}
+    {%- set index_json = target_index | tojson -%}
+    {%- set index_blob = ("{\"_index\":" + index_json + "}") | fromjson -%}
+    {{- (ns.new_params + index_blob) | tojson -}}
+{%- endmacro -%}
+
+{%- macro get_create() -%}create{% endmacro %}
+{%- macro get_index() -%}index{% endmacro %}
+{%- macro get_update() -%}update{% endmacro %}
+
+{%- macro rewrite_command_parameters(command, parameters, target_index) -%}
+    {%- if target_index -%}
+        "{{ invoke_macro("get_"+command) }}": {{ retarget_command_parameters(parameters, target_index) }}
+    {%- endif -%}
+{%- endmacro -%}
+
+{%- macro rewrite_index_parameters(parameters, target_index) -%}
+    {{ rewrite_command_parameters('index', parameters, target_index) }}
+{%- endmacro -%}
+
+{%- macro rewrite_command(command, parameters, target_index, doc) -%}
+    {%- if target_index -%}
+        { {{ rewrite_command_parameters(command, parameters, target_index) }} },
+        {{ doc | tojson }}
+    {%- endif -%}
+{%- endmacro -%}
+
+{%- macro run_delete(parameters, target_index) -%}
+    {%- if target_index -%}
+        { "delete": {{ retarget_command_parameters(parameters, target_index) }} }
+    {%- endif -%}
+{%- endmacro -%}
+
+{%- macro rewrite_bulk_for_default_source_index(uri_match, input_map, source_index) -%}
+{
+    "preserveWhenMissing": "*",
+    "payload": {
+        "inlinedJsonSequenceBodies": [
+            {%- set operation_types = ['delete', 'update', 'index', 'create'] -%}
+            {%- set operations = input_map.request.payload.inlinedJsonSequenceBodies -%}
+            {%- set loopcontrol = namespace(skipnext=false) -%}
+            {%- for item in operations -%}
+                {%- set operation = namespace(type=None, output=None, num_written=0) -%}
+                {%- if not loopcontrol.skipnext -%}
+                    {%- for type in operation_types -%}
+                        {%- if item is mapping and type in item -%}
+                            {%- set operation.type = type -%}
+                        {%- endif -%}
+                    {%- endfor -%}
+                    {%- if not operation -%}
+                        {%- throw "No valid operation type was found for item {{ item }}" -%}
+                    {% endif %}
+                {% else %}
+                    {%- set loopcontrol.skipnext = false -%}
+                {%- endif -%}
+
+                {%- if operation.type -%}
+                    {%- set parameters = item[operation.type] -%}
+                    {%- set type_name = parameters['_type'] -%}
+                    {%- set target_index = transidx.convert_source_index_to_target(parameters['_index'], type_name, input_map.index_mappings, input_map.regex_index_mappings) if type_name -%}
+                    {%- if operation.type == 'delete' -%}
+                        {%- if type_name -%}
+                            {%- set operation.output = run_delete(parameters, target_index) -%}
+                        {%- else -%}
+                            {%- set operation.output = (item | tojson) -%}
+                        {%- endif -%}
+                    {%- else -%}
+                        {%- if loop.index < operations|length -%}
+                            {%- if type_name -%}
+                                {%- set operation.output = rewrite_command(operation.type, parameters, target_index, operations[loop.index]) -%}
+                            {%- else -%}
+                                {%- set operation.output = (item | tojson) ~ "," ~ (operations[loop.index] | tojson) -%}
+                            {%- endif -%}
+                            {%- set loopcontrol.skipnext = true -%}
+                        {%- else -%}
+                            {%- throw "Handle case where there's no next item but one was expected for item {{ item }}" -%}
+                        {%- endif -%}
+                    {%- endif -%}
+                    {% if (operation.output | string | trim | length) > 0  %}
+                        {%- set loopcontrol.num_written = loopcontrol.num_written + 1 -%}
+                        {{ "," if loopcontrol.num_written > 1 else "" }}
+                        {{ operation.output }}
+                    {% endif %}
+                {%- endif -%}
+            {%- endfor -%}
+        ]
+    }
+}
+{%- endmacro -%}
+{%- macro rewrite_bulk(match, input_map) -%}
+    {{ rewrite_bulk_for_default_source_index(match, input_map, none) }}
+{%- endmacro -%}

@@ -44,10 +44,11 @@ public class TransformationLoaderTest {
     }
 
     @Test
-    public void testMisconfiguration() throws Exception {
+    public void testMisconfiguration() {
+        var transformLoader = new TransformationLoader();
         Assertions.assertThrows(
             IllegalArgumentException.class,
-            () -> new TransformationLoader().getTransformerFactoryLoader("localhost", null, "Not right")
+            () -> transformLoader.getTransformerFactoryLoader("localhost", null, "Not right")
         );
     }
 
@@ -61,7 +62,7 @@ public class TransformationLoaderTest {
         Assertions.assertNotNull(transformer.transformJson(origDoc));
     }
 
-    final String TEST_INPUT_REQUEST = "{\n"
+    static final String TEST_INPUT_REQUEST = "{\n"
         + "  \"method\": \"PUT\",\n"
         + "  \"URI\": \"/oldStyleIndex\",\n"
         + "  \"headers\": {\n"
@@ -75,9 +76,7 @@ public class TransformationLoaderTest {
         var userAgentTransformer = new TransformationLoader().getTransformerFactoryLoader("localhost", "tester", null);
 
         var origDoc = parseAsMap(TEST_INPUT_REQUEST);
-        var origDocStr = mapper.writeValueAsString(origDoc);
         var pass1 = userAgentTransformer.transformJson(origDoc);
-        var pass1DocStr = mapper.writeValueAsString(origDoc);
         var pass2 = userAgentTransformer.transformJson(pass1);
         var finalUserAgentInHeaders = ((Map<String, Object>) pass2.get("headers")).get("user-agent");
         Assertions.assertEquals("tester; tester", finalUserAgentInHeaders);
