@@ -62,7 +62,8 @@ def parse_args():
     parser.add_argument("--endpoint", help="Cluster endpoint e.g. http://test.elb.us-west-2.amazonaws.com:9200.")
     parser.add_argument("--username", help="Cluster username.")
     parser.add_argument("--password", help="Cluster password.")
-    parser.add_argument("--enable_multi_type", action='store_true', help="Flag to enable sending documents to a multi-type index.")
+    parser.add_argument("--enable_multi_type", action='store_true',
+                        help="Flag to enable sending documents to a multi-type index.")
     parser.add_argument("--no-clear-output", action='store_true',
                         help="Flag to not clear the output before each run. " +
                              "Helpful for piping to a file or other utility.")
