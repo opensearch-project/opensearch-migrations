@@ -10,7 +10,7 @@
     {%- if target_index -%}
         {
           {{ rewrite_index_parameters(parameters, target_index) }},
-          "source": {{ source_document.source | tojson }}
+          "preserve": ["source"]
         }
     {%- endif -%}
 {%- else -%}
