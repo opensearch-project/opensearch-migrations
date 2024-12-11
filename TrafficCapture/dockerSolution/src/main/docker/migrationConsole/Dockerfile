@@ -60,7 +60,8 @@ RUN dnf install -y bash-completion --setopt=install_weak_deps=False && \
 RUN echo '. /etc/profile.d/bash_completion.sh' >> ~/.bashrc && \
     echo '. /etc/profile.d/venv.sh' >> ~/.bashrc && \
     echo 'echo Welcome to the Migration Assistant Console' >> ~/.bashrc && \
-    echo 'eval "$(register-python-argcomplete cluster_tools)"' >> ~/.bashrc
+    echo 'eval "$(register-python-argcomplete cluster_tools)"' >> ~/.bashrc && \
+    echo 'PS1="(\t) \[\e[92m\]migration-console \[\e[0m\](\w) -> "' >> ~/.bashrc
 
 # Set ENV to control startup script in /bin/sh mode
 ENV ENV=/root/.bashrc
