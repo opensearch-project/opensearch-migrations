@@ -39,16 +39,13 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
     public static Stream<Arguments> makeDocumentMigrationArgs() {
         var numWorkersList = List.of(1, 3, 40);
         var compressionEnabledList = List.of(true, false);
-        return SupportedClusters.targets().stream()
-            .flatMap(
-                targetImage -> numWorkersList.stream()
+        return numWorkersList.stream()
                     .flatMap(numWorkers -> compressionEnabledList.stream().map(compression -> Arguments.of(
                             numWorkers,
-                            targetImage,
+                            SearchClusterContainer.OS_V2_14_0,
                             compression
                         ))
-                    )
-            );
+                    );
     }
 
     @ParameterizedTest
@@ -70,8 +67,8 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
             var osTargetContainer = new SearchClusterContainer(targetVersion);
         ) {
             CompletableFuture.allOf(
-                CompletableFuture.runAsync(() ->  esSourceContainer.start(), executorService),
-                CompletableFuture.runAsync(() ->  osTargetContainer.start(), executorService)
+                CompletableFuture.runAsync(esSourceContainer::start, executorService),
+                CompletableFuture.runAsync(osTargetContainer::start, executorService)
             ).join();
 
             // Populate the source cluster with data

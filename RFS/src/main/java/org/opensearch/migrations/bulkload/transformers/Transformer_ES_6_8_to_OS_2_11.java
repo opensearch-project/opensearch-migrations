@@ -18,13 +18,19 @@ import lombok.extern.slf4j.Slf4j;
 public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     private static final ObjectMapper mapper = new ObjectMapper();
 
-    private final List<TransformationRule<Index>> indexTransformations = List.of(new IndexMappingTypeRemoval());
-    private final List<TransformationRule<Index>> indexTemplateTransformations = List.of(new IndexMappingTypeRemoval());
+    private final List<TransformationRule<Index>> indexTransformations;
+    private final List<TransformationRule<Index>> indexTemplateTransformations;
 
     private final int awarenessAttributeDimensionality;
 
-    public Transformer_ES_6_8_to_OS_2_11(int awarenessAttributeDimensionality) {
+    public Transformer_ES_6_8_to_OS_2_11(int awarenessAttributeDimensionality, MetadataTransformerParams params) {
         this.awarenessAttributeDimensionality = awarenessAttributeDimensionality;
+        this.indexTransformations = List.of(new IndexMappingTypeRemoval(
+                params.getMultiTypeResolutionBehavior()
+        ));
+        this.indexTemplateTransformations = List.of(new IndexMappingTypeRemoval(
+                params.getMultiTypeResolutionBehavior()
+        ));
     }
 
     @Override
@@ -37,7 +43,18 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
             var templates = mapper.createObjectNode();
             templatesRoot.fields().forEachRemaining(template -> {
                 var templateCopy = (ObjectNode) template.getValue().deepCopy();
-                var indexTemplate = (Index) () -> templateCopy;
+                var indexTemplate = new Index() {
+                    @Override
+                    public String getName() {
+                        return template.getKey();
+                    }
+
+                    @Override
+                    public ObjectNode getRawJson() {
+                        return templateCopy;
+                    }
+                };
+
                 try {
                     transformIndex(indexTemplate, IndexType.TEMPLATE);
                     templates.set(template.getKey(), indexTemplate.getRawJson());
