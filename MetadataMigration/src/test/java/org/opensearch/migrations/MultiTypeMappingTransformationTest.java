@@ -14,6 +14,7 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
+import org.testcontainers.containers.BindMode;
 
 import static org.hamcrest.CoreMatchers.containsString;
 import static org.hamcrest.CoreMatchers.equalTo;
@@ -31,10 +32,9 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
     @Test
     public void multiTypeTransformationTest_union() {
         try (
-                final var indexCreatedCluster = new SearchClusterContainer(SearchClusterContainer.ES_V5_6_13)
-                        .withFileSystemBind(localDirectory.getAbsolutePath(), SearchClusterContainer.CLUSTER_SNAPSHOT_DIR);
+                final var indexCreatedCluster = new SearchClusterContainer(SearchClusterContainer.ES_V5_6_16);
                 final var upgradedSourceCluster = new SearchClusterContainer(ES_V6_8_23)
-                        .withFileSystemBind(localDirectory.getAbsolutePath(), SearchClusterContainer.CLUSTER_SNAPSHOT_DIR);
+                    .withFileSystemBind(localDirectory.getAbsolutePath(), SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, BindMode.READ_WRITE);
                 final var targetCluster = new SearchClusterContainer(SearchClusterContainer.OS_V2_14_0)
         ) {
             indexCreatedCluster.start();
@@ -59,6 +59,8 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
             var es5Repo = "es5";
             indexCreatedOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, es5Repo);
             indexCreatedOperations.takeSnapshot(es5Repo, snapshotName, originalIndexName);
+
+            indexCreatedCluster.copySnapshotData(localDirectory.getAbsolutePath());
 
             // Register snapshot repository and restore snapshot in ES 6 cluster
             upgradedSourceOperations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, es5Repo);
@@ -119,7 +121,7 @@ class MultiTypeMappingTransformationTest extends BaseMigrationTest {
     @Test
     public void es5_doesNotAllow_multiTypeConflicts() {
         try (
-            final var es5 = new SearchClusterContainer(SearchClusterContainer.ES_V5_6_13)
+            final var es5 = new SearchClusterContainer(SearchClusterContainer.ES_V5_6_16)
         ) {
             es5.start();
 
