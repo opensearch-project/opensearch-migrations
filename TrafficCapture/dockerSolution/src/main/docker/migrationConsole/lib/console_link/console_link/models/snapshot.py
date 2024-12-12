@@ -232,9 +232,7 @@ def get_repository_for_snapshot(cluster: Cluster, snapshot: str) -> Optional[str
 
 
 def format_date(millis: int) -> str:
-    if millis == 0:
-        return "N/A"
-    return datetime.datetime.fromtimestamp(millis / 1000).strftime('%Y-%m-%d %H:%M:%S')
+    return datetime.datetime.fromtimestamp(millis / 1000, datetime.timezone.utc).isoformat()
 
 
 def format_duration(millis: int) -> str:
@@ -245,46 +243,62 @@ def format_duration(millis: int) -> str:
 
 
 def get_snapshot_status_message(snapshot_info: Dict) -> str:
-    snapshot_state = snapshot_info.get("state")
+    # Extract basic snapshot information
+    snapshot_state = snapshot_info.get("state", "UNKNOWN")
     stats = snapshot_info.get("stats", {})
-    total_size_in_bytes = stats.get("total", {}).get("size_in_bytes", 0)
-    processed_size_in_bytes = stats.get("processed", stats.get("incremental", {})).get("size_in_bytes", 0)
-    percent_completed = (processed_size_in_bytes / total_size_in_bytes) * 100 if total_size_in_bytes > 0 else 0
-    total_size_gibibytes = total_size_in_bytes / (1024 ** 3)
-    processed_size_gibibytes = processed_size_in_bytes / (1024 ** 3)
+
+    total_size_bytes = stats.get("total", {}).get("size_in_bytes", 0)
+    processed_size_bytes = stats.get("processed", {}).get("size_in_bytes",
+        # Processed size may not be returned for SUCCESS snapshots, in which case we set it to the full size
+        total_size_bytes if snapshot_state == "SUCCESS" else 0
+    )
 
     total_shards = snapshot_info.get('shards_stats', {}).get('total', 0)
     successful_shards = snapshot_info.get('shards_stats', {}).get('done', 0)
     failed_shards = snapshot_info.get('shards_stats', {}).get('failed', 0)
+    start_time = stats.get('start_time_in_millis', 0)
+    duration_millis = stats.get('time_in_millis', 0)
 
-    start_time = snapshot_info.get('stats', {}).get('start_time_in_millis', 0)
-    duration_in_millis = snapshot_info.get('stats', {}).get('time_in_millis', 0)
+    # Calculate percentage completed
+    percent_completed = (processed_size_bytes / total_size_bytes * 100) if total_size_bytes > 0 else 0
 
+    # Convert sizes to GiB
+    total_size_gib = total_size_bytes / (1024 ** 3)
+    processed_size_gib = processed_size_bytes / (1024 ** 3)
+
+    # Format time and duration
     start_time_formatted = format_date(start_time)
-    duration_formatted = format_duration(duration_in_millis)
+    duration_formatted = format_duration(duration_millis)
 
-    anticipated_duration_remaining_formatted = (
-        format_duration((duration_in_millis / percent_completed) * (100 - percent_completed))
-        if percent_completed > 0 else "N/A (not enough data to compute)"
-    )
+    # Safely calculate remaining duration to avoid division by zero
+    remaining_duration = ((duration_millis / percent_completed) * (100 - percent_completed)) if percent_completed > 0 else None
 
+    # Calculate throughput
     throughput_mib_per_sec = (
-        (processed_size_in_bytes / (1024 ** 2)) / (duration_in_millis / 1000)
-        if duration_in_millis > 0 else 0
+        (processed_size_bytes / (1024 ** 2)) / (duration_millis / 1000)
+        if duration_millis > 0
+        else None
     )
 
-    return (
-        f"Snapshot is {snapshot_state}.\n"
-        f"Percent completed: {percent_completed:.2f}%\n"
-        f"Data GiB done: {processed_size_gibibytes:.3f}/{total_size_gibibytes:.3f}\n"
-        f"Total shards: {total_shards}\n"
-        f"Successful shards: {successful_shards}\n"
-        f"Failed shards: {failed_shards}\n"
-        f"Start time: {start_time_formatted}\n"
-        f"Duration: {duration_formatted}\n"
-        f"Anticipated duration remaining: {anticipated_duration_remaining_formatted}\n"
-        f"Throughput: {throughput_mib_per_sec:.2f} MiB/sec"
-    )
+    # Determine anticipated duration remaining and throughput format
+    if duration_millis > 1000 and percent_completed > 0 and remaining_duration is not None:
+        anticipated_remaining_formatted = format_duration(remaining_duration)
+        throughput_mib_per_sec = f"{throughput_mib_per_sec:.2f} MiB/s"
+    else:
+        anticipated_remaining_formatted = "N/A (not enough data to compute)"
+        throughput_mib_per_sec = "N/A (not enough data to compute)"
+
+    # Compile status message
+    return (f"Snapshot is {snapshot_state}.\n"
+            f"Percent completed: {percent_completed:.2f}%\n"
+            f"Data GiB done: {processed_size_gib:.3f}/{total_size_gib:.3f}\n"
+            f"Total shards: {total_shards}\n"
+            f"Successful shards: {successful_shards}\n"
+            f"Failed shards: {failed_shards}\n"
+            f"Start time: {start_time_formatted}\n"
+            f"Duration: {duration_formatted}\n"
+            f"Anticipated duration remaining: {anticipated_remaining_formatted}\n"
+            f"Throughput: {throughput_mib_per_sec}")
 
 
 def get_snapshot_status_full(cluster: Cluster, snapshot: str,

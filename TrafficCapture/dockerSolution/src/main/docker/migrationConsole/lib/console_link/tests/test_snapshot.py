@@ -415,3 +415,62 @@ def test_handling_extra_args(mocker, request, snapshot_fixture):
     assert result.success
     mock.assert_called_once()
     assert all([arg in mock.call_args.args[0] for arg in extra_args])
+
+
+import unittest
+from unittest.mock import MagicMock
+from console_link.models.snapshot import get_snapshot_status_full, get_snapshot_status_message
+
+class TestSnapshot(unittest.TestCase):
+    def setUp(self):
+        self.cluster = MagicMock()
+
+    def test_throughput_calculation(self):
+        # Mock response for a fully completed snapshot
+        snapshot_info = {
+            "state": "IN_PROGRESS",
+            "stats": {
+                "total": {"size_in_bytes": 2 * 1024 * 1024 * 1024},  # 2 GiB
+                "processed": {"size_in_bytes": 1 * 1024 * 1024 * 1024},  # 1 GiB
+                "start_time_in_millis": 0,
+                "time_in_millis": 2000,  # 2 seconds
+            },
+            "shards_stats": {
+                "total": 5,
+                "done": 2,
+                "failed": 0
+            }
+        }
+
+        # Test with normal duration
+        snapshot_info["stats"]["processed"] = {"size_in_bytes": 1 * 1024 * 1024 * 1024}  # Ensure processed size is set correctly
+        message = get_snapshot_status_message(snapshot_info)
+        self.assertIn("Throughput: 512.00 MiB/s", message)
+
+        # Expected output assertions
+        self.assertIn("Snapshot is IN_PROGRESS.", message)
+        self.assertIn("Percent completed: 50.00%", message)
+        self.assertIn("Data GiB done: 1.000/2.000", message)
+        self.assertIn("Total shards: 5", message)
+        self.assertIn("Successful shards: 2", message)
+        self.assertIn("Failed shards: 0", message)
+        self.assertIn("Start time: 1970-01-01T00:00:00", message)  # Assuming epoch start time
+        self.assertIn("Duration: 0h 0m 2s", message)
+        self.assertIn("Anticipated duration remaining: 0h 0m 2s", message)
+        self.assertIn("Throughput: 512.00 MiB/s", message)
+
+        # Test with very short duration
+        snapshot_info["stats"]["time_in_millis"] = 500  # 0.5 seconds
+        message = get_snapshot_status_message(snapshot_info)
+
+        # Assertions for short duration
+        self.assertIn("Snapshot is IN_PROGRESS.", message)
+        self.assertIn("Percent completed: 50.00%", message)
+        self.assertIn("Data GiB done: 1.000/2.000", message)
+        self.assertIn("Total shards: 5", message)
+        self.assertIn("Successful shards: 2", message)
+        self.assertIn("Failed shards: 0", message)
+        self.assertIn("Start time: 1970-01-01T00:00:00", message)  # Assuming epoch start time
+        self.assertIn("Duration: 0h 0m 0s", message)
+        self.assertIn("Anticipated duration remaining: N/A (not enough data to compute)", message)
+        self.assertIn("Throughput: N/A (not enough data to compute)", message)
