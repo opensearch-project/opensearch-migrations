@@ -31,7 +31,7 @@ dependencies {
     testImplementation testFixtures(project(path: ':testHelperFixtures'))
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformerProvider')
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformerProvider')
-    testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:openSearch23PlusTargetTransformerProvider')
+    testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformerProvider')
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJoltMessageTransformer')
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJMESPathMessageTransformer')
 

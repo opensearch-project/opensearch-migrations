@@ -1,11 +1,9 @@
 package org.opensearch.migrations.transform.replay;
 
-import java.util.Map;
 import java.util.StringJoiner;
 
 import org.opensearch.migrations.transform.TransformationLoader;
 
-import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
@@ -17,11 +15,6 @@ public class MultipleJMESPathScriptsTest {
     private static final String HOSTNAME_SCRIPT = "{\\n  \\\"method\\\": method,\\n  \\\"URI\\\": URI,\\n  "
         + "\\\"headers\\\": {\\\"host\\\": \\\"localhost\\\"},\\n  \\\"payload\\\": payload\\n}";
     private static final ObjectMapper mapper = new ObjectMapper();
-
-    private static Map<String, Object> parseAsMap(String contents) throws Exception {
-        return mapper.readValue(contents.getBytes(), new TypeReference<>() {
-        });
-    }
 
     @Test
     public void testTwoScripts() throws Exception {
