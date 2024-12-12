@@ -1,9 +1,7 @@
 package org.opensearch.migrations.bulkload;
 
-import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -23,47 +21,31 @@ import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 
 import eu.rekawek.toxiproxy.model.ToxicDirection;
-import lombok.AllArgsConstructor;
-import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 import org.testcontainers.containers.Network;
 
-/**
- * TODO - the code in this test was lifted from ProcessLifecycleTest.java
- * Some of the functionality and code are shared between the two and should be refactored.
- */
+@Tag("longTest")
 @Slf4j
 public class LeaseExpirationTest extends SourceTestBase {
 
     public static final String TARGET_DOCKER_HOSTNAME = "target";
-    public static final String SNAPSHOT_NAME = "test_snapshot";
 
-    @AllArgsConstructor
-    @Getter
-    private static class RunData {
-        Path tempDirSnapshot;
-        Path tempDirLucene;
-        ToxiProxyWrapper proxyContainer;
-    }
-
-    @Tag("isolatedTest")
     @ParameterizedTest
     @ValueSource(booleans = {true, false})
     public void testProcessExitsAsExpected(boolean forceMoreSegments) {
-        // Sending 5 docs per request with 4 requests concurrently with each taking 0.125 second is 160 docs/sec
-        // will process 9760 docs in 61 seconds. With 20s lease duration, expect to be finished in 4 leases.
+        // Sending 5 docs per request with 4 requests concurrently with each taking 0.250 second is 80 docs/sec
+        // will process 9680 docs in 121 seconds. With 40s lease duration, expect to be finished in 4 leases.
         // This is ensured with the toxiproxy settings, the migration should not be able to be completed
         // faster, but with a heavily loaded test environment, may be slower which is why this is marked as
         // isolated.
         // 2 Shards, for each shard, expect three status code 2 and one status code 0 (4 leases)
         int shards = 2;
-        int indexDocCount = 9760 * shards;
+        int indexDocCount = 9680 * shards;
         int migrationProcessesPerShard = 4;
         int continueExitCode = 2;
         int finalExitCodePerShard = 0;
@@ -196,15 +178,26 @@ public class LeaseExpirationTest extends SourceTestBase {
         Path tempDirSnapshot,
         Path tempDirLucene,
         ToxiProxyWrapper proxyContainer
-    )
-    {
+    ) {
         String targetAddress = proxyContainer.getProxyUriAsString();
         var tp = proxyContainer.getProxy();
-        var latency = tp.toxics().latency("latency-toxic", ToxicDirection.UPSTREAM, 125);
+        var latency = tp.toxics().latency("latency-toxic", ToxicDirection.UPSTREAM, 250);
 
         // Set to less than 2x lease time to ensure leases aren't doubling
-        int timeoutSeconds = 30;
-        ProcessBuilder processBuilder = setupProcess(tempDirSnapshot, tempDirLucene, targetAddress);
+        int timeoutSeconds = 60;
+
+        String[] additionalArgs = {
+            "--documents-per-bulk-request", "5",
+            "--max-connections", "4",
+            "--initial-lease-duration", "PT40s"
+        };
+
+        ProcessBuilder processBuilder = setupProcess(
+            tempDirSnapshot,
+            tempDirLucene,
+            targetAddress,
+            additionalArgs
+        );
 
         var process = runAndMonitorProcess(processBuilder);
         boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
@@ -221,53 +214,6 @@ public class LeaseExpirationTest extends SourceTestBase {
         latency.remove();
 
         return process.exitValue();
-    }
-
-
-    @NotNull
-    private static ProcessBuilder setupProcess(
-        Path tempDirSnapshot,
-        Path tempDirLucene,
-        String targetAddress
-    ) {
-        String classpath = System.getProperty("java.class.path");
-        String javaHome = System.getProperty("java.home");
-        String javaExecutable = javaHome + File.separator + "bin" + File.separator + "java";
-
-        String[] args = {
-            "--snapshot-name",
-            SNAPSHOT_NAME,
-            "--snapshot-local-dir",
-            tempDirSnapshot.toString(),
-            "--lucene-dir",
-            tempDirLucene.toString(),
-            "--target-host",
-            targetAddress,
-            "--index-allowlist",
-            "geonames",
-            "--documents-per-bulk-request",
-            "5",
-            "--max-connections",
-            "4",
-            "--source-version",
-            "ES_7_10",
-            "--initial-lease-duration",
-            "PT20s" };
-
-        // Kick off the doc migration process
-        log.atInfo().setMessage("Running RfsMigrateDocuments with args: {}")
-            .addArgument(() -> Arrays.toString(args))
-            .log();
-        ProcessBuilder processBuilder = new ProcessBuilder(
-            javaExecutable,
-            "-cp",
-            classpath,
-            "org.opensearch.migrations.RfsMigrateDocuments"
-        );
-        processBuilder.command().addAll(Arrays.asList(args));
-        processBuilder.redirectErrorStream(true);
-        processBuilder.redirectOutput();
-        return processBuilder;
     }
 
 }

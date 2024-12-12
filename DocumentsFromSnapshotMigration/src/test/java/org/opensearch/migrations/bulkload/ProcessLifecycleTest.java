@@ -1,10 +1,7 @@
 package org.opensearch.migrations.bulkload;
 
-import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
-import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Function;
@@ -24,7 +21,6 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -32,17 +28,11 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.testcontainers.containers.Network;
 
-/**
- * TODO - the code in this test was lifted from FullTest.java (now named ParallelDocumentMigrationsTest.java).
- * Some of the functionality and code are shared between the two and should be refactored.
- */
 @Slf4j
 @Tag("longTest")
 public class ProcessLifecycleTest extends SourceTestBase {
 
     public static final String TARGET_DOCKER_HOSTNAME = "target";
-    public static final String SNAPSHOT_NAME = "test_snapshot";
-    public static final List<String> INDEX_ALLOWLIST = List.of();
     public static final int OPENSEARCH_PORT = 9200;
 
     enum FailHow {
@@ -166,8 +156,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
         Path tempDirSnapshot,
         Path tempDirLucene,
         ToxiProxyWrapper proxyContainer,
-        FailHow failHow)
-    {
+        FailHow failHow
+    ) {
         String targetAddress = proxyContainer.getProxyUriAsString();
         var tp = proxyContainer.getProxy();
         if (failHow == FailHow.AT_STARTUP) {
@@ -177,7 +167,21 @@ public class ProcessLifecycleTest extends SourceTestBase {
         }
 
         int timeoutSeconds = 90;
-        ProcessBuilder processBuilder = setupProcess(tempDirSnapshot, tempDirLucene, targetAddress, failHow);
+
+        String initialLeaseDuration = failHow == FailHow.NEVER ? "PT10M" : "PT1S";
+
+        String[] additionalArgs = {
+            "--documents-per-bulk-request", "10",
+            "--max-connections", "1",
+            "--initial-lease-duration", initialLeaseDuration
+        };
+
+        ProcessBuilder processBuilder = setupProcess(
+            tempDirSnapshot,
+            tempDirLucene,
+            targetAddress,
+            additionalArgs
+        );
 
         var process = runAndMonitorProcess(processBuilder);
         boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
@@ -192,53 +196,5 @@ public class ProcessLifecycleTest extends SourceTestBase {
         }
 
         return process.exitValue();
-    }
-
-
-    @NotNull
-    private static ProcessBuilder setupProcess(
-        Path tempDirSnapshot,
-        Path tempDirLucene,
-        String targetAddress,
-        FailHow failHow
-    ) {
-        String classpath = System.getProperty("java.class.path");
-        String javaHome = System.getProperty("java.home");
-        String javaExecutable = javaHome + File.separator + "bin" + File.separator + "java";
-
-        String[] args = {
-            "--snapshot-name",
-            SNAPSHOT_NAME,
-            "--snapshot-local-dir",
-            tempDirSnapshot.toString(),
-            "--lucene-dir",
-            tempDirLucene.toString(),
-            "--target-host",
-            targetAddress,
-            "--index-allowlist",
-            "geonames",
-            "--documents-per-bulk-request",
-            "10",
-            "--max-connections",
-            "1",
-            "--source-version",
-            "ES_7_10",
-            "--initial-lease-duration",
-            failHow == FailHow.NEVER ? "PT10M" : "PT1S" };
-
-        // Kick off the doc migration process
-        log.atInfo().setMessage("Running RfsMigrateDocuments with args: {}")
-            .addArgument(() -> Arrays.toString(args))
-            .log();
-        ProcessBuilder processBuilder = new ProcessBuilder(
-            javaExecutable,
-            "-cp",
-            classpath,
-            "org.opensearch.migrations.RfsMigrateDocuments"
-        );
-        processBuilder.command().addAll(Arrays.asList(args));
-        processBuilder.redirectErrorStream(true);
-        processBuilder.redirectOutput();
-        return processBuilder;
     }
 }

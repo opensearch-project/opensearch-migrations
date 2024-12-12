@@ -2,12 +2,15 @@ package org.opensearch.migrations.bulkload;
 
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
@@ -18,6 +21,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
 import java.util.function.UnaryOperator;
 
+import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.RfsMigrateDocuments;
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.DefaultSourceRepoAccessor;
@@ -40,9 +44,12 @@ import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
+import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
+import org.opensearch.migrations.testutils.ToxiProxyWrapper;
 import org.opensearch.migrations.transform.TransformationLoader;
 
 import lombok.AllArgsConstructor;
+import lombok.Getter;
 import lombok.Lombok;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -52,12 +59,14 @@ import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import reactor.core.publisher.Flux;
 
+
 @Slf4j
 public class SourceTestBase {
     public static final String GENERATOR_BASE_IMAGE = "migrations/elasticsearch_client_test_console:latest";
     public static final int MAX_SHARD_SIZE_BYTES = 64 * 1024 * 1024;
     public static final String SOURCE_SERVER_ALIAS = "source";
     public static final long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
+    public static final String SNAPSHOT_NAME = "test_snapshot";
 
     protected static Object[] makeParamsForBase(SearchClusterContainer.ContainerVersion baseSourceImage) {
         return new Object[]{
@@ -282,5 +291,78 @@ public class SourceTestBase {
                 }
             });
         }
+    }
+
+    @AllArgsConstructor
+    @Getter
+    public static class RunData {
+        Path tempDirSnapshot;
+        Path tempDirLucene;
+        ToxiProxyWrapper proxyContainer;
+    }
+
+    public enum FailHow {
+        NEVER,
+        AT_STARTUP,
+        WITH_DELAYS
+    }
+
+    @NotNull
+    public static ProcessBuilder setupProcess(
+        Path tempDirSnapshot,
+        Path tempDirLucene,
+        String targetAddress,
+        String[] additionalArgs
+    ) {
+        String classpath = System.getProperty("java.class.path");
+        String javaHome = System.getProperty("java.home");
+        String javaExecutable = javaHome + File.separator + "bin" + File.separator + "java";
+
+        List<String> argsList = new ArrayList<>(Arrays.asList(
+            "--snapshot-name",
+            SNAPSHOT_NAME,
+            "--snapshot-local-dir",
+            tempDirSnapshot.toString(),
+            "--lucene-dir",
+            tempDirLucene.toString(),
+            "--target-host",
+            targetAddress,
+            "--index-allowlist",
+            "geonames",
+            "--source-version",
+            "ES_7_10"
+        ));
+
+        if (additionalArgs != null && additionalArgs.length > 0) {
+            argsList.addAll(Arrays.asList(additionalArgs));
+        }
+
+        log.atInfo().setMessage("Running RfsMigrateDocuments with args: {}")
+            .addArgument(() -> argsList.toString())
+            .log();
+        ProcessBuilder processBuilder = new ProcessBuilder(
+            javaExecutable,
+            "-cp",
+            classpath,
+            "org.opensearch.migrations.RfsMigrateDocuments"
+        );
+        processBuilder.command().addAll(argsList);
+        processBuilder.redirectErrorStream(true);
+        processBuilder.redirectOutput(ProcessBuilder.Redirect.INHERIT);
+        return processBuilder;
+    }
+
+    public void createSnapshot(
+        SearchClusterContainer sourceContainer,
+        String snapshotName,
+        SnapshotTestContext testSnapshotContext
+    ) throws Exception {
+        var args = new CreateSnapshot.Args();
+        args.snapshotName = snapshotName;
+        args.fileSystemRepoPath = SearchClusterContainer.CLUSTER_SNAPSHOT_DIR;
+        args.sourceArgs.host = sourceContainer.getUrl();
+
+        var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
+        snapshotCreator.run();
     }
 }
