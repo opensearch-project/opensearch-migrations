@@ -23,6 +23,7 @@ import org.apache.lucene.index.IndexWriter;
 import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.store.ByteBuffersDirectory;
 import org.apache.lucene.util.BytesRef;
+import org.junit.jupiter.api.Disabled;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import reactor.core.publisher.Mono;
@@ -36,6 +37,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 @Slf4j
+@Disabled("https://opensearch.atlassian.net/browse/MIGRATIONS-2254")
 public class PerformanceVerificationTest {
 
     @Test
@@ -71,9 +73,9 @@ public class PerformanceVerificationTest {
             }
 
             @Override
-            protected RfsLuceneDocument getDocument(IndexReader reader, int luceneDocId, boolean isLive, int segmentDocBase) {
+            protected RfsLuceneDocument getDocument(IndexReader reader, int docId, boolean isLive) {
                 ingestedDocuments.incrementAndGet();
-                return super.getDocument(reader, luceneDocId, isLive, segmentDocBase);
+                return super.getDocument(reader, docId, isLive);
             }
         };
 
@@ -92,7 +94,7 @@ public class PerformanceVerificationTest {
                     return null;
                 }).subscribeOn(blockingScheduler)
                 .then(Mono.just(response))
-                .doFinally(s -> blockingScheduler.dispose());
+                .doOnTerminate(blockingScheduler::dispose);
         });
 
         // Create DocumentReindexer
@@ -107,7 +109,7 @@ public class PerformanceVerificationTest {
 
         // Start reindexing in a separate thread
         Thread reindexThread = new Thread(() -> {
-            reindexer.reindex("test-index", reader.readDocuments(), mockContext).then().block();
+            reindexer.reindex("test-index", reader.readDocuments(), mockContext).block();
         });
         reindexThread.start();
 

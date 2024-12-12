@@ -32,8 +32,10 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
     @Getter
     @Setter
     private boolean disableThrowingPayloadNotLoaded;
+    private boolean payloadWasAccessed;
 
     public PayloadAccessFaultingMap(StrictCaseInsensitiveHttpHeadersMap headers) {
+        disableThrowingPayloadNotLoaded = true;
         underlyingMap = new TreeMap<>();
         isJson = Optional.ofNullable(headers.get("content-type"))
             .map(list -> list.stream().anyMatch(s -> s.startsWith("application/json")))
@@ -51,19 +53,19 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
                     return new Iterator<>() {
                         @Override
                         public boolean hasNext() {
-                            throw PayloadNotLoadedException.getInstance();
+                            throw makeFault();
                         }
 
                         @Override
                         public Map.Entry<String, Object> next() {
-                            throw PayloadNotLoadedException.getInstance();
+                            throw makeFault();
                         }
                     };
                 }
 
                 @Override
                 public int size() {
-                    throw PayloadNotLoadedException.getInstance();
+                    throw makeFault();
                 }
             };
         } else {
@@ -80,8 +82,21 @@ public class PayloadAccessFaultingMap extends AbstractMap<String, Object> {
     public Object get(Object key) {
         var value = super.get(key);
         if (value == null && !disableThrowingPayloadNotLoaded) {
-            throw PayloadNotLoadedException.getInstance();
+            throw makeFault();
         }
         return value;
+    }
+
+    public boolean missingPayloadWasAccessed() {
+        return payloadWasAccessed;
+    }
+
+    public void resetMissingPayloadWasAccessed() {
+        payloadWasAccessed = false;
+    }
+
+    private PayloadNotLoadedException makeFault() throws PayloadNotLoadedException {
+        payloadWasAccessed = true;
+        return PayloadNotLoadedException.getInstance();
     }
 }

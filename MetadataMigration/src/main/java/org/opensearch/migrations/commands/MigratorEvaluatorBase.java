@@ -55,7 +55,7 @@ public abstract class MigratorEvaluatorBase {
     }
 
     protected Transformer getCustomTransformer() {
-        var transformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.metadataTransformationParams);
+        var transformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.metadataCustomTransformationParams);
         if (transformerConfig != null) {
             log.atInfo().setMessage("Metadata Transformations config string: {}")
                     .addArgument(transformerConfig).log();
@@ -72,7 +72,8 @@ public abstract class MigratorEvaluatorBase {
         var versionTransformer = TransformFunctions.getTransformer(
             clusters.getSource().getVersion(),
             clusters.getTarget().getVersion(),
-            arguments.minNumberOfReplicas
+            arguments.minNumberOfReplicas,
+            arguments.metadataTransformationParams
         );
         var customTransformer = getCustomTransformer();
         var compositeTransformer = new CompositeTransformer(customTransformer, versionTransformer);

@@ -161,6 +161,7 @@ jobs:
         uses: ScribeMD/docker-cache@0.5.0
         with:
           key: docker-${{ runner.os }}-${{ steps.generate_cache_key.outputs.key }}
+          read-only: true
       - name: Start Docker Solution
         run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
         env:

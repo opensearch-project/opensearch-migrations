@@ -10,7 +10,8 @@ public interface IFieldCreator {
     ObjectMapper mapper = new ObjectMapper();
 
     default ObjectNode createField(ElasticsearchType type) {
-        return mapper.createObjectNode().put("type", type.getValue());
+        String typeString = type.getValue();
+        return mapper.createObjectNode().put("type", typeString);
     }
 
     default ObjectNode fieldGeoPoint() { return createField(ElasticsearchType.GEO_POINT); }

@@ -3,6 +3,7 @@ package org.opensearch.migrations.bulkload.http;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.Map;
+import java.util.Optional;
 
 import lombok.SneakyThrows;
 import org.apache.hc.client5.http.classic.methods.HttpDelete;
@@ -31,7 +32,7 @@ public class ClusterOperations {
         httpClient = HttpClients.createDefault();
     }
 
-    public void createSnapshotRepository(final String repoPath) throws IOException {
+    public void createSnapshotRepository(final String repoPath, final String repoName) throws IOException {
         // Create snapshot repository
         final var repositoryJson = "{\n"
             + "  \"type\": \"fs\",\n"
@@ -43,7 +44,7 @@ public class ClusterOperations {
             + "  }\n"
             + "}";
 
-        final var createRepoRequest = new HttpPut(clusterUrl + "/_snapshot/test-repo");
+        final var createRepoRequest = new HttpPut(clusterUrl + "/_snapshot/" + repoName);
         createRepoRequest.setEntity(new StringEntity(repositoryJson));
         createRepoRequest.setHeader("Content-Type", "application/json");
 
@@ -53,19 +54,23 @@ public class ClusterOperations {
     }
 
     @SneakyThrows
-    public void createDocument(final String index, final String docId, final String body) {
-        var indexDocumentRequest = new HttpPut(clusterUrl + "/" + index + "/_doc/" + docId);
-        indexDocumentRequest.setEntity(new StringEntity(body));
-        indexDocumentRequest.setHeader("Content-Type", "application/json");
+    public void restoreSnapshot(final String repository, final String snapshotName) {
+        var restoreRequest = new HttpPost(clusterUrl + "/_snapshot/" + repository + "/" + snapshotName + "/_restore"+ "?wait_for_completion=true");
+        restoreRequest.setHeader("Content-Type", "application/json");
+        restoreRequest.setEntity(new StringEntity("{}"));
 
-        try (var response = httpClient.execute(indexDocumentRequest)) {
-            assertThat(response.getCode(), anyOf(equalTo(201), equalTo(200)));
+        try (var response = httpClient.execute(restoreRequest)) {
+            assertThat(response.getCode(), anyOf(equalTo(200), equalTo(202)));
         }
     }
 
+    public void createDocument(final String index, final String docId, final String body) {
+        createDocument(index, docId, body, null, "_doc");
+    }
+
     @SneakyThrows
-    public void createDocument(final String index, final String docId, final String body, String routing) {
-        var indexDocumentRequest = new HttpPut(clusterUrl + "/" + index + "/_doc/" + docId + "?routing=" + routing);
+    public void createDocument(final String index, final String docId, final String body, String routing, String type) {
+        var indexDocumentRequest = new HttpPut(clusterUrl + "/" + index + "/" + Optional.ofNullable(type).orElse("_doc") + "/" + docId + "?routing=" + routing);
         indexDocumentRequest.setEntity(new StringEntity(body));
         indexDocumentRequest.setHeader("Content-Type", "application/json");
 
@@ -80,6 +85,19 @@ public class ClusterOperations {
         try (var response = httpClient.execute(deleteDocumentRequest)) {
             assertThat(response.getCode(), equalTo(200));
         }
+    }
+
+    public void createIndexWithMappings(final String index, final String mappings) {
+        var body = "{" +
+                "  \"settings\": {" +
+                "    \"index\": {" +
+                "      \"number_of_shards\": 5," +
+                "      \"number_of_replicas\": 0" +
+                "    }" +
+                "  }," +
+                "  \"mappings\": " + mappings +
+                "}";
+        createIndex(index, body);
     }
 
     public void createIndex(final String index) {
@@ -107,6 +125,19 @@ public class ClusterOperations {
     }
 
     @SneakyThrows
+    public Map.Entry<Integer, String> put(final String path, final String body) {
+        final var putRequest = new HttpPut(clusterUrl + path);
+        if (body != null) {
+            putRequest.setEntity(new StringEntity(body));
+            putRequest.setHeader("Content-Type", "application/json");
+        }
+        try (var response = httpClient.execute(putRequest)) {
+            var responseBody = EntityUtils.toString(response.getEntity(), StandardCharsets.UTF_8);
+            return Map.entry(response.getCode(), responseBody);
+        }
+    }
+
+    @SneakyThrows
     public Map.Entry<Integer, String> get(final String path) {
         final var getRequest = new HttpGet(clusterUrl + path);
 
@@ -116,7 +147,7 @@ public class ClusterOperations {
         }
     }
 
-    public void takeSnapshot(final String snapshotName, final String indexPattern) throws IOException {
+    public void takeSnapshot(final String repoName, final String snapshotName, final String indexPattern) throws IOException {
         final var snapshotJson = "{\n"
             + "  \"indices\": \""
             + indexPattern
@@ -126,7 +157,7 @@ public class ClusterOperations {
             + "}";
 
         final var createSnapshotRequest = new HttpPut(
-            clusterUrl + "/_snapshot/test-repo/" + snapshotName + "?wait_for_completion=true"
+            clusterUrl + "/_snapshot/" + repoName + "/" + snapshotName + "?wait_for_completion=true"
         );
         createSnapshotRequest.setEntity(new StringEntity(snapshotJson));
         createSnapshotRequest.setHeader("Content-Type", "application/json");
@@ -149,7 +180,7 @@ public class ClusterOperations {
             "    \"number_of_shards\": 1\r\n" + //
             "  },\r\n" + //
             "  \"aliases\": {\r\n" + //
-            "    \"alias1\": {}\r\n" + //
+            "    \"alias_legacy\": {}\r\n" + //
             "  },\r\n" + //
             "  \"mappings\": {\r\n" + //
             "    \"_doc\": {\r\n" + //
@@ -208,7 +239,7 @@ public class ClusterOperations {
             + "        }"
             + "    },"
             + "    \"aliases\": {"
-            + "        \"alias1\": {}"
+            + "        \"alias_component\": {}"
             + "    }"
             + "},"
             + "\"version\": 1"
@@ -277,7 +308,7 @@ public class ClusterOperations {
             + "        }"
             + "    },"
             + "    \"aliases\": {"
-            + "        \"alias1\": {}"
+            + "        \"alias_index\": {}"
             + "    }"
             + "}";
 

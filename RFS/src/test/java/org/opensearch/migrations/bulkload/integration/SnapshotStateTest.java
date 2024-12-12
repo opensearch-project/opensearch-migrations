@@ -53,7 +53,7 @@ public class SnapshotStateTest {
 
         // Configure operations and rfs implementation
         operations = new ClusterOperations(cluster.getUrl());
-        operations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR);
+        operations.createSnapshotRepository(SearchClusterContainer.CLUSTER_SNAPSHOT_DIR, "test-repo");
         srfs = new SimpleRestoreFromSnapshot_ES_7_10();
     }
 
@@ -72,7 +72,8 @@ public class SnapshotStateTest {
         operations.createDocument(indexName, document1Id, document1Body);
 
         final var snapshotName = "snapshot-1";
-        operations.takeSnapshot(snapshotName, indexName);
+        final var repoName = "test-repo";
+        operations.takeSnapshot(repoName, snapshotName, indexName);
 
         final File snapshotCopy = new File(localDirectory + "/snapshotCopy");
         cluster.copySnapshotData(snapshotCopy.getAbsolutePath());
@@ -94,7 +95,7 @@ public class SnapshotStateTest {
         final var docsCaptor = ArgumentCaptor.forClass(listOfBulkDocSectionType);
         verify(client, times(1)).sendBulkRequest(eq(indexName), docsCaptor.capture(), any());
         final var document = docsCaptor.getValue().get(0);
-        assertThat(document.getId(), equalTo(document1Id));
+        assertThat(document.getDocId(), equalTo(document1Id));
         assertThat(document.asBulkIndexString(), allOf(containsString(document1Id), containsString("{\"fo$o\":\"bar\"}")));
 
         verifyNoMoreInteractions(client);
@@ -110,7 +111,8 @@ public class SnapshotStateTest {
         operations.createDocument(indexName, document1Id, document1Body);
         operations.deleteDocument(indexName, document1Id);
         final var snapshotName = "snapshot-delete-item";
-        operations.takeSnapshot(snapshotName, indexName);
+        var repoName = "test-repo";
+        operations.takeSnapshot(repoName, snapshotName, indexName);
 
         final File snapshotCopy = new File(localDirectory + "/snapshotCopy");
         cluster.copySnapshotData(snapshotCopy.getAbsolutePath());
@@ -145,7 +147,8 @@ public class SnapshotStateTest {
         operations.createDocument(indexName, document1Id, document1BodyUpdated);
 
         final var snapshotName = "snapshot-delete-item";
-        operations.takeSnapshot(snapshotName, indexName);
+        final var repoName = "test-repo";
+        operations.takeSnapshot(repoName, snapshotName, indexName);
 
         final File snapshotCopy = new File(localDirectory + "/snapshotCopy");
         cluster.copySnapshotData(snapshotCopy.getAbsolutePath());
@@ -169,7 +172,7 @@ public class SnapshotStateTest {
 
         assertThat("Only one document, the one that was updated", docsCaptor.getValue().size(), equalTo(1));
         final var document = docsCaptor.getValue().get(0);
-        assertThat(document.getId(), equalTo(document1Id));
+        assertThat(document.getDocId(), equalTo(document1Id));
         assertThat(document.asBulkIndexString(), not(containsString(document1BodyOriginal)));
 
         verifyNoMoreInteractions(client);

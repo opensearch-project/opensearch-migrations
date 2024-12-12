@@ -27,6 +27,7 @@ dependencies {
     testImplementation group: 'org.mockito', name: 'mockito-junit-jupiter'
     testImplementation group: 'org.hamcrest', name: 'hamcrest'
     testImplementation group: 'org.testcontainers', name: 'testcontainers'
+    testImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
 
     testRuntimeOnly group: 'org.junit.jupiter', name: 'junit-jupiter-engine'
 }

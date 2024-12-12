@@ -53,8 +53,7 @@ public class WorkloadGenerator {
                 log.atTrace().setMessage("Created doc for index {}: {}")
                     .addArgument(indexName)
                     .addArgument(doc::toString).log();
-                var docId = docIdCounter.incrementAndGet();
-                return new BulkDocSection(indexName + "_" + docId, indexName, null, doc.toString(), null);
+                return new BulkDocSection(indexName + "_" + docIdCounter.incrementAndGet(), indexName, null, doc.toString());
             })
             .collect(Collectors.toList());
 

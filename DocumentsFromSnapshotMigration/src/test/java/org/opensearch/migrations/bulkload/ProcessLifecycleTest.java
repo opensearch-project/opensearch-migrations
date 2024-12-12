@@ -1,6 +1,9 @@
 package org.opensearch.migrations.bulkload;
 
+import java.io.BufferedReader;
 import java.io.File;
+import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -241,4 +244,35 @@ public class ProcessLifecycleTest extends SourceTestBase {
         processBuilder.redirectOutput();
         return processBuilder;
     }
+
+    @NotNull
+    private static Process runAndMonitorProcess(ProcessBuilder processBuilder) throws IOException {
+        var process = processBuilder.start();
+
+        log.atInfo().setMessage("Process started with ID: {}").addArgument(() -> process.toHandle().pid()).log();
+
+        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
+        var readerThread = new Thread(() -> {
+            String line;
+            while (true) {
+                try {
+                    if ((line = reader.readLine()) == null) break;
+                } catch (IOException e) {
+                    log.atWarn().setCause(e).setMessage("Couldn't read next line from sub-process").log();
+                    return;
+                }
+                String finalLine = line;
+                log.atInfo()
+                    .setMessage("from sub-process [{}]: {}")
+                    .addArgument(() -> process.toHandle().pid())
+                    .addArgument(finalLine)
+                    .log();
+            }
+        });
+
+        // Kill the process and fail if we have to wait too long
+        readerThread.start();
+        return process;
+    }
+
 }
