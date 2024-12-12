@@ -5,7 +5,7 @@ import java.io.Serializable;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
@@ -111,7 +111,7 @@ public interface IWorkCoordinator extends AutoCloseable {
      */
     void createSuccessorWorkItemsAndMarkComplete(
         String workItemId,
-        ArrayList<String> successorWorkItemIds,
+        List<String> successorWorkItemIds,
         int initialNextAcquisitionLeaseExponent,
         Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException;

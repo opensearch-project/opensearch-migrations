@@ -4,6 +4,7 @@ import java.nio.file.Paths;
 import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.common.BulkDocSection;
 import org.opensearch.migrations.bulkload.common.DocumentReindexer;
@@ -73,9 +74,9 @@ public class PerformanceVerificationTest {
             }
 
             @Override
-            protected RfsLuceneDocument getDocument(IndexReader reader, int luceneDocId, boolean isLive, int segmentDocBase) {
+            protected RfsLuceneDocument getDocument(IndexReader reader, int luceneDocId, boolean isLive, int segmentDocBase, Supplier<String> getSegmentReaderDebugInfo) {
                 ingestedDocuments.incrementAndGet();
-                return super.getDocument(reader, luceneDocId, isLive, segmentDocBase);
+                return super.getDocument(reader, luceneDocId, isLive, segmentDocBase, () -> "TestReaderWrapper(" + getSegmentReaderDebugInfo.get() + ")");
             }
         };
 

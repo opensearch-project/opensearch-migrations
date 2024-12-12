@@ -5,7 +5,9 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Path;
 import java.util.Comparator;
 import java.util.List;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Function;
+import java.util.function.Supplier;
 
 import org.opensearch.migrations.cluster.ClusterSnapshotReader;
 
@@ -130,7 +132,7 @@ public class LuceneDocumentsReader {
                     }
                     return leafDetails.toString();
                 };
-                log.atError().setMessage("Unexpected equality during leafReader sorting, expected sort to yield no equality " +
+                log.atWarn().setMessage("Unexpected equality during leafReader sorting, expected sort to yield no equality " +
                         "to ensure consistent segment ordering. This may cause missing documents if both segments" +
                         "contains docs. LeafReader1DebugInfo: {} \nLeafReader2DebugInfo: {}")
                         .addArgument(getLeafReaderDebugInfo.apply(leafReader1))
@@ -242,6 +244,14 @@ public class LuceneDocumentsReader {
         int startDocIdInSegment = Math.max(docStartingId - segmentDocBase, 0);
         int numDocsToProcessInSegment = segmentReader.maxDoc() - startDocIdInSegment;
 
+        // For any errors, we want to log the segment reader debug info so we can see which segment is causing the issue.
+        // This allows us to pass the supplier to getDocument without having to recompute the debug info
+        // every time if requested multiple times.
+        var segmentReaderDebugInfoCache = new AtomicReference<String>();
+        final Supplier<String> getSegmentReaderDebugInfo = () -> segmentReaderDebugInfoCache.updateAndGet(s -> 
+            s == null ? segmentReader.toString() : s
+        );
+
         log.atInfo().setMessage("For segment: {}, migrating from doc: {}. Will process {} docs in segment.")
                 .addArgument(leafReaderContext)
                 .addArgument(startDocIdInSegment)
@@ -253,14 +263,20 @@ public class LuceneDocumentsReader {
                     try {
                         if (liveDocs == null || liveDocs.get(docIdx)) {
                             // Get document, returns null to skip malformed docs
-                            RfsLuceneDocument document = getDocument(segmentReader, docIdx, true, segmentDocBase);
+                            RfsLuceneDocument document = getDocument(segmentReader, docIdx, true, segmentDocBase, getSegmentReaderDebugInfo);
                             return Mono.justOrEmpty(document); // Emit only non-null documents
                         } else {
                             return Mono.empty(); // Skip non-live documents
                         }
                     } catch (Exception e) {
                         // Handle individual document read failures gracefully
-                        return Mono.error(new RuntimeException("Error reading document at index: " + docIdx, e));
+                        log.atError().setMessage("Error reading document from reader {} with index: {}")
+                            .addArgument(getSegmentReaderDebugInfo)
+                            .addArgument(docIdx)
+                            .setCause(e)
+                            .log();
+                        return Mono.error(new RuntimeException("Error reading document from reader with index " + docIdx 
+                            + " from segment " + getSegmentReaderDebugInfo.get(), e));
                     }
                 }).subscribeOn(scheduler),
                         concurrency, 1)
@@ -273,7 +289,7 @@ public class LuceneDocumentsReader {
         return reader;
     }
 
-    protected RfsLuceneDocument getDocument(IndexReader reader, int luceneDocId, boolean isLive, int segmentDocBase) {
+    protected RfsLuceneDocument getDocument(IndexReader reader, int luceneDocId, boolean isLive, int segmentDocBase, final Supplier<String> getSegmentReaderDebugInfo) {
         Document document;
         try {
             document = reader.document(luceneDocId);
@@ -319,21 +335,31 @@ public class LuceneDocumentsReader {
                 }
             }
             if (openSearchDocId == null) {
-                log.atError().setMessage("Document with index {} does not have an id. Skipping")
-                    .addArgument(luceneDocId).log();
+                log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, it does not have an referenceable id.")
+                    .addArgument(luceneDocId)
+                    .addArgument(getSegmentReaderDebugInfo)
+                    .addArgument(indexDirectoryPath)
+                    .log();
                 return null;  // Skip documents with missing id
             }
 
             if (sourceBytes == null || sourceBytes.bytes.length == 0) {
-                log.atWarn().setMessage("Document {} doesn't have the _source field enabled")
-                    .addArgument(openSearchDocId).log();
+                log.atWarn().setMessage("Skipping document with index {} from segment {} from source {}, it does not have the _source field enabled.")
+                    .addArgument(luceneDocId)
+                    .addArgument(getSegmentReaderDebugInfo)
+                    .addArgument(indexDirectoryPath)
+                    .log();
                 return null;  // Skip these
             }
 
             log.atDebug().setMessage("Reading document {}").addArgument(openSearchDocId).log();
         } catch (RuntimeException e) {
             StringBuilder errorMessage = new StringBuilder();
-            errorMessage.append("Unable to parse Document id from Document.  The Document's Fields: ");
+            errorMessage.append("Unable to parse Document id from Document with index ")
+                .append(luceneDocId)
+                .append(" from segment ")
+                .append(getSegmentReaderDebugInfo.get())
+                .append(".  The Document's Fields: ");
             document.getFields().forEach(f -> errorMessage.append(f.name()).append(", "));
             log.atError().setCause(e).setMessage("{}").addArgument(errorMessage).log();
             return null; // Skip documents with invalid id

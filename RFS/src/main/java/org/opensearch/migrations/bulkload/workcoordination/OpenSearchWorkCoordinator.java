@@ -114,7 +114,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     static class WorkItemWithPotentialSuccessors {
         final String workItemId;
         final Instant leaseExpirationTime;
-        final ArrayList<String> successorWorkItemIds;
+        final List<String> successorWorkItemIds;
     }
 
     private final long tolerableClientServerClockDifferenceSeconds;
@@ -394,11 +394,11 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    private ArrayList<String> getSuccessorItemsIfPresent(JsonNode responseDoc) {
+    private List<String> getSuccessorItemsIfPresent(JsonNode responseDoc) {
         if (responseDoc.has(SUCCESSOR_ITEMS_FIELD_NAME)) {
             return new ArrayList<>(Arrays.asList(responseDoc.get(SUCCESSOR_ITEMS_FIELD_NAME).asText().split(SUCCESSOR_ITEM_DELIMITER)));
         }
-        return null;
+        return List.of();
     }
 
     @Override
@@ -673,8 +673,8 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         final var resultHitsUpper = objectMapper.readTree(response.getPayloadBytes()).path("hits");
         if (resultHitsUpper.isMissingNode()) {
-            log.warn("Couldn't find the top level 'hits' field, returning null");
-            return null;
+            log.warn("Couldn't find the top level 'hits' field, returning no work item");
+            throw new AssignedWorkDocumentNotFoundException(response);
         }
         final var numDocs = resultHitsUpper.path("total").path("value").longValue();
         if (numDocs == 0) {
@@ -737,7 +737,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
-    private void updateWorkItemWithSuccessors(String workItemId, ArrayList<String> successorWorkItemIds) throws IOException, NonRetryableException {
+    private void updateWorkItemWithSuccessors(String workItemId, List<String> successorWorkItemIds) throws IOException, NonRetryableException {
         final var updateSuccessorWorkItemsTemplate = "{\n"
                 + "  \"script\": {\n"
                 + "    \"lang\": \"painless\",\n"
@@ -805,7 +805,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     // API which creates a document only if the specified ID doesn't yet exist. It is distinct from createUnassignedWorkItem
     // because it is an expected outcome of this function that sometimes the work item is already created. That function
     // uses `createOrUpdateLease`, whereas this function deliberately never modifies an already-existing work item.
-    private void createUnassignedWorkItemsIfNonexistent(ArrayList<String> workItemIds, int nextAcquisitionLeaseExponent) throws IOException, IllegalStateException {
+    private void createUnassignedWorkItemsIfNonexistent(List<String> workItemIds, int nextAcquisitionLeaseExponent) throws IOException, IllegalStateException {
         String workItemBodyTemplate = "{\"nextAcquisitionLeaseExponent\":" + nextAcquisitionLeaseExponent + ", \"scriptVersion\":\"" + SCRIPT_VERSION_TEMPLATE + "\", " +
             "\"creatorId\":\"" + WORKER_ID_TEMPLATE + "\", \"" + EXPIRATION_FIELD_NAME + "\":0 }";
         String workItemBody = workItemBodyTemplate.replace(SCRIPT_VERSION_TEMPLATE, "2.0").replace(WORKER_ID_TEMPLATE, workerId);
@@ -863,7 +863,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
     @Override
     public void createSuccessorWorkItemsAndMarkComplete(
             String workItemId,
-            ArrayList<String> successorWorkItemIds,
+            List<String> successorWorkItemIds,
             int successorNextAcquisitionLeaseExponent,
             Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException, IllegalStateException {
@@ -1038,7 +1038,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                         case SUCCESSFUL_ACQUISITION:
                             ctx.recordAssigned();
                             var workItem = getAssignedWorkItem(leaseChecker, ctx);
-                            if (workItem.successorWorkItemIds != null) {
+                            if (!workItem.successorWorkItemIds.isEmpty()) {
                                 // continue the previous work of creating the successors and marking this item as completed.
                                 createSuccessorWorkItemsAndMarkComplete(workItem.workItemId, workItem.successorWorkItemIds,
                                         // in cases of partial successor creation, create with 0 nextAcquisitionLeaseExponent to use default

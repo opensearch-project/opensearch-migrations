@@ -410,7 +410,7 @@ public class RfsMigrateDocuments {
         System.exit(PROCESS_TIMED_OUT_EXIT_CODE);
     }
 
-    protected static int getSuccessorNextAcquisitionLeaseExponent(WorkItemTimeProvider workItemTimeProvider, Duration initialLeaseDuration,
+    public static int getSuccessorNextAcquisitionLeaseExponent(WorkItemTimeProvider workItemTimeProvider, Duration initialLeaseDuration,
                                        Instant leaseExpirationTime) {
         if (workItemTimeProvider.getLeaseAcquisitionTimeRef().get() == null ||
             workItemTimeProvider.getDocumentMigraionStartTimeRef().get() == null) {

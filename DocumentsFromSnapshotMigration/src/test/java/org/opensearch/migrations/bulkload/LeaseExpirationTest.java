@@ -109,12 +109,12 @@ public class LeaseExpirationTest extends SourceTestBase {
             );
             sourceClusterOperations.createIndex("geonames", body);
 
-            workloadOptions.totalDocs = indexDocCount;
-            workloadOptions.workloads = List.of(Workloads.GEONAMES);
-            workloadOptions.index.indexSettings.put(IndexOptions.PROP_NUMBER_OF_SHARDS, shards);
+            workloadOptions.setTotalDocs(indexDocCount);
+            workloadOptions.setWorkloads(List.of(Workloads.GEONAMES));
+            workloadOptions.getIndex().indexSettings.put(IndexOptions.PROP_NUMBER_OF_SHARDS, shards);
             // Segments will be created on each refresh which tests segment ordering logic
-            workloadOptions.refreshAfterEachWrite = forceMoreSegments;
-            workloadOptions.maxBulkBatchSize = forceMoreSegments ? 10 : 1000;
+            workloadOptions.setRefreshAfterEachWrite(forceMoreSegments);
+            workloadOptions.setMaxBulkBatchSize(forceMoreSegments ? 10 : 1000);
             generator.generate(workloadOptions);
 
             // Create the snapshot from the source cluster

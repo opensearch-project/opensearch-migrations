@@ -1,7 +1,7 @@
 package org.opensearch.migrations.bulkload.common;
 
 import java.util.Map;
-import java.util.function.Function;
+import java.util.function.UnaryOperator;
 
 import lombok.AllArgsConstructor;
 
@@ -32,7 +32,7 @@ public class RfsDocument {
         );
     }
 
-    public static RfsDocument transform(Function<Map<String, Object>, Map<String, Object>> transformer, RfsDocument doc) {
+    public static RfsDocument transform(UnaryOperator<Map<String, Object>> transformer, RfsDocument doc) {
         return new RfsDocument(
             doc.luceneDocNumber,
             BulkDocSection.fromMap(transformer.apply(doc.document.toMap()))
