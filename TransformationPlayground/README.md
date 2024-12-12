@@ -56,6 +56,17 @@ curl -X POST "http://127.0.0.1:8000/transforms/index/" -H "Content-Type: applica
 
 The `test_target_url` is optional, but enables the system to test the output Index settings created by running the transform against the starting Index settings against a real OpenSearch domain by creating/deleting them on it.
 
+#### Frontend
+
+To run the Frontend, first start the backend and ensure it's running.  Then, execute the following commands:
+
+```bash
+# Start in the repo root
+
+(cd playground_frontend && npm install && npm run dev)
+```
+
+You should then be able to hit the Playground website in your web browser at `http://localhost:3000`.  The GUI should be pretty self-explanatory.
 
 ### Dependencies
 `pipenv` is used to managed dependencies within the project.  The `Pipefile` and `Pipefile.lock` handle the local environment.  You can add dependencies like so:

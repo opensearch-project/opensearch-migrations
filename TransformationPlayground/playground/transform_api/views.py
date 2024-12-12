@@ -1,6 +1,7 @@
 import logging
 import uuid
 
+from django.views.decorators.csrf import csrf_exempt
 from langchain_core.messages import HumanMessage
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -19,6 +20,7 @@ logger = logging.getLogger("transform_api")
 
 
 class TransformsIndexView(APIView):
+    @csrf_exempt
     def post(self, request):
         logger.info(f"Received transformation request: {request.data}")
 
