@@ -14,7 +14,7 @@ python3 -m venv venv
 source venv/bin/activate
 pipenv sync --dev
 
-(cd tp_backend && python3 manage.py runserver)
+(cd playground && python3 manage.py runserver)
 ```
 
 This will start a Django REST Framework API running at `http://127.0.0.1:8000`.
@@ -70,5 +70,5 @@ This updates the `Pipfile`/`Pipfile.lock` with the new dependency.  To create a 
 pipenv requirements > requirements.txt
 python3 -m pip install -r requirements.txt -t ./package --upgrade
 
-zip -r9 tp_backend.zip tools/ package/
+zip -r9 playground.zip tools/ package/
 ```
