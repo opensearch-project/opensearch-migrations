@@ -4,6 +4,7 @@ package org.opensearch.migrations.bulkload;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
@@ -47,22 +48,15 @@ import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
+import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import reactor.core.publisher.Flux;
 
 @Slf4j
 public class SourceTestBase {
-    public static final String GENERATOR_BASE_IMAGE = "migrations/elasticsearch_client_test_console:latest";
     public static final int MAX_SHARD_SIZE_BYTES = 64 * 1024 * 1024;
     public static final String SOURCE_SERVER_ALIAS = "source";
     public static final long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
-
-    protected static Object[] makeParamsForBase(SearchClusterContainer.ContainerVersion baseSourceImage) {
-        return new Object[]{
-            baseSourceImage,
-            GENERATOR_BASE_IMAGE,
-            new String[]{"/root/runTestBenchmarks.sh", "--endpoint", "http://" + SOURCE_SERVER_ALIAS + ":9200/"}};
-    }
 
     @NotNull
     protected static Process runAndMonitorProcess(ProcessBuilder processBuilder) throws IOException {
