@@ -99,3 +99,35 @@ sequenceDiagram
     ma -->> fe: Translate and Response
     fe -->> u: Response
 ```
+
+### Website Architecture
+
+With a stateless frontend required by the overall architecture the website assets will need to use JavaScript to interact with the Migration Console API.  Lets review the high-level components that will be part of the website architecture
+
+#### Language
+
+[Typescript](https://www.typescriptlang.org/), already in use in this project for CDK.  OpenSearch's frontend OpenSearch-Dashboards is built with Typescript. Finally all of the AWS Console components for OpenSearch are built with Typescript.  Its a great choice with its huge developer community and numerous library and tools vended with npm.
+
+#### Design Language
+
+[Cloudscape](https://cloudscape.design/) is the open-source version of AWS Console's UX.  Being that current set of maintainers also work on UX design at Amazon there is clear skill set alignment.
+
+The components of Cloudscape use React, and therefore the majority of the component design will follow this model for consistency even for the few custom components.
+
+#### Application Framework
+
+[Next.js](https://nextjs.org/docs) providers routing, caching, and packaging.  The packaging system of Next.js can compile all our web assets for deployment.  While there are other lighter  weight frameworks out there the critical workflows of client-based site development, simple routing and caching approaches and static asset deployment align with our purposes.
+
+#### Developer Velocity
+
+*Linting*
+
+Linters will be enforced for best practice management and code styling.  All website components will follow these tooling that are available through NPM.  Next.js has [default conventions](https://nextjs.org/docs/app/api-reference/config/eslint) for both eslint and prettier and we will enable them in our CI workflows.
+
+*Local Dev*
+
+Next.js comes with a [dev webserver](https://nextjs.org/docs/app/api-reference/cli/next#next-dev-options) that runs all pages as part of a sever-side website.  While this is slightly different experience from the static workflow writing code and seeing an update to the UX occurs in sub-second time frame - perfect for quickly iterating on layout and routing logic.
+
+*Testing*
+
+With a decoupled backend, a mock response library will be configurable as the api layer to serve as UX reference.  When there is sufficiently complex logic that requires testing [Jest](https://nextjs.org/docs/app/building-your-application/testing/jest) is the library of choice that provides a framework for test declaration and snapshotting for UX components.  Finally for end to end testing [Cypress](https://nextjs.org/docs/app/building-your-application/testing/cypress) supports headless and full dom based testing with clean reporting and validation.
