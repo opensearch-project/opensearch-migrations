@@ -42,7 +42,7 @@ import org.junit.jupiter.api.Test;
  * GET call to find out the new expiration value.
  */
 @Slf4j
-@Tag("longTest")
+@Tag("isolatedTest")
 public class WorkCoordinatorTest {
 
     public static final String DUMMY_FINISHED_DOC_ID = "dummy_finished_doc";
