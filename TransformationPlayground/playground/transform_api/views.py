@@ -47,7 +47,9 @@ class TransformsIndexView(APIView):
         # Serialize and return the response
         response_serializer = TransformsIndexCreateResponseSerializer(data={
             "output_shape": transform_report.task.output,
-            "transform_logic": transform_report.task.transform.to_file_format()
+            "transform_logic": transform_report.task.transform.to_file_format(),
+            "validation_report": transform_report.report_entries,
+            "validation_outcome": "PASSED" if transform_report.passed else "FAILED"
         })
         if not response_serializer.is_valid():
             logger.error(f"Invalid transformation response: {response_serializer.errors}")

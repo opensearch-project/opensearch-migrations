@@ -92,6 +92,7 @@ class IndexTransformValidator(TransformValidatorBase):
     def _try_test_against_target(self, output: List[Dict[str, Any]], report: ValidationReport):
         if self.test_client:
             report.append_entry(f"The transformed output has {len(output)} Index entries.", logger.info)
+            report.append_entry(f"Using target cluster for testing: {self.test_client.get_url()}", logger.info)
             for index_def in output:
                 try:
                     index_name = index_def["index_name"]

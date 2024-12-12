@@ -65,3 +65,5 @@ class TransformsIndexCreateRequestSerializer(serializers.Serializer):
 class TransformsIndexCreateResponseSerializer(serializers.Serializer):
     output_shape = serializers.ListField(child=IndexShapeField())
     transform_logic = serializers.CharField()
+    validation_report = serializers.ListField(child=serializers.CharField())
+    validation_outcome = serializers.CharField()

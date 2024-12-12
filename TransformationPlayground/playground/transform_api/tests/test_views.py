@@ -76,7 +76,21 @@ class TransformsIndexViewTestCase(TestCase):
                     }
                 }
             ],
-            "transform_logic": "Generated Python transformation logic"
+            "transform_logic": "Generated Python transformation logic",
+            "validation_report": [
+                "Attempting to load the transform function...",
+                "Loaded the transform function without exceptions",
+                "Attempting to invoke the transform function against the input...",
+                "Invoked the transform function without exceptions",
+                "The transformed output has 2 Index entries.",
+                "Attempting to create & delete index 'test-index-type1' with transformed settings...",
+                "Created index 'test-index-type1'.  Response: \n{\"acknowledged\": true, \"shards_acknowledged\": true, \"index\": \"test-index-type1\"}",
+                "Deleted index 'test-index-type1'.  Response: \n{\"acknowledged\": true}",
+                "Attempting to create & delete index 'test-index-type2' with transformed settings...",
+                "Created index 'test-index-type2'.  Response: \n{\"acknowledged\": true, \"shards_acknowledged\": true, \"index\": \"test-index-type2\"}",
+                "Deleted index 'test-index-type2'.  Response: \n{\"acknowledged\": true}"
+            ],
+            "validation_outcome": "PASSED"
         }
 
     @patch("transform_api.views.TransformsIndexView._perform_transformation")
@@ -84,6 +98,8 @@ class TransformsIndexViewTestCase(TestCase):
         # Mock the transformation result
         mock_transform_report = MagicMock()
         mock_transform_report.task.output = self.valid_response_body["output_shape"]
+        mock_transform_report.report_entries = self.valid_response_body["validation_report"]
+        mock_transform_report.passed = True
         mock_transform_report.task.transform.to_file_format.return_value = self.valid_response_body["transform_logic"]
         mock_perform_transformation.return_value = mock_transform_report
 
@@ -138,6 +154,8 @@ class TransformsIndexViewTestCase(TestCase):
         # Mock the transformation result
         mock_transform_report = MagicMock()
         mock_transform_report.task.output = self.valid_response_body["output_shape"]
+        mock_transform_report.report_entries = self.valid_response_body["validation_report"]
+        mock_transform_report.passed = True
         mock_transform_report.task.transform.to_file_format.return_value = self.valid_response_body["transform_logic"]
         mock_perform_transformation.return_value = mock_transform_report
 

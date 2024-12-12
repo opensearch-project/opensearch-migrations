@@ -165,7 +165,12 @@ class TransformationCreateResponseSerializerTestCase(TestCase):
                     }
                 }
             ],
-            "transform_logic": "the transform logic"
+            "transform_logic": "the transform logic",
+            "validation_report": [
+                "Entry 1",
+                "Entry 2"
+            ],
+            "validation_outcome": "PASSED"
         })
         self.assertTrue(test_serializer.is_valid())
 
@@ -176,6 +181,11 @@ class TransformationCreateResponseSerializerTestCase(TestCase):
                     "index_name": "test-index-type1"
                 }
             ],
-            "transform_logic": "the transform logic"
+            "transform_logic": "the transform logic",
+            "validation_report": [
+                "Entry 1",
+                "Entry 2"
+            ],
+            "validation_outcome": "PASSED"
         })
         self.assertFalse(test_serializer.is_valid())
