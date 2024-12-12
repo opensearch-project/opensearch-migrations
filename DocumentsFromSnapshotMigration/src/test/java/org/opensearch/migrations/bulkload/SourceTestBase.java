@@ -2,16 +2,19 @@ package org.opensearch.migrations.bulkload;
 
 
 import java.io.BufferedReader;
+import java.io.File;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Clock;
 import java.time.Duration;
+import java.util.Arrays;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
 import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
@@ -95,6 +98,51 @@ public class SourceTestBase {
         readerThread.start();
         return process;
     }
+
+    @SneakyThrows
+    protected static int runProcessAgainstTarget(String[] processArgs)
+    {
+        int timeoutSeconds = 30;
+        ProcessBuilder processBuilder = setupProcess(processArgs);
+
+        var process = runAndMonitorProcess(processBuilder);
+        boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+        if (!finished) {
+            log.atError().setMessage("Process timed out, attempting to kill it...").log();
+            process.destroy(); // Try to be nice about things first...
+            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                log.atError().setMessage("Process still running, attempting to force kill it...").log();
+                process.destroyForcibly();
+            }
+            Assertions.fail("The process did not finish within the timeout period (" + timeoutSeconds + " seconds).");
+        }
+
+        return process.exitValue();
+    }
+
+
+    @NotNull
+    protected static ProcessBuilder setupProcess(String[] processArgs) {
+        String classpath = System.getProperty("java.class.path");
+        String javaHome = System.getProperty("java.home");
+        String javaExecutable = javaHome + File.separator + "bin" + File.separator + "java";
+
+        // Kick off the doc migration process
+        log.atInfo().setMessage("Running RfsMigrateDocuments with args: {}")
+            .addArgument(() -> Arrays.toString(processArgs))
+            .log();
+        ProcessBuilder processBuilder = new ProcessBuilder(
+            javaExecutable,
+            "-cp",
+            classpath,
+            "org.opensearch.migrations.RfsMigrateDocuments"
+        );
+        processBuilder.command().addAll(Arrays.asList(processArgs));
+        processBuilder.redirectErrorStream(true);
+        processBuilder.redirectOutput();
+        return processBuilder;
+    }
+
 
     @AllArgsConstructor
     public static class ExpectedMigrationWorkTerminationException extends RuntimeException {

@@ -1,14 +1,13 @@
 package org.opensearch.migrations.bulkload;
 
-import java.io.File;
 import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 import java.util.function.Function;
+import java.util.stream.Stream;
 
 import org.opensearch.migrations.CreateSnapshot;
 import org.opensearch.migrations.bulkload.common.RestClient;
@@ -19,13 +18,10 @@ import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
 import org.opensearch.migrations.snapshot.creation.tracing.SnapshotTestContext;
 
-import lombok.AllArgsConstructor;
-import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
 import org.hamcrest.MatcherAssert;
 import org.hamcrest.Matchers;
-import org.jetbrains.annotations.NotNull;
 import org.json.JSONArray;
 import org.json.JSONObject;
 import org.junit.jupiter.api.Assertions;
@@ -33,20 +29,13 @@ import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.testcontainers.containers.Network;
 
+
 @Slf4j
 @Tag("isolatedTest")
-public class CustomTransformationTest extends SourceTestBase {
+public class CustomRfsTransformationTest extends SourceTestBase {
 
     public static final String TARGET_DOCKER_HOSTNAME = "target";
     public static final String SNAPSHOT_NAME = "test_snapshot";
-
-    @AllArgsConstructor
-    @Getter
-    private static class RunData {
-        Path tempDirSnapshot;
-        Path tempDirLucene;
-        SearchClusterContainer targetContainer;
-    }
 
     @Test
     public void testCustomTransformationProducesDesiredTargetClusterState() {
@@ -55,23 +44,47 @@ public class CustomTransformationTest extends SourceTestBase {
         expectedSourceMap.put("geonames", 1);
         var expectedTargetMap = new HashMap<String, Integer>();
         expectedTargetMap.put("geonames_transformed", 1);
-        // 2 Shards, for each shard, expect three status code 2 and one status code 0
-        int shards = 2;
-        int migrationProcessesPerShard = 4;
-        int continueExitCode = 2;
-        int finalExitCodePerShard = 0;
-        runTestProcessWithCheckpoint(continueExitCode, (migrationProcessesPerShard - 1) * shards,
-                finalExitCodePerShard, shards, expectedSourceMap, expectedTargetMap,
-            d -> runProcessAgainstTarget(d.tempDirSnapshot, d.tempDirLucene, d.targetContainer, nameTransformation
-            ));
+        String[] transformationArgs = {
+            "--doc-transformer-config",
+            nameTransformation,
+        };
+        int totalSourceShards = 1;
+        Consumer<ClusterOperations> loadDataIntoSource = cluster -> {
+            // Number of default shards is different across different versions on ES/OS.
+            // So we explicitly set it.
+            String body = String.format(
+                "{" +
+                    "  \"settings\": {" +
+                    "    \"index\": {" +
+                    "      \"number_of_shards\": %d," +
+                    "      \"number_of_replicas\": 0" +
+                    "    }" +
+                    "  }" +
+                    "}",
+                totalSourceShards
+            );
+            cluster.createIndex("geonames", body);
+            cluster.createDocument("geonames", "111", "{\"author\":\"Tobias Funke\", \"category\": \"cooking\"}");
+        };
+        runTestProcess(
+            transformationArgs,
+            expectedSourceMap,
+            expectedTargetMap,
+            loadDataIntoSource,
+            totalSourceShards,
+            SourceTestBase::runProcessAgainstTarget
+        );
     }
 
     @SneakyThrows
-    private void runTestProcessWithCheckpoint(int initialExitCode, int initialExitCodes,
-                                              int eventualExitCode, int eventualExitCodeCount,
-                                              Map<String, Integer> expectedSourceDocs,
-                                              Map<String, Integer> expectedTargetDocs,
-                                              Function<RunData, Integer> processRunner) {
+    private void runTestProcess(
+        String[] transformationArgs,
+        Map<String, Integer> expectedSourceDocs,
+        Map<String, Integer> expectedTargetDocs,
+        Consumer<ClusterOperations> preloadDataOperations,
+        Integer numberOfShards,
+        Function<String[], Integer> processRunner)
+    {
         final var testSnapshotContext = SnapshotTestContext.factory().noOtelTracking();
 
         var tempDirSnapshot = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_snapshot");
@@ -92,23 +105,7 @@ public class CustomTransformationTest extends SourceTestBase {
             ).join();
 
             var sourceClusterOperations = new ClusterOperations(esSourceContainer.getUrl());
-
-            var shards = 2;
-            // Number of default shards is different across different versions on ES/OS.
-            // So we explicitly set it.
-            String body = String.format(
-                    "{" +
-                            "  \"settings\": {" +
-                            "    \"index\": {" +
-                            "      \"number_of_shards\": %d," +
-                            "      \"number_of_replicas\": 0" +
-                            "    }" +
-                            "  }" +
-                            "}",
-                    shards
-            );
-            sourceClusterOperations.createIndex("geonames", body);
-            sourceClusterOperations.createDocument("geonames", "111", "{\"author\":\"Tobias Funke\", \"category\": \"cooking\"}");
+            preloadDataOperations.accept(sourceClusterOperations);
 
             // Create the snapshot from the source cluster
             var args = new CreateSnapshot.Args();
@@ -118,22 +115,31 @@ public class CustomTransformationTest extends SourceTestBase {
 
             var snapshotCreator = new CreateSnapshot(args, testSnapshotContext.createSnapshotCreateContext());
             snapshotCreator.run();
-
             esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
-            int exitCode;
-            int finalExitCodeCount = 0;
-            int runs = 0;
-            do {
-                exitCode = processRunner.apply(new RunData(tempDirSnapshot, tempDirLucene, osTargetContainer));
-                runs++;
-                if (exitCode == eventualExitCode) {
-                    finalExitCodeCount++;
-                }
+            String[] processArgs = {
+                "--snapshot-name",
+                SNAPSHOT_NAME,
+                "--snapshot-local-dir",
+                tempDirSnapshot.toString(),
+                "--lucene-dir",
+                tempDirLucene.toString(),
+                "--target-host",
+                osTargetContainer.getUrl(),
+                "--documents-per-bulk-request",
+                "5",
+                "--max-connections",
+                "4",
+                "--source-version",
+                "ES_7_10"
+            };
+            String[] completeArgs = Stream.concat(Arrays.stream(processArgs), Arrays.stream(transformationArgs)).toArray(String[]::new);
+
+            // Perform RFS process for each shard
+            for(int i = 0; i < numberOfShards; i++) {
+                int exitCode = processRunner.apply(completeArgs);
                 log.atInfo().setMessage("Process exited with code: {}").addArgument(exitCode).log();
-                // Clean tree for subsequent run
-                deleteTree(tempDirLucene);
-            } while (finalExitCodeCount < eventualExitCodeCount && runs < initialExitCodes * 2);
+            }
 
             // Assert doc count on the source and target cluster match expected
             validateFinalClusterDocs(
@@ -148,6 +154,8 @@ public class CustomTransformationTest extends SourceTestBase {
         }
     }
 
+    // Create a simple Jolt transform which matches documents of a given index name in a snpahost and changes that
+    // index name to a desired index name when migrated to the target cluster
     private static String createIndexNameTransformation(String existingIndexName, String newIndexName) {
         JSONArray rootArray = new JSONArray();
         JSONObject firstObject = new JSONObject();
@@ -174,81 +182,6 @@ public class CustomTransformationTest extends SourceTestBase {
         firstObject.put("JsonConditionalTransformerProvider", jsonConditionalTransformerProvider);
         rootArray.put(firstObject);
         return rootArray.toString();
-    }
-
-    @SneakyThrows
-    private static int runProcessAgainstTarget(
-        Path tempDirSnapshot,
-        Path tempDirLucene,
-        SearchClusterContainer targetContainer,
-        String transformations
-    )
-    {
-        String targetAddress = targetContainer.getUrl();
-
-        int timeoutSeconds = 30;
-        ProcessBuilder processBuilder = setupProcess(tempDirSnapshot, tempDirLucene, targetAddress, transformations);
-
-        var process = runAndMonitorProcess(processBuilder);
-        boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
-        if (!finished) {
-            log.atError().setMessage("Process timed out, attempting to kill it...").log();
-            process.destroy(); // Try to be nice about things first...
-            if (!process.waitFor(10, TimeUnit.SECONDS)) {
-                log.atError().setMessage("Process still running, attempting to force kill it...").log();
-                process.destroyForcibly();
-            }
-            Assertions.fail("The process did not finish within the timeout period (" + timeoutSeconds + " seconds).");
-        }
-
-        return process.exitValue();
-    }
-
-
-    @NotNull
-    private static ProcessBuilder setupProcess(
-        Path tempDirSnapshot,
-        Path tempDirLucene,
-        String targetAddress,
-        String transformations
-    ) {
-        String classpath = System.getProperty("java.class.path");
-        String javaHome = System.getProperty("java.home");
-        String javaExecutable = javaHome + File.separator + "bin" + File.separator + "java";
-
-        String[] args = {
-            "--snapshot-name",
-            SNAPSHOT_NAME,
-            "--snapshot-local-dir",
-            tempDirSnapshot.toString(),
-            "--lucene-dir",
-            tempDirLucene.toString(),
-            "--target-host",
-            targetAddress,
-            "--documents-per-bulk-request",
-            "5",
-            "--max-connections",
-            "4",
-            "--source-version",
-            "ES_7_10",
-            "--doc-transformer-config",
-            transformations,
-        };
-
-        // Kick off the doc migration process
-        log.atInfo().setMessage("Running RfsMigrateDocuments with args: {}")
-            .addArgument(() -> Arrays.toString(args))
-            .log();
-        ProcessBuilder processBuilder = new ProcessBuilder(
-            javaExecutable,
-            "-cp",
-            classpath,
-            "org.opensearch.migrations.RfsMigrateDocuments"
-        );
-        processBuilder.command().addAll(Arrays.asList(args));
-        processBuilder.redirectErrorStream(true);
-        processBuilder.redirectOutput();
-        return processBuilder;
     }
 
     private static void validateFinalClusterDocs(

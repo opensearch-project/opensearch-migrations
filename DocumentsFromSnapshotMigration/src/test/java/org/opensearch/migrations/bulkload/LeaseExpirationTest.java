@@ -1,9 +1,6 @@
 package org.opensearch.migrations.bulkload;
 
-import java.io.File;
 import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -26,7 +23,6 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -45,8 +41,7 @@ public class LeaseExpirationTest extends SourceTestBase {
     @AllArgsConstructor
     @Getter
     private static class RunData {
-        Path tempDirSnapshot;
-        Path tempDirLucene;
+        String[] processArgs;
         ToxiProxyWrapper proxyContainer;
     }
 
@@ -66,8 +61,8 @@ public class LeaseExpirationTest extends SourceTestBase {
         int finalExitCodePerShard = 0;
         runTestProcessWithCheckpoint(continueExitCode, (migrationProcessesPerShard - 1) * shards,
                 finalExitCodePerShard, shards, shards, indexDocCount,
-            d -> runProcessAgainstToxicTarget(d.tempDirSnapshot, d.tempDirLucene, d.proxyContainer
-            ));
+            d -> runProcessAgainstToxicTarget(d.processArgs, d.proxyContainer)
+        );
     }
 
     @SneakyThrows
@@ -139,12 +134,32 @@ public class LeaseExpirationTest extends SourceTestBase {
 
             esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
+            String[] processArgs = {
+                "--snapshot-name",
+                SNAPSHOT_NAME,
+                "--snapshot-local-dir",
+                tempDirSnapshot.toString(),
+                "--lucene-dir",
+                tempDirLucene.toString(),
+                "--target-host",
+                proxyContainer.getProxyUriAsString(),
+                "--index-allowlist",
+                "geonames",
+                "--documents-per-bulk-request",
+                "5",
+                "--max-connections",
+                "4",
+                "--source-version",
+                "ES_7_10",
+                "--initial-lease-duration",
+                "PT20s" };
+
             int exitCode;
             int initialExitCodeCount = 0;
             int finalExitCodeCount = 0;
             int runs = 0;
             do {
-                exitCode = processRunner.apply(new RunData(tempDirSnapshot, tempDirLucene, proxyContainer));
+                exitCode = processRunner.apply(new RunData(processArgs, proxyContainer));
                 runs++;
                 if (exitCode == expectedInitialExitCode) {
                     initialExitCodeCount++;
@@ -185,19 +200,14 @@ public class LeaseExpirationTest extends SourceTestBase {
     }
 
     @SneakyThrows
-    private static int runProcessAgainstToxicTarget(
-        Path tempDirSnapshot,
-        Path tempDirLucene,
-        ToxiProxyWrapper proxyContainer
-    )
+    private static int runProcessAgainstToxicTarget(String[] processArgs, ToxiProxyWrapper proxyContainer)
     {
-        String targetAddress = proxyContainer.getProxyUriAsString();
         var tp = proxyContainer.getProxy();
         var latency = tp.toxics().latency("latency-toxic", ToxicDirection.UPSTREAM, 125);
 
         // Set to less than 2x lease time to ensure leases aren't doubling
         int timeoutSeconds = 30;
-        ProcessBuilder processBuilder = setupProcess(tempDirSnapshot, tempDirLucene, targetAddress);
+        ProcessBuilder processBuilder = setupProcess(processArgs);
 
         var process = runAndMonitorProcess(processBuilder);
         boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
@@ -214,53 +224,6 @@ public class LeaseExpirationTest extends SourceTestBase {
         latency.remove();
 
         return process.exitValue();
-    }
-
-
-    @NotNull
-    private static ProcessBuilder setupProcess(
-        Path tempDirSnapshot,
-        Path tempDirLucene,
-        String targetAddress
-    ) {
-        String classpath = System.getProperty("java.class.path");
-        String javaHome = System.getProperty("java.home");
-        String javaExecutable = javaHome + File.separator + "bin" + File.separator + "java";
-
-        String[] args = {
-            "--snapshot-name",
-            SNAPSHOT_NAME,
-            "--snapshot-local-dir",
-            tempDirSnapshot.toString(),
-            "--lucene-dir",
-            tempDirLucene.toString(),
-            "--target-host",
-            targetAddress,
-            "--index-allowlist",
-            "geonames",
-            "--documents-per-bulk-request",
-            "5",
-            "--max-connections",
-            "4",
-            "--source-version",
-            "ES_7_10",
-            "--initial-lease-duration",
-            "PT20s" };
-
-        // Kick off the doc migration process
-        log.atInfo().setMessage("Running RfsMigrateDocuments with args: {}")
-            .addArgument(() -> Arrays.toString(args))
-            .log();
-        ProcessBuilder processBuilder = new ProcessBuilder(
-            javaExecutable,
-            "-cp",
-            classpath,
-            "org.opensearch.migrations.RfsMigrateDocuments"
-        );
-        processBuilder.command().addAll(Arrays.asList(args));
-        processBuilder.redirectErrorStream(true);
-        processBuilder.redirectOutput();
-        return processBuilder;
     }
 
 }
