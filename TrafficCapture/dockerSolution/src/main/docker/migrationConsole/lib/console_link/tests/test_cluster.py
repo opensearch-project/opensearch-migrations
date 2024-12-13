@@ -389,8 +389,10 @@ def test_run_benchmark_executes_correctly_no_auth(mocker):
     mock = mocker.patch("subprocess.run", autospec=True)
     workload = "nyctaxis"
     cluster.execute_benchmark_workload(workload=workload)
-    mock.assert_called_once_with("opensearch-benchmark execute-test --distribution-version=1.0.0 "
-                                 f"--target-host={cluster.endpoint} --workload={workload} --pipeline=benchmark-only"
+    mock.assert_called_once_with("opensearch-benchmark execute-test --distribution-version=1.0.0"
+                                 f" --target-host={cluster.endpoint} --workload={workload}"
+                                 f" --workload-revision=440ce4b1fc8832b6b7673bdcec948cce3ee87e7e"
+                                 " --pipeline=benchmark-only"
                                  " --test-mode --kill-running-processes --workload-params=target_throughput:0.5,"
                                  "bulk_size:10,bulk_indexing_clients:1,search_clients:1 "
                                  "--client-options=verify_certs:false", shell=True)
@@ -411,8 +413,10 @@ def test_run_benchmark_executes_correctly_basic_auth_and_https(mocker):
     mock = mocker.patch("subprocess.run", autospec=True)
     workload = "nyctaxis"
     cluster.execute_benchmark_workload(workload=workload)
-    mock.assert_called_once_with("opensearch-benchmark execute-test --distribution-version=1.0.0 "
-                                 f"--target-host={cluster.endpoint} --workload={workload} --pipeline=benchmark-only"
+    mock.assert_called_once_with("opensearch-benchmark execute-test --distribution-version=1.0.0"
+                                 f" --target-host={cluster.endpoint} --workload={workload}"
+                                 f" --workload-revision=440ce4b1fc8832b6b7673bdcec948cce3ee87e7e"
+                                 " --pipeline=benchmark-only"
                                  " --test-mode --kill-running-processes --workload-params=target_throughput:0.5,"
                                  "bulk_size:10,bulk_indexing_clients:1,search_clients:1 "
                                  "--client-options=verify_certs:false,use_ssl:true,"
