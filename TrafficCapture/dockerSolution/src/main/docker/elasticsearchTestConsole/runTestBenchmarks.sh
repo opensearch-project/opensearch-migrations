@@ -86,6 +86,7 @@ set -o xtrace
 # Newer OSB Workload revisions fail with single node cluster that is persistently in yellow state
 # See https://github.com/opensearch-project/opensearch-migrations/pull/1202
 workload_revision="440ce4b1fc8832b6b7673bdcec948cce3ee87e7e"
+pipenv run opensearch-benchmark info --workload-revision=$workload_revision --workload=geonames
 
 echo "Running opensearch-benchmark workloads against ${endpoint}"
 echo "Running opensearch-benchmark w/ 'geonames' workload..." &&
