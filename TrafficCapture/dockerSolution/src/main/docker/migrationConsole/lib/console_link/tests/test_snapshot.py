@@ -9,7 +9,8 @@ from console_link.models.command_result import CommandResult
 from console_link.models.factories import (UnsupportedSnapshotError,
                                            get_snapshot)
 from console_link.models.snapshot import (FileSystemSnapshot, S3Snapshot,
-                                          Snapshot, delete_snapshot)
+                                          Snapshot, delete_snapshot,
+                                          get_snapshot_status_message)
 from tests.utils import create_valid_cluster
 
 
@@ -409,7 +410,7 @@ def test_handling_extra_args(mocker, request, snapshot_fixture):
     snapshot = request.getfixturevalue(snapshot_fixture)
     mock = mocker.patch('subprocess.run', autospec=True)
     extra_args = ['--extra-flag', '--extra-arg', 'extra-arg-value', 'this-is-an-option']
-    
+
     result = snapshot.create(extra_args=extra_args)
 
     assert result.success
@@ -419,7 +420,7 @@ def test_handling_extra_args(mocker, request, snapshot_fixture):
 
 import unittest
 from unittest.mock import MagicMock
-from console_link.models.snapshot import get_snapshot_status_full, get_snapshot_status_message
+
 
 class TestSnapshot(unittest.TestCase):
     def setUp(self):
@@ -443,7 +444,8 @@ class TestSnapshot(unittest.TestCase):
         }
 
         # Test with normal duration
-        snapshot_info["stats"]["processed"] = {"size_in_bytes": 1 * 1024 * 1024 * 1024}  # Ensure processed size is set correctly
+        snapshot_info["stats"]["processed"] = {"size_in_bytes": 1 *
+                                               1024 * 1024 * 1024}  # Ensure processed size is set correctly
         message = get_snapshot_status_message(snapshot_info)
         self.assertIn("Throughput: 512.00 MiB/s", message)
 
