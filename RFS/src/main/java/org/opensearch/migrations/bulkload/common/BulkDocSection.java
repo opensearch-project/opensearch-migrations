@@ -102,7 +102,7 @@ public class BulkDocSection {
 
     @SuppressWarnings("unchecked")
     public Map<String, Object> toMap() {
-        return (Map<String, Object>) OBJECT_MAPPER.convertValue(bulkIndex, Map.class);
+        return OBJECT_MAPPER.convertValue(bulkIndex, Map.class);
     }
 
     @NoArgsConstructor(force = true) // For Jackson

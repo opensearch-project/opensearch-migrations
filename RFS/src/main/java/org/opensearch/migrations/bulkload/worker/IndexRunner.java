@@ -65,10 +65,10 @@ public class IndexRunner {
         try {
             indexMetadata = transformer.transformIndexMetadata(indexMetadata);
             return indexCreator.create(indexMetadata, mode, context);
-        } catch (Throwable t) {
+        } catch (Exception e) {
             return CreationResult.builder()
                 .name(indexName)
-                .exception(new IndexTransformationException(indexName, t))
+                .exception(new IndexTransformationException(indexName, e))
                 .failureType(CreationFailureType.UNABLE_TO_TRANSFORM_FAILURE)
                 .build();
         }

@@ -14,6 +14,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.testcontainers.containers.GenericContainer;
 import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.utility.DockerImageName;
+import org.testcontainers.utility.MountableFile;
 
 /**
  * Containerized version of Elasticsearch cluster
@@ -111,6 +112,16 @@ public class SearchClusterContainer extends GenericContainer<SearchClusterContai
             throw new RuntimeException(e);
         }
     }
+
+    public void putSnapshotData(final String directory) {
+        try {
+            this.copyFileToContainer(MountableFile.forHostPath(directory), CLUSTER_SNAPSHOT_DIR);
+            this.execInContainer("chown", "-R", "elasticsearch:elasticsearch", CLUSTER_SNAPSHOT_DIR);
+        } catch (final Exception e) {
+            throw new RuntimeException(e);
+        }
+    }
+
 
     public void start() {
         log.info("Starting container version:" + containerVersion.version);

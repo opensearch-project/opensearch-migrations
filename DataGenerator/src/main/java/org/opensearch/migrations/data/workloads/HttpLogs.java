@@ -83,8 +83,9 @@ public class HttpLogs implements Workload, IFieldCreator, IRandomDataBuilders {
         return IntStream.range(0, numDocs)
             .mapToObj(i -> {
                 var random = new Random(i);
+                long randomTime = randomTime(currentTime, random);
                 return mapper.createObjectNode()
-                    .put("@timestamp", randomTime(currentTime, random))
+                    .put("@timestamp", randomTime)
                     .put("clientip", randomIpAddress(random))
                     .put("request", randomRequest(random))
                     .put("status", randomStatus(random))

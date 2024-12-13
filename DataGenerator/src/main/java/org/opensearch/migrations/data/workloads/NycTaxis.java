@@ -100,21 +100,29 @@ public class NycTaxis implements Workload, IFieldCreator, IRandomDataBuilders {
         return IntStream.range(0, numDocs)
             .mapToObj(i -> {
                 var random = new Random(i);
+                double totalAmount = randomDouble(random, 5.0, 50.0);
+                String pickupTime = randomTimeISOString(currentTime, random);
+                String dropOffTime = randomTimeISOString(currentTime, random);
+                double tolls = randomDouble(random, 0.0, 5.0);
+                double fare = randomDouble(random, 5.0, 50.0);
+                double extra = randomDouble(random, 0.0, 1.0);
+                double tripDistance = randomDouble(random, 0.5, 20.0);
+                double tip = randomDouble(random, 0.0, 15.0);
                 return mapper.createObjectNode()
-                .<ObjectNode>put("total_amount", randomDouble(random, 5.0, 50.0))
+                .<ObjectNode>put("total_amount", totalAmount)
                 .<ObjectNode>put("improvement_surcharge", 0.3)
                 .<ObjectNode>set("pickup_location", randomLocationInNyc(random))
-                .<ObjectNode>put("pickup_datetime", randomTimeISOString(currentTime, random))
+                .<ObjectNode>put("pickup_datetime", pickupTime)
                 .<ObjectNode>put("trip_type", randomTripType(random))
-                .<ObjectNode>put("dropoff_datetime", randomTimeISOString(currentTime, random))
+                .<ObjectNode>put("dropoff_datetime", dropOffTime)
                 .<ObjectNode>put("rate_code_id", "1")
-                .<ObjectNode>put("tolls_amount", randomDouble(random, 0.0, 5.0))
+                .<ObjectNode>put("tolls_amount", tolls)
                 .<ObjectNode>set("dropoff_location", randomLocationInNyc(random))
                 .<ObjectNode>put("passenger_count", random.nextInt(4) + 1)
-                .<ObjectNode>put("fare_amount", randomDouble(random, 5.0, 50.0))
-                .<ObjectNode>put("extra", randomDouble(random, 0.0, 1.0))
-                .<ObjectNode>put("trip_distance", randomDouble(random, 0.5, 20.0))
-                .<ObjectNode>put("tip_amount", randomDouble(random, 0.0, 15.0))
+                .<ObjectNode>put("fare_amount", fare)
+                .<ObjectNode>put("extra", extra)
+                .<ObjectNode>put("trip_distance", tripDistance)
+                .<ObjectNode>put("tip_amount", tip)
                 .<ObjectNode>put("store_and_fwd_flag", randomStoreAndFwdFlag(random))
                 .<ObjectNode>put("payment_type", randomPaymentType(random))
                 .<ObjectNode>put("mta_tax", 0.5)

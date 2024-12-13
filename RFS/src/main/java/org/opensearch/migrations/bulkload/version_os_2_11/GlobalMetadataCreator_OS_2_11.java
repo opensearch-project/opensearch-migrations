@@ -118,12 +118,12 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
             return List.of();
         }
 
-        var templatesToCreate = getAllTemplates(templates, templateType);
+        var templatesToCreate = getAllTemplates(templates);
 
         return processTemplateCreation(templatesToCreate, templateType, templateAllowlist, mode, context);
     }
 
-    Map<String, ObjectNode> getAllTemplates(ObjectNode templates, TemplateTypes templateType) {
+    Map<String, ObjectNode> getAllTemplates(ObjectNode templates) {
         var templatesToCreate = new HashMap<String, ObjectNode>();
 
         templates.fieldNames().forEachRemaining(templateName -> {
@@ -143,7 +143,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         ) {
         var skipCreation = FilterScheme.filterByAllowList(templateAllowList).negate();
 
-        return templatesToCreate.entrySet().stream().map((kvp) -> {
+        return templatesToCreate.entrySet().stream().map(kvp -> {
             var templateName = kvp.getKey();
             var templateBody = kvp.getValue();
             var creationResult = CreationResult.builder().name(templateName);

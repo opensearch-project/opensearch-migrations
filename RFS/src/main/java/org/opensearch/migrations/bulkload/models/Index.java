@@ -6,8 +6,8 @@ import lombok.NoArgsConstructor;
 
 @NoArgsConstructor(force = true, access = AccessLevel.PRIVATE) // For Jackson
 public class Index extends MigrationItem {
-    public final static String TYPE = "index";
+    public static final String TYPE_NAME = "index";
     public Index(String name, ObjectNode body) {
-        super(TYPE, name, body);
+        super(TYPE_NAME, name, body);
     }
 }

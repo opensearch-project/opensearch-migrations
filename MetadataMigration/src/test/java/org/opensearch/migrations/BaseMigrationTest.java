@@ -1,6 +1,6 @@
 package org.opensearch.migrations;
 
-import java.io.File;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 
@@ -26,7 +26,7 @@ import org.junit.jupiter.api.io.TempDir;
 abstract class BaseMigrationTest {
 
     @TempDir
-    protected File localDirectory;
+    protected Path localDirectory;
 
     @Getter
     protected SearchClusterContainer sourceCluster;
@@ -83,7 +83,7 @@ abstract class BaseMigrationTest {
      */
     protected MigrateOrEvaluateArgs prepareSnapshotMigrationArgs(String snapshotName) {
         var arguments = new MigrateOrEvaluateArgs();
-        arguments.fileSystemRepoPath = localDirectory.getAbsolutePath();
+        arguments.fileSystemRepoPath = localDirectory.toString();
         arguments.snapshotName = snapshotName;
         arguments.sourceVersion = sourceCluster.getContainerVersion().getVersion();
         arguments.targetArgs.host = targetCluster.getUrl();
