@@ -190,10 +190,11 @@ class Cluster:
             raise NotImplementedError(f"Auth type {self.auth_type} is not currently support for executing "
                                       f"benchmark workloads")
         # Note -- we should censor the password when logging this command
-        workload_revision="440ce4b1fc8832b6b7673bdcec948cce3ee87e7e"
+        workload_revision = "440ce4b1fc8832b6b7673bdcec948cce3ee87e7e"
         logger.info(f"Running opensearch-benchmark with '{workload}' workload and revision '{workload_revision}'")
         command = (f"opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host={self.endpoint} "
-                   f"--workload={workload} --workload-revision={workload_revision} --pipeline=benchmark-only --test-mode --kill-running-processes "
+                   f"--workload={workload} --workload-revision={workload_revision} --pipeline=benchmark-only "
+                   "--test-mode --kill-running-processes "
                    f"--workload-params={workload_params} --client-options={client_options}")
         # While a little wordier, this apprach prevents us from censoring the password if it appears in other contexts,
         # e.g. username:admin,password:admin.
