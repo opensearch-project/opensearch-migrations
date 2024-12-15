@@ -1,0 +1,13 @@
+apiVersion: v2
+name: elasticsearch-searchguard
+description: A Helm chart to install Elasticsearch with Searchguard
+type: application
+version: 0.1.0
+appVersion: "1.16.0"
+dependencies:
+  - name: common-lib
+    version: "0.1.0"
+    repository: "file://../common-lib"
+  - name: snapshot-vol
+    version: "0.1.0"
+    repository: "file://../../shared/snapshot-vol"

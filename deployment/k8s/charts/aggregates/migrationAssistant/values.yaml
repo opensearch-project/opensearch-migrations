@@ -1,0 +1,37 @@
+conditionalPackageInstalls:
+  kafka: true
+  jaeger: true
+  prometheus: true
+  grafana: true
+
+namespace:
+  create: true
+  name: ma
+
+proxy:
+  enabled: true
+  namespace:
+    name: ma
+  parameters:
+    destinationUri:
+      configMapName: "source-cluster-endpoint"
+      yamlPath: "endpoint"
+    insecureDestination:
+      configMapName: "source-cluster-endpoint"
+      yamlPath: "allow_insecure"
+
+migration-console:
+  namespace:
+    name: ma
+
+bulk-document-loader:
+  namespace:
+    name: ma
+
+capture-proxy:
+  namespace:
+    name: ma
+
+replayer:
+  namespace:
+    name: ma
