@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "generate-api-client": "openapi-generator-cli generate -i ../playground/schema.json -g typescript-axios -o src/generated-api-client",
     "dev": "next dev --turbopack",
     "build": "next build",
     "start": "next start",
@@ -12,6 +13,7 @@
   "dependencies": {
     "@cloudscape-design/components": "^3.0.839",
     "@cloudscape-design/global-styles": "^1.0.32",
+    "@openapitools/openapi-generator-cli": "^2.15.3",
     "eslint-config-prettier": "^9.1.0",
     "next": "^15.0.2",
     "prettier": "^3.4.2",

@@ -40,6 +40,7 @@ INSTALLED_APPS = [
     'django.contrib.staticfiles',
     'rest_framework',
     'corsheaders',
+    'drf_spectacular',
     'transform_api'
 ]
 
@@ -75,6 +76,17 @@ TEMPLATES = [
 ]
 
 WSGI_APPLICATION = 'playground.wsgi.application'
+
+# API Spec generation
+REST_FRAMEWORK = {
+    'DEFAULT_SCHEMA_CLASS': 'drf_spectacular.openapi.AutoSchema',
+}
+
+SPECTACULAR_SETTINGS = {
+    'TITLE': 'Transformation API',
+    'DESCRIPTION': 'API for JSON transformation logic.',
+    'VERSION': '0.1.0',
+}
 
 
 # Database

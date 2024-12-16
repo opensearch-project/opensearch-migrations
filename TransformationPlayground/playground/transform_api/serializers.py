@@ -1,5 +1,6 @@
 from typing import Any, Dict, List
 
+from drf_spectacular.utils import extend_schema_field
 from rest_framework import serializers
 
 from transform_expert.parameters import SourceVersion, TargetVersion, TransformType, TransformLanguage
@@ -23,7 +24,15 @@ class EnumChoiceField(serializers.ChoiceField):
     def to_representation(self, value):
         # Convert the Enum member back to its value for representation
         return value.value if isinstance(value, self.enum) else value
-    
+
+@extend_schema_field({
+    "type": "object",
+    "properties": {
+        "index_name": {"type": "string"},
+        "index_json": {"type": "object"},
+    },
+    "required": ["index_name", "index_json"],
+})
 class IndexShapeField(serializers.Field):
     """
     Custom serializer field to validate index shape data with the structure:
@@ -63,6 +72,20 @@ class TransformsIndexCreateRequestSerializer(serializers.Serializer):
     test_target_url = serializers.URLField(required=False, default=None)
     
 class TransformsIndexCreateResponseSerializer(serializers.Serializer):
+    output_shape = serializers.ListField(child=IndexShapeField())
+    transform_logic = serializers.CharField()
+    validation_report = serializers.ListField(child=serializers.CharField())
+    validation_outcome = serializers.CharField()
+
+class TransformsIndexTestRequestSerializer(serializers.Serializer):
+    transform_language = EnumChoiceField(enum=TransformLanguage)
+    source_version = EnumChoiceField(enum=SourceVersion)
+    target_version = EnumChoiceField(enum=TargetVersion)
+    input_shape = IndexShapeField()
+    transform_logic = serializers.CharField()
+    test_target_url = serializers.URLField(required=False, default=None)
+    
+class TransformsIndexTestResponseSerializer(serializers.Serializer):
     output_shape = serializers.ListField(child=IndexShapeField())
     transform_logic = serializers.CharField()
     validation_report = serializers.ListField(child=serializers.CharField())

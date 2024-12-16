@@ -4,6 +4,11 @@ import React, { useState } from "react";
 import "@cloudscape-design/global-styles/index.css";
 import { Grid, Container, FormField, Textarea, Button, Input, Select, SelectProps, Spinner } from "@cloudscape-design/components";
 
+import { Configuration, TransformsApi, TransformsIndexCreateRequest, TransformsIndexTestRequest,
+  SourceVersionEnum, TargetVersionEnum, TransformLanguageEnum
+ } from '../generated-api-client';
+
+
 const TransformationPage = () => {
   // States for user inputs
   const [inputShape, setInputShape] = useState("");
@@ -11,13 +16,24 @@ const TransformationPage = () => {
   const [outputShape, setOutputShape] = useState("");
   const [validationReport, setValidationReport] = useState("");
   const [testTargetUrl, setTestTargetUrl] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [isRecommending, setIsRecommending] = useState(false);
+  const [isTesting, setIsTesting] = useState(false);
 
-  // Select options for dropdowns
-  const sourceVersionOptions: SelectProps.Options = [{ label: "Elasticsearch 6.8", value: "Elasticsearch 6.8" }];
-  const targetVersionOptions: SelectProps.Options = [{ label: "OpenSearch 2.17", value: "OpenSearch 2.17" }];
+  
+  // Select options for dropdowns using enumerated types
+  const sourceVersionOptions: SelectProps.Options = Object.values(SourceVersionEnum).map((value) => ({
+    label: value,
+    value,
+  }));
+  const targetVersionOptions: SelectProps.Options = Object.values(TargetVersionEnum).map((value) => ({
+    label: value,
+    value,
+  }));
+  const transformLanguageOptions: SelectProps.Options = Object.values(TransformLanguageEnum).map((value) => ({
+    label: value,
+    value,
+  }));
   const transformTypeOptions: SelectProps.Options = [{ label: "Index", value: "Index" }];
-  const transformLanguageOptions: SelectProps.Options = [{ label: "Python", value: "Python" }];
 
   const [sourceVersion, setSourceVersion] = useState<SelectProps.Option>(sourceVersionOptions[0]);
   const [targetVersion, setTargetVersion] = useState<SelectProps.Option>(targetVersionOptions[0]);
@@ -26,64 +42,71 @@ const TransformationPage = () => {
     transformLanguageOptions[0]
   );
 
-  // Define the request body for GenAI Recommendations
-  interface GetRecommendationBody {
-    input_shape: any;
-    source_version: string;
-    target_version: string;
-    transform_language: string;
-    test_target_url?: string;
-  }
+  // API Configuration
+  const apiConfig = new Configuration({ basePath: "http://localhost:8000" });
+  const apiClient = new TransformsApi(apiConfig);
 
   // Handle Get Recommendation Request
   const handleGetRecommendation = async () => {
-    setIsLoading(true); // Start visual spinner
-
-    // Parse the input_shape string into JSON
-    const parsedInputShape = JSON.parse(inputShape);
-
-    const payload: GetRecommendationBody = {
-      input_shape: parsedInputShape,
-      source_version: sourceVersion.value!,
-      target_version: targetVersion.value!,
-      transform_language: transformLanguage.value!
-    };
-
-    // Add optional fields to payload
-    if (testTargetUrl && testTargetUrl.length > 0) {
-      payload.test_target_url = testTargetUrl;
-    }
+    setIsRecommending(true); // Start visual spinner
 
     try {
-      const response = await fetch("http://localhost:8000/transforms/index/", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      });
+      const parsedInputShape = JSON.parse(inputShape);
 
-      if (response.ok) {
-        const data = await response.json();
+      const payload = {
+        input_shape: {
+          index_name: parsedInputShape.index_name,
+          index_json: parsedInputShape.index_json,
+        },
+        source_version: sourceVersion.value as SourceVersionEnum,
+        target_version: targetVersion.value as TargetVersionEnum,
+        transform_language: transformLanguage.value as TransformLanguageEnum,
+        ...(testTargetUrl && { test_target_url: testTargetUrl }), // Add optional field
+      };
 
-        // Pretty-print JSON for output_shape
-        const prettyOutputShape = JSON.stringify(data.output_shape, null, 4);
+      const response = await apiClient.transformsIndexCreate(payload);
 
-        // Join validation_report with new lines
-        const formattedValidationReport = (data.validation_report || []).join("\n\n");
-
-        setTransformLogic(data.transform_logic || "");
-        setOutputShape(prettyOutputShape || "");
-        setValidationReport(formattedValidationReport || "");
-      } else {
-        console.error("Failed to fetch recommendation");
-      }
+      // Update state with response data
+      setTransformLogic(response.data.transform_logic || "");
+      setOutputShape(JSON.stringify(response.data.output_shape, null, 4) || ""); // Pretty print JSON
+      setValidationReport((response.data.validation_report || []).join("\n\n"));
     } catch (error) {
-      console.error("Error:", error);
-
-      if (error instanceof SyntaxError) {
-        alert("Invalid JSON: Please check your input and try again.");
-      }
+      console.error("Error while fetching recommendation:", error);
+      alert("Failed to fetch recommendation. Please check the input.");
     } finally {
-      setIsLoading(false); // Stop visual spinner
+      setIsRecommending(false); // Stop visual spinner
+    }
+  };
+
+  // Handle Get Recommendation Request
+  const handleTestTransform = async () => {
+    setIsTesting(true); // Start visual spinner
+
+    try {
+      const parsedInputShape = JSON.parse(inputShape);
+
+      const payload: TransformsIndexTestRequest = {
+        input_shape: {
+          index_name: parsedInputShape.index_name,
+          index_json: parsedInputShape.index_json,
+        },
+        source_version: sourceVersion.value as SourceVersionEnum,
+        target_version: targetVersion.value as TargetVersionEnum,
+        transform_language: transformLanguage.value as TransformLanguageEnum,
+        transform_logic: transformLogic,
+        ...(testTargetUrl && { test_target_url: testTargetUrl }), // Add optional field
+      };
+
+      const response = await apiClient.transformsIndexTestCreate(payload);
+
+      // Update state with response data
+      setOutputShape(JSON.stringify(response.data.output_shape, null, 4) || ""); // Pretty print JSON
+      setValidationReport((response.data.validation_report || []).join("\n\n"));
+    } catch (error) {
+      console.error("Error while testing transformation:", error);
+      alert("Failed to test transformation. Please check the input.");
+    } finally {
+      setIsTesting(false); // Stop visual spinner
     }
   };
 
@@ -149,7 +172,7 @@ const TransformationPage = () => {
         </FormField>
         <br />
         <Button onClick={handleGetRecommendation}>
-          {isLoading ? <Spinner/> : "Get GenAI Recommendation"}
+          {isRecommending ? <Spinner/> : "Get GenAI Recommendation"}
         </Button>
         <Button onClick={() => {
           setTransformLogic("");
@@ -158,11 +181,11 @@ const TransformationPage = () => {
         }}>
           Clear Transform
         </Button>
-        <FormField label="Generated Transformation Logic">
+        <FormField label="Transformation Logic">
           <Textarea
             value={transformLogic}
-            readOnly
-            placeholder="The Python code for the transformation will appear here."
+            onChange={({ detail }) => setTransformLogic(detail.value)}
+            placeholder="View/edit Transformation Logic in here."
             rows={30}
           />
         </FormField>
@@ -180,6 +203,10 @@ const TransformationPage = () => {
             placeholder="https://example.com"
           />
         </FormField>
+        <br />
+        <Button onClick={handleTestTransform}>
+          {isTesting ? <Spinner/> : "Test Transform"}
+        </Button>
         <br />
         <FormField label="Transformed JSON Output">
           <Textarea

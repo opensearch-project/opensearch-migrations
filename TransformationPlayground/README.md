@@ -58,7 +58,17 @@ The `test_target_url` is optional, but enables the system to test the output Ind
 
 #### Frontend
 
-To run the Frontend, first start the backend and ensure it's running.  Then, execute the following commands:
+If you changed the Backend API specification, you'll first need to generate new client code.  The Backend uses `drf-spectacular` to auto-supply OpenAPI specs to facilitate this process.  You can generate the new client code like so:
+
+```bash
+# Start in the repo root
+
+(cd playground && python3 manage.py spectacular --file schema.json)
+
+(cd playground_frontend && npm install && npm run generate-api-client)
+```
+
+To run the Frontend, first start the Backend and ensure it's running.  Then, execute the following commands:
 
 ```bash
 # Start in the repo root

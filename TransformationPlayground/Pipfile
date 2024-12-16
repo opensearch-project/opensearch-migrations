@@ -12,6 +12,7 @@ langchain = "*"
 langchain-aws = "*"
 requests = "*"
 django-cors-headers = "*"
+drf-spectacular = "*"
 
 [dev-packages]
 
