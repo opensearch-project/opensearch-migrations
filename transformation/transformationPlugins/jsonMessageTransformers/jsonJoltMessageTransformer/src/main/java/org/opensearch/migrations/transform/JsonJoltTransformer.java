@@ -18,7 +18,7 @@ public class JsonJoltTransformer implements IJsonTransformer {
     }
 
     @Override
-    public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
+    public Object transformJson(Object incomingJson) {
         return (Map<String, Object>) this.spec.transform(incomingJson);
     }
 }
