@@ -77,7 +77,7 @@ class JinjavaTransformerProviderTest {
         var documentJson = parseStringAsJson(mapper, TEST_INPUT_REQUEST);
         var transformer = new JsonJinjavaTransformerProvider().createTransformer(Map.of(
             "template",  EXCISE_TYPE_EXPRESSION_STRING));
-        var transformedDocument = transformer.transformJson(documentJson);
+        Object transformedDocument = transformer.transformJson(documentJson);
         var outputStr = emitJson(mapper, transformedDocument);
 
         final String TEST_OUTPUT_REQUEST = "{\n"

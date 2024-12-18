@@ -75,7 +75,7 @@ public class BulkDocSection {
         }
     }
 
-    public static BulkDocSection fromMap(Map<String, Object> map) {
+    public static BulkDocSection fromMap(Object map) {
         BulkIndex bulkIndex = OBJECT_MAPPER.convertValue(map, BulkIndex.class);
         return new BulkDocSection(bulkIndex);
     }

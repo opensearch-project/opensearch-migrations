@@ -1,6 +1,5 @@
 package org.opensearch.migrations.transform;
 
-import java.util.Map;
 
 import io.burt.jmespath.BaseRuntime;
 import io.burt.jmespath.Expression;
@@ -16,7 +15,7 @@ public class JsonJMESPathPredicate implements IJsonPredicate {
     }
 
     @Override
-    public boolean test(Map<String, Object> incomingJson) {
+    public boolean test(Object incomingJson) {
         var output = expression.search(incomingJson);
         log.atDebug().setMessage("output={}").addArgument(output).log();
         return (Boolean) output;

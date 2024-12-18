@@ -14,7 +14,7 @@ import org.junit.jupiter.api.Test;
 public class RouteTest {
     private static final ObjectMapper objectMapper = new ObjectMapper();
 
-    public Map<String, Object> doRouting(Map<String, Object> flags, Map<String, Object> inputDoc) {
+    public Object doRouting(Map<String, Object> flags, Map<String, Object> inputDoc) {
         log.atInfo().setMessage("parsed flags: {}").addArgument(flags).log();
         final var template = "" +
             "{%- macro doDefault(ignored_input) -%}" +
@@ -65,16 +65,16 @@ public class RouteTest {
                 "data2"
             ));
         {
-            var resultMap = doRouting(null, docA);
+            var resultMap = (Map) doRouting(null, docA);
             Assertions.assertEquals(1, resultMap.size());
             Assertions.assertEquals("_and more!", resultMap.get("matchedVal"));
         }
         {
-            var resultMap = doRouting(flagAOff, docA);
+            var resultMap = (Map) doRouting(flagAOff, docA);
             Assertions.assertTrue(resultMap.isEmpty());
         }
         {
-            var resultMap = doRouting(flagAOff, docB);
+            var resultMap = (Map) doRouting(flagAOff, docB);
             Assertions.assertEquals("{\"label\":\"B-hive\",\"stuff\":[\"data2\",\"data1\"]}",
                 objectMapper.writeValueAsString(new TreeMap<>(resultMap)));
         }

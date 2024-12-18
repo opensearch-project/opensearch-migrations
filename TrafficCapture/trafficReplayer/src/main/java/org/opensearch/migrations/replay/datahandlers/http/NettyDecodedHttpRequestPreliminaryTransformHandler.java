@@ -117,10 +117,19 @@ public class NettyDecodedHttpRequestPreliminaryTransformHandler<R> extends Chann
 
         assert httpJsonMessage.containsKey("payload");
 
-        var returnedObject = transformer.transformJson(httpJsonMessage);
+        Object returnedObject = transformer.transformJson(httpJsonMessage);
+        if(!(returnedObject instanceof Map)) {
+            throw new TransformationException(
+                new IllegalArgumentException("Returned object from transformation not map, instead was "
+                    + returnedObject.getClass().getName())
+            );
+        }
+        @SuppressWarnings("unchecked")
+        var returnedObjectMap = (Map<String, ?>) returnedObject;
+
 
         if (returnedObject != httpJsonMessage) {
-            httpJsonMessage = new HttpJsonRequestWithFaultingPayload(returnedObject);
+            httpJsonMessage = new HttpJsonRequestWithFaultingPayload(returnedObjectMap);
         }
 
         if (originalHttpJsonMessage != httpJsonMessage) {

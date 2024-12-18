@@ -30,7 +30,7 @@ public class MultipleJMESPathScriptsTest {
             aggregateScriptString
         );
         var origDoc = JsonTransformerTest.parseStringAsJson(mapper, JsonTransformerTest.TEST_INPUT_REQUEST);
-        var newDoc = toNewHostTransformer.transformJson(origDoc);
+        Object newDoc = toNewHostTransformer.transformJson(origDoc);
 
         final String TEST_OUTPUT_REQUEST = "{\n"
             + "    \"method\": \"PUT\",\n"

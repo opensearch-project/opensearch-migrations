@@ -125,8 +125,9 @@ public class TransformationLoader {
         private final String userAgent;
 
         @Override
-        public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
-            var headers = (Map<String, Object>) incomingJson.get(JsonKeysForHttpMessage.HEADERS_KEY);
+        public Object transformJson(Object incomingJson) {
+            @SuppressWarnings("unchecked")
+            var headers = (Map<String, Object>) ((Map<String, Object>) incomingJson).get(JsonKeysForHttpMessage.HEADERS_KEY);
             var oldVal = headers.get(USER_AGENT);
             if (oldVal != null) {
                 if (oldVal instanceof List) {
@@ -146,8 +147,9 @@ public class TransformationLoader {
         private final String newHostName;
 
         @Override
-        public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
-            var headers = (Map<String, Object>) incomingJson.get(JsonKeysForHttpMessage.HEADERS_KEY);
+        public Object transformJson(Object incomingJson) {
+            @SuppressWarnings("unchecked")
+            var headers = (Map<String, Object>) ((Map<String, Object>) incomingJson).get(JsonKeysForHttpMessage.HEADERS_KEY);
             if (headers != null) {
                 headers.replace("host", newHostName);
             } else {

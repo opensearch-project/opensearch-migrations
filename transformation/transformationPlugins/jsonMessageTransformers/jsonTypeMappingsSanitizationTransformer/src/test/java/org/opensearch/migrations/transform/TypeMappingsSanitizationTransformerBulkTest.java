@@ -111,7 +111,7 @@ public class TypeMappingsSanitizationTransformerBulkTest {
                 "}";
 
 
-        var resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+        Object resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
         log.atInfo().setMessage("resultStr = {}").addArgument(() -> {
             try {
                 return OBJECT_MAPPER.writeValueAsString(resultObj);

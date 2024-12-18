@@ -13,7 +13,7 @@ import org.testcontainers.shaded.com.fasterxml.jackson.databind.ObjectMapper;
 @Slf4j
 public class FeatureMaskingTest {
     private static final ObjectMapper objectMapper = new ObjectMapper();
-    public Map<String, Object> transformForMask(Map<String, Object> incomingFlags) throws IOException {
+    public Object transformForMask(Map<String, Object> incomingFlags) throws IOException {
         var incomingFlagStr = objectMapper.writeValueAsString(incomingFlags);
         log.atInfo().setMessage("incoming map as string: {}").addArgument(incomingFlagStr).log();
         var flags = FeatureFlags.parseJson(incomingFlagStr);
@@ -39,44 +39,44 @@ public class FeatureMaskingTest {
     public void testFalseFlag() throws Exception {
         Assertions.assertEquals(
             "false,false,false,false",
-            transformForMask(Map.of("testFlag", false)).get("enabledFlags"));
+            ((Map) transformForMask(Map.of("testFlag", false))).get("enabledFlags"));
     }
 
     @Test
     public void testTrueFlag() throws Exception {
         Assertions.assertEquals(
             "true,false,false,false",
-            transformForMask(Map.of("testFlag", true)).get("enabledFlags"));
+            ((Map) transformForMask(Map.of("testFlag", true))).get("enabledFlags"));
     }
 
     @Test
     public void testLongerFalseFlag() throws Exception {
         Assertions.assertEquals(
             "false,false,false,false",
-            transformForMask(Map.of("testFlag", false)).get("enabledFlags"));
+            ((Map) transformForMask(Map.of("testFlag", false))).get("enabledFlags"));
     }
 
     @Test
     public void testLongerTrueFlag() throws Exception {
         Assertions.assertEquals(
             "true,false,false,false",
-            transformForMask(Map.of(
+            ((Map) transformForMask(Map.of(
                 "testFlag", Map.of("notPresent", false))
-            ).get("enabledFlags"));
+            )).get("enabledFlags"));
     }
 
     @Test
     public void testImplicitTrueFlag() throws Exception {
         Assertions.assertEquals(
             "true,true,false,false",
-            transformForMask(Map.of(
+            ((Map) transformForMask(Map.of(
                 "testFlag", Map.of("t1", true))
-            ).get("enabledFlags"));
+            )).get("enabledFlags"));
     }
 
     @Test
     public void testNullFeatures() throws Exception {
         Assertions.assertEquals(
-            "true,true,true,true", transformForMask(null).get("enabledFlags"));
+            "true,true,true,true", ((Map) transformForMask(null)).get("enabledFlags"));
     }
 }

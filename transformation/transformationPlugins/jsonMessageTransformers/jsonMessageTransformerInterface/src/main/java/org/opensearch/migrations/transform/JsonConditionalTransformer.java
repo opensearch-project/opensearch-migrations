@@ -1,7 +1,5 @@
 package org.opensearch.migrations.transform;
 
-import java.util.Map;
-
 public class JsonConditionalTransformer implements IJsonTransformer {
     IJsonPredicate jsonPredicate;
     IJsonTransformer jsonTransformer;
@@ -12,7 +10,7 @@ public class JsonConditionalTransformer implements IJsonTransformer {
     }
 
     @Override
-    public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
+    public Object transformJson(Object incomingJson) {
         if (jsonPredicate.test(incomingJson)) {
             return jsonTransformer.transformJson(incomingJson);
         }

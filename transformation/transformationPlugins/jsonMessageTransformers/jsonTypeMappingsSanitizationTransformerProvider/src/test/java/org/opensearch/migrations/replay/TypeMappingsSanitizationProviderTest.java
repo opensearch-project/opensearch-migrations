@@ -73,12 +73,12 @@ public class TypeMappingsSanitizationProviderTest {
         Map<String, Object> inputMap = OBJECT_MAPPER.readValue(TEST_INPUT_REQUEST, new TypeReference<>() {
         });
         {
-            var transformedDocument = provider.createTransformer(config).transformJson(inputMap);
+            Object transformedDocument = provider.createTransformer(config).transformJson(inputMap);
             Assertions.assertEquals(JsonNormalizer.fromString(EXPECTED),
                 JsonNormalizer.fromObject(transformedDocument));
         }
         {
-            var resultFromNullConfig = provider.createTransformer(null).transformJson(inputMap);
+            Object resultFromNullConfig = provider.createTransformer(null).transformJson(inputMap);
             Assertions.assertEquals(
                 JsonNormalizer.fromString(
                     EXPECTED.replace(
@@ -97,7 +97,7 @@ public class TypeMappingsSanitizationProviderTest {
                     Map.of("major",  (Object) 6,
                         "minor", (Object) 10)));
         var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(fullTransformerConfig);
-        var resultObj = transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+        Object resultObj = transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
         Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
     }
 
@@ -110,7 +110,7 @@ public class TypeMappingsSanitizationProviderTest {
                         "minor", (Object) 10)),
                 "regex_index_mappings", List.of(List.of("", "", "")));
         var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(fullTransformerConfig);
-        var resultObj = transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+        Object resultObj = transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
         Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
     }
 
