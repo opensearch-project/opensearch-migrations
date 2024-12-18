@@ -1,15 +1,17 @@
 package org.opensearch.migrations.bulkload.workcoordination;
 
 import java.io.IOException;
+import java.io.Serializable;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
-import java.util.ArrayList;
+import java.util.List;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 
 import lombok.AllArgsConstructor;
+import lombok.EqualsAndHashCode;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.ToString;
@@ -109,7 +111,8 @@ public interface IWorkCoordinator extends AutoCloseable {
      */
     void createSuccessorWorkItemsAndMarkComplete(
         String workItemId,
-        ArrayList<String> successorWorkItemIds,
+        List<String> successorWorkItemIds,
+        int initialNextAcquisitionLeaseExponent,
         Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
     ) throws IOException, InterruptedException;
 
@@ -183,12 +186,59 @@ public interface IWorkCoordinator extends AutoCloseable {
     @AllArgsConstructor
     @ToString
     class WorkItemAndDuration implements WorkAcquisitionOutcome {
-        final String workItemId;
         final Instant leaseExpirationTime;
+        final WorkItem workItem;
 
         @Override
         public <T> T visit(WorkAcquisitionOutcomeVisitor<T> v) throws IOException, InterruptedException {
             return v.onAcquiredWork(this);
+        }
+
+        public int getStartingDocId() {
+            return workItem.startingDocId;
+        }
+
+        @EqualsAndHashCode
+        @Getter
+        public static class WorkItem implements Serializable {
+            private static final String SEPARATOR = "__";
+            String indexName;
+            Integer shardNumber;
+            Integer startingDocId;
+
+            public WorkItem(String indexName, Integer shardNumber, Integer startingDocId) {
+                if (indexName.contains(SEPARATOR)) {
+                    throw new IllegalArgumentException(
+                            "Illegal work item name: '" + indexName + "'.  " + "Work item names cannot contain '" + SEPARATOR + "'"
+                    );
+                }
+                this.indexName = indexName;
+                this.shardNumber = shardNumber;
+                this.startingDocId = startingDocId;
+            }
+
+            @Override
+            public String toString() {
+                var name = indexName;
+                if (shardNumber != null) {
+                    name += SEPARATOR + shardNumber;
+                }
+                if (startingDocId != null) {
+                    name += SEPARATOR + startingDocId;
+                }
+                return name;
+            }
+
+            public static WorkItem valueFromWorkItemString(String input) {
+                if ("shard_setup".equals(input)) {
+                    return new WorkItem(input, null, null);
+                }
+                var components = input.split(SEPARATOR + "+");
+                if (components.length != 3) {
+                    throw new IllegalArgumentException("Illegal work item: '" + input + "'");
+                }
+                return new WorkItem(components[0], Integer.parseInt(components[1]), Integer.parseInt(components[2]));
+            }
         }
     }
 
