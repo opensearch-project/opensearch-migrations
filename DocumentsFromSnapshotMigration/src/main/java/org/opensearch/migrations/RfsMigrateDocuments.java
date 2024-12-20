@@ -472,9 +472,11 @@ public class RfsMigrateDocuments {
             throw new IllegalStateException("Unexpected worker coordination state. Expected workItem set when progressCursor not null.");
         }
         var workItem = workItemAndDuration.getWorkItem();
+        // Set successor as same last docId, this will ensure we process every document fully in cases where there is a 1:many doc split
+        var successorStartingDocId = progressCursor.getDocId();
         var successorWorkItem = new IWorkCoordinator.WorkItemAndDuration
                 .WorkItem(workItem.getIndexName(), workItem.getShardNumber(),
-                progressCursor.getDocId() + 1);
+            successorStartingDocId);
         ArrayList<String> successorWorkItemIds = new ArrayList<>();
         successorWorkItemIds.add(successorWorkItem.toString());
         return successorWorkItemIds;
