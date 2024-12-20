@@ -1,0 +1,38 @@
+plugins {
+    id 'org.opensearch.migrations.java-library-conventions'
+    id 'io.freefair.lombok'
+    id 'de.undercouch.download' version '5.4.0'  // For downloading LiquidJS
+}
+
+def graalVersion = '24.1.1'
+
+dependencies {
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+
+    implementation group: 'com.google.guava', name: 'guava'
+    implementation group: 'org.slf4j', name: 'slf4j-api'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
+    implementation group: 'org.codehaus.groovy', name: 'groovy-all', version: '3.0.13'
+    implementation group: "org.graalvm.js", name: 'js', version: "${graalVersion}"
+    implementation group: "org.graalvm.js", name: 'js-scriptengine', "version": "${graalVersion}"
+
+    testImplementation project(':TrafficCapture:trafficReplayer')
+    testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
+    testImplementation testFixtures(project(path: ':testHelperFixtures'))
+    testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))
+
+    testImplementation group:'org.junit.jupiter', name:'junit-jupiter-api'
+    testImplementation group:'org.junit.jupiter', name:'junit-jupiter-params'
+    testImplementation group:'org.slf4j', name: 'slf4j-api'
+    testRuntimeOnly group:'org.junit.jupiter', name:'junit-jupiter-engine'
+}
+
+// Task to download LiquidJS
+task downloadLiquidJs(type: Download) {
+    src 'https://cdn.jsdelivr.net/npm/liquidjs/dist/liquid.browser.min.js'
+    dest new File(projectDir, 'src/main/resources/liquid.min.js')
+    overwrite true
+}
+
+processResources.dependsOn downloadLiquidJs

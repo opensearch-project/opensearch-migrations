@@ -6,8 +6,8 @@ plugins {
     id 'me.champeau.jmh'
 }
 
-java.sourceCompatibility = JavaVersion.VERSION_11
-java.targetCompatibility = JavaVersion.VERSION_11
+java.sourceCompatibility = JavaVersion.VERSION_17
+java.targetCompatibility = JavaVersion.VERSION_17
 
 ext {
     awsSdkVersion = '2.25.16'

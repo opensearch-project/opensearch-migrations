@@ -5,8 +5,8 @@ plugins {
     id 'org.opensearch.migrations.java-application-conventions'
 }
 
-java.sourceCompatibility = JavaVersion.VERSION_11
-java.targetCompatibility = JavaVersion.VERSION_11
+java.sourceCompatibility = JavaVersion.VERSION_17
+java.targetCompatibility = JavaVersion.VERSION_17
 
 dependencies {
     implementation project(':coreUtilities')

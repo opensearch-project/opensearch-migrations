@@ -19,9 +19,6 @@ repositories {
 }
 
 dependencies {
-    implementation project(':coreUtilities')
-    implementation project(":RFS")
-
     implementation group: 'com.fasterxml.jackson.core', name:'jackson-databind'
     implementation group: 'org.slf4j', name: 'slf4j-api'
     implementation group: 'org.apache.logging.log4j', name: 'log4j-slf4j2-impl'
