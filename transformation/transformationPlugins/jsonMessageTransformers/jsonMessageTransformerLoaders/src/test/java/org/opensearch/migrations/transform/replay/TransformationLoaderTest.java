@@ -23,9 +23,9 @@ public class TransformationLoaderTest {
         var toOldHostTransformer = new TransformationLoader().getTransformerFactoryLoaderWithNewHostName("localhost");
         var origDoc = parseAsMap(SampleContents.loadSampleJsonRequestAsString());
         var origDocStr = mapper.writeValueAsString(origDoc);
-        var outputWithNewHostname = toNewHostTransformer.transformJson(origDoc);
+        Object outputWithNewHostname = toNewHostTransformer.transformJson(origDoc);
         var docWithNewHostnameStr = mapper.writeValueAsString(outputWithNewHostname);
-        var outputWithOldHostname = toOldHostTransformer.transformJson(outputWithNewHostname);
+        Object outputWithOldHostname = toOldHostTransformer.transformJson(outputWithNewHostname);
         var docWithOldHostnameStr = mapper.writeValueAsString(outputWithOldHostname);
         Assertions.assertEquals(origDocStr, docWithOldHostnameStr);
         Assertions.assertNotEquals(origDocStr, docWithNewHostnameStr);
@@ -39,7 +39,7 @@ public class TransformationLoaderTest {
             "NoopTransformerProvider"
         );
         var origDoc = parseAsMap(SampleContents.loadSampleJsonRequestAsString());
-        var output = noopTransformer.transformJson(origDoc);
+        Object output = noopTransformer.transformJson(origDoc);
         Assertions.assertEquals(mapper.writeValueAsString(origDoc), mapper.writeValueAsString(output));
     }
 
@@ -72,13 +72,14 @@ public class TransformationLoaderTest {
         + "}\n";
 
     @Test
+    @SuppressWarnings("unchecked")
     public void testUserAgentAppends() throws Exception {
         var userAgentTransformer = new TransformationLoader().getTransformerFactoryLoader("localhost", "tester", null);
 
         var origDoc = parseAsMap(TEST_INPUT_REQUEST);
-        var pass1 = userAgentTransformer.transformJson(origDoc);
-        var pass2 = userAgentTransformer.transformJson(pass1);
-        var finalUserAgentInHeaders = ((Map<String, Object>) pass2.get("headers")).get("user-agent");
+        Object pass1 = userAgentTransformer.transformJson(origDoc);
+        Object pass2 = userAgentTransformer.transformJson(pass1);
+        var finalUserAgentInHeaders = ((Map<String, Object>) ((Map<String, Object>) pass2).get("headers")).get("user-agent");
         Assertions.assertEquals("tester; tester", finalUserAgentInHeaders);
     }
 }

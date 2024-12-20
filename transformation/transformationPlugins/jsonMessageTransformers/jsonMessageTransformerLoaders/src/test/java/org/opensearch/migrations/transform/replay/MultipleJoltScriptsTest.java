@@ -29,9 +29,9 @@ public class MultipleJoltScriptsTest {
         );
         var origDocStr = SampleContents.loadSampleJsonRequestAsString();
         var origDoc = parseAsMap(origDocStr);
-        var newDoc = toNewHostTransformer.transformJson(origDoc);
-        Assertions.assertEquals("testhostname", ((Map) newDoc.get(JsonKeysForHttpMessage.HEADERS_KEY)).get("host"));
-        Assertions.assertEquals("gzip", ((Map) newDoc.get(JsonKeysForHttpMessage.HEADERS_KEY)).get("content-encoding"));
+        Object newDoc = toNewHostTransformer.transformJson(origDoc);
+        Assertions.assertEquals("testhostname", ((Map) ((Map) newDoc).get(JsonKeysForHttpMessage.HEADERS_KEY)).get("host"));
+        Assertions.assertEquals("gzip", ((Map) ((Map) newDoc).get(JsonKeysForHttpMessage.HEADERS_KEY)).get("content-encoding"));
     }
 
     @Test
@@ -53,9 +53,9 @@ public class MultipleJoltScriptsTest {
         );
         var origDocStr = SampleContents.loadSampleJsonRequestAsString();
         var origDoc = parseAsMap(origDocStr);
-        var newDoc = toNewHostTransformer.transformJson(origDoc);
-        Assertions.assertEquals("testhostname", ((Map) newDoc.get(JsonKeysForHttpMessage.HEADERS_KEY)).get("host"));
-        var headers = (Map) newDoc.get(JsonKeysForHttpMessage.HEADERS_KEY);
+        Object newDoc = toNewHostTransformer.transformJson(origDoc);
+        Assertions.assertEquals("testhostname", ((Map) ((Map) newDoc).get(JsonKeysForHttpMessage.HEADERS_KEY)).get("host"));
+        var headers = (Map) ((Map) newDoc).get(JsonKeysForHttpMessage.HEADERS_KEY);
         Assertions.assertEquals("gzip", headers.get("content-encoding"));
         Assertions.assertEquals("newValue", headers.get("newHeader"));
     }
@@ -136,14 +136,14 @@ public class MultipleJoltScriptsTest {
             "}";
         var expectedDocStr = "{\"method\":\"PUT\",\"protocol\":\"HTTP/1.0\",\"URI\":\"/oldStyleIndex/moreStuff\",\"headers\":{\"host\":\"testhostname\"},\"payload\":{\"inlinedJsonBody\":{\"top\":{\"properties\":{\"field1\":{\"type\":\"text\"},\"field2\":{\"type\":\"keyword\"}}}}}}";
         var origDoc = parseAsMap(origDocStr);
-        var newDoc = excisingTransformer.transformJson(origDoc);
+        Object newDoc = excisingTransformer.transformJson(origDoc);
         var newAsStr = mapper.writeValueAsString(newDoc);
         Assertions.assertEquals(expectedDocStr, newAsStr);
 
-        var secondPassDoc = excisingTransformer.transformJson(newDoc);
+        Object secondPassDoc = excisingTransformer.transformJson(newDoc);
         var secondPassDocAsStr = mapper.writeValueAsString(secondPassDoc);
         Assertions.assertEquals(expectedDocStr, secondPassDocAsStr);
 
-        Assertions.assertEquals("testhostname", ((Map) newDoc.get(JsonKeysForHttpMessage.HEADERS_KEY)).get("host"));
+        Assertions.assertEquals("testhostname", ((Map) ((Map) newDoc).get(JsonKeysForHttpMessage.HEADERS_KEY)).get("host"));
     }
 }

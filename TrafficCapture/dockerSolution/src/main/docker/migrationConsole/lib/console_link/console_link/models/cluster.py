@@ -190,11 +190,19 @@ class Cluster:
             raise NotImplementedError(f"Auth type {self.auth_type} is not currently support for executing "
                                       f"benchmark workloads")
         # Note -- we should censor the password when logging this command
-        logger.info(f"Running opensearch-benchmark with '{workload}' workload")
-        command = (f"opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host={self.endpoint} "
-                   f"--workload={workload} --pipeline=benchmark-only --test-mode --kill-running-processes "
-                   f"--workload-params={workload_params} --client-options={client_options}")
-        # While a little wordier, this apprach prevents us from censoring the password if it appears in other contexts,
+        # Fix commit used for OSB on latest verified working commit
+        workload_revision = "fc64258a9b2ed2451423d7758ca1c5880626c520"
+        logger.info(f"Running opensearch-benchmark with '{workload}' workload and revision '{workload_revision}'")
+        command = (f"opensearch-benchmark execute-test --distribution-version=1.0.0 "
+                   f"--exclude-tasks=check-cluster-health "
+                   f"--workload-revision={workload_revision} "
+                   f"--target-host={self.endpoint} "
+                   f"--workload={workload} "
+                   f"--pipeline=benchmark-only "
+                   "--test-mode --kill-running-processes "
+                   f"--workload-params={workload_params} "
+                   f"--client-options={client_options}")
+        # While a little wordier, this approach prevents us from censoring the password if it appears in other contexts,
         # e.g. username:admin,password:admin.
         display_command = command.replace(f"basic_auth_password:{password_to_censor}", "basic_auth_password:********")
         logger.info(f"Executing command: {display_command}")
