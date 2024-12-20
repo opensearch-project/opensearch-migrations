@@ -31,7 +31,7 @@ public class DocumentReindexer {
         var scheduler = Schedulers.newParallel("DocumentBulkAggregator");
         var rfsDocs = documentStream
             .publishOn(scheduler, 1)
-            .map(doc -> transformDocument(doc, indexName));
+            .concatMapIterable(doc -> transformDocument(doc, indexName));
 
         return this.reindexDocsInParallelBatches(rfsDocs, indexName, context)
             .doFinally(s -> scheduler.dispose());
@@ -52,12 +52,12 @@ public class DocumentReindexer {
     }
 
     @SneakyThrows
-    RfsDocument transformDocument(RfsLuceneDocument doc, String indexName) {
-        var finalDocument = RfsDocument.fromLuceneDocument(doc, indexName);
+    List<RfsDocument> transformDocument(RfsLuceneDocument doc, String indexName) {
+        var originalDoc = RfsDocument.fromLuceneDocument(doc, indexName);
         if (transformer != null) {
-            finalDocument = RfsDocument.transform(transformer::transformJson, finalDocument);
+            return RfsDocument.transform(transformer, originalDoc);
         }
-        return finalDocument;
+        return List.of(originalDoc);
     }
 
     /*

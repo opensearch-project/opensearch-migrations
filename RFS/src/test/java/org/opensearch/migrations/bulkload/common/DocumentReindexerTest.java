@@ -132,7 +132,7 @@ class DocumentReindexerTest {
         // Set up the transformer that replaces the sourceDoc from the document
         var replacedSourceDoc = Map.of("simpleKey", "simpleValue");
         IJsonTransformer transformer = originalJson -> {
-            originalJson.put("source", replacedSourceDoc);
+            ((Map<String, Object>) originalJson).put("source", replacedSourceDoc);
             return originalJson;
         };
         int numDocs = 5;

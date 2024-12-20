@@ -1,7 +1,10 @@
 package org.opensearch.migrations.bulkload.common;
 
+import java.util.List;
 import java.util.Map;
-import java.util.function.UnaryOperator;
+import java.util.stream.Collectors;
+
+import org.opensearch.migrations.transform.IJsonTransformer;
 
 import lombok.AllArgsConstructor;
 
@@ -32,10 +35,27 @@ public class RfsDocument {
         );
     }
 
-    public static RfsDocument transform(UnaryOperator<Map<String, Object>> transformer, RfsDocument doc) {
-        return new RfsDocument(
-            doc.luceneDocNumber,
-            BulkDocSection.fromMap(transformer.apply(doc.document.toMap()))
-        );
+    @SuppressWarnings("unchecked")
+    public static List<RfsDocument> transform(IJsonTransformer transformer, RfsDocument doc) {
+        var transformedObject = transformer.transformJson(doc.document.toMap());
+        if (transformedObject instanceof Map) {
+            Map<String, Object> transformedMap = (Map<String, Object>) transformedObject;
+            return List.of(new RfsDocument(
+                doc.luceneDocNumber,
+                BulkDocSection.fromMap(transformedMap)
+            ));
+        } else if (transformedObject instanceof List) {
+            var transformedList = (List<Map<String, Object>>) transformedObject;
+            return transformedList.stream()
+                .map(item -> new RfsDocument(
+                    doc.luceneDocNumber,
+                    BulkDocSection.fromMap(item)
+                ))
+                .collect(Collectors.toList());
+        } else {
+            throw new IllegalArgumentException(
+                "Unsupported transformed document type: " + transformedObject.getClass().getName()
+            );
+        }
     }
 }
