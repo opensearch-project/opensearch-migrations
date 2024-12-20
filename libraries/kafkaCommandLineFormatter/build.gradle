@@ -4,6 +4,9 @@ plugins {
     id 'io.freefair.lombok'
 }
 
+java.sourceCompatibility = JavaVersion.VERSION_17
+java.targetCompatibility = JavaVersion.VERSION_17
+
 dependencies {
     implementation group: 'org.apache.kafka', name:'kafka-clients', version:'3.8.0'
 }

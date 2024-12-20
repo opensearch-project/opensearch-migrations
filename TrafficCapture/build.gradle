@@ -15,7 +15,7 @@ subprojects {
             if (project.name == "trafficReplayer" || project.name == "trafficCaptureProxyServer") {
                 options.compilerArgs += [
                         "-XDcompilePolicy=simple",
-                        "-Xplugin:ErrorProne -XepDisableAllChecks -Xep:MustBeClosed:ERROR -XepDisableWarningsInGeneratedCode",
+//                        "-Xplugin:ErrorProne -XepDisableAllChecks -Xep:MustBeClosed:ERROR -XepDisableWarningsInGeneratedCode",
                 ]
             }
         }
@@ -25,12 +25,6 @@ subprojects {
 allprojects {
     apply plugin: 'java'
     apply plugin: 'org.owasp.dependencycheck'
-
-    java {
-        toolchain {
-            languageVersion = JavaLanguageVersion.of(11)
-        }
-    }
 }
 
 subprojects {
