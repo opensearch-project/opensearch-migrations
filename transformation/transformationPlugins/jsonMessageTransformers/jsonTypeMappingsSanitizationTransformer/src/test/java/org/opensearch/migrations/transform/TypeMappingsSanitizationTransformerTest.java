@@ -34,7 +34,7 @@ class TypeMappingsSanitizationTransformerTest {
                 "tweet", "communal",
                 "user", "communal"));
         var regexIndexMappings = List.of(
-            List.of("time-(.*)", "(.*)", "time-\\1-\\2"));
+            List.of("time-(.*)", "(.*)", "time-$1-$2"));
         indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings);
     }
 

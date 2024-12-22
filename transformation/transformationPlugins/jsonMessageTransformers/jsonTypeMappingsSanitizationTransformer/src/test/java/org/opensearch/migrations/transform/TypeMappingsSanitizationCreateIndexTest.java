@@ -29,7 +29,7 @@ public class TypeMappingsSanitizationCreateIndexTest {
                 "tweet", "communal",
                 "user", "communal"));
         var regexIndexMappings = List.of(
-            List.of("time-(.*)", "(.*)", "time-\\1-\\2"));
+            List.of("time-(.*)", "(.*)", "time-$1-$2"));
         return new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings);
     }
 

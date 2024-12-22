@@ -10,12 +10,10 @@ import org.opensearch.migrations.testutils.WrapWithNettyLeakDetection;
 import org.opensearch.migrations.transform.JsonKeysForHttpMessage;
 import org.opensearch.migrations.transform.TestRequestBuilder;
 import org.opensearch.migrations.transform.TypeMappingSanitizationTransformerProvider;
-import org.opensearch.migrations.transform.jinjava.ThrowTag;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.hubspot.jinjava.interpret.FatalTemplateErrorsException;
 import lombok.NonNull;
 import lombok.extern.slf4j.Slf4j;
 import org.junit.jupiter.api.Assertions;
@@ -39,7 +37,7 @@ public class TypeMappingsSanitizationProviderTest {
                     "type2", "indexb"),
                 "indexc", Map.of(
                     "type2", "indexc")),
-            "regexMappings", List.of(List.of("(time.*)", "(type.*)", "\\1_And_\\2")));
+            "regexMappings", List.of(List.of("(time.*)", "(type.*)", "$1_And_$2")));
         final String TEST_INPUT_REQUEST = "{\n"
             + "  \"method\": \"PUT\",\n"
             + "  \"URI\": \"/indexa/type2/someuser\",\n"
@@ -70,14 +68,14 @@ public class TypeMappingsSanitizationProviderTest {
             + "}\n";
 
         var provider = new TypeMappingSanitizationTransformerProvider();
-        Map<String, Object> inputMap = OBJECT_MAPPER.readValue(TEST_INPUT_REQUEST, new TypeReference<>() {
-        });
         {
+            Map<String, Object> inputMap = OBJECT_MAPPER.readValue(TEST_INPUT_REQUEST, new TypeReference<>() {});
             var transformedDocument = provider.createTransformer(config).transformJson(inputMap);
             Assertions.assertEquals(JsonNormalizer.fromString(EXPECTED),
                 JsonNormalizer.fromObject(transformedDocument));
         }
         {
+            Map<String, Object> inputMap = OBJECT_MAPPER.readValue(TEST_INPUT_REQUEST, new TypeReference<>() {});
             var resultFromNullConfig = provider.createTransformer(null).transformJson(inputMap);
             Assertions.assertEquals(
                 JsonNormalizer.fromString(
@@ -123,11 +121,8 @@ public class TypeMappingsSanitizationProviderTest {
             "}";
         var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(null);
         var thrownException =
-            Assertions.assertThrows(FatalTemplateErrorsException.class, () ->
+            Assertions.assertThrows(Exception.class, () ->
             transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class)));
-        Assertions.assertNotNull(
-            findCausalException(thrownException.getErrors().iterator().next().getException(),
-                e->e==null || e instanceof ThrowTag.JinjavaThrowTagException));
     }
 
     private static @NonNull String makeCreateIndexRequestWithoutTypes() {

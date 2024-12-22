@@ -28,7 +28,8 @@ public class TypeMappingsSanitizationDocBackfillTest {
 
 
         var indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(null, null);
-        var resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+        var docObj = OBJECT_MAPPER.readValue(testString, LinkedHashMap.class);
+        var resultObj = indexTypeMappingRewriter.transformJson(docObj);
         log.atInfo().setMessage("resultStr = {}").addArgument(() -> {
             try {
                 return OBJECT_MAPPER.writeValueAsString(resultObj);

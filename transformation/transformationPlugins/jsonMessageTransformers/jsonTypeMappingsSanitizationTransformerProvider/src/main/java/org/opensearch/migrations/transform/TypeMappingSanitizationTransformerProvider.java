@@ -4,7 +4,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
-import org.opensearch.migrations.transform.jinjava.JinjavaConfig;
 import org.opensearch.migrations.transform.typemappings.SourceProperties;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -16,7 +15,6 @@ public class TypeMappingSanitizationTransformerProvider implements IJsonTransfor
     public static final String STATIC_MAPPINGS = "staticMappings";
     public static final String REGEX_MAPPINGS = "regexMappings";
 
-    public static final String JINJAVA_CONFIG_KEY = "jinjavaConfig";
     public static final String SOURCE_PROPERTIES_KEY = "sourceProperties";
 
     public final static ObjectMapper mapper = new ObjectMapper();
@@ -27,7 +25,7 @@ public class TypeMappingSanitizationTransformerProvider implements IJsonTransfor
         try {
             if ((jsonConfig == null) ||
                 (jsonConfig instanceof String && ((String) jsonConfig).isEmpty())) {
-                return new TypeMappingsSanitizationTransformer(null, null, null, null, null);
+                return new TypeMappingsSanitizationTransformer(null, null, null, null);
             } else if (!(jsonConfig instanceof Map)) {
                 throw new IllegalArgumentException(getConfigUsageStr());
             }
@@ -38,9 +36,7 @@ public class TypeMappingSanitizationTransformerProvider implements IJsonTransfor
                 (List<List<String>>) config.get(REGEX_MAPPINGS),
                 Optional.ofNullable(config.get(SOURCE_PROPERTIES_KEY)).map(m ->
                     mapper.convertValue(m, SourceProperties.class)).orElse(null),
-                (Map<String, Object>) config.get(FEATURE_FLAGS),
-                Optional.ofNullable(config.get(JINJAVA_CONFIG_KEY)).map(m ->
-                    mapper.convertValue(m, JinjavaConfig.class)).orElse(null));
+                (Map<String, Object>) config.get(FEATURE_FLAGS));
         } catch (ClassCastException e) {
             throw new IllegalArgumentException(getConfigUsageStr(), e);
         }

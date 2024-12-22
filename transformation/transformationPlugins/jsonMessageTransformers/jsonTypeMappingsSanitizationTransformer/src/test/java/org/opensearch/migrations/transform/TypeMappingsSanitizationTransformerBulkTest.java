@@ -1,6 +1,7 @@
 package org.opensearch.migrations.transform;
 
 import java.io.IOException;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -31,7 +32,7 @@ public class TypeMappingsSanitizationTransformerBulkTest {
             "indexc", Map.of(
                 "type2", "indexc"));
         var regexIndexMappings = List.of(
-            List.of("time-(.*)", "(.*)", "time-\\1-\\2"));
+            List.of("time-(.*)", "(.*)", "time-$1-$2"));
         indexTypeMappingRewriter = new TypeMappingsSanitizationTransformer(indexMappings, regexIndexMappings);
     }
 
@@ -111,15 +112,31 @@ public class TypeMappingsSanitizationTransformerBulkTest {
                 "}";
 
 
-        var resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
-        log.atInfo().setMessage("resultStr = {}").addArgument(() -> {
-            try {
-                return OBJECT_MAPPER.writeValueAsString(resultObj);
-            } catch (JsonProcessingException e) {
-                throw new RuntimeException(e);
+        long totalNanos = 0;
+        final int totalRuns = 10000;
+        int totalCounted = 0;
+        final double warmupPercent = .5;
+        for (int i=0; i<(int)(totalRuns*(1.0+warmupPercent)); ++i) {
+            var input = OBJECT_MAPPER.readValue(testString, LinkedHashMap.class);
+            final var start = System.nanoTime();
+            var resultObj = indexTypeMappingRewriter.transformJson(input);
+            if (i >= totalRuns*warmupPercent) {
+                totalNanos += System.nanoTime() - start;
+                totalCounted++;
             }
-        }).log();
-        Assertions.assertEquals(JsonNormalizer.fromString(expectedString), JsonNormalizer.fromObject(resultObj));
+            log.atDebug().setMessage("resultStr = {}").addArgument(() -> {
+                try {
+                    return OBJECT_MAPPER.writeValueAsString(resultObj);
+                } catch (JsonProcessingException e) {
+                    throw new RuntimeException(e);
+                }
+            }).log();
+            Assertions.assertEquals(JsonNormalizer.fromString(expectedString), JsonNormalizer.fromObject(resultObj));
+        }
+        log.atInfo().setMessage("Total time={} over {} runs")
+            .addArgument(Duration.ofNanos(totalNanos))
+            .addArgument(totalCounted)
+            .log();
     }
 
 }

@@ -5,7 +5,7 @@ plugins {
 }
 
 dependencies {
-    api project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJinjavaTransformer')
+    api project(':transformation:transformationPlugins:jsonMessageTransformers:jsonLiquidJSTransformer')
 
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-annotations'
