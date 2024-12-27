@@ -17,7 +17,7 @@ def _get_base_template(source_version: SourceVersion, target_version: TargetVers
 def get_system_prompt_factory(source_version: SourceVersion, target_version: TargetVersion, input_shape_type: TransformType, transform_language: TransformLanguage) -> Callable[[Dict[str, Any]], SystemMessage]:
     base_template = _get_base_template(source_version, target_version, input_shape_type, transform_language)
     
-    def factory(input_shape: Dict[str, Any]) -> SystemMessage:
+    def factory(user_guidance: str, input_shape: Dict[str, Any]) -> SystemMessage:
         return SystemMessage(
             content=base_template.format(
                 source_version=source_version,
@@ -26,7 +26,8 @@ def get_system_prompt_factory(source_version: SourceVersion, target_version: Tar
                 target_version=target_version,
                 target_guidance=get_target_guidance(source_version, target_version, input_shape_type, transform_language),
                 target_knowledge=get_target_knowledge(source_version, target_version, input_shape_type, transform_language),
-                source_json=input_shape
+                source_json=input_shape,
+                user_guidance=user_guidance
             )
         )
     

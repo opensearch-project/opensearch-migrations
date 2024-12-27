@@ -2,7 +2,8 @@
 
 import React, { useState } from "react";
 import "@cloudscape-design/global-styles/index.css";
-import { Grid, Container, FormField, Textarea, Button, Input, Select, SelectProps, Spinner } from "@cloudscape-design/components";
+import { Box, Button, Container, FormField, Grid, Input, Modal, Select,
+  SelectProps, SpaceBetween, Spinner, Textarea } from "@cloudscape-design/components";
 
 import { Configuration, TransformsApi, TransformsIndexCreateRequest, TransformsIndexTestRequest,
   SourceVersionEnum, TargetVersionEnum, TransformLanguageEnum
@@ -10,7 +11,7 @@ import { Configuration, TransformsApi, TransformsIndexCreateRequest, TransformsI
 
 
 const TransformationPage = () => {
-  // States for user inputs
+  // States for page elements
   const [inputShape, setInputShape] = useState("");
   const [transformLogic, setTransformLogic] = useState("");
   const [outputShape, setOutputShape] = useState("");
@@ -18,7 +19,9 @@ const TransformationPage = () => {
   const [testTargetUrl, setTestTargetUrl] = useState("");
   const [isRecommending, setIsRecommending] = useState(false);
   const [isTesting, setIsTesting] = useState(false);
-
+  const [userGuidanceVisible, setUserGuidanceVisible] = useState(false);
+  const [userGuidance, setUserGuidance] = useState("");
+  const [userGuidanceTemp, setUserGuidanceTemp] = useState("");
   
   // Select options for dropdowns using enumerated types
   const sourceVersionOptions: SelectProps.Options = Object.values(SourceVersionEnum).map((value) => ({
@@ -61,10 +64,13 @@ const TransformationPage = () => {
         source_version: sourceVersion.value as SourceVersionEnum,
         target_version: targetVersion.value as TargetVersionEnum,
         transform_language: transformLanguage.value as TransformLanguageEnum,
-        ...(testTargetUrl && { test_target_url: testTargetUrl }), // Add optional field
+        // Add optional fields
+        ...(transformLogic && { transform_logic: transformLogic }),
+        ...(testTargetUrl && { test_target_url: testTargetUrl }),
+        ...(userGuidance && { user_guidance: userGuidance }),
       };
 
-      const response = await apiClient.transformsIndexCreate(payload);
+      const response = await apiClient.transformsIndexCreateCreate(payload);
 
       // Update state with response data
       setTransformLogic(response.data.transform_logic || "");
@@ -174,6 +180,46 @@ const TransformationPage = () => {
         <Button onClick={handleGetRecommendation}>
           {isRecommending ? <Spinner/> : "Get GenAI Recommendation"}
         </Button>
+        <Button onClick={() => {
+          setUserGuidanceVisible(true);
+          setUserGuidanceTemp(userGuidance);
+        }}>
+          Set User Guidance
+        </Button>
+        <Modal
+          onDismiss={() => setUserGuidanceVisible(false)}
+          visible={userGuidanceVisible}
+          footer={
+            <Box float="right">
+              <SpaceBetween direction="horizontal" size="xs">
+                <Button variant="link" onClick={() => {
+                  setUserGuidanceVisible(false);
+                }}>
+                  Cancel
+                </Button>
+                <Button variant="primary" onClick={() => {
+                  setUserGuidanceVisible(false);
+                  setUserGuidance(userGuidanceTemp);
+                }}>
+                  Set
+                </Button>
+              </SpaceBetween>
+            </Box>
+          }
+          header="Modal title"
+        >
+          <FormField
+            label="Form field label"
+            description="This is a description"
+          >
+            <Textarea
+              value={userGuidanceTemp}
+              onChange={({ detail }) => setUserGuidanceTemp(detail.value)}
+              placeholder='Add any special instructions or guidance for the LLM here...'
+              rows={25}
+            />
+          </FormField>
+        </Modal>
         <Button onClick={() => {
           setTransformLogic("");
           setOutputShape("");

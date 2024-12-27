@@ -65,10 +65,12 @@ class IndexShapeField(serializers.Field):
 
 
 class TransformsIndexCreateRequestSerializer(serializers.Serializer):
-    transform_language = EnumChoiceField(enum=TransformLanguage)
     source_version = EnumChoiceField(enum=SourceVersion)
     target_version = EnumChoiceField(enum=TargetVersion)
+    transform_language = EnumChoiceField(enum=TransformLanguage)
     input_shape = IndexShapeField()
+    transform_logic = serializers.CharField(required=False, default=None)
+    user_guidance = serializers.CharField(required=False, default=None)
     test_target_url = serializers.URLField(required=False, default=None)
     
 class TransformsIndexCreateResponseSerializer(serializers.Serializer):

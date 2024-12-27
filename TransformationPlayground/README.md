@@ -78,6 +78,67 @@ To run the Frontend, first start the Backend and ensure it's running.  Then, exe
 
 You should then be able to hit the Playground website in your web browser at `http://localhost:3000`.  The GUI should be pretty self-explanatory.
 
+Here's an example input JSON for ElasticSearch 6.8:
+```json
+{
+    "index_name": "test-index",
+    "index_json": {
+        "settings": {
+            "index": {
+                "number_of_shards": 1,
+                "number_of_replicas": 0
+            }
+        },
+        "mappings": {
+            "type1": {
+                "properties": {
+                    "title": {
+                        "type": "text"
+                    }
+                }
+            },
+            "type2": {
+                "properties": {
+                    "contents": {
+                        "type": "text"
+                    }
+                }
+            }
+        }
+    }
+}
+```
+
+
+Here's an example input JSON for ElasticSearch 7.10:
+```json
+{
+    "index_name": "test-index",
+    "index_json": {
+        "settings": {
+            "index": {
+                "soft_deletes": {
+                    "enabled": false
+                },
+                "number_of_shards": 1,
+                "number_of_replicas": 1
+            }
+        },
+        "mappings": {
+            "properties": {
+                "title": {
+                    "type": "text"
+                },
+                "content": {
+                    "type": "text"
+                }
+            }
+        }
+    }
+}
+```
+
+
 ### Dependencies
 `pipenv` is used to managed dependencies within the project.  The `Pipefile` and `Pipefile.lock` handle the local environment.  You can add dependencies like so:
 

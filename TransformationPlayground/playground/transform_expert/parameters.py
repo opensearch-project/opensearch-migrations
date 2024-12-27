@@ -6,6 +6,7 @@ This module contains enumerated types representing the separate axes that a tran
 
 class SourceVersion(Enum):
     ES_6_8 = "Elasticsearch 6.8"
+    ES_7_10 = "Elasticsearch 7.10"
 
 class TargetVersion(Enum):
     OS_2_17 = "OpenSearch 2.17"

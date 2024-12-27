@@ -107,6 +107,8 @@ class TransformationCreateRequestSerializerTestCase(TestCase):
                     }
                 }
             },
+            "transform_logic": "some transform logic",
+            "user_guidance": "some user guidance",
             "test_target_url": "http://localhost:29200"
         })
         self.assertTrue(test_serializer.is_valid())
@@ -165,7 +167,7 @@ class TransformationCreateResponseSerializerTestCase(TestCase):
                     }
                 }
             ],
-            "transform_logic": "the transform logic",
+            "transform_logic": "the new transform logic",
             "validation_report": [
                 "Entry 1",
                 "Entry 2"

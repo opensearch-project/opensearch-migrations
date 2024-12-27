@@ -21,7 +21,7 @@ from transform_expert.utils.transforms import TransformTask, TransformPython
 logger = logging.getLogger("transform_api")
 
 
-class TransformsIndexView(APIView):
+class TransformsIndexCreateView(APIView):
     @csrf_exempt
     @extend_schema(
         request=TransformsIndexCreateRequestSerializer,
@@ -86,7 +86,8 @@ class TransformsIndexView(APIView):
         )
 
         system_message = expert.system_prompt_factory(
-            request.validated_data["input_shape"]           
+            user_guidance=request.validated_data["user_guidance"],
+            input_shape=request.validated_data["input_shape"]           
         )
         turns = [
             system_message,

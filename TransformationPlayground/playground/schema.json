@@ -1,7 +1,7 @@
 openapi: 3.0.3
 info:
   title: Transformation API
-  version: 0.0.1
+  version: 0.1.0
   description: API for JSON transformation logic.
 paths:
   /api/schema/:
@@ -150,9 +150,9 @@ paths:
                 type: object
                 additionalProperties: {}
           description: ''
-  /transforms/index/:
+  /transforms/index/create/:
     post:
-      operationId: transforms_index_create
+      operationId: transforms_index_create_create
       tags:
       - transforms
       requestBody:
@@ -211,8 +211,11 @@ components:
     SourceVersionEnum:
       enum:
       - Elasticsearch 6.8
+      - Elasticsearch 7.10
       type: string
-      description: '* `Elasticsearch 6.8` - ES_6_8'
+      description: |-
+        * `Elasticsearch 6.8` - ES_6_8
+        * `Elasticsearch 7.10` - ES_7_10
     TargetVersionEnum:
       enum:
       - OpenSearch 2.17
@@ -226,12 +229,12 @@ components:
     TransformsIndexCreateRequest:
       type: object
       properties:
-        transform_language:
-          $ref: '#/components/schemas/TransformLanguageEnum'
         source_version:
           $ref: '#/components/schemas/SourceVersionEnum'
         target_version:
           $ref: '#/components/schemas/TargetVersionEnum'
+        transform_language:
+          $ref: '#/components/schemas/TransformLanguageEnum'
         input_shape:
           type: object
           properties:
@@ -242,6 +245,10 @@ components:
           required:
           - index_name
           - index_json
+        transform_logic:
+          type: string
+        user_guidance:
+          type: string
         test_target_url:
           type: string
           format: uri

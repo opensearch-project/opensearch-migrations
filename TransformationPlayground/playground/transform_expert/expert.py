@@ -60,6 +60,9 @@ def get_expert(source_version: SourceVersion, target_version: TargetVersion, tra
         tools=tool_bundle
     )
 
+class NoTransformCreatedError(Exception):
+    pass
+
 def invoke_expert(expert: Expert, task: TransformTask) -> TransformTask:
     logger.info(f"Invoking the Transform Expert for transform_id: {task.transform_id}")
     logger.debug(f"Initial Transform Task: {str(task.to_json())}")
