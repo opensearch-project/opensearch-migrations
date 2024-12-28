@@ -76,9 +76,15 @@ const TransformationPage = () => {
       setTransformLogic(response.data.transform_logic || "");
       setOutputShape(JSON.stringify(response.data.output_shape, null, 4) || ""); // Pretty print JSON
       setValidationReport((response.data.validation_report || []).join("\n\n"));
-    } catch (error) {
-      console.error("Error while fetching recommendation:", error);
-      alert("Failed to fetch recommendation. Please check the input.");
+    } catch (error: any) {
+      if (error.response && error.response.data) {
+        const serverErrorMessage = error.response.data.error || "An unknown error occurred.";
+        console.error("Server error:", serverErrorMessage);
+        alert(`Failed to fetch recommendation. Error:\n\n${serverErrorMessage}`);
+      } else {
+        console.error("Unexpected error:", error);
+        alert("An unexpected error occurred. Please try again later.");
+      }
     } finally {
       setIsRecommending(false); // Stop visual spinner
     }
@@ -108,9 +114,15 @@ const TransformationPage = () => {
       // Update state with response data
       setOutputShape(JSON.stringify(response.data.output_shape, null, 4) || ""); // Pretty print JSON
       setValidationReport((response.data.validation_report || []).join("\n\n"));
-    } catch (error) {
-      console.error("Error while testing transformation:", error);
-      alert("Failed to test transformation. Please check the input.");
+    } catch (error: any) {
+      if (error.response && error.response.data) {
+        const serverErrorMessage = error.response.data.error || "An unknown error occurred.";
+        console.error("Server error:", serverErrorMessage);
+        alert(`Failed to test transformation. Error:\n\n${serverErrorMessage}`);
+      } else {
+        console.error("Unexpected error:", error);
+        alert("An unexpected error occurred. Please try again later.");
+      }
     } finally {
       setIsTesting(false); // Stop visual spinner
     }

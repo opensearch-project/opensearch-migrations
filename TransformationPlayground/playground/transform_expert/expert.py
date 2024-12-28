@@ -43,7 +43,7 @@ def get_expert(source_version: SourceVersion, target_version: TargetVersion, tra
     llm = ChatBedrockConverse(
         model="anthropic.claude-3-5-sonnet-20240620-v1:0", # This is the older version of the model, could be updated
         temperature=0, # Suitable for straightforward, practical code generation
-        max_tokens=4096,
+        max_tokens=4096, # The maximum number of output tokens for this model
         region_name="us-west-2", # Somewhat necessary to hardcode, as models are only available in limited regions
         config=config
     )
@@ -73,6 +73,10 @@ def invoke_expert(expert: Expert, task: TransformTask) -> TransformTask:
     inference_result = perform_inference(expert.llm, [inference_task])[0]
 
     logger.debug(f"Inference Result: {str(inference_result.to_json())}")
+
+    # Confirm that the LLM request resulted in a tool call
+    if not inference_result.response.tool_calls:
+        raise NoTransformCreatedError("The LLM did not create a tool call for the transform.  Final LLM message: " + inference_result.response.content)
 
     # Append the LLM response to the context
     task.context.append(inference_result.response)
