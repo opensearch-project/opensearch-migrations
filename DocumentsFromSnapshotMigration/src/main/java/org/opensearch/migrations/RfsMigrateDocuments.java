@@ -72,7 +72,7 @@ public class RfsMigrateDocuments {
         @Parameter(required = false,
             names = { "--snapshot-local-dir", "--snapshotLocalDir" },
             description = ("The absolute path to the directory on local disk where the snapshot exists.  " +
-                "Use this parameter if have a copy of the snapshot disk.  Mutually exclusive with " +
+                "Use this parameter if there is a reachable copy of the snapshot on disk.  Mutually exclusive with " +
                 "--s3-local-dir, --s3-repo-uri, and --s3-region."))
         public String snapshotLocalDir = null;
 
@@ -191,6 +191,7 @@ public class RfsMigrateDocuments {
     public static void main(String[] args) throws Exception {
         // TODO: Add back arg printing after not consuming plaintext password MIGRATIONS-1915
         var workerId = ProcessHelpers.getNodeInstanceName();
+        System.err.println("Starting program with: " + String.join(" ", args));
         log.info("Starting RfsMigrateDocuments with workerId=" + workerId);
 
         Args arguments = new Args();
