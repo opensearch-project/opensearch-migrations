@@ -8,5 +8,5 @@ dependencies:
 - name: logs-volume
   repository: file://../../sharedResources/logsVolume
   version: 0.1.0
-digest: sha256:cf5d93a1d72439ae56a98fa1fda701c906cea59cc7a37a886531f91470e95e0a
-generated: "2024-11-05T10:52:15.582522-05:00"
+digest: sha256:4f480eb9ba10ee779064919444e65e9adcab54916ba47962ca784738be1c803e
+generated: "2024-12-28T10:22:19.870333-05:00"

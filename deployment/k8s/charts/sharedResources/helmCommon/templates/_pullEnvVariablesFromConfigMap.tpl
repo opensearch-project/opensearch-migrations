@@ -2,7 +2,7 @@
 {{- $packageName := .PackageName -}}
 {{- range $sourceKey, $param := .Parameters -}}
 {{- $configMapKey := printf "%s-%s" $packageName (include "toKebabCase" $sourceKey) }}
-{{- $envName := printf "%s-%s" ($packageName | upper) ( include "toSnakeCase" $sourceKey | upper) }}
+{{- $envName := ( include "toSnakeCase" $sourceKey | upper) }}
 - name: {{ $envName }}_DEFAULT
   valueFrom:
     configMapKeyRef:

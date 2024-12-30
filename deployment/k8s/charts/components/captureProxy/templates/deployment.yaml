@@ -3,9 +3,8 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "generic.fullname" . }}
-  namespace: {{ dig "namespace" "name" "default" (.Values | merge (dict)) }}
 spec:
-  replicas: 1
+  replicas: 0
   selector:
     matchLabels:
       app: {{ include "generic.fullname" . }}

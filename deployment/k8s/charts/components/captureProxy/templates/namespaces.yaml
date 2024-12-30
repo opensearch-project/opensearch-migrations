@@ -1,1 +1,0 @@
-{{ include "generic.createNamespace" .Values.namespace }}

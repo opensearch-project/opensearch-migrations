@@ -9,38 +9,40 @@ dependencies:
     repository: "file://../../components/migrationConsole"
 
   - name: bulk-document-loader
+    condition: conditionalPackageInstalls.bulkLoader
     version: "0.1.0"
     repository: "file://../../components/bulkLoad"
 
   - name: capture-proxy
-    condition: install-locally-managed-capture-proxy
+    condition: conditionalPackageInstalls.proxy
     version: "0.1.0"
     repository: "file://../../components/captureProxy"
-##  - name: captured-traffic-kafka-cluster
-##    condition: install-locally-managed-kafka
-##    version: "0.1.0"
-##    repository: "file://../../captured-traffic-kafka-cluster"
-#  - name: replayer
-#    version: "0.1.0"
-#    repository: "file://../../components/replayer"
+  - name: captured-traffic-kafka-cluster
+    condition: conditionalPackageInstalls.kafka
+    version: "0.1.0"
+    repository: "file://../../components/capturedTrafficKafkaCluster"
+  - name: replayer
+    condition: conditionalPackageInstalls.replayer
+    version: "0.1.0"
+    repository: "file://../../components/replayer"
 
   - name: shared-configs
     version: "0.1.0"
     repository: "file://../../sharedResources/sharedConfigs"
 
-##  - name: otel-collector
-##    version: 1.2.2
-##    repository:
+#  - name: otel-collector
+#    version: 1.2.2
+#    repository:
 
-#  - name: grafana
-#    condition: install-locally-managed-grafana
-#    version: "8.5.0"
-#    repository: "https://grafana.github.io/helm-charts"
-#  - name: prometheus
-#    condition: install-locally-managed-prometheus
-#    version: "25.27.0"
-#    repository: "https://prometheus-community.github.io/helm-charts"
-#  - name: jaeger
-#    condition: install-locally-managed-jaeger
-#    version: "3.2.0"
-#    repository: "https://jaegertracing.github.io/helm-charts"
+  - name: grafana
+    condition: conditionalPackageInstalls.grafana
+    version: "8.5.0"
+    repository: "https://grafana.github.io/helm-charts"
+  - name: prometheus
+    condition: conditionalPackageInstalls.prometheus
+    version: "25.27.0"
+    repository: "https://prometheus-community.github.io/helm-charts"
+  - name: jaeger
+    condition: conditionalPackageInstalls.jaeger
+    version: "3.2.0"
+    repository: "https://jaegertracing.github.io/helm-charts"

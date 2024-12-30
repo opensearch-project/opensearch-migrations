@@ -1,17 +1,22 @@
 minikube start
 eval $(minikube docker-env)
 
-helm repo add strimzi https://strimzi.io/charts/
-helm repo update
+helm dependency build charts/aggregates/mockCustomerClusters
+./linkSubChartsToDependencies.sh charts/aggregates/mockCustomerClusters
+helm install mcc -n mcc charts/aggregates/mockCustomerClusters --create-namespace
 
-helm dependency build  mockCustomerClusters # not sure if this is required
-helm install mock-context  mockCustomerClusters --values ../helmValues/localTesting/sourceElasticsearchCluster.yaml --values ../helmValues/localTesting/targetOpenSearchCluster.yaml --values ../helmValues/localTesting/captureProxy.yaml
+
+helm dependency build charts/aggregates/migrationAssistant
+./linkSubChartsToDependencies.sh charts/aggregates/migrationAssistant
+helm install ma -n ma charts/aggregates/migrationAssistant --create-namespace
+
+# Test with
+# kc exec -n ma  -it migration-console-7c846764b8-zvf6w --  curl https://opensearch-cluster-master.mcc:9200/   -u admin:myStrongPassword123!  --insecure
+
 kubectl port-forward service/capture-proxy 9200:9200 &
 kubectl port-forward service/elasticsearch 19200:9200 &
 kubectl port-forward service/opensearch 29200:9200 &
 
-helm dependency build  testObervability # not sure if this is required
-helm install observability ./testObervability --values ../helmValues/localTesting/grafana.yaml --values ../helmValues/localTesting/jaeger.yaml
 # kubectl get secret observability-grafana -o jsonpath="{.data.admin-password}" | base64 --decode ; echo
 kc port-forward service/observability-grafana 3000:80
 

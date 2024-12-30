@@ -6,7 +6,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: {{ include "generic.fullname" . }}
-  namespace: {{ dig "namespace" "name" "default" (.Values | merge (dict)) }}
 spec:
   replicas: 1
   selector:
@@ -34,7 +33,7 @@ spec:
               mountPath: /config
               subPath: migration_services.yaml
           args:
-            - "--namespace=default"
+            - "--namespace={{.Release.Namespace}}"
             - "--outfile=/config/migration_services.yaml"
       containers:
         - name: console

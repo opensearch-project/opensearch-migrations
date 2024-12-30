@@ -1,17 +1,15 @@
 conditionalPackageInstalls:
+  bulkLoader: true
   kafka: true
-  jaeger: true
-  prometheus: true
-  grafana: true
+  replayer: true
+  jaeger: false
+  prometheus: false
+  proxy: false
+  grafana: false
 
-namespace:
-  create: true
-  name: ma
 
-proxy:
+capture-proxy:
   enabled: true
-  namespace:
-    name: ma
   parameters:
     destinationUri:
       configMapName: "source-cluster-endpoint"
@@ -21,17 +19,44 @@ proxy:
       yamlPath: "allow_insecure"
 
 migration-console:
-  namespace:
-    name: ma
+  parameters:
+    nothingImportant:
+      value: false
 
 bulk-document-loader:
-  namespace:
-    name: ma
-
-capture-proxy:
-  namespace:
-    name: ma
+  parameters:
+    luceneDir:
+      value: /tmp
+      allowRuntimeOverride: true
+    snapshotName:
+      value: rfs
+      allowRuntimeOverride: true
+    targetHost:
+      value: https://opensearch-cluster-master.mcc:9200/
+      allowRuntimeOverride: true
+    snapshotLocalDir:
+      value: /snapshot
+      allowRuntimeOverride: true
 
 replayer:
-  namespace:
-    name: ma
+  parameters:
+    targetUri:
+      value: https://opensearch-cluster-master.mcc:9200/
+      allowRuntimeOverride: true
+
+
+captured-traffic-kafka-cluster:
+  environment: test
+
+  kafka-cluster:
+    replicas: 1
+    storageType: ephemeral
+    storageSize: 100Gi
+    storageDeleteClaim: true
+    dedicatedController:
+      replicas: 4
+      storageSize: 10Gi
+
+  topicName: "logging-traffic-topic"
+  numReplicas: 1
+  numPartitions: 1

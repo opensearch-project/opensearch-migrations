@@ -1,7 +1,6 @@
 {{- include "generic.createConfigMaps" (dict
     "Parameters" .Values.parameters
     "PackageName" (include "generic.fullname" .)
-    "NameSpace" (dig "namespace" "name" "default" (.Values | merge (dict)))
     "include" .Template.Include
     "Template" .Template
 ) | indent 0 }}

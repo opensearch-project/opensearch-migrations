@@ -1,10 +1,5 @@
 nameOverride: ""
 fullnameOverride: ""
-#namespace:
-#  name: "opensearch-migration-assistant"
-#  create: true
-#  annotations: {}
-#  labels: {}
 useSharedConfigs: false
 parameters:
   destinationUri:
