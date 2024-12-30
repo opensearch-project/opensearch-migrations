@@ -26,9 +26,9 @@ class HeaderRemoverHandlerTest {
     private static final int NUM_RANDOM_RUNS = 1_000;
 
     private void runTestsWithSize(BiFunction<Boolean, String, String> msgMaker, Supplier<IntStream> sizesSupplier) {
-        log.atDebug().setMessage(() ->
-            "sizes: " + sizesSupplier.get().limit(16).mapToObj(i->""+i)
-                .collect(Collectors.joining(","))).log();
+        log.atDebug().setMessage("sizes: {}")
+            .addArgument(() -> sizesSupplier.get().limit(16).mapToObj(i->""+i).collect(Collectors.joining(",")))
+            .log();
         runTestWithSize(b -> msgMaker.apply(b,"\n"), sizesSupplier.get());
         runTestWithSize(b -> msgMaker.apply(b, "\r\n"), sizesSupplier.get());
     }
@@ -92,7 +92,7 @@ class HeaderRemoverHandlerTest {
         final var bound = getBound(HeaderRemoverHandlerTest::makeInterlacedMessage);
         for (int i=0; i<NUM_RANDOM_RUNS; ++i) {
             Random r = new Random(i);
-            log.atDebug().setMessage(() -> "random run={}").addArgument(i).log();
+            log.atDebug().setMessage("random run={}").addArgument(i).log();
             runTestsWithSize(HeaderRemoverHandlerTest::makeInterlacedMessage,
                 () -> IntStream.generate(() -> r.nextInt(bound)));
         }
@@ -113,7 +113,7 @@ class HeaderRemoverHandlerTest {
         final var bound = getBound(HeaderRemoverHandlerTest::makeConsecutiveMessage);
         for (int i=0; i<NUM_RANDOM_RUNS; ++i) {
             Random r = new Random(i);
-            log.atDebug().setMessage(() -> "random run={}").addArgument(i).log();
+            log.atDebug().setMessage("random run={}").addArgument(i).log();
             runTestsWithSize(HeaderRemoverHandlerTest::makeConsecutiveMessage,
                 () -> IntStream.generate(() -> r.nextInt(bound)));
         }

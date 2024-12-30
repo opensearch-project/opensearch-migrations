@@ -61,7 +61,7 @@ public class JsonAccumulator {
     }
 
     public void consumeByteBuffer(ByteBuffer byteBuffer) throws IOException {
-        log.atTrace().setMessage(() -> "Consuming bytes: {}").addArgument(() -> byteBuffer.toString()).log();
+        log.atTrace().setMessage("Consuming bytes: {}").addArgument(byteBuffer::toString).log();
         feeder.feedInput(byteBuffer);
     }
     
@@ -73,7 +73,7 @@ public class JsonAccumulator {
                 break;
             }
 
-            log.atTrace().setMessage(() -> "{} ... adding token={}").addArgument(this).addArgument(token).log();
+            log.atTrace().setMessage("{} ... adding token={}").addArgument(this).addArgument(token).log();
             switch (token) {
                 case FIELD_NAME:
                     jsonObjectStack.push(parser.getText());
@@ -116,10 +116,10 @@ public class JsonAccumulator {
                     pushCompletedValue(parser.getText());
                     break;
                 case VALUE_NUMBER_INT:
-                    pushCompletedValue(parser.getIntValue());
+                    pushCompletedValue(parser.getLongValue());
                     break;
                 case VALUE_NUMBER_FLOAT:
-                    pushCompletedValue(parser.getFloatValue());
+                    pushCompletedValue(parser.getDoubleValue());
                     break;
                 case NOT_AVAILABLE:
                     // pipeline stall - need more data

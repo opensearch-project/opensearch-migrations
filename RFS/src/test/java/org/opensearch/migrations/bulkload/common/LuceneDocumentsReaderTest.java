@@ -11,6 +11,7 @@ import java.util.List;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.stream.Collectors;
 import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
@@ -29,6 +30,7 @@ import org.apache.lucene.index.LeafReader;
 import org.apache.lucene.index.LeafReaderContext;
 import org.apache.lucene.util.BytesRef;
 import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -53,7 +55,7 @@ public class LuceneDocumentsReaderTest {
     @BeforeEach
     public void setUp() throws IOException {
         tempDirectory = Files.createTempDirectory("test-temp-dir");
-        log.atDebug().log("Temporary directory created at: " + tempDirectory);
+        log.atDebug().setMessage("Temporary directory created at: {}").addArgument(tempDirectory).log();
     }
 
     @AfterEach
@@ -64,7 +66,7 @@ public class LuceneDocumentsReaderTest {
                 try {
                     Files.delete(path);
                 } catch (IOException e) {
-                    log.atError().setMessage("Failed to delete: " + path).setCause(e).log();
+                    log.atError().setCause(e).setMessage("Failed to delete: {}").addArgument(path).log();
                 }
             });
         log.atDebug().log("Temporary directory deleted.");
@@ -106,25 +108,36 @@ public class LuceneDocumentsReaderTest {
             String expectedId = "complexdoc";
             String actualId = doc.id;
 
+            String expectedType = null;
+            String actualType = doc.type;
+
             String expectedSource = "{\"title\":\"This is a doc with complex history\",\"content\":\"Updated!\"}";
             String actualSource = doc.source;
-            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            assertDocsEqual(expectedId, actualId, expectedType, actualType, expectedSource, actualSource);
             return true;
         }).expectNextMatches(doc -> {
             String expectedId = "unchangeddoc";
             String actualId = doc.id;
 
+            String expectedType = null;
+            String actualType = doc.type;
+
             String expectedSource = "{\"title\":\"This doc will not be changed\\nIt has multiple lines of text\\nIts source doc has extra newlines.\",\"content\":\"bluh bluh\"}";
             String actualSource = doc.source;
-            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            assertDocsEqual(expectedId, actualId, expectedType, actualType,
+                    expectedSource, actualSource);
             return true;
         }).expectNextMatches(doc -> {
             String expectedId = "updateddoc";
             String actualId = doc.id;
 
+            String expectedType = null;
+            String actualType = doc.type;
+
             String expectedSource = "{\"title\":\"This is doc that will be updated\",\"content\":\"Updated!\"}";
             String actualSource = doc.source;
-            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            assertDocsEqual(expectedId, actualId, expectedType, actualType,
+                    expectedSource, actualSource);
             return true;
         }).expectComplete().verify();
     }
@@ -156,28 +169,39 @@ public class LuceneDocumentsReaderTest {
 
         // Verify that the results are as expected
         StepVerifier.create(documents).expectNextMatches(doc -> {
-            String expectedId = "type1#complexdoc";
+            String expectedId = "complexdoc";
             String actualId = doc.id;
+
+             String expectedType = "type1";
+             String actualType = doc.type;
 
             String expectedSource = "{\"title\":\"This is a doc with complex history. Updated!\"}";
             String actualSource = doc.source;
-            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            assertDocsEqual(expectedId, actualId, expectedType, actualType,
+                    expectedSource, actualSource);
             return true;
         }).expectNextMatches(doc -> {
-            String expectedId = "type2#unchangeddoc";
+            String expectedId = "unchangeddoc";
             String actualId = doc.id;
+
+             String expectedType = "type2";
+             String actualType = doc.type;
 
             String expectedSource = "{\"content\":\"This doc will not be changed\nIt has multiple lines of text\nIts source doc has extra newlines.\"}";
             String actualSource = doc.source;
-            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            assertDocsEqual(expectedId, actualId, expectedType, actualType, expectedSource, actualSource);
             return true;
         }).expectNextMatches(doc -> {
-            String expectedId = "type2#updateddoc";
+            String expectedId = "updateddoc";
             String actualId = doc.id;
+
+             String expectedType = "type2";
+             String actualType = doc.type;
 
             String expectedSource = "{\"content\":\"Updated!\"}";
             String actualSource = doc.source;
-            assertDocsEqual(expectedId, actualId, expectedSource, actualSource);
+            assertDocsEqual(expectedId, actualId, expectedType, actualType,
+                    expectedSource, actualSource);
             return true;
         }).expectComplete().verify();
     }
@@ -245,7 +269,7 @@ public class LuceneDocumentsReaderTest {
             .block(Duration.ofSeconds(2));
 
         // Verify results
-        var expectedConcurrentSegments = 5;
+        var expectedConcurrentSegments = 10;
         var expectedConcurrentDocReads = 100;
         assertNotNull(actualDocuments);
         assertEquals(numSegments * docsPerSegment, actualDocuments.size());
@@ -255,7 +279,87 @@ public class LuceneDocumentsReaderTest {
 
     }
 
-    protected void assertDocsEqual(String expectedId, String actualId, String expectedSource, String actualSource) {
+    @Test
+    public void ReadDocumentsStartingFromCheckpointForOneSegments_AsExpected() throws Exception {
+        // This snapshot has 6 documents in 1 segment. There are updates and deletes involved, so
+        // there are only 3 final documents, which affects which document id the reader should
+        // start at.
+        var snapshot = TestResources.SNAPSHOT_ES_7_10_W_SOFT;
+        var version = Version.fromString("ES 7.10");
+        List<List<String>> documentIds = List.of(
+                List.of("complexdoc", "unchangeddoc", "updateddoc"),
+                List.of("unchangeddoc", "updateddoc"),
+                List.of("unchangeddoc"));
+        List<Integer> documentStartingIndices = List.of(0, 2, 5);
+
+        final var repo = new FileSystemRepo(snapshot.dir);
+        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo);
+        DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
+
+        final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
+
+        SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(
+                repoAccessor,
+                tempDirectory,
+                shardMetadata,
+                Integer.MAX_VALUE
+        );
+        Path luceneDir = unpacker.unpack();
+
+        // Use the LuceneDocumentsReader to get the documents
+        var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
+
+
+        for (int i = 0; i < documentStartingIndices.size(); i++) {
+            Flux<RfsLuceneDocument> documents = reader.readDocuments(0, documentStartingIndices.get(i))
+                    .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
+
+            var actualDocIds = documents.collectList().block().stream().map(doc -> doc.id).collect(Collectors.joining(","));
+            var expectedDocIds = String.join(",", documentIds.get(i));
+            Assertions.assertEquals(expectedDocIds, actualDocIds);
+        }
+    }
+
+    @Test
+    public void ReadDocumentsStartingFromCheckpointForManySegments_AsExpected() throws Exception {
+        // This snapshot has three segments, each with only a single document.
+        var snapshot = TestResources.SNAPSHOT_ES_6_8;
+        var version = Version.fromString("ES 6.8");
+        List<List<String>> documentIds = List.of(
+                List.of("complexdoc", "unchangeddoc", "updateddoc"),
+                List.of("unchangeddoc", "updateddoc"),
+                List.of("unchangeddoc"));
+
+        final var repo = new FileSystemRepo(snapshot.dir);
+        var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo);
+        DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
+
+        final ShardMetadata shardMetadata = sourceResourceProvider.getShardMetadata().fromRepo(snapshot.name, "test_updates_deletes", 0);
+
+        SnapshotShardUnpacker unpacker = new SnapshotShardUnpacker(
+                repoAccessor,
+                tempDirectory,
+                shardMetadata,
+                Integer.MAX_VALUE
+        );
+        Path luceneDir = unpacker.unpack();
+
+        // Use the LuceneDocumentsReader to get the documents
+        var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
+
+
+        for (int i = 0; i < documentIds.size(); i++) {
+            Flux<RfsLuceneDocument> documents = reader.readDocuments(i, 0)
+                    .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
+
+            var actualDocIds = documents.collectList().block().stream().map(doc -> doc.id).collect(Collectors.joining(","));
+            var expectedDocIds = String.join(",", documentIds.get(i));
+            Assertions.assertEquals(expectedDocIds, actualDocIds);
+        }
+    }
+
+    protected void assertDocsEqual(String expectedId, String actualId, String expectedType,
+                                   String actualType, String expectedSource, String actualSource) {
         try {
             String sanitizedExpected = expectedSource.trim().replace("\n", "").replace("\\n", "");
             String sanitizedActual = actualSource.trim().replace("\n", "").replace("\\n", "");
@@ -264,6 +368,7 @@ public class LuceneDocumentsReaderTest {
             JsonNode expectedNode = objectMapper.readTree(sanitizedExpected);
             JsonNode actualNode = objectMapper.readTree(sanitizedActual);
             assertEquals(expectedId, actualId);
+            assertEquals(expectedType, actualType);
             assertEquals(expectedNode, actualNode);
         } catch (JsonProcessingException e) {
             throw new RuntimeException(e);

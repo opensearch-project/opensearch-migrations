@@ -4,6 +4,7 @@ import java.io.IOException;
 import java.time.Clock;
 import java.time.Duration;
 import java.time.Instant;
+import java.util.ArrayList;
 import java.util.function.Supplier;
 
 import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
@@ -67,8 +68,8 @@ public interface IWorkCoordinator extends AutoCloseable {
         String workItemId,
         Duration leaseDuration,
         Supplier<IWorkCoordinationContexts.IAcquireSpecificWorkContext> contextSupplier
-    ) throws IOException;
-
+    ) throws IOException, InterruptedException;
+    
     /**
      * Scan the created work items that have not yet had leases acquired and have not yet finished.
      * One of those work items will be returned along with a lease for how long this process may continue
@@ -99,11 +100,25 @@ public interface IWorkCoordinator extends AutoCloseable {
     ) throws IOException, InterruptedException;
 
     /**
+     * Add the list of successor items to the work item, create new work items for each of the successors, and mark the
+     * original work item as completed.
+     * @param workItemId the work item that is being completed
+     * @param successorWorkItemIds the list of successor work items that will be created
+     * @throws IOException
+     * @throws InterruptedException
+     */
+    void createSuccessorWorkItemsAndMarkComplete(
+        String workItemId,
+        ArrayList<String> successorWorkItemIds,
+        Supplier<IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext> contextSupplier
+    ) throws IOException, InterruptedException;
+
+    /**
      * @return the number of items that are not yet complete.  This will include items with and without claimed leases.
      * @throws IOException
      * @throws InterruptedException
      */
-    int numWorkItemsArePending(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
+    int numWorkItemsNotYetComplete(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
         throws IOException, InterruptedException;
 
     /**
@@ -111,7 +126,7 @@ public interface IWorkCoordinator extends AutoCloseable {
      * @throws IOException
      * @throws InterruptedException
      */
-    boolean workItemsArePending(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
+    boolean workItemsNotYetComplete(Supplier<IWorkCoordinationContexts.IPendingWorkItemsContext> contextSupplier)
         throws IOException, InterruptedException;
 
     /**

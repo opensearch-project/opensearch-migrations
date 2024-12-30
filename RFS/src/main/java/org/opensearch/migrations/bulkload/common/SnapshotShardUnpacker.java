@@ -51,8 +51,9 @@ public class SnapshotShardUnpacker {
             try (FSDirectory primaryDirectory = FSDirectory.open(luceneIndexDir, lockFactory)) {
                 for (ShardFileInfo fileMetadata : shardMetadata.getFiles()) {
                     log.atInfo().setMessage("Unpacking - Blob Name: {}, Lucene Name: {}")
-                        .addArgument(fileMetadata.getName())
-                        .addArgument(fileMetadata.getPhysicalName()).log();
+                        .addArgument(fileMetadata::getName)
+                        .addArgument(fileMetadata::getPhysicalName)
+                        .log();
                     try (
                         IndexOutput indexOutput = primaryDirectory.createOutput(
                             fileMetadata.getPhysicalName(),

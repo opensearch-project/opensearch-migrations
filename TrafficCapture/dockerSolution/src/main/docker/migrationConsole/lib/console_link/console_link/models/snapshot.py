@@ -23,6 +23,7 @@ SNAPSHOT_SCHEMA = {
                 'schema': {
                     'repo_uri': {'type': 'string', 'required': True},
                     'aws_region': {'type': 'string', 'required': True},
+                    'role': {'type': 'string', 'required': False}
                 }
             },
             'fs': {
@@ -109,6 +110,7 @@ class S3Snapshot(Snapshot):
         self.snapshot_name = config['snapshot_name']
         self.otel_endpoint = config.get("otel_endpoint", None)
         self.s3_repo_uri = config['s3']['repo_uri']
+        self.s3_role_arn = config['s3'].get('role')
         self.s3_region = config['s3']['aws_region']
 
     def create(self, *args, **kwargs) -> CommandResult:
@@ -131,6 +133,8 @@ class S3Snapshot(Snapshot):
             command_args["--no-wait"] = FlagOnlyArgument
         if max_snapshot_rate_mb_per_node is not None:
             command_args["--max-snapshot-rate-mb-per-node"] = max_snapshot_rate_mb_per_node
+        if self.s3_role_arn:
+            command_args["--s3-role-arn"] = self.s3_role_arn
         if extra_args:
             for arg in extra_args:
                 command_args[arg] = FlagOnlyArgument

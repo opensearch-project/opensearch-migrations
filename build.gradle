@@ -13,6 +13,30 @@ allprojects {
     }
 }
 
+// Define version properties
+ext {
+    // support -Dbuild.version, but include default
+    buildVersion = System.getProperty("build.version", "0.1.0")
+    // support -Dbuild.snapshot=false, but default to true
+    buildSnapshot = System.getProperty("build.snapshot", "true") == "true"
+    finalVersion = buildSnapshot ? "${buildVersion}-SNAPSHOT" : buildVersion
+}
+
+allprojects {
+    version = finalVersion
+    // This should eventually change, see https://opensearch.atlassian.net/browse/MIGRATIONS-2167
+    group = 'org.opensearch.migrations.trafficcapture'
+    tasks.withType(Jar).tap {
+        configureEach {
+            manifest {
+                attributes(
+                        'SPDX-License-Identifier': 'Apache-2.0'
+                )
+            }
+        }
+    }
+}
+
 subprojects { subproject ->
     subproject.afterEvaluate {
         if (subproject.plugins.hasPlugin('java') && subproject.name != 'commonDependencyVersionConstraints') {
@@ -103,7 +127,7 @@ subprojects {
         systemProperty 'junit.jupiter.execution.parallel.enabled', 'false'
         systemProperty 'log4j2.contextSelector', 'org.apache.logging.log4j.core.selector.BasicContextSelector'
         // Verify assertions in tests
-        jvmArgs '-ea'
+        jvmArgs = ['-ea', '-XX:+HeapDumpOnOutOfMemoryError']
         jacoco.enabled = true
     }
 
@@ -144,8 +168,9 @@ subprojects {
     task sourcesJar(type: Jar) {
         archiveClassifier.set('sources')
         from sourceSets.main.allSource
-        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        duplicatesStrategy = DuplicatesStrategy.WARN
     }
+
     def excludedProjectPaths = [
             ':RFS',
             ':TrafficCapture',
@@ -157,6 +182,12 @@ subprojects {
                 mavenJava(MavenPublication) {
                     versionMapping {
                         allVariants {
+                            // Test fixtures are published as a separate jar in maven
+                            // This ensures dependencies that are only declared in test
+                            // fixtures have a version number in the pom
+                            if (project.plugins.hasPlugin('java-test-fixtures')) {
+                                fromResolutionOf('testFixturesRuntimeClasspath')
+                            }
                             fromResolutionResult()
                         }
                     }
@@ -164,16 +195,6 @@ subprojects {
                     from components.java
                     artifact javadocJar
                     artifact sourcesJar
-
-                    group = 'org.opensearch.migrations.trafficcapture'
-
-                    // support -Dbuild.version, but include default
-                    version = System.getProperty("build.version", "0.1.0")
-
-                    // support -Dbuild.snapshot=false, but default to true
-                    if (System.getProperty("build.snapshot", "true") == "true") {
-                        version += "-SNAPSHOT"
-                    }
 
                     pom {
                         name = project.name
@@ -199,6 +220,24 @@ subprojects {
                         }
                     }
 
+                    pom.withXml {
+                        def pomFile = asNode()
+
+                        // Find all dependencies in the POM file
+                        def dependencies = pomFile.dependencies.dependency
+
+                        // Iterate over each dependency and check if the version is missing
+                        dependencies.each { dependency ->
+                            def version = dependency.version.text()
+
+                            if (version == null || version.trim().isEmpty() || version.trim() == 'unspecified') {
+                                def groupId = dependency.groupId.text()
+                                def artifactId = dependency.artifactId.text()
+                                throw new GradleException("Dependency ${groupId}:${artifactId} is missing a version in the pom.xml")
+                            }
+                        }
+                    }
+
                     // Suppress POM metadata warnings for test fixtures
                     suppressPomMetadataWarningsFor('testFixturesApiElements')
                     suppressPomMetadataWarningsFor('testFixturesRuntimeElements')
@@ -216,7 +255,7 @@ subprojects {
 
     // Utility task to allow copying required libraries into a 'dependencies' folder for security scanning
     tasks.register('copyDependencies', Sync) {
-        duplicatesStrategy = DuplicatesStrategy.EXCLUDE
+        duplicatesStrategy = DuplicatesStrategy.WARN
 
         from configurations.runtimeClasspath
         into "${buildDir}/dependencies"
@@ -225,13 +264,7 @@ subprojects {
     jacocoTestReport {
         dependsOn = project.tasks.withType(Test).matching { it.jacoco && it.jacoco.enabled }
         executionData.from = project.tasks.withType(Test).matching { it.jacoco && it.jacoco.enabled }.collect { it.jacoco.destinationFile }
-        // Exclude protos and load tests from test coverage
-        classDirectories.from = files(subprojects.collect { it.sourceSets.main.output.collect {
-            fileTree(dir: it) {
-                exclude '**/protos/**'
-                exclude '**/JMeterLoadTest**'
-            }
-        } })
+        classDirectories.from = files(subprojects.collect { it.sourceSets.main.output.classesDirs })
         reports {
             xml.required = true
             xml.destination file("${buildDir}/reports/jacoco/test/jacocoTestReport.xml")

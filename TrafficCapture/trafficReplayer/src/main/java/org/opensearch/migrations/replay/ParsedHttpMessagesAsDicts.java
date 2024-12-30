@@ -42,6 +42,10 @@ public class ParsedHttpMessagesAsDicts {
     public static final String STATUS_CODE_KEY = "Status-Code";
     public static final String RESPONSE_TIME_MS_KEY = "response_time_ms";
     public static final String EXCEPTION_KEY_STRING = "Exception";
+    public static final String REQUEST_URI_KEY = "Request-URI";
+    public static final String METHOD_KEY = "Method";
+    public static final String HTTP_VERSION_KEY = "HTTP-Version";
+    public static final String PAYLOAD_KEY = "payload";
 
     public final Optional<Map<String, Object>> sourceRequestOp;
     public final Optional<Map<String, Object>> sourceResponseOp;
@@ -153,13 +157,10 @@ public class ParsedHttpMessagesAsDicts {
         } catch (Exception e) {
             // TODO - this isn't a good design choice.
             // We should follow through with the spirit of this class and leave this as empty optional values
-            log.atWarn()
-                .setMessage(
-                    () -> "Putting what may be a bogus value in the output because transforming it "
-                        + "into json threw an exception for "
-                        + context
-                )
-                .setCause(e)
+            log.atWarn().setCause(e)
+                .setMessage("Putting what may be a bogus value in the output because transforming it "
+                        + "into json threw an exception for {}")
+                .addArgument(context)
                 .log();
             return Map.of(EXCEPTION_KEY_STRING, (Object) e.toString());
         }
@@ -186,15 +187,15 @@ public class ParsedHttpMessagesAsDicts {
                 var message = (HttpJsonRequestWithFaultingPayload) messageHolder.get();
                 if (message != null) {
                     var map = new LinkedHashMap<>(message.headers());
-                    map.put("Request-URI", message.path());
-                    map.put("Method", message.method());
-                    map.put("HTTP-Version", message.protocol());
+                    map.put(REQUEST_URI_KEY, message.path());
+                    map.put(METHOD_KEY, message.method());
+                    map.put(HTTP_VERSION_KEY, message.protocol());
                     context.setMethod(message.method());
                     context.setEndpoint(message.path());
                     context.setHttpVersion(message.protocol());
                     encodeBinaryPayloadIfExists(message);
                     if (!message.payload().isEmpty()) {
-                        map.put("payload", message.payload());
+                        map.put(PAYLOAD_KEY, message.payload());
                     }
                     return map;
                 } else {
@@ -226,14 +227,14 @@ public class ParsedHttpMessagesAsDicts {
                 var message = (HttpJsonResponseWithFaultingPayload) messageHolder.get();
                 if (message != null) {
                     var map = new LinkedHashMap<>(message.headers());
-                    map.put("HTTP-Version", message.protocol());
+                    map.put(HTTP_VERSION_KEY, message.protocol());
                     map.put(STATUS_CODE_KEY, Integer.parseInt(message.code()));
                     map.put("Reason-Phrase", message.reason());
                     map.put(RESPONSE_TIME_MS_KEY, latency.toMillis());
                     context.setHttpVersion(message.protocol());
                     encodeBinaryPayloadIfExists(message);
                     if (!message.payload().isEmpty()) {
-                        map.put("payload", message.payload());
+                        map.put(PAYLOAD_KEY, message.payload());
                     }
                     return map;
                 } else {

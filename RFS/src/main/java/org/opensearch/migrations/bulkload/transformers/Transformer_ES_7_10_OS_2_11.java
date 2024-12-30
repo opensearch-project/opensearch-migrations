@@ -24,12 +24,13 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
 
         // Transform the legacy templates
         if (root.get(TEMPLATES_KEY_STR) != null) {
-            ObjectNode templatesRoot = (ObjectNode) root.get(TEMPLATES_KEY_STR).deepCopy();
+            ObjectNode templatesRoot =  metaData.getTemplates().deepCopy();
             templatesRoot.fieldNames().forEachRemaining(templateName -> {
                 ObjectNode template = (ObjectNode) templatesRoot.get(templateName);
                 log.atInfo().setMessage("Transforming template: {}").addArgument(templateName).log();
                 log.atDebug().setMessage("Original template: {}").addArgument(template).log();
                 TransformFunctions.removeIntermediateIndexSettingsLevel(template); // run before fixNumberOfReplicas
+                TransformFunctions.removeIntermediateMappingsLevels(template);
                 TransformFunctions.fixReplicasForDimensionality(templatesRoot, awarenessAttributeDimensionality);
                 log.atDebug().setMessage("Transformed template: {}").addArgument(template).log();
                 templatesRoot.set(templateName, template);
@@ -39,8 +40,7 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
 
         // Transform the index templates
         if (root.get(INDEX_TEMPLATE_KEY_STR) != null) {
-            ObjectNode indexTemplatesRoot = (ObjectNode) root.get(INDEX_TEMPLATE_KEY_STR).deepCopy();
-            ObjectNode indexTemplateValuesRoot = (ObjectNode) indexTemplatesRoot.get(INDEX_TEMPLATE_KEY_STR);
+            ObjectNode indexTemplateValuesRoot = metaData.getIndexTemplates().deepCopy();
             indexTemplateValuesRoot.fieldNames().forEachRemaining(templateName -> {
                 ObjectNode template = (ObjectNode) indexTemplateValuesRoot.get(templateName);
                 ObjectNode templateSubRoot = (ObjectNode) template.get("template");
@@ -57,13 +57,12 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
                 log.atDebug().setMessage("Transformed index template: {}").addArgument(template).log();
                 indexTemplateValuesRoot.set(templateName, template);
             });
-            root.set(INDEX_TEMPLATE_KEY_STR, indexTemplatesRoot);
+            ((ObjectNode) root.get(INDEX_TEMPLATE_KEY_STR)).set(INDEX_TEMPLATE_KEY_STR, indexTemplateValuesRoot);
         }
 
         // Transform the component templates
         if (root.get(COMPONENT_TEMPLATE_KEY_STR) != null) {
-            ObjectNode componentTemplatesRoot = (ObjectNode) root.get(COMPONENT_TEMPLATE_KEY_STR).deepCopy();
-            ObjectNode componentTemplateValuesRoot = (ObjectNode) componentTemplatesRoot.get(COMPONENT_TEMPLATE_KEY_STR);
+            ObjectNode componentTemplateValuesRoot = metaData.getComponentTemplates().deepCopy();
             componentTemplateValuesRoot.fieldNames().forEachRemaining(templateName -> {
                 ObjectNode template = (ObjectNode) componentTemplateValuesRoot.get(templateName);
                 ObjectNode templateSubRoot = (ObjectNode) template.get("template");
@@ -78,7 +77,7 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
                 log.atDebug().setMessage("Transformed component template: {}").addArgument(template).log();
                 componentTemplateValuesRoot.set(templateName, template);
             });
-            root.set(COMPONENT_TEMPLATE_KEY_STR, componentTemplatesRoot);
+            ((ObjectNode) root.get(COMPONENT_TEMPLATE_KEY_STR)).set(COMPONENT_TEMPLATE_KEY_STR, componentTemplateValuesRoot);
         }
 
         return new GlobalMetadataData_OS_2_11(root);
@@ -86,7 +85,7 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
 
     @Override
     public IndexMetadata transformIndexMetadata(IndexMetadata indexData) {
-        log.atDebug().setMessage("Original Object: {}").addArgument(indexData.getRawJson()).log();
+        log.atDebug().setMessage("Original Object: {}").addArgument(indexData::getRawJson).log();
         var copy = indexData.deepCopy();
         var newRoot = copy.getRawJson();
 

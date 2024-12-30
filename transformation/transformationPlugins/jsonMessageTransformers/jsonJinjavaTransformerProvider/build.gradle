@@ -1,0 +1,33 @@
+buildscript {
+    dependencies {
+        classpath 'org.junit.platform:junit-platform-gradle-plugin:1.0.1'
+    }
+}
+
+plugins {
+    id 'io.freefair.lombok'
+}
+
+dependencies {
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJinjavaTransformer')
+
+    implementation group: 'org.apache.commons', name: 'commons-collections4', version: '4.4'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
+    implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+
+    testImplementation project(':TrafficCapture:trafficReplayer')
+    testImplementation testFixtures(project(path: ':testHelperFixtures'))
+    testImplementation testFixtures(project(path: ':TrafficCapture:trafficReplayer'))
+
+    testImplementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
+    testImplementation group: 'io.netty', name: 'netty-all'
+    testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-api'
+    testImplementation group: 'org.junit.jupiter', name:'junit-jupiter-params'
+    testImplementation group: 'org.slf4j', name: 'slf4j-api'
+    testRuntimeOnly group:'org.junit.jupiter', name:'junit-jupiter-engine'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+}

@@ -13,7 +13,6 @@
     - [Appendix: Assumptions](#appendix-assumptions)
     - [Appendix: Centralized or Decentralized Coordination?](#appendix-centralized-or-decentralized-coordination)
     - [Appendix: CMS Schema](#appendix-cms-schema)
-    - [Appendix: RFS Worker State Machine](#appendix-rfs-worker-state-machine)
 
 ## Terminology
 * **Lucene Document**: A single data record, as understood by Lucene
@@ -77,20 +76,17 @@ Below is an example for the structure of an Elasticsearch 7.10 snapshot, along w
 8. **Snapshot Metadata File**: SMILE encoded; contains things like whether the snapshot succeeded, the number of shards, how many shards succeeded, the ES/OS version, the indices in the snapshot, etc
 
 ## Ultra-High Level Design
-The responsibility of performing an RFS operation is split into two groups of actors - the RFS Workers, and RFS Scaler (see Figure 1, below).
+The responsibility of performing an RFS operation is performed by a group of one or more RFS Workers (see Figure 1, below).
 
 ![RFS System Design](./RFS_Worker_HL_System.svg)
 
 **Figure 1:** The Reindex-from-Snapshot high level system design 
 
-The first group of actors are the RFS Workers, which this document focuses on.  RFS Workers perform the work of migrating the data and metadata from a source cluster to a target cluster.  They will coordinate amongst themselves in a decentralized manner using the target cluster as the source-of-truth for the state of the overall operation (see: Appendix: Centralized or Decentralized Coordination?).  Each RFS Worker is oblivious to the existence of any other RFS Worker working on the same operation, except as expressed in changes to overall operation’s metadata stored on the target cluster.  Each RFS Worker is solely concerned with answering the question, “given the operation metadata in the source-of-truth, what should I do right now?”  Any given RFS Worker may perform every step in the overall process, some of them, or none of them.  Any given RFS Worker should be able to die at any point in its work, and have a new RFS Worker resume that work gracefully.  The steps in an RFS operation are:
+RFS Workers perform the work of migrating the data from a source cluster to a target cluster.  They will coordinate amongst themselves in a decentralized manner using the target cluster as the source-of-truth for the state of the overall operation (see: Appendix: Centralized or Decentralized Coordination?).  Each RFS Worker is oblivious to the existence of any other RFS Worker working on the same operation, except as expressed in changes to overall operation’s metadata stored on the target cluster.  Each RFS Worker is solely concerned with answering the question, “given the operation metadata in the source-of-truth, what should I do right now?”  Any given RFS Worker may perform every step in the overall process, some of them, or none of them.  Any given RFS Worker should be able to die at any point in its work, and have a new RFS Worker resume that work gracefully.  The steps in an RFS operation are:
 
-1. Take a snapshot of the source cluster and wait for its completion
-2. Migrate the Elasticsearch Legacy Templates, Component Templates, and Index Templates
-3. Migrate the Elasticsearch Index settings and configuration
-4. Migrate the documents by retrieving each Elasticsearch Shard, unpacking it into a Lucene Index locally, and re-indexing its contents against the target cluster
-
-The second group of actors are the RFS Scalers, which will receive a more detailed design in the future.  It is expected that RFS Scalers will not perform any steps of the RFS operation themselves; they will just manage the fleet of RFS Workers.  This includes regulating how many of them are running at a given time and reaping unhealthy RFS Workers.  The RFS Scalers will not assign work or help coordinate the RFS Workers.
+1. Create the coordinating metadata index on the target
+2. Create work items to track the migration of each Shard on the Source
+3. Migrate the documents by retrieving each Elasticsearch Shard, unpacking it into a Lucene Index locally, and re-indexing its contents against the target cluster
 
 ## Key RFS Worker concepts
 
@@ -118,9 +114,7 @@ The process of finding the optimal initial work lease duration will be data driv
 
 ### One work lease at a time
 
-An RFS Worker retains no more than a single work lease at a time.  If work item associated with that lease has multiple steps or components, the work lease covers the completion of all of them as a combined unit.  As a specific example, the RFS Worker that wins the lease to migrate the Elasticsearch Templates is responsible for migrating every Template of each type.  
-
-Alternatively, if the work involved does not need coordination between RFS Workers to ensure only one is processing it at a given time, then a work lease is not used and the “one lease at a time” tenet does not apply.  As a specific example, multiple RFS Workers in the process of migrating Elasticsearch Indices will each receive a collection to migrate and could have the same Index in their collection.  They will each attempt to migrate the Index, and this is as expected.
+An RFS Worker retains no more than a single work lease at a time.  If the work item associated with that lease has multiple steps or components, the work lease covers the completion of all of them as a combined unit.  As a specific example, the RFS Worker that wins the lease to migrate an Elasticsearch Shard is responsible for migrating every Document in that Shard.
 
 ### Work lease backoff
 
@@ -130,9 +124,7 @@ The algorithm for backoff based on number of attempts and the maximum number of 
 
 ### Don’t touch existing templates or indices
 
-While performing its work, if an RFS Worker is tasked to create an Elasticsearch Template or Elasticsearch Index on the target cluster, but finds it already exists there, it will skip that creation.  The reasoning for this policy is as follows.
-
-First, creation of Elasticsearch Template and Elasticsearch Index is atomic (see [Appendix: Assumptions](#appendix-assumptions)).  Second, it prevents re-work in the case that an RFS Worker is picking up the partial work of another RFS Worker that died.  Third, it provides space for users to customize/configure the target cluster differently than the source cluster.
+While performing its work, RFS Workers will not modify any Templates or Index Settings on the target cluster.  They instead assume that another, separate process has pre-configured those entries in order to correctly receive the documents being reindexed into the target cluster.  This approach allows separation of concerns between the RFS Workers and the metadata migration process.  It also provides space for users to customize/configure the target cluster differently than the source cluster.
 
 ### Overwrite documents by ID
 
@@ -142,13 +134,13 @@ The unit of work for an RFS Worker migrating Elasticsearch Documents is an Elast
 
 ## How the RFS Worker works
 
-In this section, we describe in a high-level, narrative manner how the RFS Worker operates. Detailed state machine diagrams that outline the behavior more explicitly are below as well (see [Appendix: RFS Worker State Machine](#appendix-rfs-worker-state-machine)).  The state machine diagram is intended to be the source of truth, so favor its representation over the narrative description below if conflicts exist.
+In this section, we describe in a high-level, narrative manner how the RFS Worker operates.
 
 ### RFS Worker threads
 
 The RFS Worker’s running process has at least two running threads:
 
-* Main Thread - performs the work of moving the data/metadata from the source cluster to the target cluster; starts the Metrics and Healthcheck Threads
+* Main Thread - performs the work of moving the data from the source cluster to the target cluster; starts the Healthcheck Thread
 * Healthcheck Thread - on a regular, scheduled basis will check the process’ shared state to determine which work item the RFS Worker currently has a lease on (if any) and confirm the lease is still valid; if the lease has expired, it immediately kills the process and all threads (see [Work leases](#work-leases)).
 
 There are two pieces of state shared by the threads of the process, which the Main Thread is solely responsible for writing to.  The Healthcheck Thread treats this shared state as read-only.
@@ -222,25 +214,18 @@ If no Entry is returned, we know that this sub-phase is complete and attempt to 
 
 The work lease for this sub-phase is on the Shard (ensuring every Elasticsearch Document in that Shard has been processed).  We log/emit metrics to indicate how many Documents are successfully and unsuccessfully migrated but we don’t consider the Shard Work Entry to have failed if some (or even all) of the Documents in it are unsuccessfully migrated.  We only retry the Shard Work Entry when an RFS Worker fails to process every Document within the lease window.  These retries are relatively time consuming, but safe because we overwrite any partial work performed by a previous RFS Worker. 
 
-
 ## Appendix: Assumptions
 
 We start with the following high-level assumptions about the structure of the solution.  Changes to these assumptions would likely have a substantial impact on the design.  
 
 * (A1) - The RFS Workers cannot assume access to a data store other than the migration’s target cluster as a state-store for coordinating their work.
 * (A2) - The RFS Worker will perform all the work required to complete a historical migration.
-* (A3) - The RFS Scaler will only need to scale one type of Docker composition, which may be composed of multiple Containers, one of which is the RFS Worker
 
 We have the following, additional assumptions about the process of performing a Reindex-from-Snapshot operation:
 
-* (A4) - The creation of Elasticsearch Templates is atomic
-* (A5) - The creation of Elasticsearch Indices is atomic
-* (A6) - Re-doing portions of the overall RFS operation is fine, as long as every portion is completed at least once
-* (A7) - Elasticsearch Templates must be migrated in the order: first Legacy, then Composite, then Index
-* (A8) - All Elasticsearch Templates must be migrated before any Elasticsearch Indices can be migrated
-* (A9) - Elasticsearch Indices can be migrated in parallel without ordering concerns
-* (A10) - Elasticsearch Shards can only be migrated after their Elasticsearch Index has been migrated
-* (A11) - Elasticsearch Shards can be migrated in parallel without ordering concerns
+* (A3) - Re-doing portions of the overall RFS operation is fine, as long as every portion is completed at least once
+* (A4) - Elasticsearch Shards can only be migrated after their Elasticsearch Index has been created or migrated
+* (A5) - Elasticsearch Shards can be migrated in parallel without ordering concerns
 
 ## Appendix: Centralized or Decentralized Coordination?
 
@@ -251,26 +236,6 @@ At a high level, the primary concerns for a Reindex-from-Snapshot operation are 
 Below is the schema for the coordinating metadata records to be stored in the CMS:
 
 ```
-SNAPSHOT STATUS RECORD
-ID: snapshot_status
-FIELDS:
-    * name (string): The snapshot name
-    * status (string): NOT_STARTED, IN_PROGRESS, COMPLETED, FAILED
-
-CLUSTER METADATA MIGRATION STATUS RECORD
-ID: metadata_status
-FIELDS:
-    * status (string): IN_PROGRESS, COMPLETED, FAILED
-    * leaseExpiry (timestamp): When the current work lease expires
-    * numAttempts (integer): Times the task has been attempted
-
-INDEX MIGRATION STATUS RECORD
-ID: index_status
-FIELDS:
-    * status (string): SETUP, IN_PROGRESS, COMPLETED, FAILED
-    * leaseExpiry (timestamp): When the current work lease expires
-    * numAttempts (integer): Times the task has been attempted
-
 INDEX WORK ENTRY RECORD
 ID: <name of the index to be migrated>
 FIELDS:
@@ -295,9 +260,3 @@ FIELDS:
     * leaseExpiry (timestamp): When the current work lease expires
     * numAttempts (integer): Times the task has been attempted
 ```
-
-## Appendix: RFS Worker State Machine
-
-Here is a state machine diagram for the RFS Worker:
-
-![RFS Worker state machine](./RFS_Worker_State_Machine.svg)

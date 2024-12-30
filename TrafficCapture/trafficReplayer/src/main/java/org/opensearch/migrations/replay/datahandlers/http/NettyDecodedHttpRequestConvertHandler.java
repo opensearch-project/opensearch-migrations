@@ -30,16 +30,11 @@ public class NettyDecodedHttpRequestConvertHandler extends ChannelInboundHandler
         if (msg instanceof HttpRequest) {
             httpTransactionContext.onHeaderParse();
             var request = (HttpRequest) msg;
-            log.atDebug()
-                .setMessage(
-                    () -> diagnosticLabel
-                        + " parsed request: "
-                        + request.method()
-                        + " "
-                        + request.uri()
-                        + " "
-                        + request.protocolVersion().text()
-                )
+            log.atDebug().setMessage("{} parsed request: {} {} {}")
+                .addArgument(diagnosticLabel)
+                .addArgument(request::method)
+                .addArgument(request::uri)
+                .addArgument(() -> request.protocolVersion().text())
                 .log();
             var httpJsonMessage = parseHeadersIntoMessage(request);
             ctx.fireChannelRead(httpJsonMessage);

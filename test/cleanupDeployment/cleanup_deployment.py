@@ -139,7 +139,7 @@ def delete_stacks_for_environment(stage_name: str):
         next_stack_names = [stack['StackName'] for stack in next_list_stacks_response['StackSummaries']
                             if stack['StackStatus'] not in CFN_INITIAL_STATUS_SKIP]
         stack_names.extend(next_stack_names)
-        list_stacks_response.get("NextToken", None)
+        next_token = next_list_stacks_response.get("NextToken", None)
 
     stage_stack_names = []
     for name in stack_names:
@@ -151,6 +151,7 @@ def delete_stacks_for_environment(stage_name: str):
 
 
 def main():
+    logging.info("Starting cleanup deployment process")
     parser = argparse.ArgumentParser(description="Cleanup an opensearch-migrations deployment environment.")
     parser.add_argument("--stage", type=str, help="The deployment stage environment to delete")
     args = parser.parse_args()

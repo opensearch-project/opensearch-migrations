@@ -1,0 +1,19 @@
+{# see https://github.com/opensearch-project/opensearch-migrations/pull/1110 for the format of these messages #}
+{%- include "typeMappings/rewriteBulkRequest.j2" -%}
+{%- import "typeMappings/rewriteIndexForTarget.j2" as transidx -%}
+
+{%- set parameters = source_document.index -%}
+
+{%- set type_name = parameters['_type'] -%}
+{%- if type_name -%}
+    {%- set target_index = transidx.convert_source_index_to_target(parameters['_index'], type_name, input_map.index_mappings, input_map.regex_index_mappings) if type_name -%}
+    {%- if target_index -%}
+        {
+          {{ rewrite_index_parameters(parameters, target_index) }},
+          "preserve": ["source"]
+        }
+    {%- endif -%}
+{%- else -%}
+    {%- import "typeMappings/preserveAll.j2" as preserve -%}
+    {{- preserve.make_keep_json()  -}}
+{%- endif -%}

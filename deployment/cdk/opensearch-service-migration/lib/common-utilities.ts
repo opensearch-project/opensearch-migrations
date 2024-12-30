@@ -305,6 +305,7 @@ export enum MigrationSSMParameter {
 }
 
 
+// eslint-disable-next-line @typescript-eslint/no-extraneous-class
 export class ClusterNoAuth {}
 
 export class ClusterSigV4Auth {
@@ -380,7 +381,8 @@ export class ClusterAuth {
     }
 }
 
-function getBasicClusterAuth(basicAuthObject: { [key: string]: any }): ClusterBasicAuth {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getBasicClusterAuth(basicAuthObject: Record<string, any>): ClusterBasicAuth {
     // Destructure and validate the input object
     const { username, password, passwordFromSecretArn } = basicAuthObject;
     // Ensure the required 'username' field is present
@@ -400,7 +402,8 @@ function getBasicClusterAuth(basicAuthObject: { [key: string]: any }): ClusterBa
     });
 }
 
-function getSigV4ClusterAuth(sigv4AuthObject: { [key: string]: any }): ClusterSigV4Auth {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function getSigV4ClusterAuth(sigv4AuthObject: Record<string, any>): ClusterSigV4Auth {
     // Destructure and validate the input object
     const { serviceSigningName, region } = sigv4AuthObject;
 
@@ -409,6 +412,7 @@ function getSigV4ClusterAuth(sigv4AuthObject: { [key: string]: any }): ClusterSi
 }
 
 // Function to parse and validate auth object
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function parseAuth(json: any): ClusterAuth | null {
     if (json.type === 'basic' && typeof json.username === 'string' && (typeof json.password === 'string' || typeof json.passwordFromSecretArn === 'string') && !(typeof json.password === 'string' && typeof json.passwordFromSecretArn === 'string')) {
         return new ClusterAuth({basicAuth: getBasicClusterAuth(json)});
@@ -420,11 +424,40 @@ function parseAuth(json: any): ClusterAuth | null {
     return null; // Invalid auth type
 }
 
+// Validate a proper url string is provided and return an url string which contains a protocol, host name, and port.
+// If a port is not provided, the default protocol port (e.g. 443, 80) will be explicitly added
+export function validateAndReturnFormattedHttpURL(urlString: string) {
+    // URL will throw error if the urlString is invalid
+    const url = new URL(urlString);
+    if (url.protocol !== "http:" && url.protocol !== "https:") {
+        throw new Error(`Invalid url protocol for endpoint: ${urlString} was expecting 'http' or 'https'`)
+    }
+    if (url.pathname !== "/") {
+        throw new Error(`Provided endpoint: ${urlString} must not contain a path: ${url.pathname}`)
+    }
+    // URLs that contain the default protocol port (e.g. 443, 80) will not show in the URL toString()
+    let formattedUrlString = url.toString()
+    if (formattedUrlString.endsWith("/")) {
+        formattedUrlString = formattedUrlString.slice(0, -1)
+    }
+    if (!url.port) {
+        if (url.protocol === "http:") {
+            formattedUrlString = formattedUrlString.concat(":80")
+        }
+        else {
+            formattedUrlString = formattedUrlString.concat(":443")
+        }
+    }
+    return formattedUrlString
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 export function parseClusterDefinition(json: any): ClusterYaml {
-    const endpoint = json.endpoint
+    let endpoint = json.endpoint
     if (!endpoint) {
         throw new Error('Missing required field in cluster definition: endpoint')
     }
+    endpoint = validateAndReturnFormattedHttpURL(endpoint)
     const version = json.version;
     const auth = parseAuth(json.auth)
     if (!auth) {
@@ -447,18 +480,18 @@ export function isRegionGovCloud(region: string): boolean {
  *
  * This allows us to create a private ECR repo for any image allowing us to have a consistent
  * experience across VPCs and regions (e.g. running within VPC in gov-cloud with no internet access)
- * 
+ *
  * This works by creating a temp Dockerfile with only the FROM with the param imageName and
  * using that Dockerfile with cdk.assets to create a local Docker image asset.
  *
  * @param {string} imageName - The name of the Docker image to save as a tarball and use in CDK.
  * @returns {ContainerImage} - A `ContainerImage` object representing the Docker image asset.
- */        
+ */
 export function makeLocalAssetContainerImage(scope: Construct, imageName: string): ContainerImage {
         const sanitizedImageName = imageName.replace(/[^a-zA-Z0-9-_]/g, '_');
         const tempDir = mkdtempSync(join(tmpdir(), 'docker-build-' + sanitizedImageName));
         const dockerfilePath = join(tempDir, 'Dockerfile');
-    
+
         let imageHash = null;
         try {
             // Update the image if it is not a local image
@@ -476,7 +509,7 @@ export function makeLocalAssetContainerImage(scope: Construct, imageName: string
             CdkLogger.error('Error fetching the actual hash for the image: ' + imageName + ' Error: ' + error);
             throw new Error('Error fetching the image hash for the image: ' + imageName + ' Error: ' + error);
         }
-    
+
         const dockerfileContent = `
             FROM ${imageName}
         `;

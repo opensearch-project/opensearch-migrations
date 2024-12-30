@@ -9,6 +9,10 @@ This directory is aimed at housing deployment/distribution methods for various m
 A containerized end-to-end solution (including a source and target cluster as well as the migration services) can be deployed locally using the
 [Docker Solution](../TrafficCapture/dockerSolution/README.md).
 
+### Deploying the Migration Assistant Solution to AWS
+
+The Migration Assistant is avaliable as an AWS Solution, [learn more](./migration-assistant-solution/README.md).
+
 ### Deploying Migration solution to AWS
 
 **Note**: These features are still under development and subject to change

@@ -20,11 +20,12 @@ public class TransformFunctions {
     public static Transformer getTransformer(
         Version sourceVersion,
         Version targetVersion,
-        int dimensionality
+        int dimensionality,
+        MetadataTransformerParams metadataTransformerParams
     ) {
         if (VersionMatchers.isOS_2_X.or(VersionMatchers.isOS_1_X).test(targetVersion)) {
             if (VersionMatchers.isES_6_X.test(sourceVersion)) {
-                return new Transformer_ES_6_8_to_OS_2_11(dimensionality);
+                return new Transformer_ES_6_8_to_OS_2_11(dimensionality, metadataTransformerParams);
             }
             if (VersionMatchers.equalOrGreaterThanES_7_10.test(sourceVersion)) {
                 return new Transformer_ES_7_10_OS_2_11(dimensionality);

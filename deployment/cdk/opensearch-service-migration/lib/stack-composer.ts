@@ -43,13 +43,14 @@ export class StackComposer {
     public stacks: Stack[] = [];
 
     private addStacksToAppRegistry(appRegistryAppARN: string, allStacks: Stack[]) {
-        for (let stack of allStacks) {
+        for (const stack of allStacks) {
             const appRegistryApp = Application.fromApplicationArn(stack, 'AppRegistryApplicationImport', appRegistryAppARN)
             appRegistryApp.associateApplicationWithStack(stack)
         }
     }
 
-    private getContextForType(optionName: string, expectedType: string, defaultValues: { [x: string]: (any); }, contextJSON: { [x: string]: (any); }): any {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    private getContextForType(optionName: string, expectedType: string, defaultValues: Record<string, any>, contextJSON: Record<string, any>): any {
         const option = contextJSON[optionName]
 
         // If no context is provided (undefined or empty string) and a default value exists, use it
@@ -97,8 +98,8 @@ export class StackComposer {
         return version
     }
 
-    private addDependentStacks(primaryStack: Stack, dependantStacks: any[]) {
-        for (let stack of dependantStacks) {
+    private addDependentStacks(primaryStack: Stack, dependantStacks: (Stack|undefined)[]) {
+        for (const stack of dependantStacks) {
             if (stack) {
                 primaryStack.addDependency(stack)
             }
@@ -136,7 +137,8 @@ export class StackComposer {
 
     constructor(scope: Construct, props: StackComposerProps) {
 
-        const defaultValues: { [x: string]: (any); } = defaultValuesJson
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const defaultValues: Record<string, any> = defaultValuesJson
         const region = props.env?.region
         const defaultDeployId = 'default'
 
@@ -212,7 +214,7 @@ export class StackComposer {
         const reindexFromSnapshotMaxShardSizeGiB = this.getContextForType('reindexFromSnapshotMaxShardSizeGiB', 'number', defaultValues, contextJSON)
         const reindexFromSnapshotWorkerSize = this.getContextForType('reindexFromSnapshotWorkerSize', 'string', defaultValues, contextJSON)
         const albAcmCertArn = this.getContextForType('albAcmCertArn', 'string', defaultValues, contextJSON);
-        const managedServiceSourceSnapshotEnabled = this.getContextForType('managedServiceSourceSnapshotEnabled', 'boolean', defaultValues, contextJSON)
+        let managedServiceSourceSnapshotEnabled = this.getContextForType('managedServiceSourceSnapshotEnabled', 'boolean', defaultValues, contextJSON)
 
         // We're in a transition state from an older model with limited, individually defined fields and heading towards objects
         // that fully define the source and target cluster configurations. For the time being, we're supporting both.
@@ -243,6 +245,9 @@ export class StackComposer {
         if (managedServiceSourceSnapshotEnabled && !sourceCluster?.auth.sigv4) {
             throw new Error("A managed service source snapshot is only compatible with sigv4 authentication. If you would like to proceed" +
                 " please disable `managedServiceSourceSnapshotEnabled` and provide your own snapshot of the source cluster.")
+        } else if (sourceCluster?.auth.sigv4 && managedServiceSourceSnapshotEnabled == null) {
+            managedServiceSourceSnapshotEnabled = true;
+            CdkLogger.info("`managedServiceSourceSnapshotEnabled` is not set with source cluster set with sigv4 auth, defaulting to true.")
         }
 
         const targetClusterEndpointField = this.getContextForType('targetClusterEndpoint', 'string', defaultValues, contextJSON)
@@ -251,6 +256,7 @@ export class StackComposer {
         if (!targetClusterDefinition && usePreexistingTargetCluster) {
             CdkLogger.warn("`targetClusterEndpoint` is being deprecated in favor of a `targetCluster` object.")
             CdkLogger.warn("Please update your CDK context block to use the `targetCluster` object.")
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
             let auth: any = {"type": "none"}
             if (fineGrainedManagerUserName || fineGrainedManagerUserSecretManagerKeyARN) {
                 CdkLogger.warn(`Use of ${fineGrainedManagerUserName} and ${fineGrainedManagerUserSecretManagerKeyARN} with a preexisting target cluster
@@ -280,15 +286,15 @@ export class StackComposer {
         }
 
         const targetClusterAuth = targetCluster?.auth
-        const targetVersion = targetCluster?.version ? this.getEngineVersion(targetCluster?.version) : null
         const engineVersionValue = engineVersion ? this.getEngineVersion(engineVersion) : this.getEngineVersion('OS_2.15')
 
         if (reindexFromSnapshotWorkerSize !== "default" && reindexFromSnapshotWorkerSize !== "maximum") {
             throw new Error("Invalid value for reindexFromSnapshotWorkerSize, must be either 'default' or 'maximum'")
         }
 
-        const requiredFields: { [key: string]: any; } = {"stage":stage}
-        for (let key in requiredFields) {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const requiredFields: Record<string, any> = {"stage":stage}
+        for (const key in requiredFields) {
             if (!requiredFields[key]) {
                 throw new Error(`Required CDK context field ${key} is not present`)
             }
@@ -365,7 +371,7 @@ export class StackComposer {
             })
             this.stacks.push(networkStack)
         }
-        let servicesYaml = new ServicesYaml();
+        const servicesYaml = new ServicesYaml();
 
         if (props.migrationsUserAgent) {
             servicesYaml.client_options = new ClientOptions()

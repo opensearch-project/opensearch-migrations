@@ -1,0 +1,28 @@
+{%- macro convert_source_index_to_target_via_regex(source_index, source_type, regex_index_mappings) -%}
+    {%- set ns = namespace(target_index=none) -%}
+    {%- for idx_regex, type_regex, target_idx_pattern in regex_index_mappings -%}
+        {%- if ns.target_index is none -%}
+            {%- set conjoined_source = source_index + "/" + source_type -%}
+            {%- set conjoined_regex = idx_regex + "/" + type_regex -%}
+            {%- set didMatch = conjoined_source | regex_capture(conjoined_regex) -%}
+            {%- if didMatch is not none -%}
+{#                conjoined_source = {{ conjoined_source }} conjoined_regex {{ conjoined_regex }} target_idx_pattern = {{ target_idx_pattern }}#}
+                {%- set ns.target_index = conjoined_source | regex_replace(conjoined_regex, target_idx_pattern) -%}
+            {%- endif -%}
+        {%- endif -%}
+    {%- endfor -%}
+    {{- ns.target_index -}}
+{%- endmacro -%}
+
+{%- macro convert_source_index_to_target(source_index, source_type, index_mappings, regex_index_mappings) -%}
+    {%- if source_type == "_doc" -%}
+        {{- source_index -}}
+    {%- else -%}
+        {%- set ns = namespace(target_index=none) -%}
+        {%- set ns.target_index = (index_mappings[source_index] | default({}))[source_type] -%}
+        {%- if ns.target_index is none -%}
+            {%- set ns.target_index = convert_source_index_to_target_via_regex(source_index, source_type, regex_index_mappings) -%}
+        {%- endif -%}
+        {{- ns.target_index -}}
+    {%- endif -%}
+{%- endmacro -%}

@@ -2,7 +2,6 @@ import {StackPropsExt} from "../stack-composer";
 import {ISecurityGroup, IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
-import {join} from "path";
 import {ELBTargetGroup, MigrationServiceCore} from "./migration-service-core";
 import {StreamingSourceType} from "../streaming-source-type";
 import {
@@ -24,12 +23,12 @@ export interface CaptureProxyProps extends StackPropsExt {
     readonly extraArgs?: string,
 }
 
-type MigrationSSMDestinationConfig = {
+interface MigrationSSMDestinationConfig {
     readonly endpointMigrationSSMParameter: MigrationSSMParameter,
     readonly securityGroupMigrationSSMParameter?: MigrationSSMParameter,
 }
 
-type CustomSSMDestinationConfig = {
+interface CustomSSMDestinationConfig {
     readonly endpointCustomSSMParameter: string,
     readonly securityGroupCustomSSMParameter?: string,
 }
@@ -90,7 +89,7 @@ export class CaptureProxyStack extends MigrationServiceCore {
         super(scope, id, props)
         const serviceName = props.serviceName ?? "capture-proxy";
 
-        let securityGroupConfigs = [
+        const securityGroupConfigs = [
             { id: "serviceSG", param: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID },
             { id: "trafficStreamSourceAccessSG", param: MigrationSSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID },
         ];

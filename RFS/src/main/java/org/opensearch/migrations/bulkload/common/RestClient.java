@@ -30,6 +30,7 @@ import io.netty.handler.codec.http.HttpMethod;
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
 import io.netty.handler.ssl.util.InsecureTrustManagerFactory;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import reactor.core.publisher.Mono;
 import reactor.netty.Connection;
@@ -41,6 +42,7 @@ import reactor.util.annotation.Nullable;
 
 @Slf4j
 public class RestClient {
+    @Getter
     private final ConnectionContext connectionContext;
     private final HttpClient client;
 

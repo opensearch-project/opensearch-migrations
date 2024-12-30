@@ -26,7 +26,7 @@ jobs:
         with:
           java-version: ${{ env.java-version }}
           distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.gradle-version }}
       - uses: actions/checkout@v4
@@ -49,7 +49,32 @@ jobs:
           ./gradlew publishMavenJavaPublicationToMavenRepository -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }} && tar -C build -cvf traffic-capture-artifacts.tar.gz repository
       - name: Build Docker Images
         run: |
-          ./deployment/cdk/opensearch-service-migration/buildDockerImages.sh
+          ./deployment/cdk/opensearch-service-migration/buildDockerImages.sh -Dbuild.snapshot=false -Dbuild.version=0.${{ steps.get_data.outputs.version }}
+      - name: Generate SBOM for migration_console
+        uses: anchore/sbom-action@v0.17.7
+        with:
+          image: migrations/migration_console:latest
+          artifact-name: opensearch-migrations-console-sbom.spdx.json
+      - name: Generate SBOM for traffic_replayer
+        uses: anchore/sbom-action@v0.17.7
+        with:
+          image: migrations/traffic_replayer:latest
+          artifact-name: opensearch-migrations-traffic-replayer-sbom.spdx.json
+      - name: Generate SBOM for capture_proxy
+        uses: anchore/sbom-action@v0.17.7
+        with:
+          image: migrations/capture_proxy:latest
+          artifact-name: opensearch-migrations-traffic-capture-proxy-sbom.spdx.json
+      - name: Generate SBOM for reindex_from_snapshot
+        uses: anchore/sbom-action@v0.17.7
+        with:
+          image: migrations/reindex_from_snapshot:latest
+          artifact-name: opensearch-migrations-reindex-from-snapshot-sbom.spdx.json
+      - name: Generate SBOM for artifacts
+        uses: anchore/sbom-action@v0.17.7
+        with:
+          file: artifacts.tar.gz
+          artifact-name: artifacts-sbom.spdx.json
       - name: Tag Docker image
         run: |
           docker tag migrations/migration_console:latest opensearchstaging/opensearch-migrations-console:${{ steps.get_data.outputs.version }}
@@ -97,3 +122,4 @@ jobs:
           files: |
             artifacts.tar.gz
             traffic-capture-artifacts.tar.gz
+            **/*.spdx.json

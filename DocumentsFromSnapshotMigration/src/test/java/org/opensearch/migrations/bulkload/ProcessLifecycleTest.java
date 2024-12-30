@@ -150,7 +150,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
             esSourceContainer.copySnapshotData(tempDirSnapshot.toString());
 
             int actualExitCode = processRunner.apply(new RunData(tempDirSnapshot, tempDirLucene, proxyContainer));
-            log.atInfo().setMessage("Process exited with code: " + actualExitCode).log();
+            log.atInfo().setMessage("Process exited with code: {}").addArgument(actualExitCode).log();
 
             // Check if the exit code is as expected
             Assertions.assertEquals(
@@ -230,7 +230,9 @@ public class ProcessLifecycleTest extends SourceTestBase {
             failHow == FailHow.NEVER ? "PT10M" : "PT1S" };
 
         // Kick off the doc migration process
-        log.atInfo().setMessage("Running RfsMigrateDocuments with args: " + Arrays.toString(args)).log();
+        log.atInfo().setMessage("Running RfsMigrateDocuments with args: {}")
+            .addArgument(() -> Arrays.toString(args))
+            .log();
         ProcessBuilder processBuilder = new ProcessBuilder(
             javaExecutable,
             "-cp",
@@ -247,7 +249,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
     private static Process runAndMonitorProcess(ProcessBuilder processBuilder) throws IOException {
         var process = processBuilder.start();
 
-        log.atInfo().setMessage("Process started with ID: " + process.toHandle().pid()).log();
+        log.atInfo().setMessage("Process started with ID: {}").addArgument(() -> process.toHandle().pid()).log();
 
         BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
         var readerThread = new Thread(() -> {
@@ -261,7 +263,9 @@ public class ProcessLifecycleTest extends SourceTestBase {
                 }
                 String finalLine = line;
                 log.atInfo()
-                    .setMessage(() -> "from sub-process [" + process.toHandle().pid() + "]: " + finalLine)
+                    .setMessage("from sub-process [{}]: {}")
+                    .addArgument(() -> process.toHandle().pid())
+                    .addArgument(finalLine)
                     .log();
             }
         });

@@ -1,7 +1,8 @@
 import {StackComposer} from "../lib/stack-composer";
 import {App} from "aws-cdk-lib";
 
-export function createStackComposer(contextBlock: { [x: string]: (any); }, migrationsUserAgent?: string) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function createStackComposer(contextBlock: Record<string, any>, migrationsUserAgent?: string) {
     contextBlock.stage = "unit-test"
     const app = new App({
         context: {
@@ -16,7 +17,8 @@ export function createStackComposer(contextBlock: { [x: string]: (any); }, migra
     })
 }
 
-export function createStackComposerOnlyPassedContext(contextBlock: { [x: string]: (any); }) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function createStackComposerOnlyPassedContext(contextBlock: Record<string, any>) {
     const app = new App({
         context: contextBlock
     })

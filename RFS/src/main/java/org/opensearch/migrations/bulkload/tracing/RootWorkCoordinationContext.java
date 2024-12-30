@@ -18,6 +18,7 @@ public class RootWorkCoordinationContext extends RootOtelContext {
     public final WorkCoordinationContexts.AcquireSpecificWorkContext.MetricInstruments acquireSpecificWorkMetrics;
     public final WorkCoordinationContexts.CompleteWorkItemContext.MetricInstruments completeWorkMetrics;
     public final WorkCoordinationContexts.AcquireNextWorkItemContext.MetricInstruments acquireNextWorkMetrics;
+    public final WorkCoordinationContexts.CreateSuccessorWorkItemsContext.MetricInstruments createSuccessorWorkItemsMetrics;
 
     public RootWorkCoordinationContext(OpenTelemetry sdk, IContextTracker contextTracker) {
         this(sdk, contextTracker, null);
@@ -38,6 +39,7 @@ public class RootWorkCoordinationContext extends RootOtelContext {
         acquireSpecificWorkMetrics = WorkCoordinationContexts.AcquireSpecificWorkContext.makeMetrics(meter);
         completeWorkMetrics = WorkCoordinationContexts.CompleteWorkItemContext.makeMetrics(meter);
         acquireNextWorkMetrics = WorkCoordinationContexts.AcquireNextWorkItemContext.makeMetrics(meter);
+        createSuccessorWorkItemsMetrics = WorkCoordinationContexts.CreateSuccessorWorkItemsContext.makeMetrics(meter);
     }
 
     public IWorkCoordinationContexts.IInitializeCoordinatorStateContext createCoordinationInitializationStateContext() {
@@ -87,4 +89,13 @@ public class RootWorkCoordinationContext extends RootOtelContext {
     ) {
         return new WorkCoordinationContexts.CompleteWorkItemContext(this, enclosingScope);
     }
-}
+
+    public IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext createSuccessorWorkItemsContext() {
+        return createSuccessorWorkItemsContext(null);
+    }
+
+    public IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext createSuccessorWorkItemsContext(
+            IScopedInstrumentationAttributes enclosingScope
+    ) {
+        return new WorkCoordinationContexts.CreateSuccessorWorkItemsContext(this, enclosingScope);
+    }}

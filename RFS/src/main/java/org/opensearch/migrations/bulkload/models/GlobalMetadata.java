@@ -9,6 +9,7 @@ import org.opensearch.migrations.bulkload.common.ByteArrayIndexInput;
 import org.opensearch.migrations.bulkload.common.RfsException;
 import org.opensearch.migrations.bulkload.common.SnapshotRepo;
 
+import com.fasterxml.jackson.core.JsonPointer;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -21,14 +22,34 @@ public interface GlobalMetadata {
     * See: https://github.com/elastic/elasticsearch/blob/v7.10.2/server/src/main/java/org/elasticsearch/cluster/metadata/Metadata.java#L1622
     * See: https://github.com/elastic/elasticsearch/blob/v6.8.23/server/src/main/java/org/elasticsearch/cluster/metadata/MetaData.java#L1214
     */
-    public ObjectNode toObjectNode();
+    ObjectNode toObjectNode();
 
-    public ObjectNode getTemplates();
+    JsonPointer getTemplatesPath();
+
+    JsonPointer getIndexTemplatesPath();
+
+    JsonPointer getComponentTemplatesPath();
+
+    default ObjectNode getTemplates() {
+        return getObjectNodeWithPath(getTemplatesPath());
+    }
+
+    default ObjectNode getIndexTemplates() {
+        return getObjectNodeWithPath(getIndexTemplatesPath());
+    }
+
+    default ObjectNode getComponentTemplates() {
+        return getObjectNodeWithPath(getComponentTemplatesPath());
+    }
+
+    default ObjectNode getObjectNodeWithPath(JsonPointer path) {
+        return toObjectNode().withObject(path, JsonNode.OverwriteMode.NULLS, false);
+    }
 
     /**
     * Defines the behavior required to read a snapshot's global metadata as JSON and convert it into a Data object
     */
-    public static interface Factory {
+    interface Factory {
         private JsonNode getJsonNode(
             SnapshotRepo.Provider repoDataProvider,
             String snapshotName,
@@ -69,22 +90,22 @@ public interface GlobalMetadata {
         }
 
         // Version-specific implementation
-        public GlobalMetadata fromJsonNode(JsonNode root);
+        GlobalMetadata fromJsonNode(JsonNode root);
 
         // Version-specific implementation
-        public SmileFactory getSmileFactory();
+        SmileFactory getSmileFactory();
 
         // Get the underlying SnapshotRepo Provider
-        public SnapshotRepo.Provider getRepoDataProvider();
+        SnapshotRepo.Provider getRepoDataProvider();
     }
 
-    public static class CantFindSnapshotInRepo extends RfsException {
+     class CantFindSnapshotInRepo extends RfsException {
         public CantFindSnapshotInRepo(String snapshotName) {
             super("Can't find snapshot in repo: " + snapshotName);
         }
     }
 
-    public static class CantReadGlobalMetadataFromSnapshot extends RfsException {
+    class CantReadGlobalMetadataFromSnapshot extends RfsException {
         public CantReadGlobalMetadataFromSnapshot(String snapshotName, Throwable cause) {
             super("Can't read the global metadata from snapshot: " + snapshotName, cause);
         }

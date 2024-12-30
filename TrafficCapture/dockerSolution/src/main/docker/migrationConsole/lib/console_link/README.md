@@ -191,6 +191,7 @@ Exactly one of the following blocks must be present:
 - `s3`:
     - `repo_uri`: required, `s3://` path to where the snapshot repo exists or should be created (the bucket must already exist, and the repo needs to be configured on the source cluster)
     - `aws_region`: required, region for the s3 bucket
+    - `role`: optional, required for clusters managed by Amazon OpenSearch Service.  The IAM Role that is passed to the source cluster for the service to assume in order to work with the snapshot bucket.  
 
 - `fs`:
     - `repo_path`: required, path to where the repo exists or should be created on the filesystem (the repo needs to be configured on the source cluster).
@@ -291,7 +292,7 @@ Unit tests can be run from this current `console_link/` by first installing depe
 
 ```shell
 pipenv install --dev
-pipenv run coverage run -m pytest
+pipenv run test
 ```
 
 ### Coverage

@@ -1,9 +1,0 @@
-{
-  "method": "GET",
-  "URI": "/oldStyleIndex/oldType/_search",
-  "payload": {
-    "inlinedJsonBody": {
-      "query": { "match": { "field1": "VALUE_1" } }
-    }
-  }
-}

@@ -10,8 +10,8 @@ import * as forge from 'node-forge';
 export const handler = async (event: CloudFormationCustomResourceEvent, context: Context): Promise<CloudFormationCustomResourceResponse> => {
   console.log('Received event:', JSON.stringify(event, null, 2));
   console.log('Received context:', JSON.stringify(context, null, 2));
-  let responseData: { [key: string]: any } = {};
-  let physicalResourceId: string = '';
+  let responseData: { CertificateArn?: string } = {};
+  let physicalResourceId = '';
 
   try {
     switch (event.RequestType) {
@@ -45,7 +45,7 @@ export const handler = async (event: CloudFormationCustomResourceEvent, context:
 };
 
 async function generateSelfSignedCertificate(): Promise<{ certificate: string, privateKey: string, certificateChain: string }> {
-  return new Promise((resolve, reject) => {
+  return new Promise((resolve) => {
     const keys = forge.pki.rsa.generateKeyPair(2048);
     const cert = forge.pki.createCertificate();
 
@@ -103,7 +103,10 @@ async function importCertificate(certificate: string, privateKey: string, certif
   });
 
   const response = await client.send(command);
-  return response.CertificateArn!;
+  if (!response.CertificateArn) {
+    throw new Error(`Unexpected response, no certificate arn in response`);
+  }
+  return response.CertificateArn;
 }
 
 async function deleteCertificate(certificateArn: string): Promise<void> {
@@ -115,7 +118,8 @@ async function deleteCertificate(certificateArn: string): Promise<void> {
   await client.send(command);
 }
 
-async function sendResponse(event: CloudFormationCustomResourceEvent, context: Context, responseStatus: string, responseData: { [key: string]: any }, physicalResourceId: string): Promise<CloudFormationCustomResourceResponse> {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function sendResponse(event: CloudFormationCustomResourceEvent, context: Context, responseStatus: string, responseData: Record<string, any>, physicalResourceId: string): Promise<CloudFormationCustomResourceResponse> {
   const responseBody = JSON.stringify({
     Status: responseStatus,
     Reason: `See the details in CloudWatch Log Stream: ${context.logStreamName}`,

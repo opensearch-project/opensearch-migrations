@@ -253,7 +253,7 @@ describe('ReindexFromSnapshotStack Tests', () => {
         "auth": {"type": "none"},
         "version": "ES_7.10"
       },
-      reindexFromSnapshotExtraArgs: '--custom-arg value --flag --snapshot-name \"custom-snapshot\"',
+      reindexFromSnapshotExtraArgs: '--custom-arg value --flag --snapshot-name "custom-snapshot"',
       migrationAssistanceEnabled: true,
     };
 

@@ -743,15 +743,13 @@ class StreamChannelConnectionCaptureSerializerTest {
             return CompletableFuture.runAsync(() -> {
                 try {
                     osh.getOutputStream().flush();
-                    log.atTrace().setMessage("Just flushed for {}").addArgument(osh.getOutputStream()).log();
+                    log.atTrace().setMessage("Just flushed for {}").addArgument(osh::getOutputStream).log();
                     var bb = osh.getByteBuffer();
                     bb.position(0);
                     var bytesWritten = osh.getOutputStream().getTotalBytesWritten();
                     bb.limit(bytesWritten);
-                    log.atTrace()
-                        .setMessage("Adding {}")
-                        .addArgument(() -> StandardCharsets.UTF_8.decode(bb.duplicate()))
-                        .log();
+                    log.atTrace().setMessage("Adding {}")
+                        .addArgument(() -> StandardCharsets.UTF_8.decode(bb.duplicate())).log();
                     outputBuffers.add(bb);
                 } catch (IOException e) {
                     throw Lombok.sneakyThrow(e);

@@ -45,8 +45,13 @@ class Backfill(ABC):
         pass
 
     @abstractmethod
+    def pause(self, *args, **kwargs) -> CommandResult[str]:
+        """Pause the backfill. This backfill should be resumable afterwards by invoking `start`."""
+        pass
+
+    @abstractmethod
     def stop(self, *args, **kwargs) -> CommandResult[str]:
-        """Stop or pause the backfill. This does not make guarantees about resumeability."""
+        """Stop the backfill. This does not make guarantees about resumeability."""
         pass
 
     @abstractmethod
@@ -56,6 +61,12 @@ class Backfill(ABC):
 
     @abstractmethod
     def scale(self, units: int, *args, **kwargs) -> CommandResult[str]:
+        pass
+
+    @abstractmethod
+    def archive(self, *args, **kwargs) -> CommandResult[str]:
+        """Archive the backfill operation.  Should return the information required to resume the backfill operations.
+        Should fail if there are currently running operations."""
         pass
 
     def describe(self) -> Dict:

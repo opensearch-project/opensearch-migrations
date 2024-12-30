@@ -63,7 +63,7 @@ public class DocumentsRunner {
 
                 @Override
                 public CompletionStatus onAcquiredWork(IWorkCoordinator.WorkItemAndDuration workItem) {
-                    doDocumentsMigration(IndexAndShard.valueFromWorkItemString(workItem.getWorkItemId()), context);
+                    doDocumentsMigration(IndexAndShardCursor.valueFromWorkItemString(workItem.getWorkItemId()), context);
                     return CompletionStatus.WORK_COMPLETED;
                 }
 
@@ -88,26 +88,22 @@ public class DocumentsRunner {
     }
 
     private void doDocumentsMigration(
-        IndexAndShard indexAndShard,
+        IndexAndShardCursor indexAndShardCursor,
         IDocumentMigrationContexts.IDocumentReindexContext context
     ) {
-        log.info("Migrating docs for " + indexAndShard);
-        ShardMetadata shardMetadata = shardMetadataFactory.apply(indexAndShard.indexName, indexAndShard.shard);
+        log.info("Migrating docs for " + indexAndShardCursor);
+        ShardMetadata shardMetadata = shardMetadataFactory.apply(indexAndShardCursor.indexName, indexAndShardCursor.shard);
 
         var unpacker = unpackerFactory.create(shardMetadata);
         var reader = readerFactory.apply(unpacker.unpack());
-        Flux<RfsLuceneDocument> documents = reader.readDocuments();
+        Flux<RfsLuceneDocument> documents = reader.readDocuments(indexAndShardCursor.startingSegmentIndex, indexAndShardCursor.startingDocId);
 
         reindexer.reindex(shardMetadata.getIndexName(), documents, context)
             .doOnError(error -> log.error("Error during reindexing: " + error))
             .doOnSuccess(
-                done -> log.atInfo()
-                    .setMessage(
-                        () -> "Reindexing completed for Index "
-                            + shardMetadata.getIndexName()
-                            + ", Shard "
-                            + shardMetadata.getShardId()
-                    )
+                done -> log.atInfo().setMessage("Reindexing completed for Index {}, Shard {}")
+                    .addArgument(shardMetadata::getIndexName)
+                    .addArgument(shardMetadata::getShardId)
                     .log()
             )
             // Wait for the reindexing to complete before proceeding

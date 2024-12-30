@@ -5,7 +5,7 @@ import java.util.List;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.IRequestResponsePacketPair;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
-import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.buffer.ByteBuf;
 

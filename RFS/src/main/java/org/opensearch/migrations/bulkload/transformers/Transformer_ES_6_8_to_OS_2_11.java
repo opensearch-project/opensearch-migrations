@@ -18,13 +18,19 @@ import lombok.extern.slf4j.Slf4j;
 public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     private static final ObjectMapper mapper = new ObjectMapper();
 
-    private final List<TransformationRule<Index>> indexTransformations = List.of(new IndexMappingTypeRemoval());
-    private final List<TransformationRule<Index>> indexTemplateTransformations = List.of(new IndexMappingTypeRemoval());
+    private final List<TransformationRule<Index>> indexTransformations;
+    private final List<TransformationRule<Index>> indexTemplateTransformations;
 
     private final int awarenessAttributeDimensionality;
 
-    public Transformer_ES_6_8_to_OS_2_11(int awarenessAttributeDimensionality) {
+    public Transformer_ES_6_8_to_OS_2_11(int awarenessAttributeDimensionality, MetadataTransformerParams params) {
         this.awarenessAttributeDimensionality = awarenessAttributeDimensionality;
+        this.indexTransformations = List.of(new IndexMappingTypeRemoval(
+                params.getMultiTypeResolutionBehavior()
+        ));
+        this.indexTemplateTransformations = List.of(new IndexMappingTypeRemoval(
+                params.getMultiTypeResolutionBehavior()
+        ));
     }
 
     @Override
@@ -37,9 +43,28 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
             var templates = mapper.createObjectNode();
             templatesRoot.fields().forEachRemaining(template -> {
                 var templateCopy = (ObjectNode) template.getValue().deepCopy();
-                var indexTemplate = (Index) () -> templateCopy;
-                transformIndex(indexTemplate, IndexType.TEMPLATE);
-                templates.set(template.getKey(), indexTemplate.getRawJson());
+                var indexTemplate = new Index() {
+                    @Override
+                    public String getName() {
+                        return template.getKey();
+                    }
+
+                    @Override
+                    public ObjectNode getRawJson() {
+                        return templateCopy;
+                    }
+                };
+
+                try {
+                    transformIndex(indexTemplate, IndexType.TEMPLATE);
+                    templates.set(template.getKey(), indexTemplate.getRawJson());
+                }  catch (Exception e) {
+                    log.atError()
+                        .setMessage("Unable to transform object: {}")
+                        .addArgument(indexTemplate::getRawJson)
+                        .setCause(e)
+                        .log();
+                }
             });
             newRoot.set("templates", templates);
         }
@@ -67,7 +92,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
     }
 
     private void transformIndex(Index index, IndexType type) {
-        log.atDebug().setMessage(()->"Original Object: {}").addArgument(index.getRawJson().toString()).log();
+        log.atDebug().setMessage("Original Object: {}").addArgument(index::getRawJson).log();
         var newRoot = index.getRawJson();
 
         switch (type) {
@@ -85,7 +110,7 @@ public class Transformer_ES_6_8_to_OS_2_11 implements Transformer {
         TransformFunctions.removeIntermediateIndexSettingsLevel(newRoot); // run before fixNumberOfReplicas
         TransformFunctions.fixReplicasForDimensionality(newRoot, awarenessAttributeDimensionality);
 
-        log.atDebug().setMessage(()->"Transformed Object: {}").addArgument(newRoot.toString()).log();
+        log.atDebug().setMessage("Transformed Object: {}").addArgument(newRoot).log();
     }
 
     private enum IndexType {

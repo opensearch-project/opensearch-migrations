@@ -17,7 +17,7 @@ jest.mock('aws-cdk-lib', () => ({
       add: jest.fn(),
     }),
   },
-  Stack: class MockStack {},
+  Stack: jest.fn().mockImplementation(),
 }));
 
 jest.mock('../lib/stack-composer');

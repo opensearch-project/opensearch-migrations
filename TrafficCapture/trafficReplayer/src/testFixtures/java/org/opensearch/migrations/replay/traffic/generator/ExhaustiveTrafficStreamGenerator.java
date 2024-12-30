@@ -181,7 +181,7 @@ public class ExhaustiveTrafficStreamGenerator {
                 getTypeFromObservation(ssl.get(ssl.size() - 1), outgoingLastType),
                 ssl.size()
             );
-            log.atTrace().setMessage(() -> "classification=" + classificationToString(type)).log();
+            log.atTrace().setMessage("classification={}").addArgument(() -> classificationToString(type)).log();
             previousObservationType = outgoingLastType;
             counter += possibilitiesLeftToTest.remove(type) ? 1 : 0;
         }
@@ -274,9 +274,8 @@ public class ExhaustiveTrafficStreamGenerator {
         var r2 = new Random(rSeed);
         var bufferSize = r2.nextInt(MAX_BUFFER_SIZE - MIN_BUFFER_SIZE) + MIN_BUFFER_SIZE;
         final var bufferBound = (int) (Math.abs(r2.nextGaussian()) * ((MAX_BUFFER_SIZE_MULTIPLIER * bufferSize))) + 1;
-        log.atTrace()
-            .setMessage(
-                () -> String.format(
+        log.atTrace().setMessage("{}")
+            .addArgument(() -> String.format(
                     "bufferSize=%d bufferBound=%d maxPossibleReads=%d maxPossibleWrites=%d",
                     bufferSize,
                     bufferBound,
@@ -357,9 +356,8 @@ public class ExhaustiveTrafficStreamGenerator {
             : generateAllIndicativeRandomTrafficStreamsAndSizes(rootContext);
         var testCaseArr = generatedCases.toArray(RandomTrafficStreamAndTransactionSizes[]::new);
         log.atInfo()
-            .setMessage(
-                () -> "test case array = \n"
-                    + Arrays.stream(testCaseArr)
+            .setMessage("test case array = \n{}")
+            .addArgument(() -> Arrays.stream(testCaseArr)
                         .flatMap(tc -> Arrays.stream(tc.trafficStreams).map(TrafficStreamUtils::summarizeTrafficStream))
                         .collect(Collectors.joining("\n"))
             )

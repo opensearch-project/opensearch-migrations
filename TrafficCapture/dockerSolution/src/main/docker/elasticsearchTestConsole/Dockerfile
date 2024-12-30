@@ -3,6 +3,7 @@ FROM amazonlinux:2023
 ENV PIP_ROOT_USER_ACTION ignore
 ENV LANG C.UTF-8
 
+# procps-ng used for enabling 'watch' command on console
 RUN dnf install -y --setopt=install_weak_deps=False \
         curl-minimal \
         diffutils \
@@ -26,14 +27,15 @@ RUN dnf install -y --setopt=install_weak_deps=False \
         vim \
         wget \
         zlib-devel \
+        procps-ng \
         && \
     dnf clean all && \
     rm -rf /var/cache/dnf
 
 # Install HDF5 from source for Opensearch Benchmark compatibility with ARM
 ARG HDF5_VERSION=1.14.4
-RUN wget --tries=5 --retry-connrefused --waitretry=15 -q https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5_${HDF5_VERSION}.tar.gz -O /tmp/hdf5.tar.gz && \
-    mkdir /tmp/hdf5 && \
+ADD https://github.com/HDFGroup/hdf5/archive/refs/tags/hdf5_${HDF5_VERSION}.tar.gz /tmp/hdf5.tar.gz
+RUN mkdir /tmp/hdf5 && \
     tar -xzf /tmp/hdf5.tar.gz -C /tmp/hdf5 --strip-components=1 && \
     rm /tmp/hdf5.tar.gz
 WORKDIR /tmp/hdf5

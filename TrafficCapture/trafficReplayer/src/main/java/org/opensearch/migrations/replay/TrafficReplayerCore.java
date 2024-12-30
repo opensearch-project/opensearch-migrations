@@ -23,11 +23,11 @@ import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.ITrafficCaptureSource;
 import org.opensearch.migrations.replay.traffic.source.ITrafficStreamWithKey;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
-import org.opensearch.migrations.replay.util.TextTrackedFuture;
-import org.opensearch.migrations.replay.util.TrackedFuture;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStreamUtils;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.utils.TextTrackedFuture;
+import org.opensearch.migrations.utils.TrackedFuture;
 
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
@@ -111,7 +111,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             );
             finishedAccumulatingResponseFuture.future.whenComplete(
                 (v, t) -> log.atDebug()
-                    .setMessage(() -> "Done receiving captured stream for {}:{}")
+                    .setMessage("Done receiving captured stream for {}:{}")
                     .addArgument(ctx)
                     .addArgument(v.requestData)
                     .log()
@@ -160,9 +160,9 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 );
             httpSentRequestFuture.future.whenComplete(
                 (v, t) -> log.atTrace()
-                    .setMessage(() -> "Summary response value for " + requestKey + " returned=" + v)
-                    .log()
-            );
+                    .setMessage("Summary response value for {} returned={}")
+                    .addArgument(requestKey).addArgument(v)
+                    .log());
             return httpSentRequestFuture;
         }
 
@@ -189,26 +189,19 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                     commitTrafficStreams(rrPair.completionStatus, rrPair.trafficStreamKeysBeingHeld);
                     return null;
                 } else {
-                    log.atError()
-                        .setCause(t)
-                        .setMessage(() -> "Throwable passed to handle() for " + context + ".  Rethrowing.")
-                        .log();
+                    log.atError().setCause(t)
+                        .setMessage("Throwable passed to handle() for {}.  Rethrowing.").addArgument(context).log();
                     throw Lombok.sneakyThrow(t);
                 }
             } catch (Error error) {
-                log.atError()
-                    .setCause(error)
-                    .setMessage(() -> "Caught error and initiating TrafficReplayer shutdown")
-                    .log();
+                log.atError().setCause(error)
+                    .setMessage("Caught error and initiating TrafficReplayer shutdown").log();
                 shutdown(error);
                 throw error;
             } catch (Exception e) {
-                log.atError()
-                    .setMessage(
-                        "Unexpected exception while sending the "
-                            + "aggregated response and context for {} to the callback.  "
-                            + "Proceeding, but the tuple receiver context may be compromised."
-                    )
+                log.atError().setMessage("Unexpected exception while sending the "
+                        + "aggregated response and context for {} to the callback.  "
+                        + "Proceeding, but the tuple receiver context may be compromised.")
                     .addArgument(context)
                     .setCause(e)
                     .log();
@@ -286,9 +279,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
             }
             try (var requestResponseTuple = new SourceTargetCaptureTuple(tupleHandlingContext, rrPair, summary, t)) {
                 log.atDebug()
-                    .setMessage("{}")
-                    .addArgument(() -> "Source/Target Request/Response tuple: " + requestResponseTuple)
-                    .log();
+                    .setMessage("Source/Target Request/Response tuple: {}").addArgument(requestResponseTuple).log();
                 tupleWriter.accept(requestResponseTuple);
             }
 
@@ -322,11 +313,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                                        HttpRequestTransformationStatus transformationStatus,
                                        IReplayContexts.IReplayerHttpTransactionContext context) {
         if (summary != null && summary.getError() != null) {
-            log.atInfo()
-                .setCause(summary.getError())
-                .setMessage("Exception for {}: ")
-                .addArgument(context)
-                .log();
+            log.atInfo().setCause(summary.getError())
+                .setMessage("Exception for {}: ").addArgument(context).log();
             exceptionRequestCount.incrementAndGet();
         } else if (transformationStatus.isError()) {
             log.atInfo()
@@ -336,8 +324,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 .log();
             exceptionRequestCount.incrementAndGet();
         } else if (summary == null) {
-            log.atInfo()
-                .setMessage("Not counting this response.  No result at all for {}: ")
+            log.atInfo().setMessage("Not counting this response.  No result at all for {}: ")
                 .addArgument(context)
                 .log();
         } else {
@@ -363,10 +350,8 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                 trafficStreams = this.nextChunkFutureRef.get().get();
             } catch (ExecutionException ex) {
                 if (ex.getCause() instanceof EOFException) {
-                    log.atWarn()
-                        .setCause(ex.getCause())
-                        .setMessage("Got an EOF on the stream.  " + "Done reading traffic streams.")
-                        .log();
+                    log.atWarn().setCause(ex.getCause())
+                        .setMessage("Got an EOF on the stream.  " + "Done reading traffic streams.").log();
                     break;
                 } else {
                     log.atWarn().setCause(ex).setMessage("Done reading traffic streams due to exception.").log();
@@ -380,9 +365,7 @@ public abstract class TrafficReplayerCore extends RequestTransformerAndSender<Tr
                         .collect(Collectors.joining(";"))
                 )
                     .filter(s -> !s.isEmpty())
-                    .ifPresent(
-                        s -> log.atInfo().setMessage("{}").addArgument("TrafficStream Summary: {" + s + "}").log()
-                    );
+                    .ifPresent(s -> log.atInfo().setMessage("TrafficStream Summary: {{}}").addArgument(s).log());
             }
             trafficStreams.forEach(trafficToHttpTransactionAccumulator::accept);
         }

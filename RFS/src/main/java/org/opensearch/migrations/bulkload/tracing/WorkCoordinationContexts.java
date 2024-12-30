@@ -248,6 +248,10 @@ public interface WorkCoordinationContexts extends IWorkCoordinationContexts {
         public MetricInstruments getRetryMetrics() {
             return getRootInstrumentationScope().acquireSpecificWorkMetrics;
         }
+
+        public ICreateSuccessorWorkItemsContext  getCreateSuccessorWorkItemsContext() {
+            return new CreateSuccessorWorkItemsContext(this.rootInstrumentationScope, this);
+        }
     }
 
     @Getter
@@ -274,6 +278,10 @@ public interface WorkCoordinationContexts extends IWorkCoordinationContexts {
         @Override
         public IRefreshContext getRefreshContext() {
             return new Refresh(this.rootInstrumentationScope, this);
+        }
+
+        public ICreateSuccessorWorkItemsContext  getCreateSuccessorWorkItemsContext() {
+            return new CreateSuccessorWorkItemsContext(this.rootInstrumentationScope, this);
         }
 
         public static class MetricInstruments extends RetryMetricInstruments {
@@ -361,6 +369,58 @@ public interface WorkCoordinationContexts extends IWorkCoordinationContexts {
         @Override
         public MetricInstruments getRetryMetrics() {
             return getRootInstrumentationScope().completeWorkMetrics;
+        }
+    }
+
+    @Getter
+    class CreateSuccessorWorkItemsContext extends BaseSpanContext<RootWorkCoordinationContext>
+            implements
+            ICreateSuccessorWorkItemsContext,
+            RetryableActivityContextMetricMixin<CreateSuccessorWorkItemsContext.MetricInstruments> {
+        final IScopedInstrumentationAttributes enclosingScope;
+
+        CreateSuccessorWorkItemsContext(
+                RootWorkCoordinationContext rootScope,
+                IScopedInstrumentationAttributes enclosingScope
+        ) {
+            super(rootScope);
+            this.enclosingScope = enclosingScope;
+            initializeSpan(rootScope);
+        }
+
+        @Override
+        public String getActivityName() {
+            return ACTIVITY_NAME;
+        }
+
+        @Override
+        public IRefreshContext getRefreshContext() {
+            return new Refresh(this.rootInstrumentationScope, this);
+        }
+
+        @Override
+        public ICompleteWorkItemContext getCompleteWorkItemContext() {
+            return new CompleteWorkItemContext(this.rootInstrumentationScope, this);
+        }
+
+        @Override
+        public ICreateUnassignedWorkItemContext getCreateUnassignedWorkItemContext() {
+            return null;
+        }
+
+        public static class MetricInstruments extends RetryMetricInstruments {
+            private MetricInstruments(Meter meter, String activityName) {
+                super(meter, autoLabels(activityName));
+            }
+        }
+
+        public static @NonNull MetricInstruments makeMetrics(Meter meter) {
+            return new MetricInstruments(meter, ACTIVITY_NAME);
+        }
+
+        @Override
+        public MetricInstruments getRetryMetrics() {
+            return getRootInstrumentationScope().createSuccessorWorkItemsMetrics;
         }
     }
 }

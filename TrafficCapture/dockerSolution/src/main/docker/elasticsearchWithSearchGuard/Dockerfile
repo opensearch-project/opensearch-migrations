@@ -29,4 +29,4 @@ RUN sed -i '/^-Xms/i # Increase default heap to 80% RAM, Requires JDK >= 10' $EL
 
 
 #CMD tail -f /dev/null
-CMD /usr/local/bin/docker-entrypoint.sh eswrapper
+CMD ["/usr/local/bin/docker-entrypoint.sh", "eswrapper"]

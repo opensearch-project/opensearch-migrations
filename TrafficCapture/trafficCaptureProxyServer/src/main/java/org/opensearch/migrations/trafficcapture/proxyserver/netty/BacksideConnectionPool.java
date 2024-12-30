@@ -75,7 +75,7 @@ public class BacksideConnectionPool {
         Duration frequency
     ) {
         eventLoop.scheduleAtFixedRate(
-            () -> log.atLevel(logLevel).log(channelPoolMap.getStats().toString()),
+            () -> log.atLevel(logLevel).setMessage("{}").addArgument(channelPoolMap::getStats).log(),
             frequency.toMillis(),
             frequency.toMillis(),
             TimeUnit.MILLISECONDS

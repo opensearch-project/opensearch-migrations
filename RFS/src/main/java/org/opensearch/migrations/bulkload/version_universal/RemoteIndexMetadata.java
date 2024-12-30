@@ -2,55 +2,56 @@ package org.opensearch.migrations.bulkload.version_universal;
 
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 
+import com.fasterxml.jackson.annotation.JsonAutoDetect;
+import com.fasterxml.jackson.annotation.JsonProperty;
+import com.fasterxml.jackson.annotation.JsonTypeInfo;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import lombok.AllArgsConstructor;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
-@AllArgsConstructor
-public class RemoteIndexMetadata implements IndexMetadata {
+@NoArgsConstructor(force = true) // For Jackson
+@JsonAutoDetect(fieldVisibility = JsonAutoDetect.Visibility.NONE, getterVisibility = JsonAutoDetect.Visibility.NONE)
+@JsonTypeInfo(use = JsonTypeInfo.Id.CLASS, property = "type")
+@Getter
+public class RemoteIndexMetadata extends IndexMetadata {
+    @JsonProperty("name")
+    private String name;
+    @JsonProperty("id")
+    private String id;
+    @JsonProperty("body")
+    private ObjectNode rawJson;
 
-    private String indexName;
-    private ObjectNode sourceData;
-
-    @Override
-    public ObjectNode getRawJson() {
-        return sourceData;
+    RemoteIndexMetadata(String indexName, ObjectNode rawJson) {
+        this.name = indexName;
+        // ID is the same as name in remote metadata
+        this.id = indexName;
+        this.rawJson = rawJson;
     }
 
     @Override
     public JsonNode getAliases() {
-        return sourceData.get("aliases");
-    }
-
-    @Override
-    public String getId() {
-        // The ID is the name in this case
-        return getName();
+        return rawJson.get("aliases");
     }
 
     @Override
     public JsonNode getMappings() {
-        return sourceData.get("mappings");
-    }
-
-    @Override
-    public String getName() {
-        return indexName;
+        return rawJson.get("mappings");
     }
 
     @Override
     public int getNumberOfShards() {
-        throw new UnsupportedOperationException("Unimplemented method 'getNumberOfShards'");
+        return getSettings().get("index").get("number_of_shards").asInt();
     }
 
     @Override
     public JsonNode getSettings() {
-        return sourceData.get("settings");
+        return rawJson.get("settings");
     }
 
     @Override
     public IndexMetadata deepCopy() {
-        return new RemoteIndexMetadata(indexName, sourceData.deepCopy());
+        return new RemoteIndexMetadata(name, rawJson.deepCopy());
     }
     
 }

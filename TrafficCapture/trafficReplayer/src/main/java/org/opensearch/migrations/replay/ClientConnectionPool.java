@@ -7,8 +7,8 @@ import java.util.function.BiFunction;
 import org.opensearch.migrations.NettyFutureBinders;
 import org.opensearch.migrations.replay.datatypes.ConnectionReplaySession;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.util.TextTrackedFuture;
-import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.utils.TextTrackedFuture;
+import org.opensearch.migrations.utils.TrackedFuture;
 
 import com.google.common.cache.CacheBuilder;
 import com.google.common.cache.CacheLoader;
@@ -87,30 +87,26 @@ public class ClientConnectionPool {
             () -> buildConnectionReplaySession(channelKeyCtx)
         );
         log.atTrace()
-            .setMessage(
-                () -> "returning ReplaySession="
-                    + crs
-                    + " for "
-                    + channelKeyCtx.getConnectionId()
-                    + " from "
-                    + channelKeyCtx
-            )
+            .setMessage("returning ReplaySession={} for {} from {}")
+            .addArgument(crs)
+            .addArgument(channelKeyCtx::getConnectionId)
+            .addArgument(channelKeyCtx)
             .log();
         return crs;
     }
 
     public void closeConnection(IReplayContexts.IChannelKeyContext ctx, int sessionNumber) {
         var connId = ctx.getConnectionId();
-        log.atTrace().setMessage(() -> "closing connection for " + connId).log();
+        log.atTrace().setMessage("closing connection for {}").addArgument(connId).log();
         var connectionReplaySession = connectionId2ChannelCache.getIfPresent(getKey(connId, sessionNumber));
         if (connectionReplaySession != null) {
             closeClientConnectionChannel(connectionReplaySession);
             connectionId2ChannelCache.invalidate(connId);
         } else {
             log.atTrace()
-                .setMessage(
-                    () -> "No ChannelFuture for " + ctx + " in closeConnection.  " +
+                .setMessage("No ChannelFuture for {} in closeConnection.  " +
                         "The connection may have already been closed")
+                .addArgument(ctx)
                 .log();
         }
     }
@@ -127,24 +123,30 @@ public class ClientConnectionPool {
             .getChannelFutureInAnyState() // this could throw, especially if the even loop has begun to shut down
             .thenCompose(channelFuture -> {
                 if (channelFuture == null) {
-                    log.atTrace().setMessage(() ->
-                        "Couldn't find the channel for " + session.getChannelKeyContext() + " to close it.  " +
-                            "It may have already been reset.").log();
+                    log.atTrace().setMessage("Couldn't find the channel for {} to close it.  " +
+                            "It may have already been reset.")
+                        .addArgument(session::getChannelKeyContext)
+                        .log();
                     return TextTrackedFuture.completedFuture(null, () -> "");
                 }
-                log.atTrace().setMessage(() ->
-                    "closing channel " + channelFuture.channel() + "(" + session.getChannelKeyContext() + ")...").log();
+                log.atTrace().setMessage("closing channel {} ({})...")
+                    .addArgument(channelFuture::channel)
+                    .addArgument(session::getChannelKeyContext)
+                    .log();
 
                 return NettyFutureBinders.bindNettyFutureToTrackableFuture(
                         channelFuture.channel().close(), "calling channel.close()")
                     .thenApply(v -> {
-                        log.atTrace().setMessage(() ->
-                            "channel.close() has finished for " + session.getChannelKeyContext() + " with value=" + v).log();
+                        log.atTrace().setMessage("channel.close() has finished for {} with value={}")
+                            .addArgument(session::getChannelKeyContext)
+                            .addArgument(v)
+                            .log();
                         if (session.hasWorkRemaining()) {
-                            log.atWarn().setMessage(() ->
-                                "Work items are still remaining for this connection session" +
-                                    "(last associated with connection=" + session.getChannelKeyContext() + ").  "
-                                    + session.calculateSizeSlowly() + " requests that were enqueued won't be run").log();
+                            log.atWarn().setMessage("Work items are still remaining for this connection session " +
+                                    "(last associated with connection={}). {} requests that were enqueued won't be run")
+                                .addArgument(session::getChannelKeyContext)
+                                .addArgument(session::calculateSizeSlowly)
+                                .log();
                         }
                         session.schedule.clear();
                         return channelFuture.channel();

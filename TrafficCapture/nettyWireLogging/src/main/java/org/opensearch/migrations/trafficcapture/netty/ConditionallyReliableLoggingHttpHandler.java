@@ -41,17 +41,15 @@ public class ConditionallyReliableLoggingHttpHandler<T> extends LoggingHttpHandl
             ((IWireCaptureContexts.IRequestContext) messageContext).onBlockingRequest();
             messageContext = messageContext.createBlockingContext();
             trafficOffloader.flushCommitAndResetStream(false).whenComplete((result, t) -> {
-                log.atInfo().setMessage(() -> "Done flushing").log();
+                log.atInfo().setMessage("Done flushing").log();
 
                 if (t != null) {
                     // This is a spot where we would benefit from having a behavioral policy that different users
                     // could set as needed. Some users may be fine with just logging a failed offloading of a request
                     // where other users may want to stop entirely. JIRA here:
                     // https://opensearch.atlassian.net/browse/MIGRATIONS-1276
-                    log.atWarn()
-                        .setCause(t)
-                        .setMessage("Error offloading the request, but forwarding it to the service anyway")
-                        .log();
+                    log.atWarn().setCause(t)
+                        .setMessage("Error offloading the request, but forwarding it to the service anyway").log();
                     ReferenceCountUtil.release(msg);
                     messageContext.addCaughtException(t);
                 }

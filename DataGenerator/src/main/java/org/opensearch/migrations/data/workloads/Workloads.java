@@ -7,10 +7,10 @@ import lombok.Getter;
 
 @AllArgsConstructor
 public enum Workloads {
-    Geonames(Geonames::new),
-    HttpLogs(HttpLogs::new),
-    Nested(Nested::new),
-    NycTaxis(NycTaxis::new);
+    GEONAMES(Geonames::new),
+    HTTP_LOGS(HttpLogs::new),
+    NESTED(Nested::new),
+    NYC_TAXIS(NycTaxis::new);
 
     @Getter
     private Supplier<Workload> newInstance;

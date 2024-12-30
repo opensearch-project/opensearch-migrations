@@ -11,7 +11,7 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.HttpByteBufFormatter;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
-import org.opensearch.migrations.replay.util.TextTrackedFuture;
+import org.opensearch.migrations.utils.TextTrackedFuture;
 
 import io.netty.buffer.Unpooled;
 import org.junit.jupiter.api.Assertions;

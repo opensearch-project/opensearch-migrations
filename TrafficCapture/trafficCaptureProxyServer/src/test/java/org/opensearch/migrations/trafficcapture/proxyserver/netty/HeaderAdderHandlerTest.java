@@ -70,7 +70,7 @@ class HeaderAdderHandlerTest {
                 var endIdx = startIdx + len;
                 var substr = msg.substring(lastStart.get(), Math.min(endIdx, msg.length()));
                 lastStart.set(endIdx);
-                log.atTrace().setMessage(() -> "s: " + substr).log();
+                log.atTrace().setMessage("s: {}").addArgument(substr).log();
                 return substr;
             })
             .takeWhile(Objects::nonNull)

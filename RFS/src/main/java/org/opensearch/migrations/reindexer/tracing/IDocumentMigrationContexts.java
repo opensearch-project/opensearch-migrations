@@ -26,6 +26,8 @@ public interface IDocumentMigrationContexts {
         IWorkCoordinationContexts.ICompleteWorkItemContext createWorkCompletionContext();
 
         IAddShardWorkItemContext createShardWorkItemContext();
+
+        IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext createSuccessorWorkItemsContext();
     }
 
     interface IAddShardWorkItemContext extends IScopedInstrumentationAttributes {
@@ -42,5 +44,8 @@ public interface IDocumentMigrationContexts {
         IRfsContexts.IRequestContext createBulkRequest();
 
         IRfsContexts.IRequestContext createRefreshContext();
+
+        IWorkCoordinationContexts.ICreateSuccessorWorkItemsContext createSuccessorWorkItemsContext();
+
     }
 }

@@ -1,0 +1,21 @@
+{%- import "common/route.j2" as rscope -%}
+{%- import "typeMappings/preserveAll.j2" as preserve -%}
+{%- include "typeMappings/rewriteDocumentRequest.j2" -%}
+{%- include "typeMappings/rewriteBulkRequest.j2" -%}
+{%- include "typeMappings/rewriteCreateIndexRequest.j2" -%}
+
+
+{%- set source_and_mappings = {
+  'request': source_document,
+  'index_mappings': index_mappings,
+  'regex_index_mappings': regex_index_mappings,
+  'properties': source_properties}
+-%}
+{{- rscope.route(source_and_mappings, source_document.method + " " + source_document.URI, flags, 'preserve.make_keep_json',
+    [
+        ('(?:PUT|POST) /([^/]*)/([^/]*)/(.*)', 'rewrite_doc_request',  'rewrite_add_request_to_strip_types'),
+        (         'GET /((?!\\.\\.$)[^-_+\\p{Lu}\\\\/*?\\\"<>|,# ][^\\p{Lu}\\\\/*?\\\"<>|,# ]*)/((?!\\.\\.$)[^-_+\\p{Lu}\\\\/*?\\\"<>|,# ][^\\p{Lu}\\\\/*?\\\"<>|,# ]*)/([^/]+)$',  'rewrite_doc_request',  'rewrite_get_request_to_strip_types'),
+        ('(?:PUT|POST) /_bulk',                'rewrite_bulk',         'rewrite_bulk'),
+        ('(?:PUT|POST) /([^/]*)',              'rewrite_create_index', 'rewrite_create_index')
+  ])
+-}}

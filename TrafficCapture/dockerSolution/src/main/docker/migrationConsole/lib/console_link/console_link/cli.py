@@ -1,6 +1,7 @@
 import json
 from pprint import pprint
 import sys
+import time
 from typing import Dict
 import click
 import console_link.middleware.clusters as clusters_
@@ -13,6 +14,7 @@ import console_link.middleware.kafka as kafka_
 import console_link.middleware.tuples as tuples_
 
 from console_link.models.cluster import HttpMethod
+from console_link.models.backfill_rfs import RfsWorkersInProgress, WorkingIndexDoesntExist
 from console_link.models.utils import ExitCode
 from console_link.environment import Environment
 from console_link.models.metrics_source import Component, MetricStatistic
@@ -36,9 +38,7 @@ class Context(object):
 
 
 @click.group()
-@click.option(
-    "--config-file", default="/etc/migration_services.yaml", help="Path to config file"
-)
+@click.option("--config-file", default="/etc/migration_services.yaml", help="Path to config file")
 @click.option("--json", is_flag=True)
 @click.option('-v', '--verbose', count=True, help="Verbosity level. Default is warn, -v is info, -vv is debug.")
 @click.pass_context
@@ -294,6 +294,16 @@ def start_backfill_cmd(ctx, pipeline_name):
     click.echo(message)
 
 
+@backfill_group.command(name="pause")
+@click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
+@click.pass_obj
+def pause_backfill_cmd(ctx, pipeline_name):
+    exitcode, message = backfill_.pause(ctx.env.backfill, pipeline_name=pipeline_name)
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(message)
+
+
 @backfill_group.command(name="stop")
 @click.option('--pipeline-name', default=None, help='Optionally specify a pipeline name')
 @click.pass_obj
@@ -302,6 +312,22 @@ def stop_backfill_cmd(ctx, pipeline_name):
     if exitcode != ExitCode.SUCCESS:
         raise click.ClickException(message)
     click.echo(message)
+
+    click.echo("Archiving the working state of the backfill operation...")
+    exitcode, message = backfill_.archive(ctx.env.backfill)
+
+    if isinstance(message, WorkingIndexDoesntExist):
+        click.echo("Working state index doesn't exist, skipping archive operation.")
+        return
+
+    while isinstance(message, RfsWorkersInProgress):
+        click.echo("RFS Workers are still running, waiting for them to complete...")
+        time.sleep(5)
+        exitcode, message = backfill_.archive(ctx.env.backfill)
+
+    if exitcode != ExitCode.SUCCESS:
+        raise click.ClickException(message)
+    click.echo(f"Backfill working state archived to: {message}")
 
 
 @backfill_group.command(name="scale")

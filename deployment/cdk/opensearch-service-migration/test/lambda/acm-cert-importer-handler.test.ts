@@ -65,7 +65,6 @@ describe('ACM Certificate Importer Handler', () => {
 
     const mockCertificate = 'mockCertificate';
     const mockPrivateKey = 'mockPrivateKey';
-    const mockCertificateChain = 'mockCertificateChain';
     const mockCertificateArn = 'arn:aws:acm:us-west-2:123456789012:certificate/mock-certificate-id';
 
     (forge.pki.rsa.generateKeyPair as jest.Mock).mockReturnValue({

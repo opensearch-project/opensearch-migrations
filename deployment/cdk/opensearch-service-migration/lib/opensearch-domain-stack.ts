@@ -83,15 +83,16 @@ export class OpenSearchDomainStack extends Stack {
       })
   }
 
-  parseAccessPolicies(jsonObject: { [x: string]: any; }): PolicyStatement[] {
-    let accessPolicies: PolicyStatement[] = []
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  parseAccessPolicies(jsonObject: Record<string, any>): PolicyStatement[] {
+    const accessPolicies: PolicyStatement[] = []
     const statements = jsonObject['Statement']
     if (!statements || statements.length < 1) {
         throw new Error ("Provided accessPolicies JSON must have the 'Statement' element present and not be empty, for reference https://docs.aws.amazon.com/IAM/latest/UserGuide/reference_policies_elements_statement.html")
     }
     // Access policies can provide a single Statement block or an array of Statement blocks
     if (Array.isArray(statements)) {
-        for (let statementBlock of statements) {
+        for (const statementBlock of statements) {
             const statement = PolicyStatement.fromJson(statementBlock)
             accessPolicies.push(statement)
         }
@@ -121,7 +122,7 @@ export class OpenSearchDomainStack extends Stack {
   }
 
   generateTargetClusterYaml(domain: Domain, adminUserName: string | undefined, adminUserSecret: ISecret|undefined, version: EngineVersion) {
-    let clusterAuth = new ClusterAuth({});
+    const clusterAuth = new ClusterAuth({});
     if (adminUserName) {
       clusterAuth.basicAuth = new ClusterBasicAuth({ username: adminUserName, password_from_secret_arn: adminUserSecret?.secretArn })
     } else {

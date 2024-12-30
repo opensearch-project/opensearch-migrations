@@ -1,12 +1,13 @@
 package org.opensearch.migrations.bulkload.version_os_2_11;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 import org.opensearch.migrations.MigrationMode;
+import org.opensearch.migrations.bulkload.common.FilterScheme;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.metadata.CreationResult;
@@ -35,14 +36,13 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         log.info("Setting Global Metadata");
 
         var results = GlobalMetadataCreatorResults.builder();
-        GlobalMetadataData_OS_2_11 globalMetadata = new GlobalMetadataData_OS_2_11(root.toObjectNode());
-        results.legacyTemplates(createLegacyTemplates(globalMetadata, mode, context));
-        results.componentTemplates(createComponentTemplates(globalMetadata, mode, context));
-        results.indexTemplates(createIndexTemplates(globalMetadata, mode, context));
+        results.legacyTemplates(createLegacyTemplates(root, mode, context));
+        results.componentTemplates(createComponentTemplates(root, mode, context));
+        results.indexTemplates(createIndexTemplates(root, mode, context));
         return results.build();
     }
 
-    public List<CreationResult> createLegacyTemplates(GlobalMetadataData_OS_2_11 metadata, MigrationMode mode, IClusterMetadataContext context) {
+    public List<CreationResult> createLegacyTemplates(GlobalMetadata metadata, MigrationMode mode, IClusterMetadataContext context) {
         return createTemplates(
             metadata.getTemplates(),
             legacyTemplateAllowlist,
@@ -52,7 +52,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         );
     }
 
-    public List<CreationResult> createComponentTemplates(GlobalMetadataData_OS_2_11 metadata, MigrationMode mode, IClusterMetadataContext context) {
+    public List<CreationResult> createComponentTemplates(GlobalMetadata metadata, MigrationMode mode, IClusterMetadataContext context) {
         return createTemplates(
             metadata.getComponentTemplates(),
             componentTemplateAllowlist,
@@ -62,7 +62,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
         );
     }
 
-    public List<CreationResult> createIndexTemplates(GlobalMetadataData_OS_2_11 metadata, MigrationMode mode, IClusterMetadataContext context) {
+    public List<CreationResult> createIndexTemplates(GlobalMetadata metadata, MigrationMode mode, IClusterMetadataContext context) {
         return createTemplates(
             metadata.getIndexTemplates(),
             indexTemplateAllowlist,
@@ -73,7 +73,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
     }
 
     @AllArgsConstructor
-    private enum TemplateTypes {
+    enum TemplateTypes {
         INDEX_TEMPLATE(
             (targetClient, name, body, context) -> targetClient.createIndexTemplate(name, body, context.createMigrateTemplateContext()),
             (targetClient, name) -> targetClient.hasIndexTemplate(name)
@@ -118,34 +118,18 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
             return List.of();
         }
 
-        if (templateAllowlist != null && templateAllowlist.isEmpty()) {
-            log.info("No {} in specified allowlist", templateType);
-            return List.of();
-        }
+        var templatesToCreate = getAllTemplates(templates);
 
-        var templatesToCreate = getTemplatesToCreate(templates, templateAllowlist, templateType);
-
-        return processTemplateCreation(templatesToCreate, templateType, mode, context);
+        return processTemplateCreation(templatesToCreate, templateType, templateAllowlist, mode, context);
     }
 
-    private Map<String, ObjectNode> getTemplatesToCreate(ObjectNode templates, List<String> templateAllowlist, TemplateTypes templateType) {
+    Map<String, ObjectNode> getAllTemplates(ObjectNode templates) {
         var templatesToCreate = new HashMap<String, ObjectNode>();
 
-        if (templateAllowlist != null) {
-            for (String templateName : templateAllowlist) {
-                if (!templates.has(templateName) || templates.get(templateName) == null) {
-                    log.warn("{} not found: {}", templateType, templateName);
-                    continue;
-                }
-                ObjectNode settings = (ObjectNode) templates.get(templateName);
-                templatesToCreate.put(templateName, settings);
-            }
-        } else {
-            templates.fieldNames().forEachRemaining(templateName -> {
-                ObjectNode settings = (ObjectNode) templates.get(templateName);
-                templatesToCreate.put(templateName, settings);
-            });
-        }
+        templates.fieldNames().forEachRemaining(templateName -> {
+            ObjectNode settings = (ObjectNode) templates.get(templateName);
+            templatesToCreate.put(templateName, settings);
+        });
 
         return templatesToCreate;
     }
@@ -153,14 +137,22 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
     private List<CreationResult> processTemplateCreation(
             Map<String, ObjectNode> templatesToCreate,
             TemplateTypes templateType,
+            List<String> templateAllowList,
             MigrationMode mode,
             IClusterMetadataContext context
         ) {
+        var skipCreation = FilterScheme.filterByAllowList(templateAllowList).negate();
 
-        List<CreationResult> templateList = new ArrayList<>();
-
-        templatesToCreate.forEach((templateName, templateBody) -> {
+        return templatesToCreate.entrySet().stream().map(kvp -> {
+            var templateName = kvp.getKey();
+            var templateBody = kvp.getValue();
             var creationResult = CreationResult.builder().name(templateName);
+
+            if (skipCreation.test(templateName)) {
+                log.atInfo().setMessage("Template {} was skipped due to allowlist filter {}").addArgument(templateName).addArgument(templateAllowList).log();
+                return creationResult.failureType(CreationFailureType.SKIPPED_DUE_TO_FILTER).build();
+            }
+
             log.info("Creating {}: {}", templateType, templateName);
             try {
                 if (mode == MigrationMode.SIMULATE) {
@@ -179,9 +171,7 @@ public class GlobalMetadataCreator_OS_2_11 implements GlobalMetadataCreator {
                 creationResult.failureType(CreationFailureType.TARGET_CLUSTER_FAILURE);
                 creationResult.exception(e);
             }
-            templateList.add(creationResult.build());
-        });
-
-        return templateList;
+            return creationResult.build();
+        }).collect(Collectors.toList());
     }
 }

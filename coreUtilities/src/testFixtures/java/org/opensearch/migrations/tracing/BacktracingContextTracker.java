@@ -34,11 +34,8 @@ public class BacktracingContextTracker implements IContextTracker, AutoCloseable
             if (priorValue != null) {
                 var priorKey = scopedContextToCallDetails.entrySet().stream().findFirst().get().getKey();
                 if (priorKey.equals(ctx)) {
-                    log.atError()
-                        .setMessage(
-                            () -> "Trying to re-add the same context (" + ctx + ") back into this context tracker"
-                        )
-                        .log();
+                    log.atError().setMessage("Trying to re-add the same context ({}) back into this context tracker")
+                        .addArgument(ctx).log();
                 }
             }
             assert priorValue == null;
@@ -55,8 +52,8 @@ public class BacktracingContextTracker implements IContextTracker, AutoCloseable
             assert oldCallDetails != null;
             final var oldE = oldCallDetails.closeStackException;
             if (oldE != null) {
-                log.atError().setCause(newExceptionStack).setMessage(() -> "Close is being called here").log();
-                log.atError().setCause(oldE).setMessage(() -> "... but close was already called here").log();
+                log.atError().setCause(newExceptionStack).setMessage("Close is being called here").log();
+                log.atError().setCause(oldE).setMessage("... but close was already called here").log();
                 assert oldE == null;
             }
             oldCallDetails.closeStackException = new ExceptionForStackTracingOnly();

@@ -1,0 +1,97 @@
+{%- import "typeMappings/makeNoop.j2" as noop -%}
+{%- import "typeMappings/preserveAll.j2" as preserve -%}
+
+{%- macro rewrite_create_index_as_unioned_excise(source_index_name, target_index_name, input_map) -%}
+    {%- set source_input_types = input_map.index_mappings[source_index_name] -%}
+    {%- set source_type_name = source_input_types.keys() | first() -%}
+    {
+        "preserveWhenMissing": "*",
+        "method": "{{ input_map.request.method }}",
+        "URI": "/{{ target_index_name }}",
+        "payload": {
+            "inlinedJsonBody": {
+                {%- for key, value in input_map.request.payload.inlinedJsonBody.items() -%}
+                    {%- if key != "mappings" -%}
+                        "{{ key }}": {{ value | tojson }},
+                    {%- endif -%}
+                {%- endfor -%}
+                "mappings": {
+                    "properties": {
+                        {%- set ns = namespace(combined_props={"type": "keyword"}) -%}
+                        {%- for source_type_name in source_input_types.keys() -%}
+                            {%- set type_props = input_map.request.payload.inlinedJsonBody.mappings.get(source_type_name) -%}
+                            {%- for prop_name, prop_def in type_props.properties.items() -%}
+                                {%- if prop_name in ns.combined_props -%}
+                                    {%- if ns.combined_props[prop_name] != prop_def -%}
+                                        {%- throw "Conflicting definitions for property {{ prop_name }} ({{ ns.combined_props[prop_name] }} and {{ prop_def }})" -%}
+                                    {%- endif -%}
+                                {%- else -%}
+                                    {%- set body = prop_def | tojson -%}
+                                    {%- set jsonblob = ("{\"" + prop_name + "\":" + body + "}") | fromjson -%}
+                                    {%- set ns.combined_props = ns.combined_props + jsonblob -%}
+                                {%- endif -%}
+                            {%- endfor -%}
+                        {%- endfor -%}
+
+                        {%- for prop_name, prop_def in ns.combined_props.items() -%}
+                            "{{- prop_name -}}": {{- prop_def | tojson -}},
+                        {%- endfor -%}
+
+                        "type": { "type": "keyword" }
+                    }
+                }
+            }
+        }
+    }
+{%- endmacro -%}
+
+{%- macro uses_type_names(input_map) -%}
+    {%- set uri_flag_match = input_map.request.URI | regex_capture("[?&]include_type_name=([^&#]*)") -%}
+    {%- if uri_flag_match -%}
+        {{- uri_flag_match.group1 | lower -}}
+    {%- else -%}
+        {%- set major_version = ((input_map.properties |  default({})).version |  default({})).major -%}
+        {%- if major_version >= 7-%}
+            false
+        {%- elif major_version <= 6  -%}
+            true
+        {%- else -%}
+            {%- throw "include_type_name was not set on the incoming URI." +
+                    "The template needs to know what version the original request was targeted for " +
+                    "in order to properly understand the semantics and what was intended.  " +
+                    "Without that, this transformation cannot map the request " +
+                    "to an unambiguous request for the target" -%}
+        {%- endif -%}
+    {%- endif -%}
+{%- endmacro -%}
+
+{%- macro rewrite_create_index(match, input_map) -%}
+    {%- set orig_mappings = input_map.request.payload.inlinedJsonBody.mappings -%}
+
+    {%- if orig_mappings and uses_type_names(input_map).trim() == 'true' -%}
+        {%- set source_index_name = match.group1 | regex_replace("[?].*", "") -%}
+
+        {%- set ns = namespace(accum_target_indices=[]) -%}
+        {%- for source_type, mapping in orig_mappings.items() -%}
+            {%- set target_index = convert_source_index_to_target(source_index_name, source_type,
+                                                                input_map.index_mappings,
+                                                                input_map.regex_index_mappings) | trim -%}
+            {%- if target_index -%}
+                {%- set ns.accum_target_indices = ns.accum_target_indices + [target_index] -%}
+            {%- endif -%}
+        {%- endfor -%}
+
+        {%- set target_indices = ns.accum_target_indices | unique() -%}
+        {%- set num_target_mappings = target_indices | length -%}
+        {%- if num_target_mappings == 0 -%}
+            {{-  noop.make_request() -}}
+        {%- elif num_target_mappings == 1 -%}
+            {{- rewrite_create_index_as_unioned_excise(source_index_name, (target_indices | first), input_map) -}}
+        {%- else -%}
+            {%- throw "Cannot specify multiple indices to create with a single request and cannot yet " +
+                    "represent multiple requests with the request format." -%}
+        {%- endif -%}
+    {%- else -%}
+        {{- preserve.make_keep_json() -}}
+    {%- endif -%}
+{%- endmacro -%}

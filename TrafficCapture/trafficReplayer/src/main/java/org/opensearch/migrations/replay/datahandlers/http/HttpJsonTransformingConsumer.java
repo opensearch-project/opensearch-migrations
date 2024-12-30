@@ -11,10 +11,10 @@ import org.opensearch.migrations.replay.datahandlers.IPacketFinalizingConsumer;
 import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatus;
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.util.TextTrackedFuture;
-import org.opensearch.migrations.replay.util.TrackedFuture;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.utils.TextTrackedFuture;
+import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.embedded.EmbeddedChannel;
@@ -98,14 +98,9 @@ public class HttpJsonTransformingConsumer<R> implements IPacketFinalizingConsume
     public TrackedFuture<String, Void> consumeBytes(ByteBuf nextRequestPacket) {
         chunks.add(nextRequestPacket.retainedDuplicate());
         chunkSizes.get(chunkSizes.size() - 1).add(nextRequestPacket.readableBytes());
-        log.atTrace()
-            .setMessage("{}")
-            .addArgument(
-                () -> "HttpJsonTransformingConsumer["
-                    + this
-                    + "]: writing into embedded channel: "
-                    + nextRequestPacket.toString(StandardCharsets.UTF_8)
-            )
+        log.atTrace().setMessage("HttpJsonTransformingConsumer[{}]: writing into embedded channel: {}")
+            .addArgument(this)
+            .addArgument(() -> nextRequestPacket.toString(StandardCharsets.UTF_8))
             .log();
         return TextTrackedFuture.completedFuture(null, () -> "initialValue")
             .map(

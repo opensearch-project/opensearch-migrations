@@ -38,4 +38,13 @@ public class VersionTest {
         assertThat(Version.fromString("OpenSearch 1.x"), equalTo(expected));
         assertThat(Version.fromString("OpenSearch  1"), equalTo(expected));
     }
+
+    @Test
+    void parseAllPossibleNames() throws ParseException {
+        for (var testCase : Flavor.values()) {
+            var expected = Version.builder().flavor(testCase).major(4).build();
+            assertThat(Version.fromString(testCase.shorthand + " 4.0.0") , equalTo(expected));
+            assertThat(Version.fromString(testCase.name() + " 4.0.0") , equalTo(expected));
+        }
+    }
 }

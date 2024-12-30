@@ -22,13 +22,13 @@ import org.opensearch.migrations.replay.SourceTargetCaptureTuple;
 import org.opensearch.migrations.replay.TimeShifter;
 import org.opensearch.migrations.replay.TrafficReplayer;
 import org.opensearch.migrations.replay.TrafficReplayerTopLevel;
-import org.opensearch.migrations.replay.TransformationLoader;
 import org.opensearch.migrations.replay.datatypes.ISourceTrafficChannelKey;
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.ISimpleTrafficCaptureSource;
 import org.opensearch.migrations.tracing.TestContext;
 import org.opensearch.migrations.transform.StaticAuthTransformerFactory;
+import org.opensearch.migrations.transform.TransformationLoader;
 
 import com.google.common.base.Strings;
 import lombok.AllArgsConstructor;
@@ -142,15 +142,12 @@ public class TrafficReplayerRunner {
             } catch (TrafficReplayer.TerminationException e) {
                 log.atLevel(e.originalCause instanceof FabricatedErrorToKillTheReplayer ? Level.INFO : Level.ERROR)
                     .setCause(e.originalCause)
-                    .setMessage(() -> "broke out of the replayer, with this shutdown reason")
+                    .setMessage("broke out of the replayer, with this shutdown reason")
                     .log();
                 log.atLevel(e.immediateCause == null ? Level.INFO : Level.ERROR)
                     .setCause(e.immediateCause)
-                    .setMessage(
-                        () -> "broke out of the replayer, with the shutdown cause="
-                            + e.originalCause
-                            + " and this immediate reason"
-                    )
+                    .setMessage("broke out of the replayer, with the shutdown cause={} and this immediate reason")
+                    .addArgument(e.originalCause)
                     .log();
                 FabricatedErrorToKillTheReplayer killSignalError =
                     e.originalCause instanceof FabricatedErrorToKillTheReplayer
@@ -187,25 +184,22 @@ public class TrafficReplayerRunner {
             }
         }
         log.atInfo()
-            .setMessage(() -> "completely received request keys=\n{}")
-            .addArgument(completelyHandledItems.keySet().stream().sorted().collect(Collectors.joining("\n")))
+            .setMessage("completely received request keys=\n{}")
+            .addArgument(() -> completelyHandledItems.keySet().stream().sorted().collect(Collectors.joining("\n")))
             .log();
         var skippedPerRun = IntStream.range(0, receivedPerRun.size())
             .map(i -> totalUniqueEverReceivedSizeAfterEachRun.get(i) - receivedPerRun.get(i))
             .toArray();
-        log.atInfo()
-            .setMessage(
-                () -> "Summary: (run #, uniqueSoFar, receivedThisRun, skipped)\n"
-                    + IntStream.range(0, receivedPerRun.size())
-                        .mapToObj(
-                            i -> new StringJoiner(", ").add("" + i)
-                                .add("" + totalUniqueEverReceivedSizeAfterEachRun.get(i))
-                                .add("" + receivedPerRun.get(i))
-                                .add("" + skippedPerRun[i])
-                                .toString()
-                        )
-                        .collect(Collectors.joining("\n"))
-            )
+        log.atInfo().setMessage("Summary: (run #, uniqueSoFar, receivedThisRun, skipped)\n{}")
+            .addArgument(() -> IntStream.range(0, receivedPerRun.size())
+                .mapToObj(
+                    i -> new StringJoiner(", ").add("" + i)
+                        .add("" + totalUniqueEverReceivedSizeAfterEachRun.get(i))
+                        .add("" + receivedPerRun.get(i))
+                        .add("" + skippedPerRun[i])
+                        .toString()
+                )
+                .collect(Collectors.joining("\n")))
             .log();
         var skippedPerRunDiffs = IntStream.range(0, receivedPerRun.size() - 1)
             .map(i -> (skippedPerRun[i] <= skippedPerRun[i + 1]) ? 1 : 0)

@@ -1,5 +1,6 @@
-from typing import Any, Dict, Optional
+from typing import Any, Dict, Generator, Optional
 from enum import Enum
+import json
 import logging
 import subprocess
 
@@ -189,12 +190,79 @@ class Cluster:
             raise NotImplementedError(f"Auth type {self.auth_type} is not currently support for executing "
                                       f"benchmark workloads")
         # Note -- we should censor the password when logging this command
-        logger.info(f"Running opensearch-benchmark with '{workload}' workload")
-        command = (f"opensearch-benchmark execute-test --distribution-version=1.0.0 --target-host={self.endpoint} "
-                   f"--workload={workload} --pipeline=benchmark-only --test-mode --kill-running-processes "
-                   f"--workload-params={workload_params} --client-options={client_options}")
-        # While a little wordier, this apprach prevents us from censoring the password if it appears in other contexts,
+        # Fix commit used for OSB on latest verified working commit
+        workload_revision = "fc64258a9b2ed2451423d7758ca1c5880626c520"
+        logger.info(f"Running opensearch-benchmark with '{workload}' workload and revision '{workload_revision}'")
+        command = (f"opensearch-benchmark execute-test --distribution-version=1.0.0 "
+                   f"--exclude-tasks=check-cluster-health "
+                   f"--workload-revision={workload_revision} "
+                   f"--target-host={self.endpoint} "
+                   f"--workload={workload} "
+                   f"--pipeline=benchmark-only "
+                   "--test-mode --kill-running-processes "
+                   f"--workload-params={workload_params} "
+                   f"--client-options={client_options}")
+        # While a little wordier, this approach prevents us from censoring the password if it appears in other contexts,
         # e.g. username:admin,password:admin.
         display_command = command.replace(f"basic_auth_password:{password_to_censor}", "basic_auth_password:********")
         logger.info(f"Executing command: {display_command}")
         subprocess.run(command, shell=True)
+
+    def fetch_all_documents(self, index_name: str, batch_size: int = 100) -> Generator[Dict[str, Any], None, None]:
+        """
+        Generator that fetches all documents from the specified index in batches
+        """
+
+        session = requests.Session()
+
+        # Step 1: Initiate the scroll
+        path = f"/{index_name}/_search?scroll=1m"
+        headers = {'Content-Type': 'application/json'}
+        body = json.dumps({"size": batch_size, "query": {"match_all": {}}})
+        response = self.call_api(
+            path=path,
+            method=HttpMethod.POST,
+            data=body,
+            headers=headers,
+            session=session
+        )
+
+        response_json = response.json()
+        scroll_id = response_json.get('_scroll_id')
+        hits = response_json.get('hits', {}).get('hits', [])
+
+        # Yield the first batch of documents
+        if hits:
+            yield {hit['_id']: hit['_source'] for hit in hits}
+
+        # Step 2: Continue scrolling until no more documents
+        while scroll_id and hits:
+            path = "/_search/scroll"
+            body = json.dumps({"scroll": "1m", "scroll_id": scroll_id})
+            response = self.call_api(
+                path=path,
+                method=HttpMethod.POST,
+                data=body,
+                headers=headers,
+                session=session
+            )
+
+            response_json = response.json()
+            scroll_id = response_json.get('_scroll_id')
+            hits = response_json.get('hits', {}).get('hits', [])
+
+            if hits:
+                yield {hit['_id']: hit['_source'] for hit in hits}
+
+        # Step 3: Cleanup the scroll if necessary
+        if scroll_id:
+            path = "/_search/scroll"
+            body = json.dumps({"scroll_id": scroll_id})
+            self.call_api(
+                path=path,
+                method=HttpMethod.DELETE,
+                data=body,
+                headers=headers,
+                session=session,
+                raise_error=False
+            )

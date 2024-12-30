@@ -13,6 +13,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.replay.datatypes.UniqueSourceRequestKey;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.transform.TransformationLoader;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import io.netty.buffer.ByteBuf;
@@ -136,19 +137,17 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
      */
     public void accept(SourceTargetCaptureTuple tuple, ParsedHttpMessagesAsDicts parsedMessages) {
         final var index = tupleCounter.getAndIncrement();
-        progressLogger.atInfo()
-            .setMessage("{}")
-            .addArgument(() -> toTransactionSummaryString(index, tuple, parsedMessages))
-            .log();
+        progressLogger.atInfo().setMessage("{}")
+            .addArgument(() -> toTransactionSummaryString(index, tuple, parsedMessages)).log();
         if (tupleLogger.isInfoEnabled()) {
             try {
                 var originalTuple = toJSONObject(tuple, parsedMessages);
-                var transformedTuple = tupleTransformer.transformJson(originalTuple);
+                Object transformedTuple = tupleTransformer.transformJson(originalTuple);
                 var tupleString = PLAIN_MAPPER.writeValueAsString(transformedTuple);
-                tupleLogger.atInfo().setMessage("{}").addArgument(() -> tupleString).log();
+                tupleLogger.atInfo().setMessage("{}").addArgument(tupleString).log();
             } catch (Exception e) {
-                log.atError().setMessage("Exception converting tuple to string").setCause(e).log();
-                tupleLogger.atInfo().setMessage("{}").addArgument("{ \"error\":\"" + e.getMessage() + "\" }").log();
+                log.atError().setCause(e).setMessage("Exception converting tuple to string").log();
+                tupleLogger.atInfo().setMessage("{ \"error\":\"{}\" }").addArgument(e::getMessage).log();
                 throw Lombok.sneakyThrow(e);
             }
         }
@@ -162,6 +161,8 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
             .add("SOURCE_STATUS_CODE/TARGET_STATUS_CODE...")
             .add("SOURCE_RESPONSE_SIZE_BYTES/TARGET_RESPONSE_SIZE_BYTES...")
             .add("SOURCE_LATENCY_MS/TARGET_LATENCY_MS...")
+            .add("METHOD...")
+            .add("URI...")
             .toString();
     }
 
@@ -219,6 +220,16 @@ public class ResultsToLogsConsumer implements BiConsumer<SourceTargetCaptureTupl
                     transformStreamToString(parsed.targetResponseList.stream(),
                         r -> "" + r.get(ParsedHttpMessagesAsDicts.RESPONSE_TIME_MS_KEY))
             )
+            // method
+            .add(
+                parsed.sourceRequestOp
+                    .map(r -> (String) r.get(ParsedHttpMessagesAsDicts.METHOD_KEY))
+                    .orElse(MISSING_STR))
+            // uri
+            .add(
+                parsed.sourceRequestOp
+                    .map(r -> (String) r.get(ParsedHttpMessagesAsDicts.REQUEST_URI_KEY))
+                    .orElse(MISSING_STR))
             .toString();
     }
 

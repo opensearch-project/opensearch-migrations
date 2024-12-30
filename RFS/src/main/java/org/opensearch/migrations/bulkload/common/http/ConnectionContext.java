@@ -28,6 +28,7 @@ public class ConnectionContext {
     private final boolean insecure;
     private final RequestTransformer requestTransformer;
     private final boolean compressionSupported;
+    private final boolean awsSpecificAuthentication;
 
     private ConnectionContext(IParams params) {
         assert params.getHost() != null : "host is null";
@@ -61,6 +62,7 @@ public class ConnectionContext {
         if (basicAuthEnabled && sigv4Enabled) {
             throw new IllegalArgumentException("Cannot have both Basic Auth and SigV4 Auth enabled.");
         }
+        awsSpecificAuthentication = sigv4Enabled;
 
         if (basicAuthEnabled) {
             requestTransformer = new BasicAuthTransformer(params.getUsername(), params.getPassword());

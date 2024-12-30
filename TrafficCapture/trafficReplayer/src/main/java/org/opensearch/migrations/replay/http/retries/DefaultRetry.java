@@ -8,8 +8,8 @@ import org.opensearch.migrations.replay.AggregatedRawResponse;
 import org.opensearch.migrations.replay.HttpByteBufFormatter;
 import org.opensearch.migrations.replay.IRequestResponsePacketPair;
 import org.opensearch.migrations.replay.RequestSenderOrchestrator;
-import org.opensearch.migrations.replay.util.TextTrackedFuture;
-import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.utils.TextTrackedFuture;
+import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.handler.codec.http.HttpResponse;

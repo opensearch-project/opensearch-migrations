@@ -2,7 +2,6 @@ import {StackPropsExt} from "../stack-composer";
 import {IVpc, SecurityGroup} from "aws-cdk-lib/aws-ec2";
 import {CpuArchitecture, PortMapping, Protocol} from "aws-cdk-lib/aws-ecs";
 import {Construct} from "constructs";
-import {join} from "path";
 import {Effect, PolicyStatement, Role, ServicePrincipal} from "aws-cdk-lib/aws-iam";
 import {
     createMigrationStringParameter,
@@ -133,7 +132,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
     constructor(scope: Construct, id: string, props: MigrationConsoleProps) {
         super(scope, id, props)
 
-        let securityGroups = [
+        const securityGroups = [
             { id: "serviceSG", param: MigrationSSMParameter.SERVICE_SECURITY_GROUP_ID },
             { id: "trafficStreamSourceAccessSG", param: MigrationSSMParameter.TRAFFIC_STREAM_SOURCE_ACCESS_SECURITY_GROUP_ID },
             { id: "defaultDomainAccessSG", param: MigrationSSMParameter.OS_ACCESS_SECURITY_GROUP_ID },
@@ -240,7 +239,7 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             getSecretAccessPolicy(props.sourceCluster?.auth.basicAuth?.password_from_secret_arn) : null;
 
         // Upload the services.yaml file to Parameter Store
-        let servicesYaml = props.servicesYaml
+        const servicesYaml = props.servicesYaml
         servicesYaml.source_cluster = props.sourceCluster
         servicesYaml.metadata_migration = new MetadataMigrationYaml();
         servicesYaml.metadata_migration.source_cluster_version = props.sourceCluster?.version
@@ -254,19 +253,10 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             }
         }
 
-        const parameter = createMigrationStringParameter(this, servicesYaml.stringify(), {
-            ...props,
-            parameter: MigrationSSMParameter.SERVICES_YAML_FILE,
+        const serviceTaskRole = new Role(this, 'MigrationServiceTaskRole', {
+            assumedBy: new ServicePrincipal('ecs-tasks.amazonaws.com'),
+            description: 'Role for Migration Console ECS Tasks',
         });
-        const environment: { [key: string]: string; } = {
-            "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
-            "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints,
-            "MIGRATION_STAGE": props.stage,
-            "MIGRATION_SOLUTION_VERSION": props.migrationsSolutionVersion,
-            "MIGRATION_SERVICES_YAML_PARAMETER": parameter.parameterName,
-            "MIGRATION_SERVICES_YAML_HASH": hashStringSHA256(servicesYaml.stringify()),
-            "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/migration-console-${props.defaultDeployId}`,
-        }
 
         const openSearchPolicy = createOpenSearchIAMAccessPolicy(this.partition, this.region, this.account)
         const openSearchServerlessPolicy = createOpenSearchServerlessIAMAccessPolicy(this.partition, this.region, this.account)
@@ -276,10 +266,35 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             ...(getTargetSecretsPolicy ? [getTargetSecretsPolicy] : []),
             ...(getSourceSecretsPolicy ? [getSourceSecretsPolicy] : [])
         ]
+
         if (props.streamingSourceType === StreamingSourceType.AWS_MSK) {
             const mskAdminPolicies = this.createMSKAdminIAMPolicies(props.stage, props.defaultDeployId)
             servicePolicies = servicePolicies.concat(mskAdminPolicies)
         }
+
+        if (props.managedServiceSourceSnapshotEnabled &&
+            servicesYaml.snapshot &&
+            servicesYaml.snapshot.s3) {
+            servicesYaml.snapshot.s3.role =
+                createSnapshotOnAOSRole(this, artifactS3Arn, serviceTaskRole.roleArn,
+                    this.region, props.stage, props.defaultDeployId)
+                    .roleArn;
+        }
+
+        const parameter = createMigrationStringParameter(this, servicesYaml.stringify(), {
+            ...props,
+            parameter: MigrationSSMParameter.SERVICES_YAML_FILE,
+        });
+        const environment: Record<string, string> = {
+            "MIGRATION_DOMAIN_ENDPOINT": osClusterEndpoint,
+            "MIGRATION_KAFKA_BROKER_ENDPOINTS": brokerEndpoints,
+            "MIGRATION_STAGE": props.stage,
+            "MIGRATION_SOLUTION_VERSION": props.migrationsSolutionVersion,
+            "MIGRATION_SERVICES_YAML_PARAMETER": parameter.parameterName,
+            "MIGRATION_SERVICES_YAML_HASH": hashStringSHA256(servicesYaml.stringify()),
+            "SHARED_LOGS_DIR_PATH": `${sharedLogFileSystem.mountPointPath}/migration-console-${props.defaultDeployId}`,
+        }
+
 
         if (props.migrationAPIEnabled) {
             servicePortMappings = [{
@@ -320,16 +335,13 @@ export class MigrationConsoleStack extends MigrationServiceCore {
             volumes: [sharedLogFileSystem.asVolume()],
             mountPoints: [sharedLogFileSystem.asMountPoint()],
             environment: environment,
+            taskRole: serviceTaskRole,
             taskRolePolicies: servicePolicies,
             cpuArchitecture: props.fargateCpuArch,
-            taskCpuUnits: 1024,
-            taskMemoryLimitMiB: 2048,
+            taskCpuUnits: 2048,
+            taskMemoryLimitMiB: 4096,
             ...props
         });
-
-        if (props.managedServiceSourceSnapshotEnabled) {
-            const snapshotRole = createSnapshotOnAOSRole(this, artifactS3Arn, this.serviceTaskRole.roleArn, this.region, props.stage, props.defaultDeployId);
-        }
     }
 
 }

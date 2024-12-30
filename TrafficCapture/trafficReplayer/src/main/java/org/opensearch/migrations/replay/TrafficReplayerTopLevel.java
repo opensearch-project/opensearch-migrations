@@ -23,10 +23,10 @@ import org.opensearch.migrations.replay.http.retries.RetryCollectingVisitorFacto
 import org.opensearch.migrations.replay.tracing.IRootReplayerContext;
 import org.opensearch.migrations.replay.traffic.source.BlockingTrafficSource;
 import org.opensearch.migrations.replay.traffic.source.TrafficStreamLimiter;
-import org.opensearch.migrations.replay.util.TextTrackedFuture;
-import org.opensearch.migrations.replay.util.TrackedFuture;
 import org.opensearch.migrations.transform.IAuthTransformerFactory;
 import org.opensearch.migrations.transform.IJsonTransformer;
+import org.opensearch.migrations.utils.TextTrackedFuture;
+import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.handler.ssl.SslContext;
 import io.netty.handler.ssl.SslContextBuilder;
@@ -203,20 +203,18 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 waitForRemainingWork(logLevel, timeout);
                 break;
             } catch (TimeoutException e) {
-                log.atLevel(logLevel).log("Timed out while waiting for the remaining " + "requests to be finalized...");
+                log.atLevel(logLevel).log("Timed out while waiting for the remaining requests to be finalized...");
                 logLevel = secondaryLogLevel;
             }
         }
         if (!requestWorkTracker.isEmpty() || exceptionRequestCount.get() > 0) {
             log.atWarn()
-                .setMessage(
-                    "{} in-flight requests being dropped due to pending shutdown; "
-                        + "{} requests to the target threw an exception; "
-                        + "{} requests were successfully processed."
-                )
-                .addArgument(requestWorkTracker.size())
-                .addArgument(exceptionRequestCount.get())
-                .addArgument(successfulRequestCount.get())
+                .setMessage("{} in-flight requests being dropped due to pending shutdown; "
+                    + "{} requests to the target threw an exception; "
+                    + "{} requests were successfully processed.")
+                .addArgument(requestWorkTracker::size)
+                .addArgument(exceptionRequestCount::get)
+                .addArgument(successfulRequestCount::get)
                 .log();
         } else {
             log.info(successfulRequestCount.get() + " requests were successfully processed.");
@@ -325,10 +323,8 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
                 throw e;
             }
         } catch (Error t) {
-            log.atError()
-                .setCause(t)
-                .setMessage(() -> "Not waiting for all work to finish.  " + "The TrafficReplayer is shutting down")
-                .log();
+            log.atError().setCause(t)
+                .setMessage("Not waiting for all work to finish.  The TrafficReplayer is shutting down").log();
             throw t;
         }
     }
@@ -339,21 +335,21 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             UniqueReplayerRequestKey,
             TrackedFuture<String, TransformedTargetRequestAndResponseList>>[] allRemainingWorkArray
     ) {
-        log.atLevel(logLevel).log("All remaining work to wait on " + allRemainingWorkArray.length);
+        log.atLevel(logLevel).setMessage("All remaining work to wait on {}")
+            .addArgument(allRemainingWorkArray.length).log();
         if (log.isInfoEnabled()) {
             LoggingEventBuilder loggingEventBuilderToUse = log.isTraceEnabled() ? log.atTrace() : log.atInfo();
             long itemLimit = log.isTraceEnabled() ? Long.MAX_VALUE : MAX_ITEMS_TO_SHOW_FOR_LEFTOVER_WORK_AT_INFO_LEVEL;
-            loggingEventBuilderToUse.setMessage(
-                () -> " items: "
-                    + Arrays.stream(allRemainingWorkArray)
-                        .map(
-                            kvp -> kvp.getKey()
-                                + " --> "
-                                + kvp.getValue().formatAsString(TrafficReplayerTopLevel::formatWorkItem)
-                        )
-                        .limit(itemLimit)
-                        .collect(Collectors.joining("\n"))
-            ).log();
+            loggingEventBuilderToUse.setMessage(" items: {}")
+                .addArgument(() -> Arrays.stream(allRemainingWorkArray)
+                    .map(
+                        kvp -> kvp.getKey()
+                            + " --> "
+                            + kvp.getValue().formatAsString(TrafficReplayerTopLevel::formatWorkItem)
+                    )
+                    .limit(itemLimit)
+                    .collect(Collectors.joining("\n")))
+            .log();
         }
     }
 
@@ -380,14 +376,11 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
     @SneakyThrows
     @Override
     public @NonNull CompletableFuture<Void> shutdown(Error error) {
-        log.atWarn().setCause(error).setMessage(() -> "Shutting down " + this).log();
+        log.atWarn().setCause(error).setMessage("Shutting down {}").addArgument(this).log();
         shutdownReasonRef.compareAndSet(null, error);
         if (!shutdownFutureRef.compareAndSet(null, new CompletableFuture<>())) {
-            log.atError()
-                .setMessage(
-                    () -> "Shutdown was already signaled by {}.  " + "Ignoring this shutdown request due to {}."
-                )
-                .addArgument(shutdownReasonRef.get())
+            log.atError().setMessage("Shutdown was already signaled by {}.  Ignoring this shutdown request due to {}.")
+                .addArgument(shutdownReasonRef::get)
                 .addArgument(error)
                 .log();
             return shutdownFutureRef.get();
@@ -416,7 +409,7 @@ public class TrafficReplayerTopLevel extends TrafficReplayerCore implements Auto
             }
         }
         var shutdownFuture = shutdownFutureRef.get();
-        log.atWarn().setMessage(() -> "Shutdown setup has been initiated").log();
+        log.atWarn().setMessage("Shutdown setup has been initiated").log();
         return shutdownFuture;
     }
 

@@ -35,6 +35,7 @@ import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordin
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
 import org.opensearch.migrations.cluster.ClusterProviderRegistry;
 import org.opensearch.migrations.reindexer.tracing.DocumentMigrationTestContext;
+import org.opensearch.migrations.transform.TransformationLoader;
 
 import lombok.AllArgsConstructor;
 import lombok.Lombok;
@@ -53,10 +54,10 @@ public class SourceTestBase {
     public static final long TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS = 3600;
 
     protected static Object[] makeParamsForBase(SearchClusterContainer.ContainerVersion baseSourceImage) {
-        return new Object[] {
+        return new Object[]{
             baseSourceImage,
             GENERATOR_BASE_IMAGE,
-            new String[] { "/root/runTestBenchmarks.sh", "--endpoint", "http://" + SOURCE_SERVER_ALIAS + ":9200/" } };
+            new String[]{"/root/runTestBenchmarks.sh", "--endpoint", "http://" + SOURCE_SERVER_ALIAS + ":9200/"}};
     }
 
     @AllArgsConstructor
@@ -101,7 +102,7 @@ public class SourceTestBase {
         Version version,
         boolean compressionEnabled
     ) {
-        for (int runNumber = 1;; ++runNumber) {
+        for (int runNumber = 1; ; ++runNumber) {
             try {
                 var workResult = migrateDocumentsWithOneWorker(
                     sourceRepo,
@@ -125,13 +126,8 @@ public class SourceTestBase {
                 );
                 throw new ExpectedMigrationWorkTerminationException(e, runNumber);
             } catch (Exception e) {
-                log.atError()
-                    .setCause(e)
-                    .setMessage(
-                        () -> "Caught an exception, "
-                            + "but just going to run again with this worker to simulate task/container recycling"
-                    )
-                    .log();
+                log.atError().setCause(e).setMessage("Caught an exception, " +
+                    "but just going to run again with this worker to simulate task/container recycling").log();
             }
         }
     }
@@ -145,12 +141,13 @@ public class SourceTestBase {
         }
 
         @Override
-        public Flux<RfsLuceneDocument> readDocuments() {
-            return super.readDocuments().map(docTransformer::apply);
+        public Flux<RfsLuceneDocument> readDocuments(int startSegmentIndex, int startDoc) {
+            return super.readDocuments(startSegmentIndex, startDoc).map(docTransformer::apply);
         }
     }
 
-    static class LeasePastError extends Error {}
+    static class LeasePastError extends Error {
+    }
 
     @SneakyThrows
     public static DocumentsRunner.CompletionStatus migrateDocumentsWithOneWorker(
@@ -166,7 +163,8 @@ public class SourceTestBase {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
         var shouldThrow = new AtomicBoolean();
         try (var processManager = new LeaseExpireTrigger(workItemId -> {
-            log.atDebug().setMessage("Lease expired for " + workItemId + " making next document get throw").log();
+            log.atDebug().setMessage("Lease expired for {} making next document get throw")
+                .addArgument(workItemId).log();
             shouldThrow.set(true);
         })) {
             UnaryOperator<RfsLuceneDocument> terminatingDocumentFilter = d -> {
@@ -192,6 +190,8 @@ public class SourceTestBase {
             Function<Path, LuceneDocumentsReader> readerFactory = path -> new FilteredLuceneDocumentsReader(path, sourceResourceProvider.getSoftDeletesPossible(),
                 sourceResourceProvider.getSoftDeletesFieldData(), terminatingDocumentFilter);
 
+            var defaultDocTransformer = new TransformationLoader().getTransformerFactoryLoader(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
+
             try (var workCoordinator = new OpenSearchWorkCoordinator(
                 new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                     .host(targetAddress)
@@ -207,7 +207,7 @@ public class SourceTestBase {
                         .host(targetAddress)
                         .compressionEnabled(compressionEnabled)
                         .build()
-                        .toConnectionContext()), 1000, Long.MAX_VALUE, 1),
+                        .toConnectionContext()), 1000, Long.MAX_VALUE, 1, defaultDocTransformer),
                     new OpenSearchWorkCoordinator(
                         new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                             .host(targetAddress)

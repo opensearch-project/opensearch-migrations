@@ -21,8 +21,8 @@ import org.opensearch.migrations.replay.datatypes.IndexedChannelInteraction;
 import org.opensearch.migrations.replay.datatypes.UniqueReplayerRequestKey;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
 import org.opensearch.migrations.replay.util.RefSafeHolder;
-import org.opensearch.migrations.replay.util.TextTrackedFuture;
-import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.utils.TextTrackedFuture;
+import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.buffer.ByteBuf;
 import io.netty.channel.EventLoop;
@@ -102,7 +102,10 @@ public class RequestSenderOrchestrator {
             ctx.getChannelKeyContext(),
             ctx.getReplayerRequestKey().sourceRequestIndexSessionIdentifier
         );
-        log.atDebug().setMessage(() -> "Scheduling work for " + ctx.getConnectionId() + " at time " + timestamp).log();
+        log.atDebug().setMessage("Scheduling work for {} at time {}")
+            .addArgument(ctx::getConnectionId)
+            .addArgument(timestamp)
+            .log();
         var scheduledContext = ctx.createScheduledContext(timestamp);
         // This method doesn't use the scheduling that scheduleRequest and scheduleClose use because
         // doing work associated with a connection is considered to be preprocessing work independent
@@ -187,7 +190,10 @@ public class RequestSenderOrchestrator {
     ) {
         var channelKey = ctx.getChannelKey();
         var channelInteraction = new IndexedChannelInteraction(channelKey, channelInteractionNum);
-        log.atDebug().setMessage(() -> "Scheduling CLOSE for " + channelInteraction + " at time " + timestamp).log();
+        log.atDebug().setMessage("Scheduling CLOSE for {} at time {}")
+            .addArgument(channelInteraction)
+            .addArgument(timestamp)
+            .log();
         return submitUnorderedWorkToEventLoop(
             ctx,
             sessionNumber,
@@ -245,16 +251,10 @@ public class RequestSenderOrchestrator {
         final var replaySession = clientConnectionPool.getCachedSession(ctx, sessionNumber);
         return NettyFutureBinders.bindNettySubmitToTrackableFuture(replaySession.eventLoop)
             .getDeferredFutureThroughHandle((v, t) -> {
-                log.atTrace()
-                    .setMessage("{}")
-                    .addArgument(
-                        () -> "adding work item at slot "
-                            + channelInteractionNumber
-                            + " for "
-                            + replaySession.getChannelKeyContext()
-                            + " with "
-                            + replaySession.scheduleSequencer
-                    )
+                log.atTrace().setMessage("adding work item at slot {} for {} with {}")
+                    .addArgument(channelInteractionNumber)
+                    .addArgument(replaySession::getChannelKeyContext)
+                    .addArgument(replaySession.scheduleSequencer)
                     .log();
                 return replaySession.scheduleSequencer.addFutureForWork(
                     channelInteractionNumber,
@@ -323,7 +323,11 @@ public class RequestSenderOrchestrator {
         Instant atTime,
         ChannelTask<T> task
     ) {
-        log.atInfo().setMessage(() -> channelInteraction + " scheduling " + task.kind + " at " + atTime).log();
+        log.atInfo().setMessage("{} scheduling {} at {}")
+            .addArgument(channelInteraction)
+            .addArgument(task.kind)
+            .addArgument(atTime)
+            .log();
 
         var schedule = channelFutureAndRequestSchedule.schedule;
         var eventLoop = channelFutureAndRequestSchedule.eventLoop;
@@ -333,8 +337,10 @@ public class RequestSenderOrchestrator {
             : "Per-connection TrafficStream ordering should force a time ordering on incoming requests";
         var workPointTrigger = schedule.appendTaskTrigger(atTime, task.kind).scheduleFuture;
         var workFuture = task.getRunnable().apply(workPointTrigger);
-        log.atTrace()
-            .setMessage(() -> channelInteraction + " added a scheduled event at " + atTime + "... " + schedule)
+        log.atTrace().setMessage("{} added a scheduled event at {}... {}")
+            .addArgument(channelInteraction)
+            .addArgument(atTime)
+            .addArgument(schedule)
             .log();
         if (wasEmpty) {
             bindNettyScheduleToCompletableFuture(eventLoop, atTime, workPointTrigger.future);
@@ -344,14 +350,9 @@ public class RequestSenderOrchestrator {
             var itemStartTimeOfPopped = schedule.removeFirstItem();
             assert atTime.equals(itemStartTimeOfPopped)
                 : "Expected to have popped the item to match the start time for the responseFuture that finished";
-            log.atDebug()
-                .setMessage("{}")
-                .addArgument(
-                    () -> channelInteraction.toString()
-                        + " responseFuture completed - checking "
-                        + schedule
-                        + " for the next item to schedule"
-                )
+            log.atDebug().setMessage("{} responseFuture completed - checking {} for the next item to schedule")
+                .addArgument(channelInteraction::toString)
+                .addArgument(schedule)
                 .log();
             Optional.ofNullable(schedule.peekFirstItem())
                 .ifPresent(kvp -> bindNettyScheduleToCompletableFuture(eventLoop, kvp.startTime, kvp.scheduleFuture));
@@ -399,7 +400,7 @@ public class RequestSenderOrchestrator {
                 }
                 if (dtr.directive == RetryDirective.RETRY) {
                     var newStartTime = referenceStartTime.plus(nextRetryDelay);
-                    log.atInfo().setMessage(() -> "Making request scheduled at " + newStartTime).log();
+                    log.atInfo().setMessage("Making request scheduled at {}").addArgument(newStartTime).log();
                     var schedulingDelay = Duration.between(now(), newStartTime);
                     return NettyFutureBinders.bindNettyScheduleToCompletableFuture(
                         eventLoop, schedulingDelay)
@@ -423,7 +424,7 @@ public class RequestSenderOrchestrator {
         AtomicInteger requestPacketCounter
     ) {
         final var oldCounter = requestPacketCounter.getAndIncrement();
-        log.atTrace().setMessage(() -> "sendNextPartAndContinue: packetCounter=" + oldCounter).log();
+        log.atTrace().setMessage("sendNextPartAndContinue: packetCounter={}").addArgument(oldCounter).log();
         assert iterator.hasNext() : "Should not have called this with no items to send";
 
         var consumeFuture = packetReceiver.consumeBytes(iterator.next().retainedDuplicate());

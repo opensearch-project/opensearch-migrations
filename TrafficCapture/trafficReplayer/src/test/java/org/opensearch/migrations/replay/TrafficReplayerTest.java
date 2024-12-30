@@ -31,6 +31,7 @@ import org.opensearch.migrations.trafficcapture.protos.ReadObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficObservation;
 import org.opensearch.migrations.trafficcapture.protos.TrafficStream;
 import org.opensearch.migrations.trafficcapture.protos.WriteObservation;
+import org.opensearch.migrations.transform.TransformationLoader;
 
 import com.google.protobuf.ByteString;
 import com.google.protobuf.Timestamp;

@@ -88,9 +88,13 @@ public class LuceneDocumentsReader {
 
      */
     public Flux<RfsLuceneDocument> readDocuments() {
+        return readDocuments(0, 0);
+    }
+
+    public Flux<RfsLuceneDocument> readDocuments(int startSegmentIndex, int startDoc) {
         return Flux.using(
             () -> wrapReader(getReader(), softDeletesPossible, softDeletesField),
-            this::readDocsByLeavesInParallel,
+            reader -> readDocsByLeavesFromStartingPosition(reader, startSegmentIndex, startDoc),
             reader -> {
                 try {
                     reader.close();
@@ -114,35 +118,40 @@ public class LuceneDocumentsReader {
         }
     }
 
-    Publisher<RfsLuceneDocument> readDocsByLeavesInParallel(DirectoryReader reader) {
-        var segmentsToReadAtOnce = 5; // Arbitrary value
+    /* Start reading docs from a specific segment and document id.
+    If the startSegmentIndex is 0, it will start from the first segment.
+    If the startDocId is 0, it will start from the first document in the segment.
+     */
+    Publisher<RfsLuceneDocument> readDocsByLeavesFromStartingPosition(DirectoryReader reader, int startSegmentIndex, int startDocId) {
         var maxDocumentsToReadAtOnce = 100; // Arbitrary value
         log.atInfo().setMessage("{} documents in {} leaves found in the current Lucene index")
             .addArgument(reader::maxDoc)
-            .addArgument(reader.leaves()::size)
+            .addArgument(() -> reader.leaves().size())
             .log();
 
         // Create shared scheduler for i/o bound document reading
         var sharedSegmentReaderScheduler = Schedulers.newBoundedElastic(maxDocumentsToReadAtOnce, Integer.MAX_VALUE, "sharedSegmentReader");
 
         return Flux.fromIterable(reader.leaves())
-            .flatMap(this::getReadDocCallablesFromSegments, segmentsToReadAtOnce)
+            .skip(startSegmentIndex)
+            .flatMap(ctx -> getReadDocCallablesFromSegments(ctx,
+                    // Only use startDocId for the first segment we process
+                    ctx.ord == startSegmentIndex ? startDocId : 0))
             .flatMap(c -> Mono.fromCallable(c)
-                    .subscribeOn(sharedSegmentReaderScheduler), // Scheduler to read documents on
-                maxDocumentsToReadAtOnce) // Don't need to worry about prefetch before this step as documents aren't realized
+                            .subscribeOn(sharedSegmentReaderScheduler), // Scheduler to read documents on
+                    maxDocumentsToReadAtOnce) // Don't need to worry about prefetch before this step as documents aren't realized
             .doOnTerminate(sharedSegmentReaderScheduler::dispose);
     }
 
-    Publisher<Callable<RfsLuceneDocument>> getReadDocCallablesFromSegments(LeafReaderContext leafReaderContext) {
-        @SuppressWarnings("resource") // segmentReader will be closed by parent DirectoryReader
+    Publisher<Callable<RfsLuceneDocument>> getReadDocCallablesFromSegments(LeafReaderContext leafReaderContext, int startDocId) {
         var segmentReader = leafReaderContext.reader();
         var liveDocs = segmentReader.getLiveDocs();
 
-        return Flux.range(0, segmentReader.maxDoc())
+        return Flux.range(startDocId, segmentReader.maxDoc() - startDocId)
             .subscribeOn(Schedulers.parallel())
             .map(docIdx -> () -> ((liveDocs == null || liveDocs.get(docIdx)) ? // Filter for live docs
-                getDocument(segmentReader, docIdx, true) : // Get document, returns null to skip malformed docs
-                null));
+                    getDocument(segmentReader, docIdx, true) : // Get document, returns null to skip malformed docs
+                    null));
     }
 
     protected DirectoryReader wrapReader(DirectoryReader reader, boolean softDeletesEnabled, String softDeletesField) throws IOException {
@@ -152,17 +161,25 @@ public class LuceneDocumentsReader {
         return reader;
     }
 
-    protected RfsLuceneDocument getDocument(IndexReader reader, int docId, boolean isLive) {
+    protected RfsLuceneDocument getDocument(IndexReader reader, int docSegId, boolean isLive) {
         Document document;
         try {
-            document = reader.document(docId);
+            document = reader.document(docSegId);
         } catch (IOException e) {
-            log.atError().setMessage("Failed to read document at Lucene index location {}").addArgument(docId).setCause(e).log();
+            log.atError()
+                .setCause(e)
+                .setMessage("Failed to read document segment id {} from source {}")
+                .addArgument(docSegId)
+                .addArgument(indexDirectoryPath)
+                .log();
             return null;
         }
 
         String id = null;
+        String type = null;
         BytesRef sourceBytes = null;
+        String routing = null;
+
         try {
             for (var field : document.getFields()) {
                 String fieldName = field.name();
@@ -174,8 +191,10 @@ public class LuceneDocumentsReader {
                         break;
                     }
                     case "_uid": {
-                        // ES 5
-                        id = field.stringValue();
+                        // ES <= 6
+                        var combinedTypeId = field.stringValue().split("#", 2);
+                        type = combinedTypeId[0];
+                        id = combinedTypeId[1];
                         break;
                     }
                     case "_source": {
@@ -183,26 +202,35 @@ public class LuceneDocumentsReader {
                         sourceBytes = field.binaryValue();
                         break;
                     }
+                    case "_routing": {
+                        routing = field.stringValue();
+                        break;
+                    }
                     default:
                         break;
                 }
             }
             if (id == null) {
-                log.atError().setMessage("Document with index" + docId + " does not have an id. Skipping").log();
+                log.atWarn().setMessage("Skipping document segment id {} from source {}, it does not have an referenceable id.")
+                    .addArgument(docSegId)
+                    .addArgument(indexDirectoryPath)
+                    .log();
                 return null;  // Skip documents with missing id
             }
 
             if (sourceBytes == null || sourceBytes.bytes.length == 0) {
-                log.atWarn().setMessage("Document {} doesn't have the _source field enabled").addArgument(id).log();
+                log.atWarn().setMessage("Skipping document segment id {} document id {} from source {}, it doesn't have the _source field enabled.")
+                    .addArgument(docSegId)
+                    .addArgument(id)
+                    .addArgument(indexDirectoryPath)
+                    .log();
                 return null;  // Skip these
             }
-
-            log.atDebug().setMessage("Reading document {}").addArgument(id).log();
         } catch (RuntimeException e) {
             StringBuilder errorMessage = new StringBuilder();
             errorMessage.append("Unable to parse Document id from Document.  The Document's Fields: ");
             document.getFields().forEach(f -> errorMessage.append(f.name()).append(", "));
-            log.atError().setMessage(errorMessage.toString()).setCause(e).log();
+            log.atError().setCause(e).setMessage("{}").addArgument(errorMessage).log();
             return null; // Skip documents with invalid id
         }
 
@@ -211,7 +239,10 @@ public class LuceneDocumentsReader {
             return null; // Skip these
         }
 
-        log.atDebug().setMessage("Document {} read successfully").addArgument(id).log();
-        return new RfsLuceneDocument(id, sourceBytes.utf8ToString());
+        log.atDebug().setMessage("Document id {} from source {} read successfully.")
+            .addArgument(id)
+            .addArgument(indexDirectoryPath)
+            .log();
+        return new RfsLuceneDocument(id, type, sourceBytes.utf8ToString(), routing);
     }
 }

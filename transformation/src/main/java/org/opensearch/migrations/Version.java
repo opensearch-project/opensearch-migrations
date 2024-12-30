@@ -1,6 +1,7 @@
 package org.opensearch.migrations;
 
 import java.util.Arrays;
+import java.util.Comparator;
 
 import lombok.Builder;
 import lombok.EqualsAndHashCode;
@@ -27,6 +28,7 @@ public class Version {
 
         var finalRemainingString = remainingString;
         var matchedFlavor = Arrays.stream(Flavor.values())
+            .sorted(Comparator.comparing((Flavor f) -> f.shorthand.length()).reversed())
             .filter(flavor -> finalRemainingString.startsWith(flavor.name().toLowerCase()) ||
                               finalRemainingString.startsWith(flavor.shorthand.toLowerCase()))
             .findFirst();

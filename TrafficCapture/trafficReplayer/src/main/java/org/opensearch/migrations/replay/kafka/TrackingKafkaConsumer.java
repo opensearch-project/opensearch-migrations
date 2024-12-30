@@ -136,7 +136,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     @Override
     public void onPartitionsRevoked(Collection<TopicPartition> partitions) {
         if (partitions.isEmpty()) {
-            log.atDebug().setMessage(() -> this + " revoked no partitions.").log();
+            log.atDebug().setMessage("{} revoked no partitions.").addArgument(this).log();
             return;
         }
 
@@ -153,12 +153,9 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 partitionToOffsetLifecycleTrackerMap.values().stream().mapToInt(OffsetLifecycleTracker::size).sum()
             );
             kafkaRecordsReadyToCommit.set(!nextSetOfCommitsMap.values().isEmpty());
-            log.atWarn()
-                .setMessage(
-                    () -> this
-                        + " partitions revoked for "
-                        + partitions.stream().map(String::valueOf).collect(Collectors.joining(","))
-                )
+            log.atWarn().setMessage("{} partitions revoked for {}")
+                .addArgument(this)
+                .addArgument(() -> partitions.stream().map(String::valueOf).collect(Collectors.joining(",")))
                 .log();
         }
     }
@@ -166,7 +163,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
     @Override
     public void onPartitionsAssigned(Collection<TopicPartition> newPartitions) {
         if (newPartitions.isEmpty()) {
-            log.atInfo().setMessage(() -> this + " assigned no new partitions.").log();
+            log.atInfo().setMessage("{} assigned no new partitions.").addArgument(this).log();
             return;
         }
 
@@ -180,22 +177,17 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 )
             );
             log.atInfo()
-                .setMessage(
-                    () -> this
-                        + " partitions added for "
-                        + newPartitions.stream().map(String::valueOf).collect(Collectors.joining(","))
-                )
+                .setMessage("{} partitions added for {}")
+                .addArgument(this)
+                .addArgument(() -> newPartitions.stream().map(String::valueOf).collect(Collectors.joining(",")))
                 .log();
         }
     }
 
     public void close() {
         log.atInfo()
-            .setMessage(
-                () -> "Kafka consumer closing.  "
-                    + "Committing (implicitly by Kafka's consumer): "
-                    + nextCommitsToString()
-            )
+            .setMessage("Kafka consumer closing.  Committing (implicitly by Kafka's consumer): {}")
+            .addArgument(this::nextCommitsToString)
             .log();
         kafkaConsumer.close();
     }
@@ -205,13 +197,9 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         var r = kafkaRecordsLeftToCommitEventually.get() == 0
             ? Optional.<Instant>empty()
             : Optional.of(kafkaRecordsReadyToCommit.get() ? Instant.now() : lastTouchTime.plus(keepAliveInterval));
-        log.atTrace()
-            .setMessage(
-                () -> "returning next required touch at "
-                    + r.map(t -> "" + t).orElse("N/A")
-                    + " from a lastTouchTime of "
-                    + lastTouchTime
-            )
+        log.atTrace().setMessage("returning next required touch at {} from a lastTouchTime of {}")
+            .addArgument(() -> r.map(Instant::toString).orElse("N/A"))
+            .addArgument(lastTouchTime)
             .log();
         return r;
     }
@@ -231,14 +219,10 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             } catch (IllegalStateException e) {
                 throw e;
             } catch (RuntimeException e) {
-                log.atWarn()
-                    .setCause(e)
-                    .setMessage(
-                        "Unable to poll the topic: "
-                            + topic
-                            + " with our Kafka consumer. "
-                            + "Swallowing and awaiting next metadata refresh to try again."
-                    )
+                log.atWarn().setCause(e)
+                    .setMessage("Unable to poll the topic: {} with our Kafka consumer. "
+                            + "Swallowing and awaiting next metadata refresh to try again.")
+                    .addArgument(topic)
                     .log();
             } finally {
                 resume();
@@ -256,18 +240,14 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             log.atError()
                 .setCause(e)
                 .setMessage(
-                    () -> "Unable to pause the topic partitions: "
-                        + topic
-                        + ".  "
-                        + "The active partitions passed here : "
-                        + activePartitions.stream().map(String::valueOf).collect(Collectors.joining(","))
-                        + ".  "
-                        + "The active partitions as tracked here are: "
-                        + getActivePartitions().stream().map(String::valueOf).collect(Collectors.joining(","))
-                        + ".  "
-                        + "The active partitions according to the consumer:  "
-                        + kafkaConsumer.assignment().stream().map(String::valueOf).collect(Collectors.joining(","))
-                )
+                    () -> "Unable to pause the topic partitions: {}.  "
+                        + "The active partitions passed here : {}.  "
+                        + "The active partitions as tracked here are: {}.  "
+                        + "The active partitions according to the consumer: {}")
+                .addArgument(topic)
+                .addArgument(() -> activePartitions.stream().map(String::valueOf).collect(Collectors.joining(",")))
+                .addArgument(() -> getActivePartitions().stream().map(String::valueOf).collect(Collectors.joining(",")))
+                .addArgument(() -> kafkaConsumer.assignment().stream().map(String::valueOf).collect(Collectors.joining(",")))
                 .log();
         }
     }
@@ -279,21 +259,17 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         } catch (IllegalStateException e) {
             log.atError()
                 .setCause(e)
-                .setMessage(
-                    () -> "Unable to resume the topic partitions: "
-                        + topic
-                        + ".  "
-                        + "This may not be a fatal error for the entire process as the consumer should eventually"
-                        + " rejoin and rebalance.  "
-                        + "The active partitions passed here : "
-                        + activePartitions.stream().map(String::valueOf).collect(Collectors.joining(","))
-                        + ".  "
-                        + "The active partitions as tracked here are: "
-                        + getActivePartitions().stream().map(String::valueOf).collect(Collectors.joining(","))
-                        + ".  "
-                        + "The active partitions according to the consumer:  "
-                        + kafkaConsumer.assignment().stream().map(String::valueOf).collect(Collectors.joining(","))
+                .setMessage("Unable to resume the topic partitions: {}.  "
+                        + "This may not be a fatal error for the entire process as the consumer should eventually " +
+                        " rejoin and rebalance.  "
+                        + "The active partitions passed here : {}.  "
+                        + "The active partitions as tracked here are: {}.  "
+                        + "The active partitions according to the consumer: {}"
                 )
+                .addArgument(topic)
+                .addArgument(() -> activePartitions.stream().map(String::valueOf).collect(Collectors.joining(",")))
+                .addArgument(() -> getActivePartitions().stream().map(String::valueOf).collect(Collectors.joining(",")))
+                .addArgument(() -> kafkaConsumer.assignment().stream().map(String::valueOf).collect(Collectors.joining(",")))
                 .log();
         }
     }
@@ -328,7 +304,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             );
             offsetTracker.add(offsetDetails.getOffset());
             kafkaRecordsLeftToCommitEventually.incrementAndGet();
-            log.atTrace().setMessage(() -> "records in flight=" + kafkaRecordsLeftToCommitEventually.get()).log();
+            log.atTrace().setMessage("records in flight={}").addArgument(kafkaRecordsLeftToCommitEventually::get).log();
             return builder.apply(offsetDetails, kafkaRecord);
         });
     }
@@ -343,44 +319,28 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
                 records = kafkaConsumer.poll(keepAliveInterval.dividedBy(POLL_TIMEOUT_KEEP_ALIVE_DIVISOR));
             }
             log.atLevel(records.isEmpty() ? Level.TRACE : Level.INFO)
-                .setMessage(
-                    () -> "Kafka consumer poll has fetched "
-                        + records.count()
-                        + " records.  "
-                        + "Records in flight="
-                        + kafkaRecordsLeftToCommitEventually.get()
-                )
+                .setMessage("Kafka consumer poll has fetched {} records.  Records in flight={}")
+                .addArgument(records::count)
+                .addArgument(kafkaRecordsLeftToCommitEventually::get)
                 .log();
-            log.atTrace()
-                .setMessage("{}")
-                .addArgument(
-                    () -> "All positions: {"
-                        + kafkaConsumer.assignment()
-                            .stream()
-                            .map(tp -> tp + ": " + kafkaConsumer.position(tp))
-                            .collect(Collectors.joining(","))
-                        + "}"
-                )
+            log.atTrace().setMessage("All positions: {{}}")
+                .addArgument(() ->
+                    kafkaConsumer.assignment()
+                        .stream()
+                        .map(tp -> tp + ": " + kafkaConsumer.position(tp))
+                        .collect(Collectors.joining(",")))
                 .log();
-            log.atTrace()
-                .setMessage("{}")
-                .addArgument(
-                    () -> "All previously COMMITTED positions: {"
-                        + kafkaConsumer.assignment()
-                            .stream()
-                            .map(tp -> tp + ": " + kafkaConsumer.committed(tp))
-                            .collect(Collectors.joining(","))
-                        + "}"
-                )
+            log.atTrace().setMessage("All previously COMMITTED positions: {{}}")
+                .addArgument(() -> kafkaConsumer.assignment()
+                        .stream()
+                        .map(tp -> tp + ": " + kafkaConsumer.committed(tp))
+                        .collect(Collectors.joining(",")))
                 .log();
             return records;
         } catch (RuntimeException e) {
-            log.atWarn()
-                .setCause(e)
-                .setMessage(
-                    "Unable to poll the topic: {} with our Kafka consumer. "
-                        + "Swallowing and awaiting next metadata refresh to try again."
-                )
+            log.atWarn().setCause(e)
+                .setMessage("Unable to poll the topic: {} with our Kafka consumer. "
+                        + "Swallowing and awaiting next metadata refresh to try again.")
                 .addArgument(topic)
                 .log();
             return new ConsumerRecords<>(Collections.emptyMap());
@@ -395,16 +355,14 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         if (tracker == null || tracker.consumerConnectionGeneration != kafkaTsk.getGeneration()) {
             log.atWarn()
                 .setMessage(
-                    () -> "trafficKey's generation ("
-                        + kafkaTsk.getGeneration()
-                        + ") is not current ("
-                        + (Optional.ofNullable(tracker)
-                            .map(t -> "new generation=" + t.consumerConnectionGeneration)
-                            .orElse("Partition unassigned"))
-                        + ").  Dropping this commit request since the record would "
-                        + "have been handled again by a current consumer within this process or another. Full key="
-                        + kafkaTsk
-                )
+                    () -> "trafficKey's generation ({}) is not current ({})." +
+                        "  Dropping this commit request since the record would "
+                        + "have been handled again by a current consumer within this process or another. Full key={}")
+                .addArgument(kafkaTsk::getGeneration)
+                .addArgument((Optional.ofNullable(tracker)
+                    .map(t -> "new generation=" + t.consumerConnectionGeneration)
+                    .orElse("Partition unassigned")))
+                .addArgument(kafkaTsk)
                 .log();
             return ITrafficCaptureSource.CommitResult.IGNORED;
         }
@@ -417,7 +375,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         newHeadValue = tracker.removeAndReturnNewHead(kafkaTsk.getOffset());
         return newHeadValue.map(o -> {
             var v = new OffsetAndMetadata(o);
-            log.atDebug().setMessage(() -> "Adding new commit " + k + "->" + v + " to map").log();
+            log.atDebug().setMessage("Adding new commit {}->{} to map").addArgument(k).addArgument(v).log();
             synchronized (commitDataLock) {
                 addKeyContextForEventualCommit(streamKey, kafkaTsk, k);
                 nextSetOfCommitsMap.put(k, v);
@@ -471,25 +429,22 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
             kafkaRecordsLeftToCommitEventually.set(
                 partitionToOffsetLifecycleTrackerMap.values().stream().mapToInt(OffsetLifecycleTracker::size).sum()
             );
-            log.atDebug()
-                .setMessage(() -> "Done committing now records in flight=" + kafkaRecordsLeftToCommitEventually.get())
+            log.atDebug().setMessage("Done committing now records in flight={}")
+                .addArgument(kafkaRecordsLeftToCommitEventually::get)
                 .log();
         } catch (RuntimeException e) {
-            log.atWarn()
-                .setCause(e)
-                .setMessage(
-                    () -> "Error while committing.  "
+            log.atWarn().setCause(e).setMessage("Error while committing.  "
                         + "Another consumer may already be processing messages before these commits.  "
                         + "Commits ARE NOT being discarded here, with the expectation that the revoked callback "
                         + "(onPartitionsRevoked) will be called.  "
                         + "Within that method, commits for unassigned partitions will be discarded.  "
                         + "After that, touch() or poll() will trigger another commit attempt."
-                        + "Those calls will occur in the near future if assigned partitions have pending commits."
-                        + nextSetOfCommitsMap.entrySet()
-                            .stream()
-                            .map(kvp -> kvp.getKey() + "->" + kvp.getValue())
-                            .collect(Collectors.joining(","))
+                        + "Those calls will occur in the near future if assigned partitions have pending commits.{}"
                 )
+                .addArgument(() -> nextSetOfCommitsMap.entrySet()
+                    .stream()
+                    .map(kvp -> kvp.getKey() + "->" + kvp.getValue())
+                    .collect(Collectors.joining(",")))
                 .log();
         } finally {
             if (context != null) {
@@ -504,7 +459,7 @@ public class TrackingKafkaConsumer implements ConsumerRebalanceListener {
         HashMap<TopicPartition, OffsetAndMetadata> nextCommitsMap
     ) {
         assert !nextCommitsMap.isEmpty();
-        log.atDebug().setMessage(() -> "Committing " + nextCommitsMap).log();
+        log.atDebug().setMessage("Committing {}").addArgument(nextCommitsMap).log();
         try (var kafkaContext = context.createNewKafkaCommitContext()) {
             kafkaConsumer.commitSync(nextCommitsMap);
         }

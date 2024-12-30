@@ -11,8 +11,8 @@ import org.opensearch.migrations.replay.datatypes.HttpRequestTransformationStatu
 import org.opensearch.migrations.replay.datatypes.TransformedOutputAndResult;
 import org.opensearch.migrations.replay.http.retries.IRetryVisitorFactory;
 import org.opensearch.migrations.replay.tracing.IReplayContexts;
-import org.opensearch.migrations.replay.util.TextTrackedFuture;
-import org.opensearch.migrations.replay.util.TrackedFuture;
+import org.opensearch.migrations.utils.TextTrackedFuture;
+import org.opensearch.migrations.utils.TrackedFuture;
 
 import io.netty.buffer.Unpooled;
 import lombok.AllArgsConstructor;
@@ -102,7 +102,10 @@ public class RequestTransformerAndSender<T> {
                 start,
                 () -> transformAllData(inputRequestTransformerFactory.create(ctx), packetsSupplier)
             );
-            log.atDebug().setMessage(() -> "request transform future for " + ctx + " = " + requestReadyFuture).log();
+            log.atDebug().setMessage("request transform future for {} = {}")
+                .addArgument(ctx)
+                .addArgument(requestReadyFuture)
+                .log();
             // It might be safer to chain this work directly inside the scheduleWork call above so that the
             // read buffer horizons aren't set after the transformation work finishes, but after the packets
             // are fully handled
@@ -133,26 +136,27 @@ public class RequestTransformerAndSender<T> {
             var packets = packetSupplier.get().map(Unpooled::wrappedBuffer);
             packets.forEach(packetData -> {
                 log.atDebug()
-                    .setMessage(
-                        () -> logLabel + " sending " + packetData.readableBytes() + " bytes to the packetHandler"
-                    )
+                    .setMessage("{} sending {} bytes to the packetHandler")
+                    .addArgument(logLabel)
+                    .addArgument(packetData::readableBytes)
                     .log();
                 var consumeFuture = packetHandler.consumeBytes(packetData);
-                log.atDebug().setMessage(() -> logLabel + " consumeFuture = " + consumeFuture).log();
+                log.atDebug().setMessage("{} consumeFuture = {}")
+                    .addArgument(logLabel)
+                    .addArgument(consumeFuture)
+                    .log();
             });
-            log.atDebug().setMessage(() -> logLabel + "  done sending bytes, now finalizing the request").log();
+            log.atDebug().setMessage("{}  done sending bytes, now finalizing the request").addArgument(logLabel).log();
             return packetHandler.finalizeRequest();
         } catch (Exception e) {
             log.atInfo()
                 .setCause(e)
                 .setMessage(
                     "Encountered an exception while transforming the http request.  "
-                        + "The base64 gzipped traffic stream, for later diagnostic purposes, is: "
-                        + Utils.packetsToCompressedTrafficStream(packetSupplier.get())
-                )
+                        + "The base64 gzipped traffic stream, for later diagnostic purposes, is: {}")
+                .addArgument(() -> Utils.packetsToCompressedTrafficStream(packetSupplier.get()))
                 .log();
             throw e;
         }
     }
-
 }

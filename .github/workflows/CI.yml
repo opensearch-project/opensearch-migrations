@@ -11,6 +11,27 @@ env:
   node-version: '18.x'
 
 jobs:
+  workflow-info:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Create JSON Artifact
+        run: |
+          echo '{' > workflow-info.json
+          echo '  "pr_number": "${{ github.event.pull_request.number }}",' >> workflow-info.json
+          echo '  "commit": "${{ github.event.pull_request.head.sha || github.event.after || github.sha }}",' >> workflow-info.json
+          echo '  "branch": "${{ github.ref }}",' >> workflow-info.json
+          echo '  "commit_parent": "${{ github.event.pull_request.base.sha || github.event.before || github.base.sha }}",' >> workflow-info.json
+          echo '  "build_url": "https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}",' >> workflow-info.json
+          echo '  "build": "${{ github.run_id }}"' >> workflow-info.json
+          echo '}' >> workflow-info.json
+          echo "workflow-info.json created"
+      - name: Upload JSON Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: workflow-info
+          path: workflow-info.json
+
+
   style-check:
     runs-on: ubuntu-latest
     steps:
@@ -19,7 +40,7 @@ jobs:
         with:
           java-version: ${{ env.java-version }}
           distribution: "corretto"
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.gradle-version }}
       - name: Run Gradle Build
@@ -42,16 +63,20 @@ jobs:
        run: |
         flake8 $(git ls-files '*.py')
 
-  python-tests:
+  console-python-tests:
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         py-project:
-          - ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/lib/console_link
+          - lib/console_link
+          - cluster_tools
+          - console_api
+    env:
+      WORKING_DIR: ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/${{ matrix.py-project }}
     defaults:
       run:
-        working-directory: ${{ matrix.py-project }}
+        working-directory: ${{ env.WORKING_DIR }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -60,37 +85,19 @@ jobs:
       - run: |
           python3 -m pip install --upgrade pipenv
           pipenv install --deploy --dev
-          pipenv run coverage run -m pytest
+          pipenv run test
           pipenv run coverage xml
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@v4
+      - name: Get Sanitized Name
+        env:
+          PY_PROJECT: ${{ matrix.py-project }}
+        run: echo "SANITIZED_PY_PROJECT=${PY_PROJECT/\//-}" >> $GITHUB_ENV
+      - name: Upload Coverage Reports
+        uses: actions/upload-artifact@v4
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.xml
-          flags: python-test
-          fail_ci_if_error: true
+          if-no-files-found: error
+          name: coverage-reports-python-tests-${{ env.SANITIZED_PY_PROJECT }}
+          path: ${{ env.WORKING_DIR }}/coverage.xml
 
-  console-api-tests:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        working-directory: ./TrafficCapture/dockerSolution/src/main/docker/migrationConsole/console_api
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
-        with:
-          python-version: ${{ env.python-version }}
-      - run: |
-          python3 -m pip install --upgrade pipenv
-          pipenv install --deploy --dev
-          pipenv run coverage run --source='.' manage.py test console_api
-          pipenv run coverage xml
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@v4
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./coverage.xml
-          fail_ci_if_error: true
 
   gradle-tests:
     runs-on: ubuntu-latest
@@ -100,7 +107,7 @@ jobs:
         with:
           java-version: ${{ env.java-version }}
           distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.gradle-version }}
           gradle-home-cache-cleanup: true
@@ -114,22 +121,38 @@ jobs:
         env:
           OS_MIGRATIONS_GRADLE_SCAN_TOS_AGREE_AND_ENABLED: ''
 
+      - name: Detect Memory Dumps
+        if: failure()
+        run: |
+          if find . -type f -name "*.hprof" | grep -q '.'; then
+            echo "::group::Memory Dumps Detected"
+            echo "::warning::Memory dumps were found and uploaded as artifacts. Review these files to diagnose OOM issues."
+            echo "To download and inspect these files, navigate to 'Actions' -> 'Artifacts'."
+            echo "::endgroup::"
+          fi
+
+      - name: Upload memory dump
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          if-no-files-found: ignore
+          name: memory-dumps
+          path: ./**/*.hprof
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: test-reports
+          name: test-reports-gradle-tests
           path: |
             **/build/reports/tests/
             **/reports/jacoco/mergedReport/
-
-      - name: Upload to Codecov
-        uses: codecov/codecov-action@v4
+      - name: Upload Coverage Reports
+        uses: actions/upload-artifact@v4
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ${{ github.workspace }}/build/reports/jacoco/mergedReport/jacocoMergedReport.xml
-          flags: gradle-test
-          fail_ci_if_error: true
-          disable_search: true
+          if-no-files-found: error
+          name: coverage-reports-gradle-tests
+          path: ./**/jacocoMergedReport.xml
+
 
   python-e2e-tests:
     runs-on: ubuntu-latest
@@ -139,7 +162,7 @@ jobs:
         with:
           java-version: ${{ env.java-version }}
           distribution: 'corretto'
-      - uses: gradle/actions/setup-gradle@v3
+      - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: ${{ env.gradle-version }}
       - uses: actions/setup-python@v5
@@ -156,6 +179,7 @@ jobs:
         uses: ScribeMD/docker-cache@0.5.0
         with:
           key: docker-${{ runner.os }}-${{ steps.generate_cache_key.outputs.key }}
+          read-only: true
       - name: Start Docker Solution
         run: ./gradlew -p TrafficCapture dockerSolution:ComposeUp -x test -x spotlessCheck --info --stacktrace
         env:
@@ -188,11 +212,17 @@ jobs:
           docker stop $(docker ps -q) && docker system prune --volumes -f
           docker image ls --format '{{.Repository}}:{{.Tag}}' | grep '^migrations/' | xargs -I {} docker image rm {}
 
-  cdk-tests:
+  node-tests:
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        npm-project:
+          - ./deployment/cdk/opensearch-service-migration
+          - ./deployment/migration-assistant-solution
     defaults:
       run:
-        working-directory: ./deployment/cdk/opensearch-service-migration
+        working-directory: ${{ matrix.npm-project }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -224,15 +254,16 @@ jobs:
         env:
           GITHUB_TOKEN: ${{secrets.GITHUB_TOKEN}}
 
+
   all-ci-checks-pass:
     needs:
-      - style-check
-      - cdk-tests
+      - console-python-tests
       - gradle-tests
       - link-checker
+      - node-tests
       - python-e2e-tests
       - python-lint
-      - python-tests
+      - style-check
     if: always()
     runs-on: ubuntu-latest
     steps:
