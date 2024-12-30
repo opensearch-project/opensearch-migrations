@@ -20,6 +20,10 @@ spec:
         {{- include "generic.setupEnvLoadInitContainer" (merge . (dict
            "MountName" $mountName
            "include" .Template.Include)) | nindent 8 }}
+        - name: wait-for-kafka
+          image: bitnami/kubectl:latest  # or any image with curl/kubectl
+          command: [ 'sh', '-c',
+                     'until kubectl get configmap kafka-config; do echo waiting for kafka config; sleep 1; done' ]
       containers:
         - name: captureproxy
           image: migrations/capture_proxy:latest
