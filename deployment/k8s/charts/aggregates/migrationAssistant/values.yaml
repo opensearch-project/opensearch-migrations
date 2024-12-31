@@ -43,20 +43,20 @@ replayer:
     targetUri:
       value: https://opensearch-cluster-master.mcc:9200/
       allowRuntimeOverride: true
+    kafkaTrafficBrokers:
+      value: captured-traffic-kafka-bootstrap.ma.svc:9092
+      allowRuntimeOverride: true
 
 
 captured-traffic-kafka-cluster:
   environment: test
 
-  kafka-cluster:
-    replicas: 1
-    storageType: ephemeral
-    storageSize: 100Gi
-    storageDeleteClaim: true
-    dedicatedController:
-      replicas: 4
-      storageSize: 10Gi
+  clusterName: captured-traffic
 
-  topicName: "logging-traffic-topic"
-  numReplicas: 1
-  numPartitions: 1
+  replicas: 1
+  storageType: ephemeral
+  storageSize: 100Gi
+  storageDeleteClaim: true
+  dedicatedController:
+    replicas: 1
+    storageSize: 10Gi

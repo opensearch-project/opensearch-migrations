@@ -30,13 +30,11 @@
         {{- end -}}
 
         {{- if hasKey $param "value" -}}
-            {{- $lines = append $lines (printf "if [ -n \"$%s\" ]; then" $envVarName) -}}
             {{- if not (eq "" $formattedKeyFlagName) -}}
+                {{- $lines = append $lines (printf "if [ -n \"$%s\" ]; then" $envVarName) -}}
                 {{- $lines = append $lines (printf "  export %s=\"$%s %s $%s\"" $argsName $argsName $formattedKeyFlagName $envVarName) -}}
-            {{- else -}}
-                {{- $lines = append $lines "echo do nothing" -}}
+                {{- $lines = append $lines (printf "fi") -}}
             {{- end -}}
-            {{- $lines = append $lines (printf "fi") -}}
         {{- else if hasKey $param "list" -}}
             {{- $lines = append $lines (printf "if [ -n \"$%s\" ]; then" $envVarName) -}}
             {{- $lines = append $lines (printf "  LIST_ITEMS=$(echo \"$%s\" | yq eval '.[ ]' - | xargs -I{} echo -n \"{} \")" $envVarName $envVarName) -}}

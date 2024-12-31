@@ -17,10 +17,11 @@ dependencies:
     condition: conditionalPackageInstalls.proxy
     version: "0.1.0"
     repository: "file://../../components/captureProxy"
-  - name: captured-traffic-kafka-cluster
+  - name: kafka-cluster
+    alias: captured-traffic-kafka-cluster
     condition: conditionalPackageInstalls.kafka
     version: "0.1.0"
-    repository: "file://../../components/capturedTrafficKafkaCluster"
+    repository: "file://../../sharedResources/baseKafkaCluster"
   - name: replayer
     condition: conditionalPackageInstalls.replayer
     version: "0.1.0"
