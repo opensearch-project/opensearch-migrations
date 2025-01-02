@@ -9,6 +9,7 @@ import java.util.stream.Stream;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
@@ -141,6 +142,7 @@ class BulkDocSectionTest {
     }
 
     @Test
+    @Tag("longTest") // Mark as long test to control memory usage during parallel execution
     void testLargeSourceDoc() throws JsonProcessingException {
         var writer = new ObjectMapper();
         // Generate a 25MB source document
