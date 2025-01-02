@@ -60,3 +60,43 @@ def clear_indices(cluster: Cluster):
     clear_indices_path = "/*,-.*,-searchguard*,-sg7*,.migrations_working_state"
     r = cluster.call_api(clear_indices_path, method=HttpMethod.DELETE, params={"ignore_unavailable": "true"})
     return r.content
+
+
+def clear_cluster(cluster: Cluster):
+    clear_indices(cluster)
+    clear_snapshots(cluster, 'migration_assistant_repo')
+
+
+def clear_snapshots(cluster: Cluster, repository: str) -> None:
+    """
+    Clears all snapshots from the specified repository.
+
+    :param cluster: Cluster object to interact with the Elasticsearch cluster.
+    :param repository: Name of the snapshot repository to clear snapshots from.
+    :raises Exception: For general errors during snapshot clearing, except when the repository is missing.
+    """
+    try:
+        # List all snapshots in the repository
+        snapshots_path = f"/_snapshot/{repository}/_all"
+        response = call_api(cluster, snapshots_path, raise_error=True)
+        snapshots = response.json().get("snapshots", [])
+
+        if not snapshots:
+            logger.info(f"No snapshots found in repository '{repository}'.")
+            return
+
+        # Delete each snapshot
+        for snapshot in snapshots:
+            snapshot_name = snapshot["snapshot"]
+            delete_path = f"/_snapshot/{repository}/{snapshot_name}"
+            call_api(cluster, delete_path, method=HttpMethod.DELETE, raise_error=True)
+            logger.info(f"Deleted snapshot: {snapshot_name} from repository '{repository}'.")
+
+    except Exception as e:
+        # Handle 404 errors specifically for missing repository
+        if "repository_missing_exception" in str(e):
+            logger.info(f"Repository '{repository}' is missing. Skipping snapshot clearing.")
+        else:
+            # Re-raise other errors
+            logger.error(f"Error clearing snapshots from repository '{repository}': {e}")
+            raise e
