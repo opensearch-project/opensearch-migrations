@@ -61,7 +61,7 @@ export class MigrationServiceCore extends Stack {
         props.taskRolePolicies?.forEach(policy => this.serviceTaskRole.addToPolicy(policy))
 
         const serviceTaskDef = new FargateTaskDefinition(this, "ServiceTaskDef", {
-            ephemeralStorageGiB: props.ephemeralStorageGiB ? props.ephemeralStorageGiB : 75,
+            ephemeralStorageGiB: Math.max(props.ephemeralStorageGiB ? props.ephemeralStorageGiB : 75, 21), // valid values 21 - 200
             runtimePlatform: {
                 operatingSystemFamily: OperatingSystemFamily.LINUX,
                 cpuArchitecture: props.cpuArchitecture

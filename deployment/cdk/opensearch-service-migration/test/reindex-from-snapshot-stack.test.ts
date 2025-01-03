@@ -382,16 +382,88 @@ describe('ReindexFromSnapshotStack Tests', () => {
         VolumeConfigurations: volumesCapture,
       });
       const volumes = volumesCapture.asArray();
-        expect(volumes).toEqual(
-          expect.arrayContaining([
-            expect.objectContaining({
-              ManagedEBSVolume: expect.objectContaining({
-                Encrypted: true,
-                SizeInGiB: 218,
-                Throughput: 450,
-              }),
+      expect(volumes).toEqual(
+        expect.arrayContaining([
+          expect.objectContaining({
+            ManagedEBSVolume: expect.objectContaining({
+              Encrypted: true,
+              SizeInGiB: 194,
+              Throughput: 450,
             }),
-          ])
-        );
+          }),
+        ])
+      );
+      const volumeCapture = new Capture();
+      template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+        Volumes: volumeCapture,
+      });
+      // Ensure there are 2 volumes, ebs and ephemeral
+      expect(volumeCapture.asArray().length).toBe(2);
     });
+
+  test('ReindexFromSnapshotStack configures ephemeral storage in GovCloud', () => {
+    const contextOptions = {
+      vpcEnabled: true,
+      reindexFromSnapshotServiceEnabled: true,
+      stage: 'unit-test',
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
+      },
+      migrationAssistanceEnabled: true,
+    };
+    const stacks = createStackComposer(contextOptions, undefined, 'us-gov-west-1');
+    const reindexStack = stacks.stacks.find(s => s instanceof ReindexFromSnapshotStack) as ReindexFromSnapshotStack;
+    expect(reindexStack).toBeDefined();
+    expect(reindexStack.region).toEqual("us-gov-west-1");
+    const template = Template.fromStack(reindexStack);
+
+    const taskDefinitionCapture = new Capture();
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      ContainerDefinitions: taskDefinitionCapture,
+    });
+
+    const containerDefinitions = taskDefinitionCapture.asArray();
+    expect(containerDefinitions.length).toBe(1);
+    expect(containerDefinitions[0].Command).toEqual([
+      '/bin/sh',
+      '-c',
+      '/rfs-app/entrypoint.sh'
+    ]);
+
+    const ephemeralStorageCapture = new Capture();
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      EphemeralStorage: ephemeralStorageCapture,
+    });
+
+    const ephemeralStorage = ephemeralStorageCapture.asObject();
+    expect(ephemeralStorage.SizeInGiB).toBe(199);
+
+    const volumeCapture = new Capture();
+    template.hasResourceProperties('AWS::ECS::TaskDefinition', {
+      Volumes: volumeCapture,
+    });
+    // Ensure the only volume is the ephemeral storage
+    expect(volumeCapture.asArray().length).toBe(1);
+  });
+
+  test('ReindexFromSnapshotStack throws error for large shard size in GovCloud', () => {
+    const contextOptions = {
+      vpcEnabled: true,
+      reindexFromSnapshotServiceEnabled: true,
+      stage: 'unit-test',
+      reindexFromSnapshotMaxShardSizeGiB: 81, // Exceeding the limit
+      sourceCluster: {
+        "endpoint": "https://test-cluster",
+        "auth": {"type": "none"},
+        "version": "ES_7.10"
+      },
+      migrationAssistanceEnabled: true,
+    };
+
+    expect(() => createStackComposer(contextOptions, undefined, 'us-gov-west-1')).toThrowError(
+      /Your max shard size of 81 GiB is too large to migrate in GovCloud, the max supported is 80 GiB/
+    );
+  });
 });
