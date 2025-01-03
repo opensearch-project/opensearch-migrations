@@ -82,7 +82,7 @@ public class LuceneDocumentsReaderTest {
 
     @ParameterizedTest
     @MethodSource("provideSnapshots")
-    public void ReadDocuments_AsExpected(TestResources.Snapshot snapshot, Version version) throws Exception {
+    public void ReadDocuments_AsExpected(TestResources.Snapshot snapshot, Version version) {
         final var repo = new FileSystemRepo(snapshot.dir);
         var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, repo);
         DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(repo);
@@ -100,8 +100,7 @@ public class LuceneDocumentsReaderTest {
         // Use the LuceneDocumentsReader to get the documents
         var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
 
-        Flux<RfsLuceneDocument> documents = reader.readDocuments()
-            .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
+        Flux<RfsLuceneDocument> documents = reader.readDocuments();
 
         // Verify that the results are as expected
         StepVerifier.create(documents).expectNextMatches(doc -> {
@@ -116,18 +115,6 @@ public class LuceneDocumentsReaderTest {
             assertDocsEqual(expectedId, actualId, expectedType, actualType, expectedSource, actualSource);
             return true;
         }).expectNextMatches(doc -> {
-            String expectedId = "unchangeddoc";
-            String actualId = doc.id;
-
-            String expectedType = null;
-            String actualType = doc.type;
-
-            String expectedSource = "{\"title\":\"This doc will not be changed\\nIt has multiple lines of text\\nIts source doc has extra newlines.\",\"content\":\"bluh bluh\"}";
-            String actualSource = doc.source;
-            assertDocsEqual(expectedId, actualId, expectedType, actualType,
-                    expectedSource, actualSource);
-            return true;
-        }).expectNextMatches(doc -> {
             String expectedId = "updateddoc";
             String actualId = doc.id;
 
@@ -139,11 +126,23 @@ public class LuceneDocumentsReaderTest {
             assertDocsEqual(expectedId, actualId, expectedType, actualType,
                     expectedSource, actualSource);
             return true;
+        }).expectNextMatches(doc -> {
+            String expectedId = "unchangeddoc";
+            String actualId = doc.id;
+
+            String expectedType = null;
+            String actualType = doc.type;
+
+            String expectedSource = "{\"title\":\"This doc will not be changed\\nIt has multiple lines of text\\nIts source doc has extra newlines.\",\"content\":\"bluh bluh\"}";
+            String actualSource = doc.source;
+            assertDocsEqual(expectedId, actualId, expectedType, actualType,
+                    expectedSource, actualSource);
+            return true;
         }).expectComplete().verify();
     }
 
     @Test
-    public void ReadDocuments_ES5_Origin_AsExpected() throws Exception {
+    public void ReadDocuments_ES5_Origin_AsExpected() {
         TestResources.Snapshot snapshot = TestResources.SNAPSHOT_ES_6_8_MERGED;
         Version version = Version.fromString("ES 6.8");
 
@@ -164,28 +163,15 @@ public class LuceneDocumentsReaderTest {
         // Use the LuceneDocumentsReader to get the documents
         var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
 
-        Flux<RfsLuceneDocument> documents = reader.readDocuments()
-            .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
+        Flux<RfsLuceneDocument> documents = reader.readDocuments();
 
         // Verify that the results are as expected
         StepVerifier.create(documents).expectNextMatches(doc -> {
-            String expectedId = "complexdoc";
-            String actualId = doc.id;
-
-             String expectedType = "type1";
-             String actualType = doc.type;
-
-            String expectedSource = "{\"title\":\"This is a doc with complex history. Updated!\"}";
-            String actualSource = doc.source;
-            assertDocsEqual(expectedId, actualId, expectedType, actualType,
-                    expectedSource, actualSource);
-            return true;
-        }).expectNextMatches(doc -> {
             String expectedId = "unchangeddoc";
             String actualId = doc.id;
 
-             String expectedType = "type2";
-             String actualType = doc.type;
+            String expectedType = "type2";
+            String actualType = doc.type;
 
             String expectedSource = "{\"content\":\"This doc will not be changed\nIt has multiple lines of text\nIts source doc has extra newlines.\"}";
             String actualSource = doc.source;
@@ -195,10 +181,22 @@ public class LuceneDocumentsReaderTest {
             String expectedId = "updateddoc";
             String actualId = doc.id;
 
-             String expectedType = "type2";
-             String actualType = doc.type;
+            String expectedType = "type2";
+            String actualType = doc.type;
 
             String expectedSource = "{\"content\":\"Updated!\"}";
+            String actualSource = doc.source;
+            assertDocsEqual(expectedId, actualId, expectedType, actualType,
+                    expectedSource, actualSource);
+            return true;
+        }).expectNextMatches(doc -> {
+            String expectedId = "complexdoc";
+            String actualId = doc.id;
+
+             String expectedType = "type1";
+             String actualType = doc.type;
+
+            String expectedSource = "{\"title\":\"This is a doc with complex history. Updated!\"}";
             String actualSource = doc.source;
             assertDocsEqual(expectedId, actualId, expectedType, actualType,
                     expectedSource, actualSource);
@@ -269,26 +267,24 @@ public class LuceneDocumentsReaderTest {
             .block(Duration.ofSeconds(2));
 
         // Verify results
-        var expectedConcurrentSegments = 10;
+        var expectedConcurrentSegments = 1; // Segment concurrency disabled for preserved ordering
         var expectedConcurrentDocReads = 100;
         assertNotNull(actualDocuments);
         assertEquals(numSegments * docsPerSegment, actualDocuments.size());
+        assertEquals(expectedConcurrentSegments, observedConcurrentSegments.get(), "Expected concurrent open segments equal to " + expectedConcurrentSegments);
         assertEquals(expectedConcurrentDocReads, observedConcurrentDocReads.get(), "Expected concurrent document reads to equal DEFAULT_BOUNDED_ELASTIC_SIZE");
-        assertEquals(expectedConcurrentSegments, observedConcurrentSegments.get(), "Expected concurrent open segments equal to 5");
-
-
     }
 
     @Test
-    public void ReadDocumentsStartingFromCheckpointForOneSegments_AsExpected() throws Exception {
+    public void ReadDocumentsStartingFromCheckpointForOneSegments_AsExpected() {
         // This snapshot has 6 documents in 1 segment. There are updates and deletes involved, so
         // there are only 3 final documents, which affects which document id the reader should
         // start at.
         var snapshot = TestResources.SNAPSHOT_ES_7_10_W_SOFT;
         var version = Version.fromString("ES 7.10");
         List<List<String>> documentIds = List.of(
-                List.of("complexdoc", "unchangeddoc", "updateddoc"),
-                List.of("unchangeddoc", "updateddoc"),
+                List.of("complexdoc", "updateddoc", "unchangeddoc"),
+                List.of("updateddoc", "unchangeddoc"),
                 List.of("unchangeddoc"));
         List<Integer> documentStartingIndices = List.of(0, 2, 5);
 
@@ -311,8 +307,7 @@ public class LuceneDocumentsReaderTest {
 
 
         for (int i = 0; i < documentStartingIndices.size(); i++) {
-            Flux<RfsLuceneDocument> documents = reader.readDocuments(0, documentStartingIndices.get(i))
-                    .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
+            Flux<RfsLuceneDocument> documents = reader.readDocuments(documentStartingIndices.get(i));
 
             var actualDocIds = documents.collectList().block().stream().map(doc -> doc.id).collect(Collectors.joining(","));
             var expectedDocIds = String.join(",", documentIds.get(i));
@@ -326,8 +321,8 @@ public class LuceneDocumentsReaderTest {
         var snapshot = TestResources.SNAPSHOT_ES_6_8;
         var version = Version.fromString("ES 6.8");
         List<List<String>> documentIds = List.of(
-                List.of("complexdoc", "unchangeddoc", "updateddoc"),
-                List.of("unchangeddoc", "updateddoc"),
+                List.of("complexdoc", "updateddoc", "unchangeddoc"),
+                List.of("updateddoc", "unchangeddoc"),
                 List.of("unchangeddoc"));
 
         final var repo = new FileSystemRepo(snapshot.dir);
@@ -348,12 +343,11 @@ public class LuceneDocumentsReaderTest {
         var reader = LuceneDocumentsReader.getFactory(sourceResourceProvider).apply(luceneDir);
 
 
-        for (int i = 0; i < documentIds.size(); i++) {
-            Flux<RfsLuceneDocument> documents = reader.readDocuments(i, 0)
-                    .sort(Comparator.comparing(doc -> doc.id)); // Sort for consistent order given LuceneDocumentsReader may interleave
+        for (int startingDocIndex = 0; startingDocIndex < documentIds.size(); startingDocIndex++) {
+            Flux<RfsLuceneDocument> documents = reader.readDocuments(startingDocIndex);
 
             var actualDocIds = documents.collectList().block().stream().map(doc -> doc.id).collect(Collectors.joining(","));
-            var expectedDocIds = String.join(",", documentIds.get(i));
+            var expectedDocIds = String.join(",", documentIds.get(startingDocIndex));
             Assertions.assertEquals(expectedDocIds, actualDocIds);
         }
     }
