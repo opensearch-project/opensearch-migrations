@@ -1,0 +1,23 @@
+nameOverride: ""
+fullnameOverride: ""
+useSharedConfigs: false
+parameters:
+  destinationUri:
+    value: "http://sourcecluster.example.com:9200"
+    allowRuntimeOverride: false
+  listenPort:
+    value: 9200
+    allowRuntimeOverride: false
+  noCapture:
+    present: false
+    allowRuntimeOverride: true
+  insecureDestination:
+    present: true
+    allowRuntimeOverride: false
+# TODO - setup cert management
+#  sslConfigFile:
+#    value: "/usr/share/elasticsearch/config/proxy_tls.yml"
+#    allowRuntimeOverride: false
+  otelCollectorEndpoint:
+    value: "http://otel-collector:4317"
+    allowRuntimeOverride: false

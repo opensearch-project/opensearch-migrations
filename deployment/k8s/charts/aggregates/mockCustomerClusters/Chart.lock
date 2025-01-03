@@ -1,0 +1,12 @@
+dependencies:
+- name: elasticsearch
+  repository: https://helm.elastic.co
+  version: 8.5.1
+- name: capture-proxy
+  repository: file://../../components/captureProxy
+  version: 0.1.0
+- name: opensearch
+  repository: https://opensearch-project.github.io/helm-charts/
+  version: 2.23.1
+digest: sha256:9b3812d61b38a98c97adfbd7afe6cc27a73615ca3b3f792c8d64847fc50c5600
+generated: "2024-12-28T10:22:08.454087-05:00"

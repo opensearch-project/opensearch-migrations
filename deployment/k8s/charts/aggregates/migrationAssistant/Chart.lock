@@ -1,0 +1,30 @@
+dependencies:
+- name: migration-console
+  repository: file://../../components/migrationConsole
+  version: 0.1.0
+- name: bulk-document-loader
+  repository: file://../../components/bulkLoad
+  version: 0.1.0
+- name: capture-proxy
+  repository: file://../../components/captureProxy
+  version: 0.1.0
+- name: captured-traffic-kafka-cluster
+  repository: file://../../sharedResources/baseKafkaCluster
+  version: 0.1.0
+- name: replayer
+  repository: file://../../components/replayer
+  version: 0.1.0
+- name: shared-configs
+  repository: file://../../sharedResources/sharedConfigs
+  version: 0.1.0
+- name: grafana
+  repository: https://grafana.github.io/helm-charts
+  version: 8.5.0
+- name: prometheus
+  repository: https://prometheus-community.github.io/helm-charts
+  version: 25.27.0
+- name: jaeger
+  repository: https://jaegertracing.github.io/helm-charts
+  version: 3.2.0
+digest: sha256:7515543c70c0fc5dd25e224c5359627e4fc95525af097198d8d4587216a25e19
+generated: "2024-12-29T23:02:36.252572-05:00"

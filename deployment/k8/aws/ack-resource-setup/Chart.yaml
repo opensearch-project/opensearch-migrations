@@ -1,0 +1,9 @@
+apiVersion: v2
+name: ack-resource-setup
+description: A Helm chart for deploying required AWS resources for running the Migration Assistant
+version: 0.1.0
+appVersion: "3.5.0"
+dependencies:
+  - name: strimzi-kafka-operator
+    version: 0.43.0
+    repository: https://strimzi.io/charts/

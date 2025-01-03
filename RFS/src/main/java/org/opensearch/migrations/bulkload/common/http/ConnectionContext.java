@@ -103,28 +103,41 @@ public class ConnectionContext {
 
     @Getter
     public static class TargetArgs implements IParams {
-        @Parameter(names = {
-            "--target-host" }, description = "The target host and port (e.g. http://localhost:9200)", required = true)
+        @Parameter(
+            names = {"--target-host", "--targetHost" },
+            description = "The target host and port (e.g. http://localhost:9200)",
+            required = true)
         public String host;
 
-        @Parameter(names = {
-            "--target-username" }, description = "Optional.  The target username; if not provided, will assume no auth on target", required = false)
+        @Parameter(
+            names = {"--target-username", "--targetUsername" },
+            description = "Optional.  The target username; if not provided, will assume no auth on target",
+            required = false)
         public String username = null;
 
-        @Parameter(names = {
-            "--target-password" }, description = "Optional.  The target password; if not provided, will assume no auth on target", required = false)
+        @Parameter(
+            names = {"--target-password", "--targetPassword" },
+            description = "Optional.  The target password; if not provided, will assume no auth on target",
+            required = false)
         public String password = null;
 
-        @Parameter(names = {
-            "--target-aws-region" }, description = "Optional. The target aws region. Required only if sigv4 auth is used", required = false)
+        @Parameter(
+            names = {"--target-aws-region", "--targetAwsRegion" },
+            description = "Optional. The target aws region. Required only if sigv4 auth is used",
+            required = false)
         public String awsRegion = null;
 
-        @Parameter(names = {
-            "--target-aws-service-signing-name" }, description = "Optional. The target aws service signing name, e.g 'es' for Amazon OpenSearch Service and 'aoss' for Amazon OpenSearch Serverless. Required if sigv4 auth is used.", required = false)
+        @Parameter(
+            names = {"--target-aws-service-signing-name", "--targetAwsServiceSigningName" },
+            description = "Optional. The target aws service signing name, e.g 'es' for " +
+                "Amazon OpenSearch Service and 'aoss' for Amazon OpenSearch Serverless. " +
+                "Required if sigv4 auth is used.",
+            required = false)
         public String awsServiceSigningName = null;
 
-        @Parameter(names = {
-            "--target-insecure" }, description = "Allow untrusted SSL certificates for target", required = false)
+        @Parameter(
+            names = { "--target-insecure", "--targetInsecure" },
+            description = "Allow untrusted SSL certificates for target", required = false)
         public boolean insecure = false;
 
         @ParametersDelegate
@@ -139,35 +152,50 @@ public class ConnectionContext {
     // Flags that require more testing and validation before recommendations are made
     @Getter
     public static class TargetAdvancedArgs {
-        @Parameter(names = {
-            "--target-compression" }, description = "**Advanced**. Allow request compression to target", required = false)
+        @Parameter(names = {"--target-compression", "--targetCompression" },
+            description = "**Advanced**. Allow request compression to target",
+            required = false)
         public boolean compressionEnabled = false;
     }
 
     @Getter
     public static class SourceArgs implements IParams {
-        @Parameter(names = {
-            "--source-host" }, description = "The source host and port (e.g. http://localhost:9200)", required = false)
+        @Parameter(
+            names = {"--source-host", "--sourceHost" },
+            description = "The source host and port (e.g. http://localhost:9200)",
+            required = false)
         public String host = null;
 
-        @Parameter(names = {
-            "--source-username" }, description = "The source username; if not provided, will assume no auth on source", required = false)
+        @Parameter(
+            names = {"--source-username", "--sourceUsername" },
+            description = "The source username; if not provided, will assume no auth on source",
+            required = false)
         public String username = null;
 
-        @Parameter(names = {
-            "--source-password" }, description = "The source password; if not provided, will assume no auth on source", required = false)
+        @Parameter(
+            names = {"--source-password", "--sourcePassword" },
+            description = "The source password; if not provided, will assume no auth on source",
+            required = false)
         public String password = null;
 
-        @Parameter(names = {
-            "--source-aws-region" }, description = "Optional. The source aws region, e.g. 'us-east-1'. Required if sigv4 auth is used", required = false)
+        @Parameter(
+            names = {"--source-aws-region", "--sourceAwsRegion" },
+            description = "Optional. The source aws region, e.g. 'us-east-1'. Required if sigv4 auth is used",
+            required = false)
         public String awsRegion = null;
 
-        @Parameter(names = {
-            "--source-aws-service-signing-name" }, description = "Optional. The source aws service signing name, e.g 'es' for Amazon OpenSearch Service and 'aoss' for Amazon OpenSearch Serverless. Required if sigv4 auth is used.", required = false)
+        @Parameter(
+            names = {"--source-aws-service-signing-name", "--sourceAwsServiceSigningName" },
+            description = "Optional. The source aws service signing name, e.g 'es' for " +
+                "Amazon OpenSearch Service and 'aoss' for Amazon OpenSearch Serverless. " +
+                "Required if sigv4 auth is used.",
+            required = false)
         public String awsServiceSigningName = null;
 
-        @Parameter(names = {
-            "--source-insecure" }, description = "Allow untrusted SSL certificates for source", required = false)
+        @Parameter(
+            names = {"--source-insecure", "--sourceInsecure" },
+            description = "Allow untrusted SSL certificates for source",
+            required = false)
         public boolean insecure = false;
 
         public boolean isCompressionEnabled() {

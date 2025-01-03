@@ -1,0 +1,43 @@
+{%- if values.source_cluster is defined -%}
+source_cluster:
+  {{ values | pop_value("source_cluster") | to_yaml | indent(2) }}
+{%- endif %}
+
+{%- if values.target_clusters is defined %}
+target_clusters:
+{%- for cluster_name in (values | pop_value("target_clusters")) %}
+  {%- if values[cluster_name] is defined %}
+  {{ cluster_name }}:
+    {{ values | pop_value(cluster_name) | to_yaml | indent(4) }}
+  {%- endif %}
+{%- endfor %}
+{%- endif %}
+
+{%- if values.metricsSource is defined %}
+metrics_source:
+  {{ values | pop_value("metricsSource") | to_yaml | indent(2) }}
+{%- endif %}
+
+{%- if values.snapshot is defined %}
+snapshot:
+  {{ values | pop_value("snapshot") | to_yaml | indent(2) }}
+{%- endif %}
+
+{%- if values.otelEndpoint is defined %}
+otel_endpoint: {{ values | pop_value("otelEndpoint")  }}
+{%- endif %}
+
+metadata_migration:
+  from_snapshot: {{ values.metadata_migration_from_snapshot | default(none) }}
+  min_replicas: {{ values | pop_value("minReplicasForMigratedIndices") | default(0) }}
+
+{%- if values.kafkaBroker is defined %}
+kafka:
+  {{ values | pop_value("kafkaBroker") | to_yaml | indent(2) }}
+{%- endif %}
+
+
+{%- if values %}
+extraValues:
+  {{ values | to_yaml | indent(2) }}
+{%- endif %}
