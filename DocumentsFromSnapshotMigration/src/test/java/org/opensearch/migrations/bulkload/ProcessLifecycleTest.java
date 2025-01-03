@@ -1,12 +1,7 @@
 package org.opensearch.migrations.bulkload;
 
-import java.io.BufferedReader;
-import java.io.File;
-import java.io.IOException;
-import java.io.InputStreamReader;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
@@ -27,7 +22,6 @@ import lombok.AllArgsConstructor;
 import lombok.Getter;
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
-import org.jetbrains.annotations.NotNull;
 import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
@@ -124,8 +118,8 @@ public class ProcessLifecycleTest extends SourceTestBase {
             var proxyContainer = new ToxiProxyWrapper(network)
         ) {
             CompletableFuture.allOf(
-                CompletableFuture.runAsync(() -> esSourceContainer.start()),
-                CompletableFuture.runAsync(() -> osTargetContainer.start()),
+                CompletableFuture.runAsync(esSourceContainer::start),
+                CompletableFuture.runAsync(osTargetContainer::start),
                 CompletableFuture.runAsync(() -> proxyContainer.start(TARGET_DOCKER_HOSTNAME, OPENSEARCH_PORT))
             ).join();
 
@@ -180,36 +174,7 @@ public class ProcessLifecycleTest extends SourceTestBase {
         }
 
         int timeoutSeconds = 90;
-        ProcessBuilder processBuilder = setupProcess(tempDirSnapshot, tempDirLucene, targetAddress, failHow);
-
-        var process = runAndMonitorProcess(processBuilder);
-        boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
-        if (!finished) {
-            log.atError().setMessage("Process timed out, attempting to kill it...").log();
-            process.destroy(); // Try to be nice about things first...
-            if (!process.waitFor(10, TimeUnit.SECONDS)) {
-                log.atError().setMessage("Process still running, attempting to force kill it...").log();
-                process.destroyForcibly();
-            }
-            Assertions.fail("The process did not finish within the timeout period (" + timeoutSeconds + " seconds).");
-        }
-
-        return process.exitValue();
-    }
-
-
-    @NotNull
-    private static ProcessBuilder setupProcess(
-        Path tempDirSnapshot,
-        Path tempDirLucene,
-        String targetAddress,
-        FailHow failHow
-    ) {
-        String classpath = System.getProperty("java.class.path");
-        String javaHome = System.getProperty("java.home");
-        String javaExecutable = javaHome + File.separator + "bin" + File.separator + "java";
-
-        String[] args = {
+        String[] processArgs = {
             "--snapshot-name",
             SNAPSHOT_NAME,
             "--snapshot-local-dir",
@@ -228,51 +193,21 @@ public class ProcessLifecycleTest extends SourceTestBase {
             "ES_7_10",
             "--initial-lease-duration",
             failHow == FailHow.NEVER ? "PT10M" : "PT1S" };
+        ProcessBuilder processBuilder = setupProcess(processArgs);
 
-        // Kick off the doc migration process
-        log.atInfo().setMessage("Running RfsMigrateDocuments with args: {}")
-            .addArgument(() -> Arrays.toString(args))
-            .log();
-        ProcessBuilder processBuilder = new ProcessBuilder(
-            javaExecutable,
-            "-cp",
-            classpath,
-            "org.opensearch.migrations.RfsMigrateDocuments"
-        );
-        processBuilder.command().addAll(Arrays.asList(args));
-        processBuilder.redirectErrorStream(true);
-        processBuilder.redirectOutput();
-        return processBuilder;
-    }
-
-    @NotNull
-    private static Process runAndMonitorProcess(ProcessBuilder processBuilder) throws IOException {
-        var process = processBuilder.start();
-
-        log.atInfo().setMessage("Process started with ID: {}").addArgument(() -> process.toHandle().pid()).log();
-
-        BufferedReader reader = new BufferedReader(new InputStreamReader(process.getInputStream()));
-        var readerThread = new Thread(() -> {
-            String line;
-            while (true) {
-                try {
-                    if ((line = reader.readLine()) == null) break;
-                } catch (IOException e) {
-                    log.atWarn().setCause(e).setMessage("Couldn't read next line from sub-process").log();
-                    return;
-                }
-                String finalLine = line;
-                log.atInfo()
-                    .setMessage("from sub-process [{}]: {}")
-                    .addArgument(() -> process.toHandle().pid())
-                    .addArgument(finalLine)
-                    .log();
+        var process = runAndMonitorProcess(processBuilder);
+        boolean finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS);
+        if (!finished) {
+            log.atError().setMessage("Process timed out, attempting to kill it...").log();
+            process.destroy(); // Try to be nice about things first...
+            if (!process.waitFor(10, TimeUnit.SECONDS)) {
+                log.atError().setMessage("Process still running, attempting to force kill it...").log();
+                process.destroyForcibly();
             }
-        });
+            Assertions.fail("The process did not finish within the timeout period (" + timeoutSeconds + " seconds).");
+        }
 
-        // Kill the process and fail if we have to wait too long
-        readerThread.start();
-        return process;
+        return process.exitValue();
     }
 
 }
