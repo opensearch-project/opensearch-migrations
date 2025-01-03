@@ -41,7 +41,7 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
         this(transformer, LoggerFactory.getLogger(OUTPUT_TRANSFORMATION_JSON_LOGGER));
     }
 
-    private void logTransformation(Map<String, Object> before, Map<String, Object> after) {
+    private void logTransformation(Map<String, Object> before, Object after) {
         if (transformerLogger.isInfoEnabled()) {
             try {
                 var transformationTuple = toTransformationMap(before, after);
@@ -55,7 +55,7 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
         }
     }
 
-    private Map<String, Object> toTransformationMap(Map<String, Object> before, Map<String, Object> after) {
+    private Map<String, Object> toTransformationMap(Map<String, Object> before, Object after) {
         var transformationMap = new LinkedHashMap<String, Object>();
         transformationMap.put("before", before);
         transformationMap.put("after", after);
@@ -69,7 +69,7 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
     }
 
     @SneakyThrows
-    private static String printMap(Map<String, Object> map) {
+    private static String printMap(Object map) {
         return MAPPER.writeValueAsString(map);
     }
 
@@ -77,7 +77,7 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
     private MigrationItem transformMigrationItem(MigrationItem migrationItem) {
         // Keep untouched original for logging
         final Map<String, Object> originalMap = MAPPER.convertValue(migrationItem, Map.class);
-        var transformedMigrationItem = transformer.transformJson(MAPPER.convertValue(migrationItem, Map.class));
+        Object transformedMigrationItem = transformer.transformJson(MAPPER.convertValue(migrationItem, Map.class));
         logTransformation(originalMap, transformedMigrationItem);
         return MAPPER.convertValue(transformedMigrationItem, MigrationItem.class);
     }
@@ -100,7 +100,7 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
     public GlobalMetadata transformGlobalMetadata(GlobalMetadata globalData) {
         var inputJson = objectNodeToMap(globalData.toObjectNode());
         log.atInfo().setMessage("BeforeJsonGlobal: {}").addArgument(() -> printMap(inputJson)).log();
-        var afterJson = transformer.transformJson(inputJson);
+        Object afterJson = transformer.transformJson(inputJson);
         log.atInfo().setMessage("AfterJsonGlobal: {}").addArgument(() -> printMap(afterJson)).log();
 
 
@@ -154,7 +154,7 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
     public IndexMetadata transformIndexMetadata(IndexMetadata indexData) {
         final Map<String, Object> originalInput = MAPPER.convertValue(indexData, Map.class);
         final Map<String, Object> inputJson = MAPPER.convertValue(indexData, Map.class);
-        var afterJson = transformer.transformJson(inputJson);
+        Object afterJson = transformer.transformJson(inputJson);
         logTransformation(originalInput, afterJson);
         return MAPPER.convertValue(inputJson, IndexMetadata.class);
     }

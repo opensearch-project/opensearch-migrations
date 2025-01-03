@@ -138,7 +138,7 @@ public class TypeMappingsSanitizationCreateIndexTest {
             "  }\n" +
             "}";
         var indexTypeMappingRewriter = makeIndexTypeMappingRewriter();
-        var resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+        Object resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
         Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
     }
 
@@ -161,7 +161,7 @@ public class TypeMappingsSanitizationCreateIndexTest {
             "  }\n" +
             "}";
         var indexTypeMappingRewriter = makeIndexTypeMappingRewriter();
-        var resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+        Object resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
         Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
     }
 

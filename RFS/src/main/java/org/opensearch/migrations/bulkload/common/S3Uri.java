@@ -1,5 +1,8 @@
 package org.opensearch.migrations.bulkload.common;
 
+import lombok.ToString;
+
+@ToString
 public class S3Uri {
     public final String bucketName;
     public final String key;

@@ -87,7 +87,7 @@ class JinjavaTransformerTest {
             new JinjavaConfig(null,
                 Map.of("hello", "{%- macro hello() -%} hi {%- endmacro -%}\n")));
 
-        var resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, Map.class));
+        Object resultObj = indexTypeMappingRewriter.transformJson(OBJECT_MAPPER.readValue(testString, Map.class));
         Assertions.assertEquals(JsonNormalizer.fromString(testString.replace("indexA/type2/", "indexA_2/_doc/")),
             JsonNormalizer.fromObject(resultObj));
     }
@@ -101,7 +101,7 @@ class JinjavaTransformerTest {
             new JinjavaConfig(null,
                 Map.of("hello", "{%- macro hello() -%}{\"hi\": \"world\"}{%- endmacro -%}\n")));
 
-        var resultObj = indexTypeMappingRewriter.transformJson(Map.of());
+        Object resultObj = indexTypeMappingRewriter.transformJson(Map.of());
         var resultStr = OBJECT_MAPPER.writeValueAsString(resultObj);
         Assertions.assertEquals("{\"hi\":\"world\"}", resultStr);
     }
@@ -121,7 +121,7 @@ class JinjavaTransformerTest {
                 new JinjavaConfig(null,
                     Map.of("hello", "{%- macro hello() -%}{\"hi\": \"world\"}{%- endmacro -%}\n")));
 
-            var resultObj = indexTypeMappingRewriter.transformJson(Map.of());
+            Object resultObj = indexTypeMappingRewriter.transformJson(Map.of());
             var resultStr = OBJECT_MAPPER.writeValueAsString(resultObj);
             Assertions.assertEquals("{}", resultStr);
 
