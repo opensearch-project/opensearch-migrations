@@ -154,7 +154,7 @@ public class CustomRfsTransformationTest extends SourceTestBase {
         }
     }
 
-    // Create a simple Jolt transform which matches documents of a given index name in a snpahost and changes that
+    // Create a simple Jolt transform which matches documents of a given index name in a snapshot and changes that
     // index name to a desired index name when migrated to the target cluster
     private static String createIndexNameTransformation(String existingIndexName, String newIndexName) {
         JSONArray rootArray = new JSONArray();
