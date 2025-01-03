@@ -426,6 +426,7 @@ def test_run_benchmark_executes_correctly_basic_auth_and_https(mocker):
                                  f"basic_auth_password:{auth_details['password']}", shell=True)
 
 
+@pytest.mark.skip(reason="Flaky test needs fix: https://opensearch.atlassian.net/browse/MIGRATIONS-2294")
 @pytest.mark.parametrize("method, endpoint, data, has_body", [
     (HttpMethod.GET, "/_cluster/health", None, False),
     (HttpMethod.POST, "/_search", {"query": {"match_all": {}}}, True)
