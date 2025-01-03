@@ -2,7 +2,7 @@ import {StackComposer} from "../lib/stack-composer";
 import {App} from "aws-cdk-lib";
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-export function createStackComposer(contextBlock: Record<string, any>, migrationsUserAgent?: string) {
+export function createStackComposer(contextBlock: Record<string, any>, migrationsUserAgent?: string, region?: string): StackComposer {
     contextBlock.stage = "unit-test"
     const app = new App({
         context: {
@@ -11,7 +11,7 @@ export function createStackComposer(contextBlock: Record<string, any>, migration
         }
     })
     return new StackComposer(app, {
-        env: {account: "test-account", region: "us-east-1"},
+        env: {account: "test-account", region: region ?? "us-east-1"},
         migrationsSolutionVersion: "1.0.0",
         migrationsUserAgent: migrationsUserAgent
     })
