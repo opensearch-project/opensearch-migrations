@@ -78,8 +78,9 @@ def execute_api_call(cluster: Cluster, path: str, method=HttpMethod.GET, data=No
 
 
 def create_index(index_name: str, cluster: Cluster, **kwargs):
+    headers = {'Content-Type': 'application/json'}
     return execute_api_call(cluster=cluster, method=HttpMethod.PUT, path=f"/{index_name}",
-                            **kwargs)
+                            headers=headers, **kwargs)
 
 
 def get_index(index_name: str, cluster: Cluster, **kwargs):
@@ -221,3 +222,31 @@ def wait_for_running_replayer(replayer: Replayer,
         test_case.fail(error_message)
     else:
         raise ReplayerNotActiveError(error_message)
+
+
+def convert_transformations_to_str(transform_list: List[Dict]) -> str:
+    return json.dumps(transform_list)
+
+
+def get_index_name_transformation(existing_index_name: str, target_index_name: str) -> Dict:
+    return {
+        "JsonConditionalTransformerProvider": [
+            {
+                "JsonJMESPathPredicateProvider": {
+                    "script": f"name == '{existing_index_name}'"
+                }
+            },
+            [
+                {
+                    "JsonJoltTransformerProvider": {
+                        "script": {
+                            "operation": "modify-overwrite-beta",
+                            "spec": {
+                                "name": f"{target_index_name}"
+                            }
+                        }
+                    }
+                }
+            ]
+        ]
+    }

@@ -5,7 +5,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.function.UnaryOperator;
+import java.util.function.Function;
 
 import org.opensearch.migrations.transform.typemappings.SourceProperties;
 
@@ -33,7 +33,7 @@ public class TypeMappingsSanitizationTransformer extends JavascriptTransformer {
             makeSourceWrapperFunction(sourceProperties, featureFlags, indexMappings, regexIndexMappings));
     }
 
-    private static UnaryOperator<Map<String, Object>>
+    private static Function<Object, Map<String, Object>>
     makeSourceWrapperFunction(SourceProperties sourceProperties,
                               Map<String, Object> featureFlagsIncoming,
                               Map<String, Map<String, String>> indexMappingsIncoming,
