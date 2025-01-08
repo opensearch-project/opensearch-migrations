@@ -4,7 +4,7 @@ kind: Deployment
 metadata:
   name: {{ include "generic.fullname" . }}
 spec:
-  replicas: 0
+  replicas: 1
   selector:
     matchLabels:
       app: {{ include "generic.fullname" . }}
@@ -23,7 +23,7 @@ spec:
         - name: wait-for-kafka
           image: bitnami/kubectl:latest  # or any image with curl/kubectl
           command: [ 'sh', '-c',
-                     'until kubectl get configmap kafka-config; do echo waiting for kafka config; sleep 1; done' ]
+                     'until kubectl wait --for=condition=Ready kafka/captured-traffic -n {{.Release.Namespace }} --timeout=10s; do echo waiting for kafka cluster is ready; sleep 1; done' ]
       containers:
         - name: captureproxy
           image: migrations/capture_proxy:latest

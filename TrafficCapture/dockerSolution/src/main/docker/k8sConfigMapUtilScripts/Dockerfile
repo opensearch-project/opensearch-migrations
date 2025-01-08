@@ -36,4 +36,4 @@ RUN pipenv install --deploy
 COPY configmap2yaml/* /root/
 RUN chmod ug+x /root/*.py
 
-ENTRYPOINT ["/.venv/bin/python", "config_watcher.py"]
+ENTRYPOINT ["tail", "-f", "/dev/null"]

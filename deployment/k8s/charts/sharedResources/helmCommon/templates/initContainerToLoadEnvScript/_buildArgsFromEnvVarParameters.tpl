@@ -1,4 +1,4 @@
-{{- define "generic.buildArgumentsBuilderScript" -}}
+{{- define "generic.buildArgsFromEnvVarParameters" -}}
     {{- $argsName := .ArgsVarName | default "ARGS" -}}
     {{- $lines := list -}}
     {{- $lines = append $lines "set -e" -}}
@@ -62,24 +62,4 @@
         {{- $lines = append $lines (printf "export %s=\"%s $%s\"" $argsName $orderedArgs $argsName) -}}
     {{- end }}
     {{- join "\n" $lines -}}
-{{- end -}}
-
-{{- define "generic.buildCommandBuilderScript" -}}
-{{- include "generic.buildArgumentsBuilderScript" . }}
-{{- $command := .Command }}
-{{- $cmdvarname := .CmdVarName }}
-{{ $cmdvarname }}="{{ .Command }}"
-{{ $cmdvarname}}="{{ $command }} $ARGS"
-{{- end }}
-
-{{- define "generic.buildCommand" -}}
-{{- include "generic.buildCommandBuilderScript" (dict
-  "CmdVarName" "CMD"
-  "Command" .Command
-  "Parameters" .Parameters
-  "include" .Template.Include
-  "Template" .Template) }}
-
-echo "Executing command: $CMD"
-exec $CMD
 {{- end -}}

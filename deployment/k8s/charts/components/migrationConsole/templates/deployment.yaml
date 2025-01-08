@@ -25,14 +25,16 @@ spec:
            "MountName" $envVarMountName
            "include" .Template.Include)) | nindent 8 }}
         - name: service-yaml-agent
-          image: migrations/service_yaml_from_config_maps
+          image: migrations/k8s_config_map_util_scripts
           imagePullPolicy: IfNotPresent
           restartPolicy: Always
           volumeMounts:
             - name: merged-config
               mountPath: /config
               subPath: migration_services.yaml
-          args:
+          command:
+            - /.venv/bin/python
+            - config_watcher.py
             - "--namespace={{.Release.Namespace}}"
             - "--outfile=/config/migration_services.yaml"
       containers:

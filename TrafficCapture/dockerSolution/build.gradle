@@ -18,7 +18,7 @@ dependencies {
 def dockerFilesForExternalServices = [
         "elasticsearch_searchguard": "elasticsearchWithSearchGuard",
         "capture_proxy_base": "captureProxyBase",
-        "service_yaml_from_config_maps": "serviceYamlFromConfigMaps",
+        "k8s_config_map_util_scripts": "k8sConfigMapUtilScripts",
         "elasticsearch_client_test_console": "elasticsearchTestConsole",
         "migration_console": "migrationConsole",
         "otel_collector": "otelCollector",
@@ -126,7 +126,7 @@ dockerCompose {
 }
 
 task buildDockerImages {
-    dependsOn buildDockerImage_service_yaml_from_config_maps
+    dependsOn buildDockerImage_k8s_config_map_util_scripts
     dependsOn buildDockerImage_elasticsearch_searchguard
     dependsOn buildDockerImage_migration_console
     dependsOn buildDockerImage_otel_collector
