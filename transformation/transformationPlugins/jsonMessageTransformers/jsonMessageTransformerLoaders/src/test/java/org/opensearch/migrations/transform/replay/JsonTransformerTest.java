@@ -54,7 +54,7 @@ class JsonTransformerTest {
         var transformer = JsonJoltTransformer.newBuilder()
                 .addCannedOperation(JsonJoltTransformBuilder.CANNED_OPERATION.PASS_THRU)
                 .build();
-        var transformedDocument = transformer.transformJson(documentJson);
+        Object transformedDocument = transformer.transformJson(documentJson);
         var finalOutputStr = emitJson(transformedDocument);
 
         Assertions.assertEquals(TEST_DOCUMENT, finalOutputStr);
@@ -65,7 +65,7 @@ class JsonTransformerTest {
         var testResourceName = "parsed/post_formUrlEncoded_withFixedLength.json";
         final var documentJson = parseSampleRequestFromResource(testResourceName);
         var transformer = JsonJoltTransformer.newBuilder().addHostSwitchOperation(DUMMY_HOSTNAME_TEST_STRING).build();
-        var transformedDocument = transformer.transformJson(documentJson);
+        Object transformedDocument = transformer.transformJson(documentJson);
         String transformedJsonOutputStr = emitJson(transformedDocument);
         log.atInfo().setMessage("transformed json document: {}").addArgument(transformedJsonOutputStr).log();
         Assertions.assertTrue(transformedJsonOutputStr.contains(DUMMY_HOSTNAME_TEST_STRING));
@@ -123,7 +123,7 @@ class JsonTransformerTest {
         public void testSimpleTransformJMES() throws JsonProcessingException {
             var documentJson = parseStringAsJson(mapper, TEST_INPUT_REQUEST);
             var transformer = new JsonJMESPathTransformer(new JcfRuntime(), EXCISE_TYPE_EXPRESSION_STRING);
-            var transformedDocument = transformer.transformJson(documentJson);
+            Object transformedDocument = transformer.transformJson(documentJson);
             var outputStr = emitJson(mapper, transformedDocument);
 
             final String TEST_OUTPUT_REQUEST = "{\n"

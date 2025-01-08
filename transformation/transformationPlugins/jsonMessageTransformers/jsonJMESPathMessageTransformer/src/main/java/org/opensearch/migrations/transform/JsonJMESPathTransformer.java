@@ -16,7 +16,7 @@ public class JsonJMESPathTransformer implements IJsonTransformer {
     }
 
     @Override
-    public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
+    public Object transformJson(Object incomingJson) {
         var output = expression.search(incomingJson);
         log.info("output=" + output);
         return (Map<String, Object>) output;
