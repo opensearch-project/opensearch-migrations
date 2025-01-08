@@ -1,8 +1,8 @@
 {{- define "generic.pullEnvVarsFromConfigMaps" }}
 {{- $packageName := .PackageName -}}
 {{- range $sourceKey, $param := .Parameters -}}
-{{- $configMapKey := printf "%s-%s" $packageName (include "toKebabCase" $sourceKey) }}
-{{- $envName := ( include "toSnakeCase" $sourceKey | upper) }}
+{{- $configMapKey := printf "%s-%s" $packageName (kebabcase $sourceKey) }}
+{{- $envName := ( snakecase $sourceKey | upper) }}
 - name: {{ $envName }}_DEFAULT
   valueFrom:
     configMapKeyRef:

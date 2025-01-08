@@ -5,7 +5,7 @@
 
     {{- /* Default environment variables if not set */ -}}
     {{- range $key, $param := .Parameters }}
-        {{- $envVarName := include "toSnakeCase" $key -}}
+        {{- $envVarName := snakecase $key | upper -}}
         {{- $lines = append $lines (printf "if [ -z \"$%s\" ]; then" $envVarName) -}}
         {{- $lines = append $lines (printf "  export %s=\"$%s_DEFAULT\"" $envVarName $envVarName) -}}
         {{- $lines = append $lines "fi" -}}
@@ -21,7 +21,7 @@
     {{- end }}
 
     {{- range $key, $param := .Parameters }}
-        {{- $envVarName := include "toSnakeCase" $key -}}
+        {{- $envVarName := snakecase $key | upper -}}
         {{- $formattedKeyFlagName := "" -}}
         {{- if hasKey $keyToPositionMap $key -}}
             {{- $positionalMap = merge $positionalMap (dict (get $keyToPositionMap $key) $envVarName) -}}

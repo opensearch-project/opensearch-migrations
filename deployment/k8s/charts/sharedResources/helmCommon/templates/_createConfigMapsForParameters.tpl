@@ -8,7 +8,7 @@
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ $namePrefix }}{{ $key | include "toKebabCase" }}-default
+  name: {{ $namePrefix }}{{ kebabcase $key }}-default
   namespace: {{ $namespace }}
   labels:
     type: default
@@ -34,7 +34,7 @@ data:
 apiVersion: v1
 kind: ConfigMap
 metadata:
-  name: {{ $namePrefix }}{{ $key | include "toKebabCase" }}
+  name: {{ $namePrefix }}{{ kebabcase $key }}
   namespace: {{ $namespace }}
   labels:
     type: override
