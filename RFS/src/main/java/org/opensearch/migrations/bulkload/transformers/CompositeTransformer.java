@@ -1,5 +1,9 @@
 package org.opensearch.migrations.bulkload.transformers;
 
+import java.util.List;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
+
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 
@@ -19,10 +23,13 @@ public class CompositeTransformer implements Transformer {
     }
 
     @Override
-    public IndexMetadata transformIndexMetadata(IndexMetadata indexData) {
-        for (Transformer transformer : transformers) {
-            indexData = transformer.transformIndexMetadata(indexData);
-        }
-        return indexData;
+    public List<IndexMetadata> transformIndexMetadata(IndexMetadata indexData) {
+        return Stream.of(transformers)
+                .reduce(
+                    Stream.of(indexData),
+                    (stream, transformer) -> stream.flatMap(data -> transformer.transformIndexMetadata(data).stream()),
+                    Stream::concat
+                )
+                .collect(Collectors.toList());
     }
 }
