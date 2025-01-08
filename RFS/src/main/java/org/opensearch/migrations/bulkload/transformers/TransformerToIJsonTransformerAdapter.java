@@ -109,10 +109,8 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
 
     @Override
     public GlobalMetadata transformGlobalMetadata(GlobalMetadata globalData) {
-        var inputJson = objectNodeToMap(globalData.toObjectNode());
-        log.atInfo().setMessage("BeforeJsonGlobal: {}").addArgument(() -> printMap(inputJson)).log();
-        Object afterJson = transformer.transformJson(inputJson);
-        log.atInfo().setMessage("AfterJsonGlobal: {}").addArgument(() -> printMap(afterJson)).log();
+        log.atInfo().setMessage("BeforeJsonGlobal: {}")
+            .addArgument(() -> printMap(objectNodeToMap(globalData.toObjectNode()))).log();
 
         final List<LegacyTemplate> legacyTemplates = new ArrayList<>();
         globalData.getTemplates().fields().forEachRemaining(
@@ -150,13 +148,12 @@ public class TransformerToIJsonTransformerAdapter implements Transformer {
                 .map(ComponentTemplate.class::cast)
                 .collect(Collectors.toList());
 
-        assert transformedLegacy.size() + transformedIndex.size() + transformedComponent.size() == transformedTemplates.size();
-
         updateTemplates(transformedLegacy, globalData.getTemplates());
         updateTemplates(transformedIndex, globalData.getIndexTemplates());
         updateTemplates(transformedComponent, globalData.getComponentTemplates());
 
-        log.atInfo().setMessage("GlobalOutput: {}").addArgument(() -> printMap(objectNodeToMap(globalData.toObjectNode()))).log();
+        log.atInfo().setMessage("AfterJsonGlobal: {}")
+            .addArgument(() -> printMap(objectNodeToMap(globalData.toObjectNode()))).log();
         return globalData;
     }
 

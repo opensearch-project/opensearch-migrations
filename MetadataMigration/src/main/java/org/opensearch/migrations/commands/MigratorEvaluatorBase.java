@@ -5,7 +5,7 @@ import java.util.List;
 
 import org.opensearch.migrations.MigrateOrEvaluateArgs;
 import org.opensearch.migrations.MigrationMode;
-import org.opensearch.migrations.bulkload.transformers.CompositeTransformer;
+import org.opensearch.migrations.bulkload.transformers.FanOutCompositeTransformer;
 import org.opensearch.migrations.bulkload.transformers.TransformFunctions;
 import org.opensearch.migrations.bulkload.transformers.Transformer;
 import org.opensearch.migrations.bulkload.transformers.TransformerToIJsonTransformerAdapter;
@@ -76,7 +76,7 @@ public abstract class MigratorEvaluatorBase {
             arguments.metadataTransformationParams
         );
         var customTransformer = getCustomTransformer();
-        var compositeTransformer = new CompositeTransformer(customTransformer, versionTransformer);
+        var compositeTransformer = new FanOutCompositeTransformer(customTransformer, versionTransformer);
         log.atInfo().setMessage("Selected transformer: {}").addArgument(compositeTransformer).log();
         return compositeTransformer;
     }

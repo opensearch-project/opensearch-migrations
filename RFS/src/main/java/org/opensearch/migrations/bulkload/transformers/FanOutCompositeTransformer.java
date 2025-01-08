@@ -7,10 +7,10 @@ import java.util.stream.Stream;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 
-public class CompositeTransformer implements Transformer {
+public class FanOutCompositeTransformer implements Transformer {
     private final Transformer[] transformers;
 
-    public CompositeTransformer(Transformer... transformers) {
+    public FanOutCompositeTransformer(Transformer... transformers) {
         this.transformers = transformers;
     }
 
@@ -24,12 +24,10 @@ public class CompositeTransformer implements Transformer {
 
     @Override
     public List<IndexMetadata> transformIndexMetadata(IndexMetadata indexData) {
-        return Stream.of(transformers)
-                .reduce(
-                    Stream.of(indexData),
-                    (stream, transformer) -> stream.flatMap(data -> transformer.transformIndexMetadata(data).stream()),
-                    Stream::concat
-                )
-                .collect(Collectors.toList());
+        var indexDataStream = Stream.of(indexData);
+        for (Transformer transformer : transformers) {
+            indexDataStream = indexDataStream.flatMap(data -> transformer.transformIndexMetadata(data).stream());
+        }
+        return indexDataStream.collect(Collectors.toList());
     }
 }
