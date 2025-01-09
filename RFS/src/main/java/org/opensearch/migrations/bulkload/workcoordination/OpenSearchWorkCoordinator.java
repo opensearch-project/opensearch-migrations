@@ -31,7 +31,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
-    // Create a stable logger that descendants can use, and we can predictable read from in tests
+    // Create a stable logger that descendants can use, and we can predictably read from in tests
     protected static final Logger log = LoggerFactory.getLogger(OpenSearchWorkCoordinator.class);
 
     public static final String INDEX_NAME = ".migrations_working_state";
