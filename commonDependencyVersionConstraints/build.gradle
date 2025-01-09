@@ -124,6 +124,12 @@ dependencies {
     def json = '20240303'
     api group: 'org.json', name: 'json', version: json
 
+    def graalVersion = '24.1.1'
+
+    api group: 'org.codehaus.groovy', name: 'groovy-all', version: '3.0.13'
+    api group: "org.graalvm.js", name: 'js', version: graalVersion
+    api group: "org.graalvm.js", name: 'js-scriptengine', version: graalVersion
+
     // ************************************************************
     // The following constraints are for mitigating transitive CVEs
     // ************************************************************

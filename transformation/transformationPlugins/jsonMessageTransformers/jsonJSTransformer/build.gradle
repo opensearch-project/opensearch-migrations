@@ -1,10 +1,8 @@
 plugins {
     id 'org.opensearch.migrations.java-library-conventions'
     id 'io.freefair.lombok'
-    id 'de.undercouch.download' version '5.4.0'  // For downloading LiquidJS
+    id 'de.undercouch.download' version '5.4.0'  // For downloading JS packages
 }
-
-def graalVersion = '24.1.1'
 
 dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
@@ -13,9 +11,9 @@ dependencies {
     implementation group: 'org.slf4j', name: 'slf4j-api'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
-    implementation group: 'org.codehaus.groovy', name: 'groovy-all', version: '3.0.13'
-    implementation group: "org.graalvm.js", name: 'js', version: "${graalVersion}"
-    implementation group: "org.graalvm.js", name: 'js-scriptengine', "version": "${graalVersion}"
+    implementation group: 'org.codehaus.groovy', name: 'groovy-all'
+    implementation group: "org.graalvm.js", name: 'js'
+    implementation group: "org.graalvm.js", name: 'js-scriptengine'
 
     testImplementation project(':TrafficCapture:trafficReplayer')
     testImplementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerLoaders')
@@ -28,11 +26,20 @@ dependencies {
     testRuntimeOnly group:'org.junit.jupiter', name:'junit-jupiter-engine'
 }
 
-// Task to download LiquidJS
-task downloadLiquidJs(type: Download) {
-    src 'https://cdn.jsdelivr.net/npm/liquidjs/dist/liquid.browser.min.js'
-    dest new File(projectDir, 'src/main/resources/liquid.min.js')
-    overwrite true
-}
-
-processResources.dependsOn downloadLiquidJs
+/**
+ * Task to download JS Packages
+ * This task is used to download any JS packages that the JsonJSTransformer plugin needs
+ * to run. It downloads the packages and makes them available to the plugins.
+ *
+ * Example of how to use this task to download a JS package:
+ *
+ * Note: should probably be moved to output to the build directory
+ *
+ * task downloadJSPackages(type: Download) {
+ *     src 'https://cdn.jsdelivr.net/npm/liquidjs/dist/liquid.browser.min.js'
+ *     dest new File(projectDir, 'src/main/resources/liquid.min.js')
+ *     overwrite true
+ * }
+ *
+ * processResources.dependsOn downloadJSPackages
+ */
