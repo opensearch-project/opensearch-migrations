@@ -16,6 +16,7 @@ spec:
       - id: 0
         type: persistent-claim
         size: {{ .Values.nodePool.volume.size}}
+        class: {{ .Values.nodePool.volume.class}}
         deleteClaim: {{ .Values.nodePool.volume.deleteClaim}}
         kraftMetadata: shared
 ---

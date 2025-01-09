@@ -41,8 +41,8 @@ A convenience script `minikubeLocal.sh` is located in this directory which wraps
 
 ## Deploying
 
-### Full environment
-Guide for deploying a complete environment helm chart comprised of many Migration service helm charts
+### Migration Assistant environment
+Guide for deploying a complete Migration Assistant environment helm chart, with the ability to enabled/disable different Migration services and clusters as needed
 
 The full environment helm charts consists of:
 * Source cluster
@@ -51,26 +51,20 @@ The full environment helm charts consists of:
 
 **Note**: For first-time deployments and deployments after changes have been made to a dependent helm package, such as the `migration-console` chart, the following command is needed to update dependent charts
 ```shell
-helm dependency update environments/full-environment
+helm dependency update migration-assistant
 ```
 
 The full environment helm chart can be deployed with the helm command
 ```shell
-helm install local environments/full-environment
+helm install ma migration-assistant
 ```
 
 ### Specific services
 Guide for deploying an individual Migration service helm chart
 
-Most migration services have a dependency on Persistent Volumes that can be installed to the Kubernetes cluster using the following commands
-```shell
-helm install shared-logs shared/shared-logs-vol
-helm install snapshot-vol shared/snapshot-vol
-```
-
 A particular service could then be deployed with a command similar to the below.
 ```shell
-helm install migration-console migration-console
+helm install migration-console services/migration-console
 ```
 
 ## Uninstalling
@@ -82,4 +76,55 @@ helm list
 To uninstall a particular helm deployment
 ```shell
 helm uninstall <deployment_name>
+```
+
+### AWS Initial Setup
+#### Setting up EBS driver to dynamically provision PVs
+```shell
+# To check if any IAM OIDC provider is configured:
+aws iam list-open-id-connect-providers
+# If none exist, create one:
+eksctl utils associate-iam-oidc-provider --cluster <cluster_name> --approve
+# Create IAM role for service account in order to use EBS CSI driver in EKS
+# This currently creates a CFN stack and may 
+eksctl create iamserviceaccount \
+    --name ebs-csi-controller-sa \
+    --namespace kube-system \
+    --cluster <cluster_name> \
+    --role-name AmazonEKS_EBS_CSI_DriverRole \
+    --role-only \
+    --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy \
+    --approve
+# Install add-on to EKS cluster using the created IAM role for the service account
+eksctl create addon --cluster <cluster_name> --name aws-ebs-csi-driver --version latest --service-account-role-arn <role_arn> --force
+# Create StorageClass to dynamically provision persistent volumes (PV)
+kubectl apply -f aws/storage-class-ebs.yml
+```
+#### Setting up EFS driver to dynamically provision PVs
+```shell
+export cluster_name=<cluster_name>
+export role_name=AmazonEKS_EFS_CSI_DriverRole
+eksctl create iamserviceaccount \
+    --name efs-csi-controller-sa \
+    --namespace kube-system \
+    --cluster $cluster_name \
+    --role-name $role_name \
+    --role-only \
+    --attach-policy-arn arn:aws:iam::aws:policy/service-role/AmazonEFSCSIDriverPolicy \
+    --approve
+TRUST_POLICY=$(aws iam get-role --role-name $role_name --query 'Role.AssumeRolePolicyDocument' | \
+    sed -e 's/efs-csi-controller-sa/efs-csi-*/' -e 's/StringEquals/StringLike/')
+aws iam update-assume-role-policy --role-name $role_name --policy-document "$TRUST_POLICY"
+eksctl create addon --cluster $cluster_name --name aws-efs-csi-driver --version latest --service-account-role-arn <role_arn> --force
+kubectl apply -f aws/storage-class-efs.yml
+```
+
+Create an ECR to store images
+```shell
+./buildDockerImagesMini.sh --create-ecr
+```
+
+Build images and push to ECR
+```shell
+./buildDockerImagesMini.sh --sync-ecr
 ```
