@@ -76,7 +76,7 @@ public class TypeMappingsSanitizationProviderTest {
         }
         {
             Map<String, Object> inputMap = OBJECT_MAPPER.readValue(TEST_INPUT_REQUEST, new TypeReference<>() {});
-            var resultFromNullConfig = provider.createTransformer(null).transformJson(inputMap);
+            var resultFromNullConfig = provider.createTransformer(Map.of()).transformJson(inputMap);
             Assertions.assertEquals(
                 JsonNormalizer.fromString(
                     EXPECTED.replace(
@@ -106,7 +106,7 @@ public class TypeMappingsSanitizationProviderTest {
             Map.of("sourceProperties", Map.of("version",
                     Map.of("major",  (Object) 5,
                         "minor", (Object) 10)),
-                "regex_index_mappings", List.of(List.of("", "", "")));
+                "regex_mappings", List.of(List.of("", "", "")));
         var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(fullTransformerConfig);
         var resultObj = transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
         Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
@@ -119,7 +119,7 @@ public class TypeMappingsSanitizationProviderTest {
             "  \"URI\" : \"/\",\n" +
             "  \"method\" : \"GET\"\n" +
             "}";
-        var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(null);
+        var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(Map.of());
         var thrownException =
             Assertions.assertThrows(Exception.class, () ->
             transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class)));
