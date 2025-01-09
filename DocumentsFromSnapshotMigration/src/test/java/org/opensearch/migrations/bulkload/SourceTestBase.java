@@ -38,7 +38,7 @@ import org.opensearch.migrations.bulkload.framework.SearchClusterContainer;
 import org.opensearch.migrations.bulkload.http.SearchClusterRequests;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
-import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
 import org.opensearch.migrations.bulkload.worker.WorkItemCursor;
@@ -144,7 +144,8 @@ public class SourceTestBase {
         AtomicInteger runCounter,
         Random clockJitter,
         DocumentMigrationTestContext testContext,
-        Version version,
+        Version sourceVersion,
+        Version targetVersion,
         boolean compressionEnabled
     ) {
         for (int runNumber = 1; ; ++runNumber) {
@@ -156,7 +157,8 @@ public class SourceTestBase {
                     targetAddress,
                     clockJitter,
                     testContext,
-                    version,
+                    sourceVersion,
+                    targetVersion,
                     compressionEnabled
                 );
                 if (workResult == DocumentsRunner.CompletionStatus.NOTHING_DONE) {
@@ -202,7 +204,8 @@ public class SourceTestBase {
         String targetAddress,
         Random clockJitter,
         DocumentMigrationTestContext context,
-        Version version,
+        Version sourceVersion,
+        Version targetVersion,
         boolean compressionEnabled
     ) throws RfsMigrateDocuments.NoWorkLeftException {
         var tempDir = Files.createTempDirectory("opensearchMigrationReindexFromSnapshot_test_lucene");
@@ -219,7 +222,7 @@ public class SourceTestBase {
                 return d;
             };
 
-            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(version, sourceRepo);
+            var sourceResourceProvider = ClusterProviderRegistry.getSnapshotReader(sourceVersion, sourceRepo);
 
             DefaultSourceRepoAccessor repoAccessor = new DefaultSourceRepoAccessor(sourceRepo);
             SnapshotShardUnpacker.Factory unpackerFactory = new SnapshotShardUnpacker.Factory(
@@ -238,7 +241,8 @@ public class SourceTestBase {
             var defaultDocTransformer = new TransformationLoader().getTransformerFactoryLoader(RfsMigrateDocuments.DEFAULT_DOCUMENT_TRANSFORMATION_CONFIG);
 
             AtomicReference<WorkItemCursor> progressCursor = new AtomicReference<>();
-            try (var workCoordinator = new OpenSearchWorkCoordinator(
+            var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
+            try (var workCoordinator = coordinatorFactory.get(
                 new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                     .host(targetAddress)
                     .build()
@@ -255,7 +259,7 @@ public class SourceTestBase {
                         .build()
                         .toConnectionContext()), 1000, Long.MAX_VALUE, 1, defaultDocTransformer),
                     progressCursor,
-                    new OpenSearchWorkCoordinator(
+                    coordinatorFactory.get(
                         new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                             .host(targetAddress)
                             .build()

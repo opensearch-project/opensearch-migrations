@@ -140,6 +140,7 @@ public class EndToEndTest extends SourceTestBase {
                         clockJitter,
                         testDocMigrationContext,
                         sourceCluster.getContainerVersion().getVersion(),
+                        targetCluster.getContainerVersion().getVersion(),
                         false
                     )
                 )
@@ -178,5 +179,30 @@ public class EndToEndTest extends SourceTestBase {
             Assertions.assertEquals("1", routing);
         }
     }
+
+    // private static Stream<Arguments> scenarios_experimental() {
+    //     var scenarios = Stream.<Arguments>builder();
+
+    //     for (var sourceCluster : SupportedClusters.sources()) {
+    //         for (var targetCluster : SupportedClusters.targets_experimental()) {
+    //             scenarios.add(Arguments.of(sourceCluster, targetCluster));
+    //         }
+    //     }
+
+    //     return scenarios.build();
+    // }
+
+    // @ParameterizedTest(name = "Source {0} to Target {1}")
+    // @MethodSource(value = "scenarios_experimental")
+    // public void migrationDocumentsExperimental(
+    //     final SearchClusterContainer.ContainerVersion sourceVersion,
+    //     final SearchClusterContainer.ContainerVersion targetVersion) throws Exception {
+    //     try (
+    //         final var sourceCluster = new SearchClusterContainer(sourceVersion);
+    //         final var targetCluster = new SearchClusterContainer(targetVersion)
+    //     ) {
+    //         migrationDocumentsWithClusters(sourceCluster, targetCluster);
+    //     }
+    // }
 
 }

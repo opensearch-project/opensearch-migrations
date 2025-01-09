@@ -27,10 +27,13 @@ import lombok.Lombok;
 import lombok.NonNull;
 import lombok.SneakyThrows;
 import lombok.ToString;
-import lombok.extern.slf4j.Slf4j;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
-@Slf4j
-public class OpenSearchWorkCoordinator implements IWorkCoordinator {
+public abstract class OpenSearchWorkCoordinator implements IWorkCoordinator {
+    // Create a stable logger that descendants can use, and we can predictable read from in tests
+    protected static final Logger log = LoggerFactory.getLogger(OpenSearchWorkCoordinator.class);
+
     public static final String INDEX_NAME = ".migrations_working_state";
     public static final int MAX_REFRESH_RETRIES = 6;
     public static final int MAX_SETUP_RETRIES = 6;
@@ -194,38 +197,23 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         }
     }
 
+    public String getLoggerName() {
+        return log.getName();
+    }
+
+    protected abstract String getCoordinationIndexSettingsBody();
+
+    protected abstract String getPathForUpdates(String workItemId);
+
+    protected abstract String getPathForGets(String workItemId);
+
+    protected abstract String getPathForSearches();
+
+    protected abstract int getTotalHitsFromSearchResponse(JsonNode searchResponse);
+
     public void setup(Supplier<IWorkCoordinationContexts.IInitializeCoordinatorStateContext> contextSupplier)
         throws IOException, InterruptedException {
-        var body = "{\n"
-            + "  \"settings\": {\n"
-            + "   \"index\": {"
-            + "    \"number_of_shards\": 1,\n"
-            + "    \"number_of_replicas\": 1\n"
-            + "   }\n"
-            + "  },\n"
-            + "  \"mappings\": {\n"
-            + "    \"properties\": {\n"
-            + "      \"" + EXPIRATION_FIELD_NAME + "\": {\n"
-            + "        \"type\": \"long\"\n"
-            + "      },\n"
-            + "      \"" + COMPLETED_AT_FIELD_NAME + "\": {\n"
-            + "        \"type\": \"long\"\n"
-            + "      },\n"
-            + "      \"leaseHolderId\": {\n"
-            + "        \"type\": \"keyword\",\n"
-            + "        \"norms\": false\n"
-            + "      },\n"
-            + "      \"status\": {\n"
-            + "        \"type\": \"keyword\",\n"
-            + "        \"norms\": false\n"
-            + "      },\n"
-            + "     \"" + SUCCESSOR_ITEMS_FIELD_NAME + "\": {\n"
-            + "       \"type\": \"keyword\",\n"
-            + "        \"norms\": false\n"
-            + "      }\n"
-            + "    }\n"
-            + "  }\n"
-            + "}\n";
+        var body = getCoordinationIndexSettingsBody();
 
         try {
             doUntil("setup-" + INDEX_NAME, 100, MAX_SETUP_RETRIES, contextSupplier::get, () -> {
@@ -345,7 +333,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
         return httpClient.makeJsonRequest(
             AbstractedHttpClient.POST_METHOD,
-            INDEX_NAME + "/_update/" + workItemId,
+            getPathForUpdates(workItemId),
             null,
             body
         );
@@ -419,7 +407,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
             } else {
                 final var httpResponse = httpClient.makeJsonRequest(
                     AbstractedHttpClient.GET_METHOD,
-                    INDEX_NAME + "/_doc/" + workItemId,
+                    getPathForGets(workItemId),
                     null,
                     null
                 );
@@ -471,7 +459,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
 
             var response = httpClient.makeJsonRequest(
                 AbstractedHttpClient.POST_METHOD,
-                INDEX_NAME + "/_update/" + workItemId,
+                getPathForUpdates(workItemId),
                 null,
                 body
             );
@@ -513,7 +501,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 + "\"size\": 0" // This sets the number of items to include in the `hits.hits` array, but doesn't affect
                 + "}";          // the integer value in `hits.total.value`
 
-            var path = INDEX_NAME + "/_search";
+            var path = getPathForSearches();
             var response = httpClient.makeJsonRequest(AbstractedHttpClient.POST_METHOD, path, null, queryBody);
             var statusCode = response.getStatusCode();
             if (statusCode != 200) {
@@ -525,7 +513,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 );
             }
             var payload = objectMapper.readTree(response.getPayloadBytes());
-            var totalHits = payload.path("hits").path("total").path("value").asInt();
+            var totalHits = getTotalHitsFromSearchResponse(payload);
             // In the case where totalHits is 0, we need to be particularly sure that we're not missing data. The `relation`
             // for the total must be `eq` or we need to throw an error because it's not safe to rely on this data.
             if (totalHits == 0 && !payload.path("hits").path("total").path("relation").textValue().equals("eq")) {
@@ -662,7 +650,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
         final var body = queryWorkersAssignedItemsTemplate.replace(WORKER_ID_TEMPLATE, workerId);
         var response = httpClient.makeJsonRequest(
             AbstractedHttpClient.POST_METHOD,
-            INDEX_NAME + "/_search",
+            getPathForSearches(),
             null,
             body
         );
@@ -770,7 +758,7 @@ public class OpenSearchWorkCoordinator implements IWorkCoordinator {
                 .addArgument(workItemId).log();
         var response = httpClient.makeJsonRequest(
                 AbstractedHttpClient.POST_METHOD,
-                INDEX_NAME + "/_update/" + workItemId,
+                getPathForUpdates(workItemId),
                 null,
                 body
         );

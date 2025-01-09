@@ -29,8 +29,8 @@ import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
-import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
@@ -181,6 +181,12 @@ public class RfsMigrateDocuments {
             description = ("Version of the source cluster."))
         public Version sourceVersion = Version.fromString("ES 7.10");
 
+        @Parameter(required = true,
+            names = { "--target-version" },
+            converter = VersionConverter.class,
+            description = ("Version of the target cluster."))
+        public Version targetVersion = Version.fromString("OS 2.11");
+
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
     }
@@ -288,7 +294,8 @@ public class RfsMigrateDocuments {
         var progressCursor = new AtomicReference<WorkItemCursor>();
         var cancellationRunnableRef = new AtomicReference<Runnable>();
         var workItemTimeProvider = new WorkItemTimeProvider();
-        try (var workCoordinator = new OpenSearchWorkCoordinator(
+        var coordinatorFactory = new WorkCoordinatorFactory(arguments.targetVersion);
+        try (var workCoordinator = coordinatorFactory.get(
                  new CoordinateWorkHttpClient(connectionContext),
                  TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                  workerId,
