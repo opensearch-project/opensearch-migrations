@@ -1,11 +1,4 @@
 {
     "java.compile.nullAnalysis.mode": "automatic",
-    "java.completion.importOrder": [
-        "javax",
-        "java",
-        "org.opensearch",
-        "",
-        "#"
-    ],
-    "java.configuration.updateBuildConfiguration": "automatic"
+    "java.completion.importOrder": ["javax","java","org.opensearch","","#"]
 }
