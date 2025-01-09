@@ -11,6 +11,7 @@ plugins {
 dependencies {
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonMessageTransformerInterface')
     implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonTypeMappingsSanitizationTransformer')
+    implementation project(':transformation:transformationPlugins:jsonMessageTransformers:jsonJSTransformerProvider')
 
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-core'
     implementation group: 'com.fasterxml.jackson.core', name: 'jackson-databind'

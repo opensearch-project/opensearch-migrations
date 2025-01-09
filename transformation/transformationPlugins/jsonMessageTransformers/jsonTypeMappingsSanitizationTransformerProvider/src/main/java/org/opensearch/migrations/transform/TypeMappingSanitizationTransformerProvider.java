@@ -9,7 +9,7 @@ import org.opensearch.migrations.transform.typemappings.SourceProperties;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.SneakyThrows;
 
-public class TypeMappingSanitizationTransformerProvider implements IJsonTransformerProvider {
+public class TypeMappingSanitizationTransformerProvider extends JsonJSTransformerProvider {
 
     public static final String FEATURE_FLAGS = "featureFlags";
     public static final String STATIC_MAPPINGS = "staticMappings";
@@ -21,6 +21,7 @@ public class TypeMappingSanitizationTransformerProvider implements IJsonTransfor
 
     @SneakyThrows
     @Override
+    @SuppressWarnings("unchecked")
     public IJsonTransformer createTransformer(Object jsonConfig) {
         try {
             if ((jsonConfig == null) ||
