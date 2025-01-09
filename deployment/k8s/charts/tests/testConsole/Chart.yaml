@@ -1,6 +1,6 @@
 apiVersion: v2
-name: replayer
-description: A Helm chart to install the Traffic Replayer
+name: test-console
+description: A Helm chart to install a test pod based upon the Migration Console container
 type: application
 version: 0.1.0
 appVersion: "1.16.0"

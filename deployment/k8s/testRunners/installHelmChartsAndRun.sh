@@ -14,11 +14,20 @@ fi
 
 helm install -n ma ma charts/aggregates/migrationAssistant
 if [ $? -eq 0 ]; then
-  echo "installed mockCustomerClusters in 'mcc' namespace"
+  echo "installed mockCustomerClusters in 'ma' namespace"
 else
   echo Rebuilding dependency
   helm dependency build charts/aggregates/migrationAssistant
   helm install -n ma ma charts/aggregates/migrationAssistant
+fi
+
+helm install -n ma ma charts/tests/testConsole
+if [ $? -eq 0 ]; then
+  echo "installed testConsole in 'mcc' namespace"
+else
+  echo Rebuilding dependency
+  helm dependency build charts/tests/testConsole
+  helm install -n ma ma charts/tests/testConsole
 fi
 
 cd $ORIGINAL_DIR || exit
