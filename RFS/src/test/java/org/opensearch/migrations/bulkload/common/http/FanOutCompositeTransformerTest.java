@@ -11,7 +11,7 @@ import reactor.test.StepVerifier;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 
-public class CompositeTransformerTest {
+public class FanOutCompositeTransformerTest {
 
     @Test
     public void testCompositeTransformer() {
