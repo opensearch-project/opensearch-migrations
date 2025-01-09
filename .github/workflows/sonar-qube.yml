@@ -86,7 +86,7 @@ jobs:
         fi
     - name: Upload SonarQube Artifacts
       if: always()
-      uses: actions/upload-artifact@v3
+      uses: actions/upload-artifact@v4
       with:
         name: sonar-reports
         path: issues.json
