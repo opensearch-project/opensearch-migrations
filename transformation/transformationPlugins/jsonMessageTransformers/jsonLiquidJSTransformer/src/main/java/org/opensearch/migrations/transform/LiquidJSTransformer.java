@@ -15,12 +15,12 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class LiquidJSTransformer implements IJsonTransformer {
 
-    private final UnaryOperator<Map<String, Object>> bindingsProvider;
+    private final UnaryOperator<Object> bindingsProvider;
     protected ScriptRunner scriptRunner;
     ObjectMapper objectMapper = new ObjectMapper();
 
     public LiquidJSTransformer(String templateString,
-                               UnaryOperator<Map<String, Object>> bindingsProvider) throws IOException {
+                               UnaryOperator<Object> bindingsProvider) throws IOException {
         this.bindingsProvider = bindingsProvider;
         scriptRunner = new ScriptRunner();
 
@@ -35,14 +35,15 @@ public class LiquidJSTransformer implements IJsonTransformer {
         );
     }
 
-    public CompletableFuture<Object> transformJsonFuture(Map<String, Object> incomingJson) {
+    public CompletableFuture<Object> transformJsonFuture(Object incomingJson) {
         scriptRunner.setGlobal("incomingJson", bindingsProvider.apply(incomingJson));
         return scriptRunner.runScriptAsFuture("engine.render(parsedTemplate, incomingJson);");
     }
 
     @SneakyThrows
     @Override
-    public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
+    @SuppressWarnings("unchecked")
+    public Object transformJson(Object incomingJson) {
         var resultStr = (String) transformJsonFuture(incomingJson).get();
         log.atTrace().setMessage("resultStr={}").addArgument(resultStr).log();
         var parsedObj = (Map<String,Object>) objectMapper.readValue(resultStr, LinkedHashMap.class);

@@ -31,6 +31,7 @@ class LiquidJSTransformerTest {
 
 
     @Test
+    @SuppressWarnings("unchecked")
     public void testLiquidPerformance() throws Exception {
         var testTransformer = new LiquidJSTransformer("" +
             "{\n" +
@@ -47,7 +48,7 @@ class LiquidJSTransformerTest {
             var start = System.nanoTime();
             var count = 0;
             for (int i = 0; i < 1000; ++i) {
-                count += testTransformer.transformJson(testDoc).size();
+                count += ((Map<String, Object>) testTransformer.transformJson(testDoc)).size();
             }
             log.atInfo().setMessage("Run {}: {}")
                 .addArgument(j)

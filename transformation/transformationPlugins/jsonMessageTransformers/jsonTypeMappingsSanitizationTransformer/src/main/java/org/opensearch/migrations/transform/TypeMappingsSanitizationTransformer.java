@@ -33,7 +33,7 @@ public class TypeMappingsSanitizationTransformer extends JavascriptTransformer {
             makeSourceWrapperFunction(sourceProperties, featureFlags, indexMappings, regexIndexMappings));
     }
 
-    private static Function<Object, Map<String, Object>>
+    private static Function<Object, Object>
     makeSourceWrapperFunction(SourceProperties sourceProperties,
                               Map<String, Object> featureFlagsIncoming,
                               Map<String, Map<String, String>> indexMappingsIncoming,

@@ -2,7 +2,7 @@ package org.opensearch.migrations.transform;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.function.UnaryOperator;
+import java.util.function.Function;
 
 import lombok.SneakyThrows;
 import lombok.extern.slf4j.Slf4j;
@@ -11,11 +11,11 @@ import lombok.extern.slf4j.Slf4j;
 public class JavascriptTransformer implements IJsonTransformer {
     protected ScriptRunner scriptRunner;
     private final String invocationScript;
-    private final UnaryOperator<Map<String, Object>> bindingsProvider;
+    private final Function<Object, Object> bindingsProvider;
 
     public JavascriptTransformer(String initializationScript,
                                  String invocationScript,
-                                 UnaryOperator<Map<String, Object>> bindingsProvider) {
+                                 Function<Object, Object> bindingsProvider) {
         this.invocationScript = invocationScript;
         this.bindingsProvider = bindingsProvider;
         this.scriptRunner = new ScriptRunner();
@@ -23,8 +23,11 @@ public class JavascriptTransformer implements IJsonTransformer {
     }
 
     @SneakyThrows
-    public CompletableFuture<Object> transformJsonFuture(Map<String, Object> incomingJson) {
-        for (var kvp : bindingsProvider.apply(incomingJson).entrySet()) {
+    @SuppressWarnings("unchecked")
+    public CompletableFuture<Object> transformJsonFuture(Object incomingJson) {
+        assert incomingJson instanceof Map;
+        var incomingJsonMap = (Map<String, Object>) incomingJson;
+        for (var kvp : ((Map<String, Object>) bindingsProvider.apply(incomingJsonMap)).entrySet()) {
             scriptRunner.setGlobal(kvp.getKey(), kvp.getValue());
         }
         return scriptRunner.runScriptAsFuture(invocationScript);
@@ -32,7 +35,7 @@ public class JavascriptTransformer implements IJsonTransformer {
 
     @Override
     @SneakyThrows
-    public Map<String, Object> transformJson(Map<String, Object> incomingJson) {
-        return (Map<String, Object>) transformJsonFuture(incomingJson).get();
+    public Object transformJson(Object incomingJson) {
+        return transformJsonFuture(incomingJson).get();
     }
 }

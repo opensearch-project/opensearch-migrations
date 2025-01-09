@@ -13,6 +13,7 @@ public class JavascriptTransformerTest {
     private static final String INVOCATION_SCRIPT = "({docSize: Object.keys(document).length+2 })";
 
     @Test
+    @SuppressWarnings("unchecked")
     public void testInlinedScriptPerformance() throws Exception {
         var testTransformer = new JavascriptTransformer(INIT_SCRIPT, INVOCATION_SCRIPT,
             incoming -> Map.of("document", incoming));
@@ -22,7 +23,7 @@ public class JavascriptTransformerTest {
             var start = System.nanoTime();
             var count = 0;
             for (int i = 0; i < 1000; ++i) {
-                count += testTransformer.transformJson(testDoc).size();
+                count += ((Map<String, Object>) testTransformer.transformJson(testDoc)).size();
             }
             log.atInfo().setMessage("Run {}: {}")
                 .addArgument(j)
