@@ -13,6 +13,7 @@ import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3Repo;
 import org.opensearch.migrations.bulkload.common.S3Uri;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
@@ -278,7 +279,8 @@ public class RfsMigrateDocuments {
                  workerId)
         ) {
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
-            OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
+            var clientFactory = new OpenSearchClientFactory(null);
+            OpenSearchClient targetClient = clientFactory.get(connectionContext);
             DocumentReindexer reindexer = new DocumentReindexer(targetClient,
                 arguments.numDocsPerBulkRequest,
                 arguments.numBytesPerBulkRequest,

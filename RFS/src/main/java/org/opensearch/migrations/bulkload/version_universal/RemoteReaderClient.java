@@ -21,6 +21,16 @@ public class RemoteReaderClient extends OpenSearchClient {
         super(connection);
     }
 
+    @Override
+    protected String getCreateIndexPath(String indexName) {
+        return indexName;
+    }
+
+    @Override
+    protected String getBulkRequestPath(String indexName) {
+        return indexName + "/_bulk";
+    }
+
     protected Map<String, String> getTemplateEndpoints() {
         return Map.of(
             "index_template", "_index_template",

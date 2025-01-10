@@ -3,7 +3,7 @@ package org.opensearch.migrations;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.FileSystemSnapshotCreator;
-import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
@@ -135,7 +135,8 @@ public class CreateSnapshot {
     private ICreateSnapshotContext context;
 
     public void run() {
-        var client = new OpenSearchClient(arguments.sourceArgs.toConnectionContext());
+        var clientFactory = new OpenSearchClientFactory(null);
+        var client = clientFactory.get(arguments.sourceArgs.toConnectionContext());
         SnapshotCreator snapshotCreator;
         if (arguments.fileSystemRepoPath != null) {
             snapshotCreator = new FileSystemSnapshotCreator(

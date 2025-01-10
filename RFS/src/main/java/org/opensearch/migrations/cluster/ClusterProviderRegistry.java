@@ -6,6 +6,7 @@ import java.util.stream.Stream;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.SourceRepo;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.DataFilterArgs;
@@ -58,7 +59,8 @@ public class ClusterProviderRegistry {
      * @return The remote resource provider
      */
     public ClusterReader getRemoteReader(ConnectionContext connection) {
-        var client = new OpenSearchClient(connection);
+        var clientFactory = new OpenSearchClientFactory(null);
+        var client = clientFactory.get(connection);
         var version = client.getClusterVersion();
 
         var remoteProvider = getRemoteProviders(connection)
@@ -78,8 +80,9 @@ public class ClusterProviderRegistry {
      * @return The remote resource creator
      */
     public ClusterWriter getRemoteWriter(ConnectionContext connection, Version versionOverride, DataFilterArgs dataFilterArgs) {
+        var clientFactory = new OpenSearchClientFactory(null);
         var version = Optional.ofNullable(versionOverride)
-            .orElseGet(() -> new OpenSearchClient(connection).getClusterVersion());
+            .orElseGet(() -> clientFactory.get(connection).getClusterVersion());
 
         var remoteProvider = getRemoteProviders(connection)
             .filter(p -> p.compatibleWith(version))

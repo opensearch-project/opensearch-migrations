@@ -27,6 +27,7 @@ import org.opensearch.migrations.bulkload.common.DocumentReindexer;
 import org.opensearch.migrations.bulkload.common.FileSystemRepo;
 import org.opensearch.migrations.bulkload.common.LuceneDocumentsReader;
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.RestClient;
 import org.opensearch.migrations.bulkload.common.RfsLuceneDocument;
 import org.opensearch.migrations.bulkload.common.SnapshotShardUnpacker;
@@ -274,9 +275,10 @@ public class SourceTestBase {
                 UUID.randomUUID().toString(),
                 Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))
             )) {
+                var clientFactory = new OpenSearchClientFactory(version);
                 return RfsMigrateDocuments.run(
                     readerFactory,
-                    new DocumentReindexer(new OpenSearchClient(ConnectionContextTestParams.builder()
+                    new DocumentReindexer(clientFactory.get(ConnectionContextTestParams.builder()
                         .host(targetAddress)
                         .compressionEnabled(compressionEnabled)
                         .build()

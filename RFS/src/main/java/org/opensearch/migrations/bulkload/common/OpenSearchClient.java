@@ -2,6 +2,8 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
+import java.net.URLEncoder;
+import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;
@@ -30,7 +32,7 @@ import reactor.core.publisher.Mono;
 import reactor.util.retry.Retry;
 
 @Slf4j
-public class OpenSearchClient {
+public abstract class OpenSearchClient {
 
     protected static final ObjectMapper objectMapper = new ObjectMapper();
 
@@ -269,6 +271,30 @@ public class OpenSearchClient {
         return hasObjectCheck(indexName, null);
     }
 
+//    private String appendUrlParameters(String path, Map<String, String> urlParameters) {
+//        if (urlParameters == null || urlParameters.isEmpty()) {
+//            return path;
+//        }
+//
+//        StringBuilder sb = new StringBuilder(path);
+//        sb.append('?');
+//
+//        boolean first = true;
+//        for (Map.Entry<String, String> entry : urlParameters.entrySet()) {
+//            if (!first) {
+//                sb.append('&');
+//            }
+//            sb.append(URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8))
+//                    .append('=')
+//                    .append(URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8));
+//            first = false;
+//        }
+//
+//        return sb.toString();
+//    }
+
+    protected abstract String getCreateIndexPath(String indexName);
+
     /*
      * Create an index if it does not already exist.  Returns an Optional; if the index was created, it
      * will be the created object and empty otherwise.
@@ -278,7 +304,7 @@ public class OpenSearchClient {
         ObjectNode settings,
         IRfsContexts.ICheckedIdempotentPutRequestContext context
     ) {
-        String targetPath = indexName;
+        var targetPath = getCreateIndexPath(indexName);
         return createObjectIdempotent(targetPath, settings, context);
     }
 
@@ -442,6 +468,8 @@ public class OpenSearchClient {
         }
     }
 
+    protected abstract String getBulkRequestPath(String indexName);
+
     Retry getBulkRetryStrategy() {
         return BULK_RETRY_STRATEGY;
     }
@@ -451,7 +479,7 @@ public class OpenSearchClient {
     {
         final var docsMap = docs.stream().collect(Collectors.toMap(d -> d.getDocId(), d -> d));
         return Mono.defer(() -> {
-            final String targetPath = indexName + "/_bulk";
+            final String targetPath = getBulkRequestPath(indexName);
             log.atTrace().setMessage("Creating bulk body with document ids {}").addArgument(docsMap::keySet).log();
             var body = BulkDocSection.convertToBulkRequestBody(docsMap.values());
             var additionalHeaders = new HashMap<String, List<String>>();

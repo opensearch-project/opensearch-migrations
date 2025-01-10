@@ -97,7 +97,7 @@ class OpenSearchClientTest {
     @BeforeEach
     void beforeTest() {
         doReturn(connectionContext).when(restClient).getConnectionContext();
-        openSearchClient = spy(new OpenSearchClient(restClient, failedRequestLogger));
+        openSearchClient = spy(new OpenSearchClientFactory(null).get(restClient, failedRequestLogger));
     }
 
     @Test

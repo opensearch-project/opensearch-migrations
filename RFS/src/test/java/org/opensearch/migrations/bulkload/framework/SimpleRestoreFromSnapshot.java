@@ -4,6 +4,7 @@ import java.nio.file.Path;
 import java.util.List;
 
 import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.reindexer.tracing.IDocumentMigrationContexts;
@@ -28,7 +29,8 @@ public interface SimpleRestoreFromSnapshot {
             tempSnapshotName,
             unpackedShardDataDir
         );
-        final var targetClusterClient = new OpenSearchClient(ConnectionContextTestParams.builder()
+        var clientFactory = new OpenSearchClientFactory(null);
+        final var targetClusterClient =clientFactory.get(ConnectionContextTestParams.builder()
             .host(targetClusterUrl)
             .build()
             .toConnectionContext());
