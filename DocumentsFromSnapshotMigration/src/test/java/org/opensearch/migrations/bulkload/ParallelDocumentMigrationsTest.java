@@ -103,6 +103,7 @@ public class ParallelDocumentMigrationsTest extends SourceTestBase {
                                 clockJitter,
                                 testDocMigrationContext,
                                 sourceVersion.getVersion(),
+                                targetVersion.getVersion(),
                                 compressionEnabled
                             ),
                             executorService

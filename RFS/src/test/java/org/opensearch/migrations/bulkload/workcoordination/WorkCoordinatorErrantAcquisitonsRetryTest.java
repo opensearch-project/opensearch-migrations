@@ -6,6 +6,7 @@ import java.util.Map;
 import java.util.function.Function;
 import java.util.stream.Stream;
 
+import org.opensearch.migrations.Version;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.testutils.HttpRequest;
 import org.opensearch.migrations.testutils.SimpleHttpResponse;
@@ -23,6 +24,7 @@ import org.junit.jupiter.params.provider.MethodSource;
 import org.slf4j.MDC;
 
 public class WorkCoordinatorErrantAcquisitonsRetryTest {
+    private static final WorkCoordinatorFactory factory = new WorkCoordinatorFactory(Version.fromString("OS 2.11"));
 
     private static final String UPDATE_BY_QUERY_RESPONSE_BODY = "" +
         "{\n" +
@@ -121,7 +123,7 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
                 .toConnectionContext());
             var startingLeaseDuration = Duration.ofSeconds(1);
             var rootContext = WorkCoordinationTestContext.factory().withAllTracking();
-            try (var workCoordinator = new OpenSearchWorkCoordinator(client, 2, TEST_WORKER_ID)) {
+            try (var workCoordinator = factory.get(client, 2, TEST_WORKER_ID)) {
                 var e = Assertions.assertThrows(OpenSearchWorkCoordinator.RetriesExceededException.class,
                     () -> workCoordinator.acquireNextWorkItem(startingLeaseDuration, rootContext::createAcquireNextItemContext));
                 validate(pathToCounts, exceptionClassToTest, e);
@@ -156,7 +158,7 @@ public class WorkCoordinatorErrantAcquisitonsRetryTest {
                 .toConnectionContext());
             var startingLeaseDuration = Duration.ofSeconds(1);
             var rootContext = WorkCoordinationTestContext.factory().withAllTracking();
-            try (var wc = new OpenSearchWorkCoordinator(client, 2, TEST_WORKER_ID)) {
+            try (var wc = factory.get(client, 2, TEST_WORKER_ID)) {
                 var e1 = Assertions.assertThrows(OpenSearchWorkCoordinator.RetriesExceededException.class,
                     () -> wc.acquireNextWorkItem(startingLeaseDuration, rootContext::createAcquireNextItemContext));
                 validate(pathToCounts, OpenSearchWorkCoordinator.MalformedAssignedWorkDocumentException.class, e1);

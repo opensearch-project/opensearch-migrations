@@ -140,6 +140,7 @@ public class EndToEndTest extends SourceTestBase {
                         clockJitter,
                         testDocMigrationContext,
                         sourceCluster.getContainerVersion().getVersion(),
+                        targetCluster.getContainerVersion().getVersion(),
                         false
                     )
                 )
@@ -178,5 +179,5 @@ public class EndToEndTest extends SourceTestBase {
             Assertions.assertEquals("1", routing);
         }
     }
-
+    
 }

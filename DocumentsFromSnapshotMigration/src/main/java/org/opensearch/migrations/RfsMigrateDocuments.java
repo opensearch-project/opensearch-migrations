@@ -29,8 +29,8 @@ import org.opensearch.migrations.bulkload.tracing.IWorkCoordinationContexts;
 import org.opensearch.migrations.bulkload.workcoordination.CoordinateWorkHttpClient;
 import org.opensearch.migrations.bulkload.workcoordination.IWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.LeaseExpireTrigger;
-import org.opensearch.migrations.bulkload.workcoordination.OpenSearchWorkCoordinator;
 import org.opensearch.migrations.bulkload.workcoordination.ScopedWorkCoordinator;
+import org.opensearch.migrations.bulkload.workcoordination.WorkCoordinatorFactory;
 import org.opensearch.migrations.bulkload.workcoordination.WorkItemTimeProvider;
 import org.opensearch.migrations.bulkload.worker.DocumentsRunner;
 import org.opensearch.migrations.bulkload.worker.ShardWorkPreparer;
@@ -271,6 +271,9 @@ public class RfsMigrateDocuments {
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
         var connectionContext = arguments.targetArgs.toConnectionContext();
+        OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
+        var targetVersion = targetClient.getClusterVersion();
+
 
 
         String docTransformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams);
@@ -288,7 +291,8 @@ public class RfsMigrateDocuments {
         var progressCursor = new AtomicReference<WorkItemCursor>();
         var cancellationRunnableRef = new AtomicReference<Runnable>();
         var workItemTimeProvider = new WorkItemTimeProvider();
-        try (var workCoordinator = new OpenSearchWorkCoordinator(
+        var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
+        try (var workCoordinator = coordinatorFactory.get(
                  new CoordinateWorkHttpClient(connectionContext),
                  TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
                  workerId,
@@ -308,7 +312,6 @@ public class RfsMigrateDocuments {
             );
         ) {
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
-            OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
             DocumentReindexer reindexer = new DocumentReindexer(targetClient,
                 arguments.numDocsPerBulkRequest,
                 arguments.numBytesPerBulkRequest,
