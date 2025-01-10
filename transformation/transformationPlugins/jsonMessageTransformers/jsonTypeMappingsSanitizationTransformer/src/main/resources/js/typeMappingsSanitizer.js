@@ -42,25 +42,22 @@ function route(input, fieldToMatch, featureFlags, defaultAction, routes) {
 
 function convertSourceIndexToTargetViaRegex(sourceIndex, sourceType, regexIndexMappings) {
     const conjoinedSource = `${sourceIndex}/${sourceType}`;
-
     for (const [idxRegex, typeRegex, targetIdxPattern] of regexIndexMappings) {
-        const conjoinedRegex = `${idxRegex}/${typeRegex}`;
-        const match = conjoinedSource.match(new RegExp(conjoinedRegex));
-
-        if (match) {
-            return conjoinedSource.replace(new RegExp(conjoinedRegex), targetIdxPattern);
+        // Add start (^) and end ($) anchors to the regex to ensure it matches the entire string
+        const conjoinedRegexString = `^${idxRegex}/${typeRegex}$`;
+        const conjoinedRegex = new RegExp(conjoinedRegexString);
+        if (conjoinedRegex.test(conjoinedSource)) {
+            return conjoinedSource.replace(conjoinedRegex, targetIdxPattern);
         }
     }
     return null;
 }
 
 function convertSourceIndexToTarget(sourceIndex, sourceType, indexMappings, regexIndexMappings) {
-    if (!sourceType || sourceType === '_doc') return sourceIndex;
-
-    const targetIndex = indexMappings[sourceIndex]?.[sourceType] ||
-        convertSourceIndexToTargetViaRegex(sourceIndex, sourceType, regexIndexMappings);
-
-    return targetIndex;
+    if (indexMappings[sourceIndex]) {
+        return indexMappings[sourceIndex][sourceType];
+    }
+    return convertSourceIndexToTargetViaRegex(sourceIndex, sourceType, regexIndexMappings);
 }
 
 function makeNoopRequest() {
@@ -93,40 +90,42 @@ function retargetCommandParameters(parameters, targetIndex) {
 function rewriteBulk(match, context) {
     const lines = context.request.payload.inlinedJsonSequenceBodies;
     const newLines = [];
+    let ndi = 0;
 
-    for (let ndi = 0; ndi < lines.length; ndi) {
+    while (ndi < lines.length) {
         const command = lines[ndi++];
         const commandType = Object.keys(command)[0];
-        const parameters = command[commandType];
+        const commandParameters = command[commandType] || {};
 
-        if (ndi >= lines.length) {
-            break;
+        // Next line is doc if it's not a 'delete' command.
+        let doc = null;
+        if (commandType !== 'delete' && ndi < lines.length) {
+            doc = lines[ndi++];
         }
 
-        const typeName = parameters._type;
-        const targetIndex = convertSourceIndexToTarget(
-            parameters._index,
-            typeName,
-            context.index_mappings,
-            context.regex_index_mappings
-        );
-        if (!targetIndex) {
-            continue;
-        }
+        const { _type: typeName } = commandParameters;
 
-        if (commandType === 'delete') {
-            retargetCommandParameters(parameters, targetIndex)
-            newLines.push(command);
-        } else {
-            const doc = lines[ndi++];
-            retargetCommandParameters(parameters, targetIndex)
-            newLines.push(command);
-            newLines.push(doc);
+        if (typeName) {
+            // Convert source index to target index.
+            const targetIndex = convertSourceIndexToTarget(
+                commandParameters._index,
+                typeName,
+                context.index_mappings,
+                context.regex_index_mappings
+            );
+
+            // If no valid target index, skip.
+            if (!targetIndex) {
+                continue;
+            }
+            retargetCommandParameters(commandParameters, targetIndex);
         }
+        newLines.push(command);
+        if (doc) newLines.push(doc);
+
     }
 
     context.request.payload.inlinedJsonSequenceBodies = newLines;
-    context.request.URI = '/_bulk';
     return context.request;
 }
 
@@ -151,21 +150,74 @@ function includesTypeNames(inputMap) {
     }
 }
 
-function createIndexAsUnionedExcise(sourceIndex, targetIndex, inputMap) {
+function deepEqualsMaps(map1, map2) {
+    if (map1.size !== map2.size) return false;
+
+    for (const [key, value1] of map1) {
+        if (!map2.has(key)) return false;
+
+        const value2 = map2.get(key);
+
+        if (!deepEquals(value1, value2)) return false;
+    }
+
+    return true;
+}
+
+function deepEquals(value1, value2) {
+    if (value1 === value2) return true; // Handles primitives and identical references
+
+    if (value1 instanceof Map && value2 instanceof Map) {
+        return deepEqualsMaps(value1, value2); // Recurse for maps
+    }
+
+    if (value1 && value2 && typeof value1 === 'object' && typeof value2 === 'object') {
+        return deepEqualsObjects(value1, value2); // Recurse for objects
+    }
+
+    return false; // Otherwise, values are not deeply equal
+}
+
+function deepEqualsObjects(obj1, obj2) {
+    const keys1 = Object.keys(obj1);
+    const keys2 = Object.keys(obj2);
+
+    if (keys1.length !== keys2.length) return false;
+
+    return keys1.every(key => key in obj2 && deepEquals(obj1[key], obj2[key]));
+}
+
+function createIndexAsUnionedExcise(targetIndicesMap, inputMap) {
     const request = inputMap.request;
     const jsonBody = request.payload.inlinedJsonBody;
-    const sourceInputTypes = Object.keys(inputMap.index_mappings[sourceIndex]);
-    var newProperties = {type: { type: "keyword"} }
-    for (sourceType of sourceInputTypes) {
-        const oldType = jsonBody.mappings[sourceType]
-        if (!oldType) {
-            continue;
-        }
-        for (fieldName of Object.keys(oldType.properties)) {
-            newProperties[fieldName] = oldType.properties[fieldName];
+
+    const targetIndices = [...new Set(targetIndicesMap.values())];
+
+    if (targetIndices.length === 0) {
+        return makeNoopRequest();
+    } else if (targetIndices.length > 1) {
+        throw new Error("Cannot specify multiple indices to create with a single request and cannot yet " +
+            "represent multiple requests with the request format. Attempting to create request for " + targetIndices.join(", "));
+    }
+    const oldMappings = jsonBody.mappings;
+    const targetIndex = targetIndices.at(0);
+    request.URI = "/" + targetIndex;
+
+    var newProperties = {}
+    for (const [sourceType, ] of targetIndicesMap) {
+        for (fieldName of Object.keys(oldMappings[sourceType].properties)) {
+            if (newProperties[fieldName]) {
+                const previouslyProcessedFieldDef = newProperties[fieldName];
+                const currentlyProcessingFieldDef = oldMappings[sourceType].properties[fieldName];
+                if (!deepEquals(previouslyProcessedFieldDef, currentlyProcessingFieldDef)) {
+                    throw new Error("Cannot create union of different types for field " + fieldName);
+                }
+            }
+            else {
+                newProperties[fieldName] = oldMappings[sourceType].properties[fieldName];
+            }
         }
     }
-    request.URI = "/" + targetIndex;
     jsonBody.mappings = {properties: newProperties};
     return inputMap.request;
 }
@@ -174,29 +226,18 @@ function rewriteCreateIndex(match, inputMap) {
     const body = inputMap.request.payload.inlinedJsonBody || {};
     const mappings = body.mappings;
 
-    if (!mappings || !includesTypeNames(inputMap)) {
+    if (!mappings || (mappings.properties && !mappings.properties?.properties)) {
+        // Do not modify if types are not found
         return inputMap.request;
     }
 
     const sourceIndex = match[1].replace(new RegExp("[?].*"), ""); // remove the query string that could be after
     const types = Object.keys(mappings);
-    if (types.length === 0) {
-        return inputMap.request;
-    }
-
-    const targetIndicesList = types
-        .map(type => convertSourceIndexToTarget(sourceIndex, type, inputMap.index_mappings, inputMap.regex_index_mappings))
-        .filter(Boolean);
-    const targetIndices = [...new Set(targetIndicesList)];
-
-    if (targetIndices.length === 0) {
-        return makeNoopRequest();
-    } else if (targetIndices.length == 1) {
-        return createIndexAsUnionedExcise(sourceIndex, targetIndices[0], inputMap);
-    } else {
-        throw new Error("Cannot specify multiple indices to create with a single request and cannot yet " +
-            "represent multiple requests with the request format.");
-    }
+    const sourceTypeToTargetIndicesMap = new Map(types
+        .map(type => [type, convertSourceIndexToTarget(sourceIndex, type, inputMap.index_mappings, inputMap.regex_index_mappings)])
+        .filter(([, targetIndex]) => targetIndex) // Keep only entries with valid target indices
+    );
+    return createIndexAsUnionedExcise(sourceTypeToTargetIndicesMap, inputMap);
 }
 
 function routeHttpRequest(source_document, context) {

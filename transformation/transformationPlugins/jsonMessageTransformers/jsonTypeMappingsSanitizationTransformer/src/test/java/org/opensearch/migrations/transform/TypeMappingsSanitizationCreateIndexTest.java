@@ -70,9 +70,6 @@ public class TypeMappingsSanitizationCreateIndexTest {
             "          \"name\" : {\n" +
             "            \"type\" : \"text\"\n" +
             "          },\n" +
-            "          \"type\" : {\n" +
-            "            \"type\" : \"keyword\"\n" +
-            "          },\n" +
             "          \"user_name\" : {\n" +
             "            \"type\" : \"keyword\"\n" +
             "          }\n" +
@@ -101,7 +98,6 @@ public class TypeMappingsSanitizationCreateIndexTest {
             .path("mappings"));
         mappings.remove("following");
         var newProperties = new HashMap<String, Object>();
-        newProperties.put("type", Map.of("type", "keyword"));
         var user = mappings.remove("user");
         user.path("properties").fields().forEachRemaining(e -> newProperties.put(e.getKey(), e.getValue()));
         var tweet = mappings.remove("tweet");

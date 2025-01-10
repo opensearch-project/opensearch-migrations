@@ -102,4 +102,41 @@ class TypeMappingsSanitizationTransformerTest {
         Assertions.assertEquals(JsonNormalizer.fromString(bespokeRequest),
             JsonNormalizer.fromObject(transformedResult));
     }
+
+    @Test
+    public void testCreateIndexWithIncludeTypeName() throws Exception {
+        var testString =
+            "{\n" +
+                "  \"" + JsonKeysForHttpMessage.METHOD_KEY + "\": \"PUT\",\n" +
+                "  \"" + JsonKeysForHttpMessage.URI_KEY + "\": \"/index?include_type_name=true\",\n" +
+                "  \"" + JsonKeysForHttpMessage.PAYLOAD_KEY + "\": {\n" +
+                "    \"" + JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY + "\": {\n" +
+                "      \"mappings\": {\n" +
+                "        \"_doc\": {\n" +
+                "          \"properties\": {\n" +
+                "            \"field\": {\"type\": \"text\"}\n" +
+                "          }\n" +
+                "        }\n" +
+                "      }\n" +
+                "    }\n" +
+                "  }\n" +
+                "}";
+        var expectedString = "{\n" +
+            "  \"" + JsonKeysForHttpMessage.METHOD_KEY + "\":\"PUT\",\n" +
+            "  \"" + JsonKeysForHttpMessage.URI_KEY + "\": \"/index\",\n" +
+            "  \"" + JsonKeysForHttpMessage.PAYLOAD_KEY + "\":{" +
+            "    \"" + JsonKeysForHttpMessage.INLINED_JSON_BODY_DOCUMENT_KEY + "\": {\n" +
+            "      \"mappings\": {\n" +
+            "        \"properties\": {\n" +
+            "          \"field\": {\"type\": \"text\"}\n" +
+            "        }\n" +
+            "      }\n" +
+            "    }\n" +
+            "  }\n" +
+            "}";
+        var rewriter = new TypeMappingsSanitizationTransformer(null, null);
+        var resultObj = rewriter.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
+        Assertions.assertEquals(JsonNormalizer.fromString(expectedString),
+            JsonNormalizer.fromObject(resultObj));
+    }
 }
