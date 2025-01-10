@@ -28,17 +28,4 @@ public class SupportedClusters {
             SearchClusterContainer.OS_V2_14_0
         );
     }
-
-    public static List<ContainerVersion> targets_experimental() {
-        return List.of(
-            SearchClusterContainer.ES_V6_8_23
-        );
-    }
-
-    public static List<ContainerVersion> targets_all() {
-        List<ContainerVersion> all_targets = List.of();
-        all_targets.addAll(targets());
-        all_targets.addAll(targets_experimental());
-        return all_targets;
-    }
 }

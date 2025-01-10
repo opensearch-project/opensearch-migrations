@@ -181,12 +181,6 @@ public class RfsMigrateDocuments {
             description = ("Version of the source cluster."))
         public Version sourceVersion = Version.fromString("ES 7.10");
 
-        @Parameter(required = true,
-            names = { "--target-version" },
-            converter = VersionConverter.class,
-            description = ("Version of the target cluster."))
-        public Version targetVersion = Version.fromString("OS 2.11");
-
         @ParametersDelegate
         private DocParams docTransformationParams = new DocParams();
     }
@@ -277,6 +271,9 @@ public class RfsMigrateDocuments {
         var snapshotLocalDirPath = arguments.snapshotLocalDir != null ? Paths.get(arguments.snapshotLocalDir) : null;
 
         var connectionContext = arguments.targetArgs.toConnectionContext();
+        OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
+        var targetVersion = targetClient.getClusterVersion();
+
 
 
         String docTransformerConfig = TransformerConfigUtils.getTransformerConfig(arguments.docTransformationParams);
@@ -294,7 +291,7 @@ public class RfsMigrateDocuments {
         var progressCursor = new AtomicReference<WorkItemCursor>();
         var cancellationRunnableRef = new AtomicReference<Runnable>();
         var workItemTimeProvider = new WorkItemTimeProvider();
-        var coordinatorFactory = new WorkCoordinatorFactory(arguments.targetVersion);
+        var coordinatorFactory = new WorkCoordinatorFactory(targetVersion);
         try (var workCoordinator = coordinatorFactory.get(
                  new CoordinateWorkHttpClient(connectionContext),
                  TOLERABLE_CLIENT_SERVER_CLOCK_DIFFERENCE_SECONDS,
@@ -315,7 +312,6 @@ public class RfsMigrateDocuments {
             );
         ) {
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
-            OpenSearchClient targetClient = new OpenSearchClient(connectionContext);
             DocumentReindexer reindexer = new DocumentReindexer(targetClient,
                 arguments.numDocsPerBulkRequest,
                 arguments.numBytesPerBulkRequest,
