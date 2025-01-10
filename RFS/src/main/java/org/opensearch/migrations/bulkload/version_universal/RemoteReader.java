@@ -2,7 +2,6 @@ package org.opensearch.migrations.bulkload.version_universal;
 
 import org.opensearch.migrations.Version;
 import org.opensearch.migrations.VersionMatchers;
-import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
 import org.opensearch.migrations.bulkload.models.GlobalMetadata.Factory;

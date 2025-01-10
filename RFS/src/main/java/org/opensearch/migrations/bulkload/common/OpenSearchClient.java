@@ -2,8 +2,6 @@ package org.opensearch.migrations.bulkload.common;
 
 import java.io.IOException;
 import java.net.HttpURLConnection;
-import java.net.URLEncoder;
-import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.HashSet;

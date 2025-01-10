@@ -2,7 +2,6 @@ package org.opensearch.migrations;
 
 import java.text.NumberFormat;
 
-import org.opensearch.migrations.bulkload.common.OpenSearchClient;
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.data.WorkloadGenerator;
 import org.opensearch.migrations.utils.ProcessHelpers;
