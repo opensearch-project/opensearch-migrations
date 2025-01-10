@@ -20,7 +20,7 @@ public class OpenSearchClientFactory {
     public OpenSearchClient get(
         ConnectionContext connectionContext
     ) {
-        if (version == null || VersionMatchers.isOS_1_X.test(version) || VersionMatchers.isOS_2_X.test(version) || VersionMatchers.isES_7_X.test(version)) {
+        if (version == null || VersionMatchers.isOS_1_X.or(VersionMatchers.isOS_2_X).or(VersionMatchers.isES_7_X).test(version)) {
             return new OpenSearchClient_OS_2_11(connectionContext);
         } else if (VersionMatchers.isES_6_X.test(version)) {
             return new OpenSearchClient_ES_6_8(connectionContext);

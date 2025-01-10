@@ -269,28 +269,6 @@ public abstract class OpenSearchClient {
         return hasObjectCheck(indexName, null);
     }
 
-//    private String appendUrlParameters(String path, Map<String, String> urlParameters) {
-//        if (urlParameters == null || urlParameters.isEmpty()) {
-//            return path;
-//        }
-//
-//        StringBuilder sb = new StringBuilder(path);
-//        sb.append('?');
-//
-//        boolean first = true;
-//        for (Map.Entry<String, String> entry : urlParameters.entrySet()) {
-//            if (!first) {
-//                sb.append('&');
-//            }
-//            sb.append(URLEncoder.encode(entry.getKey(), StandardCharsets.UTF_8))
-//                    .append('=')
-//                    .append(URLEncoder.encode(entry.getValue(), StandardCharsets.UTF_8));
-//            first = false;
-//        }
-//
-//        return sb.toString();
-//    }
-
     protected abstract String getCreateIndexPath(String indexName);
 
     /*
