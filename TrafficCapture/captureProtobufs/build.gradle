@@ -7,9 +7,6 @@ plugins {
     id 'com.google.protobuf' version "0.9.2"
 }
 
-java.sourceCompatibility = JavaVersion.VERSION_11
-java.targetCompatibility = JavaVersion.VERSION_11
-
 dependencies {
     api group: 'com.google.protobuf', name: 'protobuf-java'
 }

@@ -10,9 +10,6 @@ import com.bmuschko.gradle.docker.tasks.image.DockerBuildImage
 import groovy.transform.Canonical
 import org.opensearch.migrations.common.CommonUtils
 
-java.sourceCompatibility = JavaVersion.VERSION_17
-java.targetCompatibility = JavaVersion.VERSION_17
-
 @Canonical
 class DockerServiceProps {
     String projectName = ""

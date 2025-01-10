@@ -5,7 +5,7 @@ on:
   pull_request:
 
 env:
-  java-version: '11'
+  java-version: '17'
   gradle-version: '8.0.2'
 
 jobs:
@@ -32,7 +32,7 @@ jobs:
       with:
         distribution: 'corretto'
         java-version: |
-            11
+            17
     - name: Cache SonarQube Scanner
       uses: actions/cache@v3
       with:

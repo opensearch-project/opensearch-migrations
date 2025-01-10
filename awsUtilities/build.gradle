@@ -22,9 +22,6 @@ plugins {
     id 'java'
 }
 
-java.sourceCompatibility = JavaVersion.VERSION_17
-java.targetCompatibility = JavaVersion.VERSION_17
-
 dependencies {
     implementation group: 'software.amazon.awssdk', name: 'arns'
     implementation group: 'software.amazon.awssdk', name: 'auth'

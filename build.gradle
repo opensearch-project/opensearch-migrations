@@ -13,6 +13,35 @@ allprojects {
     }
 }
 
+
+// Ensure Capture Proxy and Dependencies are built with JDK 11 for On Node Install
+
+// Cache dependencies during the configuration phase
+ext.captureProxyDependencies = []
+gradle.projectsEvaluated {
+    def captureProxyProject = rootProject.project(":TrafficCapture:trafficCaptureProxyServer")
+    captureProxyDependencies = captureProxyProject.configurations.collectMany { configuration ->
+        configuration.dependencies.findAll { it instanceof ProjectDependency }.collect { it.dependencyProject.path }
+    }
+    // Add the TrafficCaptureProxyServer project itself
+    captureProxyDependencies << captureProxyProject.path
+}
+
+// Modify sourceCompatibility during the execution phase
+gradle.taskGraph.whenReady { taskGraph ->
+    allprojects {
+        tasks.withType(JavaCompile).configureEach {
+            if (project.path in rootProject.captureProxyDependencies) {
+                sourceCompatibility = JavaVersion.VERSION_11
+                targetCompatibility = JavaVersion.VERSION_11
+            } else {
+                sourceCompatibility = JavaVersion.VERSION_17
+                targetCompatibility = JavaVersion.VERSION_17
+            }
+        }
+    }
+}
+
 // Define version properties
 ext {
     // support -Dbuild.version, but include default
