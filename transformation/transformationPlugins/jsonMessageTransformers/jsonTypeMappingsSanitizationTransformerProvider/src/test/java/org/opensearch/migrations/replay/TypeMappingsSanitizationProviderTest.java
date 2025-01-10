@@ -37,7 +37,7 @@ public class TypeMappingsSanitizationProviderTest {
                     "type2", "indexb"),
                 "indexc", Map.of(
                     "type2", "indexc")),
-            "regexMappings", List.of(List.of("(time.*)", "(type.*)", "$1_And_$2")));
+            "regexIndexMappings", List.of(List.of("(time.*)", "(type.*)", "$1_And_$2")));
         final String TEST_INPUT_REQUEST = "{\n"
             + "  \"method\": \"PUT\",\n"
             + "  \"URI\": \"/indexa/type2/someuser\",\n"
@@ -106,7 +106,7 @@ public class TypeMappingsSanitizationProviderTest {
             Map.of("sourceProperties", Map.of("version",
                     Map.of("major",  (Object) 5,
                         "minor", (Object) 10)),
-                "regex_mappings", List.of(List.of("", "", "")));
+                "regexIndexMappings", List.of(List.of("", "", "")));
         var transformer = new TypeMappingSanitizationTransformerProvider().createTransformer(fullTransformerConfig);
         var resultObj = transformer.transformJson(OBJECT_MAPPER.readValue(testString, LinkedHashMap.class));
         Assertions.assertEquals(JsonNormalizer.fromString(testString), JsonNormalizer.fromObject(resultObj));
