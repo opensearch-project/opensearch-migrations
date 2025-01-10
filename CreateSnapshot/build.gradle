@@ -11,6 +11,7 @@ java.targetCompatibility = JavaVersion.VERSION_11
 dependencies {
     implementation project(':coreUtilities')
     implementation project(":RFS")
+    implementation project(":transformation")
 
     implementation group: 'org.jcommander', name: 'jcommander'
     implementation group: 'org.slf4j', name: 'slf4j-api'

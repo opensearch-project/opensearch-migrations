@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicReference;
 
-import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
 import org.opensearch.migrations.bulkload.common.S3SnapshotCreator;
 import org.opensearch.migrations.bulkload.common.http.ConnectionContextTestParams;
 import org.opensearch.migrations.bulkload.worker.SnapshotRunner;
@@ -52,7 +52,8 @@ public class TestCreateSnapshot {
         {
             final var endpoint = destinationServer.localhostEndpoint().toString();
 
-            var sourceClient = new OpenSearchClient(ConnectionContextTestParams.builder()
+            var sourceClientFactory = new OpenSearchClientFactory(null);
+            var sourceClient = sourceClientFactory.get(ConnectionContextTestParams.builder()
                     .host(endpoint)
                     .insecure(true)
                     .build()
@@ -120,7 +121,8 @@ public class TestCreateSnapshot {
         {
             final var endpoint = destinationServer.localhostEndpoint().toString();
 
-            var sourceClient = new OpenSearchClient(ConnectionContextTestParams.builder()
+            var sourceClientFactory = new OpenSearchClientFactory(null);
+            var sourceClient = sourceClientFactory.get(ConnectionContextTestParams.builder()
                     .host(endpoint)
                     .insecure(true)
                     .build()
