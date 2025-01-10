@@ -1,5 +1,7 @@
 package org.opensearch.migrations.bulkload.transformers;
 
+import java.util.List;
+
 import org.opensearch.migrations.bulkload.models.GlobalMetadata;
 import org.opensearch.migrations.bulkload.models.IndexMetadata;
 import org.opensearch.migrations.bulkload.version_os_2_11.GlobalMetadataData_OS_2_11;
@@ -84,7 +86,7 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
     }
 
     @Override
-    public IndexMetadata transformIndexMetadata(IndexMetadata indexData) {
+    public List<IndexMetadata> transformIndexMetadata(IndexMetadata indexData) {
         log.atDebug().setMessage("Original Object: {}").addArgument(indexData::getRawJson).log();
         var copy = indexData.deepCopy();
         var newRoot = copy.getRawJson();
@@ -96,6 +98,6 @@ public class Transformer_ES_7_10_OS_2_11 implements Transformer {
         TransformFunctions.fixReplicasForDimensionality(newRoot, awarenessAttributeDimensionality);
 
         log.atDebug().setMessage("Transformed Object: {}").addArgument(newRoot).log();
-        return copy;
+        return List.of(copy);
     }
 }
