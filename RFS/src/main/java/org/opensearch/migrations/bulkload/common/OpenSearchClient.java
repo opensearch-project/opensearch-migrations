@@ -69,7 +69,7 @@ public abstract class OpenSearchClient {
     protected final RestClient client;
     protected final FailedRequestsLogger failedRequestsLogger;
 
-    public OpenSearchClient(ConnectionContext connectionContext) {
+    protected OpenSearchClient(ConnectionContext connectionContext) {
         this(new RestClient(connectionContext), new FailedRequestsLogger());
     }
 
