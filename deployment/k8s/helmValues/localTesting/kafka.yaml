@@ -1,2 +1,0 @@
-kafka-cluster:
-  stage: prod

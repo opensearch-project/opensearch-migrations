@@ -4,11 +4,13 @@ import os
 import yaml
 from jinja2 import Environment, FileSystemLoader
 
+
 def to_yaml_filter(value):
     """Custom filter to convert value to YAML format."""
     if value is None:
         return ''
     return yaml.dump(value, default_flow_style=False).rstrip()
+
 
 def pop_value(dictionary, key, default=None):
     """Remove and return a value from a nested dictionary using dot notation."""
@@ -49,6 +51,7 @@ class YAMLTemplateConverter:
         template = env.get_template(self.template_file)
         outStream.write(template.render(values=values))
 
+
 def main():
     template_path = sys.argv[1] if len(sys.argv) > 1 else 'template.yaml.j2'
     template_dir = os.path.dirname(template_path) or '.'
@@ -62,6 +65,7 @@ def main():
     except Exception as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
+
 
 if __name__ == '__main__':
     main()

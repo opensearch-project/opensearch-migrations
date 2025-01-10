@@ -14,6 +14,7 @@ import yaml
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+
 class ConfigMapWatcher:
     def __init__(self, label_selector: str, namespace: str, output_file: str):
         self.label_selector = label_selector
@@ -101,6 +102,7 @@ class ConfigMapWatcher:
             logger.error(f"Error watching ConfigMaps: {e}")
             raise
 
+
 def parse_args():
     parser = argparse.ArgumentParser(
         description='Watch Kubernetes ConfigMaps and update a YAML file'
@@ -122,9 +124,11 @@ def parse_args():
     )
     return parser.parse_args()
 
+
 def sigterm_handler(signum, frame):
     # Clean exit without traceback
     sys.exit(0)
+
 
 if __name__ == "__main__":
     args = parse_args()

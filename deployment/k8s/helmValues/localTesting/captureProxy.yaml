@@ -1,3 +1,0 @@
-parameters:
-  destinationUri:
-    value: "http://elasticsearch:9200"

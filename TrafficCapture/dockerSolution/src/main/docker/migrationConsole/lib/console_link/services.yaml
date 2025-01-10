@@ -1,11 +1,11 @@
 source_cluster:
-  endpoint: "https://capture-proxy:9201"
+  endpoint: "https://capture-proxy:9200"
   allow_insecure: true
   basic_auth:
     username: "admin"
     password: "admin"
 target_cluster:
-  endpoint: "https://opensearch-cluster-master:9200"
+  endpoint: "https://opensearchtarget:9200"
   allow_insecure: true
   basic_auth:
     username: "admin"
@@ -19,14 +19,14 @@ backfill:
 replay:
   docker:
 snapshot:
-  snapshot_name: "rfs-snapshot"
+  snapshot_name: "snapshot_2023_01_01"
   fs:
-    repo_path: "/storage/snapshot"
-  otel_endpoint: "http://localhost:4317"
+    repo_path: "/snapshot/test-console"
+  otel_endpoint: "http://otel-collector:4317"
 metadata_migration:
   from_snapshot:
   min_replicas: 0
-  otel_endpoint: "http://localhost:4317"
+  otel_endpoint: "http://otel-collector:4317"
 kafka:
-  broker_endpoints: "kafka-cluster-kafka-bootstrap:9092"
+  broker_endpoints: "kafka:9092"
   standard: ""

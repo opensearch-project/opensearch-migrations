@@ -1,7 +1,7 @@
 #!/usr/bin/python3
-import os
 import yaml
 import sys
+
 
 # Parse YAML and extract value using dot notation
 def yaml_extract(yaml_str, path):
@@ -11,6 +11,7 @@ def yaml_extract(yaml_str, path):
     for key in keys:
         result = result[key]
     return result
+
 
 if __name__ == "__main__":
     # Parse args like yq does: script.py '.foo.bar' file.yaml
