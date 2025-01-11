@@ -25,7 +25,7 @@ spec:
                 "MountName" "merged-config"
                 "include" .Template.Include) .) | nindent 8 }}
       containers:
-        - name: console
+        - name: test-console
           image: migrations/migration_console:latest
           imagePullPolicy: IfNotPresent
           command:

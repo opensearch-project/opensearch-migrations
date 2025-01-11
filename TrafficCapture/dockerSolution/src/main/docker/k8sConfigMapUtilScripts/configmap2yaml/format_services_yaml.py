@@ -28,7 +28,7 @@ def pop_value(dictionary, key, default=None):
 
 
 class YAMLTemplateConverter:
-    def __init__(self, template_dir='.', template_file='template.yaml.j2'):
+    def __init__(self, template_dir='.', template_file='migration_services.yaml.j2'):
         """
         Initialize the converter with template directory and file.
 
@@ -53,7 +53,7 @@ class YAMLTemplateConverter:
 
 
 def main():
-    template_path = sys.argv[1] if len(sys.argv) > 1 else 'template.yaml.j2'
+    template_path = sys.argv[1] if len(sys.argv) > 1 else 'migration_services.yaml.j2'
     template_dir = os.path.dirname(template_path) or '.'
     template_file = os.path.basename(template_path)
 

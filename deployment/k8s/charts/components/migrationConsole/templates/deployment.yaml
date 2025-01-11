@@ -21,12 +21,12 @@ spec:
     spec:
       serviceAccountName: configmap-watcher
       initContainers:
-        {{- include "generic.setupEnvLoadInitContainer" (merge . (dict
+        {{- include "generic.setupEnvLoadInitContainer" (merge (dict
            "MountName" $envVarMountName
-           "include" .Template.Include)) | nindent 8 }}
-        {{- include "generic.setupServicesYamlContainer" (merge . (dict
+           "include" .Template.Include) .) | nindent 8 }}
+        {{- include "generic.setupServicesYamlContainer" (merge (dict
            "MountName" "merged-config"
-           "include" .Template.Include)) | nindent 8 }}
+           "include" .Template.Include) .) | nindent 8 }}
       containers:
         - name: console
           image: migrations/migration_console:latest
