@@ -7,6 +7,7 @@ import java.util.concurrent.CompletableFuture;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.graalvm.polyglot.Context;
+import org.graalvm.polyglot.HostAccess;
 import org.graalvm.polyglot.Value;
 import org.graalvm.polyglot.proxy.ProxyArray;
 import org.graalvm.polyglot.proxy.ProxyExecutable;
@@ -18,7 +19,14 @@ public class ScriptRunner {
 
     public ScriptRunner() {
         this.context = Context.newBuilder("js")
-            .allowAllAccess(true)
+            .allowHostAccess(HostAccess.newBuilder()
+                .allowArrayAccess(true)
+                .allowMapAccess(true)
+                .allowListAccess(true)
+                .allowIterableAccess(true)
+                .allowAccessInheritance(true)
+                .allowBufferAccess(true)
+                .build())
             .build();
     }
 
