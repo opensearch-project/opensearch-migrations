@@ -274,14 +274,14 @@ public class SourceTestBase {
                 UUID.randomUUID().toString(),
                 Clock.offset(Clock.systemUTC(), Duration.ofMillis(nextClockShift))
             )) {
-                var clientFactory = new OpenSearchClientFactory(version);
-                return RfsMigrateDocuments.run(
-                    readerFactory,
-                    new DocumentReindexer(clientFactory.get(ConnectionContextTestParams.builder()
+                var clientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
                         .host(targetAddress)
                         .compressionEnabled(compressionEnabled)
                         .build()
-                        .toConnectionContext()), 1000, Long.MAX_VALUE, 1, defaultDocTransformer),
+                        .toConnectionContext());
+                return RfsMigrateDocuments.run(
+                    readerFactory,
+                    new DocumentReindexer(clientFactory.determineVersionAndCreate(), 1000, Long.MAX_VALUE, 1, defaultDocTransformer),
                     new OpenSearchWorkCoordinator(
                         new CoordinateWorkHttpClient(ConnectionContextTestParams.builder()
                             .host(targetAddress)

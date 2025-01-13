@@ -279,8 +279,8 @@ public class RfsMigrateDocuments {
                  workerId)
         ) {
             MDC.put(LOGGING_MDC_WORKER_ID, workerId); // I don't see a need to clean this up since we're in main
-            var clientFactory = new OpenSearchClientFactory(null);
-            OpenSearchClient targetClient = clientFactory.get(connectionContext);
+            var clientFactory = new OpenSearchClientFactory(connectionContext);
+            OpenSearchClient targetClient = clientFactory.determineVersionAndCreate();
             DocumentReindexer reindexer = new DocumentReindexer(targetClient,
                 arguments.numDocsPerBulkRequest,
                 arguments.numBytesPerBulkRequest,

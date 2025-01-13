@@ -44,8 +44,8 @@ public class RemoteReader implements RemoteCluster, ClusterReader {
     public Version getVersion() {
         if (version == null) {
             // Use a throw away client that will work on any version of the service
-            var clientFactory = new OpenSearchClientFactory(null);
-            version = clientFactory.get(connection).getClusterVersion();
+            var clientFactory = new OpenSearchClientFactory(connection);
+            version = clientFactory.getClusterVersion();
         }
         return version;
     }

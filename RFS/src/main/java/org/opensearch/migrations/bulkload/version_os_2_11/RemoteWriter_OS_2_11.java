@@ -77,8 +77,8 @@ public class RemoteWriter_OS_2_11 implements RemoteCluster, ClusterWriter {
 
     private OpenSearchClient getClient() {
         if (client == null) {
-            var clientFactory = new OpenSearchClientFactory(version);
-            client = clientFactory.get(getConnection());
+            var clientFactory = new OpenSearchClientFactory(getConnection());
+            client = clientFactory.determineVersionAndCreate();
         }
         return client;
     }

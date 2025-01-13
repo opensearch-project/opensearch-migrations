@@ -29,11 +29,11 @@ public interface SimpleRestoreFromSnapshot {
             tempSnapshotName,
             unpackedShardDataDir
         );
-        var clientFactory = new OpenSearchClientFactory(null);
-        final var targetClusterClient =clientFactory.get(ConnectionContextTestParams.builder()
-            .host(targetClusterUrl)
-            .build()
-            .toConnectionContext());
+        var clientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+                .host(targetClusterUrl)
+                .build()
+                .toConnectionContext());
+        final var targetClusterClient =clientFactory.determineVersionAndCreate();
 
         // TODO: This should update the following metdata:
         // - Global cluster state

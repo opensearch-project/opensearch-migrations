@@ -35,8 +35,8 @@ public class DataGenerator {
 
     public void run(DataGeneratorArgs arguments) {
         var connectionContext = arguments.targetArgs.toConnectionContext();
-        var clientFactory = new OpenSearchClientFactory(null);
-        var client = clientFactory.get(connectionContext);
+        var clientFactory = new OpenSearchClientFactory(connectionContext);
+        var client = clientFactory.determineVersionAndCreate();
 
         var startTimeMillis = System.currentTimeMillis();
         var workloadGenerator = new WorkloadGenerator(client);

@@ -18,7 +18,7 @@ import reactor.core.publisher.Mono;
 public class RemoteReaderClient extends OpenSearchClient {
 
     public RemoteReaderClient(ConnectionContext connection) {
-        super(connection);
+        super(connection, null);
     }
 
     @Override

@@ -105,12 +105,12 @@ public class EndToEndTest extends SourceTestBase {
 
             // === ACTION: Take a snapshot ===
             var snapshotName = "my_snap";
-            var sourceClientFactory = new OpenSearchClientFactory(sourceCluster.getContainerVersion().getVersion());
-            var sourceClient = sourceClientFactory.get(ConnectionContextTestParams.builder()
-                .host(sourceCluster.getUrl())
-                .insecure(true)
-                .build()
-                .toConnectionContext());
+            var sourceClientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+                    .host(sourceCluster.getUrl())
+                    .insecure(true)
+                    .build()
+                    .toConnectionContext());
+            var sourceClient = sourceClientFactory.determineVersionAndCreate();
             var snapshotCreator = new FileSystemSnapshotCreator(
                 snapshotName,
                 sourceClient,

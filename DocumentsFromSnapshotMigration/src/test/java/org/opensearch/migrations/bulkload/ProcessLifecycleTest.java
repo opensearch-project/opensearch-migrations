@@ -124,12 +124,12 @@ public class ProcessLifecycleTest extends SourceTestBase {
             ).join();
 
             // Populate the source cluster with data
-            var clientFactory = new OpenSearchClientFactory(esSourceContainer.getContainerVersion().getVersion());
-            var client = clientFactory.get(ConnectionContextTestParams.builder()
-                .host(esSourceContainer.getUrl())
-                .build()
-                .toConnectionContext()
+            var clientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
+                    .host(esSourceContainer.getUrl())
+                    .build()
+                    .toConnectionContext()
             );
+            var client = clientFactory.determineVersionAndCreate();
             var generator = new WorkloadGenerator(client);
             generator.generate(new WorkloadOptions());
 

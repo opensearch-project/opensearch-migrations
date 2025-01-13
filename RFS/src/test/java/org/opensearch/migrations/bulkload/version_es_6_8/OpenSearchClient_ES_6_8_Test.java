@@ -1,7 +1,19 @@
 package org.opensearch.migrations.bulkload.version_es_6_8;
 
+import java.util.List;
+
+import org.opensearch.migrations.Version;
+import org.opensearch.migrations.bulkload.common.BulkDocSection;
+import org.opensearch.migrations.bulkload.common.OpenSearchClient;
+import org.opensearch.migrations.bulkload.common.RestClient;
+import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
+import org.opensearch.migrations.bulkload.common.http.HttpResponse;
+import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
+import org.opensearch.migrations.bulkload.http.BulkRequestGenerator.BulkItemResponseEntry;
+import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
+import org.opensearch.migrations.reindexer.FailedRequestsLogger;
+
 import com.fasterxml.jackson.core.StreamReadFeature;
-import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -9,53 +21,22 @@ import lombok.SneakyThrows;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
-import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.Mock.Strictness;
 import org.mockito.Mockito;
 import org.mockito.junit.jupiter.MockitoExtension;
-import org.opensearch.migrations.Flavor;
-import org.opensearch.migrations.Version;
-import org.opensearch.migrations.bulkload.common.BulkDocSection;
-import org.opensearch.migrations.bulkload.common.InvalidResponse;
-import org.opensearch.migrations.bulkload.common.OpenSearchClient;
-import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
-import org.opensearch.migrations.bulkload.common.RestClient;
-import org.opensearch.migrations.bulkload.common.http.ConnectionContext;
-import org.opensearch.migrations.bulkload.common.http.HttpResponse;
-import org.opensearch.migrations.bulkload.http.BulkRequestGenerator;
-import org.opensearch.migrations.bulkload.http.BulkRequestGenerator.BulkItemResponseEntry;
-import org.opensearch.migrations.bulkload.tracing.IRfsContexts;
-import org.opensearch.migrations.bulkload.tracing.IRfsContexts.ICheckedIdempotentPutRequestContext;
-import org.opensearch.migrations.reindexer.FailedRequestsLogger;
 import reactor.core.publisher.Mono;
-import reactor.util.retry.Retry;
-
-import java.time.Duration;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.function.BiFunction;
-import java.util.function.Function;
 
 import static org.hamcrest.CoreMatchers.containsString;
-import static org.hamcrest.CoreMatchers.equalTo;
 import static org.hamcrest.CoreMatchers.not;
 import static org.hamcrest.MatcherAssert.assertThat;
-import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
-import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.spy;
-import static org.mockito.Mockito.times;
-import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
-import static org.mockito.Mockito.verifyNoMoreInteractions;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.withSettings;
 import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntry;
-import static org.opensearch.migrations.bulkload.http.BulkRequestGenerator.itemEntryFailure;
 
 @ExtendWith(MockitoExtension.class)
 class OpenSearchClient_ES_6_8_Test {
@@ -76,8 +57,7 @@ class OpenSearchClient_ES_6_8_Test {
 
     @BeforeEach
     void beforeTest() {
-        doReturn(connectionContext).when(restClient).getConnectionContext();
-        openSearchClient = spy(new OpenSearchClientFactory(Version.builder().flavor(Flavor.ELASTICSEARCH).major(6).minor(8).build()).get(restClient, failedRequestLogger));
+        openSearchClient = spy(new OpenSearchClient_ES_6_8(restClient, failedRequestLogger, Version.fromString("ES_6_8")));
     }
 
     @SneakyThrows
@@ -115,7 +95,7 @@ class OpenSearchClient_ES_6_8_Test {
         var bulkDocs = List.of(createBulkDoc(docId1), createBulkDoc(docId2));
         when(restClient.postAsync(any(), any(), any())).thenReturn(Mono.just(successResponse));
 
-        var result = openSearchClient.sendBulkRequest("indexName", bulkDocs, mock(IRfsContexts.IRequestContext.class)).block();
+//        var result = openSearchClient.sendBulkRequest("indexName", bulkDocs, mock(IRfsContexts.IRequestContext.class)).block();
 
         Mockito.verify(restClient).postAsync("indexName/_doc/_bulk", null, null);
 

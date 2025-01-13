@@ -135,8 +135,8 @@ public class CreateSnapshot {
     private ICreateSnapshotContext context;
 
     public void run() {
-        var clientFactory = new OpenSearchClientFactory(null);
-        var client = clientFactory.get(arguments.sourceArgs.toConnectionContext());
+        var clientFactory = new OpenSearchClientFactory(arguments.sourceArgs.toConnectionContext());
+        var client = clientFactory.determineVersionAndCreate();
         SnapshotCreator snapshotCreator;
         if (arguments.fileSystemRepoPath != null) {
             snapshotCreator = new FileSystemSnapshotCreator(

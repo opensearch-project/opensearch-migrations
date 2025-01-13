@@ -6,6 +6,7 @@ import java.util.AbstractMap;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.opensearch.migrations.bulkload.common.OpenSearchClientFactory;
@@ -29,6 +30,21 @@ import static org.hamcrest.MatcherAssert.assertThat;
 
 @Slf4j
 public class TestCreateSnapshot {
+    private static final byte[] ROOT_RESPONSE_ES_7_10_2 = "{\"version\": {\"number\": \"7.10.2\"}}".getBytes(StandardCharsets.UTF_8);
+    private static final Map<String, String> ROOT_RESPONSE_HEADERS = Map.of(
+            "Content-Type",
+            "application/json",
+            "Content-Length",
+            "" + ROOT_RESPONSE_ES_7_10_2.length
+    );
+    private static final byte[] CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED = "{\"persistent\":{\"compatibility\":{\"override_main_response_version\":\"false\"}}}".getBytes(StandardCharsets.UTF_8);
+    private static final Map<String, String> CLUSTER_SETTINGS_COMPATIBILITY_HEADERS = Map.of(
+            "Content-Type",
+            "application/json",
+            "Content-Length",
+            "" + CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED.length
+    );
+
     final SnapshotTestContext snapshotContext = SnapshotTestContext.factory().noOtelTracking();
     final byte[] payloadBytes = "Success".getBytes(StandardCharsets.UTF_8);
     final Map<String, String> headers = Map.of(
@@ -46,18 +62,24 @@ public class TestCreateSnapshot {
         try (var destinationServer = SimpleNettyHttpServer.makeNettyServer(false,
                 Duration.ofMinutes(10),
                 fl -> {
+                    if (Objects.equals(fl.uri(), "/")) {
+                        return new SimpleHttpResponse(ROOT_RESPONSE_HEADERS, ROOT_RESPONSE_ES_7_10_2, "OK", 200);
+                    } else if (Objects.equals(fl.uri(), "/_cluster/settings")) {
+                        return new SimpleHttpResponse(CLUSTER_SETTINGS_COMPATIBILITY_HEADERS, CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED,
+                                "OK", 200);
+                    }
                     capturedRequestList.add(new AbstractMap.SimpleEntry<>(fl, fl.content().toString(StandardCharsets.UTF_8)));
                     return new SimpleHttpResponse(headers, payloadBytes, "OK", 200);
                 }))
         {
             final var endpoint = destinationServer.localhostEndpoint().toString();
 
-            var sourceClientFactory = new OpenSearchClientFactory(null);
-            var sourceClient = sourceClientFactory.get(ConnectionContextTestParams.builder()
+            var sourceClientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
                     .host(endpoint)
                     .insecure(true)
                     .build()
                     .toConnectionContext());
+            var sourceClient = sourceClientFactory.determineVersionAndCreate();
             var snapshotCreator = new S3SnapshotCreator(
                     snapshotName,
                     sourceClient,
@@ -112,7 +134,12 @@ public class TestCreateSnapshot {
         try (var destinationServer = SimpleNettyHttpServer.makeNettyServer(false,
                 Duration.ofMinutes(10),
                 fl -> {
-                    if (fl.uri().equals("/_snapshot/migration_assistant_repo/" + snapshotName)) {
+                    if (Objects.equals(fl.uri(), "/")) {
+                        return new SimpleHttpResponse(ROOT_RESPONSE_HEADERS, ROOT_RESPONSE_ES_7_10_2, "OK", 200);
+                    } else if (Objects.equals(fl.uri(), "/_cluster/settings")) {
+                        return new SimpleHttpResponse(CLUSTER_SETTINGS_COMPATIBILITY_HEADERS, CLUSTER_SETTINGS_COMPATIBILITY_OVERRIDE_DISABLED,
+                                "OK", 200);
+                    } else if (fl.uri().equals("/_snapshot/migration_assistant_repo/" + snapshotName)) {
                         createSnapshotRequest.set(fl);
                         createSnapshotRequestContent.set(fl.content().toString(StandardCharsets.UTF_8));
                     }
@@ -121,12 +148,12 @@ public class TestCreateSnapshot {
         {
             final var endpoint = destinationServer.localhostEndpoint().toString();
 
-            var sourceClientFactory = new OpenSearchClientFactory(null);
-            var sourceClient = sourceClientFactory.get(ConnectionContextTestParams.builder()
+            var sourceClientFactory = new OpenSearchClientFactory(ConnectionContextTestParams.builder()
                     .host(endpoint)
                     .insecure(true)
                     .build()
                     .toConnectionContext());
+            var sourceClient = sourceClientFactory.determineVersionAndCreate();
             var snapshotCreator = new S3SnapshotCreator(
                     snapshotName,
                     sourceClient,
