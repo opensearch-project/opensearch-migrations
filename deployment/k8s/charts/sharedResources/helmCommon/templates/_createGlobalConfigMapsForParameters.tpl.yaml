@@ -1,0 +1,16 @@
+{{- define "generic.createCommonConfigs" -}}
+{{- $fullname := include "generic.fullname" . -}}
+{{- if not (lookup "v1" "ConfigMap" .Release.Namespace $fullname) }}
+{{- $weight := (dig "weights" "sharedConfig" 0 (.Values | merge (dict)))  }}
+
+{{- range $key, $param := .Values.globalParameters }}
+{{ include "generic.createParameterConfigMap" (dict
+  "Weight" (dig "weights" "sharedConfigMaps" 0 (.Values | merge (dict)))
+  "Key" $key
+  "Param" $param
+  "NameSpace" (dig "namespace" "name" "default" (.Values | merge (dict)) )
+) }}
+{{- end }}
+
+{{- end }}
+{{- end }}

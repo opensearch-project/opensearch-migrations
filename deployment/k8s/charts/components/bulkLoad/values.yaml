@@ -1,0 +1,6 @@
+useSharedConfigs: false
+parameters:
+  initialLeaseDuration:
+    value: PT10M
+  documentsPerBulkRequest:
+    value: 1000
